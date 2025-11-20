@@ -1,0 +1,130 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<rsm:TaxInvoice_CrossIndustryInvoice 
+ xmlns:ram="urn:etda:uncefact:data:standard:TaxInvoice_ReusableAggregateBusinessInformationEntity:2"
+ xmlns:rsm="urn:etda:uncefact:data:standard:TaxInvoice_CrossIndustryInvoice:2"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="urn:etda:uncefact:data:standard:TaxInvoice_CrossIndustryInvoice:2">
+    <rsm:ExchangedDocumentContext>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID schemeAgencyID="ETDA" schemeVersionID="v2.0">ER3-2560</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+    <rsm:ExchangedDocument>
+        <ram:ID>REC250110009570</ram:ID>
+        <ram:Name>ใบเสร็จรับเงิน/ใบกำกับภาษี</ram:Name>
+        <ram:TypeCode>T03</ram:TypeCode>
+        <ram:IssueDateTime>2025-01-10T00:00:00.000</ram:IssueDateTime>
+        
+        
+        <ram:CreationDateTime>2025-01-10T00:00:00.000</ram:CreationDateTime>
+        
+    </rsm:ExchangedDocument>
+    <rsm:SupplyChainTradeTransaction>
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:SellerTradeParty>
+				      <ram:Name>หจก.แอม แฮปปี้เนส (สำนักงานใหญ่)</ram:Name>
+              <ram:SpecifiedTaxRegistration>
+              <ram:ID schemeID="TXID">020356200587100000</ram:ID>
+              </ram:SpecifiedTaxRegistration>
+              <ram:DefinedTradeContact>
+            <ram:EmailURIUniversalCommunication> 
+ <ram:URIID>taketime.bangphra@gmail.com</ram:URIID> 
+ </ram:EmailURIUniversalCommunication> 
+
+            <ram:TelephoneUniversalCommunication> 
+ <ram:CompleteNumber>+66-634161496</ram:CompleteNumber> 
+ </ram:TelephoneUniversalCommunication> 
+
+</ram:DefinedTradeContact>
+                                 
+              <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>20110</ram:PostcodeCode>
+                <ram:LineOne>202/24 ม.5 ซ.บ้านห้วยกุ่ม4 บางพระ ศรีราชา ชลบุรี 20110</ram:LineOne>
+                
+                <ram:CityName>2007</ram:CityName>
+                <ram:CitySubDivisionName>200707</ram:CitySubDivisionName>
+                <ram:CountryID schemeID="3166-1 alpha-2">TH</ram:CountryID>
+                <ram:CountrySubDivisionID>20</ram:CountrySubDivisionID>
+                <ram:BuildingNumber>202/24</ram:BuildingNumber>
+              </ram:PostalTradeAddress>
+
+
+            </ram:SellerTradeParty>
+            <ram:BuyerTradeParty>
+                <ram:Name>บริษัท แมกซ์ เวนเจอร์ส จำกัด (สำนักงานใหญ่)</ram:Name>
+              <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="TXID">010555919002000000</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+              <ram:DefinedTradeContact>
+            <ram:EmailURIUniversalCommunication> 
+ <ram:URIID>punyapatr.ar@pt.co.th</ram:URIID> 
+ </ram:EmailURIUniversalCommunication> 
+
+           
+</ram:DefinedTradeContact>
+                                 
+              <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>10310</ram:PostcodeCode>
+                
+                
+                <ram:CityName>1017</ram:CityName>
+                <ram:CitySubDivisionName>101701</ram:CitySubDivisionName>                
+                <ram:CountryID schemeID="3166-1 alpha-2">TH</ram:CountryID>
+                <ram:CountrySubDivisionID>10</ram:CountrySubDivisionID>
+                <ram:BuildingNumber>90</ram:BuildingNumber>
+              </ram:PostalTradeAddress>
+            </ram:BuyerTradeParty>
+			   
+        </ram:ApplicableHeaderTradeAgreement>
+        <ram:ApplicableHeaderTradeDelivery>
+          <ram:ShipToTradeParty>
+            <ram:DefinedTradeContact>
+					    
+				  </ram:DefinedTradeContact>
+            </ram:ShipToTradeParty>
+        </ram:ApplicableHeaderTradeDelivery>
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode listID="ISO 4217 3A">THB</ram:InvoiceCurrencyCode>
+            <ram:ApplicableTradeTax>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:CalculatedRate>7</ram:CalculatedRate>
+                <ram:BasisAmount>3738.32</ram:BasisAmount>
+                <ram:CalculatedAmount>261.68</ram:CalculatedAmount>
+            </ram:ApplicableTradeTax>
+          
+          
+          
+          <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+			     <ram:LineTotalAmount>3738.32</ram:LineTotalAmount>
+           <ram:TaxBasisTotalAmount>3738.32</ram:TaxBasisTotalAmount>
+           <ram:TaxTotalAmount>261.68</ram:TaxTotalAmount>
+           <ram:GrandTotalAmount>4000</ram:GrandTotalAmount>
+       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </ram:ApplicableHeaderTradeSettlement>
+		            <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+              
+                
+              <ram:Name>ค่าที่พักหรือค่ามัดจำที่พัก</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:GrossPriceProductTradePrice>
+                    <ram:ChargeAmount>3738.32</ram:ChargeAmount>
+                </ram:GrossPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="XCS">1</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+              
+              <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:NetLineTotalAmount>3738.32</ram:NetLineTotalAmount>
+                    <ram:NetIncludingTaxesLineTotalAmount>4000</ram:NetIncludingTaxesLineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:TaxInvoice_CrossIndustryInvoice>

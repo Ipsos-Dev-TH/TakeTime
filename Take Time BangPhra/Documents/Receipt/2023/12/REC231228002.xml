@@ -1,0 +1,86 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<rsm:TaxInvoice_CrossIndustryInvoice 
+ xmlns:ram="urn:etda:uncefact:data:standard:TaxInvoice_ReusableAggregateBusinessInformationEntity:2"
+ xmlns:rsm="urn:etda:uncefact:data:standard:TaxInvoice_CrossIndustryInvoice:2"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="urn:etda:uncefact:data:standard:TaxInvoice_CrossIndustryInvoice:2">
+    <rsm:ExchangedDocumentContext>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID schemeAgencyID="ETDA" schemeVersionID="v2.0">ER3-2560</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+    <rsm:ExchangedDocument>
+        <ram:ID>REC231228002</ram:ID>
+        <ram:Name>ใบกำกับภาษี/ใบเสร็จรับเงิน</ram:Name>
+        <ram:TypeCode>T03</ram:TypeCode>
+        <ram:IssueDateTime>12/28/2023 12:00:00 AM</ram:IssueDateTime>
+        
+        
+        <ram:CreationDateTime>12/28/2023 12:00:00 AM</ram:CreationDateTime>
+        
+    </rsm:ExchangedDocument>
+    <rsm:SupplyChainTradeTransaction>
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:SellerTradeParty>
+				      <ram:Name>หจก.แอม แฮปปี้เนส (สำนักงานใหญ่)</ram:Name>
+              <ram:SpecifiedTaxRegistration>
+              <ram:ID schemeID="TXID">0203562005871</ram:ID>
+              </ram:SpecifiedTaxRegistration>
+              taketime.bangphra@gmail.com
+              <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>*seller_zipcode</ram:PostcodeCode>
+                202/24 ม.5 ซ.บ้านห้วยกุ่ม4 ต.บางพระ อ.ศรีราชา จ.ชลบุรี 20110
+                
+                
+                
+                <ram:CountryID schemeID="3166-1 alpha-2"></ram:CountryID>
+                
+                
+              </ram:PostalTradeAddress>
+            </ram:SellerTradeParty>
+            <ram:BuyerTradeParty>
+                <ram:Name>นิดา ดิลกสัมพันธ์</ram:Name>
+              <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="*buyer_taxtype"></ram:ID>
+                </ram:SpecifiedTaxRegistration>
+              
+              <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>*buyer_zipcode</ram:PostcodeCode>
+                
+                
+                
+                               
+                <ram:CountryID schemeID="3166-1 alpha-2"></ram:CountryID>
+                
+                
+              </ram:PostalTradeAddress>
+            </ram:BuyerTradeParty>
+			   
+        </ram:ApplicableHeaderTradeAgreement>
+        <ram:ApplicableHeaderTradeDelivery>
+          <ram:ShipToTradeParty>
+            <ram:DefinedTradeContact>
+					    
+				  </ram:DefinedTradeContact>
+            </ram:ShipToTradeParty>
+        </ram:ApplicableHeaderTradeDelivery>
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode listID="ISO 4217 3A">THB</ram:InvoiceCurrencyCode>
+            <ram:ApplicableTradeTax>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:CalculatedRate>7</ram:CalculatedRate>
+                <ram:BasisAmount>1635.51</ram:BasisAmount>
+                <ram:CalculatedAmount>114.49</ram:CalculatedAmount>
+            </ram:ApplicableTradeTax>
+          
+          
+          <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+			     <ram:LineTotalAmount>1635.51</ram:LineTotalAmount>
+           <ram:TaxBasisTotalAmount>1635.51</ram:TaxBasisTotalAmount>
+           <ram:TaxTotalAmount>114.49</ram:TaxTotalAmount>
+           <ram:GrandTotalAmount>1750</ram:GrandTotalAmount>
+       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </ram:ApplicableHeaderTradeSettlement>
+		    ค่าที่พักหรือค่ามัดจำที่พัก
+    </rsm:SupplyChainTradeTransaction>
+</rsm:TaxInvoice_CrossIndustryInvoice>

@@ -1,0 +1,277 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+using System.Configuration;
+using System.IO;
+using Microsoft.Ajax.Utilities;
+using Take_Time_BangPhra.Account.Report;
+using System.Security.Cryptography;
+using ECertificateAPI;
+using System.Net.Mail;
+using Microsoft.Reporting.WebForms;
+
+namespace Take_Time_BangPhra.Product
+{
+    public partial class In : System.Web.UI.Page
+    {
+        _Default codeDefault = new _Default();
+        Receipt codeReceipt = new Receipt();
+        code code = new code();
+        string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            
+            try
+            {
+                try
+                {
+                    if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
+                    {
+
+                    }
+                    else
+                    {
+                        Response.Redirect("/Default");
+                    }
+                }
+                catch
+                {
+                    Response.Redirect("/Default");
+                }
+
+                if (!IsPostBack)
+                {
+                    DataTable dtOrder = new DataTable();
+                    try
+                    {
+                        dtOrder.Columns.Add("ID");
+                        dtOrder.Columns.Add("Barcode");
+                        dtOrder.Columns.Add("Product_Name");
+                        dtOrder.Columns.Add("Amount");
+                        dtOrder.Columns.Add("Sell_Price");
+                        dtOrder.Columns.Add("Price_Total");
+                        dtOrder.Columns.Add("Category_ID");
+                        Session["dtOrder"] = dtOrder;
+                    }
+                    catch { }
+                    string yourHTMLstring = "<script> var Material_Name = [";
+                    DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct(Product_Name) as Material_Name FROM [Taketime].[dbo].[Product] Where [Status] = 'True'");
+                    for (int i = 0; i < dt.Rows.Count; i++)
+                    {
+                        yourHTMLstring += "\"" + dt.Rows[i][0].ToString().Replace(",", "") + "\"";
+                        if (i < dt.Rows.Count - 1)
+                        {
+                            yourHTMLstring += ",";
+                        }
+                    }
+                    yourHTMLstring += "];\r\nautocomplete(document.getElementById(\"MainContent_TextBox1\"), Material_Name);</script>";
+                    Literal1.Text = yourHTMLstring;
+                }
+            }
+            catch(Exception ex) {
+
+                //Response.Redirect("/Default");  
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('" + ex + "');", true);
+            }
+
+            
+        }
+
+        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
+        {
+            string ID = "0";
+
+            try
+            {
+                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                ID = dt.Rows[0][0].ToString();
+            }
+            catch { }
+
+            return ID;
+        }
+
+
+
+       
+        
+
+        
+        protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
+        {
+            if (e.CommandName == "Add")
+            {
+                DataTable dtOrder = (DataTable)Session["dtOrder"];
+                int amount = Convert.ToInt32(dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Amount"].ToString());
+                amount = amount + 1;
+                double total = amount * Convert.ToDouble(dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Sell_Price"].ToString());
+                dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Amount"] = amount;
+                dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Price_Total"] = total;
+                GridView1.DataSource = dtOrder;
+                GridView1.DataBind();
+                Session["dtOrder"] = dtOrder;
+                TextBox1.Text = string.Empty;
+                double pricetotal = 0;
+                for (int i = 0; i < dtOrder.Rows.Count; i++)
+                {
+                    pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
+                }
+                
+            }
+            else if (e.CommandName == "Reduce")
+            {
+                DataTable dtOrder = (DataTable)Session["dtOrder"];
+                int amount = Convert.ToInt32(dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Amount"].ToString());
+                if (amount > 1)
+                {
+                    amount = amount - 1;
+                    double total = amount * Convert.ToDouble(dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Sell_Price"].ToString());
+                    dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Amount"] = amount;
+                    dtOrder.Rows[Convert.ToInt32(e.CommandArgument)]["Price_Total"] = total;
+                    GridView1.DataSource = dtOrder;
+                    GridView1.DataBind();
+                    Session["dtOrder"] = dtOrder;
+                    TextBox1.Text = string.Empty;
+                    double pricetotal = 0;
+                    for (int i = 0; i < dtOrder.Rows.Count; i++)
+                    {
+                        pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
+                    }
+                    
+                }
+            }
+            else if (e.CommandName == "DeleteItem")
+            {
+                DataTable dtOrder = (DataTable)Session["dtOrder"];
+                dtOrder.Rows[Convert.ToInt32(e.CommandArgument)].Delete();
+                dtOrder.AcceptChanges();
+                GridView1.DataSource = dtOrder;
+                GridView1.DataBind();
+                Session["dtOrder"] = dtOrder;
+                TextBox1.Text = string.Empty;
+                double pricetotal = 0;
+                for (int i = 0; i < dtOrder.Rows.Count; i++)
+                {
+                    pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
+                }
+                
+            }
+        }
+        protected void GridView1_RowEditing(object sender, GridViewEditEventArgs e)
+        {
+            GridView1.EditIndex = e.NewEditIndex;
+            DataTable dtOrder = (DataTable)Session["dtOrder"];
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+        }
+
+        protected void GridView1_RowCancelingEdit(object sender, GridViewCancelEditEventArgs e)
+        {
+            GridView1.EditIndex = -1;
+            DataTable dtOrder = (DataTable)Session["dtOrder"];
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+        }
+
+        protected void GridView1_RowUpdating(object sender, GridViewUpdateEventArgs e)
+        {
+            DataTable dtOrder = (DataTable)Session["dtOrder"];
+            TextBox txtAmount = (TextBox)GridView1.Rows[e.RowIndex].Cells[2].Controls[0];
+            TextBox txtPrice = (TextBox)GridView1.Rows[e.RowIndex].Cells[3].Controls[0];
+            GridView1.EditIndex = -1;
+            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Amount"] = txtAmount.Text;
+            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Sell_Price"] = txtPrice.Text;
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+            Session["dtOrder"] = dtOrder;
+            TextBox1.Text = string.Empty;
+            double pricetotal = 0;
+            for (int i = 0; i < dtOrder.Rows.Count; i++)
+            {
+                pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
+            }
+            
+        }
+
+        protected void Button3_Click(object sender, EventArgs e)
+        {
+            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");
+            if (dtProduct.Rows.Count > 0)
+            {
+                DataTable dtOrder = (DataTable)Session["dtOrder"];
+                if (dtOrder.Rows.Count == 0)
+                {
+                    int amount = Convert.ToInt32(TextBox2.Text);
+                    double total = amount * Convert.ToDouble(TextBox3.Text);
+                    dtOrder.Rows.Add(dtProduct.Rows[0]["ID"].ToString(), dtProduct.Rows[0]["Barcode"].ToString(), dtProduct.Rows[0]["Product_Name"].ToString(), amount, TextBox3.Text, total, dtProduct.Rows[0]["Category_ID"].ToString());
+
+                }
+                else
+                {
+                    int rowid = 0;
+                    int checkdup = 0;
+                    for (int i = 0; i < dtOrder.Rows.Count; i++)
+                    {
+                        if (dtOrder.Rows[i]["Product_Name"].ToString() == dtProduct.Rows[0]["Product_Name"].ToString())
+                        {
+                            checkdup = 1;
+                            rowid = i;
+                        }
+
+                    }
+                    if (checkdup == 0)
+                    {
+                        int amount = Convert.ToInt32(TextBox2.Text);
+                        double total = amount * Convert.ToDouble(TextBox3.Text);
+                        dtOrder.Rows.Add(dtProduct.Rows[0]["ID"].ToString(), dtProduct.Rows[0]["Barcode"].ToString(), dtProduct.Rows[0]["Product_Name"].ToString(), amount, TextBox3.Text, total, dtProduct.Rows[0]["Category_ID"].ToString());
+
+                    }
+                    else
+                    {
+                        int amount = Convert.ToInt32(dtOrder.Rows[rowid]["Amount"].ToString());
+                        amount = amount + Convert.ToInt32(TextBox2.Text);
+                        double total = amount * Convert.ToDouble(TextBox3.Text);
+                        dtOrder.Rows[rowid]["Amount"] = amount;
+                        dtOrder.Rows[rowid]["Price_Total"] = total;
+                    }
+                }
+                GridView1.DataSource = dtOrder;
+                GridView1.DataBind();
+                Session["dtOrder"] = dtOrder;
+                TextBox1.Text = string.Empty;
+                double pricetotal = 0;
+                for (int i = 0; i < dtOrder.Rows.Count; i++)
+                {
+                    pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
+                }
+
+            }
+            else
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีรายชื่อสินค้าดังกล่าว');", true);
+            }
+        }
+
+        protected void Button2_Click(object sender, EventArgs e)
+        {
+            DataTable dtOrder = (DataTable)Session["dtOrder"];
+            if(dtOrder.Rows.Count > 0)
+            {
+                for(int i = 0;i<dtOrder.Rows.Count;i++)
+                {
+                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) VALUES ('"+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "','" + dtOrder.Rows[i]["ID"].ToString() +"','" + dtOrder.Rows[i]["Amount"].ToString() +"','" + dtOrder.Rows[i]["Sell_Price"].ToString() +"')");
+                }
+                Response.Redirect("/Product/In");
+            }
+            else
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีข้อมูลนำเข้า');", true);
+            }
+            
+        }
+    }
+}

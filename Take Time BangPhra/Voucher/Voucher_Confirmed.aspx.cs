@@ -1,0 +1,60 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+using System.Data.SqlClient;
+using System.Configuration;
+using iTextSharp.text.pdf.qrcode;
+
+namespace Take_Time_BangPhra.Voucher
+{
+    public partial class Voucher_Confirmed : System.Web.UI.Page
+    {
+        code code2 = new code();
+        _Default code = new _Default();
+        string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        protected async void Page_Load(object sender, EventArgs e)
+        {
+          if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
+            {
+
+            }
+            else
+            {
+                Response.Redirect("/Default");
+            }
+            Page.MaintainScrollPositionOnPostBack = true;
+            try
+            {
+                string id = Request.QueryString["id"];
+                id = id.Replace("@", " ");
+               
+                DataTable dtVoucher = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Voucher] inner join Customer on Customer.ID = Customer_ID Where Created_Date = '"+id+"'");
+
+                Image1.ImageUrl = "../Upload/Slip/" + dtVoucher.Rows[0]["Voucher_Number"].ToString() + ".jpg";
+                Image1.DataBind();
+                string vnumber = "";
+                for(int i = 0;i<dtVoucher.Rows.Count;i++)
+                {
+                    vnumber += dtVoucher.Rows[i]["Voucher_Number"].ToString() + "<br/>"+ Environment.NewLine ;
+                }
+                Label1.Text = vnumber;
+                Label2.Text = dtVoucher.Rows[0]["Name"].ToString();
+                Label3.Text = dtVoucher.Rows[0]["NickName"].ToString();
+                Label4.Text = dtVoucher.Rows[0]["MobilePhone"].ToString(); 
+                Label5.Text = dtVoucher.Rows[0]["Sell_Price"].ToString();
+                Label14.Text = dtVoucher.Rows[0]["Remark"].ToString();
+                Label15.Text = (Convert.ToDouble(dtVoucher.Rows[0]["Sell_Price"].ToString()) * Convert.ToDouble(dtVoucher.Rows.Count)).ToString();
+                Label16.Text = ( Convert.ToDouble(dtVoucher.Rows.Count)).ToString();
+                Label10.Text = "ยืนยันการจองสำเร็จ (Reservation Complete)";
+            }
+            catch
+            {
+                Label10.Text = "ยืนยันการจองผิดพลาด (Reservation Error)";
+            }
+        }
+    }
+}

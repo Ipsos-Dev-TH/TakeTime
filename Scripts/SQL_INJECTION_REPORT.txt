@@ -1,0 +1,445 @@
+🔍 SQL Injection Vulnerability Report
+Generated: Wed Nov  5 03:43:58 UTC 2025
+========================================
+
+FILE: ../Take Time BangPhra/Default.aspx.cs
+ISSUES FOUND: 12
+----------------------------------------
+48:                DataTable dtReviews = DatabaseQuery(conn, code.AdaptSql("Select * from Reviews Where [Date] > '" +DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd")+"'"));
+123:                DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID  Where '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
+124:                DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by OrderID asc"));
+221:        public DataTable DatabaseQuery(string connStr, string cmd)
+295:            DataTable dt = DatabaseQuery(conn, code.AdaptSql("select Top 1 ID from " + tablename + " Where ID like '" + doctype + Year + Month + Day + "%' order by ID desc"));
+348:                    DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
+349:                    DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 AND AccomName = N'" + GridView1.SelectedRow.Cells[1].Text + "'"));
+397:                    DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
+398:                    DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by ID asc"));33:                   DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + System.Net.Dns.GetHostEntry(HttpContext.Current.Request.UserHostName.ToString()).HostName + "','"+ HttpContext.Current.Request.UserHostName.ToString() + "','"+ HttpContext.Current.Request.Browser.Browser+ "')")) ;
+35:                catch { DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.Browser.Browser + "')")); }
+58:                    DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES ('" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "',N'" + jsonResponse.Replace("'", "''") + "');"));
+198:        public int DatabaseInsert(string connStr, string cmd)
+
+
+FILE: ../Take Time BangPhra/Reservation.aspx.cs
+ISSUES FOUND: 82
+----------------------------------------
+40:                DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+187:                                DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
+188:                                DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+241:                                DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "'");
+242:                                DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+256:                                    //DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+353:                    DataTable dtReservation = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] Where ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+354:                    DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+355:                    DataTable dtItemsold = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+357:                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  * FROM [Account_Receipt] Where RESERVATION_ID = '" + id + "'");
+447:                    DataTable dtCustomer = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID left join Account_Receipt on Account_Receipt.Reservation_ID = Reservation.ID  Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+568:                        DataTable dtReserveAccomDup = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where CheckinDate = '"+Convert.ToDateTime(TextBox12.Text).AddDays(i).ToString("yyyy-MM-dd")+"' AND AccomName = N'" + listcheck[j] +"'");
+753:                                    DataTable dtCustomer = code.DatabaseQuery(conn, "Select * From Customer Where MobilePhone = '" + TextBox1.Text + "'");
+765:                                    DataTable dtoldAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = " + id);
+766:                                    DataTable dtoldItem = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Items] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = " + id);
+1077:                                        DataTable dtfindDeposit = code.DatabaseQuery(conn, "Select * From Account_Receipt Where Reservation_ID = " + id + " AND IsDeposit = 'True' AND Status = 'Normal' AND UseDeposit = 'false'");
+1126:                                                DataTable dtDepositDetail = code.DatabaseQuery(conn, "Select * From Account_Receipt_Detail Where Receipt_ID = '" + dtfindDeposit.Rows[j]["ID"].ToString() + "'");
+1238:                                                        DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
+1239:                                                        DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+1272:                                                        DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Affiliate/Default.aspx.cs
+ISSUES FOUND: 6
+----------------------------------------
+24:                DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] inner join vendor on Affiliate_Member.ID_Number = Vendor.IDNumber Where ID_Number = '" + LoginID + "'");
+30:                DataTable dtSum = code.DatabaseQuery(conn, "SELECT SUM(Commission) as Commission FROM [Taketime].[dbo].[Affiliate_Reservation] Where Affiliate_Member_Coupon_Code = '" + LoginID + "' AND Status = 'TRANSFERED'");
+76:                DataTable dt = code.DatabaseQuery(conn, cmd);
+86:            DataTable dt = code.DatabaseQuery(conn, Session["cmd"].ToString());
+102:            DataTable dt = code.DatabaseQuery(conn, Session["cmd"].ToString());
+118:            DataTable dt = code.DatabaseQuery(conn, cmd);
+
+
+FILE: ../Take Time BangPhra/Affiliate/Register.aspx.cs
+ISSUES FOUND: 10
+----------------------------------------
+48:                    //DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+67:                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '"+TextBox1.Text+"'");
+115:                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+127:            DataTable dtProvince = code.DatabaseQuery(conn, commp);
+128:            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
+129:            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+218:                                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox1.Text + "'");
+262:            DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] Where Coupon_Code like '"+couponcode+"%'");221:                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Vendor] SET [IDNumber] = '" + TextBox1.Text.Replace("'", "''") + "',[Vendor_Type_ID] = " + RadioButtonList1.SelectedValue + " ,[Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[Address] = N'" + TextBox4.Text.Replace("'", "''") + "' ,[Address1] = N'" + TextBox5.Text.Replace("'", "''") + "' ,[Address_ID] = " + CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) + ",[Phone_Number] = '" + TextBox7.Text.Replace("'", "''") + "',[Vendor_Group] = N'15-Affiliate',[Branch_Number] = '" + TextBox3.Text.Replace("'", "''") + "' WHERE IDNumber = '" + TextBox1.Text + "'");
+226:                                    ID = code.DatabaseInsertReturn(conn, "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) VALUES ('" + TextBox1.Text.Replace("'", "''") + "'," + RadioButtonList1.SelectedValue + ",N'" + TextBox2.Text.Replace("'", "''") + "','" + TextBox3.Text.Replace("'", "''") + "','" + TextBox7.Text.Replace("'", "''") + "',N'" + TextBox4.Text.Replace("'", "''") + "',N'" + TextBox5.Text.Replace("'", "''") + "'," + CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) + ",N'15-Affiliate'); SELECT SCOPE_IDENTITY();");
+229:                                code.DatabaseInsert(conn, "INSERT INTO [dbo].[Affiliate_Member] ([ID_Number],[Password],[Register_Date],[Vendor_ID],[FirstName],[LastName],[Coupon_Code],[Bank_Code],[Bank_Number]) VALUES ('" + TextBox1.Text + "',N'" + TextBox8.Text + "','" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "'," + ID + ",'" + firstname + "','" + lastname + "','" + GenCouponCode(firstname, lastname) + "','" + DropDownList6.SelectedValue + "','" + TextBox12.Text.Replace("-", "").Replace(" ", "") + "')");226:                                    ID = code.DatabaseInsertReturn(conn, "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) VALUES ('" + TextBox1.Text.Replace("'", "''") + "'," + RadioButtonList1.SelectedValue + ",N'" + TextBox2.Text.Replace("'", "''") + "','" + TextBox3.Text.Replace("'", "''") + "','" + TextBox7.Text.Replace("'", "''") + "',N'" + TextBox4.Text.Replace("'", "''") + "',N'" + TextBox5.Text.Replace("'", "''") + "'," + CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) + ",N'15-Affiliate'); SELECT SCOPE_IDENTITY();");
+
+
+FILE: ../Take Time BangPhra/Affiliate/Login.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+39:                DataTable dtUser = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] Where (ID_Number = '"+TextBox1.Text+ "' OR Coupon_Code = '"+TextBox1.Text+ "') and Password = N'" + TextBox2.Text.Replace("'","''")+"'");
+
+
+FILE: ../Take Time BangPhra/Reservation_Confirmed.aspx.cs
+ISSUES FOUND: 5
+----------------------------------------
+28:                DataTable dtReservationAccommodation = code.DatabaseQuery(conn,
+48:                DataTable dtReservation = code.DatabaseQuery(conn,
+76:                DataTable dtReservationItems = code.DatabaseQuery(conn,
+114:                DataTable dtReceipt = code.DatabaseQuery(conn,
+154:                DataTable dtReceipt = code.DatabaseQuery(conn,
+
+
+FILE: ../Take Time BangPhra/Account/CheckDocument.aspx.cs
+ISSUES FOUND: 16
+----------------------------------------
+90:                DataTable dtin = code.DatabaseQuery(conn, cmd);
+106:                DataTable dtout = code.DatabaseQuery(conn, cmd);
+225:                DataTable dt = code.DatabaseQuery(conn, cmd);
+351:                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf"))
+353:                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf");
+364:                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf"))
+366:                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf");
+382:                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf"))
+384:                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf");
+395:                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf"))
+397:                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf");
+423:                    Response.Redirect("/Account/Receipt?command=edit&uid=" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString());
+428:                    Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString());290:                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + docNum + "'");
+291:                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + docNum + "'");
+302:                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
+303:                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + docNum + "'");
+
+
+FILE: ../Take Time BangPhra/Account/Receipt.aspx.cs
+ISSUES FOUND: 32
+----------------------------------------
+48:                DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+58:                DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource2.ConnectionString, SqlDataSource2.SelectCommand);
+66:                DataTable dtVatType = code.DatabaseQuery(SqlDataSource4.ConnectionString, SqlDataSource4.SelectCommand);
+82:                    DataTable dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid+"'");
+84:                    DataTable dtReceiptDetail = code.DatabaseQuery(conn, "Select Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount from Account_Receipt_Detail Where Receipt_ID = '" + id + "'");
+90:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where Customer.ID = '" + dtReceipt.Rows[0]["Customer_ID"].ToString() + "'");
+94:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+99:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+298:            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+346:                    dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid + "'");
+385:                DataTable dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where ID = " + customerId);
+391:                    dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+395:                        //dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+402:                catch { dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'"); }
+436:                DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+439:                dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+441:                DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + RecNumber + "' order by Number ASC");
+459:                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+462:                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+726:                                    //DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Account/Report/Report.aspx.cs
+ISSUES FOUND: 4
+----------------------------------------
+31:            DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info");
+33:            DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '"+RecNumber+ "' order by Number ASC");
+34:            DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber+"'");
+35:            DataTable dtcustomer = code.DatabaseQuery(conn, "Select * from Customer Where MobilePhone = '"+dtReceipt.Rows[0]["Customer_MobilePhone"].ToString()+"'");
+
+
+FILE: ../Take Time BangPhra/Account/PaymentVoucher.aspx.cs
+ISSUES FOUND: 23
+----------------------------------------
+55:                DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource2.ConnectionString, SqlDataSource2.SelectCommand);
+62:                DataTable dtPaidType = code.DatabaseQuery(SqlDataSource3.ConnectionString, SqlDataSource3.SelectCommand);
+69:                DataTable dtVatType = code.DatabaseQuery(SqlDataSource4.ConnectionString, SqlDataSource4.SelectCommand);
+76:                DataTable dtVendor_Group = code.DatabaseQuery(SqlDataSource5.ConnectionString, SqlDataSource5.SelectCommand);
+83:                DataTable dtVendor = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+94:                    DataTable dtPayment = code.DatabaseQuery(conn, "Select * from Account_Payment Where UID = '" + uid + "'");
+96:                    DataTable dtPaymentDetail = code.DatabaseQuery(conn, "Select Number,Detail,Amount from Account_Payment_Detail Where Payment_ID = '" + id + "'");
+97:                    DataTable dtVendorSelected = code.DatabaseQuery(conn, "Select * from Vendor Where ID = '" + dtPayment.Rows[0]["Vendor_ID"].ToString() + "'");
+165:                    DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct([Name]) as Material_Name FROM [Taketime].[dbo].[Vendor] Where [Status] = 'True'");
+211:            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+256:                id = code.DatabaseQuery(conn, "Select ID from [Account_Payment] Where UID = '" + uid + "'").Rows[0][0].ToString();
+298:                DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+317:                DataTable dtVendor = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where Vendor.ID = '" + DropDownList1.SelectedValue + "'");
+347:                DataTable dtPaymentDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = '" + PayNumber + "' order by Number ASC");
+349:                DataTable dtPayment = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = '" + PayNumber + "'");
+370:                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = "+ Session["UserID"].ToString());
+373:                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+377:                DataTable dtEmployee = code.DatabaseQuery(conn, "Select * From Admin Where IDNumber = '"+ dtVendor.Rows[0]["IDNumber"].ToString() + "'");
+520:                DataTable dtVendor = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+555:                DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Vendor] Where [Name] like N'" + TextBox9.Text + "'");261:                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE UID = '" + uid + "'");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Code.cs
+ISSUES FOUND: 22
+----------------------------------------
+79:            DataTable dt = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[User] inner join [Role] on Role_ID = [Role].ID Where [User] = '" + Email.ToLower() + "'");
+90:        /// [DEPRECATED] Use DatabaseQuerySafe instead to prevent SQL Injection
+93:        public DataTable DatabaseQuery(string connStr, string cmd)
+152:        /// var dt = DatabaseQuerySafe(conn, "SELECT * FROM Reservation WHERE Customer_MobilePhone = @phone AND ID = @id", parameters);
+154:        public DataTable DatabaseQuerySafe(string connStr, string query, Dictionary<string, object> parameters = null)
+207:                System.Diagnostics.Trace.TraceError($"DatabaseQuerySafe Error: {ex.Message}\nQuery: {query}");
+806:            DataTable dtQuantityLimit = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[Project_Cost] Where ID = " + Project_Cost_ID);
+808:            DataTable dtPayment = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[Payment] Where Project_Cost_ID = " + Project_Cost_ID + " AND (Status != '" + status_deleted + "' AND Status != '" + status_declined + "' AND Status != '" + status_predeclined + "')");
+809:            DataTable dtWorkSheet = DatabaseQuery(conn, "SELECT *  FROM [Payment].[dbo].[TemporaryEmployee_Worksheet] Where Project_Cost_ID = " + Project_Cost_ID + " AND (Status != 'MAKE PAYMENT' AND Status != '" + status_deleted + "' AND Status != '" + status_declined + "'  AND Status != '" + status_declined + "')");215:        /// [DEPRECATED] Use DatabaseInsertSafe instead to prevent SQL Injection
+218:        public void DatabaseInsert(string connStr, string cmd)
+260:        /// DatabaseInsertSafe(conn, "UPDATE Customer SET Name = @name, Email = @email WHERE MobilePhone = @phone", parameters);
+262:        public int DatabaseInsertSafe(string connStr, string query, Dictionary<string, object> parameters = null)
+308:                System.Diagnostics.Trace.TraceError($"DatabaseInsertSafe Error: {ex.Message}\nQuery: {query}");
+316:        /// [DEPRECATED] Use DatabaseInsertReturnSafe instead to prevent SQL Injection
+319:        public int DatabaseInsertReturn(string connStr, string cmd)
+372:        /// int newId = DatabaseInsertReturnSafe(conn,
+376:        public int DatabaseInsertReturnSafe(string connStr, string query, Dictionary<string, object> parameters = null)
+430:                System.Diagnostics.Trace.TraceError($"DatabaseInsertReturnSafe Error: {ex.Message}\nQuery: {query}");316:        /// [DEPRECATED] Use DatabaseInsertReturnSafe instead to prevent SQL Injection
+319:        public int DatabaseInsertReturn(string connStr, string cmd)
+372:        /// int newId = DatabaseInsertReturnSafe(conn,
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Reserve.aspx.cs
+ISSUES FOUND: 86
+----------------------------------------
+52:                DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+70:                DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+313:                            DataTable dtReservation = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] Where ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+422:                    DataTable dtReservation = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] Where ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+423:                    DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+424:                    DataTable dtItemsold = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+426:                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  * FROM [Account_Receipt] Where RESERVATION_ID = '" + id + "'");
+551:                    DataTable dtCustomer = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID left join Account_Receipt on Account_Receipt.Reservation_ID = Reservation.ID  Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+708:                        DataTable dtReserveAccomDup = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where CheckinDate = '"+code2.ParseDate(TextBox12.Text).Value.AddDays(i).ToString("yyyy-MM-dd")+"' AND AccomName = N'" + listcheck[j] + "' AND Reservation_ID != "+id);
+913:                                        DataTable dtoldAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID=Accommodation_ID Where Reservation.ID = " + id);
+914:                                        DataTable dtoldItem = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Items] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = " + id);
+1262:                                                DataTable dtOldCustomer = code.DatabaseQuery(conn, "SELECT * FROM [Customer] WHERE MobilePhone = '" + TextBox1.Text + "'");
+1279:                                                DataTable dtOldReservation = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] WHERE ID = " + id);
+1536:                                            DataTable dtfindDeposit = code.DatabaseQuery(conn, "Select * From Account_Receipt Where Reservation_ID = " + id + " AND IsDeposit = 'True' AND Status = 'Normal' AND UseDeposit = 'false'");
+1585:                                                    DataTable dtDepositDetail = code.DatabaseQuery(conn, "Select * From Account_Receipt_Detail Where Receipt_ID = '" + dtfindDeposit.Rows[j]["ID"].ToString() + "'");
+1996:                    DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] inner join Affiliate_Discount on Affiliate_Discount.ID = Affiliate_Discount_ID Where Coupon_Code = '" + couponcode + "'");
+2162:                DataTable dtuseVat = code.DatabaseQuery(conn, "select Use_Vat from Business_Info");
+2188:                    DataTable dtCustomer = code.DatabaseQuery(conn, "Select * from Customer inner join Reservation on MobilePhone = Customer_MobilePhone Where Reservation.ID = '" + Reservation_ID + "'");
+2285:                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID],[UID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "' order by ID desc");
+2494:            DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/CountReserved.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+22:            DataTable dt = code.DatabaseQuery(conn, "SELECT MobilePhone,[Name],[NickName],AccomName,CheckinDate,CheckoutDate,StayDays,Reservation_Accommodation.Price,TotalPrice FROM [Taketime].[dbo].[Reservation] right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID inner join Customer on Customer.MobilePhone=Customer_MobilePhone Where Customer_MobilePhone = '"+telNum+"'  AND Reservation.Status = N'เช็คอินแล้ว' order by CheckinDate desc");
+
+
+FILE: ../Take Time BangPhra/PostponeList.aspx.cs
+ISSUES FOUND: 2
+----------------------------------------
+45:                    DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Reservation] inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where (CheckinDate = '1990-01-01' OR CheckinDate = '0001-01-01') AND Reservation.Status = N'มัดจำแล้ว' order by Reservation.ID desc");75:                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = "+ dtShow.Rows[Convert.ToInt32(e.CommandArgument.ToString())]["ID"].ToString());
+86:                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = " + id);
+
+
+FILE: ../Take Time BangPhra/DisplayReserve.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+419:                DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM Accommodation WHERE Status = 1");
+
+
+FILE: ../Take Time BangPhra/Voucher/Default.aspx.cs
+ISSUES FOUND: 47
+----------------------------------------
+51:                DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+58:                DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource2.ConnectionString, SqlDataSource2.SelectCommand);
+66:                DataTable dtVatType = code.DatabaseQuery(SqlDataSource4.ConnectionString, SqlDataSource4.SelectCommand);
+82:                    DataTable dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid+"'");
+84:                    DataTable dtReceiptDetail = code.DatabaseQuery(conn, "Select Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount from Account_Receipt_Detail Where Receipt_ID = '" + id + "'");
+90:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where Customer.ID = '" + dtReceipt.Rows[0]["Customer_ID"].ToString() + "'");
+94:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+99:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+257:                    DataTable dtDetails = code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan_Group Where GroupID = '"+ DropDownList3.SelectedValue + "'");
+261:                        if(code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan_Group Where Group_Name = N'" + dtDetail.Rows[i]["RatePlan_Group"].ToString() + "'").Rows[0]["AccomGroupID"].ToString() == dtDetails.Rows[0]["AccomGroupID"].ToString())
+301:            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+365:                    dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "' AND IDNumber = '" + TextBox12.Text.Replace("'", "''") + "'");
+373:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "'");
+378:                    dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "' AND IDNumber = '" + TextBox12.Text.Replace("'", "''") + "'");
+390:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "'");
+405:                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+409:                            //dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+416:                    catch { dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'"); }
+448:                    DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+451:                    dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Voucher/Voucher_Confirmed.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+35:                DataTable dtVoucher = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Voucher] inner join Customer on Customer.ID = Customer_ID Where Created_Date = '"+id+"'");
+
+
+FILE: ../Take Time BangPhra/ReserveTable.aspx.cs
+ISSUES FOUND: 14
+----------------------------------------
+58:            DataTable dtReservation = DatabaseQuery(conn,
+65:            DataTable dtReservation_Accom = DatabaseQuery(conn,
+73:            DataTable dtReservation_Items = DatabaseQuery(conn,
+138:                DataTable dtCount = DatabaseQuery(conn,
+232:        public DataTable DatabaseQuery(string connStr, string cmd, params SqlParameter[] parameters)
+257:            DataTable dtReservation = DatabaseQuery(conn,
+263:            DataTable dtAccommodation = DatabaseQuery(conn, "SELECT * FROM Accommodation WHERE Status = 1");
+310:                    DataTable dtCustomer = DatabaseQuery(conn,
+394:                DataTable dt = DatabaseQuery(conn,
+469:            DataTable dtRec = DatabaseQuery(conn,204:        public int DatabaseInsert(string connStr, string cmd, params SqlParameter[] parameters)
+370:            DatabaseInsert(conn, updateCmd,
+378:            DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId",
+381:            DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId",
+475:                DatabaseInsert(conn,
+
+
+FILE: ../Take Time BangPhra/DisplayToday.aspx.cs
+ISSUES FOUND: 4
+----------------------------------------
+21:            DataTable dtReservation = code.DatabaseQuery(conn, "Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+22:            DataTable dtReservation_Accom = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID  Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate order by Accommodation.orderID asc");
+23:            DataTable dtReservation_Items = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID inner join Items on Items.ID = Reservation_Items.Items_ID  Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate order by Items_ID asc");
+78:            DataTable dtAccommodation = code.DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 order by OrderID asc");
+
+
+FILE: ../Take Time BangPhra/Product/Default.aspx.cs
+ISSUES FOUND: 24
+----------------------------------------
+69:                    DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct(Product_Name) as Material_Name FROM [Taketime].[dbo].[Product] Where [Status] = 'True'");
+98:            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");
+159:                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+199:            DataTable dtProvince = code.DatabaseQuery(conn, commp);
+200:            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
+201:            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+272:            DataTable dtCustomer = code.DatabaseQuery(conn, cmd);
+352:                int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
+365:                DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+374:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
+379:                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
+390:                                dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
+395:                                dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
+406:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
+411:                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
+418:                DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + docNum + "'");
+419:                DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + docNum + "' order by Number ASC");
+437:                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+440:                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+701:                                    //DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");387:                            code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [MobilePhone] = '" + TextBox3.Text + "',[Status] = '1',[FullName] = N'" + TextBox4.Text + "',[Address] = N'" + TextBox7.Text + "',[Address1] = N'" + TextBox8.Text + "',[Address_ID] = '" + CheckAddressID(TextBox9.Text, DropDownList3.SelectedItem.Text, DropDownList4.SelectedItem.Text, DropDownList5.SelectedItem.Text) + "',[IDNumber] = '" + TextBox6.Text + "',[Email] = '" + TextBox10.Text + "',[Customer_Type_ID] = '" + DropDownList2.SelectedValue + "',[Branch_Number] = '" + TextBox5.Text + "' WHERE MobilePhone = '" + TextBox3.Text + "' or IDNumber = '" + TextBox6.Text + "'");
+... and more (showing first 20)
+
+
+FILE: ../Take Time BangPhra/Product/Stock.aspx.cs
+ISSUES FOUND: 5
+----------------------------------------
+45:                DataTable dtIn = code.DatabaseQuery(conn, "SELECT Product.ID,Barcode,Category_ID,Product_Name,SUM(Amount) as Amount FROM [Taketime].[dbo].[Product] right join Product_In on Product.ID = Product_In.Product_ID group by Product.ID,Barcode,Category_ID,Product_Name order by Category_ID,Product_Name asc");
+46:                DataTable dtOut = code.DatabaseQuery(conn, "SELECT Product.ID,Barcode,Category_ID,Product_Name,SUM(Amount) as Amount FROM [Taketime].[dbo].[Product] right join Product_Out on Product.ID = Product_Out.Product_ID group by Product.ID,Barcode,Category_ID,Product_Name order by Category_ID,Product_Name asc");
+77:                    DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct(Product_Name) as Material_Name FROM [Taketime].[dbo].[Product] Where [Status] = 'True'");
+103:                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+217:            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");281:                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Remark]) VALUES ('" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "'," + dtOrder.Rows[i]["ID"].ToString() + "," + dtOrder.Rows[i]["Amount"].ToString() + "," + dtOrder.Rows[i]["Sell_Price"].ToString() + ",'0',N'"+ dtOrder.Rows[i]["Remark"].ToString() + "')");
+
+
+FILE: ../Take Time BangPhra/Product/In.aspx.cs
+ISSUES FOUND: 3
+----------------------------------------
+62:                    DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct(Product_Name) as Material_Name FROM [Taketime].[dbo].[Product] Where [Status] = 'True'");
+90:                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+202:            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");266:                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) VALUES ('"+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "','" + dtOrder.Rows[i]["ID"].ToString() +"','" + dtOrder.Rows[i]["Amount"].ToString() +"','" + dtOrder.Rows[i]["Sell_Price"].ToString() +"')");
+
+
+FILE: ../Take Time BangPhra/Product/SellReport.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+77:            DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product_Out] inner join Product on Product.ID = Product_ID inner join Product_Category on Product_Category.ID = Category_ID left join Account_Paid_How on Account_Paid_How.ID = Account_Paid_How_ID Where cast(DateTime_Out as date) >= '"+Convert.ToDateTime(TextBox1.Text).ToString("yyyy-MM-dd")+"' AND cast(DateTime_Out as date) <= '"+Convert.ToDateTime(TextBox2.Text).ToString("yyyy-MM-dd")+"' order by Category_ID asc");70:                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Product_Out] WHERE ID = "+ GridView1.Rows[Convert.ToInt32(e.CommandArgument)].Cells[0].Text);
+
+
+FILE: ../Take Time BangPhra/Admin/HolidayPrice.aspx.cs
+ISSUES FOUND: 4
+----------------------------------------
+40:                DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation] Where Status = 1 order by OrderID asc");
+44:                DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_HolidayPrice] Where DateNewPrice >= '"+DateTime.Today.ToString("yyyy-MM-dd")+"' order by DateNewPrice asc");
+112:            DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_HolidayPrice]");99:                            code.DatabaseInsert(conn, "INSERT INTO [dbo].[Accommodation_HolidayPrice] ([Accommodation_ID],[DateNewPrice],[Price],[Remark]) VALUES (" + row.Cells[1].Text + ",'" + DateTime.Parse(dtSelectedDate.Rows[i][0].ToString()).ToString("yyyy-MM-dd") + "','" + TxtPrice.Text + "',N'" + TxtRemark.Text + "')");
+111:            code.DatabaseInsert(conn, "DELETE FROM [dbo].[Accommodation_HolidayPrice] WHERE Accommodation_ID = " + row.Cells[0].Text + "  AND DateNewPrice =  '" + row.Cells[1].Text + "'  AND Price = " + row.Cells[2].Text + "");
+
+
+FILE: ../Take Time BangPhra/Admin/CustomerManagement.aspx.cs
+ISSUES FOUND: 3
+----------------------------------------
+90:                DataTable dtTotal = codeHelper.DatabaseQuery(connString, queryTotal);
+98:                DataTable dtActive = codeHelper.DatabaseQuery(connString, queryActive);
+110:                DataTable dtNew = codeHelper.DatabaseQuery(connString, queryNew);
+
+
+FILE: ../Take Time BangPhra/Admin/PaymentAffiliate.aspx.cs
+ISSUES FOUND: 15
+----------------------------------------
+45:                    DataTable dtPayment = code.DatabaseQuery(conn, "Select * from Account_Payment Where ID = '" + id + "'");
+46:                    DataTable dtPaymentDetail = code.DatabaseQuery(conn, "Select Number,Detail,Amount from Account_Payment_Detail Where Payment_ID = '" + id + "'");
+188:                DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
+206:                DataTable dtVendor = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where Vendor.ID = '" + DropDownList5.SelectedValue + "'");
+234:                DataTable dtPaymentDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = '" + PayNumber + "' order by Number ASC");
+235:                DataTable dtPayment = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = '" + PayNumber + "'");
+255:                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = "+ Session["UserID"].ToString());
+258:                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+262:                DataTable dtEmployee = code.DatabaseQuery(conn, "Select * From Admin Where IDNumber = '"+ dtVendor.Rows[0]["IDNumber"].ToString() + "'");
+394:                DataTable dt = code.DatabaseQuery(conn, "SELECT Affiliate_Reservation.ID,StayDate,AccomName,PriceAfterDiscount as PricePerDay,Commission FROM [Taketime].[dbo].[Affiliate_Reservation] inner join Accommodation on Accommodation.ID = Accommodation_ID inner join Affiliate_Discount_RatePlan on Affiliate_Discount_RatePlan.ID = Affiliate_Discount_RatePlan_ID inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.Status = N'เช็คอินแล้ว' AND Affiliate_Reservation.Status = 'NEW' AND Affiliate_Member_Coupon_Code = '" + DropDownList5.SelectedItem.Text + "' order by StayDate desc");150:                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + id + "'");
+151:                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + id + "'");
+169:                int accountPaymentID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) VALUES ('"+docNum+"',N'"+ DropDownList5.SelectedValue+ "','"+createDate.ToString("yyyy-MM-dd")+"','"+TextBox6.Text+"','4','"+TextBox4.Text+"','"+TextBox3.Text+"',N'"+DropDownList2.SelectedItem.Text+"','2',N'Normal','"+Session["UserID"].ToString()+ "'); Select scope_identity();");
+173:                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Affiliate_Reservation_Payment] ([Affiliate_Reservation_ID],[Account_Payment_ID]) VALUES ('"+accountPaymentID+"','"+ dtDetail.Rows[i]["AffResID"].ToString() + "')");
+174:                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) VALUES ('" + docNum + "','"+dtDetail.Rows[i][0].ToString()+ "',N'" + dtDetail.Rows[i][1].ToString() + "','" + dtDetail.Rows[i][2].ToString() + "')");
+175:                    code.DatabaseInsert(conn, "UPDATE [dbo].[Affiliate_Reservation] SET [Status] = 'TRANSFERED' WHERE ID = '" + dtDetail.Rows[i]["AffResID"].ToString() + "'");
+
+
+FILE: ../Take Time BangPhra/Admin/Vendor.aspx.cs
+ISSUES FOUND: 9
+----------------------------------------
+25:                        DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
+32:                        DataTable dtVendorCategory = code.DatabaseQuery(conn, "Select DISTINCT [Vendor_Group] From Vendor");
+55:                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '"+TextBox1.Text+"'");
+94:                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+106:            DataTable dtProvince = code.DatabaseQuery(conn, commp);
+107:            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
+108:            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+173:                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox1.Text + "' AND Branch_Number = '" + TextBox3.Text + "'");176:                    code.DatabaseInsert(conn, "UPDATE [dbo].[Vendor] SET [IDNumber] = '"+ TextBox1.Text.Replace("'", "''") + "',[Vendor_Type_ID] = "+ DropDownList1.SelectedValue + " ,[Name] = N'"+ TextBox2.Text.Replace("'", "''") + "' ,[Address] = N'"+ TextBox4.Text.Replace("'", "''") + "' ,[Address1] = N'"+ TextBox5.Text.Replace("'", "''") + "' ,[Address_ID] = "+CheckAddressID(TextBox6.Text,DropDownList2.SelectedValue,DropDownList3.SelectedValue,DropDownList4.SelectedValue)+",[Phone_Number] = '"+ TextBox7.Text.Replace("'", "''") + "',[Vendor_Group] = N'"+DropDownList5.SelectedItem.Text+"',[Branch_Number] = '"+ TextBox3.Text.Replace("'", "''") + "' WHERE IDNumber = '"+TextBox1.Text+ "' AND Branch_Number = '"+TextBox3.Text+"'");
+180:                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) VALUES ('" + TextBox1.Text.Replace("'", "''") + "'," + DropDownList1.SelectedValue + ",N'" + TextBox2.Text.Replace("'", "''")+"','" + TextBox3.Text.Replace("'", "''") + "','" + TextBox7.Text.Replace("'", "''") + "',N'" + TextBox4.Text.Replace("'", "''") + "',N'" + TextBox5.Text.Replace("'", "''") + "',"+CheckAddressID(TextBox6.Text,DropDownList2.SelectedValue,DropDownList3.SelectedValue,DropDownList4.SelectedValue)+",N'"+DropDownList5.SelectedItem.Text+"')");
+
+
+FILE: ../Take Time BangPhra/Admin/Edit_Data.aspx.cs
+ISSUES FOUND: 14
+----------------------------------------
+48:                        DataTable dtt = code.DatabaseQuery(conn, "Select [Name] From Supplier Where [Status] = 'True' AND  ID = " + supplierid);
+49:                        dt = code.DatabaseQuery(conn, "Select * From Supplier_Contact Where [Status] = 'True' AND  SupplierID = " + supplierid);
+57:                        DataTable dtt = code.DatabaseQuery(conn, "Select [Type] From Supplier_Type Where [Status] = 'True' AND ID = " + supplier_type);
+58:                        dt = code.DatabaseQuery(conn, "Select * From Supplier Where [Status] = 'True' AND  TypeID = " + supplier_type);
+65:                        dt = code.DatabaseQuery(conn, "select * from Accommodation where [Status] = 'True'");
+69:                        dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");
+76:                        dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");
+99:                DataTable dtt = code.DatabaseQuery(conn, "Select [Name] From Supplier Where [Status] = 'True' AND  ID = " + supplierid);
+100:                dt = code.DatabaseQuery(conn, "Select * From Supplier_Contact Where [Status] = 'True' AND  SupplierID = " + supplierid);
+107:                DataTable dtt = code.DatabaseQuery(conn, "Select [Type] From Supplier_Type Where [Status] = 'True' AND  ID = " + supplier_type);
+108:                dt = code.DatabaseQuery(conn, "Select * From Supplier Where [Status] = 'True' AND  TypeID = " + supplier_type);
+114:                dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");200:                code.DatabaseInsert(conn, cmd);
+219:            code.DatabaseInsert(conn, "UPDATE " + data + " SET [Status] = 'False' WHERE ID = " + Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()));
+266:                code.DatabaseInsert(conn, cmd);
+
+
+FILE: ../Take Time BangPhra/Admin/Login.aspx.cs
+ISSUES FOUND: 1
+----------------------------------------
+40:            DataTable dtAdmin = code.DatabaseQuery(conn, "Select * from Admin Where Status = 1");60:                code.DatabaseInsert(conn, "UPDATE [dbo].[Admin] SET [Password] = '"+TextBox2.Text+"' WHERE ID = "+ Session["UserID"]);
+
+
+FILE: ../Take Time BangPhra/Default_Backup.aspx.cs
+ISSUES FOUND: 12
+----------------------------------------
+48:                DataTable dtReviews = DatabaseQuery(conn, "Select * from Reviews Where [Date] > '"+DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd")+"'");
+123:                DataTable dtReservation = DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID  Where '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+124:                DataTable dtAccommodation = DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 order by OrderID asc");
+247:        public DataTable DatabaseQuery(string connStr, string cmd)
+322:            DataTable dt = DatabaseQuery(conn, "select Top 1 ID from " + tablename + " Where ID like '" + doctype + Year + Month + Day + "%' order by ID desc");
+375:                    DataTable dtReservation = DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+376:                    DataTable dtAccommodation = DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 AND AccomName = N'" + GridView1.SelectedRow.Cells[1].Text +"'");
+424:                    DataTable dtReservation = DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+425:                    DataTable dtAccommodation = DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 order by ID asc");33:                   DatabaseInsert(conn, "INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + System.Net.Dns.GetHostEntry(HttpContext.Current.Request.UserHostName.ToString()).HostName + "','"+ HttpContext.Current.Request.UserHostName.ToString() + "','"+ HttpContext.Current.Request.Browser.Browser+ "')") ;
+35:                catch { DatabaseInsert(conn, "INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.Browser.Browser + "')"); }
+58:                    DatabaseInsert(conn, "INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES ('"+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+"',N'"+jsonResponse.Replace("'","''")+"');");
+198:        public int DatabaseInsert(string connectionString, string query)
+
+
