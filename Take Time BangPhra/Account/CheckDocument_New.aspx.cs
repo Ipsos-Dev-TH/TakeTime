@@ -921,29 +921,52 @@ namespace Take_Time_BangPhra.Account
         // GridView Event Handlers
         protected void gvDetails_RowDeleting(object sender, GridViewDeleteEventArgs e)
         {
+            // ✅ Check if delete is enabled (checkbox must be checked)
             if (!chkEnableDelete.Checked)
             {
-                ShowError("กรุณาเปิดใช้งานปุ่มลบก่อน");
+                ShowError("กรุณาเปิดใช้งานปุ่มลบก่อน (ติ๊กที่ช่อง 'เปิดใช้งานปุ่มลบ')");
                 return;
             }
 
             try
             {
-                string docNum = gvDetails.Rows[e.RowIndex].Cells[3].Text;
-                string docType = docNum.Remove(3, 9);
-                string docYear = "20" + docNum.Remove(0, 3).Remove(2, 7);
-                string docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, 5)).ToString();
+                // ✅ FIX: Get document number from correct column (Cells[4], not Cells[3])
+                // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร
+                string docNum = gvDetails.Rows[e.RowIndex].Cells[4].Text;
 
-                if (docType.Length > 3)
+                System.Diagnostics.Debug.WriteLine($"🗑️ Attempting to delete document: {docNum}");
+
+                // ✅ Improved parsing: Extract document type, year, month
+                // Format examples: REC2410-0001, REC241030-0001, PAY2410-0001
+                string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
+                string docYear = "";
+                string docMonth = "";
+
+                // Find the dash position to split correctly
+                int dashPos = docNum.IndexOf('-');
+                if (dashPos > 3)
                 {
-                    docType = docNum.Remove(3, 12);
-                    docYear = "20" + docNum.Remove(0, 3).Remove(2, 10);
-                    docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, 8)).ToString();
+                    // Extract year and month between docType and dash
+                    string yearMonth = docNum.Substring(3, dashPos - 3); // e.g., "2410" or "241030"
+
+                    if (yearMonth.Length >= 4)
+                    {
+                        docYear = "20" + yearMonth.Substring(0, 2); // "2410" -> "2024"
+                        docMonth = yearMonth.Substring(2, 2); // "2410" -> "10"
+                    }
                 }
+                else
+                {
+                    throw new Exception($"รูปแบบเลขที่เอกสารไม่ถูกต้อง: {docNum} (ไม่พบเครื่องหมาย '-')");
+                }
+
+                System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth}");
 
                 if (docType == "REC")
                 {
                     string path = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth;
+
+                    System.Diagnostics.Debug.WriteLine($"   Receipt path: {path}");
 
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History
                     try
@@ -967,62 +990,115 @@ namespace Take_Time_BangPhra.Account
                                     codeInstance.DatabaseInsert(conn,
                                         $"UPDATE [dbo].[Reservation] SET Deposit = ISNULL(Deposit, 0) - {amount} WHERE ID = {reservationId}");
 
-                                    System.Diagnostics.Debug.WriteLine($"✅ Updated Reservation {reservationId}: Reduced Deposit by {amount:N2}");
+                                    System.Diagnostics.Debug.WriteLine($"   ✅ Updated Reservation {reservationId}: Reduced Deposit by {amount:N2}");
                                 }
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"⚠️ Error updating Reservation.Deposit: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"   ⚠️ Error updating Reservation.Deposit: {ex.Message}");
                         // Continue with deletion even if update fails (data consistency issue but prevents stuck state)
                     }
 
                     // Delete Payment_History records
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
 
                     // Delete receipt details
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Account_Receipt_Detail records...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + docNum + "'");
 
                     // Delete receipt record
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Account_Receipt record...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + docNum + "'");
 
                     // Delete receipt files
+                    int filesDeleted = 0;
                     if (Directory.Exists(path))
                     {
                         string[] files = Directory.GetFiles(path, docNum + "*");
                         foreach (string file in files)
                         {
                             File.Delete(file);
+                            filesDeleted++;
                         }
+                        System.Diagnostics.Debug.WriteLine($"   Deleted {filesDeleted} file(s)");
                     }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
+                    }
+
+                    System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted receipt: {docNum}");
                 }
                 else if (docType == "PAY")
                 {
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
 
+                    System.Diagnostics.Debug.WriteLine($"   Payment path: {path}");
+
                     // Delete payment details
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Account_Payment_Detail records...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + docNum + "'");
 
                     // Delete payment record
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Account_Payment record...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
 
                     // Delete payment files
+                    int filesDeleted = 0;
                     if (Directory.Exists(path))
                     {
                         string[] files = Directory.GetFiles(path, docNum + "*");
                         foreach (string file in files)
                         {
                             File.Delete(file);
+                            filesDeleted++;
                         }
+                        System.Diagnostics.Debug.WriteLine($"   Deleted {filesDeleted} file(s)");
                     }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
+                    }
+
+                    System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted payment: {docNum}");
+                }
+                else
+                {
+                    throw new Exception($"ประเภทเอกสารไม่ถูกต้อง: {docType} (ต้องเป็น REC หรือ PAY)");
                 }
 
-                Response.Redirect("/Account/CheckDocument_New");
+                // Log successful deletion
+                try
+                {
+                    loggingService?.LogAccountingOperation(
+                        "DocumentDeleted",
+                        $"Deleted document: {docNum} (Type: {docType})",
+                        true,
+                        GetCurrentUserId());
+                }
+                catch { /* Ignore logging errors */ }
+
+                // Show success message and refresh page
+                ClientScript.RegisterStartupScript(this.GetType(), "deleteSuccess",
+                    $"alert('✅ ลบเอกสาร {docNum} สำเร็จ'); window.location='/Account/CheckDocument_New';", true);
             }
             catch (Exception ex)
             {
-                ShowError("ลบเอกสารไม่สำเร็จ: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine($"❌ Error deleting document: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"   Stack: {ex.StackTrace}");
+
+                // Log failed deletion
+                try
+                {
+                    loggingService?.LogException(ex, LoggingService.LogCategory.Accounting,
+                        $"Failed to delete document", GetCurrentUserId());
+                }
+                catch { /* Ignore logging errors */ }
+
+                ShowError($"❌ ลบเอกสารไม่สำเร็จ:\n\n{ex.Message}\n\nกรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ");
             }
         }
 
@@ -1235,7 +1311,8 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 int rowIndex = e.NewEditIndex;
-                string docNum = gvDetails.Rows[rowIndex].Cells[3].Text; // Column index matches RowCommand
+                // ✅ FIX: Get document number from correct column (Cells[4], not Cells[3])
+                string docNum = gvDetails.Rows[rowIndex].Cells[4].Text;
 
                 System.Diagnostics.Debug.WriteLine($"📝 RowEditing triggered: {docNum}, RowIndex: {rowIndex}");
 
