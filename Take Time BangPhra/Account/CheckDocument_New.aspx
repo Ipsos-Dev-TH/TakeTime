@@ -367,7 +367,7 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="category">1️⃣ รายได้จากการจองพัก (เช็คอินในช่วง)</td>
+                        <td class="category">1️⃣ รายได้จากการจองพัก (เช็คอินในช่วง - ไม่รวมมัดจำ)</td>
                         <td class="amount-cell"><asp:Label ID="lblCat1Cash" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat1KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat1KTB" runat="server" Text="0.00"></asp:Label></td>
@@ -375,7 +375,7 @@
                         <td class="amount-cell"><asp:Label ID="lblCat1Total" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                     <tr>
-                        <td class="category">2️⃣ รายได้จากการจองพัก (โอนในช่วง, เช็คอินนอกช่วง)</td>
+                        <td class="category">2️⃣ รายได้จากมัดจำทั้งหมด (ทุกวันเข้าพัก)</td>
                         <td class="amount-cell"><asp:Label ID="lblCat2Cash" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat2KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat2KTB" runat="server" Text="0.00"></asp:Label></td>

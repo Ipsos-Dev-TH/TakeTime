@@ -362,9 +362,10 @@ namespace Take_Time_BangPhra.Account
 
         private DataTable GetCategory1Revenue(DateTime startDate, DateTime endDate, string status)
         {
-            // Category 1: รายได้จากการจองพัก (เช็คอินในช่วง)
+            // Category 1: รายได้จากการจองพัก (เช็คอินในช่วง - ไม่รวมมัดจำ)
             // เงื่อนไขอันดับ 1: ใบกำกับภาษีออกในช่วงที่ค้นหา (Account_Receipt.Created_Date)
             // เงื่อนไขอันดับ 2: การจองมีวันเช็คอินในช่วงที่ค้นหา (Reservation.CheckinDate)
+            // เงื่อนไขอันดับ 3: ไม่เป็นมัดจำ (IsDeposit = 0 หรือ NULL)
             string query = @"
                 SELECT DISTINCT ph.ID as PaymentHistoryID, ph.PaymentMethod, ph.PaymentAmount, ar.ID as ReceiptID
                 FROM Payment_History ph
@@ -374,6 +375,7 @@ namespace Take_Time_BangPhra.Account
                   AND CAST(ar.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
                   AND CAST(r.CheckinDate AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(r.CheckinDate AS DATE) <= CAST(@EndDate AS DATE)
+                  AND (ar.IsDeposit = 0 OR ar.IsDeposit IS NULL)
                   AND ar.Status LIKE @Status
                   AND ph.Status = 'COMPLETED'
                   AND ph.Receipt_ID IS NOT NULL
@@ -391,8 +393,8 @@ namespace Take_Time_BangPhra.Account
 
         private DataTable GetCategory2Revenue(DateTime startDate, DateTime endDate, string status)
         {
-            // Category 2: รายได้จากการจองพัก (โอนในช่วง, เช็คอินนอกช่วง)
-            // ยอดรวมของใบกำกับภาษีที่ออกในช่วงที่ค้นหา แต่การจองมีวันเช็คอินนอกช่วง
+            // Category 2: รายได้จากมัดจำทั้งหมด (ไม่สนใจว่าเช็คอินเมื่อไหร่)
+            // เงื่อนไข: ใบกำกับภาษีออกในช่วงที่ค้นหา AND เป็นมัดจำ (IsDeposit = 1)
             // ดูจากวันที่ออกใบกำกับภาษี (Account_Receipt.Created_Date) ไม่ใช่วันโอนเงิน
             string query = @"
                 SELECT DISTINCT ph.ID as PaymentHistoryID, ph.PaymentMethod, ph.PaymentAmount, ar.ID as ReceiptID
@@ -401,9 +403,7 @@ namespace Take_Time_BangPhra.Account
                 INNER JOIN Account_Receipt ar ON ph.Receipt_ID = ar.ID
                 WHERE CAST(ar.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(ar.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                  AND (CAST(r.CheckinDate AS DATE) < CAST(@StartDate AS DATE)
-                       OR CAST(r.CheckinDate AS DATE) > CAST(@EndDate AS DATE)
-                       OR r.CheckinDate IS NULL)
+                  AND ar.IsDeposit = 1
                   AND ar.Status LIKE @Status
                   AND ph.Status = 'COMPLETED'
                   AND ph.Receipt_ID IS NOT NULL
@@ -475,10 +475,11 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private DataTable GetCategory1RevenueFallback(DateTime startDate, DateTime endDate, string status)
         {
-            // Category 1 Fallback: รายได้จากการจองพัก (เช็คอินในช่วง)
+            // Category 1 Fallback: รายได้จากการจองพัก (เช็คอินในช่วง - ไม่รวมมัดจำ)
             // ใช้ Account_Receipt สำหรับระบบเก่าที่ยังไม่มี Payment_History
             // เงื่อนไขอันดับ 1: ใบกำกับภาษีออกในช่วง (Created_Date)
             // เงื่อนไขอันดับ 2: วันเช็คอินในช่วง (CheckinDate)
+            // เงื่อนไขอันดับ 3: ไม่เป็นมัดจำ (IsDeposit = 0 หรือ NULL)
             string query = @"
                 SELECT ar.ID, ar.Paid_Type, ar.Total_Amount
                 FROM Account_Receipt ar
@@ -487,6 +488,7 @@ namespace Take_Time_BangPhra.Account
                   AND CAST(ar.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
                   AND CAST(r.CheckinDate AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(r.CheckinDate AS DATE) <= CAST(@EndDate AS DATE)
+                  AND (ar.IsDeposit = 0 OR ar.IsDeposit IS NULL)
                   AND ar.Status LIKE @Status
                   AND ar.Reservation_ID > 0";
 
@@ -506,18 +508,16 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private DataTable GetCategory2RevenueFallback(DateTime startDate, DateTime endDate, string status)
         {
-            // Category 2 Fallback: รายได้จากการจองพัก (โอนในช่วง, เช็คอินนอกช่วง)
+            // Category 2 Fallback: รายได้จากมัดจำทั้งหมด (ไม่สนใจว่าเช็คอินเมื่อไหร่)
             // ใช้ Account_Receipt สำหรับระบบเก่าที่ยังไม่มี Payment_History
-            // ดูจากวันที่ออกใบกำกับภาษี (Created_Date) แต่วันเช็คอินนอกช่วง
+            // เงื่อนไข: ใบกำกับภาษีออกในช่วงที่ค้นหา AND เป็นมัดจำ (IsDeposit = 1)
             string query = @"
                 SELECT ar.ID, ar.Paid_Type, ar.Total_Amount
                 FROM Account_Receipt ar
                 INNER JOIN Reservation r ON ar.Reservation_ID = r.ID
                 WHERE CAST(ar.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(ar.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                  AND (CAST(r.CheckinDate AS DATE) < CAST(@StartDate AS DATE)
-                       OR CAST(r.CheckinDate AS DATE) > CAST(@EndDate AS DATE)
-                       OR r.CheckinDate IS NULL)
+                  AND ar.IsDeposit = 1
                   AND ar.Status LIKE @Status
                   AND ar.Reservation_ID > 0";
 
