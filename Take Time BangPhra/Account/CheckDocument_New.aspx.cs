@@ -936,29 +936,12 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"🗑️ Attempting to delete document: {docNum}");
 
-                // ✅ Improved parsing: Extract document type, year, month
-                // Format examples: REC2410-0001, REC241030-0001, PAY2410-0001
-                string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
-                string docYear = "";
-                string docMonth = "";
-
-                // Find the dash position to split correctly
-                int dashPos = docNum.IndexOf('-');
-                if (dashPos > 3)
-                {
-                    // Extract year and month between docType and dash
-                    string yearMonth = docNum.Substring(3, dashPos - 3); // e.g., "2410" or "241030"
-
-                    if (yearMonth.Length >= 4)
-                    {
-                        docYear = "20" + yearMonth.Substring(0, 2); // "2410" -> "2024"
-                        docMonth = yearMonth.Substring(2, 2); // "2410" -> "10"
-                    }
-                }
-                else
-                {
-                    throw new Exception($"รูปแบบเลขที่เอกสารไม่ถูกต้อง: {docNum} (ไม่พบเครื่องหมาย '-')");
-                }
+                // ✅ Parse document number
+                // Format: REC24100001 (REC + Year(2) + Month(2) + Number(4))
+                // or PAY24100001 (PAY + Year(2) + Month(2) + Number(4))
+                string docType = docNum.Remove(3, docNum.Length - 3); // Get first 3 chars: REC or PAY
+                string docYear = "20" + docNum.Remove(0, 3).Remove(2, docNum.Length - 5); // Get year: 24 -> 2024
+                string docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, docNum.Length - 7)).ToString(); // Get month: 10
 
                 System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth}");
 
@@ -1111,29 +1094,12 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
 
-                // ✅ Improved parsing: Extract document type, year, month (same logic as RowDeleting)
-                // Format examples: REC2410-0001, REC241030-0001, PAY2410-0001
-                string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
-                string docYear = "";
-                string docMonth = "";
-
-                // Find the dash position to split correctly
-                int dashPos = docNum.IndexOf('-');
-                if (dashPos > 3)
-                {
-                    // Extract year and month between docType and dash
-                    string yearMonth = docNum.Substring(3, dashPos - 3); // e.g., "2410" or "241030"
-
-                    if (yearMonth.Length >= 4)
-                    {
-                        docYear = "20" + yearMonth.Substring(0, 2); // "2410" -> "2024"
-                        docMonth = yearMonth.Substring(2, 2); // "2410" -> "10"
-                    }
-                }
-                else
-                {
-                    throw new Exception($"รูปแบบเลขที่เอกสารไม่ถูกต้อง: {docNum} (ไม่พบเครื่องหมาย '-')");
-                }
+                // ✅ Parse document number (same logic as RowDeleting)
+                // Format: REC24100001 (REC + Year(2) + Month(2) + Number(4))
+                // or PAY24100001 (PAY + Year(2) + Month(2) + Number(4))
+                string docType = docNum.Remove(3, docNum.Length - 3); // Get first 3 chars: REC or PAY
+                string docYear = "20" + docNum.Remove(0, 3).Remove(2, docNum.Length - 5); // Get year: 24 -> 2024
+                string docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, docNum.Length - 7)).ToString(); // Get month: 10
 
                 System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth}");
 
