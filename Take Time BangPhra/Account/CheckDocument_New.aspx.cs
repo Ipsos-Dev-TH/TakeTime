@@ -1111,20 +1111,28 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
 
-                // Parse document type, year, and month from document number
+                // ✅ Improved parsing: Extract document type, year, month (same logic as RowDeleting)
+                // Format examples: REC2410-0001, REC241030-0001, PAY2410-0001
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = "";
                 string docMonth = "";
 
-                // Format: REC2410-0001 or REC241030-0001
-                if (docNum.Length >= 9) // REC2410-0001 format (8 chars before dash)
+                // Find the dash position to split correctly
+                int dashPos = docNum.IndexOf('-');
+                if (dashPos > 3)
                 {
-                    docYear = "20" + docNum.Substring(3, 2); // REC24 → 2024
-                    docMonth = docNum.Substring(5, 2); // REC2410 → 10
+                    // Extract year and month between docType and dash
+                    string yearMonth = docNum.Substring(3, dashPos - 3); // e.g., "2410" or "241030"
+
+                    if (yearMonth.Length >= 4)
+                    {
+                        docYear = "20" + yearMonth.Substring(0, 2); // "2410" -> "2024"
+                        docMonth = yearMonth.Substring(2, 2); // "2410" -> "10"
+                    }
                 }
                 else
                 {
-                    throw new Exception($"Invalid document number format: {docNum}");
+                    throw new Exception($"รูปแบบเลขที่เอกสารไม่ถูกต้อง: {docNum} (ไม่พบเครื่องหมาย '-')");
                 }
 
                 System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth}");
