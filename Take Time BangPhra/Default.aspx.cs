@@ -33,7 +33,7 @@ namespace Take_Time_BangPhra
                     // SECURE: Log access with parameterized query
                     var logParams = new Dictionary<string, object>
                     {
-                        { "@AccessDateTime", DateTime.Now.ToString() },
+                        { "@AccessDateTime", DateTime.Now },
                         { "@DeviceName", System.Net.Dns.GetHostEntry(HttpContext.Current.Request.UserHostName.ToString()).HostName },
                         { "@DeviceIP", HttpContext.Current.Request.UserHostName.ToString() },
                         { "@Browser", HttpContext.Current.Request.Browser.Browser }
@@ -48,7 +48,7 @@ namespace Take_Time_BangPhra
                     // SECURE: Fallback log access with parameterized query
                     var fallbackLogParams = new Dictionary<string, object>
                     {
-                        { "@AccessDateTime", DateTime.Now.ToString() },
+                        { "@AccessDateTime", DateTime.Now },
                         { "@DeviceName", HttpContext.Current.Request.UserHostName.ToString() },
                         { "@DeviceIP", HttpContext.Current.Request.UserHostName.ToString() },
                         { "@Browser", HttpContext.Current.Request.Browser.Browser }
@@ -91,7 +91,7 @@ namespace Take_Time_BangPhra
                     // SECURE: Insert new review with parameterized query
                     var insertReviewParams = new Dictionary<string, object>
                     {
-                        { "@ReviewDate", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") },
+                        { "@ReviewDate", DateTime.Now },
                         { "@JsonData", jsonResponse }
                     };
                     DatabaseInsertSafe(conn,
