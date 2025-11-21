@@ -79,25 +79,79 @@ namespace Take_Time_BangPhra.Voucher
                 if(command == "edit")
                 {
 
+                    // SECURE: Receipt lookup with parameterized query
+                    var receiptParams = new Dictionary<string, object>
+                    {
+                        { "@UID", uid ?? "" }
+                    };
 
-                    DataTable dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid+"'");
+                    DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Account_Receipt " +
+                        "LEFT JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                        "WHERE Account_Receipt.UID = @UID",
+                        receiptParams);
+
                     string id = dtReceipt.Rows[0]["ID"].ToString();
-                    DataTable dtReceiptDetail = code.DatabaseQuery(conn, "Select Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount from Account_Receipt_Detail Where Receipt_ID = '" + id + "'");
+
+                    // SECURE: Receipt detail lookup with parameterized query
+                    var receiptDetailParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", id }
+                    };
+
+                    DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                        "SELECT Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount " +
+                        "FROM Account_Receipt_Detail WHERE Receipt_ID = @ReceiptID",
+                        receiptDetailParams);
+
                     DataTable dtcustomer = new DataTable();
                     try
                     {
                         if( Convert.ToInt32(dtReceipt.Rows[0]["Customer_ID"].ToString()) > 0)
                         {
-                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where Customer.ID = '" + dtReceipt.Rows[0]["Customer_ID"].ToString() + "'");
+                            // SECURE: Customer lookup by ID with parameterized query
+                            var customerByIDParams = new Dictionary<string, object>
+                            {
+                                { "@CustomerID", dtReceipt.Rows[0]["Customer_ID"].ToString() }
+                            };
+
+                            dtcustomer = code.DatabaseQuerySafe(conn,
+                                "SELECT * FROM Customer " +
+                                "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                                "LEFT JOIN Address ON Address.ID = Address_ID " +
+                                "WHERE Customer.ID = @CustomerID",
+                                customerByIDParams);
                         }
                         else
                         {
-                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+                            // SECURE: Customer lookup by mobile with parameterized query
+                            var customerByPhoneParams = new Dictionary<string, object>
+                            {
+                                { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() }
+                            };
+
+                            dtcustomer = code.DatabaseQuerySafe(conn,
+                                "SELECT * FROM Customer " +
+                                "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                                "LEFT JOIN Address ON Address.ID = Address_ID " +
+                                "WHERE MobilePhone = @MobilePhone",
+                                customerByPhoneParams);
                         }
-                        
+
                     }
                     catch {
-                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+                        // SECURE: Customer lookup by mobile with parameterized query (fallback)
+                        var customerByPhoneFallbackParams = new Dictionary<string, object>
+                        {
+                            { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() }
+                        };
+
+                        dtcustomer = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM Customer " +
+                            "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                            "LEFT JOIN Address ON Address.ID = Address_ID " +
+                            "WHERE MobilePhone = @MobilePhone",
+                            customerByPhoneFallbackParams);
                         
                     }
 
@@ -255,11 +309,30 @@ namespace Take_Time_BangPhra.Voucher
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
                 if(dtDetail.Rows.Count > 0)
                 {
-                    DataTable dtDetails = code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan_Group Where GroupID = '"+ DropDownList3.SelectedValue + "'");
+                    // SECURE: Rate plan group lookup with parameterized query
+                    var ratePlanGroupParams = new Dictionary<string, object>
+                    {
+                        { "@GroupID", DropDownList3.SelectedValue }
+                    };
+
+                    DataTable dtDetails = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Accommodation_RatePlan_Group WHERE GroupID = @GroupID",
+                        ratePlanGroupParams);
+
                     bool checkdup = false;
                     for(int i = 0;i<dtDetail.Rows.Count;i++)
                     {
-                        if(code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan_Group Where Group_Name = N'" + dtDetail.Rows[i]["RatePlan_Group"].ToString() + "'").Rows[0]["AccomGroupID"].ToString() == dtDetails.Rows[0]["AccomGroupID"].ToString())
+                        // SECURE: Rate plan group lookup by name with parameterized query
+                        var ratePlanByNameParams = new Dictionary<string, object>
+                        {
+                            { "@GroupName", dtDetail.Rows[i]["RatePlan_Group"].ToString() }
+                        };
+
+                        DataTable dtRatePlanByName = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM Accommodation_RatePlan_Group WHERE Group_Name = @GroupName",
+                            ratePlanByNameParams);
+
+                        if(dtRatePlanByName.Rows[0]["AccomGroupID"].ToString() == dtDetails.Rows[0]["AccomGroupID"].ToString())
                         {
                             
                             
@@ -299,7 +372,15 @@ namespace Take_Time_BangPhra.Voucher
             {
                 totalAmount += Convert.ToDouble(dtDetail.Rows[i]["Price_Amount"].ToString());
             }
-            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+            // SECURE: VAT percent lookup with parameterized query
+            var vatParams = new Dictionary<string, object>
+            {
+                { "@VatTypeID", DropDownList4.SelectedValue }
+            };
+
+            int vatPercent = Convert.ToInt32(code.DatabaseQuerySafe(conn,
+                "SELECT Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' AND ID = @VatTypeID",
+                vatParams).Rows[0][0].ToString());
             double AmountExcludeVat = (totalAmount * 100) / (100 + vatPercent);
             double vat = totalAmount - AmountExcludeVat;
             TextBox3.Text = NumberHelper.TwoDecimalPoints(AmountExcludeVat).ToString();
