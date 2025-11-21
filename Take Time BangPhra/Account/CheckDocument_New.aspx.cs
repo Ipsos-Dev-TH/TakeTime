@@ -984,13 +984,13 @@ namespace Take_Time_BangPhra.Account
                         // Continue with deletion even if update fails (data consistency issue but prevents stuck state)
                     }
 
-                    // Delete Payment_Slips first (FK constraint to Account_Receipt)
-                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_Slips records...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
-
-                    // Delete Payment_History records
+                    // Delete Payment_History first (has FK to Payment_Slips)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
+
+                    // Delete Payment_Slips second (has FK to Account_Receipt)
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_Slips records...");
+                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
 
                     // Delete receipt details
                     System.Diagnostics.Debug.WriteLine($"   Deleting Account_Receipt_Detail records...");
