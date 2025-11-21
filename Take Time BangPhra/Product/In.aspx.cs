@@ -87,8 +87,27 @@ namespace Take_Time_BangPhra.Product
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
-                ID = dt.Rows[0][0].ToString();
+                // SECURE: Use parameterized query
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode ?? "" },
+                    { "@Province", Province ?? "" },
+                    { "@District", District ?? "" },
+                    { "@SubDistrict", SubDistrict ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address " +
+                    "WHERE PostalCode = @PostalCode " +
+                    "AND Province = @Province " +
+                    "AND District = @District " +
+                    "AND SubDistrict = @SubDistrict",
+                    parameters);
+
+                if (dt.Rows.Count > 0)
+                {
+                    ID = dt.Rows[0][0].ToString();
+                }
             }
             catch { }
 
@@ -199,7 +218,17 @@ namespace Take_Time_BangPhra.Product
 
         protected void Button3_Click(object sender, EventArgs e)
         {
-            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");
+            // SECURE: Product lookup with parameterized query
+            var productParams = new Dictionary<string, object>
+            {
+                { "@ProductName", TextBox1.Text ?? "" },
+                { "@Barcode", TextBox1.Text ?? "" }
+            };
+
+            DataTable dtProduct = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Taketime].[dbo].[Product] " +
+                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                productParams);
             if (dtProduct.Rows.Count > 0)
             {
                 DataTable dtOrder = (DataTable)Session["dtOrder"];
@@ -261,9 +290,21 @@ namespace Take_Time_BangPhra.Product
             DataTable dtOrder = (DataTable)Session["dtOrder"];
             if(dtOrder.Rows.Count > 0)
             {
+                // SECURE: INSERT Product_In with parameterized query
                 for(int i = 0;i<dtOrder.Rows.Count;i++)
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) VALUES ('"+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "','" + dtOrder.Rows[i]["ID"].ToString() +"','" + dtOrder.Rows[i]["Amount"].ToString() +"','" + dtOrder.Rows[i]["Sell_Price"].ToString() +"')");
+                    var insertParams = new Dictionary<string, object>
+                    {
+                        { "@DateTimeIn", DateTime.Now },
+                        { "@ProductID", dtOrder.Rows[i]["ID"].ToString() },
+                        { "@Amount", dtOrder.Rows[i]["Amount"].ToString() },
+                        { "@PricePerUnit", dtOrder.Rows[i]["Sell_Price"].ToString() }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) " +
+                        "VALUES (@DateTimeIn,@ProductID,@Amount,@PricePerUnit)",
+                        insertParams);
                 }
                 Response.Redirect("/Product/In");
             }

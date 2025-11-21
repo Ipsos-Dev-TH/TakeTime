@@ -67,14 +67,38 @@ namespace Take_Time_BangPhra.Product
         {
             if (e.CommandName == "DeleteItem")
             {
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Product_Out] WHERE ID = "+ GridView1.Rows[Convert.ToInt32(e.CommandArgument)].Cells[0].Text);
+                // SECURE: DELETE with parameterized query
+                var deleteParams = new Dictionary<string, object>
+                {
+                    { "@ID", GridView1.Rows[Convert.ToInt32(e.CommandArgument)].Cells[0].Text }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Product_Out] WHERE ID = @ID",
+                    deleteParams);
+
                 Button3_Click1(null, null);
             }
         }
 
         protected void Button3_Click1(object sender, EventArgs e)
         {
-            DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product_Out] inner join Product on Product.ID = Product_ID inner join Product_Category on Product_Category.ID = Category_ID left join Account_Paid_How on Account_Paid_How.ID = Account_Paid_How_ID Where cast(DateTime_Out as date) >= '"+Convert.ToDateTime(TextBox1.Text).ToString("yyyy-MM-dd")+"' AND cast(DateTime_Out as date) <= '"+Convert.ToDateTime(TextBox2.Text).ToString("yyyy-MM-dd")+"' order by Category_ID asc");
+            // SECURE: SELECT with parameterized date range
+            var selectParams = new Dictionary<string, object>
+            {
+                { "@StartDate", Convert.ToDateTime(TextBox1.Text) },
+                { "@EndDate", Convert.ToDateTime(TextBox2.Text) }
+            };
+
+            DataTable dt = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Taketime].[dbo].[Product_Out] " +
+                "INNER JOIN Product ON Product.ID = Product_ID " +
+                "INNER JOIN Product_Category ON Product_Category.ID = Category_ID " +
+                "LEFT JOIN Account_Paid_How ON Account_Paid_How.ID = Account_Paid_How_ID " +
+                "WHERE CAST(DateTime_Out AS DATE) >= CAST(@StartDate AS DATE) " +
+                "AND CAST(DateTime_Out AS DATE) <= CAST(@EndDate AS DATE) " +
+                "ORDER BY Category_ID ASC",
+                selectParams);
             try
             {
                 dt.Columns.Add("Price_Total");
