@@ -30,9 +30,34 @@ namespace Take_Time_BangPhra
             {
                 try
                 {
-                   DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + System.Net.Dns.GetHostEntry(HttpContext.Current.Request.UserHostName.ToString()).HostName + "','"+ HttpContext.Current.Request.UserHostName.ToString() + "','"+ HttpContext.Current.Request.Browser.Browser+ "')")) ;
+                    // SECURE: Log access with parameterized query
+                    var logParams = new Dictionary<string, object>
+                    {
+                        { "@AccessDateTime", DateTime.Now.ToString() },
+                        { "@DeviceName", System.Net.Dns.GetHostEntry(HttpContext.Current.Request.UserHostName.ToString()).HostName },
+                        { "@DeviceIP", HttpContext.Current.Request.UserHostName.ToString() },
+                        { "@Browser", HttpContext.Current.Request.Browser.Browser }
+                    };
+                    DatabaseInsertSafe(conn,
+                        code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) " +
+                        "VALUES(@AccessDateTime,@DeviceName,@DeviceIP,@Browser)"),
+                        logParams);
                 }
-                catch { DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) VALUES('" + DateTime.Now.ToString() + "',N'" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.UserHostName.ToString() + "','" + HttpContext.Current.Request.Browser.Browser + "')")); }
+                catch
+                {
+                    // SECURE: Fallback log access with parameterized query
+                    var fallbackLogParams = new Dictionary<string, object>
+                    {
+                        { "@AccessDateTime", DateTime.Now.ToString() },
+                        { "@DeviceName", HttpContext.Current.Request.UserHostName.ToString() },
+                        { "@DeviceIP", HttpContext.Current.Request.UserHostName.ToString() },
+                        { "@Browser", HttpContext.Current.Request.Browser.Browser }
+                    };
+                    DatabaseInsertSafe(conn,
+                        code.AdaptSql("INSERT INTO [dbo].[Logs_Access] ([AccessDateTime],[DeviceName],[DeviceIP],Browser) " +
+                        "VALUES(@AccessDateTime,@DeviceName,@DeviceIP,@Browser)"),
+                        fallbackLogParams);
+                }
                 if(selecteddate != "" && selecteddate != null)
                 {
                     Calendar1.SelectedDate = Convert.ToDateTime(selecteddate);
@@ -45,7 +70,15 @@ namespace Take_Time_BangPhra
                     Calendar1.DataBind();
                     Calendar1_SelectionChanged(null, null);
                 }
-                DataTable dtReviews = DatabaseQuery(conn, code.AdaptSql("Select * from Reviews Where [Date] > '" +DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd")+"'"));
+                // SECURE: Get recent reviews with parameterized query
+                var reviewParams = new Dictionary<string, object>
+                {
+                    { "@WeekAgoDate", DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd") }
+                };
+                DataTable dtReviews = DatabaseQuerySafe(conn,
+                    code.AdaptSql("SELECT * FROM Reviews WHERE [Date] > @WeekAgoDate"),
+                    reviewParams);
+
                 string jsonResponse = "";
                 if ( dtReviews.Rows.Count > 0)
                 {
@@ -53,9 +86,17 @@ namespace Take_Time_BangPhra
                 }
                 else
                 {
-                    
                     jsonResponse = await FetchGoogleReviews();
-                    DatabaseInsert(conn, code.AdaptSql("INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES ('" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "',N'" + jsonResponse.Replace("'", "''") + "');"));
+
+                    // SECURE: Insert new review with parameterized query
+                    var insertReviewParams = new Dictionary<string, object>
+                    {
+                        { "@ReviewDate", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") },
+                        { "@JsonData", jsonResponse }
+                    };
+                    DatabaseInsertSafe(conn,
+                        code.AdaptSql("INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES (@ReviewDate,@JsonData)"),
+                        insertReviewParams);
                 }
                  
             // Assign the response to a Literal as a JavaScript variable
@@ -120,7 +161,16 @@ namespace Take_Time_BangPhra
                 GridView1.Visible = true;
                 Label1.Text = Calendar1.SelectedDate.ToString("dd MMMM yyyy");
 
-                DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID  Where '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + Calendar1.SelectedDate.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
+                // SECURE: Get reservations with parameterized query
+                var reservationParams = new Dictionary<string, object>
+                {
+                    { "@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd") }
+                };
+                DataTable dtReservation = DatabaseQuerySafe(conn,
+                    code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
+                    "INNER JOIN Accommodation ON Accommodation.ID = Reservation_Accommodation.Accommodation_ID " +
+                    "WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate"),
+                    reservationParams);
                 DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by OrderID asc"));
                 try
                 {
@@ -280,6 +330,13 @@ namespace Take_Time_BangPhra
 
         public string createDocNumber(string conn, string tablename, string doctype,string Year,string Month,string Day)
         {
+            // SECURE: Whitelist validation for table names
+            string[] allowedTables = { "Account_Receipt", "Account_Payment", "Reservation" };
+            if (!allowedTables.Contains(tablename))
+            {
+                throw new ArgumentException("Invalid table name");
+            }
+
             string output = "";
             Year = Year.Substring(Year.Length - 2);
 
@@ -292,7 +349,15 @@ namespace Take_Time_BangPhra
             {
                 Day = "0" + Day;
             }
-            DataTable dt = DatabaseQuery(conn, code.AdaptSql("select Top 1 ID from " + tablename + " Where ID like '" + doctype + Year + Month + Day + "%' order by ID desc"));
+
+            // SECURE: Parameterized query for document number lookup
+            var docParams = new Dictionary<string, object>
+            {
+                { "@Pattern", doctype + Year + Month + Day + "%" }
+            };
+            DataTable dt = DatabaseQuerySafe(conn,
+                code.AdaptSql("SELECT TOP 1 ID FROM [" + tablename + "] WHERE ID LIKE @Pattern ORDER BY ID DESC"),
+                docParams);
             int Number = 0;
             string NumberStr = "";
             if (dt.Rows.Count > 0)
@@ -345,8 +410,26 @@ namespace Take_Time_BangPhra
                 {
                     int checkhave = 0;
                     int countPeople = 0;
-                    DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
-                    DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 AND AccomName = N'" + GridView1.SelectedRow.Cells[1].Text + "'"));
+
+                    // SECURE: Get reservations with parameterized query
+                    var dayReservationParams = new Dictionary<string, object>
+                    {
+                        { "@DayDate", e.Day.Date.ToString("yyyy-MM-dd") }
+                    };
+                    DataTable dtReservation = DatabaseQuerySafe(conn,
+                        code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
+                        "INNER JOIN Accommodation ON Accommodation.ID = Accommodation_ID " +
+                        "WHERE @DayDate >= CheckinDate AND @DayDate < CheckoutDate"),
+                        dayReservationParams);
+
+                    // SECURE: Get accommodation with parameterized query
+                    var accomParams = new Dictionary<string, object>
+                    {
+                        { "@AccomName", GridView1.SelectedRow.Cells[1].Text }
+                    };
+                    DataTable dtAccommodation = DatabaseQuerySafe(conn,
+                        code.AdaptSql("SELECT * FROM Accommodation WHERE Status = 1 AND AccomName = @AccomName"),
+                        accomParams);
                     for (int i = 0; i < dtReservation.Rows.Count; i++)
                     {
                         if( (dtReservation.Rows[i]["AccomName"].ToString() == GridView1.SelectedRow.Cells[1].Text && dtReservation.Rows[i]["LimitWithPeople"].ToString().ToLower() == "false") )
@@ -394,7 +477,15 @@ namespace Take_Time_BangPhra
                         e.Cell.BackColor = System.Drawing.Color.Transparent;
                     }
 
-                    DataTable dtReservation = DatabaseQuery(conn, code.AdaptSql("Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate"));
+                    // SECURE: Get reservations with parameterized query
+                    var elseReservationParams = new Dictionary<string, object>
+                    {
+                        { "@DayDate", e.Day.Date.ToString("yyyy-MM-dd") }
+                    };
+                    DataTable dtReservation = DatabaseQuerySafe(conn,
+                        code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
+                        "WHERE @DayDate >= CheckinDate AND @DayDate < CheckoutDate"),
+                        elseReservationParams);
                     DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by ID asc"));
                     int maxAccommodation = dtAccommodation.Rows.Count;
                     int totalAmount = 0;
