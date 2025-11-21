@@ -3335,13 +3335,41 @@ namespace Take_Time_BangPhra
                 int affiRatePlanID = checkAccomUseCoupon(AccomID, reserveday);
                 if (affiRatePlanID > 0)
                 {
-                    DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] inner join Affiliate_Discount on Affiliate_Discount.ID = Affiliate_Discount_ID Where Coupon_Code = '" + couponcode + "'");
+                    // SECURE: Affiliate member lookup with parameterized query
+                    var couponParams = new Dictionary<string, object>
+                    {
+                        { "@CouponCode", couponcode ?? "" }
+                    };
+
+                    DataTable dt = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] " +
+                        "INNER JOIN Affiliate_Discount ON Affiliate_Discount.ID = Affiliate_Discount_ID " +
+                        "WHERE Coupon_Code = @CouponCode",
+                        couponParams);
+
                     if (dt.Rows.Count > 0)
                     {
                         double commission = 0;
                         double incentivepercent = Convert.ToDouble(dt.Rows[0]["IncentivePercent"].ToString());
                         commission = TwoDecimalPoints((priceafterdiscount * incentivepercent) / 100);
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Affiliate_Reservation] ([Affiliate_Member_Coupon_Code],[Reservation_ID],[Accommodation_ID],[Affiliate_Discount_RatePlan_ID],[PriceAfterDiscount],[Commission],StayDate,[Status]) VALUES ('" + TextBox19.Text + "','" + RevID + "','" + AccomID + "','" + affiRatePlanID + "','" + priceafterdiscount.ToString() + "','" + commission + "','" + reserveday.ToString("yyyy-MM-dd") + "','NEW')");
+
+                        // SECURE: INSERT Affiliate_Reservation with parameterized query
+                        var insertParams = new Dictionary<string, object>
+                        {
+                            { "@CouponCode", TextBox19.Text ?? "" },
+                            { "@ReservationID", RevID },
+                            { "@AccommodationID", AccomID },
+                            { "@AffiRatePlanID", affiRatePlanID },
+                            { "@PriceAfterDiscount", priceafterdiscount },
+                            { "@Commission", commission },
+                            { "@StayDate", reserveday }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Affiliate_Reservation] " +
+                            "([Affiliate_Member_Coupon_Code],[Reservation_ID],[Accommodation_ID],[Affiliate_Discount_RatePlan_ID],[PriceAfterDiscount],[Commission],StayDate,[Status]) " +
+                            "VALUES (@CouponCode,@ReservationID,@AccommodationID,@AffiRatePlanID,@PriceAfterDiscount,@Commission,@StayDate,'NEW')",
+                            insertParams);
                     }
                 }
             }
@@ -3358,7 +3386,19 @@ namespace Take_Time_BangPhra
                 {
                     if (AccomIDs[i] == AccomID)
                     {
-                        code.DatabaseInsert(conn, "UPDATE [dbo].[Voucher] SET [Used_Status] = 'True',[Used_Date] = '"+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+"',[Reservation_ID] = '"+RevID+"' WHERE [Voucher_Number] = '"+couponcode+"'");
+                        // SECURE: UPDATE Voucher with parameterized query
+                        var voucherParams = new Dictionary<string, object>
+                        {
+                            { "@UsedDate", DateTime.Now },
+                            { "@ReservationID", RevID },
+                            { "@VoucherNumber", couponcode ?? "" }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            "UPDATE [dbo].[Voucher] " +
+                            "SET [Used_Status] = 'True',[Used_Date] = @UsedDate,[Reservation_ID] = @ReservationID " +
+                            "WHERE [Voucher_Number] = @VoucherNumber",
+                            voucherParams);
                     }
                 }
             }
@@ -3850,7 +3890,18 @@ namespace Take_Time_BangPhra
                 string customerId = "0";
                 try
                 {
-                    DataTable dtCustomer = code.DatabaseQuery(conn, "Select * from Customer inner join Reservation on MobilePhone = Customer_MobilePhone Where Reservation.ID = '" + Reservation_ID + "'");
+                    // SECURE: Customer lookup with parameterized query
+                    var customerParams = new Dictionary<string, object>
+                    {
+                        { "@ReservationID", Reservation_ID }
+                    };
+
+                    DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Customer " +
+                        "INNER JOIN Reservation ON MobilePhone = Customer_MobilePhone " +
+                        "WHERE Reservation.ID = @ReservationID",
+                        customerParams);
+
                     if(dtCustomer.Rows.Count > 0)
                     {
                         customerId = dtCustomer.Rows[0]["ID"].ToString();
@@ -4026,7 +4077,18 @@ namespace Take_Time_BangPhra
 
                 if (etax == true)
                 {
-                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID],[UID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "' order by ID desc");
+                    // SECURE: Receipt lookup with parameterized query
+                    var receiptParams = new Dictionary<string, object>
+                    {
+                        { "@ReservationID", Reservation_ID }
+                    };
+
+                    DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT [ID],[UID] FROM [Account_Receipt] " +
+                        "WHERE RESERVATION_ID = @ReservationID " +
+                        "ORDER BY ID DESC",
+                        receiptParams);
+
                     string uid = dtReceipt.Rows[0]["UID"].ToString();
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
                     string pdfpath = "";
@@ -4311,10 +4373,40 @@ namespace Take_Time_BangPhra
                 LEFT JOIN Customer_Type ON Business_Type_ID = Customer_Type.ID
                 LEFT JOIN Address ON Address.ID = Business_Info.Address_ID");
 
-            DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + RecNumber + "' order by Number ASC");
-            DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+            // SECURE: Receipt detail lookup with parameterized query
+            var receiptDetailParams = new Dictionary<string, object>
+            {
+                { "@ReceiptID", RecNumber }
+            };
+
+            DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Account_Receipt_Detail] " +
+                "INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID " +
+                "WHERE Receipt_ID = @ReceiptID " +
+                "ORDER BY Number ASC",
+                receiptDetailParams);
+
+            // SECURE: Receipt lookup with parameterized query
+            var receiptParams = new Dictionary<string, object>
+            {
+                { "@ReceiptID", RecNumber }
+            };
+
+            DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Account_Receipt] " +
+                "LEFT JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                "WHERE Account_Receipt.ID = @ReceiptID",
+                receiptParams);
+
             string uid = dtReceipt.Rows[0]["UID"].ToString();
-            DataTable dtcustomer = code.DatabaseQuery(conn, @"SELECT
+
+            // SECURE: Customer lookup with parameterized query
+            var customerParams = new Dictionary<string, object>
+            {
+                { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() }
+            };
+
+            DataTable dtcustomer = code.DatabaseQuerySafe(conn, @"SELECT
                 -- ⚠️ ระบุ Customer columns ทั้งหมด ยกเว้น Province, District, Subdistrict, Postcode (legacy columns)
                 Customer.ID,
                 Customer.MobilePhone,
@@ -4348,7 +4440,7 @@ namespace Take_Time_BangPhra
                 FROM Customer
                 LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                 LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                WHERE MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+                WHERE MobilePhone = @MobilePhone", customerParams);
 
             DataTable dtCustomerReport = new DataTable();
             dtCustomerReport = dtcustomer.Copy();
@@ -4434,7 +4526,16 @@ namespace Take_Time_BangPhra
             string createdsigpath = "";
             try
             {
-                dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                // SECURE: Admin lookup with parameterized query
+                var adminParams = new Dictionary<string, object>
+                {
+                    { "@UserID", Session["UserID"].ToString() }
+                };
+
+                dtCreator = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE ID = @UserID",
+                    adminParams);
+
                 CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
                 createdsigpath = "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png";
             }
@@ -4815,7 +4916,20 @@ namespace Take_Time_BangPhra
                 if (Session["permission"].ToString() == "True")
                 {
                     Button5.Visible = true;
-                    Button5.Text = "เคยมาแล้ว "+ code.DatabaseQuery(conn, "SELECT count([Customer_MobilePhone]) as CountReserved FROM [Reservation] Where Customer_MobilePhone = '" + TextBox1.Text + "' AND Status = N'เช็คอินแล้ว'").Rows[0][0].ToString()+" ครั้ง" ;
+
+                    // SECURE: Customer visit count with parameterized query
+                    var visitParams = new Dictionary<string, object>
+                    {
+                        { "@MobilePhone", TextBox1.Text ?? "" }
+                    };
+
+                    DataTable dtVisitCount = code.DatabaseQuerySafe(conn,
+                        "SELECT COUNT([Customer_MobilePhone]) AS CountReserved " +
+                        "FROM [Reservation] " +
+                        "WHERE Customer_MobilePhone = @MobilePhone AND Status = N'เช็คอินแล้ว'",
+                        visitParams);
+
+                    Button5.Text = "เคยมาแล้ว " + dtVisitCount.Rows[0][0].ToString() + " ครั้ง";
                 }
             }
             else
@@ -4833,7 +4947,18 @@ namespace Take_Time_BangPhra
 
         protected void Calendar1_DayRender(object sender, DayRenderEventArgs e)
         {
-            DataTable dtReservation = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+            // SECURE: Reservation calendar lookup with parameterized query
+            var calendarParams = new Dictionary<string, object>
+            {
+                { "@SelectedDate", e.Day.Date }
+            };
+
+            DataTable dtReservation = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Reservation " +
+                "RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
+                "WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate",
+                calendarParams);
+
             DataTable dtAccommodation = code.DatabaseQuery(conn, "Select * From Accommodation Where Status = 1");
             int maxAccommodation = dtAccommodation.Rows.Count;
             int totalAmount = 0;
@@ -5196,7 +5321,16 @@ namespace Take_Time_BangPhra
                 string id = Request.QueryString["id"];
                 string command = Request.QueryString["command"];
 
-                DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + id + "'");
+                // SECURE: Receipt lookup with parameterized query
+                var receiptCheckParams = new Dictionary<string, object>
+                {
+                    { "@ReservationID", id ?? "" }
+                };
+
+                DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                    "SELECT [ID] FROM [Account_Receipt] WHERE RESERVATION_ID = @ReservationID",
+                    receiptCheckParams);
+
                 if ((command == "edit" || command == "checkin" || command == "rentmore") && dtReceipt.Rows.Count > 0)
                 {
                     CheckBox4.Checked = false;
@@ -5225,7 +5359,15 @@ namespace Take_Time_BangPhra
         {
             int check = 0;
 
-            DataTable dtRatePlan = code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan Where Accom_ID = " + AccomID);
+            // SECURE: RatePlan lookup with parameterized query
+            var ratePlanParams = new Dictionary<string, object>
+            {
+                { "@AccomID", AccomID }
+            };
+
+            DataTable dtRatePlan = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Accommodation_RatePlan WHERE Accom_ID = @AccomID",
+                ratePlanParams);
 
             for (int j = 0; j < dtRatePlan.Rows.Count; j++)
             {
@@ -5277,7 +5419,17 @@ namespace Take_Time_BangPhra
                             Holiday = true;
                         }
                     }
-                    DataTable dtRatePlanDayType = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_RatePlan] inner join Accommodation_DayType on Accommodation_DayType.ID = DayType_Name_ID Where Accommodation_RatePlan.ID = " + dtRatePlan.Rows[j]["ID"].ToString());
+                    // SECURE: RatePlanDayType lookup with parameterized query
+                    var ratePlanDayTypeParams = new Dictionary<string, object>
+                    {
+                        { "@RatePlanID", dtRatePlan.Rows[j]["ID"].ToString() }
+                    };
+
+                    DataTable dtRatePlanDayType = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Taketime].[dbo].[Accommodation_RatePlan] " +
+                        "INNER JOIN Accommodation_DayType ON Accommodation_DayType.ID = DayType_Name_ID " +
+                        "WHERE Accommodation_RatePlan.ID = @RatePlanID",
+                        ratePlanDayTypeParams);
                     string[] days = dtRatePlanDayType.Rows[0]["Day"].ToString().Split(',');
                     var culture = CultureInfo.CurrentCulture;
                     for (int k = 0; k < days.Length; k++)
@@ -5290,7 +5442,18 @@ namespace Take_Time_BangPhra
 
                             if (UseCoupon == "Affiliate")
                             {
-                                DataTable dtCoupon = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] inner join Affiliate_Discount on Affiliate_Discount.ID = Affiliate_Member.Affiliate_Discount_ID inner join Affiliate_Discount_RatePlan on Affiliate_Discount_RatePlan.Affiliate_Discount_ID = Affiliate_Member.Affiliate_Discount_ID Where Accommodation_RatePlan_ID = " + dtRatePlan.Rows[j]["ID"].ToString());
+                                // SECURE: Coupon/Affiliate discount lookup with parameterized query
+                                var couponParams = new Dictionary<string, object>
+                                {
+                                    { "@RatePlanID", dtRatePlan.Rows[j]["ID"].ToString() }
+                                };
+
+                                DataTable dtCoupon = code.DatabaseQuerySafe(conn,
+                                    "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] " +
+                                    "INNER JOIN Affiliate_Discount ON Affiliate_Discount.ID = Affiliate_Member.Affiliate_Discount_ID " +
+                                    "INNER JOIN Affiliate_Discount_RatePlan ON Affiliate_Discount_RatePlan.Affiliate_Discount_ID = Affiliate_Member.Affiliate_Discount_ID " +
+                                    "WHERE Accommodation_RatePlan_ID = @RatePlanID",
+                                    couponParams);
                                 if (dtCoupon.Rows.Count >= 1)
                                 {
                                     check = Convert.ToInt32(dtCoupon.Rows[0]["ID2"].ToString());
@@ -5367,7 +5530,15 @@ namespace Take_Time_BangPhra
         {
             string Price = "";
 
-            DataTable dtRatePlan = code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan Where Accom_ID = " + AccomID);
+            // SECURE: RatePlan lookup with parameterized query
+            var ratePlanParams = new Dictionary<string, object>
+            {
+                { "@AccomID", AccomID }
+            };
+
+            DataTable dtRatePlan = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Accommodation_RatePlan WHERE Accom_ID = @AccomID",
+                ratePlanParams);
 
             for (int j = 0; j < dtRatePlan.Rows.Count; j++)
             {
@@ -5419,7 +5590,17 @@ namespace Take_Time_BangPhra
                             Holiday = true;
                         }
                     }
-                    DataTable dtRatePlanDayType = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_RatePlan] inner join Accommodation_DayType on Accommodation_DayType.ID = DayType_Name_ID Where Accommodation_RatePlan.ID = " + dtRatePlan.Rows[j]["ID"].ToString());
+                    // SECURE: RatePlanDayType lookup with parameterized query
+                    var ratePlanDayTypeParams = new Dictionary<string, object>
+                    {
+                        { "@RatePlanID", dtRatePlan.Rows[j]["ID"].ToString() }
+                    };
+
+                    DataTable dtRatePlanDayType = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Taketime].[dbo].[Accommodation_RatePlan] " +
+                        "INNER JOIN Accommodation_DayType ON Accommodation_DayType.ID = DayType_Name_ID " +
+                        "WHERE Accommodation_RatePlan.ID = @RatePlanID",
+                        ratePlanDayTypeParams);
                     string[] days = dtRatePlanDayType.Rows[0]["Day"].ToString().Split(',');
                     var culture = CultureInfo.CurrentCulture;
                     for (int k = 0; k < days.Length; k++)
@@ -5431,7 +5612,18 @@ namespace Take_Time_BangPhra
 
                             if (UseCoupon == "Affiliate")
                             {
-                                DataTable dtCoupon = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] inner join Affiliate_Discount on Affiliate_Discount.ID = Affiliate_Member.Affiliate_Discount_ID inner join Affiliate_Discount_RatePlan on Affiliate_Discount_RatePlan.Affiliate_Discount_ID = Affiliate_Member.Affiliate_Discount_ID Where Accommodation_RatePlan_ID = " + dtRatePlan.Rows[j]["ID"].ToString());
+                                // SECURE: Coupon/Affiliate discount lookup with parameterized query
+                                var couponParams = new Dictionary<string, object>
+                                {
+                                    { "@RatePlanID", dtRatePlan.Rows[j]["ID"].ToString() }
+                                };
+
+                                DataTable dtCoupon = code.DatabaseQuerySafe(conn,
+                                    "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] " +
+                                    "INNER JOIN Affiliate_Discount ON Affiliate_Discount.ID = Affiliate_Member.Affiliate_Discount_ID " +
+                                    "INNER JOIN Affiliate_Discount_RatePlan ON Affiliate_Discount_RatePlan.Affiliate_Discount_ID = Affiliate_Member.Affiliate_Discount_ID " +
+                                    "WHERE Accommodation_RatePlan_ID = @RatePlanID",
+                                    couponParams);
                                 if(dtCoupon.Rows.Count >= 1)
                                 {
                                     Price = (Convert.ToInt32(dtRatePlan.Rows[j]["Price"].ToString()) - Convert.ToInt32(dtCoupon.Rows[0]["Discount_Amount"].ToString())).ToString();
@@ -5446,7 +5638,24 @@ namespace Take_Time_BangPhra
                                 DataTable dtVoucher = new DataTable();
                                 try
                                 {
-                                    dtVoucher = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Voucher] inner join Voucher_RatePlan_Group on Voucher_RatePlan_Group.Voucher_Number = Voucher.Voucher_Number inner join Accommodation_RatePlan_Group on Rateplan_GroupID = Accommodation_RatePlan_Group.GroupID inner join Accommodation_RatePlan on Accommodation_RatePlan.ID = Rateplan_ID Where Voucher.Voucher_Number = N'" + TextBox19.Text + "' AND Used_Status = 'False' AND Accommodation_RatePlan.ID = "+ dtRatePlan.Rows[j]["ID"].ToString() + " AND Expired_Date >= '" + code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1).ToString("yyyy-MM-dd") + "'");
+                                    // SECURE: Voucher lookup with parameterized query
+                                    var voucherParams = new Dictionary<string, object>
+                                    {
+                                        { "@VoucherNumber", TextBox19.Text ?? "" },
+                                        { "@RatePlanID", dtRatePlan.Rows[j]["ID"].ToString() },
+                                        { "@ExpiredDate", code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1) }
+                                    };
+
+                                    dtVoucher = code.DatabaseQuerySafe(conn,
+                                        "SELECT * FROM [Taketime].[dbo].[Voucher] " +
+                                        "INNER JOIN Voucher_RatePlan_Group ON Voucher_RatePlan_Group.Voucher_Number = Voucher.Voucher_Number " +
+                                        "INNER JOIN Accommodation_RatePlan_Group ON Rateplan_GroupID = Accommodation_RatePlan_Group.GroupID " +
+                                        "INNER JOIN Accommodation_RatePlan ON Accommodation_RatePlan.ID = Rateplan_ID " +
+                                        "WHERE Voucher.Voucher_Number = @VoucherNumber " +
+                                        "AND Used_Status = 'False' " +
+                                        "AND Accommodation_RatePlan.ID = @RatePlanID " +
+                                        "AND Expired_Date >= @ExpiredDate",
+                                        voucherParams);
 
                                 }
                                 catch
@@ -6300,7 +6509,23 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
             string ID = "0";
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                // SECURE: Address lookup with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode ?? "" },
+                    { "@Province", Province ?? "" },
+                    { "@District", District ?? "" },
+                    { "@SubDistrict", SubDistrict ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address " +
+                    "WHERE PostalCode = @PostalCode " +
+                    "AND Province = @Province " +
+                    "AND District = @District " +
+                    "AND SubDistrict = @SubDistrict",
+                    addressParams);
+
                 ID = dt.Rows[0][0].ToString();
             }
             catch { }
