@@ -805,14 +805,26 @@ namespace Take_Time_BangPhra.Account.Report
                 {
                     System.Diagnostics.Debug.WriteLine($"[Receipt CREATE] Inserting Account_Receipt with ID={docNum}, UID={receiptUID}");
 
-                    if (reservation_id > 0)
+                    // SECURE: INSERT Account_Receipt with parameterized query
+                    var receiptInsertParams = new Dictionary<string, object>
                     {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID,UID) VALUES ('" + docNum + "','" + reservation_id + "','" + Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'," + TextBox6.Text + "," + TextBox4.Text + "," + TextBox3.Text + ",'" + CheckBox1.Checked + "','False',N'" + DropDownList2.SelectedItem.Text + "','Normal'," + Session["UserID"].ToString() + ",'"+CheckBox5.Checked+"','"+ customerId + "','" + receiptUID + "')");
-                    }
-                    else
-                    {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID,UID) VALUES ('" + docNum + "','" + TextBox9.Text + "','" + Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'," + TextBox6.Text + "," + TextBox4.Text + "," + TextBox3.Text + ",'" + CheckBox1.Checked + "','False',N'" + DropDownList2.SelectedItem.Text + "','Normal'," + Session["UserID"].ToString() + ",'" + CheckBox5.Checked + "','"+ customerId + "','" + receiptUID + "')");
-                    }
+                        { "@ID", docNum },
+                        { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text },
+                        { "@CreatedDate", Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
+                        { "@TotalAmount", TextBox6.Text },
+                        { "@Vat", TextBox4.Text },
+                        { "@TotalAmountExcludeVat", TextBox3.Text },
+                        { "@IsDeposit", CheckBox1.Checked },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", Session["UserID"].ToString() },
+                        { "@Etax", CheckBox5.Checked },
+                        { "@CustomerID", customerId },
+                        { "@UID", receiptUID }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID,UID) " +
+                        "VALUES (@ID,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,@IsDeposit,'False',@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID,@UID)",
+                        receiptInsertParams);
                     System.Diagnostics.Debug.WriteLine($"[Receipt CREATE] Account_Receipt inserted successfully");
                 }
                 else
@@ -824,7 +836,22 @@ namespace Take_Time_BangPhra.Account.Report
                 System.Diagnostics.Debug.WriteLine($"[Receipt] Inserting {dtDetail.Rows.Count} detail rows...");
                 for (int i = 0; i < dtDetail.Rows.Count; i++)
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) VALUES (" + dtDetail.Rows[i]["Number"].ToString() + ",'" + docNum + "','" + dtDetail.Rows[i]["ProductType_ID"].ToString() + "',0,N'" + dtDetail.Rows[i]["Product_Data"].ToString() + "'," + dtDetail.Rows[i]["Product_Amount"].ToString() + ",N'" + dtDetail.Rows[i]["Product_Unit"].ToString() + "'," + dtDetail.Rows[i]["Price_PerPeice"].ToString() + "," + dtDetail.Rows[i]["Price_Amount"].ToString() + ")");
+                    // SECURE: INSERT Receipt Detail with parameterized query
+                    var detailInsertParams = new Dictionary<string, object>
+                    {
+                        { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                        { "@ReceiptID", docNum },
+                        { "@ProductTypeID", dtDetail.Rows[i]["ProductType_ID"].ToString() },
+                        { "@ProductData", dtDetail.Rows[i]["Product_Data"].ToString() },
+                        { "@ProductAmount", dtDetail.Rows[i]["Product_Amount"].ToString() },
+                        { "@ProductUnit", dtDetail.Rows[i]["Product_Unit"].ToString() },
+                        { "@PricePerPeice", dtDetail.Rows[i]["Price_PerPeice"].ToString() },
+                        { "@PriceAmount", dtDetail.Rows[i]["Price_Amount"].ToString() }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                        "VALUES (@Number,@ReceiptID,@ProductTypeID,0,@ProductData,@ProductAmount,@ProductUnit,@PricePerPeice,@PriceAmount)",
+                        detailInsertParams);
                 }
                 System.Diagnostics.Debug.WriteLine($"[Receipt] Inserted {dtDetail.Rows.Count} detail rows successfully");
 
@@ -979,7 +1006,14 @@ namespace Take_Time_BangPhra.Account.Report
                 System.Diagnostics.Debug.WriteLine($"receiptUID: {receiptUID}");
                 System.Diagnostics.Debug.WriteLine($"docNum: {docNum}");
 
-                dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + receiptUID + "'");
+                // SECURE: Get receipt by UID with parameterized query
+                var finalReceiptParams = new Dictionary<string, object>
+                {
+                    { "@UID", receiptUID }
+                };
+                dtReceipt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Receipt] LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                    finalReceiptParams);
 
                 // ✅ Validate query result
                 if (dtReceipt == null || dtReceipt.Rows.Count == 0)
@@ -1006,7 +1040,14 @@ namespace Take_Time_BangPhra.Account.Report
                 }
 
                 // ✅ ใช้ docNum แทน actualReceiptID เพื่อให้ตรงกับ Receipt_Detail ที่เรา INSERT
-                DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + docNum + "' order by Number ASC");
+                // SECURE: Get receipt details with parameterized query
+                var receiptDetailParams = new Dictionary<string, object>
+                {
+                    { "@ReceiptID", docNum }
+                };
+                DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Receipt_Detail] INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID WHERE Receipt_ID = @ReceiptID ORDER BY Number ASC",
+                    receiptDetailParams);
 
                 System.Diagnostics.Debug.WriteLine($"dtReceiptDetail.Rows.Count: {dtReceiptDetail.Rows.Count}");
                 System.Diagnostics.Debug.WriteLine($"================================");
@@ -1030,7 +1071,14 @@ namespace Take_Time_BangPhra.Account.Report
                 DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
                 string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
 
-                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                // SECURE: Get creator info with parameterized query
+                var creatorParams = new Dictionary<string, object>
+                {
+                    { "@UserID", Session["UserID"].ToString() }
+                };
+                DataTable dtCreator = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE ID = @UserID",
+                    creatorParams);
                 string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
 
                 dtSignature.Rows.Add(ApproverFullName, "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png", CreatorFullName,"File:\\"+Signaturepath+"\\"+CreatorFullName.ToLower()+".png");
@@ -1684,7 +1732,17 @@ namespace Take_Time_BangPhra.Account.Report
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                // SECURE: Get address ID with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode },
+                    { "@Province", Province },
+                    { "@District", District },
+                    { "@SubDistrict", SubDistrict }
+                };
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address WHERE PostalCode = @PostalCode AND Province = @Province AND District = @District AND SubDistrict = @SubDistrict",
+                    addressParams);
                 ID = dt.Rows[0][0].ToString();
             }
             catch { }
