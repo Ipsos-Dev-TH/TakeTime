@@ -41,7 +41,18 @@ namespace Take_Time_BangPhra.Admin
                 GridView1.DataSource = dtAccom;
                 GridView1.DataBind();
 
-                DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_HolidayPrice] Where DateNewPrice >= '"+DateTime.Today.ToString("yyyy-MM-dd")+"' order by DateNewPrice asc");
+                // SECURE: Holiday price lookup with parameterized query
+                var holidayPriceParams = new Dictionary<string, object>
+                {
+                    { "@Today", DateTime.Today }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Taketime].[dbo].[Accommodation_HolidayPrice] " +
+                    "WHERE DateNewPrice >= @Today " +
+                    "ORDER BY DateNewPrice ASC",
+                    holidayPriceParams);
+
                 GridView2.DataSource = dt;
                 GridView2.DataBind();
 
@@ -96,7 +107,19 @@ namespace Take_Time_BangPhra.Admin
                     {
                         for (int i = 0; i < dtSelectedDate.Rows.Count; i++)
                         {
-                            code.DatabaseInsert(conn, "INSERT INTO [dbo].[Accommodation_HolidayPrice] ([Accommodation_ID],[DateNewPrice],[Price],[Remark]) VALUES (" + row.Cells[1].Text + ",'" + DateTime.Parse(dtSelectedDate.Rows[i][0].ToString()).ToString("yyyy-MM-dd") + "','" + TxtPrice.Text + "',N'" + TxtRemark.Text + "')");
+                            // SECURE: Holiday price INSERT with parameterized query
+                            var insertParams = new Dictionary<string, object>
+                            {
+                                { "@AccommodationID", row.Cells[1].Text },
+                                { "@DateNewPrice", DateTime.Parse(dtSelectedDate.Rows[i][0].ToString()) },
+                                { "@Price", TxtPrice.Text },
+                                { "@Remark", TxtRemark.Text ?? "" }
+                            };
+
+                            code.DatabaseInsertSafe(conn,
+                                "INSERT INTO [dbo].[Accommodation_HolidayPrice] ([Accommodation_ID],[DateNewPrice],[Price],[Remark]) " +
+                                "VALUES (@AccommodationID,@DateNewPrice,@Price,@Remark)",
+                                insertParams);
                         }
                     }
                 }
@@ -108,7 +131,22 @@ namespace Take_Time_BangPhra.Admin
         {
 
             GridViewRow row = (GridViewRow)GridView2.Rows[e.RowIndex];
-            code.DatabaseInsert(conn, "DELETE FROM [dbo].[Accommodation_HolidayPrice] WHERE Accommodation_ID = " + row.Cells[0].Text + "  AND DateNewPrice =  '" + row.Cells[1].Text + "'  AND Price = " + row.Cells[2].Text + "");
+
+            // SECURE: Holiday price DELETE with parameterized query
+            var deleteParams = new Dictionary<string, object>
+            {
+                { "@AccommodationID", row.Cells[0].Text },
+                { "@DateNewPrice", row.Cells[1].Text },
+                { "@Price", row.Cells[2].Text }
+            };
+
+            code.DatabaseInsertSafe(conn,
+                "DELETE FROM [dbo].[Accommodation_HolidayPrice] " +
+                "WHERE Accommodation_ID = @AccommodationID " +
+                "AND DateNewPrice = @DateNewPrice " +
+                "AND Price = @Price",
+                deleteParams);
+
             DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Accommodation_HolidayPrice]");
             GridView2.DataSource = dt;
             GridView2.DataBind();

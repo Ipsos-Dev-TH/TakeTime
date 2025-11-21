@@ -53,7 +53,19 @@ namespace Take_Time_BangPhra.Admin
             // ✅ รองรับการค้นหาด้วย Tax ID (13 หลัก)
             if(TextBox1.Text.Length == 13)
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '"+TextBox1.Text+"'");
+                // SECURE: Vendor lookup with parameterized query
+                var vendorParams = new Dictionary<string, object>
+                {
+                    { "@IDNumber", TextBox1.Text ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Vendor " +
+                    "LEFT JOIN Customer_Type ON Customer_Type.ID = Vendor_Type_ID " +
+                    "LEFT JOIN Address ON Address.ID = Address_ID " +
+                    "WHERE IDNumber = @IDNumber",
+                    vendorParams);
+
                 if(dt.Rows.Count > 0)
                 {
                     TextBox2.Text = dt.Rows[0]["Name"].ToString();
@@ -92,7 +104,23 @@ namespace Take_Time_BangPhra.Admin
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                // SECURE: Address lookup with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode ?? "" },
+                    { "@Province", Province ?? "" },
+                    { "@District", District ?? "" },
+                    { "@SubDistrict", SubDistrict ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address " +
+                    "WHERE PostalCode = @PostalCode " +
+                    "AND Province = @Province " +
+                    "AND District = @District " +
+                    "AND SubDistrict = @SubDistrict",
+                    addressParams);
+
                 ID = dt.Rows[0][0].ToString();
             }
             catch { }
