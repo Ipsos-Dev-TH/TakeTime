@@ -444,8 +444,10 @@ namespace Take_Time_BangPhra.Voucher
                 DataTable dtcustomer = new DataTable();
 
                 // SECURE: Use UpsertCustomer for safe customer INSERT/UPDATE
-                string addressId = CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text,
+                string addressIdStr = CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text,
                     DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text);
+                int addressId = string.IsNullOrEmpty(addressIdStr) ? 0 : Convert.ToInt32(addressIdStr);
+                int customerTypeId = string.IsNullOrEmpty(DropDownList8.SelectedValue) ? 0 : Convert.ToInt32(DropDownList8.SelectedValue);
 
                 long customerId = code.UpsertCustomer(
                     conn,
@@ -458,8 +460,8 @@ namespace Take_Time_BangPhra.Voucher
                     cleantext(TextBox11.Text), // address
                     TextBox16.Text,           // postalCode
                     TextBox17.Text,           // email
-                    DropDownList8.SelectedValue, // customerTypeId
-                    addressId,                // addressId
+                    customerTypeId,           // customerTypeId (converted to int)
+                    addressId,                // addressId (converted to int)
                     TextBox18.Text,           // address1
                     TextBox7.Text             // branchNumber
                 );
