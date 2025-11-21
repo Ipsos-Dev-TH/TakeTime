@@ -1348,7 +1348,15 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
-                    var uidResult = codeInstance.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'");
+                    // SECURE: Get receipt UID with parameterized query
+                    var receiptUidParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] WHERE ID = @ID",
+                        receiptUidParams);
+
                     if (uidResult != null && uidResult.Rows.Count > 0)
                     {
                         string uid = uidResult.Rows[0][0].ToString();
@@ -1362,7 +1370,15 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    var uidResult = codeInstance.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'");
+                    // SECURE: Get payment UID with parameterized query
+                    var paymentUidParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @ID",
+                        paymentUidParams);
+
                     if (uidResult != null && uidResult.Rows.Count > 0)
                     {
                         string uid = uidResult.Rows[0][0].ToString();
