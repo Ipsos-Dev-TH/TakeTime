@@ -31,8 +31,18 @@ namespace Take_Time_BangPhra.Voucher
             {
                 string id = Request.QueryString["id"];
                 id = id.Replace("@", " ");
-               
-                DataTable dtVoucher = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Voucher] inner join Customer on Customer.ID = Customer_ID Where Created_Date = '"+id+"'");
+
+                // SECURE: Voucher lookup with parameterized query
+                var voucherParams = new Dictionary<string, object>
+                {
+                    { "@CreatedDate", id ?? "" }
+                };
+
+                DataTable dtVoucher = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Taketime].[dbo].[Voucher] " +
+                    "INNER JOIN Customer ON Customer.ID = Customer_ID " +
+                    "WHERE Created_Date = @CreatedDate",
+                    voucherParams);
 
                 Image1.ImageUrl = "../Upload/Slip/" + dtVoucher.Rows[0]["Voucher_Number"].ToString() + ".jpg";
                 Image1.DataBind();
