@@ -266,6 +266,45 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>
+        /// SECURE: Execute SQL query with parameterized values to prevent SQL Injection
+        /// Delegates to the code class's DatabaseQuerySafe method
+        /// </summary>
+        /// <param name="connStr">Connection string</param>
+        /// <param name="query">SQL query with @param1, @param2 placeholders</param>
+        /// <param name="parameters">Dictionary of parameters: key = "@param1", value = actual value</param>
+        /// <returns>DataTable with results</returns>
+        public DataTable DatabaseQuerySafe(string connStr, string query, Dictionary<string, object> parameters = null)
+        {
+            return code.DatabaseQuerySafe(connStr, query, parameters);
+        }
+
+        /// <summary>
+        /// SECURE: Execute INSERT/UPDATE/DELETE with parameterized values to prevent SQL Injection
+        /// Delegates to the code class's DatabaseInsertSafe method
+        /// </summary>
+        /// <param name="connStr">Connection string</param>
+        /// <param name="query">SQL command with @param1, @param2 placeholders</param>
+        /// <param name="parameters">Dictionary of parameters</param>
+        /// <returns>Number of rows affected</returns>
+        public int DatabaseInsertSafe(string connStr, string query, Dictionary<string, object> parameters = null)
+        {
+            return code.DatabaseInsertSafe(connStr, query, parameters);
+        }
+
+        /// <summary>
+        /// SECURE: Execute INSERT and return the new ID with parameterized values to prevent SQL Injection
+        /// Delegates to the code class's DatabaseInsertReturnSafe method
+        /// </summary>
+        /// <param name="connStr">Connection string</param>
+        /// <param name="query">INSERT query with @param placeholders. Must include SCOPE_IDENTITY() or RETURNING</param>
+        /// <param name="parameters">Dictionary of parameters</param>
+        /// <returns>New record ID</returns>
+        public int DatabaseInsertReturnSafe(string connStr, string query, Dictionary<string, object> parameters = null)
+        {
+            return code.DatabaseInsertReturnSafe(connStr, query, parameters);
+        }
+
+        /// <summary>
         /// Upserts customer data - delegates to code class's UpsertCustomer method
         /// This method exists in _Default class for compatibility with Reserve.aspx.cs
         /// which uses: _Default code = new _Default();
