@@ -25,8 +25,18 @@ namespace Take_Time_BangPhra.Voucher
         code code2 = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
+
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             this.MaintainScrollPositionOnPostBack = true;
             try
             {
@@ -429,35 +439,34 @@ namespace Take_Time_BangPhra.Voucher
             }
             if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload)
             {
-                string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString();
-                string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
-                DataTable dtDetail = (DataTable)Session["dtDetail"];
-                string docNum = "";
+                // ✨ Use DocumentHelper to generate receipt number
+                DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
+                string docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
 
-                docNum = code.createDocNumber(conn, "Account_Receipt", "REC", Year, Month, Day);
-
-               
                 string RecNumber = docNum;
                 int reservation_id = 0;
 
                 DataTable dtcustomer = new DataTable();
 
-                // SECURE: Use UpsertCustomer for safe customer INSERT/UPDATE
-                string addressIdStr = CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text,
-                    DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text);
+                // ✨ SECURE: Use UpsertCustomer with Helper Classes
+                // Use AddressHelper to get Address ID
+                string addressIdStr = _addressHelper.GetAddressIdString(
+                    TextBox16.Text,
+                    DropDownList5.SelectedItem.Text,
+                    DropDownList6.SelectedItem.Text,
+                    DropDownList7.SelectedItem.Text);
                 int addressId = string.IsNullOrEmpty(addressIdStr) ? 0 : Convert.ToInt32(addressIdStr);
                 int customerTypeId = string.IsNullOrEmpty(DropDownList8.SelectedValue) ? 0 : Convert.ToInt32(DropDownList8.SelectedValue);
 
                 long customerId = code.UpsertCustomer(
                     conn,
-                    TextBox13.Text,           // mobilePhone
-                    "",                       // name
-                    "",                       // nickname
-                    "",                       // comeFrom
-                    "",                       // remark
-                    TextBox10.Text,           // fullName
-                    cleantext(TextBox11.Text), // address
+                    TextBox13.Text,                          // mobilePhone
+                    "",                                      // name
+                    "",                                      // nickname
+                    "",                                      // comeFrom
+                    "",                                      // remark
+                    TextBox10.Text,                          // fullName
+                    ValidationHelper.CleanText(TextBox11.Text), // address (✨ using ValidationHelper)
                     TextBox16.Text,           // postalCode
                     TextBox17.Text,           // email
                     customerTypeId,           // customerTypeId (converted to int)
@@ -1145,11 +1154,8 @@ namespace Take_Time_BangPhra.Voucher
             
         }
 
-        public string cleantext(string input)
-        {
-            string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
-            return output;
-        }
+        // ✨ MIGRATED: cleantext() has been replaced with ValidationHelper.CleanText()
+        // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
         protected void Button4_Click(object sender, EventArgs e)
         {
@@ -1406,35 +1412,8 @@ namespace Take_Time_BangPhra.Voucher
             DropDownList7.Items.Clear();
         }
 
-        public string CheckAddressID(string ZipCode,string Province,string District,string SubDistrict)
-        {
-            string ID = "0";
-
-            try
-            {
-                // SECURE: Address lookup with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode ?? "" },
-                    { "@Province", Province ?? "" },
-                    { "@District", District ?? "" },
-                    { "@SubDistrict", SubDistrict ?? "" }
-                };
-
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address " +
-                    "WHERE PostalCode = @PostalCode " +
-                    "AND Province = @Province " +
-                    "AND District = @District " +
-                    "AND SubDistrict = @SubDistrict",
-                    addressParams);
-
-                ID = dt.Rows[0][0].ToString();
-            }
-            catch { }
-
-            return ID;
-        }
+        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
         protected void DropDownList8_SelectedIndexChanged(object sender, EventArgs e)
         {
