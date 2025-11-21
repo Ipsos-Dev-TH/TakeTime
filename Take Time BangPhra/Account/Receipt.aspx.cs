@@ -88,17 +88,35 @@ namespace Take_Time_BangPhra.Account.Report
 
                 if(command == "edit")
                 {
-
-
-                    DataTable dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid+"'");
+                    // SECURE: Get receipt with parameterized query
+                    var receiptParams = new Dictionary<string, object>
+                    {
+                        { "@UID", uid ?? "" }
+                    };
+                    DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Account_Receipt LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                        receiptParams);
                     string id = dtReceipt.Rows[0]["ID"].ToString();
-                    DataTable dtReceiptDetail = code.DatabaseQuery(conn, "Select Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount from Account_Receipt_Detail Where Receipt_ID = '" + id + "'");
+
+                    // SECURE: Get receipt details with parameterized query
+                    var detailParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", id }
+                    };
+                    DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                        "SELECT Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount FROM Account_Receipt_Detail WHERE Receipt_ID = @ReceiptID",
+                        detailParams);
                     DataTable dtcustomer = new DataTable();
                     try
                     {
                         if( Convert.ToInt32(dtReceipt.Rows[0]["Customer_ID"].ToString()) > 0)
                         {
-                            dtcustomer = code.DatabaseQuery(conn, @"SELECT
+                            // SECURE: Get customer by ID with parameterized query
+                            var customerIdParams = new Dictionary<string, object>
+                            {
+                                { "@CustomerID", dtReceipt.Rows[0]["Customer_ID"].ToString() }
+                            };
+                            dtcustomer = code.DatabaseQuerySafe(conn, @"SELECT
                                 Customer.ID, Customer.MobilePhone, Customer.Name, Customer.NickName, Customer.ComeFrom,
                                 Customer.Remark, Customer.Status, Customer.FullName, Customer.Address, Customer.Address1,
                                 Customer.Address_ID, Customer.IDNumber, Customer.Email, Customer.Customer_Type_ID,
@@ -109,11 +127,17 @@ namespace Take_Time_BangPhra.Account.Report
                                 FROM Customer
                                 LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                                 LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                                WHERE Customer.ID = '" + dtReceipt.Rows[0]["Customer_ID"].ToString() + "'");
+                                WHERE Customer.ID = @CustomerID",
+                                customerIdParams);
                         }
                         else
                         {
-                            dtcustomer = code.DatabaseQuery(conn, @"SELECT
+                            // SECURE: Get customer by mobile with parameterized query
+                            var customerMobileParams = new Dictionary<string, object>
+                            {
+                                { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() }
+                            };
+                            dtcustomer = code.DatabaseQuerySafe(conn, @"SELECT
                                 Customer.ID, Customer.MobilePhone, Customer.Name, Customer.NickName, Customer.ComeFrom,
                                 Customer.Remark, Customer.Status, Customer.FullName, Customer.Address, Customer.Address1,
                                 Customer.Address_ID, Customer.IDNumber, Customer.Email, Customer.Customer_Type_ID,
@@ -124,7 +148,8 @@ namespace Take_Time_BangPhra.Account.Report
                                 FROM Customer
                                 LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                                 LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                                WHERE MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+                                WHERE MobilePhone = @MobilePhone",
+                                customerMobileParams);
                         }
 
                     }
@@ -358,7 +383,15 @@ namespace Take_Time_BangPhra.Account.Report
             {
                 totalAmount += Convert.ToDouble(dtDetail.Rows[i]["Price_Amount"].ToString());
             }
-            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+
+            // SECURE: Get VAT percent with parameterized query
+            var vatParams = new Dictionary<string, object>
+            {
+                { "@VatTypeID", DropDownList4.SelectedValue }
+            };
+            int vatPercent = Convert.ToInt32(code.DatabaseQuerySafe(conn,
+                "SELECT Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' AND ID = @VatTypeID",
+                vatParams).Rows[0][0].ToString());
             double AmountExcludeVat = (totalAmount * 100) / (100 + vatPercent);
             double vat = totalAmount - AmountExcludeVat;
             TextBox3.Text = NumberHelper.TwoDecimalPoints(AmountExcludeVat).ToString();
