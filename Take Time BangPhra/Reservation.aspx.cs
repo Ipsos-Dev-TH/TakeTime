@@ -1,44 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
-using Take_Time_BangPhra.Class;
 using System.Linq;
-using Take_Time_BangPhra.Class;
 using System.Web;
-using Take_Time_BangPhra.Class;
 using System.Web.UI;
-using Take_Time_BangPhra.Class;
 using System.Web.UI.WebControls;
-using Take_Time_BangPhra.Class;
 using System.Data;
-using Take_Time_BangPhra.Class;
 using System.Data.SqlClient;
-using Take_Time_BangPhra.Class;
 using System.Configuration;
-using Take_Time_BangPhra.Class;
 using System.IO;
-using Take_Time_BangPhra.Class;
 using Microsoft.Reporting.WebForms;
-using Take_Time_BangPhra.Class;
 using ECertificateAPI;
-using Take_Time_BangPhra.Class;
 using iTextSharp.text.pdf;
-using Take_Time_BangPhra.Class;
 using System.Data.SqlTypes;
-using Take_Time_BangPhra.Class;
 using System.Net;
-using Take_Time_BangPhra.Class;
 using System.Net.Mail;
-using Take_Time_BangPhra.Class;
 using System.Web.Services.Description;
-using Take_Time_BangPhra.Class;
 using Google.Apis.Auth;
-using Take_Time_BangPhra.Class;
 using Google.Apis.Auth.OAuth2;
-using Take_Time_BangPhra.Class;
 using System.Threading;
-using Take_Time_BangPhra.Class;
 using Google.Apis.Gmail.v1;
-using Take_Time_BangPhra.Class;
 using System.Text;
 using Take_Time_BangPhra.Class;
 
@@ -49,9 +29,18 @@ namespace Take_Time_BangPhra
         _Default code = new _Default();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             string date = Request.QueryString["date"];
             string accom = Request.QueryString["accom"];
             Page.MaintainScrollPositionOnPostBack = true;
@@ -1626,11 +1615,8 @@ namespace Take_Time_BangPhra
             catch { }
         }
 
-        public string ValidationHelper.CleanText(string input)
-        {
-            string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
-            return output;
-        }
+        // ✨ MIGRATED: cleantext() has been replaced with ValidationHelper.CleanText()
+        // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
         public void createReceipt(string Reservation_ID, double Total_Amount,DataTable dtReserve,bool IsDeposit,DateTime docDate,bool etax)
         {
@@ -2820,21 +2806,8 @@ namespace Take_Time_BangPhra
             Button6_Click(null, null);
         }
 
-
-        public string _addressHelper.GetAddressIdString(string ZipCode, string Province, string District, string SubDistrict)
-        {
-            string ID = "0";
-            try
-            {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
-                ID = dt.Rows[0][0].ToString();
-            }
-            catch { }
-
-            return ID;
-        }
-
-
+        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
         protected void DropDownList6_SelectedIndexChanged(object sender, EventArgs e)
         {
