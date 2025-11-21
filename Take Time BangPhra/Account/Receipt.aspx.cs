@@ -1448,26 +1448,46 @@ namespace Take_Time_BangPhra.Account.Report
             string uid = Request.QueryString["uid"];
             string path = ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
             string Imagespath = ConfigurationSettings.AppSettings["ImagesFolderPath"].ToString();
-            DataTable dtRec = code.DatabaseQuery(conn, "Select * from Account_Receipt Where Status = 'Normal' AND UID = '" + uid + "'");
+
+            // SECURE: Use parameterized query
+            var receiptParams = new Dictionary<string, object>
+            {
+                { "@UID", uid }
+            };
+            DataTable dtRec = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND UID = @UID",
+                receiptParams);
+
             string id = dtRec.Rows[0]["ID"].ToString();
             for (int i = 0; i < dtRec.Rows.Count; i++)
             {
                 // Delete related records before cancelling (to maintain data integrity)
                 string docNum = dtRec.Rows[i]["ID"].ToString();
 
-                // Delete Payment_History that references Payment_Slips (FK: PaymentSlip_ID)
-                code.DatabaseInsert(conn,
+                // Delete Payment_History that references Payment_Slips (SECURE: FK: PaymentSlip_ID)
+                var deleteParams1 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                code.DatabaseInsertSafe(conn,
                     "DELETE FROM [dbo].[Payment_History] " +
-                    "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "')");
+                    "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = @DocNum)",
+                    deleteParams1);
 
-                // Delete Payment_History by Receipt_ID (for records not linked via PaymentSlip_ID)
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
+                // Delete Payment_History by Receipt_ID (SECURE: for records not linked via PaymentSlip_ID)
+                var deleteParams2 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = @DocNum",
+                    deleteParams2);
 
-                // Delete Payment_Slips (FK to Account_Receipt)
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
+                // Delete Payment_Slips (SECURE: FK to Account_Receipt)
+                var deleteParams3 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = @DocNum",
+                    deleteParams3);
 
-                // Update status to Cancel
-                code.DatabaseInsert(conn, "UPDATE [dbo].[Account_Receipt] SET[Status] = 'Cancel' WHERE ID = '" + id + "'");
+                // Update status to Cancel (SECURE)
+                var updateParams = new Dictionary<string, object> { { "@ID", id } };
+                code.DatabaseInsertSafe(conn,
+                    "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ID",
+                    updateParams);
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
 

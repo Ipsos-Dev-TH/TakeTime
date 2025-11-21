@@ -76,10 +76,26 @@ namespace Take_Time_BangPhra
         {
             int check = 0;
 
-            DataTable dt = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[User] inner join [Role] on Role_ID = [Role].ID Where [User] = '" + Email.ToLower() + "'");
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Email", Email?.ToLower() ?? "" }
+            };
+
+            DataTable dt = DatabaseQuerySafe(conn,
+                "SELECT * FROM [Payment].[dbo].[User] " +
+                "INNER JOIN [Role] ON Role_ID = [Role].ID " +
+                "WHERE [User] = @Email",
+                parameters);
             try
             {
-                check = Convert.ToInt32(dt.Rows[0][colmnname].ToString());
+                if (dt.Rows.Count > 0)
+                {
+                    check = Convert.ToInt32(dt.Rows[0][colmnname].ToString());
+                }
+                else
+                {
+                    check = -1;
+                }
             }
             catch { check = -1; }
             return check;
@@ -435,7 +451,7 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>
-        /// Upserts customer data - inserts new customer or updates existing one
+        /// SECURE: Upserts customer data using parameterized queries - inserts new customer or updates existing one
         /// Prevents duplicates and ensures latest data is always stored
         /// ALWAYS matches by MobilePhone (unique identifier) - ensures only 1 record per phone number
         /// If customer changes from Individual to Corporate (or vice versa), it updates the existing record
@@ -457,29 +473,33 @@ namespace Take_Time_BangPhra
             string address1,
             string branchNumber)
         {
-            // Escape single quotes to prevent SQL injection
-            mobilePhone = (mobilePhone ?? "").Replace("'", "''");
-            name = (name ?? "").Replace("'", "''");
-            nickName = (nickName ?? "").Replace("'", "''");
-            comeFrom = (comeFrom ?? "").Replace("'", "''");
-            remark = (remark ?? "").Replace("'", "''");
-            fullName = (fullName ?? "").Replace("'", "''");
-            address = (address ?? "").Replace("'", "''");
-            idNumber = (idNumber ?? "").Replace("'", "''");
-            email = (email ?? "").Replace("'", "''");
-            address1 = (address1 ?? "").Replace("'", "''");
-            branchNumber = (branchNumber ?? "").Replace("'", "''");
-
             string dbType = ConfigurationManager.AppSettings["DatabaseType"] ?? "MSSQL";
             long customerId = 0;
 
+            // Create parameters dictionary
+            var parameters = new Dictionary<string, object>
+            {
+                { "@MobilePhone", mobilePhone ?? "" },
+                { "@Name", name ?? "" },
+                { "@NickName", nickName ?? "" },
+                { "@ComeFrom", comeFrom ?? "" },
+                { "@Remark", remark ?? "" },
+                { "@FullName", fullName ?? "" },
+                { "@Address", address ?? "" },
+                { "@IDNumber", idNumber ?? "" },
+                { "@Email", email ?? "" },
+                { "@CustomerTypeID", customerTypeID },
+                { "@AddressID", addressID },
+                { "@Address1", address1 ?? "" },
+                { "@BranchNumber", branchNumber ?? "" }
+            };
+
             if (dbType.ToUpper() == "POSTGRESQL")
             {
-                // PostgreSQL version using INSERT ... ON CONFLICT
-                // ALWAYS match by MobilePhone to ensure only 1 record per phone number
+                // PostgreSQL version using INSERT ... ON CONFLICT with parameterized queries
                 string mergeQuery = @"
                     INSERT INTO Customer (MobilePhone, Name, NickName, ComeFrom, Remark, FullName, Address, IDNumber, Email, Customer_Type_ID, Address_ID, Address1, Branch_Number, Status)
-                    VALUES ('" + mobilePhone + "', N'" + name + "', N'" + nickName + "', N'" + comeFrom + "', N'" + remark + "', N'" + fullName + "', N'" + address + "', N'" + idNumber + "', N'" + email + "', " + customerTypeID + ", " + addressID + ", N'" + address1 + "', N'" + branchNumber + @"', 1)
+                    VALUES (@MobilePhone, @Name, @NickName, @ComeFrom, @Remark, @FullName, @Address, @IDNumber, @Email, @CustomerTypeID, @AddressID, @Address1, @BranchNumber, 1)
                     ON CONFLICT (MobilePhone)
                     DO UPDATE SET
                         Name = EXCLUDED.Name,
@@ -502,6 +522,10 @@ namespace Take_Time_BangPhra
                     connection.Open();
                     using (NpgsqlCommand command = new NpgsqlCommand(mergeQuery, connection))
                     {
+                        foreach (var param in parameters)
+                        {
+                            command.Parameters.AddWithValue(param.Key, param.Value ?? DBNull.Value);
+                        }
                         object result = command.ExecuteScalar();
                         if (result != null)
                         {
@@ -512,24 +536,23 @@ namespace Take_Time_BangPhra
             }
             else // MSSQL
             {
-                // SQL Server version using MERGE statement
-                // ALWAYS match by MobilePhone to ensure only 1 record per phone number
+                // SQL Server version using MERGE statement with parameterized queries
                 string mergeQuery = @"
                     MERGE INTO Customer AS target
                     USING (SELECT
-                        '" + mobilePhone + @"' AS MobilePhone,
-                        N'" + name + @"' AS Name,
-                        N'" + nickName + @"' AS NickName,
-                        N'" + comeFrom + @"' AS ComeFrom,
-                        N'" + remark + @"' AS Remark,
-                        N'" + fullName + @"' AS FullName,
-                        N'" + address + @"' AS Address,
-                        N'" + idNumber + @"' AS IDNumber,
-                        N'" + email + @"' AS Email,
-                        " + customerTypeID + @" AS Customer_Type_ID,
-                        " + addressID + @" AS Address_ID,
-                        N'" + address1 + @"' AS Address1,
-                        N'" + branchNumber + @"' AS Branch_Number
+                        @MobilePhone AS MobilePhone,
+                        @Name AS Name,
+                        @NickName AS NickName,
+                        @ComeFrom AS ComeFrom,
+                        @Remark AS Remark,
+                        @FullName AS FullName,
+                        @Address AS Address,
+                        @IDNumber AS IDNumber,
+                        @Email AS Email,
+                        @CustomerTypeID AS Customer_Type_ID,
+                        @AddressID AS Address_ID,
+                        @Address1 AS Address1,
+                        @BranchNumber AS Branch_Number
                     ) AS source
                     ON (target.MobilePhone = source.MobilePhone)
                     WHEN MATCHED THEN
@@ -557,6 +580,10 @@ namespace Take_Time_BangPhra
                     connection.Open();
                     using (SqlCommand command = new SqlCommand(mergeQuery, connection))
                     {
+                        foreach (var param in parameters)
+                        {
+                            command.Parameters.AddWithValue(param.Key, param.Value ?? DBNull.Value);
+                        }
                         object result = command.ExecuteScalar();
                         if (result != null)
                         {
@@ -802,11 +829,45 @@ namespace Take_Time_BangPhra
 
         public int CheckProjectCostQuantity(string conn, string Project_Cost_ID, DataTable dtInput, string quantitycolumnname)
         {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@ProjectCostID", Project_Cost_ID }
+            };
 
-            DataTable dtQuantityLimit = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[Project_Cost] Where ID = " + Project_Cost_ID);
+            DataTable dtQuantityLimit = DatabaseQuerySafe(conn,
+                "SELECT * FROM [Payment].[dbo].[Project_Cost] WHERE ID = @ProjectCostID",
+                parameters);
 
-            DataTable dtPayment = DatabaseQuery(conn, "SELECT * FROM [Payment].[dbo].[Payment] Where Project_Cost_ID = " + Project_Cost_ID + " AND (Status != '" + status_deleted + "' AND Status != '" + status_declined + "' AND Status != '" + status_predeclined + "')");
-            DataTable dtWorkSheet = DatabaseQuery(conn, "SELECT *  FROM [Payment].[dbo].[TemporaryEmployee_Worksheet] Where Project_Cost_ID = " + Project_Cost_ID + " AND (Status != 'MAKE PAYMENT' AND Status != '" + status_deleted + "' AND Status != '" + status_declined + "'  AND Status != '" + status_declined + "')");
+            var paymentParams = new Dictionary<string, object>
+            {
+                { "@ProjectCostID", Project_Cost_ID },
+                { "@StatusDeleted", status_deleted },
+                { "@StatusDeclined", status_declined },
+                { "@StatusPreDeclined", status_predeclined }
+            };
+
+            DataTable dtPayment = DatabaseQuerySafe(conn,
+                "SELECT * FROM [Payment].[dbo].[Payment] " +
+                "WHERE Project_Cost_ID = @ProjectCostID " +
+                "AND Status != @StatusDeleted " +
+                "AND Status != @StatusDeclined " +
+                "AND Status != @StatusPreDeclined",
+                paymentParams);
+
+            var worksheetParams = new Dictionary<string, object>
+            {
+                { "@ProjectCostID", Project_Cost_ID },
+                { "@StatusDeleted", status_deleted },
+                { "@StatusDeclined", status_declined }
+            };
+
+            DataTable dtWorkSheet = DatabaseQuerySafe(conn,
+                "SELECT * FROM [Payment].[dbo].[TemporaryEmployee_Worksheet] " +
+                "WHERE Project_Cost_ID = @ProjectCostID " +
+                "AND Status != 'MAKE PAYMENT' " +
+                "AND Status != @StatusDeleted " +
+                "AND Status != @StatusDeclined",
+                worksheetParams);
 
             int QuantityUsed = 0;
             for (int i = 0; i < dtPayment.Rows.Count; i++)

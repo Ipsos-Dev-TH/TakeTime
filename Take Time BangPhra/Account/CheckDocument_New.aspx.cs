@@ -954,11 +954,17 @@ namespace Take_Time_BangPhra.Account
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History
                     try
                     {
-                        // Get payment amount and reservation ID from Payment_History
-                        var paymentData = codeInstance.DatabaseQuery(conn,
+                        // Get payment amount and reservation ID from Payment_History (SECURE: Using parameterized query)
+                        var paymentParams = new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", docNum }
+                        };
+
+                        var paymentData = codeInstance.DatabaseQuerySafe(conn,
                             "SELECT ph.PaymentAmount, ph.Reservation_ID " +
                             "FROM [dbo].[Payment_History] ph " +
-                            "WHERE ph.Receipt_ID = '" + docNum + "'");
+                            "WHERE ph.Receipt_ID = @ReceiptID",
+                            paymentParams);
 
                         if (paymentData != null && paymentData.Rows.Count > 0)
                         {
@@ -969,9 +975,16 @@ namespace Take_Time_BangPhra.Account
 
                                 if (amount > 0 && reservationId > 0)
                                 {
-                                    // Reduce Reservation.Deposit by payment amount
-                                    codeInstance.DatabaseInsert(conn,
-                                        $"UPDATE [dbo].[Reservation] SET Deposit = ISNULL(Deposit, 0) - {amount} WHERE ID = {reservationId}");
+                                    // Reduce Reservation.Deposit by payment amount (SECURE: Using parameterized query)
+                                    var updateParams = new Dictionary<string, object>
+                                    {
+                                        { "@Amount", amount },
+                                        { "@ReservationID", reservationId }
+                                    };
+
+                                    codeInstance.DatabaseInsertSafe(conn,
+                                        "UPDATE [dbo].[Reservation] SET Deposit = ISNULL(Deposit, 0) - @Amount WHERE ID = @ReservationID",
+                                        updateParams);
 
                                     System.Diagnostics.Debug.WriteLine($"   ✅ Updated Reservation {reservationId}: Reduced Deposit by {amount:N2}");
                                 }
@@ -984,27 +997,41 @@ namespace Take_Time_BangPhra.Account
                         // Continue with deletion even if update fails (data consistency issue but prevents stuck state)
                     }
 
-                    // Delete Payment_History that references the Payment_Slips we're about to delete
+                    // Delete Payment_History that references the Payment_Slips we're about to delete (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records linked to Payment_Slips...");
-                    codeInstance.DatabaseInsert(conn,
+                    var deleteParams1 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
                         "DELETE FROM [dbo].[Payment_History] " +
-                        "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "')");
+                        "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = @DocNum)",
+                        deleteParams1);
 
-                    // Delete Payment_History by Receipt_ID (for records not linked via PaymentSlip_ID)
+                    // Delete Payment_History by Receipt_ID (for records not linked via PaymentSlip_ID) (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records by Receipt_ID...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
+                    var deleteParams2 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = @DocNum",
+                        deleteParams2);
 
-                    // Delete Payment_Slips (has FK to Account_Receipt)
+                    // Delete Payment_Slips (has FK to Account_Receipt) (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Payment_Slips records...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
+                    var deleteParams3 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = @DocNum",
+                        deleteParams3);
 
-                    // Delete receipt details
+                    // Delete receipt details (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Account_Receipt_Detail records...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + docNum + "'");
+                    var deleteParams4 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = @DocNum",
+                        deleteParams4);
 
-                    // Delete receipt record
+                    // Delete receipt record (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Account_Receipt record...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + docNum + "'");
+                    var deleteParams5 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Receipt] WHERE ID = @DocNum",
+                        deleteParams5);
 
                     // Delete receipt files
                     int filesDeleted = 0;
@@ -1031,13 +1058,19 @@ namespace Take_Time_BangPhra.Account
 
                     System.Diagnostics.Debug.WriteLine($"   Payment path: {path}");
 
-                    // Delete payment details
+                    // Delete payment details (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Account_Payment_Detail records...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + docNum + "'");
+                    var deletePaymentParams1 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @DocNum",
+                        deletePaymentParams1);
 
-                    // Delete payment record
+                    // Delete payment record (SECURE)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Account_Payment record...");
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
+                    var deletePaymentParams2 = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment] WHERE ID = @DocNum",
+                        deletePaymentParams2);
 
                     // Delete payment files
                     int filesDeleted = 0;
@@ -1115,10 +1148,12 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
-                    // Get receipt UID from database
+                    // Get receipt UID from database (SECURE)
                     string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
-                    var uidResult = codeInstance.DatabaseQuery(conn,
-                        "SELECT [UID] FROM [dbo].[Account_Receipt] WHERE ID = '" + docNum + "'");
+                    var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [dbo].[Account_Receipt] WHERE ID = @DocNum",
+                        uidParams);
 
                     string uid = "";
                     if (uidResult != null && uidResult.Rows.Count > 0 && uidResult.Rows[0][0] != DBNull.Value)
@@ -1168,10 +1203,12 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    // Get payment UID from database
+                    // Get payment UID from database (SECURE)
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                    var uidResult = codeInstance.DatabaseQuery(conn,
-                        "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
+                    var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
+                    var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = @DocNum",
+                        uidParams);
 
                     string uid = "";
                     if (uidResult != null && uidResult.Rows.Count > 0 && uidResult.Rows[0][0] != DBNull.Value)
@@ -1247,7 +1284,10 @@ namespace Take_Time_BangPhra.Account
 
                     if (docType == "REC")
                     {
-                        var uidResult = codeInstance.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'");
+                        var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
+                        var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                            "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] WHERE ID = @DocNum",
+                            uidParams);
                         if (uidResult != null && uidResult.Rows.Count > 0)
                         {
                             string uid = uidResult.Rows[0][0].ToString();
@@ -1261,7 +1301,10 @@ namespace Take_Time_BangPhra.Account
                     }
                     else if (docType == "PAY")
                     {
-                        var uidResult = codeInstance.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'");
+                        var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
+                        var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                            "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @DocNum",
+                            uidParams);
                         if (uidResult != null && uidResult.Rows.Count > 0)
                         {
                             string uid = uidResult.Rows[0][0].ToString();
