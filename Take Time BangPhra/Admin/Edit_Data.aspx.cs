@@ -44,18 +44,52 @@ namespace Take_Time_BangPhra.Admin
 
                     if (data == "Supplier_Contact" && supplierid.Length > 0)
                     {
+                        // SECURE: Supplier lookup with parameterized query
+                        var supplierParams = new Dictionary<string, object>
+                        {
+                            { "@SupplierID", supplierid }
+                        };
 
-                        DataTable dtt = code.DatabaseQuery(conn, "Select [Name] From Supplier Where [Status] = 'True' AND  ID = " + supplierid);
-                        dt = code.DatabaseQuery(conn, "Select * From Supplier_Contact Where [Status] = 'True' AND  SupplierID = " + supplierid);
+                        DataTable dtt = code.DatabaseQuerySafe(conn,
+                            "SELECT [Name] FROM Supplier WHERE [Status] = 'True' AND ID = @SupplierID",
+                            supplierParams);
+
+                        // SECURE: Supplier contact lookup with parameterized query
+                        var contactParams = new Dictionary<string, object>
+                        {
+                            { "@SupplierID", supplierid }
+                        };
+
+                        dt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM Supplier_Contact WHERE [Status] = 'True' AND SupplierID = @SupplierID",
+                            contactParams);
+
                         readData();
                         string name = dtt.Rows[0][0].ToString();
                         Label1.Text = "Editing Data of " + data + " that Supplier is " + name;
                     }
                     else if (data == "Supplier" && supplier_type.Length > 0)
                     {
+                        // SECURE: Supplier type lookup with parameterized query
+                        var typeParams = new Dictionary<string, object>
+                        {
+                            { "@TypeID", supplier_type }
+                        };
 
-                        DataTable dtt = code.DatabaseQuery(conn, "Select [Type] From Supplier_Type Where [Status] = 'True' AND ID = " + supplier_type);
-                        dt = code.DatabaseQuery(conn, "Select * From Supplier Where [Status] = 'True' AND  TypeID = " + supplier_type);
+                        DataTable dtt = code.DatabaseQuerySafe(conn,
+                            "SELECT [Type] FROM Supplier_Type WHERE [Status] = 'True' AND ID = @TypeID",
+                            typeParams);
+
+                        // SECURE: Supplier by type lookup with parameterized query
+                        var supplierByTypeParams = new Dictionary<string, object>
+                        {
+                            { "@TypeID", supplier_type }
+                        };
+
+                        dt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM Supplier WHERE [Status] = 'True' AND TypeID = @TypeID",
+                            supplierByTypeParams);
+
                         readData();
                         string name = dtt.Rows[0][0].ToString();
                         Label1.Text = "Editing Data of " + data + " that Type is " + name;
@@ -66,18 +100,38 @@ namespace Take_Time_BangPhra.Admin
                         GridView2.Visible = true;
                         GridView2.DataSource = dt;
                         GridView2.DataBind();
-                        dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");
+
+                        // SECURE: Whitelist validation for table name (cannot parameterize table names)
+                        string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                            "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                        if (!allowedTables.Contains(data))
+                        {
+                            Response.Redirect("/Default");
+                            return;
+                        }
+
+                        dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
                         readData();
                         Label1.Text = "Editing Data of " + data;
                     }
                     else if (1 == 1)
                     {
                         GridView2.Visible = false;
-                        dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");
+
+                        // SECURE: Whitelist validation for table name (cannot parameterize table names)
+                        string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                            "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                        if (!allowedTables.Contains(data))
+                        {
+                            Response.Redirect("/Default");
+                            return;
+                        }
+
+                        dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
                         readData();
                         Label1.Text = "Editing Data of " + data;
                     }
-                    
+
                     else
                     {
                         Response.Redirect("/Default");
@@ -95,23 +149,62 @@ namespace Take_Time_BangPhra.Admin
         {
             if (data == "Supplier_Contact" && supplierid.Length > 0)
             {
+                // SECURE: Supplier lookup with parameterized query
+                var supplierParams = new Dictionary<string, object>
+                {
+                    { "@SupplierID", supplierid }
+                };
+                DataTable dtt = code.DatabaseQuerySafe(conn,
+                    "SELECT [Name] FROM Supplier WHERE [Status] = 'True' AND ID = @SupplierID",
+                    supplierParams);
 
-                DataTable dtt = code.DatabaseQuery(conn, "Select [Name] From Supplier Where [Status] = 'True' AND  ID = " + supplierid);
-                dt = code.DatabaseQuery(conn, "Select * From Supplier_Contact Where [Status] = 'True' AND  SupplierID = " + supplierid);
+                // SECURE: Supplier contact lookup with parameterized query
+                var contactParams = new Dictionary<string, object>
+                {
+                    { "@SupplierID", supplierid }
+                };
+                dt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Supplier_Contact WHERE [Status] = 'True' AND SupplierID = @SupplierID",
+                    contactParams);
+
                 string name = dtt.Rows[0][0].ToString();
                 Label1.Text = "Editing Data of " + data + " that Supplier is " + name;
             }
             else if (data == "Supplier" && supplier_type.Length > 0)
             {
+                // SECURE: Supplier type lookup with parameterized query
+                var typeParams = new Dictionary<string, object>
+                {
+                    { "@TypeID", supplier_type }
+                };
+                DataTable dtt = code.DatabaseQuerySafe(conn,
+                    "SELECT [Type] FROM Supplier_Type WHERE [Status] = 'True' AND ID = @TypeID",
+                    typeParams);
 
-                DataTable dtt = code.DatabaseQuery(conn, "Select [Type] From Supplier_Type Where [Status] = 'True' AND  ID = " + supplier_type);
-                dt = code.DatabaseQuery(conn, "Select * From Supplier Where [Status] = 'True' AND  TypeID = " + supplier_type);
+                // SECURE: Supplier by type lookup with parameterized query
+                var supplierByTypeParams = new Dictionary<string, object>
+                {
+                    { "@TypeID", supplier_type }
+                };
+                dt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Supplier WHERE [Status] = 'True' AND TypeID = @TypeID",
+                    supplierByTypeParams);
+
                 string name = dtt.Rows[0][0].ToString();
                 Label1.Text = "Editing Data of " + data + " that Type is " + name;
             }
             else if (1 == 1)
             {
-                dt = code.DatabaseQuery(conn, "select * from " + data + " where [Status] = 'True'");
+                // SECURE: Whitelist validation for table name (cannot parameterize table names)
+                string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                    "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                if (!allowedTables.Contains(data))
+                {
+                    Response.Redirect("/Default");
+                    return;
+                }
+
+                dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
                 Label1.Text = "Editing Data of " + data;
             }
             else
@@ -166,40 +259,52 @@ namespace Take_Time_BangPhra.Admin
 
         protected void GridView1_RowUpdating(object sender, GridViewUpdateEventArgs e)
         {
+            // SECURE: Whitelist validation for table name
+            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            if (!allowedTables.Contains(data))
+            {
+                Response.Redirect("/Default");
+                return;
+            }
+
             GridViewRow row = GridView1.Rows[e.RowIndex];
-            string cmd = "UPDATE " + data + " SET ";
+            string cmd = "UPDATE [" + data + "] SET ";
+            var updateParams = new Dictionary<string, object>();
+            var setClauses = new List<string>();
 
             for (int i = 0; i < dtshow.Columns.Count; i++)
             {
                 if(dtshow.Columns[i].ColumnName == "ID")
                 {
-
+                    // Skip ID column
                 }
                 else
                 {
+                    string paramName = "@Col" + i;
+                    string value;
+
                     try
                     {
-                        cmd += dtshow.Columns[i].ColumnName + " = N'" + ((TextBox)(row.Cells[2 + i].Controls[0])).Text + "'";
+                        value = ((TextBox)(row.Cells[2 + i].Controls[0])).Text;
                     }
                     catch
                     {
-                        cmd += dtshow.Columns[i].ColumnName + " = N'" + ((CheckBox)(row.Cells[2 + i].Controls[0])).Checked + "'";
+                        value = ((CheckBox)(row.Cells[2 + i].Controls[0])).Checked.ToString();
                     }
 
-                    if (i != dtshow.Columns.Count - 1)
-                    {
-                        cmd += ", ";
-                    }
+                    setClauses.Add("[" + dtshow.Columns[i].ColumnName + "] = " + paramName);
+                    updateParams.Add(paramName, value);
                 }
-                    
             }
-            cmd += " WHERE ID = " + Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString());
+
+            cmd += string.Join(", ", setClauses);
+            cmd += " WHERE ID = @ID";
+            updateParams.Add("@ID", Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()));
 
             try
             {
-                code.DatabaseInsert(conn, cmd);
-
-
+                code.DatabaseInsertSafe(conn, cmd, updateParams);
             }
             catch (Exception ex)
             {
@@ -211,18 +316,44 @@ namespace Take_Time_BangPhra.Admin
 
         protected void GridView1_RowDeleting(object sender, GridViewDeleteEventArgs e)
         {
+            // SECURE: Whitelist validation for table name
+            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            if (!allowedTables.Contains(data))
+            {
+                Response.Redirect("/Default");
+                return;
+            }
+
             string logde = "";
             for (int i = 0; i < dt.Columns.Count; i++)
             {
                 logde += dt.Rows[e.RowIndex][i].ToString() + ";";
             }
-            code.DatabaseInsert(conn, "UPDATE " + data + " SET [Status] = 'False' WHERE ID = " + Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()));
+
+            // SECURE: Parameterized query for soft delete
+            var deleteParams = new Dictionary<string, object>
+            {
+                { "@ID", Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()) }
+            };
+            code.DatabaseInsertSafe(conn,
+                "UPDATE [" + data + "] SET [Status] = 'False' WHERE ID = @ID",
+                deleteParams);
 
             readData();
         }
 
         protected void Button1_Click(object sender, EventArgs e)
         {
+            // SECURE: Whitelist validation for table name
+            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
+                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            if (!allowedTables.Contains(data))
+            {
+                Response.Redirect("/Default");
+                return;
+            }
+
             DataTable dtupdate = dt;
             try
             {
@@ -230,42 +361,41 @@ namespace Take_Time_BangPhra.Admin
                 dtupdate.Columns.Remove("Status");
             }
             catch { }
-            string cmd = "INSERT INTO  " + data + " (";
+
+            string cmd = "INSERT INTO [" + data + "] (";
+            var insertParams = new Dictionary<string, object>();
+            var columnNames = new List<string>();
+            var valueParams = new List<string>();
+
             for (int i = 0; i < dtupdate.Columns.Count; i++)
             {
-                cmd += "[" + dtupdate.Columns[i].ColumnName + "]";
-                if (i != dtupdate.Columns.Count - 1)
-                {
-                    cmd += ", ";
-                }
-            }
-            cmd += ") VALUES (";
-            for (int i = 0; i < dtupdate.Columns.Count; i++)
-            {
+                columnNames.Add("[" + dtupdate.Columns[i].ColumnName + "]");
+                string paramName = "@Col" + i;
+
                 if (dtupdate.Columns[i].ColumnName == "TypeID")
                 {
-                    cmd += supplier_type;
+                    insertParams.Add(paramName, supplier_type);
                 }
                 else if (dtupdate.Columns[i].ColumnName == "SupplierID")
                 {
-                    cmd += supplierid;
+                    insertParams.Add(paramName, supplierid);
                 }
                 else
                 {
-                    cmd += "''";
+                    insertParams.Add(paramName, "");
                 }
-                if (i != dtupdate.Columns.Count - 1)
-                {
-                    cmd += ", ";
-                }
+
+                valueParams.Add(paramName);
             }
+
+            cmd += string.Join(", ", columnNames);
+            cmd += ") VALUES (";
+            cmd += string.Join(", ", valueParams);
             cmd += ")";
 
             try
             {
-                code.DatabaseInsert(conn, cmd);
-
-
+                code.DatabaseInsertSafe(conn, cmd, insertParams);
             }
             catch (Exception ex)
             {
