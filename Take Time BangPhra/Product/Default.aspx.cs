@@ -919,43 +919,98 @@ namespace Take_Time_BangPhra.Product
 
                     }
 
-                    if (dtcustomer.Rows.Count > 0)
+                    // SECURE: Use UpsertCustomer to handle INSERT/UPDATE safely
+                    try
                     {
-                        try
-                        {
-                            code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [MobilePhone] = '" + TextBox3.Text + "',[Status] = '1',[FullName] = N'" + TextBox4.Text + "',[Address] = N'" + TextBox7.Text + "',[Address1] = N'" + TextBox8.Text + "',[Address_ID] = '" + CheckAddressID(TextBox9.Text, DropDownList3.SelectedItem.Text, DropDownList4.SelectedItem.Text, DropDownList5.SelectedItem.Text) + "',[IDNumber] = '" + TextBox6.Text + "',[Email] = '" + TextBox10.Text + "',[Customer_Type_ID] = '" + DropDownList2.SelectedValue + "',[Branch_Number] = '" + TextBox5.Text + "' WHERE MobilePhone = '" + TextBox3.Text + "' or IDNumber = '" + TextBox6.Text + "'");
-                            if (DropDownList2.SelectedValue == "2")
-                            {
-                                dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
+                        int addressId = 0;
+                        int.TryParse(CheckAddressID(TextBox9.Text, DropDownList3.SelectedItem.Text,
+                            DropDownList4.SelectedItem.Text, DropDownList5.SelectedItem.Text), out addressId);
+                        int customerTypeId = 0;
+                        int.TryParse(DropDownList2.SelectedValue, out customerTypeId);
 
-                            }
-                            else
-                            {
-                                dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
+                        long customerId = code.UpsertCustomer(
+                            conn,
+                            TextBox3.Text,           // mobilePhone
+                            "",                      // name
+                            "",                      // nickName
+                            "",                      // comeFrom
+                            "",                      // remark
+                            TextBox4.Text,           // fullName
+                            cleantext(TextBox7.Text), // address
+                            TextBox6.Text,           // idNumber
+                            TextBox10.Text,          // email
+                            customerTypeId,          // customerTypeID
+                            addressId,               // addressID
+                            TextBox8.Text,           // address1
+                            TextBox5.Text            // branchNumber
+                        );
 
-                            }
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox3.Text + "',N'',N'','','',N'" + TextBox4.Text.Replace("'", "''") + "',N'" + cleantext(TextBox7.Text.Replace("'", "''")) + "',N'" + TextBox6.Text + "',N'" + TextBox10.Text + "'," + DropDownList2.SelectedValue + "," + CheckAddressID(TextBox9.Text, DropDownList3.SelectedItem.Text, DropDownList4.SelectedItem.Text, DropDownList5.SelectedItem.Text) + ",N'" + TextBox8.Text + "',N'" + TextBox5.Text + "')");
+                        // SECURE: Re-query customer data with parameterized query
+                        var custParams = new Dictionary<string, object>();
+                        string customerQuery = "SELECT * FROM Customer " +
+                                             "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                                             "LEFT JOIN Address ON Address.ID = Address_ID ";
+
                         if (DropDownList2.SelectedValue == "2")
                         {
-                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
-
+                            customerQuery += "WHERE MobilePhone = @SearchValue";
+                            custParams["@SearchValue"] = TextBox3.Text;
                         }
                         else
                         {
-                            dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
-
+                            customerQuery += "WHERE IDNumber = @SearchValue";
+                            custParams["@SearchValue"] = TextBox6.Text;
                         }
+
+                        dtcustomer = code.DatabaseQuerySafe(conn, customerQuery, custParams);
                     }
+                    catch { }
                 }
-                code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) VALUES ('" + docNum + "','0','" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd HH:mm:ss") + "','" + total + "','" + vat + "','" + Total_Amount_Exclude_Vat + "',0,0,N'" + DropDownList1.SelectedItem.Text + "','Normal','" + Session["UserID"].ToString() + "','" + CheckBox3.Checked + "','"+ dtcustomer.Rows[0]["ID"].ToString() + "')");
-                code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) VALUES (1,'" + docNum + "','3','0',N'" + TextBox11.Text + "',1,N'ครั้ง'," + total + "," + total + ")");
-                DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + docNum + "'");
-                DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + docNum + "' order by Number ASC");
+                // SECURE: INSERT Receipt with parameterized query
+                var receiptParams = new Dictionary<string, object>
+                {
+                    { "@ID", docNum },
+                    { "@CreatedDate", Convert.ToDateTime(TextBox12.Text) },
+                    { "@TotalAmount", total },
+                    { "@Vat", vat },
+                    { "@TotalAmountExcludeVat", Total_Amount_Exclude_Vat },
+                    { "@PaidType", DropDownList1.SelectedItem.Text },
+                    { "@CreatedByID", Session["UserID"].ToString() },
+                    { "@Etax", CheckBox3.Checked },
+                    { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "INSERT INTO [dbo].[Account_Receipt] " +
+                    "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) " +
+                    "VALUES (@ID,'0',@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,0,0,@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID)",
+                    receiptParams);
+
+                // SECURE: INSERT Receipt Detail with parameterized query
+                var detailParams = new Dictionary<string, object>
+                {
+                    { "@ReceiptID", docNum },
+                    { "@ProductData", TextBox11.Text },
+                    { "@Total", total }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                    "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                    "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
+                    detailParams);
+
+                // SECURE: SELECT Receipt and Detail with parameterized query
+                var selectParams = new Dictionary<string, object> { { "@DocNum", docNum } };
+                DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Receipt] " +
+                    "LEFT JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                    "WHERE Account_Receipt.ID = @DocNum",
+                    selectParams);
+
+                DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Receipt_Detail] " +
+                    "INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID " +
+                    "WHERE Receipt_ID = @DocNum ORDER BY Number ASC",
+                    selectParams);
                 string uid = dtReceipt.Rows[0]["UID"].ToString();
 
 
@@ -973,10 +1028,17 @@ namespace Take_Time_BangPhra.Product
                 catch { }
 
                 string Signaturepath = System.Configuration.ConfigurationSettings.AppSettings["StaffSignatureFolderPath"].ToString();
-                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+
+                // SECURE: SELECT Admin with parameterized query
+                DataTable dtApprover = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE IsCEO = 'True'",
+                    null);
                 string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
 
-                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"].ToString() } };
+                DataTable dtCreator = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE ID = @UserID",
+                    creatorParams);
                 string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
 
                 dtSignature.Rows.Add(ApproverFullName, "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png", CreatorFullName, "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png");
@@ -1320,9 +1382,24 @@ namespace Take_Time_BangPhra.Product
 
             if (GridView1.Rows.Count > 0)
             {
+                // SECURE: INSERT Product_Out with parameterized query
                 for(int i = 0;i<dtOrder.Rows.Count;i++)
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Account_Paid_How_ID],[Remark]) VALUES ('" +Convert.ToDateTime(TextBox12.Text+" "+DateTime.Now.ToString("HH:mm:ss")).ToString("yyyy-MM-dd HH:mm:ss") + "'," + dtOrder.Rows[i]["ID"].ToString() +","+dtOrder.Rows[i]["Amount"].ToString()+","+dtOrder.Rows[i]["Sell_Price"].ToString()+",'"+docNum+"','"+DropDownList1.SelectedValue+"',N'ขาย')");
+                    var productOutParams = new Dictionary<string, object>
+                    {
+                        { "@DateTimeOut", Convert.ToDateTime(TextBox12.Text + " " + DateTime.Now.ToString("HH:mm:ss")) },
+                        { "@ProductID", dtOrder.Rows[i]["ID"].ToString() },
+                        { "@Amount", dtOrder.Rows[i]["Amount"].ToString() },
+                        { "@PricePerUnit", dtOrder.Rows[i]["Sell_Price"].ToString() },
+                        { "@ReceiptID", docNum },
+                        { "@PaidHowID", DropDownList1.SelectedValue }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Product_Out] " +
+                        "([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Account_Paid_How_ID],[Remark]) " +
+                        "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,@ReceiptID,@PaidHowID,N'ขาย')",
+                        productOutParams);
                 }
             }
             Response.Redirect("/Product");
