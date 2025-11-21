@@ -91,15 +91,37 @@ namespace Take_Time_BangPhra.Account.Report
                 string uid = Request.QueryString["uid"];
                 if (command == "edit")
                 {
-                    DataTable dtPayment = code.DatabaseQuery(conn, "Select * from Account_Payment Where UID = '" + uid + "'");
+                    // SECURE: Get payment details with parameterized query
+                    var paymentParams = new Dictionary<string, object>
+                    {
+                        { "@UID", uid ?? "" }
+                    };
+                    DataTable dtPayment = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Account_Payment WHERE UID = @UID",
+                        paymentParams);
                     string id = dtPayment.Rows[0]["ID"].ToString();
 
                     // ✅ เก็บ id และ uid ไว้ใน ViewState เพื่อใช้ใน GetFileUrl
                     ViewState["PaymentID"] = id;
                     ViewState["PaymentUID"] = uid;
 
-                    DataTable dtPaymentDetail = code.DatabaseQuery(conn, "Select Number,Detail,Amount from Account_Payment_Detail Where Payment_ID = '" + id + "'");
-                    DataTable dtVendorSelected = code.DatabaseQuery(conn, "Select * from Vendor Where ID = '" + dtPayment.Rows[0]["Vendor_ID"].ToString() + "'");
+                    // SECURE: Get payment details with parameterized query
+                    var detailParams = new Dictionary<string, object>
+                    {
+                        { "@PaymentID", id }
+                    };
+                    DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn,
+                        "SELECT Number,Detail,Amount FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
+                        detailParams);
+
+                    // SECURE: Get vendor details with parameterized query
+                    var vendorParams = new Dictionary<string, object>
+                    {
+                        { "@VendorID", dtPayment.Rows[0]["Vendor_ID"].ToString() }
+                    };
+                    DataTable dtVendorSelected = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Vendor WHERE ID = @VendorID",
+                        vendorParams);
 
                     GridView1.DataSource = dtPaymentDetail;
                     GridView1.DataBind();
@@ -213,7 +235,15 @@ namespace Take_Time_BangPhra.Account.Report
             {
                 totalAmount += Convert.ToDouble(dtDetail.Rows[i]["Amount"].ToString());
             }
-            int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = "+DropDownList4.SelectedValue).Rows[0][0].ToString());
+
+            // SECURE: Get VAT percent with parameterized query
+            var vatParams = new Dictionary<string, object>
+            {
+                { "@VatTypeID", DropDownList4.SelectedValue }
+            };
+            int vatPercent = Convert.ToInt32(code.DatabaseQuerySafe(conn,
+                "SELECT Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' AND ID = @VatTypeID",
+                vatParams).Rows[0][0].ToString());
             double vat = (totalAmount * vatPercent) / 100;
             double AmountIncludeVat = 0;
             if (vatType == "2")
@@ -258,14 +288,35 @@ namespace Take_Time_BangPhra.Account.Report
             string id = "";
             try
             {
-                id = code.DatabaseQuery(conn, "Select ID from [Account_Payment] Where UID = '" + uid + "'").Rows[0][0].ToString();
+                // SECURE: Get payment ID with parameterized query
+                var getIdParams = new Dictionary<string, object>
+                {
+                    { "@UID", uid ?? "" }
+                };
+                id = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM [Account_Payment] WHERE UID = @UID",
+                    getIdParams).Rows[0][0].ToString();
             }
             catch { }
             if (command == "edit")
             {
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE UID = '" + uid + "'");
-                
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + id + "'");
+                // SECURE: Delete payment record with parameterized query
+                var deletePaymentParams = new Dictionary<string, object>
+                {
+                    { "@UID", uid ?? "" }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Account_Payment] WHERE UID = @UID",
+                    deletePaymentParams);
+
+                // SECURE: Delete payment details with parameterized query
+                var deleteDetailParams = new Dictionary<string, object>
+                {
+                    { "@PaymentID", id }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
+                    deleteDetailParams);
             }
             else
             {
@@ -283,11 +334,40 @@ namespace Take_Time_BangPhra.Account.Report
                 {
                     docNum = id;
                 }
-                code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) VALUES ('"+docNum+"',N'"+DropDownList1.SelectedValue+"','"+createDate.ToString("yyyy-MM-dd")+"','"+TextBox6.Text+"','"+DropDownList4.SelectedValue+"','"+TextBox4.Text+"','"+TextBox3.Text+"',N'"+DropDownList2.SelectedItem.Text+"',N'"+DropDownList3.SelectedItem.Text+"',N'Normal','"+Session["UserID"].ToString()+"')");
+
+                // SECURE: Insert payment record with parameterized query
+                var paymentInsertParams = new Dictionary<string, object>
+                {
+                    { "@ID", docNum },
+                    { "@VendorID", DropDownList1.SelectedValue },
+                    { "@CreatedDate", createDate.ToString("yyyy-MM-dd") },
+                    { "@TotalAmount", TextBox6.Text },
+                    { "@VatTypeID", DropDownList4.SelectedValue },
+                    { "@Vat", TextBox4.Text },
+                    { "@TotalAmountExcludeVat", TextBox3.Text },
+                    { "@PaidHow", DropDownList2.SelectedItem.Text },
+                    { "@PaidType", DropDownList3.SelectedItem.Text },
+                    { "@CreatedByID", Session["UserID"].ToString() }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
+                    "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
+                    paymentInsertParams);
+
+                // SECURE: Insert payment details with parameterized queries
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) VALUES ('" + docNum + "','"+dtDetail.Rows[i][0].ToString()+ "',N'" + dtDetail.Rows[i][1].ToString() + "','" + dtDetail.Rows[i][2].ToString() + "')");
-
+                    var detailInsertParams = new Dictionary<string, object>
+                    {
+                        { "@PaymentID", docNum },
+                        { "@Number", dtDetail.Rows[i][0].ToString() },
+                        { "@Detail", dtDetail.Rows[i][1].ToString() },
+                        { "@Amount", dtDetail.Rows[i][2].ToString() }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
+                        "VALUES (@PaymentID,@Number,@Detail,@Amount)",
+                        detailInsertParams);
                 }
                 string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
                 try
