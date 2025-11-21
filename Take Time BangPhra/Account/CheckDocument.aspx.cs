@@ -319,14 +319,32 @@ namespace Take_Time_BangPhra.Account
                         System.Diagnostics.Debug.WriteLine($"⚠️ Error updating Reservation.Deposit: {ex.Message}");
                     }
 
-                    // Delete Payment_History records that reference this receipt
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
+                    // SECURE: Delete Payment_History records that reference this receipt
+                    var deletePaymentHistoryParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = @ReceiptID",
+                        deletePaymentHistoryParams);
 
-                    // Delete receipt details
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + docNum + "'");
+                    // SECURE: Delete receipt details
+                    var deleteReceiptDetailParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = @ReceiptID",
+                        deleteReceiptDetailParams);
 
-                    // Delete receipt record
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + docNum + "'");
+                    // SECURE: Delete receipt record
+                    var deleteReceiptParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Receipt] WHERE ID = @ID",
+                        deleteReceiptParams);
 
                     // Delete receipt files
                     string[] dirs = Directory.GetFiles(path, docNum + "*");
@@ -339,8 +357,24 @@ namespace Take_Time_BangPhra.Account
                 else if (docType == "PAY")
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + docNum + "'");
+
+                    // SECURE: Delete payment record
+                    var deletePaymentParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                        deletePaymentParams);
+
+                    // SECURE: Delete payment details
+                    var deletePaymentDetailParams = new Dictionary<string, object>
+                    {
+                        { "@PaymentID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
+                        deletePaymentDetailParams);
                     string[] dirs = Directory.GetFiles(path, docNum + "*");
                     for (int i = 0; i < dirs.Length; i++)
                     {
@@ -460,12 +494,27 @@ namespace Take_Time_BangPhra.Account
             {
                 if (docType == "REC")
                 {
-                    Response.Redirect("/Account/Receipt?command=edit&uid=" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString());
-
+                    // SECURE: Get receipt UID with parameterized query
+                    var receiptUidParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    string uid = code.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] WHERE ID = @ID",
+                        receiptUidParams).Rows[0][0].ToString();
+                    Response.Redirect("/Account/Receipt?command=edit&uid=" + uid);
                 }
                 else if (docType == "PAY")
                 {
-                    Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString());
+                    // SECURE: Get payment UID with parameterized query
+                    var paymentUidParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    string uid = code.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @ID",
+                        paymentUidParams).Rows[0][0].ToString();
+                    Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + uid);
                 }
             }
         }
