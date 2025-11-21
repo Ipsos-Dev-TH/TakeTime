@@ -129,7 +129,17 @@ namespace Take_Time_BangPhra.Product
 
         public void renderProduct()
         {
-            DataTable dtProduct = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Product] Where [Product_Name] = N'" + TextBox1.Text + "' OR Barcode = '" + TextBox1.Text + "'");
+            // SECURE: Use parameterized query to prevent SQL Injection
+            var parameters = new Dictionary<string, object>
+            {
+                { "@ProductName", TextBox1.Text ?? "" },
+                { "@Barcode", TextBox1.Text ?? "" }
+            };
+
+            DataTable dtProduct = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Taketime].[dbo].[Product] " +
+                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                parameters);
             if (dtProduct.Rows.Count > 0)
             {
                 DataTable dtOrder = (DataTable)Session["dtOrder"];
@@ -190,8 +200,27 @@ namespace Take_Time_BangPhra.Product
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
-                ID = dt.Rows[0][0].ToString();
+                // SECURE: Use parameterized query to prevent SQL Injection
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode ?? "" },
+                    { "@Province", Province ?? "" },
+                    { "@District", District ?? "" },
+                    { "@SubDistrict", SubDistrict ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address " +
+                    "WHERE PostalCode = @PostalCode " +
+                    "AND Province = @Province " +
+                    "AND District = @District " +
+                    "AND SubDistrict = @SubDistrict",
+                    parameters);
+
+                if (dt.Rows.Count > 0)
+                {
+                    ID = dt.Rows[0][0].ToString();
+                }
             }
             catch { }
 
@@ -328,14 +357,24 @@ namespace Take_Time_BangPhra.Product
         {
             if(TextBox9.Text.Length == 5)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox9.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox9.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox9.Text + "' order by SubDistrict ASC");
+                // SECURE: Use LoadAddressDropdownsByPostalCode instead of building SQL strings
+                LoadAddressDropdownsByPostalCode(TextBox9.Text);
             }
         }
 
+        /// <summary>
+        /// DEPRECATED: This method assumes pre-built SQL queries are safe.
+        /// Callers should use LoadAddressDropdownsByPostalCode instead.
+        /// Kept for backward compatibility but queries passed here should already be parameterized.
+        /// </summary>
         public void getAddress(string commp, string commd, string commsd)
         {
             string Command = Request.QueryString["Command"];
             string ID = Request.QueryString["ID"];
+
+            // NOTE: This method receives SQL query strings as parameters.
+            // The queries should be parameterized at the caller level.
+            // If they contain user input concatenation, it's a security issue at the caller.
             DataTable dtProvince = code.DatabaseQuery(conn, commp);
             DataTable dtDistrict = code.DatabaseQuery(conn, commd);
             DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
@@ -358,7 +397,7 @@ namespace Take_Time_BangPhra.Product
         }
 
         /// <summary>
-        /// Load address dropdowns without Button2 condition (for auto-fill scenarios)
+        /// SECURE: Load address dropdowns using parameterized queries
         /// </summary>
         private void LoadAddressDropdownsByPostalCode(string postalCode)
         {
@@ -367,12 +406,22 @@ namespace Take_Time_BangPhra.Product
 
             try
             {
-                DataTable dtProvince = code.DatabaseQuery(conn,
-                    $"SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = '{postalCode}' ORDER BY Province ASC");
-                DataTable dtDistrict = code.DatabaseQuery(conn,
-                    $"SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = '{postalCode}' ORDER BY District ASC");
-                DataTable dtSubDistrict = code.DatabaseQuery(conn,
-                    $"SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = '{postalCode}' ORDER BY SubDistrict ASC");
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@PostalCode", postalCode }
+                };
+
+                DataTable dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
+                    parameters);
+
+                DataTable dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
+                    parameters);
+
+                DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
+                    parameters);
 
                 if (dtProvince.Rows.Count > 0 && dtDistrict.Rows.Count > 0 && dtSubDistrict.Rows.Count > 0)
                 {
@@ -416,36 +465,41 @@ namespace Take_Time_BangPhra.Product
         }
 
         /// <summary>
-        /// Load address dropdowns by province/district/subdistrict (fallback when postal code is not available)
+        /// SECURE: Load address dropdowns by province/district/subdistrict using parameterized queries
         /// </summary>
         private void LoadAddressDropdownsByLocation(string province, string district, string subDistrict)
         {
             try
             {
-                // Build queries based on available data
-                string provinceQuery = "SELECT DISTINCT [Province] FROM [Address] WHERE 1=1";
+                // Build queries based on available data (SECURE version with parameters)
+                string provinceQuery = "SELECT DISTINCT [Province] FROM [Address] WHERE 1=1 ORDER BY Province ASC";
                 string districtQuery = "SELECT DISTINCT [District] FROM [Address] WHERE 1=1";
                 string subDistrictQuery = "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE 1=1";
+
+                var districtParams = new Dictionary<string, object>();
+                var subDistrictParams = new Dictionary<string, object>();
 
                 // Add conditions based on available data
                 if (!string.IsNullOrEmpty(province))
                 {
-                    districtQuery += $" AND Province = N'{province.Replace("'", "''")}'";
-                    subDistrictQuery += $" AND Province = N'{province.Replace("'", "''")}'";
+                    districtQuery += " AND Province = @Province";
+                    subDistrictQuery += " AND Province = @Province";
+                    districtParams["@Province"] = province;
+                    subDistrictParams["@Province"] = province;
                 }
 
                 if (!string.IsNullOrEmpty(district))
                 {
-                    subDistrictQuery += $" AND District = N'{district.Replace("'", "''")}'";
+                    subDistrictQuery += " AND District = @District";
+                    subDistrictParams["@District"] = district;
                 }
 
-                provinceQuery += " ORDER BY Province ASC";
                 districtQuery += " ORDER BY District ASC";
                 subDistrictQuery += " ORDER BY SubDistrict ASC";
 
-                DataTable dtProvince = code.DatabaseQuery(conn, provinceQuery);
-                DataTable dtDistrict = code.DatabaseQuery(conn, districtQuery);
-                DataTable dtSubDistrict = code.DatabaseQuery(conn, subDistrictQuery);
+                DataTable dtProvince = code.DatabaseQuerySafe(conn, provinceQuery, null);
+                DataTable dtDistrict = code.DatabaseQuerySafe(conn, districtQuery, districtParams.Count > 0 ? districtParams : null);
+                DataTable dtSubDistrict = code.DatabaseQuerySafe(conn, subDistrictQuery, subDistrictParams.Count > 0 ? subDistrictParams : null);
 
                 if (dtProvince.Rows.Count > 0 || dtDistrict.Rows.Count > 0 || dtSubDistrict.Rows.Count > 0)
                 {
@@ -473,13 +527,50 @@ namespace Take_Time_BangPhra.Product
         {
             if (TextBox3.Text.Length >= 9 && TextBox6.Text.Length == 0)
             {
-                fillData("SELECT * FROM[Customer] Where MobilePhone = '" + TextBox3.Text+"'");
+                // SECURE: Call fillDataByPhone instead of passing raw SQL
+                fillDataByPhone(TextBox3.Text);
             }
         }
 
+        /// <summary>
+        /// SECURE: Fill customer data by mobile phone using parameterized query
+        /// </summary>
+        public void fillDataByPhone(string mobilePhone)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@MobilePhone", mobilePhone ?? "" }
+            };
+
+            DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Customer WHERE MobilePhone = @MobilePhone",
+                parameters);
+
+            if (dtCustomer.Rows.Count > 0)
+            {
+                fillDataFromCustomerTable(dtCustomer);
+            }
+        }
+
+        /// <summary>
+        /// DEPRECATED: Use fillDataByPhone instead. Kept for backward compatibility.
+        /// </summary>
         public void fillData(string cmd)
         {
+            // WARNING: This method accepts raw SQL strings and is vulnerable to SQL Injection
+            // Callers should migrate to fillDataByPhone() or similar parameterized methods
             DataTable dtCustomer = code.DatabaseQuery(conn, cmd);
+            if (dtCustomer.Rows.Count > 0)
+            {
+                fillDataFromCustomerTable(dtCustomer);
+            }
+        }
+
+        /// <summary>
+        /// SECURE: Populate form fields from customer DataTable
+        /// </summary>
+        private void fillDataFromCustomerTable(DataTable dtCustomer)
+        {
             if (dtCustomer.Rows.Count > 0)
             {
                 // ✅ Fill basic textboxes (always works, even when Panel1 is hidden)
@@ -500,13 +591,25 @@ namespace Take_Time_BangPhra.Product
                 {
                     try
                     {
-                        DataTable dtAddress = code.DatabaseQuery(conn, $"SELECT PostalCode, Province, District, SubDistrict FROM [Address] WHERE ID = {addressId}");
-                        if (dtAddress.Rows.Count > 0)
+                        // SECURE: Use parameterized query for Address lookup
+                        if (int.TryParse(addressId, out int addrId))
                         {
-                            postalCode = dtAddress.Rows[0]["PostalCode"]?.ToString()?.Trim() ?? "";
-                            province = dtAddress.Rows[0]["Province"]?.ToString()?.Trim() ?? "";
-                            district = dtAddress.Rows[0]["District"]?.ToString()?.Trim() ?? "";
-                            subDistrict = dtAddress.Rows[0]["SubDistrict"]?.ToString()?.Trim() ?? "";
+                            var addrParams = new Dictionary<string, object>
+                            {
+                                { "@AddressID", addrId }
+                            };
+
+                            DataTable dtAddress = code.DatabaseQuerySafe(conn,
+                                "SELECT PostalCode, Province, District, SubDistrict FROM [Address] WHERE ID = @AddressID",
+                                addrParams);
+
+                            if (dtAddress.Rows.Count > 0)
+                            {
+                                postalCode = dtAddress.Rows[0]["PostalCode"]?.ToString()?.Trim() ?? "";
+                                province = dtAddress.Rows[0]["Province"]?.ToString()?.Trim() ?? "";
+                                district = dtAddress.Rows[0]["District"]?.ToString()?.Trim() ?? "";
+                                subDistrict = dtAddress.Rows[0]["SubDistrict"]?.ToString()?.Trim() ?? "";
+                            }
                         }
                     }
                     catch { }
