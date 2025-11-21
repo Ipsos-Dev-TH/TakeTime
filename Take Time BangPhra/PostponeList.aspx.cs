@@ -72,7 +72,17 @@ namespace Take_Time_BangPhra
             if(e.CommandName == "Delete")
             {
                 DataTable dtShow = (DataTable)Session["dtShow"];
-                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = "+ dtShow.Rows[Convert.ToInt32(e.CommandArgument.ToString())]["ID"].ToString());
+
+                // SECURE: Reservation status UPDATE with parameterized query
+                var reservationUpdateParams = new Dictionary<string, object>
+                {
+                    { "@ID", dtShow.Rows[Convert.ToInt32(e.CommandArgument.ToString())]["ID"].ToString() }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = @ID",
+                    reservationUpdateParams);
+
                 Response.Redirect("/PostponeList");
             }
         }
@@ -82,9 +92,19 @@ namespace Take_Time_BangPhra
             Button btn = (Button)sender;
             string id = btn.CommandArgument;
 
-                DataTable dtShow = (DataTable)Session["dtShow"];
-                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = " + id);
-                Response.Redirect("/PostponeList");
+            DataTable dtShow = (DataTable)Session["dtShow"];
+
+            // SECURE: Reservation status UPDATE with parameterized query
+            var reservationUpdateParams = new Dictionary<string, object>
+            {
+                { "@ID", id }
+            };
+
+            code.DatabaseInsertSafe(conn,
+                "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = @ID",
+                reservationUpdateParams);
+
+            Response.Redirect("/PostponeList");
             
         }
 
