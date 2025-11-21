@@ -265,7 +265,7 @@ namespace Take_Time_BangPhra.Class
 
             return _code.DatabaseQuerySafe(
                 _connectionString,
-                _code.AdaptSql($"SELECT TOP {limit} * FROM Reservation " +
+                code.AdaptSql($"SELECT TOP {limit} * FROM Reservation " +
                 "WHERE Customer_MobilePhone IN (SELECT MobilePhone FROM Customer WHERE ID = @CustomerID) " +
                 "ORDER BY CheckinDate DESC"),
                 parameters);
@@ -286,7 +286,7 @@ namespace Take_Time_BangPhra.Class
 
             return _code.DatabaseQuerySafe(
                 _connectionString,
-                _code.AdaptSql($"SELECT TOP {limit} AR.* FROM Account_Receipt AR " +
+                code.AdaptSql($"SELECT TOP {limit} AR.* FROM Account_Receipt AR " +
                 "INNER JOIN Reservation R ON AR.Reservation_ID = R.ID " +
                 "WHERE R.Customer_MobilePhone IN (SELECT MobilePhone FROM Customer WHERE ID = @CustomerID) " +
                 "ORDER BY AR.Date DESC"),

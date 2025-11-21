@@ -78,7 +78,7 @@ namespace Take_Time_BangPhra.Class
 
             DataTable dt = _code.DatabaseQuerySafe(
                 _connectionString,
-                _code.AdaptSql($"SELECT TOP 1 ID FROM [{tableName}] WHERE ID LIKE @Pattern ORDER BY ID DESC"),
+                code.AdaptSql($"SELECT TOP 1 ID FROM [{tableName}] WHERE ID LIKE @Pattern ORDER BY ID DESC"),
                 parameters);
 
             // Calculate next sequence number
@@ -214,7 +214,7 @@ namespace Take_Time_BangPhra.Class
 
             DataTable dt = _code.DatabaseQuerySafe(
                 _connectionString,
-                _code.AdaptSql($"SELECT COUNT(*) FROM [{tableName}] WHERE ID LIKE @Pattern"),
+                code.AdaptSql($"SELECT COUNT(*) FROM [{tableName}] WHERE ID LIKE @Pattern"),
                 parameters);
 
             if (dt.Rows.Count > 0)

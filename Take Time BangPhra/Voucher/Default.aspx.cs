@@ -424,6 +424,12 @@ namespace Take_Time_BangPhra.Voucher
             string command = Request.QueryString["command"];
             string id = Request.QueryString["id"];
 
+            // ✨ Declare date variables used throughout the method
+            DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
+            string Year = receiptDate.Year.ToString();
+            string Month = receiptDate.Month.ToString("00");
+            string Day = receiptDate.Day.ToString("00");
+
             bool imgupload = false;
 
             try
@@ -440,7 +446,6 @@ namespace Take_Time_BangPhra.Voucher
             if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload)
             {
                 // ✨ Use DocumentHelper to generate receipt number
-                DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
                 string docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
 
                 string RecNumber = docNum;
