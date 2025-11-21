@@ -64,7 +64,15 @@ namespace Take_Time_BangPhra.Affiliate
         {
             if(TextBox1.Text.Length == 13)
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '"+TextBox1.Text+"'");
+                // SECURE: Check vendor with parameterized query
+                var vendorParams = new Dictionary<string, object>
+                {
+                    { "@IDNumber", TextBox1.Text }
+                };
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Vendor LEFT JOIN Customer_Type ON Customer_Type.ID = Vendor_Type_ID " +
+                    "LEFT JOIN Address ON Address.ID = Address_ID WHERE IDNumber = @IDNumber",
+                    vendorParams);
                 if(dt.Rows.Count > 0)
                 {
                     TextBox2.Text = dt.Rows[0]["Name"].ToString();
@@ -112,7 +120,18 @@ namespace Take_Time_BangPhra.Affiliate
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                // SECURE: Get address ID with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode },
+                    { "@Province", Province },
+                    { "@District", District },
+                    { "@SubDistrict", SubDistrict }
+                };
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address WHERE PostalCode = @PostalCode AND Province = @Province " +
+                    "AND District = @District AND SubDistrict = @SubDistrict",
+                    addressParams);
                 ID = dt.Rows[0][0].ToString();
             }
             catch { }
@@ -215,18 +234,75 @@ namespace Take_Time_BangPhra.Affiliate
                                     lastname = input[1];
                                 }
                                 int ID = 0;
-                                DataTable dt = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox1.Text + "'");
+                                // SECURE: Check vendor with parameterized query
+                                var checkVendorParams = new Dictionary<string, object>
+                                {
+                                    { "@IDNumber", TextBox1.Text }
+                                };
+                                DataTable dt = code.DatabaseQuerySafe(conn,
+                                    "SELECT * FROM Vendor LEFT JOIN Customer_Type ON Customer_Type.ID = Vendor_Type_ID " +
+                                    "LEFT JOIN Address ON Address.ID = Address_ID WHERE IDNumber = @IDNumber",
+                                    checkVendorParams);
                                 if (dt.Rows.Count > 0)
                                 {
-                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Vendor] SET [IDNumber] = '" + TextBox1.Text.Replace("'", "''") + "',[Vendor_Type_ID] = " + RadioButtonList1.SelectedValue + " ,[Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[Address] = N'" + TextBox4.Text.Replace("'", "''") + "' ,[Address1] = N'" + TextBox5.Text.Replace("'", "''") + "' ,[Address_ID] = " + CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) + ",[Phone_Number] = '" + TextBox7.Text.Replace("'", "''") + "',[Vendor_Group] = N'15-Affiliate',[Branch_Number] = '" + TextBox3.Text.Replace("'", "''") + "' WHERE IDNumber = '" + TextBox1.Text + "'");
+                                    // SECURE: Update vendor with parameterized query
+                                    var updateVendorParams = new Dictionary<string, object>
+                                    {
+                                        { "@IDNumber", TextBox1.Text },
+                                        { "@VendorTypeID", RadioButtonList1.SelectedValue },
+                                        { "@Name", TextBox2.Text },
+                                        { "@Address", TextBox4.Text },
+                                        { "@Address1", TextBox5.Text },
+                                        { "@AddressID", CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) },
+                                        { "@PhoneNumber", TextBox7.Text },
+                                        { "@BranchNumber", TextBox3.Text },
+                                        { "@WhereIDNumber", TextBox1.Text }
+                                    };
+                                    code.DatabaseInsertSafe(conn,
+                                        "UPDATE [dbo].[Vendor] SET [IDNumber] = @IDNumber,[Vendor_Type_ID] = @VendorTypeID,[Name] = @Name," +
+                                        "[Address] = @Address,[Address1] = @Address1,[Address_ID] = @AddressID,[Phone_Number] = @PhoneNumber," +
+                                        "[Vendor_Group] = N'15-Affiliate',[Branch_Number] = @BranchNumber WHERE IDNumber = @WhereIDNumber",
+                                        updateVendorParams);
                                 }
                                 else
                                 {
                                     code.Logs(conn, "Affiliate-Register-Success", TextBox1.Text, TextBox1.Text);
-                                    ID = code.DatabaseInsertReturn(conn, "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) VALUES ('" + TextBox1.Text.Replace("'", "''") + "'," + RadioButtonList1.SelectedValue + ",N'" + TextBox2.Text.Replace("'", "''") + "','" + TextBox3.Text.Replace("'", "''") + "','" + TextBox7.Text.Replace("'", "''") + "',N'" + TextBox4.Text.Replace("'", "''") + "',N'" + TextBox5.Text.Replace("'", "''") + "'," + CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) + ",N'15-Affiliate'); SELECT SCOPE_IDENTITY();");
-                                    
+
+                                    // SECURE: Insert vendor with parameterized query
+                                    var insertVendorParams = new Dictionary<string, object>
+                                    {
+                                        { "@IDNumber", TextBox1.Text },
+                                        { "@VendorTypeID", RadioButtonList1.SelectedValue },
+                                        { "@Name", TextBox2.Text },
+                                        { "@BranchNumber", TextBox3.Text },
+                                        { "@PhoneNumber", TextBox7.Text },
+                                        { "@Address", TextBox4.Text },
+                                        { "@Address1", TextBox5.Text },
+                                        { "@AddressID", CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) }
+                                    };
+                                    ID = code.DatabaseInsertReturnSafe(conn,
+                                        "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) " +
+                                        "VALUES (@IDNumber,@VendorTypeID,@Name,@BranchNumber,@PhoneNumber,@Address,@Address1,@AddressID,N'15-Affiliate'); SELECT SCOPE_IDENTITY();",
+                                        insertVendorParams);
                                 }
-                                code.DatabaseInsert(conn, "INSERT INTO [dbo].[Affiliate_Member] ([ID_Number],[Password],[Register_Date],[Vendor_ID],[FirstName],[LastName],[Coupon_Code],[Bank_Code],[Bank_Number]) VALUES ('" + TextBox1.Text + "',N'" + TextBox8.Text + "','" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "'," + ID + ",'" + firstname + "','" + lastname + "','" + GenCouponCode(firstname, lastname) + "','" + DropDownList6.SelectedValue + "','" + TextBox12.Text.Replace("-", "").Replace(" ", "") + "')");
+
+                                // SECURE: Insert affiliate member with parameterized query
+                                var insertMemberParams = new Dictionary<string, object>
+                                {
+                                    { "@IDNumber", TextBox1.Text },
+                                    { "@Password", TextBox8.Text },
+                                    { "@RegisterDate", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") },
+                                    { "@VendorID", ID },
+                                    { "@FirstName", firstname },
+                                    { "@LastName", lastname },
+                                    { "@CouponCode", GenCouponCode(firstname, lastname) },
+                                    { "@BankCode", DropDownList6.SelectedValue },
+                                    { "@BankNumber", TextBox12.Text.Replace("-", "").Replace(" ", "") }
+                                };
+                                code.DatabaseInsertSafe(conn,
+                                    "INSERT INTO [dbo].[Affiliate_Member] ([ID_Number],[Password],[Register_Date],[Vendor_ID],[FirstName],[LastName],[Coupon_Code],[Bank_Code],[Bank_Number]) " +
+                                    "VALUES (@IDNumber,@Password,@RegisterDate,@VendorID,@FirstName,@LastName,@CouponCode,@BankCode,@BankNumber)",
+                                    insertMemberParams);
                                 Response.Redirect("../Affiliate/Login?id=" + TextBox1.Text);
                             }
                             else
