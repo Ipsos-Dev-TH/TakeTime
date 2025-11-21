@@ -27,12 +27,22 @@ namespace Take_Time_BangPhra.Product
         private const int PrimaryInterval = 300000; // 5 minutes = 300000 ms
         private const int SecondaryInterval = 60000; // 1 minute = 60000 ms
 
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
+
         // 🏨 Room Charge Feature
         private RoomChargeService _roomChargeService;
         private RoomChargeDataAccess _roomChargeDA;
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             // 🏨 Initialize Room Charge services
             _roomChargeService = new RoomChargeService(conn);
             _roomChargeDA = new RoomChargeDataAccess(conn);
@@ -194,38 +204,8 @@ namespace Take_Time_BangPhra.Product
             }
         }
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
-        {
-            string ID = "0";
-
-            try
-            {
-                // SECURE: Use parameterized query to prevent SQL Injection
-                var parameters = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode ?? "" },
-                    { "@Province", Province ?? "" },
-                    { "@District", District ?? "" },
-                    { "@SubDistrict", SubDistrict ?? "" }
-                };
-
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address " +
-                    "WHERE PostalCode = @PostalCode " +
-                    "AND Province = @Province " +
-                    "AND District = @District " +
-                    "AND SubDistrict = @SubDistrict",
-                    parameters);
-
-                if (dt.Rows.Count > 0)
-                {
-                    ID = dt.Rows[0][0].ToString();
-                }
-            }
-            catch { }
-
-            return ID;
-        }
+        // ✨ MIGRATED: CheckAddressID() method has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
 
 
@@ -397,7 +377,7 @@ namespace Take_Time_BangPhra.Product
         }
 
         /// <summary>
-        /// SECURE: Load address dropdowns using parameterized queries
+        /// ✨ REFACTORED: Load address dropdowns using AddressHelper
         /// </summary>
         private void LoadAddressDropdownsByPostalCode(string postalCode)
         {
@@ -406,27 +386,13 @@ namespace Take_Time_BangPhra.Product
 
             try
             {
-                var parameters = new Dictionary<string, object>
-                {
-                    { "@PostalCode", postalCode }
-                };
-
-                DataTable dtProvince = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
-                    parameters);
-
-                DataTable dtDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
-                    parameters);
-
-                DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
-                    parameters);
-
-                if (dtProvince.Rows.Count > 0 && dtDistrict.Rows.Count > 0 && dtSubDistrict.Rows.Count > 0)
-                {
-                    LoadAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
-                }
+                // ✨ Use AddressHelper to populate all dropdowns at once
+                _addressHelper.PopulateAddressDropdowns(
+                    postalCode,
+                    DropDownList3,  // Province
+                    DropDownList4,  // District
+                    DropDownList5   // SubDistrict
+                );
             }
             catch { }
         }
@@ -922,27 +888,33 @@ namespace Take_Time_BangPhra.Product
                     // SECURE: Use UpsertCustomer to handle INSERT/UPDATE safely
                     try
                     {
+                        // ✨ Use AddressHelper to get Address ID
                         int addressId = 0;
-                        int.TryParse(CheckAddressID(TextBox9.Text, DropDownList3.SelectedItem.Text,
-                            DropDownList4.SelectedItem.Text, DropDownList5.SelectedItem.Text), out addressId);
+                        string addressIdStr = _addressHelper.GetAddressIdString(
+                            TextBox9.Text,
+                            DropDownList3.SelectedItem.Text,
+                            DropDownList4.SelectedItem.Text,
+                            DropDownList5.SelectedItem.Text);
+                        int.TryParse(addressIdStr, out addressId);
+
                         int customerTypeId = 0;
                         int.TryParse(DropDownList2.SelectedValue, out customerTypeId);
 
                         long customerId = code.UpsertCustomer(
                             conn,
-                            TextBox3.Text,           // mobilePhone
-                            "",                      // name
-                            "",                      // nickName
-                            "",                      // comeFrom
-                            "",                      // remark
-                            TextBox4.Text,           // fullName
-                            cleantext(TextBox7.Text), // address
-                            TextBox6.Text,           // idNumber
-                            TextBox10.Text,          // email
-                            customerTypeId,          // customerTypeID
-                            addressId,               // addressID
-                            TextBox8.Text,           // address1
-                            TextBox5.Text            // branchNumber
+                            TextBox3.Text,                          // mobilePhone
+                            "",                                     // name
+                            "",                                     // nickName
+                            "",                                     // comeFrom
+                            "",                                     // remark
+                            TextBox4.Text,                          // fullName
+                            ValidationHelper.CleanText(TextBox7.Text), // address (✨ using ValidationHelper)
+                            TextBox6.Text,                          // idNumber
+                            TextBox10.Text,                         // email
+                            customerTypeId,                         // customerTypeID
+                            addressId,                              // addressID
+                            TextBox8.Text,                          // address1
+                            TextBox5.Text                           // branchNumber
                         );
 
                         // SECURE: Re-query customer data with parameterized query
@@ -1405,13 +1377,8 @@ namespace Take_Time_BangPhra.Product
             Response.Redirect("/Product");
         }
 
-        private string cleantext(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-                return input;
-
-            return input.Replace(",", "").Replace("'", "").Replace("\"", "");
-        }
+        // ✨ MIGRATED: cleantext() method has been replaced with ValidationHelper.CleanText()
+        // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
         protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
         {
