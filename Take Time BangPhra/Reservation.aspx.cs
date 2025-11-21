@@ -184,8 +184,24 @@ namespace Take_Time_BangPhra
                         {
                             for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
                             {
-                                DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
-                                DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+                                // SECURE: Get holiday price with parameterized query
+                                var holidayPriceParams = new Dictionary<string, object>
+                                {
+                                    { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                                    { "@DateNewPrice", Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") }
+                                };
+                                DataTable dtHolidayPrice = code.DatabaseQuerySafe(conn,
+                                    "SELECT * FROM Accommodation_HolidayPrice WHERE Accommodation_ID = @AccommodationID AND DateNewPrice = @DateNewPrice",
+                                    holidayPriceParams);
+
+                                // SECURE: Get accommodation price with parameterized query
+                                var accomPriceParams = new Dictionary<string, object>
+                                {
+                                    { "@ID", dtAccommodation.Rows[i]["ID"].ToString() }
+                                };
+                                DataTable dtPrice = code.DatabaseQuerySafe(conn,
+                                    "SELECT [Price] FROM [Accommodation] WHERE ID = @ID",
+                                    accomPriceParams);
                                 if (dtHolidayPrice.Rows.Count > 0)
                                 {
                                     if (Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtPrice.Rows[0][0].ToString()) || Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtHolidayPrice.Rows[0]["Price"].ToString()))
@@ -238,8 +254,24 @@ namespace Take_Time_BangPhra
                         {
                             for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
                             {
-                                DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "'");
-                                DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+                                // SECURE: Get holiday price with parameterized query
+                                var holidayPrice2Params = new Dictionary<string, object>
+                                {
+                                    { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                                    { "@DateNewPrice", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") }
+                                };
+                                DataTable dtHolidayPrice = code.DatabaseQuerySafe(conn,
+                                    "SELECT * FROM Accommodation_HolidayPrice WHERE Accommodation_ID = @AccommodationID AND DateNewPrice = @DateNewPrice",
+                                    holidayPrice2Params);
+
+                                // SECURE: Get accommodation price with parameterized query
+                                var accomPrice2Params = new Dictionary<string, object>
+                                {
+                                    { "@ID", dtAccommodation.Rows[i]["ID"].ToString() }
+                                };
+                                DataTable dtPrice = code.DatabaseQuerySafe(conn,
+                                    "SELECT [Price] FROM [Accommodation] WHERE ID = @ID",
+                                    accomPrice2Params);
                                 if (dtHolidayPrice.Rows.Count > 0)
                                 {
                                     if (Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtPrice.Rows[0][0].ToString()) || Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtHolidayPrice.Rows[0]["Price"].ToString()))
