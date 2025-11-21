@@ -729,6 +729,10 @@
     </Compile>
     <Compile Include="Services\SlipOCRService.cs" />
     <Compile Include="Code.cs" />
+    <Compile Include="Class\ValidationHelper.cs" />
+    <Compile Include="Class\DocumentHelper.cs" />
+    <Compile Include="Class\AddressHelper.cs" />
+    <Compile Include="Class\CustomerHelper.cs" />
     <Compile Include="Contact.aspx.cs">
       <DependentUpon>Contact.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

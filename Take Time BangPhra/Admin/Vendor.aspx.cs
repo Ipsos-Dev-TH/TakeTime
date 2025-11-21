@@ -1,11 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using Take_Time_BangPhra.Class;
 using System.Linq;
+using Take_Time_BangPhra.Class;
 using System.Web;
+using Take_Time_BangPhra.Class;
 using System.Web.UI;
+using Take_Time_BangPhra.Class;
 using System.Web.UI.WebControls;
+using Take_Time_BangPhra.Class;
 using System.Data;
+using Take_Time_BangPhra.Class;
 using System.Configuration;
+using Take_Time_BangPhra.Class;
 
 namespace Take_Time_BangPhra.Admin
 {
