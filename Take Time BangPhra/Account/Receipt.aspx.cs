@@ -583,12 +583,26 @@ namespace Take_Time_BangPhra.Account.Report
                     // ✅ ถ้า edit mode → query ด้วย UID (เพราะ ID อาจจะเปลี่ยน, แต่ UID ไม่เปลี่ยน)
                     if (command == "edit")
                     {
-                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid + "'");
+                        // SECURE: Get receipt by UID with parameterized query
+                        var receiptUidParams = new Dictionary<string, object>
+                        {
+                            { "@UID", uid ?? "" }
+                        };
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] INNER JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                            receiptUidParams);
                         System.Diagnostics.Debug.WriteLine($"[Edit Mode] Query Receipt by UID: {uid}");
                     }
                     else
                     {
-                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+                        // SECURE: Get receipt by ID with parameterized query
+                        var receiptIdParams = new Dictionary<string, object>
+                        {
+                            { "@ID", RecNumber }
+                        };
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] INNER JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.ID = @ID",
+                            receiptIdParams);
                         System.Diagnostics.Debug.WriteLine($"[Create Mode] Query Receipt by ID: {RecNumber}");
                     }
 
@@ -611,11 +625,25 @@ namespace Take_Time_BangPhra.Account.Report
                     // Fallback: try with ID
                     if (command == "edit")
                     {
-                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid + "'");
+                        // SECURE: Fallback get receipt by UID with parameterized query
+                        var fallbackUidParams = new Dictionary<string, object>
+                        {
+                            { "@UID", uid ?? "" }
+                        };
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                            fallbackUidParams);
                     }
                     else
                     {
-                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+                        // SECURE: Fallback get receipt by ID with parameterized query
+                        var fallbackIdParams = new Dictionary<string, object>
+                        {
+                            { "@ID", RecNumber }
+                        };
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.ID = @ID",
+                            fallbackIdParams);
                     }
                 }
 
@@ -742,8 +770,14 @@ namespace Take_Time_BangPhra.Account.Report
                     }
 
                     // ✅ DELETE และ Re-INSERT Account_Receipt_Detail (เพราะอาจมีการเปลี่ยน items)
-                    // ใช้ docNum (เลขที่สุดท้าย) เพื่อให้สอดคล้องกับ INSERT ด้านล่าง
-                    code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + docNum + "'");
+                    // SECURE: Delete with parameterized query
+                    var deleteDetailParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", docNum }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = @ReceiptID",
+                        deleteDetailParams);
                     System.Diagnostics.Debug.WriteLine($"✅ Deleted old Account_Receipt_Detail (Receipt_ID={docNum}) for re-insert");
 
                     // Store UID for re-use
