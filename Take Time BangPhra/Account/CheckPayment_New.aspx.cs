@@ -454,11 +454,23 @@ namespace Take_Time_BangPhra.Account
                 {
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
 
-                    // Delete payment details
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + docNum + "'");
+                    // SECURE: Delete payment details with parameterized query
+                    var deleteDetailsParams = new Dictionary<string, object>
+                    {
+                        { "@PaymentID", docNum }
+                    };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
+                        deleteDetailsParams);
 
-                    // Delete payment record
-                    codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
+                    // SECURE: Delete payment record with parameterized query
+                    var deletePaymentParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                        deletePaymentParams);
 
                     // Delete payment files
                     if (Directory.Exists(path))
@@ -501,10 +513,15 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "PAY")
                 {
-                    // Get payment UID from database
+                    // SECURE: Get payment UID from database with parameterized query
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                    var uidResult = codeInstance.DatabaseQuery(conn,
-                        "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = '" + docNum + "'");
+                    var uidParams = new Dictionary<string, object>
+                    {
+                        { "@ID", docNum }
+                    };
+                    var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                        uidParams);
 
                     string uid = "";
                     if (uidResult != null && uidResult.Rows.Count > 0 && uidResult.Rows[0][0] != DBNull.Value)
@@ -571,7 +588,14 @@ namespace Take_Time_BangPhra.Account
 
                     if (docType == "PAY")
                     {
-                        string uid = codeInstance.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = '" + docNum + "'").Rows[0][0].ToString();
+                        // SECURE: Get payment UID with parameterized query
+                        var uidParams = new Dictionary<string, object>
+                        {
+                            { "@ID", docNum }
+                        };
+                        string uid = codeInstance.DatabaseQuerySafe(conn,
+                            "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @ID",
+                            uidParams).Rows[0][0].ToString();
                         Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + uid);
                     }
                     else
