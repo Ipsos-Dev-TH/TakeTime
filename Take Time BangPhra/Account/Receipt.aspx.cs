@@ -25,8 +25,18 @@ namespace Take_Time_BangPhra.Account.Report
         code code2 = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
+
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             this.MaintainScrollPositionOnPostBack = true;
             try
             {
@@ -1418,14 +1428,11 @@ namespace Take_Time_BangPhra.Account.Report
             {
                 ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุข้อมูลให้ครบถ้วน');", true);
             }
-            
+
         }
 
-        public string ValidationHelper.CleanText(string input)
-        {
-            string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
-            return output;
-        }
+        // ✨ MIGRATED: cleantext() has been replaced with ValidationHelper.CleanText()
+        // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
         protected void Button4_Click(object sender, EventArgs e)
         {
@@ -1726,29 +1733,8 @@ namespace Take_Time_BangPhra.Account.Report
             DropDownList7.Items.Clear();
         }
 
-        public string _addressHelper.GetAddressIdString(string ZipCode,string Province,string District,string SubDistrict)
-        {
-            string ID = "0";
-
-            try
-            {
-                // SECURE: Get address ID with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode },
-                    { "@Province", Province },
-                    { "@District", District },
-                    { "@SubDistrict", SubDistrict }
-                };
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address WHERE PostalCode = @PostalCode AND Province = @Province AND District = @District AND SubDistrict = @SubDistrict",
-                    addressParams);
-                ID = dt.Rows[0][0].ToString();
-            }
-            catch { }
-
-            return ID;
-        }
+        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
         protected void DropDownList8_SelectedIndexChanged(object sender, EventArgs e)
         {

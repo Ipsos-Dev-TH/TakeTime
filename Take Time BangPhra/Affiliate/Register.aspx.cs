@@ -1,18 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using Take_Time_BangPhra.Class;
 using System.Linq;
-using Take_Time_BangPhra.Class;
 using System.Web;
-using Take_Time_BangPhra.Class;
 using System.Web.UI;
-using Take_Time_BangPhra.Class;
 using System.Web.UI.WebControls;
-using Take_Time_BangPhra.Class;
 using System.Data;
-using Take_Time_BangPhra.Class;
 using System.Configuration;
-using Take_Time_BangPhra.Class;
 using System.IO;
 using Take_Time_BangPhra.Class;
 
@@ -22,8 +15,19 @@ namespace Take_Time_BangPhra.Affiliate
     {
         code code = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
+
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             try
             {
 
@@ -122,30 +126,8 @@ namespace Take_Time_BangPhra.Affiliate
             }
         }
 
-        public string _addressHelper.GetAddressIdString(string ZipCode, string Province, string District, string SubDistrict)
-        {
-            string ID = "0";
-
-            try
-            {
-                // SECURE: Get address ID with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode },
-                    { "@Province", Province },
-                    { "@District", District },
-                    { "@SubDistrict", SubDistrict }
-                };
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address WHERE PostalCode = @PostalCode AND Province = @Province " +
-                    "AND District = @District AND SubDistrict = @SubDistrict",
-                    addressParams);
-                ID = dt.Rows[0][0].ToString();
-            }
-            catch { }
-
-            return ID;
-        }
+        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
         public void getAddress(string commp, string commd, string commsd)
         {
