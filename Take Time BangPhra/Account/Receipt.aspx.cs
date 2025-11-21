@@ -1452,6 +1452,21 @@ namespace Take_Time_BangPhra.Account.Report
             string id = dtRec.Rows[0]["ID"].ToString();
             for (int i = 0; i < dtRec.Rows.Count; i++)
             {
+                // Delete related records before cancelling (to maintain data integrity)
+                string docNum = dtRec.Rows[i]["ID"].ToString();
+
+                // Delete Payment_History that references Payment_Slips (FK: PaymentSlip_ID)
+                code.DatabaseInsert(conn,
+                    "DELETE FROM [dbo].[Payment_History] " +
+                    "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "')");
+
+                // Delete Payment_History by Receipt_ID (for records not linked via PaymentSlip_ID)
+                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
+
+                // Delete Payment_Slips (FK to Account_Receipt)
+                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
+
+                // Update status to Cancel
                 code.DatabaseInsert(conn, "UPDATE [dbo].[Account_Receipt] SET[Status] = 'Cancel' WHERE ID = '" + id + "'");
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
