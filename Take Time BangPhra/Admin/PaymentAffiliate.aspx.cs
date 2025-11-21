@@ -42,8 +42,25 @@ namespace Take_Time_BangPhra.Admin
                 string id = Request.QueryString["id"];
                 if (command == "edit")
                 {
-                    DataTable dtPayment = code.DatabaseQuery(conn, "Select * from Account_Payment Where ID = '" + id + "'");
-                    DataTable dtPaymentDetail = code.DatabaseQuery(conn, "Select Number,Detail,Amount from Account_Payment_Detail Where Payment_ID = '" + id + "'");
+                    // SECURE: Payment lookup with parameterized query
+                    var paymentParams = new Dictionary<string, object>
+                    {
+                        { "@ID", id ?? "" }
+                    };
+
+                    DataTable dtPayment = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Account_Payment WHERE ID = @ID",
+                        paymentParams);
+
+                    // SECURE: Payment detail lookup with parameterized query
+                    var paymentDetailParams = new Dictionary<string, object>
+                    {
+                        { "@PaymentID", id ?? "" }
+                    };
+
+                    DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn,
+                        "SELECT Number,Detail,Amount FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
+                        paymentDetailParams);
 
                     TextBox8.Text = Convert.ToDateTime(dtPayment.Rows[0]["Created_Date"].ToString()).ToString("yyyy-MM-dd");
                     TextBox3.Text = dtPayment.Rows[0]["Total_Amount_Exclude_Vat"].ToString();
@@ -147,8 +164,24 @@ namespace Take_Time_BangPhra.Admin
             string id = Request.QueryString["id"];
             if (command == "edit")
             {
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment] WHERE ID = '" + id + "'");
-                code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = '" + id + "'");
+                // SECURE: DELETE operations with parameterized queries
+                var deletePaymentParams = new Dictionary<string, object>
+                {
+                    { "@ID", id }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                    deletePaymentParams);
+
+                var deleteDetailParams = new Dictionary<string, object>
+                {
+                    { "@PaymentID", id }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
+                    deleteDetailParams);
             }
             else
             {
@@ -166,13 +199,64 @@ namespace Take_Time_BangPhra.Admin
                 {
                     docNum = id;
                 }
-                int accountPaymentID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) VALUES ('"+docNum+"',N'"+ DropDownList5.SelectedValue+ "','"+createDate.ToString("yyyy-MM-dd")+"','"+TextBox6.Text+"','4','"+TextBox4.Text+"','"+TextBox3.Text+"',N'"+DropDownList2.SelectedItem.Text+"','2',N'Normal','"+Session["UserID"].ToString()+ "'); Select scope_identity();");
+
+                // SECURE: Account_Payment INSERT with parameterized query
+                var paymentInsertParams = new Dictionary<string, object>
+                {
+                    { "@DocNum", docNum },
+                    { "@VendorID", DropDownList5.SelectedValue },
+                    { "@CreatedDate", createDate },
+                    { "@TotalAmount", TextBox6.Text },
+                    { "@Vat", TextBox4.Text },
+                    { "@TotalAmountExcludeVat", TextBox3.Text },
+                    { "@PaidHow", DropDownList2.SelectedItem.Text },
+                    { "@CreatedByID", Session["UserID"].ToString() }
+                };
+
+                int accountPaymentID = code.DatabaseInsertSafe(conn,
+                    "INSERT INTO [dbo].[Account_Payment] " +
+                    "([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
+                    "VALUES (@DocNum,@VendorID,@CreatedDate,@TotalAmount,'4',@Vat,@TotalAmountExcludeVat,@PaidHow,'2',N'Normal',@CreatedByID); " +
+                    "SELECT SCOPE_IDENTITY();",
+                    paymentInsertParams);
+
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
                 {
+                    // SECURE: Affiliate_Reservation_Payment INSERT with parameterized query
+                    var affResPaymentParams = new Dictionary<string, object>
+                    {
+                        { "@AccountPaymentID", accountPaymentID },
+                        { "@AffResID", dtDetail.Rows[i]["AffResID"].ToString() }
+                    };
 
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Affiliate_Reservation_Payment] ([Affiliate_Reservation_ID],[Account_Payment_ID]) VALUES ('"+accountPaymentID+"','"+ dtDetail.Rows[i]["AffResID"].ToString() + "')");
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) VALUES ('" + docNum + "','"+dtDetail.Rows[i][0].ToString()+ "',N'" + dtDetail.Rows[i][1].ToString() + "','" + dtDetail.Rows[i][2].ToString() + "')");
-                    code.DatabaseInsert(conn, "UPDATE [dbo].[Affiliate_Reservation] SET [Status] = 'TRANSFERED' WHERE ID = '" + dtDetail.Rows[i]["AffResID"].ToString() + "'");
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Affiliate_Reservation_Payment] ([Affiliate_Reservation_ID],[Account_Payment_ID]) " +
+                        "VALUES (@AccountPaymentID,@AffResID)",
+                        affResPaymentParams);
+
+                    // SECURE: Account_Payment_Detail INSERT with parameterized query
+                    var paymentDetailParams = new Dictionary<string, object>
+                    {
+                        { "@DocNum", docNum },
+                        { "@Number", dtDetail.Rows[i][0].ToString() },
+                        { "@Detail", dtDetail.Rows[i][1].ToString() },
+                        { "@Amount", dtDetail.Rows[i][2].ToString() }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
+                        "VALUES (@DocNum,@Number,@Detail,@Amount)",
+                        paymentDetailParams);
+
+                    // SECURE: Affiliate_Reservation UPDATE with parameterized query
+                    var affResUpdateParams = new Dictionary<string, object>
+                    {
+                        { "@AffResID", dtDetail.Rows[i]["AffResID"].ToString() }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "UPDATE [dbo].[Affiliate_Reservation] SET [Status] = 'TRANSFERED' WHERE ID = @AffResID",
+                        affResUpdateParams);
                 }
                 string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
                 try
@@ -203,7 +287,19 @@ namespace Take_Time_BangPhra.Admin
                 {
                     dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString();
                 }
-                DataTable dtVendor = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where Vendor.ID = '" + DropDownList5.SelectedValue + "'");
+
+                // SECURE: Vendor lookup with parameterized query
+                var vendorParams = new Dictionary<string, object>
+                {
+                    { "@VendorID", DropDownList5.SelectedValue }
+                };
+
+                DataTable dtVendor = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Vendor " +
+                    "LEFT JOIN Customer_Type ON Customer_Type.ID = Vendor_Type_ID " +
+                    "LEFT JOIN Address ON Address.ID = Address_ID " +
+                    "WHERE Vendor.ID = @VendorID",
+                    vendorParams);
 
                 DataTable dtVendorReport = new DataTable();
                 dtVendorReport = dtVendor.Copy();
@@ -231,8 +327,28 @@ namespace Take_Time_BangPhra.Admin
                 }
                 catch { }
 
-                DataTable dtPaymentDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = '" + PayNumber + "' order by Number ASC");
-                DataTable dtPayment = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = '" + PayNumber + "'");
+                // SECURE: Payment detail lookup with parameterized query
+                var paymentDetailReportParams = new Dictionary<string, object>
+                {
+                    { "@PayNumber", PayNumber }
+                };
+
+                DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Payment_Detail] WHERE Payment_ID = @PayNumber ORDER BY Number ASC",
+                    paymentDetailReportParams);
+
+                // SECURE: Payment with VAT type lookup with parameterized query
+                var paymentReportParams = new Dictionary<string, object>
+                {
+                    { "@PayNumber", PayNumber }
+                };
+
+                DataTable dtPayment = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Account_Payment] " +
+                    "INNER JOIN Account_Vat_Type ON Account_Vat_Type.ID = Vat_Type_ID " +
+                    "WHERE Account_Payment.ID = @PayNumber",
+                    paymentReportParams);
+
                 //GridView1.DataSource = dt;
                 //GridView1.DataBind();
                 DataTable dtSignature = new DataTable();
@@ -252,14 +368,32 @@ namespace Take_Time_BangPhra.Admin
 
                 }
                 string Signaturepath = System.Configuration.ConfigurationSettings.AppSettings["StaffSignatureFolderPath"].ToString();
-                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = "+ Session["UserID"].ToString());
+
+                // SECURE: Creator/Admin lookup with parameterized query
+                var creatorParams = new Dictionary<string, object>
+                {
+                    { "@UserID", Session["UserID"].ToString() }
+                };
+
+                DataTable dtCreator = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE ID = @UserID",
+                    creatorParams);
+
                 string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
 
                 DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
                 string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
 
+                // SECURE: Employee lookup by IDNumber with parameterized query
+                var employeeParams = new Dictionary<string, object>
+                {
+                    { "@IDNumber", dtVendor.Rows[0]["IDNumber"].ToString() }
+                };
 
-                DataTable dtEmployee = code.DatabaseQuery(conn, "Select * From Admin Where IDNumber = '"+ dtVendor.Rows[0]["IDNumber"].ToString() + "'");
+                DataTable dtEmployee = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Admin WHERE IDNumber = @IDNumber",
+                    employeeParams);
+
                 string ReceivedFullName = "";
                 string ReceivedPath = "";
                 if(dtEmployee.Rows.Count > 0)
@@ -391,7 +525,24 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "SELECT Affiliate_Reservation.ID,StayDate,AccomName,PriceAfterDiscount as PricePerDay,Commission FROM [Taketime].[dbo].[Affiliate_Reservation] inner join Accommodation on Accommodation.ID = Accommodation_ID inner join Affiliate_Discount_RatePlan on Affiliate_Discount_RatePlan.ID = Affiliate_Discount_RatePlan_ID inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.Status = N'เช็คอินแล้ว' AND Affiliate_Reservation.Status = 'NEW' AND Affiliate_Member_Coupon_Code = '" + DropDownList5.SelectedItem.Text + "' order by StayDate desc");
+                // SECURE: Affiliate reservation lookup with parameterized query
+                var affResParams = new Dictionary<string, object>
+                {
+                    { "@CouponCode", DropDownList5.SelectedItem.Text }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT Affiliate_Reservation.ID,StayDate,AccomName,PriceAfterDiscount AS PricePerDay,Commission " +
+                    "FROM [Taketime].[dbo].[Affiliate_Reservation] " +
+                    "INNER JOIN Accommodation ON Accommodation.ID = Accommodation_ID " +
+                    "INNER JOIN Affiliate_Discount_RatePlan ON Affiliate_Discount_RatePlan.ID = Affiliate_Discount_RatePlan_ID " +
+                    "INNER JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                    "WHERE Reservation.Status = N'เช็คอินแล้ว' " +
+                    "AND Affiliate_Reservation.Status = 'NEW' " +
+                    "AND Affiliate_Member_Coupon_Code = @CouponCode " +
+                    "ORDER BY StayDate DESC",
+                    affResParams);
+
                 GridView3.DataSource = dt;
                 GridView3.DataBind();
             }
