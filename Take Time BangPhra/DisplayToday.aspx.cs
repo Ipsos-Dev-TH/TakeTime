@@ -18,9 +18,28 @@ namespace Take_Time_BangPhra
         {
             Label1.Text = DateTime.Now.ToString("dd MMMM yyyy");
 
-            DataTable dtReservation = code.DatabaseQuery(conn, "Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate");
-            DataTable dtReservation_Accom = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID  Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate order by Accommodation.orderID asc");
-            DataTable dtReservation_Items = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID inner join Items on Items.ID = Reservation_Items.Items_ID  Where '" + DateTime.Now.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + DateTime.Now.ToString("yyyy-MM-dd") + "' < CheckoutDate order by Items_ID asc");
+            // SECURE: Current date lookup with parameterized query
+            var dateParams = new Dictionary<string, object>
+            {
+                { "@CurrentDate", DateTime.Now.ToString("yyyy-MM-dd") }
+            };
+
+            DataTable dtReservation = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Reservation INNER JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone " +
+                "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate",
+                dateParams);
+
+            DataTable dtReservation_Accom = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
+                "INNER JOIN Accommodation ON Accommodation.ID = Reservation_Accommodation.Accommodation_ID " +
+                "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate ORDER BY Accommodation.orderID ASC",
+                dateParams);
+
+            DataTable dtReservation_Items = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Reservation RIGHT JOIN Reservation_Items ON Reservation.ID = Reservation_Items.Reservation_ID " +
+                "INNER JOIN Items ON Items.ID = Reservation_Items.Items_ID " +
+                "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate ORDER BY Items_ID ASC",
+                dateParams);
 
             try
             {
@@ -79,25 +98,35 @@ namespace Take_Time_BangPhra
                 // Get base total price
                 decimal baseTotalPrice = Convert.ToDecimal(dtReservation.Rows[i]["TotalPrice"]);
 
-                // Get product charges (excluding cancelled)
+                // SECURE: Get product charges (excluding cancelled) with parameterized query
                 decimal productCharges = 0;
-                DataTable dtProductCharges = code.DatabaseQuery(conn,
-                    $@"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                       FROM Reservation_Product_Charges
-                       WHERE Reservation_ID = {reservationId}
-                       AND Status <> 'CANCELLED'");
+                var chargesParams = new Dictionary<string, object>
+                {
+                    { "@ReservationID", reservationId }
+                };
+                DataTable dtProductCharges = code.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
+                      FROM Reservation_Product_Charges
+                      WHERE Reservation_ID = @ReservationID
+                      AND Status <> 'CANCELLED'",
+                    chargesParams);
                 if (dtProductCharges.Rows.Count > 0 && dtProductCharges.Rows[0]["TotalCharges"] != DBNull.Value)
                 {
                     productCharges = Convert.ToDecimal(dtProductCharges.Rows[0]["TotalCharges"]);
                 }
 
-                // Get total paid
+                // SECURE: Get total paid with parameterized query
                 decimal totalPaid = 0;
-                DataTable dtPaid = code.DatabaseQuery(conn,
-                    $@"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
-                       FROM Payment_History
-                       WHERE Reservation_ID = {reservationId}
-                       AND Status = 'COMPLETED'");
+                var paidParams = new Dictionary<string, object>
+                {
+                    { "@ReservationID", reservationId }
+                };
+                DataTable dtPaid = code.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
+                      FROM Payment_History
+                      WHERE Reservation_ID = @ReservationID
+                      AND Status = 'COMPLETED'",
+                    paidParams);
                 if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
                 {
                     totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
