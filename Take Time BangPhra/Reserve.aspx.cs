@@ -40,6 +40,11 @@ namespace Take_Time_BangPhra
         _Default code = new _Default();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // ✨ Helper Classes for refactored system
+        private AddressHelper _addressHelper;
+        private CustomerHelper _customerHelper;
+        private DocumentHelper _documentHelper;
+
         // 🏨 Room Charge Feature
         private RoomChargeService _roomChargeService;
         private RoomChargeDataAccess _roomChargeDA;
@@ -49,6 +54,11 @@ namespace Take_Time_BangPhra
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // ✨ Initialize Helper Classes
+            _addressHelper = new AddressHelper(conn);
+            _customerHelper = new CustomerHelper(conn);
+            _documentHelper = new DocumentHelper(conn);
+
             // 🏨 Initialize Room Charge Services
             _roomChargeService = new RoomChargeService(conn);
             _roomChargeDA = new RoomChargeDataAccess(conn);
@@ -1259,7 +1269,7 @@ namespace Take_Time_BangPhra
                                     //        Deposit = Deposit + Convert.ToInt32(TextBox10.Text);
                                     //    }
                                     //    code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = '" + TextBox1.Text + "' ,[CheckinDate] = '" + code2.ParseDate(TextBox12.Text).ToString("yyyy-MM-dd") + "' ,[CheckoutDate] = '" + code2.ParseDate(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "' ,[StayDays] = " + DropDownList1.SelectedValue + " , [TotalPrice] = " + TextBox4.Text + " ,[Deposit] = " + Deposit + ", [Remark] = N'" + TextBox6.Text + "' WHERE ID = " + id);
-                                    //    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + cleantext(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                    //    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
 
 
                                     //    Reservation_ID = Convert.ToInt32(id);
@@ -1713,11 +1723,11 @@ namespace Take_Time_BangPhra
                                             "",  // ComeFrom
                                             "",  // Remark
                                             TextBox2.Text,  // FullName
-                                            cleantext(TextBox8.Text),  // Address
+                                            ValidationHelper.CleanText(TextBox8.Text),  // Address
                                             TextBox9.Text,  // IDNumber
                                             TextBox13.Text,  // Email
                                             Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                                            Convert.ToInt32(CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                                            Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
                                             TextBox17.Text,  // Address1
                                             TextBox18.Text  // Branch_Number
                                         );
@@ -2392,11 +2402,11 @@ namespace Take_Time_BangPhra
                                             "",  // ComeFrom
                                             "",  // Remark
                                             TextBox2.Text,  // FullName
-                                            cleantext(TextBox8.Text),  // Address
+                                            ValidationHelper.CleanText(TextBox8.Text),  // Address
                                             TextBox9.Text,  // IDNumber
                                             TextBox13.Text,  // Email
                                             Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                                            Convert.ToInt32(CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                                            Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
                                             TextBox17.Text,  // Address1
                                             TextBox18.Text  // Branch_Number
                                         );
@@ -3851,11 +3861,8 @@ namespace Take_Time_BangPhra
             }
         }
 
-        public string cleantext(string input)
-        {
-            string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
-            return output;
-        }
+        // ✨ MIGRATED: cleantext() has been replaced with ValidationHelper.CleanText()
+        // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
         public string createReceipt(string Reservation_ID, double Total_Amount,DataTable dtReserve,bool IsDeposit,DateTime docDate,bool etax)
         {
@@ -4325,11 +4332,11 @@ namespace Take_Time_BangPhra
                 "",  // ComeFrom
                 "",  // Remark
                 TextBox2.Text,  // FullName
-                cleantext(TextBox8.Text),  // Address
+                ValidationHelper.CleanText(TextBox8.Text),  // Address
                 TextBox9.Text,  // IDNumber
                 TextBox13.Text,  // Email
                 Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                Convert.ToInt32(CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
                 TextBox17.Text,  // Address1
                 TextBox18.Text  // Branch_Number
             );
@@ -6504,34 +6511,8 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
         }
 
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
-        {
-            string ID = "0";
-            try
-            {
-                // SECURE: Address lookup with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode ?? "" },
-                    { "@Province", Province ?? "" },
-                    { "@District", District ?? "" },
-                    { "@SubDistrict", SubDistrict ?? "" }
-                };
-
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address " +
-                    "WHERE PostalCode = @PostalCode " +
-                    "AND Province = @Province " +
-                    "AND District = @District " +
-                    "AND SubDistrict = @SubDistrict",
-                    addressParams);
-
-                ID = dt.Rows[0][0].ToString();
-            }
-            catch { }
-
-            return ID;
-        }
+        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
+        // See AddressHelper class in Take_Time_BangPhra.Class namespace
 
 
 
