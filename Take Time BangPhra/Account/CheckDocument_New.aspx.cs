@@ -984,11 +984,17 @@ namespace Take_Time_BangPhra.Account
                         // Continue with deletion even if update fails (data consistency issue but prevents stuck state)
                     }
 
-                    // Delete Payment_History first (has FK to Payment_Slips)
-                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records...");
+                    // Delete Payment_History that references the Payment_Slips we're about to delete
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records linked to Payment_Slips...");
+                    codeInstance.DatabaseInsert(conn,
+                        "DELETE FROM [dbo].[Payment_History] " +
+                        "WHERE PaymentSlip_ID IN (SELECT ID FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "')");
+
+                    // Delete Payment_History by Receipt_ID (for records not linked via PaymentSlip_ID)
+                    System.Diagnostics.Debug.WriteLine($"   Deleting Payment_History records by Receipt_ID...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = '" + docNum + "'");
 
-                    // Delete Payment_Slips second (has FK to Account_Receipt)
+                    // Delete Payment_Slips (has FK to Account_Receipt)
                     System.Diagnostics.Debug.WriteLine($"   Deleting Payment_Slips records...");
                     codeInstance.DatabaseInsert(conn, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = '" + docNum + "'");
 
