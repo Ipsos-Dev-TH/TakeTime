@@ -442,37 +442,40 @@ namespace Take_Time_BangPhra.Voucher
                 int reservation_id = 0;
 
                 DataTable dtcustomer = new DataTable();
-                try
-                {
-                    dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "' AND IDNumber = '" + TextBox12.Text.Replace("'", "''") + "'");
-                    if (dtcustomer.Rows.Count > 0)
-                    {
 
-                    }
-                    else
-                    {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox13.Text + "',N'" + TextBox10.Text.Replace("'", "''") + "',N'','','',N'" + TextBox10.Text.Replace("'", "''") + "',N'" + cleantext(TextBox11.Text.Replace("'", "''")) + "',N'" + TextBox12.Text + "',N'" + TextBox17.Text + "'," + DropDownList8.SelectedValue + "," + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox18.Text + "',N'" + TextBox7.Text + "')");
-                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "'");
-                    }
-                }
-                catch
-                {
-                    dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "' AND IDNumber = '" + TextBox12.Text.Replace("'", "''") + "'");
-                    if (dtcustomer.Rows.Count > 0)
-                    {
-                        try
-                        {
-                            code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [MobilePhone] = '" + TextBox13.Text + "',[Status] = '1',[FullName] = N'" + TextBox10.Text + "',[Address] = N'" + TextBox11.Text + "',[Address1] = N'" + TextBox18.Text + "',[Address_ID] = '" + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + "',[IDNumber] = '" + TextBox12.Text + "',[Email] = '" + TextBox17.Text + "',[Customer_Type_ID] = '" + DropDownList8.SelectedValue + "',[Branch_Number] = '" + TextBox7.Text + "' WHERE MobilePhone = '" + TextBox13.Text + "' or IDNumber = '" + TextBox12.Text + "'");
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox13.Text + "',N'" + TextBox10.Text.Replace("'", "''") + "',N'','','',N'" + TextBox10.Text.Replace("'", "''") + "',N'" + cleantext(TextBox11.Text.Replace("'", "''")) + "',N'" + "',N'" + TextBox12.Text + "',N'" + TextBox17.Text + "'," + DropDownList8.SelectedValue + "," + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox18.Text + "',N'" + TextBox7.Text + "')");
-                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox13.Text + "'");
-                    }
+                // SECURE: Use UpsertCustomer for safe customer INSERT/UPDATE
+                string addressId = CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text,
+                    DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text);
 
-                }
+                long customerId = code.UpsertCustomer(
+                    conn,
+                    TextBox13.Text,           // mobilePhone
+                    "",                       // name
+                    "",                       // nickname
+                    "",                       // comeFrom
+                    "",                       // remark
+                    TextBox10.Text,           // fullName
+                    cleantext(TextBox11.Text), // address
+                    TextBox16.Text,           // postalCode
+                    TextBox17.Text,           // email
+                    DropDownList8.SelectedValue, // customerTypeId
+                    addressId,                // addressId
+                    TextBox18.Text,           // address1
+                    TextBox7.Text             // branchNumber
+                );
+
+                // SECURE: Customer lookup with parameterized query
+                var customerParams = new Dictionary<string, object>
+                {
+                    { "@MobilePhone", TextBox13.Text ?? "" }
+                };
+
+                dtcustomer = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Customer " +
+                    "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                    "LEFT JOIN Address ON Address.ID = Address_ID " +
+                    "WHERE MobilePhone = @MobilePhone",
+                    customerParams);
 
 
                 if (CheckBox4.Checked == false)
@@ -484,7 +487,18 @@ namespace Take_Time_BangPhra.Voucher
                     DataTable dtReceipt = new DataTable();
                     try
                     {
-                        dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+                        // SECURE: Receipt lookup with parameterized query
+                        var receiptParams = new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", RecNumber }
+                        };
+
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] " +
+                            "INNER JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                            "WHERE Account_Receipt.ID = @ReceiptID",
+                            receiptParams);
+
                         if (dtReceipt.Rows.Count <= 0)
                         {
                             //reservation_id = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoNameinReceipt) VALUES ('" + TextBox13.Text + "','" + Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd") + "','" + Convert.ToDateTime(TextBox8.Text).AddDays(Convert.ToDouble(1)).ToString("yyyy-MM-dd") + "'," + "1" + ",N'ชำระเงินแล้ว'," + TextBox6.Text + "," + TextBox6.Text + ",N'" + TextBox6.Text + "', N'" + Session["UserName"].ToString() + "','" + DateTime.Now + "','False') SELECT SCOPE_IDENTITY(); ");
@@ -495,26 +509,79 @@ namespace Take_Time_BangPhra.Voucher
                             reservation_id = Convert.ToInt32(dtReceipt.Rows[0]["Reservation_ID"].ToString());
                         }
                     }
-                    catch { dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'"); }
+                    catch
+                    {
+                        // SECURE: Receipt lookup fallback with parameterized query
+                        var receiptFallbackParams = new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", RecNumber }
+                        };
+
+                        dtReceipt = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Account_Receipt] " +
+                            "LEFT JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                            "WHERE Account_Receipt.ID = @ReceiptID",
+                            receiptFallbackParams);
+                    }
 
                     if (command == "edit")
                     {
-                        code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + id + "'");
-                        code.DatabaseInsert(conn, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = '" + id + "'");
+                        // SECURE: DELETE operations with parameterized queries
+                        var deleteParams = new Dictionary<string, object>
+                        {
+                            { "@ID", id }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            "DELETE FROM [dbo].[Account_Receipt] WHERE ID = @ID",
+                            deleteParams);
+
+                        var deleteDetailParams = new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", id }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = @ReceiptID",
+                            deleteDetailParams);
                     }
                     else { }
 
-                    if (reservation_id > 0)
+                    // SECURE: Receipt INSERT with parameterized query
+                    var receiptInsertParams = new Dictionary<string, object>
                     {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID) VALUES ('" + docNum + "','" + reservation_id + "','" + Convert.ToDateTime(TextBox8.Text) + "'," + TextBox1.Text + "," + TextBox4.Text + "," + TextBox3.Text + ",'False','False',N'" + DropDownList2.SelectedItem.Text + "','Normal'," + Session["UserID"].ToString() + ",'" + CheckBox5.Checked + "','" + dtcustomer.Rows[0]["ID"].ToString() + "')");
-                    }
-                    else
+                        { "@DocNum", docNum },
+                        { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : "0" },
+                        { "@CreatedDate", Convert.ToDateTime(TextBox8.Text) },
+                        { "@TotalAmount", TextBox1.Text },
+                        { "@Vat", TextBox4.Text },
+                        { "@TotalAmountExcludeVat", TextBox3.Text },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", Session["UserID"].ToString() },
+                        { "@Etax", CheckBox5.Checked },
+                        { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt] " +
+                        "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID) " +
+                        "VALUES (@DocNum,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,'False','False',@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID)",
+                        receiptInsertParams);
+
+                    // SECURE: Receipt Detail INSERT with parameterized query
+                    var receiptDetailInsertParams = new Dictionary<string, object>
                     {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] ([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID) VALUES ('" + docNum + "','0','" + Convert.ToDateTime(TextBox8.Text) + "'," + TextBox1.Text + "," + TextBox4.Text + "," + TextBox3.Text + ",'False','False',N'" + DropDownList2.SelectedItem.Text + "','Normal'," + Session["UserID"].ToString() + ",'" + CheckBox5.Checked + "','" + dtcustomer.Rows[0]["ID"].ToString() + "')");
-                    }
+                        { "@DocNum", docNum },
+                        { "@ProductAmount", TextBox19.Text },
+                        { "@PricePerPiece", TextBox6.Text },
+                        { "@PriceAmount", TextBox1.Text }
+                    };
 
-
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) VALUES ('1','" + docNum + "','1',0,N'Voucher ที่พัก',"+TextBox19.Text+",N'ใบ'," + TextBox6.Text + "," + TextBox1.Text + ")");
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                        "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                        "VALUES ('1',@DocNum,'1',0,N'Voucher ที่พัก',@ProductAmount,N'ใบ',@PricePerPiece,@PriceAmount)",
+                        receiptDetailInsertParams);
 
                     // 🆕 Record payment to Payment_History when voucher receipt is created
                     if (reservation_id > 0)
@@ -611,10 +678,32 @@ namespace Take_Time_BangPhra.Voucher
 
                     DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
 
+                    // SECURE: Receipt lookup with parameterized query
+                    var receiptReportParams = new Dictionary<string, object>
+                    {
+                        { "@RecNumber", RecNumber }
+                    };
 
-                    dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
+                    dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Account_Receipt] " +
+                        "LEFT JOIN Reservation ON Reservation.ID = Reservation_ID " +
+                        "WHERE Account_Receipt.ID = @RecNumber",
+                        receiptReportParams);
+
                     string uid = dtReceipt.Rows[0]["UID"].ToString();
-                    DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + RecNumber + "' order by Number ASC");
+
+                    // SECURE: Receipt detail lookup with parameterized query
+                    var receiptDetailReportParams = new Dictionary<string, object>
+                    {
+                        { "@RecNumber", RecNumber }
+                    };
+
+                    DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Account_Receipt_Detail] " +
+                        "INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID " +
+                        "WHERE Receipt_ID = @RecNumber " +
+                        "ORDER BY Number ASC",
+                        receiptDetailReportParams);
 
 
 
@@ -635,7 +724,16 @@ namespace Take_Time_BangPhra.Voucher
                     DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
                     string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
 
-                    DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                    // SECURE: Admin/Creator lookup with parameterized query
+                    var creatorParams = new Dictionary<string, object>
+                    {
+                        { "@UserID", Session["UserID"].ToString() }
+                    };
+
+                    DataTable dtCreator = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Admin WHERE ID = @UserID",
+                        creatorParams);
+
                     string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
 
                     dtSignature.Rows.Add(ApproverFullName, "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png", CreatorFullName, "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png");
@@ -963,7 +1061,16 @@ namespace Take_Time_BangPhra.Voucher
                 string createddate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 for (int i = 0;i<Convert.ToInt32(TextBox19.Text);i++)
                 {
-                    DataTable dtDetails = code.DatabaseQuery(conn, "Select * from Accommodation_RatePlan_Group Where Group_Name = N'" + GridView1.Rows[0].Cells[1].Text + "'");
+                    // SECURE: Rate plan group lookup with parameterized query
+                    var ratePlanGroupNameParams = new Dictionary<string, object>
+                    {
+                        { "@GroupName", GridView1.Rows[0].Cells[1].Text }
+                    };
+
+                    DataTable dtDetails = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Accommodation_RatePlan_Group WHERE Group_Name = @GroupName",
+                        ratePlanGroupNameParams);
+
                     string vnumber = createVoucherNumber(dtDetails.Rows[0]["AccomGroupID"].ToString(), Year, Month, Day);
                     if (File.Exists(AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip\\" + TextBox13.Text + ".jpg"))
                     {
@@ -976,18 +1083,48 @@ namespace Take_Time_BangPhra.Voucher
 
                         }
                     }
-                    if(CheckBox4.Checked == true)
+
+                    // SECURE: Voucher INSERT with parameterized query
+                    var voucherInsertParams = new Dictionary<string, object>
                     {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) VALUES ('" + vnumber + "','" + TextBox6.Text + "','" + createddate + "','" + dtcustomer.Rows[0]["ID"].ToString() + "','',N'" + TextBox20.Text + "','"+Convert.ToDateTime(TextBox21.Text).ToString("yyyy-MM-dd")+"')");
-                    }
-                    else
-                    {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) VALUES ('" + vnumber + "','" + TextBox6.Text + "','" + createddate + "','" + dtcustomer.Rows[0]["ID"].ToString() + "','" + RecNumber + "',N'" + TextBox20.Text + "','"+Convert.ToDateTime(TextBox21.Text).ToString("yyyy-MM-dd")+"')");
-                    }
+                        { "@VoucherNumber", vnumber },
+                        { "@SellPrice", TextBox6.Text },
+                        { "@CreatedDate", createddate },
+                        { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() },
+                        { "@ReceiptID", CheckBox4.Checked ? "" : RecNumber },
+                        { "@Remark", TextBox20.Text ?? "" },
+                        { "@ExpiredDate", Convert.ToDateTime(TextBox21.Text) }
+                    };
+
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) " +
+                        "VALUES (@VoucherNumber,@SellPrice,@CreatedDate,@CustomerID,@ReceiptID,@Remark,@ExpiredDate)",
+                        voucherInsertParams);
+
                     for (int j = 0; j < GridView1.Rows.Count; j++)
                     {
-                        string groupid = code.DatabaseQuery(conn, "Select [GroupID] from Accommodation_RatePlan_Group Where Group_Name = N'" + GridView1.Rows[j].Cells[1].Text + "'").Rows[0][0].ToString();
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Voucher_RatePlan_Group] ([Voucher_Number],[RatePlan_GroupID],[PriceTo]) VALUES ('" + vnumber + "','" + groupid + "','" + GridView1.Rows[j].Cells[2].Text + "')");
+                        // SECURE: GroupID lookup with parameterized query
+                        var groupIdParams = new Dictionary<string, object>
+                        {
+                            { "@GroupName", GridView1.Rows[j].Cells[1].Text }
+                        };
+
+                        string groupid = code.DatabaseQuerySafe(conn,
+                            "SELECT [GroupID] FROM Accommodation_RatePlan_Group WHERE Group_Name = @GroupName",
+                            groupIdParams).Rows[0][0].ToString();
+
+                        // SECURE: Voucher_RatePlan_Group INSERT with parameterized query
+                        var voucherRatePlanParams = new Dictionary<string, object>
+                        {
+                            { "@VoucherNumber", vnumber },
+                            { "@GroupID", groupid },
+                            { "@PriceTo", GridView1.Rows[j].Cells[2].Text }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Voucher_RatePlan_Group] ([Voucher_Number],[RatePlan_GroupID],[PriceTo]) " +
+                            "VALUES (@VoucherNumber,@GroupID,@PriceTo)",
+                            voucherRatePlanParams);
 
                     }
                 }
@@ -1070,8 +1207,17 @@ namespace Take_Time_BangPhra.Voucher
             int a = 0;
             while(a == 0)
             {
-                code.DatabaseQuery(conn, "Select * from Voucher Where Voucher_Number = '"+output+"'");
-                if(code.DatabaseQuery(conn, "Select * from Voucher Where Voucher_Number = '" + output + "'").Rows.Count > 0)
+                // SECURE: Voucher number check with parameterized query
+                var voucherCheckParams = new Dictionary<string, object>
+                {
+                    { "@VoucherNumber", output }
+                };
+
+                DataTable dtVoucherCheck = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM Voucher WHERE Voucher_Number = @VoucherNumber",
+                    voucherCheckParams);
+
+                if(dtVoucherCheck.Rows.Count > 0)
                 {
                     output = "V" + NumberAccom + Year + Month + Day + GenerateRandomString(4);
                 }
@@ -1112,11 +1258,29 @@ namespace Take_Time_BangPhra.Voucher
             string uid = Request.QueryString["uid"];
             string path = ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
             string Imagespath = ConfigurationSettings.AppSettings["ImagesFolderPath"].ToString();
-            DataTable dtRec = code.DatabaseQuery(conn, "Select * from Account_Receipt Where Status = 'Normal' AND UID = '" + uid + "'");
+
+            // SECURE: Receipt lookup with parameterized query
+            var receiptByUidParams = new Dictionary<string, object>
+            {
+                { "@UID", uid ?? "" }
+            };
+
+            DataTable dtRec = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND UID = @UID",
+                receiptByUidParams);
+
             string id = dtRec.Rows[0]["ID"].ToString();
             for (int i = 0; i < dtRec.Rows.Count; i++)
             {
-                code.DatabaseInsert(conn, "UPDATE [dbo].[Account_Receipt] SET[Status] = 'Cancel' WHERE ID = '" + id + "'");
+                // SECURE: Receipt UPDATE with parameterized query
+                var receiptUpdateParams = new Dictionary<string, object>
+                {
+                    { "@ID", id }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ID",
+                    receiptUpdateParams);
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
 
@@ -1246,7 +1410,23 @@ namespace Take_Time_BangPhra.Voucher
 
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "Select ID from Address Where PostalCode = '" + ZipCode + "' AND Province = N'" + Province + "' AND District = N'" + District + "' AND SubDistrict = N'" + SubDistrict + "'");
+                // SECURE: Address lookup with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", ZipCode ?? "" },
+                    { "@Province", Province ?? "" },
+                    { "@District", District ?? "" },
+                    { "@SubDistrict", SubDistrict ?? "" }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    "SELECT ID FROM Address " +
+                    "WHERE PostalCode = @PostalCode " +
+                    "AND Province = @Province " +
+                    "AND District = @District " +
+                    "AND SubDistrict = @SubDistrict",
+                    addressParams);
+
                 ID = dt.Rows[0][0].ToString();
             }
             catch { }
@@ -1311,7 +1491,16 @@ namespace Take_Time_BangPhra.Voucher
         {
             if (TextBox13.Text.Length > 8)
             {
-               DataTable dtcustomer =  code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Customer] Where MobilePhone = '" + TextBox13.Text + "'");
+               // SECURE: Customer lookup with parameterized query
+               var customerLookupParams = new Dictionary<string, object>
+               {
+                   { "@MobilePhone", TextBox13.Text ?? "" }
+               };
+
+               DataTable dtcustomer = code.DatabaseQuerySafe(conn,
+                   "SELECT * FROM [Taketime].[dbo].[Customer] WHERE MobilePhone = @MobilePhone",
+                   customerLookupParams);
+
                 if (dtcustomer.Rows.Count > 0)
                 {
                     try //Address
@@ -1372,7 +1561,16 @@ namespace Take_Time_BangPhra.Voucher
             {
                 double totalAmount = Convert.ToDouble(TextBox6.Text) * Convert.ToInt32(TextBox19.Text);
 
-                int vatPercent = Convert.ToInt32(code.DatabaseQuery(conn, "Select Vat_Percent from Account_Vat_Type Where Status = 'True' AND ID = " + DropDownList4.SelectedValue).Rows[0][0].ToString());
+                // SECURE: VAT percent lookup with parameterized query
+                var vatLookupParams = new Dictionary<string, object>
+                {
+                    { "@VatTypeID", DropDownList4.SelectedValue }
+                };
+
+                int vatPercent = Convert.ToInt32(code.DatabaseQuerySafe(conn,
+                    "SELECT Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' AND ID = @VatTypeID",
+                    vatLookupParams).Rows[0][0].ToString());
+
                 double AmountExcludeVat = ((totalAmount * 100) / (100 + vatPercent) );
                 double vat = totalAmount - AmountExcludeVat;
                 TextBox3.Text = NumberHelper.TwoDecimalPoints(AmountExcludeVat).ToString();
