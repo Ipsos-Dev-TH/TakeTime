@@ -114,7 +114,7 @@ namespace Take_Time_BangPhra.Affiliate
             }
         }
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
+        public string _addressHelper.GetAddressIdString(string ZipCode, string Province, string District, string SubDistrict)
         {
             string ID = "0";
 
@@ -253,7 +253,7 @@ namespace Take_Time_BangPhra.Affiliate
                                         { "@Name", TextBox2.Text },
                                         { "@Address", TextBox4.Text },
                                         { "@Address1", TextBox5.Text },
-                                        { "@AddressID", CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) },
+                                        { "@AddressID", _addressHelper.GetAddressIdString(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) },
                                         { "@PhoneNumber", TextBox7.Text },
                                         { "@BranchNumber", TextBox3.Text },
                                         { "@WhereIDNumber", TextBox1.Text }
@@ -278,7 +278,7 @@ namespace Take_Time_BangPhra.Affiliate
                                         { "@PhoneNumber", TextBox7.Text },
                                         { "@Address", TextBox4.Text },
                                         { "@Address1", TextBox5.Text },
-                                        { "@AddressID", CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) }
+                                        { "@AddressID", _addressHelper.GetAddressIdString(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue) }
                                     };
                                     ID = code.DatabaseInsertReturnSafe(conn,
                                         "INSERT INTO [dbo].[Vendor](IDNumber,Vendor_Type_ID,Name,Branch_Number,Phone_Number,Address,Address1,Address_ID,Vendor_Group) " +

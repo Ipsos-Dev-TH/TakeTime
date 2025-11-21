@@ -547,11 +547,11 @@ namespace Take_Time_BangPhra.Account.Report
                     "",  // ComeFrom
                     "",  // Remark
                     TextBox10.Text,  // FullName
-                    cleantext(TextBox11.Text),  // Address
+                    ValidationHelper.CleanText(TextBox11.Text),  // Address
                     TextBox12.Text,  // IDNumber
                     TextBox17.Text,  // Email
                     Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                    Convert.ToInt32(CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                    Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
                     TextBox18.Text,  // Address1
                     TextBox7.Text  // Branch_Number
                 );
@@ -1421,7 +1421,7 @@ namespace Take_Time_BangPhra.Account.Report
             
         }
 
-        public string cleantext(string input)
+        public string ValidationHelper.CleanText(string input)
         {
             string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
             return output;
@@ -1726,7 +1726,7 @@ namespace Take_Time_BangPhra.Account.Report
             DropDownList7.Items.Clear();
         }
 
-        public string CheckAddressID(string ZipCode,string Province,string District,string SubDistrict)
+        public string _addressHelper.GetAddressIdString(string ZipCode,string Province,string District,string SubDistrict)
         {
             string ID = "0";
 

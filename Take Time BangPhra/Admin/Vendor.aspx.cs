@@ -98,7 +98,7 @@ namespace Take_Time_BangPhra.Admin
             }
         }
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
+        public string _addressHelper.GetAddressIdString(string ZipCode, string Province, string District, string SubDistrict)
         {
             string ID = "0";
 
@@ -223,7 +223,7 @@ namespace Take_Time_BangPhra.Admin
             {
                 string vendorName = TextBox2.Text.Trim().Replace("'", "''");
                 string branchNumber = TextBox3.Text.Trim().Replace("'", "''");
-                string addressId = CheckAddressID(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue);
+                string addressId = _addressHelper.GetAddressIdString(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue);
 
                 // 🔍 Check duplicate by Name + Branch_Number (Primary unique key)
                 DataTable dtCheckName = code.DatabaseQuery(conn,

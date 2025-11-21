@@ -769,7 +769,7 @@ namespace Take_Time_BangPhra
                                 //        Deposit = Deposit + Convert.ToInt32(TextBox10.Text);
                                 //    }
                                 //    code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = '" + TextBox1.Text + "' ,[CheckinDate] = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "' ,[CheckoutDate] = '" + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "' ,[StayDays] = " + DropDownList1.SelectedValue + " , [TotalPrice] = " + TextBox4.Text + " ,[Deposit] = " + Deposit + ", [Remark] = N'" + TextBox6.Text + "' WHERE ID = " + id);
-                                //    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + cleantext(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                //    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
 
 
                                 //    Reservation_ID = Convert.ToInt32(id);
@@ -785,11 +785,11 @@ namespace Take_Time_BangPhra
                                     DataTable dtCustomer = code.DatabaseQuery(conn, "Select * From Customer Where MobilePhone = '" + TextBox1.Text + "'");
                                     if (dtCustomer.Rows.Count == 1)
                                     {
-                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + cleantext(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
                                     }
                                     else
                                     {
-                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + cleantext(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
+                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + ValidationHelper.CleanText(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
                                     }
                                     
                                     dtReserve.Clear();
@@ -1022,7 +1022,7 @@ namespace Take_Time_BangPhra
                                         { }
                                     }
                                     msg += "\r\nหมายเหตุ: " + TextBox6.Text ;
-                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + cleantext(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
 
                                     uploadSlip(id);
                                     if (command == "edit")
@@ -1097,7 +1097,7 @@ namespace Take_Time_BangPhra
                                 else if (command == "checkin" && Session["permission"].ToString() == "True" && TextBox1.Text != "02")
                                 {
                                     IsDeposit = false;
-                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + cleantext(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
 
                                     if (Convert.ToDecimal(TextBox4.Text) == Convert.ToDecimal(TextBox5.Text))
                                     {
@@ -1406,7 +1406,7 @@ namespace Take_Time_BangPhra
                                     }
                                     else
                                     {
-                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + cleantext(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + CheckAddressID(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
+                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + ValidationHelper.CleanText(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
                                     }
                                     
                                     try
@@ -1605,7 +1605,7 @@ namespace Take_Time_BangPhra
             catch { }
         }
 
-        public string cleantext(string input)
+        public string ValidationHelper.CleanText(string input)
         {
             string output = input.Replace(",", "").Replace("'", "").Replace("\"", "");
             return output;
@@ -2800,7 +2800,7 @@ namespace Take_Time_BangPhra
         }
 
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
+        public string _addressHelper.GetAddressIdString(string ZipCode, string Province, string District, string SubDistrict)
         {
             string ID = "0";
             try
