@@ -192,8 +192,24 @@ namespace Take_Time_BangPhra.Affiliate
         protected void Button5_Click(object sender, EventArgs e)
         {
             TextBox6.Enabled = false;
-            getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' order by SubDistrict ASC");
 
+            // SECURE: Get address with parameterized query
+            var addressParams = new Dictionary<string, object>
+            {
+                { "@PostalCode", TextBox6.Text ?? "" }
+            };
+
+            DataTable dtProvince = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
+                addressParams);
+            DataTable dtDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
+                addressParams);
+            DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
+                addressParams);
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void Button2_Click(object sender, EventArgs e)
@@ -324,8 +340,15 @@ namespace Take_Time_BangPhra.Affiliate
         public string GenCouponCode(string firstname,string lastname)
         {
             string couponcode = firstname.Substring(0,3)+lastname.Substring(0,3);
-            
-            DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] Where Coupon_Code like '"+couponcode+"%'");
+
+            // SECURE: Check coupon code with parameterized query
+            var couponParams = new Dictionary<string, object>
+            {
+                { "@CouponCode", couponcode + "%" }
+            };
+            DataTable dt = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Taketime].[dbo].[Affiliate_Member] WHERE Coupon_Code LIKE @CouponCode",
+                couponParams);
             if(dt.Rows.Count > 0)
             {
                 if(dt.Rows.Count<10)
@@ -360,26 +383,135 @@ namespace Take_Time_BangPhra.Affiliate
 
         protected void DropDownList2_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox6.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND Province = N'" + DropDownList2.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND Province = N'" + DropDownList2.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND Province = N'" + DropDownList2.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and Province with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox6.Text ?? "" },
+                    { "@Province", DropDownList2.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where Province = N'" + DropDownList2.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where Province = N'" + DropDownList2.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = N'" + DropDownList2.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by Province only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@Province", DropDownList2.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void DropDownList3_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox6.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND District = N'" + DropDownList3.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND District = N'" + DropDownList3.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox6.Text + "' AND District = N'" + DropDownList3.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and District with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox6.Text ?? "" },
+                    { "@District", DropDownList3.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where District = N'" + DropDownList3.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where District = N'" + DropDownList3.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = N'" + DropDownList3.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by District only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@District", DropDownList3.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
+        }
+
+        // ✨ SECURE: Helper method to populate address dropdowns
+        private void populateAddressDropdowns(DataTable dtProvince, DataTable dtDistrict, DataTable dtSubDistrict)
+        {
+            try
+            {
+                if (dtProvince.Rows.Count <= 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่พบหมายเลขไปรษณีย์ที่คุณระบุ');", true);
+                    TextBox6.Enabled = true;
+                }
+                else
+                {
+                    List<string> ddl = new List<string>();
+
+                    for (int i = 0; i < dtProvince.Rows.Count; i++)
+                    {
+                        ddl.Add(dtProvince.Rows[i][0].ToString());
+                    }
+                    DropDownList2.DataSource = ddl;
+                    DropDownList2.DataBind();
+
+                    ddl.Clear();
+
+                    for (int i = 0; i < dtDistrict.Rows.Count; i++)
+                    {
+                        ddl.Add(dtDistrict.Rows[i][0].ToString());
+                    }
+                    DropDownList3.DataSource = ddl;
+                    DropDownList3.DataBind();
+
+                    ddl.Clear();
+
+                    for (int i = 0; i < dtSubDistrict.Rows.Count; i++)
+                    {
+                        ddl.Add(dtSubDistrict.Rows[i][0].ToString());
+                    }
+                    DropDownList4.DataSource = ddl;
+                    DropDownList4.DataBind();
+                }
+            }
+            catch { }
         }
 
         protected void Button7_Click(object sender, EventArgs e)

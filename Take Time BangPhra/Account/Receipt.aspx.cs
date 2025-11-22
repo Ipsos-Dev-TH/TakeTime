@@ -164,7 +164,12 @@ namespace Take_Time_BangPhra.Account.Report
 
                     }
                     catch {
-                        dtcustomer = code.DatabaseQuery(conn, @"SELECT
+                        // SECURE: Customer lookup fallback with parameterized query
+                        var customerMobileFallbackParams = new Dictionary<string, object>
+                        {
+                            { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() }
+                        };
+                        dtcustomer = code.DatabaseQuerySafe(conn, @"SELECT
                             Customer.ID, Customer.MobilePhone, Customer.Name, Customer.NickName, Customer.ComeFrom,
                             Customer.Remark, Customer.Status, Customer.FullName, Customer.Address, Customer.Address1,
                             Customer.Address_ID, Customer.IDNumber, Customer.Email, Customer.Customer_Type_ID,
@@ -175,7 +180,8 @@ namespace Take_Time_BangPhra.Account.Report
                             FROM Customer
                             LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                             LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                            WHERE MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+                            WHERE MobilePhone = @MobilePhone",
+                            customerMobileFallbackParams);
 
                     }
 
@@ -472,7 +478,14 @@ namespace Take_Time_BangPhra.Account.Report
                 // ✅ ถ้าเป็น edit mode → ดึงข้อมูลเดิม
                 if (command == "edit")
                 {
-                    dtReceipt = code.DatabaseQuery(conn, "Select * from Account_Receipt left join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.UID = '" + uid + "'");
+                    // SECURE: Get receipt with parameterized query
+                    var receiptUidEditParams = new Dictionary<string, object>
+                    {
+                        { "@UID", uid ?? "" }
+                    };
+                    dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM Account_Receipt LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                        receiptUidEditParams);
                     id = dtReceipt.Rows[0]["ID"].ToString();
                     System.Diagnostics.Debug.WriteLine($"[Edit Mode] Original ID from DB: {id}");
                 }
@@ -523,8 +536,14 @@ namespace Take_Time_BangPhra.Account.Report
                     {
                         System.Diagnostics.Debug.WriteLine($"[Duplicate Check] Receipt number changed from '{id}' to '{docNum}'");
 
-                        DataTable dtCheckDuplicate = code.DatabaseQuery(conn,
-                            "SELECT ID FROM Account_Receipt WHERE ID = '" + docNum + "'");
+                        // SECURE: Check duplicate with parameterized query
+                        var checkDuplicateParams = new Dictionary<string, object>
+                        {
+                            { "@DocNum", docNum }
+                        };
+                        DataTable dtCheckDuplicate = code.DatabaseQuerySafe(conn,
+                            "SELECT ID FROM Account_Receipt WHERE ID = @DocNum",
+                            checkDuplicateParams);
 
                         if (dtCheckDuplicate.Rows.Count > 0)
                         {
@@ -566,8 +585,12 @@ namespace Take_Time_BangPhra.Account.Report
                     TextBox7.Text  // Branch_Number
                 );
 
-                // Query customer data after upsert
-                DataTable dtcustomer = code.DatabaseQuery(conn, @"SELECT
+                // SECURE: Query customer data after upsert with parameterized query
+                var customerIdQueryParams = new Dictionary<string, object>
+                {
+                    { "@CustomerID", customerId }
+                };
+                DataTable dtcustomer = code.DatabaseQuerySafe(conn, @"SELECT
                     Customer.ID, Customer.MobilePhone, Customer.Name, Customer.NickName, Customer.ComeFrom,
                     Customer.Remark, Customer.Status, Customer.FullName, Customer.Address, Customer.Address1,
                     Customer.Address_ID, Customer.IDNumber, Customer.Email, Customer.Customer_Type_ID,
@@ -578,7 +601,8 @@ namespace Take_Time_BangPhra.Account.Report
                     FROM Customer
                     LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                     LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                    WHERE Customer.ID = " + customerId);
+                    WHERE Customer.ID = @CustomerID",
+                    customerIdQueryParams);
 
                 // ⚠️ Validate that customer exists before proceeding
                 if (dtcustomer.Rows.Count == 0)
@@ -699,49 +723,83 @@ namespace Take_Time_BangPhra.Account.Report
                             }
                             catch { }
 
-                            string insertQuery = "INSERT INTO [dbo].[Account_Receipt] " +
+                            // SECURE: INSERT with parameterized query
+                            var insertReceiptParams = new Dictionary<string, object>
+                            {
+                                { "@NewID", newID },
+                                { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text },
+                                { "@CreatedDate", Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
+                                { "@TotalAmount", TextBox6.Text },
+                                { "@Vat", TextBox4.Text },
+                                { "@TotalAmountExcludeVat", TextBox3.Text },
+                                { "@IsDeposit", CheckBox1.Checked },
+                                { "@PaidType", DropDownList2.SelectedItem.Text },
+                                { "@CreatedByID", Session["UserID"].ToString() },
+                                { "@Etax", CheckBox5.Checked },
+                                { "@CustomerID", customerId },
+                                { "@UID", originalUID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "INSERT INTO [dbo].[Account_Receipt] " +
                                 "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat]," +
-                                "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID],[UID]) VALUES (" +
-                                "'" + newID + "'," +
-                                (reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text) + "," +
-                                "'" + Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'," +
-                                TextBox6.Text + "," +
-                                TextBox4.Text + "," +
-                                TextBox3.Text + "," +
-                                "'" + CheckBox1.Checked + "'," +
-                                "'False'," +
-                                "N'" + DropDownList2.SelectedItem.Text + "'," +
-                                "'Normal'," +
-                                Session["UserID"].ToString() + "," +
-                                "'" + CheckBox5.Checked + "'," +
-                                "'" + customerId + "'," +
-                                "'" + originalUID + "')";
-                            code.DatabaseInsert(conn, insertQuery);
+                                "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID],[UID]) " +
+                                "VALUES (@NewID,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,@IsDeposit,'False',@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID,@UID)",
+                                insertReceiptParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 1: Inserted new Account_Receipt with ID: {newID} (with updated data)");
 
-                            // 🔗 STEP 2: UPDATE Payment_Slips (FK: Account_Receipt_ID → Account_Receipt.ID)
-                            code.DatabaseInsert(conn,
-                                "UPDATE [dbo].[Payment_Slips] SET Account_Receipt_ID = '" + newID + "' WHERE Account_Receipt_ID = '" + originalID + "'");
+                            // SECURE: STEP 2: UPDATE Payment_Slips with parameterized query
+                            var updatePaymentSlipsParams = new Dictionary<string, object>
+                            {
+                                { "@NewID", newID },
+                                { "@OriginalID", originalID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Payment_Slips] SET Account_Receipt_ID = @NewID WHERE Account_Receipt_ID = @OriginalID",
+                                updatePaymentSlipsParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 2: Updated Payment_Slips FK: {originalID} → {newID}");
 
-                            // 🔗 STEP 3: UPDATE Payment_History (FK: Receipt_ID → Account_Receipt.ID)
-                            code.DatabaseInsert(conn,
-                                "UPDATE [dbo].[Payment_History] SET Receipt_ID = '" + newID + "' WHERE Receipt_ID = '" + originalID + "'");
+                            // SECURE: STEP 3: UPDATE Payment_History with parameterized query
+                            var updatePaymentHistoryParams = new Dictionary<string, object>
+                            {
+                                { "@NewID", newID },
+                                { "@OriginalID", originalID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Payment_History] SET Receipt_ID = @NewID WHERE Receipt_ID = @OriginalID",
+                                updatePaymentHistoryParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 3: Updated Payment_History FK: {originalID} → {newID}");
 
-                            // 🔗 STEP 4: UPDATE Account_Receipt_Detail (FK: Receipt_ID → Account_Receipt.ID)
-                            code.DatabaseInsert(conn,
-                                "UPDATE [dbo].[Account_Receipt_Detail] SET Receipt_ID = '" + newID + "' WHERE Receipt_ID = '" + originalID + "'");
+                            // SECURE: STEP 4: UPDATE Account_Receipt_Detail with parameterized query
+                            var updateReceiptDetailParams = new Dictionary<string, object>
+                            {
+                                { "@NewID", newID },
+                                { "@OriginalID", originalID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Account_Receipt_Detail] SET Receipt_ID = @NewID WHERE Receipt_ID = @OriginalID",
+                                updateReceiptDetailParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 4: Updated Account_Receipt_Detail FK: {originalID} → {newID}");
 
-                            // 🔗 STEP 5: UPDATE Product_Out (FK: Account_Receipt_ID → Account_Receipt.ID)
-                            code.DatabaseInsert(conn,
-                                "UPDATE [dbo].[Product_Out] SET Account_Receipt_ID = '" + newID + "' WHERE Account_Receipt_ID = '" + originalID + "'");
+                            // SECURE: STEP 5: UPDATE Product_Out with parameterized query
+                            var updateProductOutParams = new Dictionary<string, object>
+                            {
+                                { "@NewID", newID },
+                                { "@OriginalID", originalID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Product_Out] SET Account_Receipt_ID = @NewID WHERE Account_Receipt_ID = @OriginalID",
+                                updateProductOutParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 5: Updated Product_Out FK: {originalID} → {newID}");
 
-                            // 🗑️ STEP 6: DELETE Account_Receipt เก่า (oldID) - ตอนนี้ไม่มี FK อ้างอิงแล้ว
-                            code.DatabaseInsert(conn,
-                                "DELETE FROM [dbo].[Account_Receipt] WHERE ID = '" + originalID + "' AND UID = '" + originalUID + "'");
+                            // SECURE: STEP 6: DELETE old Account_Receipt with parameterized query
+                            var deleteOldReceiptParams = new Dictionary<string, object>
+                            {
+                                { "@OriginalID", originalID },
+                                { "@OriginalUID", originalUID }
+                            };
+                            code.DatabaseInsertSafe(conn,
+                                "DELETE FROM [dbo].[Account_Receipt] WHERE ID = @OriginalID AND UID = @OriginalUID",
+                                deleteOldReceiptParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Step 6: Deleted old Account_Receipt with ID: {originalID}");
                         }
                         catch (Exception ex)
@@ -759,18 +817,33 @@ namespace Take_Time_BangPhra.Account.Report
 
                         try
                         {
-                            code.DatabaseInsert(conn,
+                            // SECURE: UPDATE with parameterized query
+                            var updateReceiptDataParams = new Dictionary<string, object>
+                            {
+                                { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text },
+                                { "@CreatedDate", Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
+                                { "@TotalAmount", TextBox6.Text },
+                                { "@Vat", TextBox4.Text },
+                                { "@TotalAmountExcludeVat", TextBox3.Text },
+                                { "@IsDeposit", CheckBox1.Checked },
+                                { "@PaidType", DropDownList2.SelectedItem.Text },
+                                { "@Etax", CheckBox5.Checked },
+                                { "@CustomerID", customerId },
+                                { "@OriginalUID", originalUID }
+                            };
+                            code.DatabaseInsertSafe(conn,
                                 "UPDATE [dbo].[Account_Receipt] SET " +
-                                "Reservation_ID = " + (reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text) + ", " +
-                                "Created_Date = '" + Convert.ToDateTime(TextBox8.Text).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "', " +
-                                "Total_Amount = " + TextBox6.Text + ", " +
-                                "Vat = " + TextBox4.Text + ", " +
-                                "Total_Amount_Exclude_Vat = " + TextBox3.Text + ", " +
-                                "IsDeposit = '" + CheckBox1.Checked + "', " +
-                                "Paid_Type = N'" + DropDownList2.SelectedItem.Text + "', " +
-                                "Etax = '" + CheckBox5.Checked + "', " +
-                                "Customer_ID = '" + customerId + "' " +
-                                "WHERE UID = '" + originalUID + "'");
+                                "Reservation_ID = @ReservationID, " +
+                                "Created_Date = @CreatedDate, " +
+                                "Total_Amount = @TotalAmount, " +
+                                "Vat = @Vat, " +
+                                "Total_Amount_Exclude_Vat = @TotalAmountExcludeVat, " +
+                                "IsDeposit = @IsDeposit, " +
+                                "Paid_Type = @PaidType, " +
+                                "Etax = @Etax, " +
+                                "Customer_ID = @CustomerID " +
+                                "WHERE UID = @OriginalUID",
+                                updateReceiptDataParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Updated Account_Receipt data");
                         }
                         catch (Exception ex)
@@ -882,12 +955,17 @@ namespace Take_Time_BangPhra.Account.Report
                             adminId = Convert.ToInt32(Session["UserID"]);
                         }
 
-                        // Get customer phone from reservation
+                        // SECURE: Get customer phone from reservation with parameterized query
                         string customerPhone = "";
                         try
                         {
-                            DataTable dtPhone = code.DatabaseQuery(conn,
-                                "SELECT Customer_MobilePhone FROM Reservation WHERE ID = '" + actualReservationId + "'");
+                            var phoneParams = new Dictionary<string, object>
+                            {
+                                { "@ReservationID", actualReservationId }
+                            };
+                            DataTable dtPhone = code.DatabaseQuerySafe(conn,
+                                "SELECT Customer_MobilePhone FROM Reservation WHERE ID = @ReservationID",
+                                phoneParams);
                             if (dtPhone.Rows.Count > 0)
                             {
                                 customerPhone = dtPhone.Rows[0]["Customer_MobilePhone"].ToString();
@@ -1453,8 +1531,12 @@ namespace Take_Time_BangPhra.Account.Report
         {
             if(TextBox9.Text.Length > 0)
             {
-                // ✅ JOIN กับ Address table เพื่อดึงข้อมูลที่อยู่เต็ม
-                DataTable dtCustomer = code.DatabaseQuery(conn, @"SELECT
+                // SECURE: Get customer from reservation with parameterized query
+                var reservationParams = new Dictionary<string, object>
+                {
+                    { "@ReservationID", TextBox9.Text }
+                };
+                DataTable dtCustomer = code.DatabaseQuerySafe(conn, @"SELECT
                     Customer.ID, Customer.MobilePhone, Customer.Name, Customer.NickName, Customer.ComeFrom,
                     Customer.Remark, Customer.Status, Customer.FullName, Customer.Address, Customer.Address1,
                     Customer.Address_ID, Customer.IDNumber, Customer.Email, Customer.Customer_Type_ID,
@@ -1465,7 +1547,8 @@ namespace Take_Time_BangPhra.Account.Report
                     INNER JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone
                     LEFT JOIN Customer_Type ON Customer.Customer_Type_ID = Customer_Type.ID
                     LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                    WHERE Reservation.ID = " + TextBox9.Text);
+                    WHERE Reservation.ID = @ReservationID",
+                    reservationParams);
 
                 if(dtCustomer.Rows.Count > 0)
                 {
@@ -1662,9 +1745,27 @@ namespace Take_Time_BangPhra.Account.Report
         protected void Button5_Click(object sender, EventArgs e)
         {
             TextBox16.Enabled = false;
-            getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by SubDistrict ASC");
+
+            // SECURE: Get address with parameterized query
+            var addressParams = new Dictionary<string, object>
+            {
+                { "@PostalCode", TextBox16.Text ?? "" }
+            };
+
+            DataTable dtProvince = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
+                addressParams);
+            DataTable dtDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
+                addressParams);
+            DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
+                addressParams);
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
+        // ✨ Helper method to populate address dropdowns (LEGACY - kept for backward compatibility)
         public void getAddress(string commp, string commd, string commsd)
         {
             string Command = Request.QueryString["Command"];
@@ -1672,6 +1773,13 @@ namespace Take_Time_BangPhra.Account.Report
             DataTable dtProvince = code.DatabaseQuery(conn, commp);
             DataTable dtDistrict = code.DatabaseQuery(conn, commd);
             DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
+        }
+
+        // ✨ SECURE: Helper method to populate address dropdowns
+        private void populateAddressDropdowns(DataTable dtProvince, DataTable dtDistrict, DataTable dtSubDistrict)
+        {
+            string Command = Request.QueryString["Command"];
             try
             {
                 if (dtProvince.Rows.Count <= 0)
@@ -1691,7 +1799,6 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                         DropDownList5.DataSource = ddl;
                         DropDownList5.DataBind();
-                        //DropDownList5.SelectedIndex = 0;
 
                         ddl.Clear();
 
@@ -1701,7 +1808,6 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                         DropDownList6.DataSource = ddl;
                         DropDownList6.DataBind();
-                        //DropDownList6.SelectedIndex = 0;
 
                         ddl.Clear();
 
@@ -1711,9 +1817,7 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                         DropDownList7.DataSource = ddl;
                         DropDownList7.DataBind();
-                        //DropDownList7.SelectedIndex = 0;
                     }
-                    else { }
                 }
             }
             catch { }
@@ -1750,26 +1854,92 @@ namespace Take_Time_BangPhra.Account.Report
 
         protected void DropDownList5_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and Province with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text ?? "" },
+                    { "@Province", DropDownList5.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by Province only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@Province", DropDownList5.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void DropDownList6_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and District with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text ?? "" },
+                    { "@District", DropDownList6.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by District only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@District", DropDownList6.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void CheckBox5_CheckedChanged(object sender, EventArgs e)

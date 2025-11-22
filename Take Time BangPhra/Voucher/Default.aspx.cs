@@ -1346,7 +1346,24 @@ namespace Take_Time_BangPhra.Voucher
         protected void Button5_Click(object sender, EventArgs e)
         {
             TextBox16.Enabled = false;
-            getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by SubDistrict ASC");
+
+            // SECURE: Get address with parameterized query
+            var addressParams = new Dictionary<string, object>
+            {
+                { "@PostalCode", TextBox16.Text ?? "" }
+            };
+
+            DataTable dtProvince = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
+                addressParams);
+            DataTable dtDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
+                addressParams);
+            DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
+                "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
+                addressParams);
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         public void getAddress(string commp, string commd, string commsd)
@@ -1434,26 +1451,92 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void DropDownList5_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and Province with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text ?? "" },
+                    { "@Province", DropDownList5.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by Province only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@Province", DropDownList5.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE Province = @Province ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void DropDownList6_SelectedIndexChanged(object sender, EventArgs e)
         {
+            DataTable dtProvince, dtDistrict, dtSubDistrict;
+
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by PostalCode and District with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text ?? "" },
+                    { "@District", DropDownList6.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Filter by District only with parameterized query
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@District", DropDownList6.SelectedValue ?? "" }
+                };
+
+                dtProvince = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [Province] FROM [Address] WHERE District = @District ORDER BY Province ASC",
+                    addressParams);
+                dtDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [District] FROM [Address] WHERE District = @District ORDER BY District ASC",
+                    addressParams);
+                dtSubDistrict = code.DatabaseQuerySafe(conn,
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE District = @District ORDER BY SubDistrict ASC",
+                    addressParams);
             }
+
+            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
         protected void CheckBox5_CheckedChanged(object sender, EventArgs e)
@@ -1616,6 +1699,53 @@ namespace Take_Time_BangPhra.Voucher
                 CheckBox3.Checked = false;
                 CheckBox3.DataBind();
             }
+        }
+
+        // ✨ SECURE: Helper method to populate address dropdowns
+        private void populateAddressDropdowns(DataTable dtProvince, DataTable dtDistrict, DataTable dtSubDistrict)
+        {
+            string Command = Request.QueryString["Command"];
+            try
+            {
+                if (dtProvince.Rows.Count <= 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่พบหมายเลขไปรษณีย์ที่คุณระบุ');", true);
+                    TextBox16.Enabled = true;
+                }
+                else
+                {
+                    if (Button2.Enabled == true || Command == "View" || Command == "Edit")
+                    {
+                        List<string> ddl = new List<string>();
+
+                        for (int i = 0; i < dtProvince.Rows.Count; i++)
+                        {
+                            ddl.Add(dtProvince.Rows[i][0].ToString());
+                        }
+                        DropDownList5.DataSource = ddl;
+                        DropDownList5.DataBind();
+
+                        ddl.Clear();
+
+                        for (int i = 0; i < dtDistrict.Rows.Count; i++)
+                        {
+                            ddl.Add(dtDistrict.Rows[i][0].ToString());
+                        }
+                        DropDownList6.DataSource = ddl;
+                        DropDownList6.DataBind();
+
+                        ddl.Clear();
+
+                        for (int i = 0; i < dtSubDistrict.Rows.Count; i++)
+                        {
+                            ddl.Add(dtSubDistrict.Rows[i][0].ToString());
+                        }
+                        DropDownList7.DataSource = ddl;
+                        DropDownList7.DataBind();
+                    }
+                }
+            }
+            catch { }
         }
     }
 }
