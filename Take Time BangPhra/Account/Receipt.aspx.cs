@@ -456,9 +456,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                 string id = "";
                 DataTable dtReceipt = new DataTable();
-                string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString();
-                string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
+                DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
                 string docNum = "";
 
@@ -513,7 +511,7 @@ namespace Take_Time_BangPhra.Account.Report
                 // ✅ Priority 3: ถ้าเป็น CREATE mode และไม่ได้กรอกเลข → สร้างเลขใหม่
                 else
                 {
-                    docNum = code.createDocNumber(conn, "Account_Receipt", "REC", Year, Month, Day);
+                    docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
                     System.Diagnostics.Debug.WriteLine($"✅ DECISION: Generated NEW receipt number (create mode): {docNum}");
                 }
                 System.Diagnostics.Debug.WriteLine($"====================================");

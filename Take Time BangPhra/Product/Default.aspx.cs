@@ -858,13 +858,11 @@ namespace Take_Time_BangPhra.Product
             if (CheckBox1.Checked == true)
             {
 
-                string Year = Convert.ToDateTime(TextBox12.Text).Year.ToString();
-                string Month = Convert.ToDateTime(TextBox12.Text).Month.ToString();
-                string Day = Convert.ToDateTime(TextBox12.Text).Day.ToString();
+                DateTime receiptDate = Convert.ToDateTime(TextBox12.Text);
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
 
 
-                docNum = codeDefault.createDocNumber(conn, "Account_Receipt", "REC", Year, Month, Day);
+                docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
                 total = Convert.ToDouble(TextBox2.Text);
                 int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
                 double vat = Math.Round(((total * 100) / (100+vatpercent)), 2);

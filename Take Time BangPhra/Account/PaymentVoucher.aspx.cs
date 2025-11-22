@@ -24,7 +24,7 @@ namespace Take_Time_BangPhra.Account.Report
         protected void Page_Load(object sender, EventArgs e)
         {
             this.MaintainScrollPositionOnPostBack = true;
-            documentHelper = new DocumentHelper();
+            documentHelper = new DocumentHelper(conn);
             try
             {
                 if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
@@ -327,11 +327,9 @@ namespace Take_Time_BangPhra.Account.Report
             if (TextBox6.Text.Length > 0 && DropDownList1.SelectedIndex >= 0 && DropDownList2.SelectedIndex > 0 && DropDownList3.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0)
             {
                 DateTime createDate = Convert.ToDateTime(TextBox8.Text);
-                string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString();
-                string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
+                DateTime docDate = Convert.ToDateTime(TextBox8.Text);
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
-                string docNum = documentHelper.CreateDocumentNumber(conn, "Account_Payment", "PAY", Year, Month, Day);
+                string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
                 if (command == "edit")
                 {
                     docNum = id;

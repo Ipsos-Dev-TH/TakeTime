@@ -26,7 +26,7 @@ namespace Take_Time_BangPhra.Product
         AddressHelper addressHelper;
         protected void Page_Load(object sender, EventArgs e)
         {
-            addressHelper = new AddressHelper();
+            addressHelper = new AddressHelper(conn);
             try
             {
                 if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))

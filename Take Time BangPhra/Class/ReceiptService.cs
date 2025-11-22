@@ -16,16 +16,20 @@ namespace Take_Time_BangPhra.Services
     public class ReceiptService
     {
         private readonly DatabaseHelper _dbHelper;
+        private readonly code _code;
         private readonly CodeHelper _codeHelper;
         private readonly EmailService _emailService;
         private readonly string _receiptFolderPath;
         private readonly string _imagesFolderPath;
         private readonly string _staffSignatureFolderPath;
         private readonly string _baseFolderPath;
+        private readonly string _connectionString;
 
         public ReceiptService()
         {
             _dbHelper = new DatabaseHelper();
+            _code = new code();
+            _connectionString = DatabaseHelper.GetConnectionString();
             _codeHelper = new CodeHelper();
             _emailService = new EmailService();
             _receiptFolderPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] ?? "~/Documents/Receipt";
@@ -43,7 +47,7 @@ namespace Take_Time_BangPhra.Services
                 {
                     { "@receiptId", receiptId }
                 };
-                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                _code.DatabaseInsertSafe(_connectionString,
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @receiptId",
                     parameters);
 
@@ -64,7 +68,7 @@ namespace Take_Time_BangPhra.Services
             {
                 { "@receiptId", receiptId }
             };
-            DataTable dtRec = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            DataTable dtRec = _code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM Account_Receipt WHERE ID = @receiptId",
                 parameters);
 
@@ -135,7 +139,7 @@ namespace Take_Time_BangPhra.Services
             {
                 { "@reservationId", reservationId }
             };
-            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            return _code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND Reservation_ID = @reservationId",
                 parameters);
         }
@@ -146,7 +150,7 @@ namespace Take_Time_BangPhra.Services
             {
                 { "@uid", uid }
             };
-            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            return _code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM Account_Receipt LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @uid",
                 parameters);
         }
@@ -157,7 +161,7 @@ namespace Take_Time_BangPhra.Services
             {
                 { "@receiptId", receiptId }
             };
-            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            return _code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM Account_Receipt_Detail WHERE Receipt_ID = @receiptId ORDER BY Number ASC",
                 parameters);
         }
@@ -340,7 +344,7 @@ namespace Take_Time_BangPhra.Services
                 { "@customerId", customerId }
             };
 
-            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+            _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt]
                     (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                      [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
@@ -358,7 +362,7 @@ namespace Take_Time_BangPhra.Services
                 { "@totalAmount", totalAmount }
             };
 
-            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+            _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt_Detail]
                   ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
                    [Product_Data], [Product_Amount], [Product_Unit],
@@ -377,7 +381,7 @@ namespace Take_Time_BangPhra.Services
                     { "@reservationId", reservationId }
                 };
 
-                var balanceResult = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                var balanceResult = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         r.TotalPrice,
                         ISNULL(SUM(ph.PaymentAmount), 0) as TotalPaid
@@ -406,7 +410,7 @@ namespace Take_Time_BangPhra.Services
                     { "@remainingBalance", remainingBalance }
                 };
 
-                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                _code.DatabaseInsertSafe(_connectionString,
                     @"INSERT INTO [dbo].[Payment_History] (
                         Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
                         Receipt_ID, RemainingBalance, Status
@@ -445,7 +449,7 @@ namespace Take_Time_BangPhra.Services
                 { "@customerId", customerId }
             };
 
-            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+            _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt]
                     (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                      [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
@@ -475,7 +479,7 @@ namespace Take_Time_BangPhra.Services
                     { "@calculatedAmount", calculatedAmount }
                 };
 
-                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                _code.DatabaseInsertSafe(_connectionString,
                     @"INSERT INTO [dbo].[Account_Receipt_Detail]
                       ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
                        [Product_Data], [Product_Amount], [Product_Unit],
@@ -495,7 +499,7 @@ namespace Take_Time_BangPhra.Services
                     { "@reservationId", reservationId }
                 };
 
-                var balanceResult = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                var balanceResult = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         r.TotalPrice,
                         ISNULL(SUM(ph.PaymentAmount), 0) as TotalPaid
@@ -524,7 +528,7 @@ namespace Take_Time_BangPhra.Services
                     { "@remainingBalance", remainingBalance }
                 };
 
-                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                _code.DatabaseInsertSafe(_connectionString,
                     @"INSERT INTO [dbo].[Payment_History] (
                         Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
                         Receipt_ID, RemainingBalance, Status
@@ -664,7 +668,7 @@ namespace Take_Time_BangPhra.Services
                 { "@mobilePhone", mobilePhone }
             };
 
-            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            return _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT
                     Customer.*,
                     Customer_Type.Customer_Type,
@@ -1066,7 +1070,7 @@ namespace Take_Time_BangPhra.Services
                 { "@receiptId", receiptId }
             };
 
-            DataTable dt = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
                 "SELECT UID FROM Account_Receipt WHERE ID = @receiptId",
                 parameters);
 

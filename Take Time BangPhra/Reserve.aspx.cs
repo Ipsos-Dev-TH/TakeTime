@@ -3897,7 +3897,7 @@ namespace Take_Time_BangPhra
             string ReceiptID = "";
             if (Total_Amount > 0)
             {
-                ReceiptID = code.createDocNumber(conn, "Account_Receipt", "REC",docDate.Year.ToString(),docDate.Month.ToString(),docDate.Day.ToString());
+                ReceiptID = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", docDate);
                 DataTable dtuseVat = code.DatabaseQuery(conn, "select Use_Vat from Business_Info");
                 double PriceExcludeVat = Total_Amount;
                 double Vat = 0;
