@@ -1837,8 +1837,7 @@ namespace Take_Time_BangPhra
                                                             string paymentMethod = DropDownList2.SelectedItem?.Text ?? "TRANSFER";
                                                             int? adminId = Session["UserID"] != null ? (int?)Convert.ToInt32(Session["UserID"]) : null;
 
-                                                            // Determine payment type
-                                                            decimal totalPrice = Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? TextBox4.Text ?? "0");
+                                                            // Determine payment type (use totalPrice from outer scope)
                                                             string paymentType = depositAmount >= totalPrice ? "FULL" : "DEPOSIT";
 
                                                             string insertPaymentQuery = @"
@@ -2327,8 +2326,7 @@ namespace Take_Time_BangPhra
                                                                 string paymentMethod = DropDownList2.SelectedItem?.Text ?? "TRANSFER";
                                                                 int? adminId = Session["UserID"] != null ? (int?)Convert.ToInt32(Session["UserID"]) : null;
 
-                                                                // Determine payment type
-                                                                decimal totalPrice = Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? TextBox4.Text ?? "0");
+                                                                // Determine payment type (use totalPrice from outer scope)
                                                                 string paymentType = depositAmount >= totalPrice ? "FULL" : "DEPOSIT";
 
                                                                 string insertPaymentQuery = @"
