@@ -297,7 +297,8 @@ namespace Take_Time_BangPhra.Product
                     if (!string.IsNullOrEmpty(customerPhone))
                     {
                         TextBox3.Text = customerPhone;
-                        fillData($"SELECT * FROM [Customer] WHERE MobilePhone = '{customerPhone}'");
+                        // SECURE: Use parameterized query to prevent SQL Injection
+                        fillDataByPhone(customerPhone);
                     }
                 }
             }
@@ -799,7 +800,18 @@ namespace Take_Time_BangPhra.Product
         {
             if (TextBox3.Text.Length == 0 && TextBox6.Text.Length == 13)
             {
-                fillData("SELECT * FROM[Customer] Where IDNumber = '"+TextBox6.Text+"'");
+                // SECURE: Use parameterized query to prevent SQL Injection
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@IDNumber", TextBox6.Text ?? "" }
+                };
+                DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Customer] WHERE IDNumber = @IDNumber",
+                    parameters);
+                if (dtCustomer.Rows.Count > 0)
+                {
+                    fillDataFromCustomerTable(dtCustomer);
+                }
             }
         }
 
@@ -874,15 +886,27 @@ namespace Take_Time_BangPhra.Product
                 DataTable dtcustomer = new DataTable();
                 if (CheckBox2.Checked == true)
                 {
+                    // SECURE: Use parameterized queries to prevent SQL Injection
+                    var custQueryParams = new Dictionary<string, object>();
+                    string customerQueryInitial;
+
                     if (DropDownList2.SelectedValue == "1")
                     {
-                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox3.Text + "'");
-
+                        customerQueryInitial = "SELECT * FROM Customer " +
+                                              "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                                              "LEFT JOIN Address ON Address.ID = Address_ID " +
+                                              "WHERE MobilePhone = @SearchValue";
+                        custQueryParams["@SearchValue"] = TextBox3.Text;
+                        dtcustomer = code.DatabaseQuerySafe(conn, customerQueryInitial, custQueryParams);
                     }
                     else
                     {
-                        dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where IDNumber = '" + TextBox6.Text + "'");
-
+                        customerQueryInitial = "SELECT * FROM Customer " +
+                                              "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                                              "LEFT JOIN Address ON Address.ID = Address_ID " +
+                                              "WHERE IDNumber = @SearchValue";
+                        custQueryParams["@SearchValue"] = TextBox6.Text;
+                        dtcustomer = code.DatabaseQuerySafe(conn, customerQueryInitial, custQueryParams);
                     }
 
                     // SECURE: Use UpsertCustomer to handle INSERT/UPDATE safely
