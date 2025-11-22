@@ -2280,16 +2280,20 @@ namespace Take_Time_BangPhra
                                         else if (command == "rentmore" && TextBox1.Text != "02")
                                         {
                                             decimal Deposit = Convert.ToDecimal(TextBox5.Text);
-                                            if (checkoldAccomRemoved == 0 && checkoldItemRemoved == 0 && totalnew.ToString() == TextBox10.Text)
+
+                                            // ✅ Process payment if checkbox is checked AND validation passes
+                                            if (CheckBox2.Checked == true)
                                             {
-                                                if (CheckBox2.Checked == true)
+                                                // Validate calculation before processing payment
+                                                if (checkoldAccomRemoved == 0 && checkoldItemRemoved == 0 && totalnew.ToString() == TextBox10.Text)
                                                 {
                                                     for (int i = 0; i < cmds.Count; i++)
                                                     {
                                                         code.DatabaseInsert(conn, cmds[i]);
                                                     }
                                                     Deposit += Convert.ToDecimal(TextBox10.Text);
-                                                    IsDeposit = false;
+                                                    IsDeposit = true;  // ✅ FIXED: Set to true (additional deposit, same as EDIT mode)
+
                                                     if (CheckBox4.Checked == false)
                                                     {
                                                         // 🏨 Add product charges to receipt
@@ -2384,28 +2388,40 @@ namespace Take_Time_BangPhra
                                                                 Session["User"]?.ToString());
                                                         }
                                                     }
-                                                    // ✅ FIXED: Use parameterized query to prevent SQL Injection
-                                                    reservationDA.UpdateReservation(
-                                                        Convert.ToInt32(id),
-                                                        TextBox1.Text,
-                                                        code2.ParseDate(TextBox12.Text).Value,
-                                                        code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
-                                                        Convert.ToInt32(DropDownList1.SelectedValue),
-                                                        Convert.ToDecimal(TextBox4.Text),
-                                                        Deposit,
-                                                        TextBox6.Text
-                                                    );
-
-                                                    // 🛒 จองของเช่าเพิ่มสำเร็จ → ไปหน้า ReserveTable
-                                                    Response.Redirect("/ReserveTable", false);
-                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                                }
+                                                else
+                                                {
+                                                    // ❌ Validation failed - show error but still update reservation below
+                                                    TextBox10.Text = "";
+                                                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('โปรแกรมคำนวนยอดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');", true);
                                                 }
                                             }
-                                            else
-                                            {
-                                                TextBox10.Text = "";
-                                                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('โปรแกรมคำนวนยอดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');", true);
 
+                                            // ✅ FIXED: ALWAYS update reservation (same as EDIT mode) - moved outside payment conditional
+                                            try
+                                            {
+                                                reservationDA.UpdateReservation(
+                                                    Convert.ToInt32(id),
+                                                    TextBox1.Text,
+                                                    code2.ParseDate(TextBox12.Text).Value,
+                                                    code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
+                                                    Convert.ToInt32(DropDownList1.SelectedValue),
+                                                    Convert.ToDecimal(TextBox4.Text),
+                                                    Deposit,
+                                                    TextBox6.Text
+                                                );
+
+                                                // 🛒 จองของเช่าเพิ่มสำเร็จ → ไปหน้า ReserveTable
+                                                Response.Redirect("/ReserveTable", false);
+                                                HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                code2.Logs(conn, "Reserve RentMore - UpdateReservation Error",
+                                                    $"Reservation {id}, Error: {ex.Message}",
+                                                    Session["User"]?.ToString());
+                                                ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                                                    "alert('เกิดข้อผิดพลาดในการอัพเดทข้อมูล กรุณาลองใหม่อีกครั้ง');", true);
                                             }
                                         }
                                         else
