@@ -73,37 +73,52 @@ namespace Take_Time_BangPhra.Account
             if (DropDownList1.SelectedValue == "P&L")
             {
                 string cmd = "";
-                if (DropDownList3.SelectedIndex > 0)
-                {
-                    cmd = "Select * From Account_Receipt Where Month(Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Created_Date) = " + DropDownList4.SelectedValue + " AND Status like '" + DropDownList2.SelectedValue + "'";
-
-                }
-                else
-                {
-                    cmd = "Select * From Account_Receipt Where Created_Date >= '" + TextBox1.Text + "' AND Created_Date <= '" + TextBox2.Text + "' AND Status like '" + DropDownList2.SelectedValue + "'";
-
-                }
-                if (Session["User"].ToString() == "Admin")
-                {
-                    cmd += " AND Created_By_ID = " + Session["UserID"].ToString();
-                }
-                DataTable dtin = code.DatabaseQuery(conn, cmd);
+                Dictionary<string, object> parameters = new Dictionary<string, object>();
 
                 if (DropDownList3.SelectedIndex > 0)
                 {
-                    cmd = "Select * From Account_Payment  Where Month(Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Created_Date) = " + DropDownList4.SelectedValue + " AND Status like '" + DropDownList2.SelectedValue + "'";
-
+                    cmd = "Select * From Account_Receipt Where Month(Created_Date) = @Month AND Year(Created_Date) = @Year AND Status like @Status";
+                    parameters["@Month"] = DropDownList3.SelectedValue;
+                    parameters["@Year"] = DropDownList4.SelectedValue;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
                 }
                 else
                 {
-                    cmd = "Select * From Account_Payment  Where Created_Date >= '" + TextBox1.Text + "' AND Created_Date <= '" + TextBox2.Text + "' AND Status like '" + DropDownList2.SelectedValue + "'";
-
+                    cmd = "Select * From Account_Receipt Where Created_Date >= @StartDate AND Created_Date <= @EndDate AND Status like @Status";
+                    parameters["@StartDate"] = TextBox1.Text;
+                    parameters["@EndDate"] = TextBox2.Text;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
                 }
                 if (Session["User"].ToString() == "Admin")
                 {
-                    cmd += " AND Created_By_ID = " + Session["UserID"].ToString();
+                    cmd += " AND Created_By_ID = @CreatedByID";
+                    parameters["@CreatedByID"] = Session["UserID"].ToString();
                 }
-                DataTable dtout = code.DatabaseQuery(conn, cmd);
+                DataTable dtin = code.DatabaseQuerySafe(conn, cmd, parameters);
+
+                cmd = "";
+                parameters = new Dictionary<string, object>();
+
+                if (DropDownList3.SelectedIndex > 0)
+                {
+                    cmd = "Select * From Account_Payment  Where Month(Created_Date) = @Month AND Year(Created_Date) = @Year AND Status like @Status";
+                    parameters["@Month"] = DropDownList3.SelectedValue;
+                    parameters["@Year"] = DropDownList4.SelectedValue;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
+                }
+                else
+                {
+                    cmd = "Select * From Account_Payment  Where Created_Date >= @StartDate AND Created_Date <= @EndDate AND Status like @Status";
+                    parameters["@StartDate"] = TextBox1.Text;
+                    parameters["@EndDate"] = TextBox2.Text;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
+                }
+                if (Session["User"].ToString() == "Admin")
+                {
+                    cmd += " AND Created_By_ID = @CreatedByID";
+                    parameters["@CreatedByID"] = Session["UserID"].ToString();
+                }
+                DataTable dtout = code.DatabaseQuerySafe(conn, cmd, parameters);
 
                 double totalCash = 0;
                 double total = 0;
@@ -168,6 +183,7 @@ namespace Take_Time_BangPhra.Account
             else
             {
                 string cmd = "";
+                Dictionary<string, object> parameters = new Dictionary<string, object>();
                 string payment_cmd = "SELECT Account_Payment.ID,[Name],Created_Date,Total_Amount,Vat_Type_ID,Vat,Total_Amount_Exclude_Vat,Paid_How,Paid_Type,Account_Payment.Status,Created_By_ID FROM [Account_Payment] inner join Vendor on Vendor.ID = Vendor_ID";
                 string receipt_cmd = "SELECT Account_Receipt.ID,Reservation_ID,Customer.FullName,Customer.Address,Customer.IDNumber,Customer_MobilePhone,Account_Receipt.Created_Date,Total_Amount,Vat,Total_Amount_Exclude_Vat,IsDeposit,UseDeposit,Paid_Type,Account_Receipt.[Status],Created_By_ID,Reservation.Remark,Reservation.NoNameinReceipt FROM [Account_Receipt] left join Reservation on Reservation.ID = Account_Receipt.Reservation_ID left join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone";
                 string detail_payment_cmd = "SELECT * FROM [Account_Payment_Detail] inner join Account_Payment on Account_Payment.ID = Payment_ID inner join Vendor on Vendor.ID = Vendor_ID";
@@ -175,41 +191,49 @@ namespace Take_Time_BangPhra.Account
 
                 if (DropDownList3.SelectedIndex > 0)
                 {
+                    parameters["@Month"] = DropDownList3.SelectedValue;
+                    parameters["@Year"] = DropDownList4.SelectedValue;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
+
                     if (DropDownList1.SelectedItem.Text == "ใบสำคัญจ่าย")
                     {
-                        cmd = payment_cmd + " Where Month(Account_Payment.Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Account_Payment.Created_Date) = " + DropDownList4.SelectedValue + " AND Account_Payment.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = payment_cmd + " Where Month(Account_Payment.Created_Date) = @Month AND Year(Account_Payment.Created_Date) = @Year AND Account_Payment.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "ใบเสร็จรับเงิน")
                     {
-                        cmd = receipt_cmd + " Where Month(Account_Receipt.Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Account_Receipt.Created_Date) = " + DropDownList4.SelectedValue + " AND Account_Receipt.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = receipt_cmd + " Where Month(Account_Receipt.Created_Date) = @Month AND Year(Account_Receipt.Created_Date) = @Year AND Account_Receipt.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "รายละเอียดใบสำคัญจ่าย")
                     {
-                        cmd = detail_payment_cmd + " Where Month(Account_Payment.Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Account_Payment.Created_Date) = " + DropDownList4.SelectedValue + " AND Account_Payment.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = detail_payment_cmd + " Where Month(Account_Payment.Created_Date) = @Month AND Year(Account_Payment.Created_Date) = @Year AND Account_Payment.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "รายละเอียดใบเสร็จรับเงิน")
                     {
-                        cmd = detail_receipt_cmd + " Where Month(Account_Receipt.Created_Date) = " + DropDownList3.SelectedValue + " AND Year(Account_Receipt.Created_Date) = " + DropDownList4.SelectedValue + " AND Account_Receipt.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = detail_receipt_cmd + " Where Month(Account_Receipt.Created_Date) = @Month AND Year(Account_Receipt.Created_Date) = @Year AND Account_Receipt.Status like @Status";
                     }
                     else { }
                 }
                 else
                 {
+                    parameters["@StartDate"] = TextBox1.Text;
+                    parameters["@EndDate"] = TextBox2.Text;
+                    parameters["@Status"] = DropDownList2.SelectedValue;
+
                     if (DropDownList1.SelectedItem.Text == "ใบสำคัญจ่าย")
                     {
-                        cmd = payment_cmd + " Where Account_Payment.Created_Date >= '" + TextBox1.Text + "' AND Account_Payment.Created_Date <= '" + TextBox2.Text + "' AND Account_Payment.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = payment_cmd + " Where Account_Payment.Created_Date >= @StartDate AND Account_Payment.Created_Date <= @EndDate AND Account_Payment.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "ใบเสร็จรับเงิน")
                     {
-                        cmd = receipt_cmd + " Where Account_Receipt.Created_Date >= '" + TextBox1.Text + "' AND Account_Receipt.Created_Date <= '" + TextBox2.Text + "' AND Account_Receipt.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = receipt_cmd + " Where Account_Receipt.Created_Date >= @StartDate AND Account_Receipt.Created_Date <= @EndDate AND Account_Receipt.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "รายละเอียดใบสำคัญจ่าย")
                     {
-                        cmd = detail_payment_cmd + " Where Account_Payment.Created_Date >= '" + TextBox1.Text + "' AND Account_Payment.Created_Date <= '" + TextBox2.Text + "' AND Account_Payment.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = detail_payment_cmd + " Where Account_Payment.Created_Date >= @StartDate AND Account_Payment.Created_Date <= @EndDate AND Account_Payment.Status like @Status";
                     }
                     else if (DropDownList1.SelectedItem.Text == "รายละเอียดใบเสร็จรับเงิน")
                     {
-                        cmd = detail_receipt_cmd + " Where Account_Receipt.Created_Date >= '" + TextBox1.Text + "' AND Account_Receipt.Created_Date <= '" + TextBox2.Text + "' AND Account_Receipt.Status like '" + DropDownList2.SelectedValue + "'";
+                        cmd = detail_receipt_cmd + " Where Account_Receipt.Created_Date >= @StartDate AND Account_Receipt.Created_Date <= @EndDate AND Account_Receipt.Status like @Status";
                     }
                     else { }
 
@@ -222,7 +246,7 @@ namespace Take_Time_BangPhra.Account
                     cmd += " AND Vendor.Vendor_Group != N'01-พนักงานประจำ'";
                 }
                 cmd += " order by ID asc";
-                DataTable dt = code.DatabaseQuery(conn, cmd);
+                DataTable dt = code.DatabaseQuerySafe(conn, cmd, parameters);
 
                 GridView1.DataSource = dt;
                 GridView1.DataBind();
@@ -292,10 +316,15 @@ namespace Take_Time_BangPhra.Account
                     try
                     {
                         // Get payment amount and reservation ID from Payment_History
-                        var paymentData = code.DatabaseQuery(conn,
+                        var paymentHistoryParams = new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", docNum }
+                        };
+                        var paymentData = code.DatabaseQuerySafe(conn,
                             "SELECT ph.PaymentAmount, ph.Reservation_ID " +
                             "FROM [dbo].[Payment_History] ph " +
-                            "WHERE ph.Receipt_ID = '" + docNum + "'");
+                            "WHERE ph.Receipt_ID = @ReceiptID",
+                            paymentHistoryParams);
 
                         if (paymentData != null && paymentData.Rows.Count > 0)
                         {
@@ -307,8 +336,14 @@ namespace Take_Time_BangPhra.Account
                                 if (amount > 0 && reservationId > 0)
                                 {
                                     // Reduce Reservation.Deposit by payment amount
-                                    code.DatabaseInsert(conn,
-                                        $"UPDATE [dbo].[Reservation] SET Deposit = ISNULL(Deposit, 0) - {amount} WHERE ID = {reservationId}");
+                                    var updateReservationParams = new Dictionary<string, object>
+                                    {
+                                        { "@Amount", amount },
+                                        { "@ReservationID", reservationId }
+                                    };
+                                    code.DatabaseInsertSafe(conn,
+                                        "UPDATE [dbo].[Reservation] SET Deposit = ISNULL(Deposit, 0) - @Amount WHERE ID = @ReservationID",
+                                        updateReservationParams);
                                 }
                             }
                         }
@@ -419,12 +454,22 @@ namespace Take_Time_BangPhra.Account
             }
             if (docType == "REC")
             {
+                // SECURE: Get receipt UID with parameterized query
+                var receiptUidParams = new Dictionary<string, object>
+                {
+                    { "@ID", docNum }
+                };
+                DataTable uidResult = code.DatabaseQuerySafe(conn,
+                    "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] WHERE ID = @ID",
+                    receiptUidParams);
+                string receiptUid = uidResult.Rows.Count > 0 ? uidResult.Rows[0][0].ToString() : "";
+
                 if (docStatus == "Cancel")
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
-                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf"))
+                    if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + receiptUid + "_Cancel.pdf"))
                     {
-                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf");
+                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + "_Cancel.pdf");
                     }
                     else
                     {
@@ -435,9 +480,9 @@ namespace Take_Time_BangPhra.Account
                 else
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
-                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf"))
+                    if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + receiptUid + ".pdf"))
                     {
-                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Receipt] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf");
+                        Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + ".pdf");
                     }
                     else
                     {
@@ -450,12 +495,22 @@ namespace Take_Time_BangPhra.Account
             }
             else if (docType == "PAY")
             {
+                // SECURE: Get payment UID with parameterized query
+                var paymentUidParams = new Dictionary<string, object>
+                {
+                    { "@ID", docNum }
+                };
+                DataTable uidResult = code.DatabaseQuerySafe(conn,
+                    "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @ID",
+                    paymentUidParams);
+                string paymentUid = uidResult.Rows.Count > 0 ? uidResult.Rows[0][0].ToString() : "";
+
                 if (docStatus == "Cancel")
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
-                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf"))
+                    if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + "_Cancel.pdf"))
                     {
-                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + "_Cancel.pdf");
+                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + "_Cancel.pdf");
                     }
                     else
                     {
@@ -466,9 +521,9 @@ namespace Take_Time_BangPhra.Account
                 else
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
-                    if (File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf"))
+                    if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + ".pdf"))
                     {
-                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + code.DatabaseQuery(conn, "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] Where ID = '" + docNum + "'").Rows[0][0].ToString() + ".pdf");
+                        Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + ".pdf");
                     }
                     else
                     {
