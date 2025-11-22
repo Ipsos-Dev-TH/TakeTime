@@ -105,7 +105,8 @@ namespace Take_Time_BangPhra
                 DropDownList8.Items.FindByValue("2").Selected = true;
                 DropDownList8.SelectedIndex = DropDownList8.Items.IndexOf(DropDownList8.Items.FindByValue("2"));
 
-                getAddress("SELECT DISTINCT [Province] FROM [Address] order by Province ASC", "SELECT DISTINCT [District] FROM [Address] order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] order by SubDistrict ASC");
+                // ✅ FIXED: No filters - get all addresses
+                getAddress();
 
                 DropDownList1.SelectedIndex = 0;
 
@@ -1544,7 +1545,14 @@ namespace Take_Time_BangPhra
                                                     }
                                                     else
                                                     {
-                                                        cmds.Add("INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price],Use_Coupon) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + txtPeopleStay.Text + "," + row.Cells[4].Text + ",'" + checkusecoupon + "') ");
+                                                        // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                                                        reservationDA.InsertReservationAccommodation(
+                                                            Convert.ToInt32(id),
+                                                            Convert.ToInt32(dtAccommodation.Rows[row.RowIndex]["ID"]),
+                                                            Convert.ToInt32(txtPeopleStay.Text),
+                                                            Convert.ToDecimal(row.Cells[4].Text),
+                                                            checkusecoupon.ToString()
+                                                        );
                                                     }
                                                     try
                                                     {
@@ -1578,7 +1586,14 @@ namespace Take_Time_BangPhra
                                                     }
                                                     else
                                                     {
-                                                        cmds.Add("INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price],Use_Coupon) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + DropDownList1.SelectedValue + "," + row.Cells[4].Text + ",'" + checkusecoupon + "') ");
+                                                        // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                                                        reservationDA.InsertReservationAccommodation(
+                                                            Convert.ToInt32(id),
+                                                            Convert.ToInt32(dtAccommodation.Rows[row.RowIndex]["ID"]),
+                                                            Convert.ToInt32(DropDownList1.SelectedValue),
+                                                            Convert.ToDecimal(row.Cells[4].Text),
+                                                            checkusecoupon.ToString()
+                                                        );
                                                     }
                                                     try
                                                     {
@@ -1618,7 +1633,13 @@ namespace Take_Time_BangPhra
                                                         }
                                                         else
                                                         {
-                                                            cmds.Add("UPDATE [dbo].[Reservation_Items] SET [Amount] = " + Convert.ToInt32(txtAmount.Text) + " ,[Price] = " + row.Cells[4].Text + " WHERE Items_ID = " + dtoldItem.Rows[x]["Items_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                            // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                                                            reservationDA.UpdateReservationItem(
+                                                                Convert.ToInt32(id),
+                                                                Convert.ToInt32(dtoldItem.Rows[x]["Items_ID"]),
+                                                                Convert.ToInt32(txtAmount.Text),
+                                                                Convert.ToDecimal(row.Cells[4].Text)
+                                                            );
                                                         }
                                                         if (Convert.ToInt32(txtAmount.Text) >= Convert.ToInt32(dtoldItem.Rows[x]["Amount"].ToString()))
                                                         {
@@ -1691,7 +1712,13 @@ namespace Take_Time_BangPhra
                                                     }
                                                     else
                                                     {
-                                                        cmds.Add("INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (" + id + "," + dtItems.Rows[row.RowIndex]["ID"].ToString() + "," + txtAmount.Text + "," + row.Cells[4].Text + ") ");
+                                                        // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                                                        reservationDA.InsertReservationItem(
+                                                            Convert.ToInt32(id),
+                                                            Convert.ToInt32(dtItems.Rows[row.RowIndex]["ID"]),
+                                                            Convert.ToInt32(txtAmount.Text),
+                                                            Convert.ToDecimal(row.Cells[4].Text)
+                                                        );
                                                     }
                                                     try
                                                     {
@@ -4016,8 +4043,14 @@ namespace Take_Time_BangPhra
                     string customerPhone = "";
                     try
                     {
-                        DataTable dtPhone = code.DatabaseQuery(conn,
-                            "SELECT Customer_MobilePhone FROM Reservation WHERE ID = '" + Reservation_ID + "'");
+                        // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                        var phoneParams = new Dictionary<string, object>
+                        {
+                            { "@ReservationID", Reservation_ID }
+                        };
+                        DataTable dtPhone = code2.DatabaseQuerySafe(conn,
+                            "SELECT Customer_MobilePhone FROM Reservation WHERE ID = @ReservationID",
+                            phoneParams);
                         if (dtPhone.Rows.Count > 0)
                         {
                             customerPhone = dtPhone.Rows[0]["Customer_MobilePhone"].ToString();
@@ -6436,7 +6469,8 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
         protected void Button6_Click(object sender, EventArgs e)
         {
             TextBox16.Enabled = false;
-            getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by SubDistrict ASC");
+            // ✅ FIXED: Use parameterized query via refactored getAddress method
+            getAddress(postalCode: TextBox16.Text);
 
         }
 
@@ -6447,17 +6481,54 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
             DropDownList5.Items.Clear();
             DropDownList6.Items.Clear();
             DropDownList7.Items.Clear();
-            getAddress("SELECT DISTINCT [Province] FROM [Address] order by Province ASC", "SELECT DISTINCT [District] FROM [Address] order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] order by SubDistrict ASC");
+            // ✅ FIXED: No filters - get all addresses
+            getAddress();
 
         }
 
-        public void getAddress(string commp, string commd, string commsd)
+        // ✅ FIXED: Use parameterized queries to prevent SQL Injection
+        public void getAddress(string postalCode = null, string province = null, string district = null, string subDistrict = null)
         {
             string Command = Request.QueryString["Command"];
             string ID = Request.QueryString["ID"];
-            DataTable dtProvince = code.DatabaseQuery(conn, commp);
-            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
-            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+
+            // Build WHERE clause based on provided filters
+            string whereClause = "";
+            var parameters = new Dictionary<string, object>();
+
+            if (!string.IsNullOrEmpty(postalCode))
+            {
+                whereClause = "WHERE PostalCode = @PostalCode";
+                parameters.Add("@PostalCode", postalCode);
+            }
+
+            if (!string.IsNullOrEmpty(province))
+            {
+                whereClause += (whereClause.Length > 0 ? " AND " : "WHERE ") + "Province = @Province";
+                parameters.Add("@Province", province);
+            }
+
+            if (!string.IsNullOrEmpty(district))
+            {
+                whereClause += (whereClause.Length > 0 ? " AND " : "WHERE ") + "District = @District";
+                parameters.Add("@District", district);
+            }
+
+            if (!string.IsNullOrEmpty(subDistrict))
+            {
+                whereClause += (whereClause.Length > 0 ? " AND " : "WHERE ") + "SubDistrict = @SubDistrict";
+                parameters.Add("@SubDistrict", subDistrict);
+            }
+
+            // Use parameterized queries
+            string provinceQuery = $"SELECT DISTINCT [Province] FROM [Address] {whereClause} ORDER BY Province ASC";
+            string districtQuery = $"SELECT DISTINCT [District] FROM [Address] {whereClause} ORDER BY District ASC";
+            string subDistrictQuery = $"SELECT DISTINCT [SubDistrict] FROM [Address] {whereClause} ORDER BY SubDistrict ASC";
+
+            DataTable dtProvince = code2.DatabaseQuerySafe(conn, provinceQuery, parameters);
+            DataTable dtDistrict = code2.DatabaseQuerySafe(conn, districtQuery, parameters);
+            DataTable dtSubDistrict = code2.DatabaseQuerySafe(conn, subDistrictQuery, parameters);
+
             try
             {
                 if (dtProvince.Rows.Count <= 0)
@@ -6520,11 +6591,13 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
         {
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // ✅ FIXED: Use parameterized query via refactored getAddress method
+                getAddress(postalCode: TextBox16.Text, district: DropDownList6.SelectedValue);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // ✅ FIXED: Use parameterized query via refactored getAddress method
+                getAddress(district: DropDownList6.SelectedValue);
             }
         }
 
@@ -6533,11 +6606,13 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
 
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // ✅ FIXED: Use parameterized query via refactored getAddress method
+                getAddress(postalCode: TextBox16.Text, province: DropDownList5.SelectedValue);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // ✅ FIXED: Use parameterized query via refactored getAddress method
+                getAddress(province: DropDownList5.SelectedValue);
             }
         }
 
