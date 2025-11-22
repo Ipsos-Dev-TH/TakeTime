@@ -330,6 +330,11 @@ namespace Take_Time_BangPhra.Account.Report
                 DateTime docDate = Convert.ToDateTime(TextBox8.Text);
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
                 string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
+
+                // Extract Year/Month for directory structure
+                string Year = docDate.Year.ToString();
+                string Month = docDate.Month.ToString();
+
                 if (command == "edit")
                 {
                     docNum = id;

@@ -863,6 +863,11 @@ namespace Take_Time_BangPhra.Product
 
 
                 docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
+
+                // Extract Year/Month for directory structure
+                string Year = receiptDate.Year.ToString();
+                string Month = receiptDate.Month.ToString();
+
                 total = Convert.ToDouble(TextBox2.Text);
                 int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
                 double vat = Math.Round(((total * 100) / (100+vatpercent)), 2);

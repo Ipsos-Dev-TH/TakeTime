@@ -457,6 +457,11 @@ namespace Take_Time_BangPhra.Account.Report
                 string id = "";
                 DataTable dtReceipt = new DataTable();
                 DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
+
+                // Extract Year/Month for directory structure
+                string Year = receiptDate.Year.ToString();
+                string Month = receiptDate.Month.ToString();
+
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
                 string docNum = "";
 
