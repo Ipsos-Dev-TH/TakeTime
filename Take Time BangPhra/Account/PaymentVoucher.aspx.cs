@@ -19,10 +19,12 @@ namespace Take_Time_BangPhra.Account.Report
 
         _Default code = new _Default();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        DocumentHelper documentHelper;
 
         protected void Page_Load(object sender, EventArgs e)
         {
             this.MaintainScrollPositionOnPostBack = true;
+            documentHelper = new DocumentHelper();
             try
             {
                 if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
@@ -329,7 +331,7 @@ namespace Take_Time_BangPhra.Account.Report
                 string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString();
                 string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
-                string docNum = code.createDocNumber(conn, "Account_Payment", "PAY",Year,Month,Day);
+                string docNum = documentHelper.CreateDocumentNumber(conn, "Account_Payment", "PAY", Year, Month, Day);
                 if (command == "edit")
                 {
                     docNum = id;

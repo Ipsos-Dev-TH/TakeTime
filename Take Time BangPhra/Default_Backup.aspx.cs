@@ -12,6 +12,7 @@ using System.Net.Mail;
 using Newtonsoft.Json.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Take_Time_BangPhra.Class;
 
 namespace Take_Time_BangPhra
 {
@@ -342,65 +343,6 @@ namespace Take_Time_BangPhra
                 address1,
                 branchNumber
             );
-        }
-
-        public string createDocNumber(string conn, string tablename, string doctype,string Year,string Month,string Day)
-        {
-            string output = "";
-            Year = Year.Substring(Year.Length - 2);
-
-            if(Convert.ToInt32(Month) < 10)
-            {
-                Month = "0" + Month;
-            }
-
-            if (Convert.ToInt32(Day) < 10)
-            {
-                Day = "0" + Day;
-            }
-            DataTable dt = DatabaseQuery(conn, "select Top 1 ID from " + tablename + " Where ID like '" + doctype + Year + Month + Day + "%' order by ID desc");
-            int Number = 0;
-            string NumberStr = "";
-            if (dt.Rows.Count > 0)
-            {
-                string lastnumber = dt.Rows[0][0].ToString().Substring(dt.Rows[0][0].ToString().Length - 3,3);
-                Number = Convert.ToInt32(lastnumber);
-                Number = Number + 1;
-                if (Number < 10)
-                {
-                    NumberStr = "00" + Number.ToString();
-                }
-                else if (Number < 100)
-                {
-                    NumberStr = "0" + Number.ToString();
-
-                }
-                else if (Number < 1000)
-                {
-                    NumberStr = Number.ToString();
-                }
-            }
-            else
-            {
-                NumberStr = "001";
-            }
-            //Random random = new Random();
-            //int randomNumber = random.Next(1, 999);
-            //string randomNum = "";
-            //if(randomNumber < 10)
-            //{
-            //    randomNum = "00"+randomNumber.ToString();
-            //}
-            //else if (randomNumber < 100)
-            //{
-            //    randomNum = "0" + randomNumber.ToString();
-            //}
-            //else
-            //{
-            //    randomNum = randomNumber.ToString();
-            //}
-            output = doctype + Year + Month + Day + NumberStr;
-            return output;
         }
 
         protected void Calendar1_DayRender(object sender, DayRenderEventArgs e)

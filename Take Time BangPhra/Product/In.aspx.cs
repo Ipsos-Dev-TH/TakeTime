@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using ECertificateAPI;
 using System.Net.Mail;
 using Microsoft.Reporting.WebForms;
+using Take_Time_BangPhra.Class;
 
 namespace Take_Time_BangPhra.Product
 {
@@ -22,9 +23,11 @@ namespace Take_Time_BangPhra.Product
         Receipt codeReceipt = new Receipt();
         code code = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        AddressHelper addressHelper;
         protected void Page_Load(object sender, EventArgs e)
         {
-            
+            addressHelper = new AddressHelper();
+
             try
             {
                 try
@@ -78,48 +81,9 @@ namespace Take_Time_BangPhra.Product
                 ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('" + ex + "');", true);
             }
 
-            
+
         }
 
-        public string CheckAddressID(string ZipCode, string Province, string District, string SubDistrict)
-        {
-            string ID = "0";
-
-            try
-            {
-                // SECURE: Use parameterized query
-                var parameters = new Dictionary<string, object>
-                {
-                    { "@PostalCode", ZipCode ?? "" },
-                    { "@Province", Province ?? "" },
-                    { "@District", District ?? "" },
-                    { "@SubDistrict", SubDistrict ?? "" }
-                };
-
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT ID FROM Address " +
-                    "WHERE PostalCode = @PostalCode " +
-                    "AND Province = @Province " +
-                    "AND District = @District " +
-                    "AND SubDistrict = @SubDistrict",
-                    parameters);
-
-                if (dt.Rows.Count > 0)
-                {
-                    ID = dt.Rows[0][0].ToString();
-                }
-            }
-            catch { }
-
-            return ID;
-        }
-
-
-
-       
-        
-
-        
         protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
         {
             if (e.CommandName == "Add")
