@@ -393,9 +393,14 @@ namespace Take_Time_BangPhra
             string receiptId = GenerateReceiptId();
 
             // Get reservation data
+            var reservationParams = new Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+
             var reservation = _code.DatabaseQuerySafe(_connectionString,
-                $"SELECT * FROM Reservation WHERE ID = {reservationId}",
-                null);
+                "SELECT * FROM Reservation WHERE ID = @reservationId",
+                reservationParams);
 
             if (reservation.Rows.Count == 0)
             {
@@ -441,9 +446,14 @@ namespace Take_Time_BangPhra
         {
             string datePrefix = "REC" + DateTime.Now.ToString("yyMMdd");
 
+            var parameters = new Dictionary<string, object>
+            {
+                { "@datePrefix", datePrefix + "%" }
+            };
+
             var result = _code.DatabaseQuerySafe(_connectionString,
-                $"SELECT MAX(ID) as LastID FROM Account_Receipt WHERE ID LIKE '{datePrefix}%'",
-                null);
+                "SELECT MAX(ID) as LastID FROM Account_Receipt WHERE ID LIKE @datePrefix",
+                parameters);
 
             int sequenceNumber = 1;
             if (result.Rows.Count > 0 && result.Rows[0]["LastID"] != DBNull.Value)

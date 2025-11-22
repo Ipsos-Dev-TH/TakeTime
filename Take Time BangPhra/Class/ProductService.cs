@@ -131,13 +131,20 @@ namespace Take_Time_BangPhra
         /// </summary>
         private void UnsetOtherMainImages(string productType, int productId, long excludeImageId)
         {
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@productType", productType },
+                { "@productId", productId },
+                { "@excludeImageId", excludeImageId }
+            };
+
             _code.DatabaseInsertSafe(_connectionString,
-                $@"UPDATE Product_Images
+                @"UPDATE Product_Images
                    SET IsMainImage = 0
-                   WHERE ProductType = '{productType}'
-                   AND Product_ID = {productId}
-                   AND ID != {excludeImageId}",
-                null);
+                   WHERE ProductType = @productType
+                   AND Product_ID = @productId
+                   AND ID != @excludeImageId",
+                parameters);
         }
 
         /// <summary>

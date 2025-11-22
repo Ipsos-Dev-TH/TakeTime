@@ -39,8 +39,13 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 // Update receipt status in database
-                string updateQuery = $"UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = '{receiptId}'";
-                _dbHelper.ExecuteInsert(updateQuery);
+                var parameters = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@receiptId", receiptId }
+                };
+                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                    "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @receiptId",
+                    parameters);
 
                 // Stamp PDF with cancellation mark
                 await StampPdfWithCancellation(receiptId, uid);
@@ -55,8 +60,13 @@ namespace Take_Time_BangPhra.Services
         private async Task StampPdfWithCancellation(string receiptId, string uid)
         {
             // Get receipt details to determine file paths
-            string receiptQuery = $"SELECT * FROM Account_Receipt WHERE ID = '{receiptId}'";
-            DataTable dtRec = _dbHelper.ExecuteQuery(receiptQuery);
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId }
+            };
+            DataTable dtRec = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                "SELECT * FROM Account_Receipt WHERE ID = @receiptId",
+                parameters);
 
             if (dtRec.Rows.Count == 0) return;
 
@@ -121,20 +131,35 @@ namespace Take_Time_BangPhra.Services
 
         public DataTable GetReceiptsByReservation(string reservationId)
         {
-            string query = $"SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND Reservation_ID = '{reservationId}'";
-            return _dbHelper.ExecuteQuery(query);
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND Reservation_ID = @reservationId",
+                parameters);
         }
 
         public DataTable GetReceiptByUid(string uid)
         {
-            string query = $"SELECT * FROM Account_Receipt LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = '{uid}'";
-            return _dbHelper.ExecuteQuery(query);
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@uid", uid }
+            };
+            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                "SELECT * FROM Account_Receipt LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @uid",
+                parameters);
         }
 
         public DataTable GetReceiptDetails(string receiptId)
         {
-            string query = $"SELECT * FROM Account_Receipt_Detail WHERE Receipt_ID = '{receiptId}' ORDER BY Number ASC";
-            return _dbHelper.ExecuteQuery(query);
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId }
+            };
+            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                "SELECT * FROM Account_Receipt_Detail WHERE Receipt_ID = @receiptId ORDER BY Number ASC",
+                parameters);
         }
 
         public string CreateReceiptDocumentNumber(DateTime documentDate)
@@ -301,41 +326,67 @@ namespace Take_Time_BangPhra.Services
                                     double totalAmount, double vat, double priceExcludeVat,
                                     string paidType, string createdById, bool etax, string customerId = "0")
         {
-            string query = $@"INSERT INTO [dbo].[Account_Receipt] 
-                        (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat], 
-                         [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status, 
-                         Paid_Type, Created_By_ID, Etax, Customer_ID) 
-                        VALUES ('{receiptId}', '{reservationId}', '{docDate:yyyy-MM-dd}', 
-                        {totalAmount}, {vat}, {priceExcludeVat}, 'True', 'False', 'Normal', 
-                        N'{paidType}', N'{createdById}', '{etax}', '{customerId}')";
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId },
+                { "@reservationId", reservationId },
+                { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                { "@totalAmount", totalAmount },
+                { "@vat", vat },
+                { "@priceExcludeVat", priceExcludeVat },
+                { "@paidType", paidType },
+                { "@createdById", createdById },
+                { "@etax", etax },
+                { "@customerId", customerId }
+            };
 
-            _dbHelper.ExecuteInsert(query);
+            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                @"INSERT INTO [dbo].[Account_Receipt]
+                    (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                     [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
+                     Paid_Type, Created_By_ID, Etax, Customer_ID)
+                    VALUES (@receiptId, @reservationId, @docDate,
+                    @totalAmount, @vat, @priceExcludeVat, 'True', 'False', 'Normal',
+                    @paidType, @createdById, @etax, @customerId)",
+                parameters);
 
             // Insert receipt detail
-            string detailQuery = $@"INSERT INTO [dbo].[Account_Receipt_Detail]
-                              ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
-                               [Product_Data], [Product_Amount], [Product_Unit],
-                               [Price_PerPeice], [Price_Amount])
-                              VALUES ('1', '{receiptId}', 1, 7,
-                              N'ค่ามัดจำที่พักของหมายเลขการจอง {reservationId} [{receiptId}]',
-                              '1', N'ครั้ง', {totalAmount}, {totalAmount})";
+            var detailParameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId },
+                { "@reservationId", reservationId },
+                { "@totalAmount", totalAmount }
+            };
 
-            _dbHelper.ExecuteInsert(detailQuery);
+            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                @"INSERT INTO [dbo].[Account_Receipt_Detail]
+                  ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
+                   [Product_Data], [Product_Amount], [Product_Unit],
+                   [Price_PerPeice], [Price_Amount])
+                  VALUES ('1', @receiptId, 1, 7,
+                  N'ค่ามัดจำที่พักของหมายเลขการจอง ' + @reservationId + ' [' + @receiptId + ']',
+                  '1', N'ครั้ง', @totalAmount, @totalAmount)",
+                detailParameters);
 
             // 🔧 FIX: Create Payment_History record
             try
             {
                 // Get remaining balance
-                var balanceQuery = $@"
-                    SELECT
+                var balanceParams = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId }
+                };
+
+                var balanceResult = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                    @"SELECT
                         r.TotalPrice,
                         ISNULL(SUM(ph.PaymentAmount), 0) as TotalPaid
                     FROM Reservation r
                     LEFT JOIN Payment_History ph ON r.ID = ph.Reservation_ID AND ph.Status = 'COMPLETED'
-                    WHERE r.ID = '{reservationId}'
-                    GROUP BY r.TotalPrice";
+                    WHERE r.ID = @reservationId
+                    GROUP BY r.TotalPrice",
+                    balanceParams);
 
-                var balanceResult = _dbHelper.ExecuteQuery(balanceQuery);
                 double remainingBalance = 0;
 
                 if (balanceResult.Rows.Count > 0)
@@ -345,17 +396,27 @@ namespace Take_Time_BangPhra.Services
                     remainingBalance = totalPrice - totalPaid - totalAmount; // After this payment
                 }
 
-                string paymentHistoryQuery = $@"
-                    INSERT INTO [dbo].[Payment_History] (
+                var paymentHistoryParams = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId },
+                    { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                    { "@totalAmount", totalAmount },
+                    { "@paidType", paidType },
+                    { "@receiptId", receiptId },
+                    { "@remainingBalance", remainingBalance }
+                };
+
+                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                    @"INSERT INTO [dbo].[Payment_History] (
                         Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
                         Receipt_ID, RemainingBalance, Status
                     )
                     VALUES (
-                        '{reservationId}', '{docDate:yyyy-MM-dd}', {totalAmount}, 'DEPOSIT', N'{paidType}',
-                        '{receiptId}', {remainingBalance}, 'COMPLETED'
-                    )";
+                        @reservationId, @docDate, @totalAmount, 'DEPOSIT', @paidType,
+                        @receiptId, @remainingBalance, 'COMPLETED'
+                    )",
+                    paymentHistoryParams);
 
-                _dbHelper.ExecuteInsert(paymentHistoryQuery);
                 System.Diagnostics.Trace.TraceInformation($"✅ Created Payment_History for Deposit Receipt {receiptId}");
             }
             catch (Exception ex)
@@ -370,15 +431,29 @@ namespace Take_Time_BangPhra.Services
                                         string paidType, string createdById, DataTable dtReserve,
                                         bool etax, string customerId)
         {
-            string query = $@"INSERT INTO [dbo].[Account_Receipt] 
-                            (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat], 
-                             [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status, 
-                             Paid_Type, Created_By_ID, Etax, Customer_ID) 
-                            VALUES ('{receiptId}', '{reservationId}', '{docDate:yyyy-MM-dd}', 
-                            {totalAmount}, {vat}, {priceExcludeVat}, 'False', 'False', 'Normal', 
-                            N'{paidType}', N'{createdById}', '{etax}', '{customerId}')";
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId },
+                { "@reservationId", reservationId },
+                { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                { "@totalAmount", totalAmount },
+                { "@vat", vat },
+                { "@priceExcludeVat", priceExcludeVat },
+                { "@paidType", paidType },
+                { "@createdById", createdById },
+                { "@etax", etax },
+                { "@customerId", customerId }
+            };
 
-            _dbHelper.ExecuteInsert(query);
+            _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                @"INSERT INTO [dbo].[Account_Receipt]
+                    (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                     [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
+                     Paid_Type, Created_By_ID, Etax, Customer_ID)
+                    VALUES (@receiptId, @reservationId, @docDate,
+                    @totalAmount, @vat, @priceExcludeVat, 'False', 'False', 'Normal',
+                    @paidType, @createdById, @etax, @customerId)",
+                parameters);
 
             // Insert receipt details
             for (int i = 0; i < dtReserve.Rows.Count; i++)
@@ -387,35 +462,49 @@ namespace Take_Time_BangPhra.Services
                 double productAmount = Convert.ToDouble(dtReserve.Rows[i]["Product_Amount"]);
                 double calculatedAmount = CalculateTwoDecimalPoints(pricePerPiece * productAmount);
 
-                string detailQuery = $@"INSERT INTO [dbo].[Account_Receipt_Detail]
-                                      ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
-                                       [Product_Data], [Product_Amount], [Product_Unit],
-                                       [Price_PerPeice], [Price_Amount])
-                                      VALUES ('{dtReserve.Rows[i]["Number"]}', '{receiptId}',
-                                      {dtReserve.Rows[i]["ProductType_ID"]},
-                                      {dtReserve.Rows[i]["Product_ID"]},
-                                      N'{dtReserve.Rows[i]["Product_Data"]}',
-                                      {dtReserve.Rows[i]["Product_Amount"]},
-                                      N'{dtReserve.Rows[i]["Product_Unit"]}',
-                                      {pricePerPiece}, {calculatedAmount})";
+                var detailParameters = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@number", dtReserve.Rows[i]["Number"] },
+                    { "@receiptId", receiptId },
+                    { "@productTypeId", dtReserve.Rows[i]["ProductType_ID"] },
+                    { "@productId", dtReserve.Rows[i]["Product_ID"] },
+                    { "@productData", dtReserve.Rows[i]["Product_Data"] },
+                    { "@productAmount", dtReserve.Rows[i]["Product_Amount"] },
+                    { "@productUnit", dtReserve.Rows[i]["Product_Unit"] },
+                    { "@pricePerPiece", pricePerPiece },
+                    { "@calculatedAmount", calculatedAmount }
+                };
 
-                _dbHelper.ExecuteInsert(detailQuery);
+                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                    @"INSERT INTO [dbo].[Account_Receipt_Detail]
+                      ([Number], [Receipt_ID], [ProductType_ID], [Product_ID],
+                       [Product_Data], [Product_Amount], [Product_Unit],
+                       [Price_PerPeice], [Price_Amount])
+                      VALUES (@number, @receiptId, @productTypeId, @productId,
+                      @productData, @productAmount, @productUnit,
+                      @pricePerPiece, @calculatedAmount)",
+                    detailParameters);
             }
 
             // 🔧 FIX: Create Payment_History record
             try
             {
                 // Get remaining balance
-                var balanceQuery = $@"
-                    SELECT
+                var balanceParams = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId }
+                };
+
+                var balanceResult = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                    @"SELECT
                         r.TotalPrice,
                         ISNULL(SUM(ph.PaymentAmount), 0) as TotalPaid
                     FROM Reservation r
                     LEFT JOIN Payment_History ph ON r.ID = ph.Reservation_ID AND ph.Status = 'COMPLETED'
-                    WHERE r.ID = '{reservationId}'
-                    GROUP BY r.TotalPrice";
+                    WHERE r.ID = @reservationId
+                    GROUP BY r.TotalPrice",
+                    balanceParams);
 
-                var balanceResult = _dbHelper.ExecuteQuery(balanceQuery);
                 double remainingBalance = 0;
 
                 if (balanceResult.Rows.Count > 0)
@@ -425,17 +514,27 @@ namespace Take_Time_BangPhra.Services
                     remainingBalance = totalPrice - totalPaid - totalAmount; // After this payment
                 }
 
-                string paymentHistoryQuery = $@"
-                    INSERT INTO [dbo].[Payment_History] (
+                var paymentHistoryParams = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId },
+                    { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                    { "@totalAmount", totalAmount },
+                    { "@paidType", paidType },
+                    { "@receiptId", receiptId },
+                    { "@remainingBalance", remainingBalance }
+                };
+
+                _dbHelper.DatabaseInsertSafe(_dbHelper.ConnectionString,
+                    @"INSERT INTO [dbo].[Payment_History] (
                         Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
                         Receipt_ID, RemainingBalance, Status
                     )
                     VALUES (
-                        '{reservationId}', '{docDate:yyyy-MM-dd}', {totalAmount}, 'PAYMENT', N'{paidType}',
-                        '{receiptId}', {remainingBalance}, 'COMPLETED'
-                    )";
+                        @reservationId, @docDate, @totalAmount, 'PAYMENT', @paidType,
+                        @receiptId, @remainingBalance, 'COMPLETED'
+                    )",
+                    paymentHistoryParams);
 
-                _dbHelper.ExecuteInsert(paymentHistoryQuery);
                 System.Diagnostics.Trace.TraceInformation($"✅ Created Payment_History for Regular Receipt {receiptId}");
             }
             catch (Exception ex)
@@ -560,8 +659,13 @@ namespace Take_Time_BangPhra.Services
 
         private DataTable GetCustomerForReceipt(string mobilePhone)
         {
-            return _dbHelper.ExecuteQuery($@"
-                SELECT
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@mobilePhone", mobilePhone }
+            };
+
+            return _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                @"SELECT
                     Customer.*,
                     Customer_Type.Customer_Type,
                     Customer_Type.Customer_Code,
@@ -574,7 +678,8 @@ namespace Take_Time_BangPhra.Services
                 FROM Customer
                 LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                 LEFT JOIN Address ON Address.ID = Customer.Address_ID
-                WHERE MobilePhone = '{mobilePhone}'");
+                WHERE MobilePhone = @mobilePhone",
+                parameters);
         }
 
         private DataTable GetSignatureData()
@@ -956,7 +1061,15 @@ namespace Take_Time_BangPhra.Services
 
         private string GetReceiptUid(string receiptId)
         {
-            DataTable dt = _dbHelper.ExecuteQuery($"SELECT UID FROM Account_Receipt WHERE ID = '{receiptId}'");
+            var parameters = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "@receiptId", receiptId }
+            };
+
+            DataTable dt = _dbHelper.DatabaseQuerySafe(_dbHelper.ConnectionString,
+                "SELECT UID FROM Account_Receipt WHERE ID = @receiptId",
+                parameters);
+
             if (dt.Rows.Count > 0)
             {
                 return dt.Rows[0]["UID"].ToString();
