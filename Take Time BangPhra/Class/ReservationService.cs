@@ -1,5 +1,6 @@
 ﻿// ReservationService.cs
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
 using System.Threading.Tasks;
@@ -20,48 +21,68 @@ namespace Take_Time_BangPhra.Services
 
         public DataTable GetReservationsForDate(DateTime date)
         {
-            string query = $"Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where '{date:yyyy-MM-dd}' >= CheckinDate AND '{date:yyyy-MM-dd}' < CheckoutDate AND (Reservation.Status != N'ยกเลิกคืนเงิน' AND Reservation.Status != N'ยกเลิกไม่คืนเงิน')";
-            return _dbHelper.ExecuteQuery(query);
+            string query = "Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where @Date >= CheckinDate AND @Date < CheckoutDate AND (Reservation.Status != N'ยกเลิกคืนเงิน' AND Reservation.Status != N'ยกเลิกไม่คืนเงิน')";
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Date", date.ToString("yyyy-MM-dd") }
+            };
+            return _dbHelper.ExecuteQueryWithParams(query, parameters);
         }
 
         public DataTable GetReservationAccommodations(DateTime date)
         {
-            string query = $"Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID Where '{date:yyyy-MM-dd}' >= CheckinDate AND '{date:yyyy-MM-dd}' < CheckoutDate order by Accommodation.orderID asc";
-            return _dbHelper.ExecuteQuery(query);
+            string query = "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID inner join Accommodation on Accommodation.ID = Reservation_Accommodation.Accommodation_ID Where @Date >= CheckinDate AND @Date < CheckoutDate order by Accommodation.orderID asc";
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Date", date.ToString("yyyy-MM-dd") }
+            };
+            return _dbHelper.ExecuteQueryWithParams(query, parameters);
         }
 
         public DataTable GetReservationItems(DateTime date)
         {
-            string query = $"Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID inner join Items on Items.ID = Reservation_Items.Items_ID Where '{date:yyyy-MM-dd}' >= CheckinDate AND '{date:yyyy-MM-dd}' < CheckoutDate order by Items_ID asc";
-            return _dbHelper.ExecuteQuery(query);
+            string query = "Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID inner join Items on Items.ID = Reservation_Items.Items_ID Where @Date >= CheckinDate AND @Date < CheckoutDate order by Items_ID asc";
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Date", date.ToString("yyyy-MM-dd") }
+            };
+            return _dbHelper.ExecuteQueryWithParams(query, parameters);
         }
 
         public DataTable GetReservationDetails(string reservationId)
         {
-            string query = $"SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID=Accommodation_ID Where Reservation.ID = {reservationId}";
-            return _dbHelper.ExecuteQuery(query);
+            string query = "SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID=Accommodation_ID Where Reservation.ID = @ReservationId";
+            var parameters = new Dictionary<string, object>
+            {
+                { "@ReservationId", reservationId }
+            };
+            return _dbHelper.ExecuteQueryWithParams(query, parameters);
         }
 
         public DataTable GetAvailableAccommodations(DateTime date)
         {
             try
             {
-                string query = $@"
-            SELECT a.* 
+                string query = @"
+            SELECT a.*
             FROM Accommodation a
-            WHERE a.Status = 1 
+            WHERE a.Status = 1
             AND a.ID NOT IN (
-                SELECT ra.Accommodation_ID 
+                SELECT ra.Accommodation_ID
                 FROM Reservation_Accommodation ra
                 INNER JOIN Reservation r ON r.ID = ra.Reservation_ID
-                WHERE '{date:yyyy-MM-dd}' >= r.CheckinDate 
-                AND '{date:yyyy-MM-dd}' < r.CheckoutDate 
+                WHERE @Date >= r.CheckinDate
+                AND @Date < r.CheckoutDate
                 AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอ้าท์แล้ว')
                 AND a.LimitWithPeople = 'False'
             )
             ORDER BY a.OrderID ASC";
 
-                return _dbHelper.ExecuteQuery(query);
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@Date", date.ToString("yyyy-MM-dd") }
+                };
+                return _dbHelper.ExecuteQueryWithParams(query, parameters);
             }
             catch (Exception ex)
             {
@@ -76,22 +97,26 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                string query = $@"
+                string query = @"
             SELECT i.*,
                    (i.Amount - ISNULL((
-                       SELECT SUM(ri.Amount) 
+                       SELECT SUM(ri.Amount)
                        FROM Reservation_Items ri
                        INNER JOIN Reservation r ON r.ID = ri.Reservation_ID
-                       WHERE ri.Items_ID = i.ID 
-                       AND '{date:yyyy-MM-dd}' >= r.CheckinDate 
-                       AND '{date:yyyy-MM-dd}' < r.CheckoutDate 
+                       WHERE ri.Items_ID = i.ID
+                       AND @Date >= r.CheckinDate
+                       AND @Date < r.CheckoutDate
                        AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอ้าท์แล้ว')
                    ), 0)) as AvailableAmount
             FROM Items i
-            WHERE i.Status = 1 
+            WHERE i.Status = 1
             ORDER BY i.OrderID ASC";
 
-                return _dbHelper.ExecuteQuery(query);
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@Date", date.ToString("yyyy-MM-dd") }
+                };
+                return _dbHelper.ExecuteQueryWithParams(query, parameters);
             }
             catch (Exception ex)
             {
@@ -107,8 +132,8 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                string query = $@"
-            SELECT 
+                string query = @"
+            SELECT
                 a.ID,
                 a.AccomName,
                 a.Price,
@@ -120,20 +145,25 @@ namespace Take_Time_BangPhra.Services
             FROM Accommodation a
             WHERE a.Status = 1
             AND (
-                a.LimitWithPeople = 'True' 
+                a.LimitWithPeople = 'True'
                 OR a.ID NOT IN (
-                    SELECT ra.Accommodation_ID 
+                    SELECT ra.Accommodation_ID
                     FROM Reservation_Accommodation ra
                     INNER JOIN Reservation r ON r.ID = ra.Reservation_ID
-                    WHERE '{date:yyyy-MM-dd}' >= r.CheckinDate 
-                    AND '{date:yyyy-MM-dd}' < r.CheckoutDate
+                    WHERE @Date >= r.CheckinDate
+                    AND @Date < r.CheckoutDate
                     AND r.Status NOT IN ('ยกเลิกแล้ว', 'Cancelled')
-                    AND r.ID != {excludeReservationId}
+                    AND r.ID != @ExcludeReservationId
                 )
             )
             ORDER BY a.AccomName";
 
-                return _dbHelper.ExecuteQuery(query);
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@Date", date.ToString("yyyy-MM-dd") },
+                    { "@ExcludeReservationId", excludeReservationId }
+                };
+                return _dbHelper.ExecuteQueryWithParams(query, parameters);
             }
             catch (Exception ex)
             {
@@ -172,8 +202,12 @@ namespace Take_Time_BangPhra.Services
 
         public DataTable GetCustomerReservationHistory(string phoneNumber)
         {
-            string query = $"SELECT count([Customer_MobilePhone]) as CountReserved FROM [Reservation] Where Customer_MobilePhone = '{phoneNumber}' AND Status = N'เช็คอินแล้ว'";
-            return _dbHelper.ExecuteQuery(query);
+            string query = "SELECT count([Customer_MobilePhone]) as CountReserved FROM [Reservation] Where Customer_MobilePhone = @PhoneNumber AND Status = N'เช็คอินแล้ว'";
+            var parameters = new Dictionary<string, object>
+            {
+                { "@PhoneNumber", phoneNumber }
+            };
+            return _dbHelper.ExecuteQueryWithParams(query, parameters);
         }
 
         public async Task<bool> CancelReservationWithRefund(string reservationId)
@@ -183,12 +217,18 @@ namespace Take_Time_BangPhra.Services
                 // 🔧 FIX: Cancel Payment_History records first
                 try
                 {
-                    _dbHelper.ExecuteInsert($@"
+                    string updatePaymentQuery = @"
                         UPDATE [dbo].[Payment_History]
                         SET Status = 'CANCELLED',
-                            Notes = N'ยกเลิกจากการยกเลิกการจอง (คืนเงิน) ID: {reservationId}'
-                        WHERE Reservation_ID = {reservationId}
-                        AND Status = 'COMPLETED'");
+                            Notes = N'ยกเลิกจากการยกเลิกการจอง (คืนเงิน) ID: ' + @ReservationId
+                        WHERE Reservation_ID = @ReservationId
+                        AND Status = 'COMPLETED'";
+
+                    var paymentParams = new Dictionary<string, object>
+                    {
+                        { "@ReservationId", reservationId }
+                    };
+                    _dbHelper.ExecuteNonQueryWithParams(updatePaymentQuery, paymentParams);
 
                     System.Diagnostics.Trace.TraceInformation($"✅ Cancelled Payment_History for Reservation {reservationId}");
                 }
@@ -199,9 +239,14 @@ namespace Take_Time_BangPhra.Services
                 }
 
                 // Update reservation status
-                _dbHelper.ExecuteInsert($"UPDATE [dbo].[Reservation] SET TotalPrice = 0, Deposit = 0 , [Status] = N'ยกเลิกคืนเงิน' WHERE ID = {reservationId}");
-                _dbHelper.ExecuteInsert($"DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = {reservationId}");
-                _dbHelper.ExecuteInsert($"DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = {reservationId}");
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@ReservationId", reservationId }
+                };
+
+                _dbHelper.ExecuteNonQueryWithParams("UPDATE [dbo].[Reservation] SET TotalPrice = 0, Deposit = 0 , [Status] = N'ยกเลิกคืนเงิน' WHERE ID = @ReservationId", parameters);
+                _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
+                _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
 
                 return true;
             }
@@ -219,12 +264,18 @@ namespace Take_Time_BangPhra.Services
                 // 🔧 FIX: Cancel Payment_History records first
                 try
                 {
-                    _dbHelper.ExecuteInsert($@"
+                    string updatePaymentQuery = @"
                         UPDATE [dbo].[Payment_History]
                         SET Status = 'CANCELLED',
-                            Notes = N'ยกเลิกจากการยกเลิกการจอง (ไม่คืนเงิน) ID: {reservationId}'
-                        WHERE Reservation_ID = {reservationId}
-                        AND Status = 'COMPLETED'");
+                            Notes = N'ยกเลิกจากการยกเลิกการจอง (ไม่คืนเงิน) ID: ' + @ReservationId
+                        WHERE Reservation_ID = @ReservationId
+                        AND Status = 'COMPLETED'";
+
+                    var paymentParams = new Dictionary<string, object>
+                    {
+                        { "@ReservationId", reservationId }
+                    };
+                    _dbHelper.ExecuteNonQueryWithParams(updatePaymentQuery, paymentParams);
 
                     System.Diagnostics.Trace.TraceInformation($"✅ Cancelled Payment_History for Reservation {reservationId}");
                 }
@@ -235,9 +286,14 @@ namespace Take_Time_BangPhra.Services
                 }
 
                 // Update reservation status (Deposit is NOT reset to 0 - customer doesn't get refund)
-                _dbHelper.ExecuteInsert($"UPDATE [dbo].[Reservation] SET TotalPrice = 0, [Status] = N'ยกเลิกไม่คืนเงิน' WHERE ID = {reservationId}");
-                _dbHelper.ExecuteInsert($"DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = {reservationId}");
-                _dbHelper.ExecuteInsert($"DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = {reservationId}");
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@ReservationId", reservationId }
+                };
+
+                _dbHelper.ExecuteNonQueryWithParams("UPDATE [dbo].[Reservation] SET TotalPrice = 0, [Status] = N'ยกเลิกไม่คืนเงิน' WHERE ID = @ReservationId", parameters);
+                _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
+                _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
 
                 return true;
             }
