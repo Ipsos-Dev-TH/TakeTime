@@ -392,11 +392,28 @@ namespace Take_Time_BangPhra
                     
 
                     Button1.Enabled = true;
-                    DataTable dtReservation = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] Where ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
-                    DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
-                    DataTable dtItemsold = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+                    // SECURE: Parameterized queries for reservation data
+                    var reservationParams = new Dictionary<string, object>
+                    {
+                        { "@ID", id },
+                        { "@MobilePhone", check }
+                    };
+                    DataTable dtReservation = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Reservation] Where ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                        reservationParams);
 
-                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  * FROM [Account_Receipt] Where RESERVATION_ID = '" + id + "'");
+                    DataTable dtAccom = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                        reservationParams);
+
+                    DataTable dtItemsold = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                        reservationParams);
+
+                    var receiptParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                    DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT  * FROM [Account_Receipt] Where RESERVATION_ID = @ReservationID",
+                        receiptParams);
                     try
                     {
                         if (dtReservation.Rows[0]["NoCreateReceipt"].ToString().ToLower() == "false")
@@ -486,7 +503,10 @@ namespace Take_Time_BangPhra
                             }
                         }
                     }
-                    DataTable dtCustomer = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID left join Account_Receipt on Account_Receipt.Reservation_ID = Reservation.ID  Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+                    // SECURE: Parameterized query for customer data
+                    DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                        "SELECT * FROM [Reservation] inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID left join Account_Receipt on Account_Receipt.Reservation_ID = Reservation.ID  Where Reservation.ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                        reservationParams);
                     try //Address
                     {
                         TextBox16.Text = dtCustomer.Rows[0]["PostalCode"].ToString();
@@ -607,7 +627,15 @@ namespace Take_Time_BangPhra
                 {
                     for(int j = 0;j<listcheck.Count;j++)
                     {
-                        DataTable dtReserveAccomDup = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where CheckinDate = '"+Convert.ToDateTime(TextBox12.Text).AddDays(i).ToString("yyyy-MM-dd")+"' AND AccomName = N'" + listcheck[j] +"'");
+                        // SECURE: Parameterized query for duplicate reservation check
+                        var dupCheckParams = new Dictionary<string, object>
+                        {
+                            { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).AddDays(i).ToString("yyyy-MM-dd") },
+                            { "@AccomName", listcheck[j] }
+                        };
+                        DataTable dtReserveAccomDup = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Taketime].[dbo].[Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID inner join Accommodation on Accommodation.ID = Accommodation_ID Where CheckinDate = @CheckinDate AND AccomName = @AccomName",
+                            dupCheckParams);
                         if(dtReserveAccomDup.Rows.Count > 0)
                         {
                             checkdup = 1;
@@ -792,20 +820,65 @@ namespace Take_Time_BangPhra
                                 //}
                                 if ((command == "edit" || command == "rentmore") && Session["permission"].ToString() == "True")
                                 {
-                                    DataTable dtCustomer = code.DatabaseQuery(conn, "Select * From Customer Where MobilePhone = '" + TextBox1.Text + "'");
+                                    // SECURE: Parameterized query to check customer existence
+                                    var customerCheckParams = new Dictionary<string, object> { { "@MobilePhone", TextBox1.Text } };
+                                    DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                                        "Select * From Customer Where MobilePhone = @MobilePhone",
+                                        customerCheckParams);
+
                                     if (dtCustomer.Rows.Count == 1)
                                     {
-                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                        // SECURE: Parameterized UPDATE for customer
+                                        var updateCustomerParams = new Dictionary<string, object>
+                                        {
+                                            { "@Name", TextBox2.Text },
+                                            { "@NickName", TextBox3.Text },
+                                            { "@FullName", TextBox2.Text },
+                                            { "@Address", ValidationHelper.CleanText(TextBox8.Text) },
+                                            { "@IDNumber", TextBox9.Text },
+                                            { "@Email", TextBox13.Text },
+                                            { "@Customer_Type_ID", DropDownList8.SelectedValue },
+                                            { "@Address_ID", _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) },
+                                            { "@Address1", TextBox17.Text },
+                                            { "@Branch_Number", TextBox18.Text },
+                                            { "@MobilePhone", TextBox1.Text }
+                                        };
+                                        code.DatabaseInsertSafe(conn,
+                                            "UPDATE [dbo].[Customer] SET [Name] = @Name ,[NickName] = @NickName,[FullName] = @FullName,[Address] = @Address,[IDNumber] = @IDNumber,[Email] = @Email,[Customer_Type_ID] = @Customer_Type_ID,[Address_ID] = @Address_ID,[Address1] = @Address1,[Branch_Number] = @Branch_Number WHERE MobilePhone = @MobilePhone",
+                                            updateCustomerParams);
                                     }
                                     else
                                     {
-                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + ValidationHelper.CleanText(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
+                                        // SECURE: Parameterized INSERT for new customer
+                                        var insertCustomerParams = new Dictionary<string, object>
+                                        {
+                                            { "@MobilePhone", TextBox1.Text },
+                                            { "@Name", TextBox2.Text },
+                                            { "@NickName", TextBox3.Text },
+                                            { "@FullName", TextBox2.Text },
+                                            { "@Address", ValidationHelper.CleanText(TextBox8.Text) },
+                                            { "@IDNumber", TextBox9.Text },
+                                            { "@Email", TextBox13.Text },
+                                            { "@Customer_Type_ID", DropDownList8.SelectedValue },
+                                            { "@Address_ID", _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) },
+                                            { "@Address1", TextBox17.Text },
+                                            { "@Branch_Number", TextBox18.Text }
+                                        };
+                                        code.DatabaseInsertSafe(conn,
+                                            "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES (@MobilePhone,@Name,@NickName,'','',@FullName,@Address,@IDNumber,@Email,@Customer_Type_ID,@Address_ID,@Address1,@Branch_Number)",
+                                            insertCustomerParams);
                                     }
-                                    
+
                                     dtReserve.Clear();
                                     dtReserve.AcceptChanges();
-                                    DataTable dtoldAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = " + id);
-                                    DataTable dtoldItem = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Items] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = " + id);
+                                    // SECURE: Parameterized queries for old accommodations and items
+                                    var oldReservationParams = new Dictionary<string, object> { { "@ID", id } };
+                                    DataTable dtoldAccom = code.DatabaseQuerySafe(conn,
+                                        "SELECT * FROM [Reservation_Accommodation] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = @ID",
+                                        oldReservationParams);
+                                    DataTable dtoldItem = code.DatabaseQuerySafe(conn,
+                                        "SELECT * FROM [Reservation_Items] inner join Reservation on Reservation.ID = Reservation_ID Where Reservation.ID = @ID",
+                                        oldReservationParams);
                                     IsDeposit = false;
                                     string msg = "";
                                     int totalnew = 0;
@@ -831,11 +904,21 @@ namespace Take_Time_BangPhra
                                                     }
                                                     if (command == "edit")
                                                     {
-                                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation_Accommodation] SET [Amount] = " + Convert.ToInt32(txtPeopleStay.Text) + " ,[Price] = " + row.Cells[4].Text + " WHERE Accommodation_ID = " + dtoldAccom.Rows[x]["Accommodation_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                        // SECURE: Parameterized UPDATE for reservation accommodation
+                                                        var updateAccomParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@Amount", Convert.ToInt32(txtPeopleStay.Text) },
+                                                            { "@Price", row.Cells[4].Text },
+                                                            { "@AccommodationID", dtoldAccom.Rows[x]["Accommodation_ID"].ToString() },
+                                                            { "@ReservationID", id }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "UPDATE [dbo].[Reservation_Accommodation] SET [Amount] = @Amount ,[Price] = @Price WHERE Accommodation_ID = @AccommodationID AND Reservation_ID = @ReservationID",
+                                                            updateAccomParams);
                                                     }
                                                     else
                                                     {
-                                                        cmds.Add("UPDATE [dbo].[Reservation_Accommodation] SET [Amount] = " + Convert.ToInt32(txtPeopleStay.Text) + " ,[Price] = " + row.Cells[4].Text + " WHERE Accommodation_ID = " + dtoldAccom.Rows[x]["Accommodation_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                        cmds.Add("SECURE_UPDATE_ACCOM|" + Convert.ToInt32(txtPeopleStay.Text) + "|" + row.Cells[4].Text + "|" + dtoldAccom.Rows[x]["Accommodation_ID"].ToString() + "|" + id);
                                                     }
                                                     if (Convert.ToInt32(txtPeopleStay.Text) >= Convert.ToInt32(dtoldAccom.Rows[x]["Amount"].ToString()))
                                                     {
@@ -864,7 +947,15 @@ namespace Take_Time_BangPhra
                                                 {
                                                     if (command == "edit")
                                                     {
-                                                        code.DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Accommodation_ID = " + dtoldAccom.Rows[x]["Accommodation_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                        // SECURE: Parameterized DELETE for accommodation
+                                                        var deleteAccomParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@AccommodationID", dtoldAccom.Rows[x]["Accommodation_ID"].ToString() },
+                                                            { "@ReservationID", id }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Accommodation_ID = @AccommodationID AND Reservation_ID = @ReservationID",
+                                                            deleteAccomParams);
                                                     }
 
                                                     checkoldAccomRemoved++;
@@ -892,11 +983,21 @@ namespace Take_Time_BangPhra
                                             {
                                                 if (command == "edit")
                                                 {
-                                                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + txtPeopleStay.Text + "," + row.Cells[4].Text + ") ");
+                                                    // SECURE: Parameterized INSERT for accommodation (LimitWithPeople)
+                                                    var insertAccom1Params = new Dictionary<string, object>
+                                                    {
+                                                        { "@ReservationID", id },
+                                                        { "@AccommodationID", dtAccommodation.Rows[row.RowIndex]["ID"].ToString() },
+                                                        { "@Amount", txtPeopleStay.Text },
+                                                        { "@Price", row.Cells[4].Text }
+                                                    };
+                                                    code.DatabaseInsertSafe(conn,
+                                                        "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (@ReservationID,@AccommodationID,@Amount,@Price)",
+                                                        insertAccom1Params);
                                                 }
                                                 else
                                                 {
-                                                    cmds.Add("INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + txtPeopleStay.Text + "," + row.Cells[4].Text + ") ");
+                                                    cmds.Add("SECURE_INSERT_ACCOM|" + id + "|" + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "|" + txtPeopleStay.Text + "|" + row.Cells[4].Text);
                                                 }
                                                 try
                                                 {
@@ -913,11 +1014,21 @@ namespace Take_Time_BangPhra
                                             {
                                                 if (command == "edit")
                                                 {
-                                                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + DropDownList1.SelectedValue + "," + row.Cells[4].Text + ") ");
+                                                    // SECURE: Parameterized INSERT for accommodation (no LimitWithPeople)
+                                                    var insertAccom2Params = new Dictionary<string, object>
+                                                    {
+                                                        { "@ReservationID", id },
+                                                        { "@AccommodationID", dtAccommodation.Rows[row.RowIndex]["ID"].ToString() },
+                                                        { "@Amount", DropDownList1.SelectedValue },
+                                                        { "@Price", row.Cells[4].Text }
+                                                    };
+                                                    code.DatabaseInsertSafe(conn,
+                                                        "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (@ReservationID,@AccommodationID,@Amount,@Price)",
+                                                        insertAccom2Params);
                                                 }
                                                 else
                                                 {
-                                                    cmds.Add("INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (" + id + "," + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "," + DropDownList1.SelectedValue + "," + row.Cells[4].Text + ") ");
+                                                    cmds.Add("SECURE_INSERT_ACCOM|" + id + "|" + dtAccommodation.Rows[row.RowIndex]["ID"].ToString() + "|" + DropDownList1.SelectedValue + "|" + row.Cells[4].Text);
                                                 }
                                                 try
                                                 {
@@ -947,12 +1058,21 @@ namespace Take_Time_BangPhra
                                                 {
                                                     if (command == "edit")
                                                     {
-                                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation_Items] SET [Amount] = " + Convert.ToInt32(txtAmount.Text) + " ,[Price] = " + row.Cells[4].Text + " WHERE Items_ID = " + dtoldItem.Rows[x]["Items_ID"].ToString() + " AND Reservation_ID = " + id);
-                                                        
+                                                        // SECURE: Parameterized UPDATE for reservation items
+                                                        var updateItemParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@Amount", Convert.ToInt32(txtAmount.Text) },
+                                                            { "@Price", row.Cells[4].Text },
+                                                            { "@ItemsID", dtoldItem.Rows[x]["Items_ID"].ToString() },
+                                                            { "@ReservationID", id }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "UPDATE [dbo].[Reservation_Items] SET [Amount] = @Amount ,[Price] = @Price WHERE Items_ID = @ItemsID AND Reservation_ID = @ReservationID",
+                                                            updateItemParams);
                                                     }
                                                     else
                                                     {
-                                                        cmds.Add("UPDATE [dbo].[Reservation_Items] SET [Amount] = " + Convert.ToInt32(txtAmount.Text) + " ,[Price] = " + row.Cells[4].Text + " WHERE Items_ID = " + dtoldItem.Rows[x]["Items_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                        cmds.Add("SECURE_UPDATE_ITEM|" + Convert.ToInt32(txtAmount.Text) + "|" + row.Cells[4].Text + "|" + dtoldItem.Rows[x]["Items_ID"].ToString() + "|" + id);
                                                     }
                                                     if (Convert.ToInt32(txtAmount.Text) >= Convert.ToInt32(dtoldItem.Rows[x]["Amount"].ToString()))
                                                     {
@@ -981,7 +1101,15 @@ namespace Take_Time_BangPhra
                                                 {
                                                     if (command == "edit")
                                                     {
-                                                        code.DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Items] WHERE Items_ID = " + dtoldItem.Rows[x]["Items_ID"].ToString() + " AND Reservation_ID = " + id);
+                                                        // SECURE: Parameterized DELETE for items
+                                                        var deleteItemParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@ItemsID", dtoldItem.Rows[x]["Items_ID"].ToString() },
+                                                            { "@ReservationID", id }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "DELETE FROM [dbo].[Reservation_Items] WHERE Items_ID = @ItemsID AND Reservation_ID = @ReservationID",
+                                                            deleteItemParams);
                                                     }
                                                     checkoldItemRemoved++;
                                                 }
@@ -1011,11 +1139,21 @@ namespace Take_Time_BangPhra
                                             {
                                                 if (command == "edit")
                                                 {
-                                                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (" + id + "," + dtItems.Rows[row.RowIndex]["ID"].ToString() + "," + txtAmount.Text + "," + row.Cells[4].Text + ") ");
+                                                    // SECURE: Parameterized INSERT for new items
+                                                    var insertItemParams = new Dictionary<string, object>
+                                                    {
+                                                        { "@ReservationID", id },
+                                                        { "@ItemsID", dtItems.Rows[row.RowIndex]["ID"].ToString() },
+                                                        { "@Amount", txtAmount.Text },
+                                                        { "@Price", row.Cells[4].Text }
+                                                    };
+                                                    code.DatabaseInsertSafe(conn,
+                                                        "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (@ReservationID,@ItemsID,@Amount,@Price)",
+                                                        insertItemParams);
                                                 }
                                                 else
                                                 {
-                                                    cmds.Add("INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (" + id + "," + dtItems.Rows[row.RowIndex]["ID"].ToString() + "," + txtAmount.Text + "," + row.Cells[4].Text + ") ");
+                                                    cmds.Add("SECURE_INSERT_ITEM|" + id + "|" + dtItems.Rows[row.RowIndex]["ID"].ToString() + "|" + txtAmount.Text + "|" + row.Cells[4].Text);
                                                 }
                                                 try
                                                 {
@@ -1032,7 +1170,23 @@ namespace Take_Time_BangPhra
                                         { }
                                     }
                                     msg += "\r\nหมายเหตุ: " + TextBox6.Text ;
-                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                    // SECURE: Parameterized UPDATE for customer (final)
+                                    var finalUpdateCustomerParams = new Dictionary<string, object>
+                                    {
+                                        { "@Name", TextBox2.Text },
+                                        { "@NickName", TextBox3.Text },
+                                        { "@FullName", TextBox2.Text },
+                                        { "@Address", ValidationHelper.CleanText(TextBox8.Text) },
+                                        { "@IDNumber", TextBox9.Text },
+                                        { "@Email", TextBox13.Text },
+                                        { "@Customer_Type_ID", DropDownList8.SelectedValue },
+                                        { "@Address_ID", _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) },
+                                        { "@Address1", TextBox17.Text },
+                                        { "@MobilePhone", TextBox1.Text }
+                                    };
+                                    code.DatabaseInsertSafe(conn,
+                                        "UPDATE [dbo].[Customer] SET [Name] = @Name ,[NickName] = @NickName,[FullName] = @FullName,[Address] = @Address,[IDNumber] = @IDNumber,[Email] = @Email,[Customer_Type_ID] = @Customer_Type_ID,[Address_ID] = @Address_ID,[Address1] = @Address1 WHERE MobilePhone = @MobilePhone",
+                                        finalUpdateCustomerParams);
 
                                     uploadSlip(id);
                                     if (command == "edit")
@@ -1054,13 +1208,39 @@ namespace Take_Time_BangPhra
                                         }
                                         try
                                         {
-                                            code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = '" + TextBox1.Text + "' ,[CheckinDate] = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "' ,[CheckoutDate] = '" + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "' ,[StayDays] = " + DropDownList1.SelectedValue + " , [TotalPrice] = " + TextBox4.Text + " ,[Deposit] = " + Deposit + ", [Remark] = N'" + TextBox6.Text + "' WHERE ID = " + id);
+                                            // SECURE: Parameterized UPDATE for reservation (edit mode)
+                                            var updateReservationParams = new Dictionary<string, object>
+                                            {
+                                                { "@MobilePhone", TextBox1.Text },
+                                                { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") },
+                                                { "@CheckoutDate", Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") },
+                                                { "@StayDays", DropDownList1.SelectedValue },
+                                                { "@TotalPrice", TextBox4.Text },
+                                                { "@Deposit", Deposit },
+                                                { "@Remark", TextBox6.Text },
+                                                { "@ID", id }
+                                            };
+                                            code.DatabaseInsertSafe(conn,
+                                                "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = @MobilePhone ,[CheckinDate] = @CheckinDate ,[CheckoutDate] = @CheckoutDate ,[StayDays] = @StayDays , [TotalPrice] = @TotalPrice ,[Deposit] = @Deposit, [Remark] = @Remark WHERE ID = @ID",
+                                                updateReservationParams);
                                         }
                                         catch(Exception ex)
                                         {
                                             if(TextBox12.Text == null || TextBox12.Text == "")
                                             {
-                                                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = '" + TextBox1.Text + "' ,[CheckinDate] = '1990-01-01' ,[CheckoutDate] = '1990-01-01' ,[StayDays] = " + DropDownList1.SelectedValue + " , [TotalPrice] = " + TextBox4.Text + " ,[Deposit] = " + Deposit + ", [Remark] = N'" + TextBox6.Text + "' WHERE ID = " + id);
+                                                // SECURE: Parameterized UPDATE for reservation (fallback)
+                                                var updateReservationFallbackParams = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", TextBox4.Text },
+                                                    { "@Deposit", Deposit },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@ID", id }
+                                                };
+                                                code.DatabaseInsertSafe(conn,
+                                                    "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = @MobilePhone ,[CheckinDate] = '1990-01-01' ,[CheckoutDate] = '1990-01-01' ,[StayDays] = @StayDays , [TotalPrice] = @TotalPrice ,[Deposit] = @Deposit, [Remark] = @Remark WHERE ID = @ID",
+                                                    updateReservationFallbackParams);
                                             }
                                             else
                                             {
@@ -1077,9 +1257,62 @@ namespace Take_Time_BangPhra
                                         {
                                             if (CheckBox2.Checked == true)
                                             {
+                                                // SECURE: Process parameterized commands for rentmore
                                                 for (int i = 0; i < cmds.Count; i++)
                                                 {
-                                                    code.DatabaseInsert(conn, cmds[i]);
+                                                    string[] parts = cmds[i].Split('|');
+                                                    if (parts[0] == "SECURE_UPDATE_ACCOM" && parts.Length == 5)
+                                                    {
+                                                        var cmdParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@Amount", parts[1] },
+                                                            { "@Price", parts[2] },
+                                                            { "@AccommodationID", parts[3] },
+                                                            { "@ReservationID", parts[4] }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "UPDATE [dbo].[Reservation_Accommodation] SET [Amount] = @Amount ,[Price] = @Price WHERE Accommodation_ID = @AccommodationID AND Reservation_ID = @ReservationID",
+                                                            cmdParams);
+                                                    }
+                                                    else if (parts[0] == "SECURE_INSERT_ACCOM" && parts.Length == 5)
+                                                    {
+                                                        var cmdParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@ReservationID", parts[1] },
+                                                            { "@AccommodationID", parts[2] },
+                                                            { "@Amount", parts[3] },
+                                                            { "@Price", parts[4] }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (@ReservationID,@AccommodationID,@Amount,@Price)",
+                                                            cmdParams);
+                                                    }
+                                                    else if (parts[0] == "SECURE_UPDATE_ITEM" && parts.Length == 5)
+                                                    {
+                                                        var cmdParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@Amount", parts[1] },
+                                                            { "@Price", parts[2] },
+                                                            { "@ItemsID", parts[3] },
+                                                            { "@ReservationID", parts[4] }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "UPDATE [dbo].[Reservation_Items] SET [Amount] = @Amount ,[Price] = @Price WHERE Items_ID = @ItemsID AND Reservation_ID = @ReservationID",
+                                                            cmdParams);
+                                                    }
+                                                    else if (parts[0] == "SECURE_INSERT_ITEM" && parts.Length == 5)
+                                                    {
+                                                        var cmdParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@ReservationID", parts[1] },
+                                                            { "@ItemsID", parts[2] },
+                                                            { "@Amount", parts[3] },
+                                                            { "@Price", parts[4] }
+                                                        };
+                                                        code.DatabaseInsertSafe(conn,
+                                                            "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (@ReservationID,@ItemsID,@Amount,@Price)",
+                                                            cmdParams);
+                                                    }
                                                 }
                                                 Deposit += Convert.ToDecimal(TextBox10.Text);
                                                 IsDeposit = false;
@@ -1087,7 +1320,21 @@ namespace Take_Time_BangPhra
                                                 {
                                                     createReceipt(id, Convert.ToDouble(TextBox10.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
                                                 }
-                                                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = '" + TextBox1.Text + "' ,[CheckinDate] = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "' ,[CheckoutDate] = '" + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "' ,[StayDays] = " + DropDownList1.SelectedValue + " , [TotalPrice] = " + TextBox4.Text + " ,[Deposit] = " + Deposit + ", [Remark] = N'" + TextBox6.Text + "' WHERE ID = " + id);
+                                                // SECURE: Parameterized UPDATE for reservation (rentmore)
+                                                var updateReservationRentmoreParams = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") },
+                                                    { "@CheckoutDate", Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", TextBox4.Text },
+                                                    { "@Deposit", Deposit },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@ID", id }
+                                                };
+                                                code.DatabaseInsertSafe(conn,
+                                                    "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = @MobilePhone ,[CheckinDate] = @CheckinDate ,[CheckoutDate] = @CheckoutDate ,[StayDays] = @StayDays , [TotalPrice] = @TotalPrice ,[Deposit] = @Deposit, [Remark] = @Remark WHERE ID = @ID",
+                                                    updateReservationRentmoreParams);
                                                 Response.Redirect("./Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
                                             }
                                         }
@@ -1107,16 +1354,41 @@ namespace Take_Time_BangPhra
                                 else if (command == "checkin" && Session["permission"].ToString() == "True" && TextBox1.Text != "02")
                                 {
                                     IsDeposit = false;
-                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Customer] SET [Name] = N'" + TextBox2.Text.Replace("'", "''") + "' ,[NickName] = N'" + TextBox3.Text.Replace("'", "''") + "',[FullName] = N'" + TextBox2.Text.Replace("'", "''") + "',[Address] = N'" + ValidationHelper.CleanText(TextBox8.Text) + "',[IDNumber] = N'" + TextBox9.Text.Replace("'", "''") + "',[Email] = N'" + TextBox13.Text.Replace("'", "''") + "',[Customer_Type_ID] = " + DropDownList8.SelectedValue + ",[Address_ID] = " + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",[Address1] = N'" + TextBox17.Text.Replace("'", "''") + "',[Branch_Number] = N'" + TextBox18.Text.Replace("'", "''") + "' WHERE MobilePhone = '" + TextBox1.Text + "'");
+                                    // SECURE: Parameterized UPDATE for customer (checkin)
+                                    var checkinUpdateCustomerParams = new Dictionary<string, object>
+                                    {
+                                        { "@Name", TextBox2.Text },
+                                        { "@NickName", TextBox3.Text },
+                                        { "@FullName", TextBox2.Text },
+                                        { "@Address", ValidationHelper.CleanText(TextBox8.Text) },
+                                        { "@IDNumber", TextBox9.Text },
+                                        { "@Email", TextBox13.Text },
+                                        { "@Customer_Type_ID", DropDownList8.SelectedValue },
+                                        { "@Address_ID", _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) },
+                                        { "@Address1", TextBox17.Text },
+                                        { "@Branch_Number", TextBox18.Text },
+                                        { "@MobilePhone", TextBox1.Text }
+                                    };
+                                    code.DatabaseInsertSafe(conn,
+                                        "UPDATE [dbo].[Customer] SET [Name] = @Name ,[NickName] = @NickName,[FullName] = @FullName,[Address] = @Address,[IDNumber] = @IDNumber,[Email] = @Email,[Customer_Type_ID] = @Customer_Type_ID,[Address_ID] = @Address_ID,[Address1] = @Address1,[Branch_Number] = @Branch_Number WHERE MobilePhone = @MobilePhone",
+                                        checkinUpdateCustomerParams);
 
                                     if (Convert.ToDecimal(TextBox4.Text) == Convert.ToDecimal(TextBox5.Text))
                                     {
-                                        code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = " + id);
+                                        // SECURE: Parameterized UPDATE for reservation (full payment)
+                                        var updateReservationFullPaidParams = new Dictionary<string, object> { { "@ID", id } };
+                                        code.DatabaseInsertSafe(conn,
+                                            "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = @ID",
+                                            updateReservationFullPaidParams);
                                     }
                                     else
                                     {
                                         TextBox5.Enabled = false;
-                                        DataTable dtfindDeposit = code.DatabaseQuery(conn, "Select * From Account_Receipt Where Reservation_ID = " + id + " AND IsDeposit = 'True' AND Status = 'Normal' AND UseDeposit = 'false'");
+                                        // SECURE: Parameterized query for deposit receipts
+                                        var findDepositParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                                        DataTable dtfindDeposit = code.DatabaseQuerySafe(conn,
+                                            "Select * From Account_Receipt Where Reservation_ID = @ReservationID AND IsDeposit = 'True' AND Status = 'Normal' AND UseDeposit = 'false'",
+                                            findDepositParams);
                                         
                                         dtReserve.Clear();
                                         dtReserve.AcceptChanges();
@@ -1159,13 +1431,21 @@ namespace Take_Time_BangPhra
                                             {
                                                 createReceipt(id, totalAmount - Deposit, dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
                                             }
-                                            code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = " + id);
+                                            // SECURE: Parameterized UPDATE for reservation (checkin no deposit)
+                                            var updateReservationNoDepositParams = new Dictionary<string, object> { { "@ID", id } };
+                                            code.DatabaseInsertSafe(conn,
+                                                "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = @ID",
+                                                updateReservationNoDepositParams);
                                         }
                                         else
                                         {
                                             for (int j = 0; j < dtfindDeposit.Rows.Count; j++)
                                             {
-                                                DataTable dtDepositDetail = code.DatabaseQuery(conn, "Select * From Account_Receipt_Detail Where Receipt_ID = '" + dtfindDeposit.Rows[j]["ID"].ToString() + "'");
+                                                // SECURE: Parameterized query for deposit details
+                                                var depositDetailParams = new Dictionary<string, object> { { "@ReceiptID", dtfindDeposit.Rows[j]["ID"].ToString() } };
+                                                DataTable dtDepositDetail = code.DatabaseQuerySafe(conn,
+                                                    "Select * From Account_Receipt_Detail Where Receipt_ID = @ReceiptID",
+                                                    depositDetailParams);
                                                 for (int k = 0; k < dtDepositDetail.Rows.Count; k++)
                                                 {
                                                     DepositAmount += Convert.ToDecimal(dtDepositDetail.Rows[0]["Price_Amount"].ToString());
@@ -1182,7 +1462,11 @@ namespace Take_Time_BangPhra
                                                 {
                                                     createReceipt(id, totalAmount, dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
                                                 }
-                                                code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = " + id);
+                                                // SECURE: Parameterized UPDATE for reservation (checkin with matching deposit)
+                                                var updateReservationDepositMatchParams = new Dictionary<string, object> { { "@ID", id } };
+                                                code.DatabaseInsertSafe(conn,
+                                                    "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = @ID",
+                                                    updateReservationDepositMatchParams);
                                             }
                                             else
                                             {
@@ -1196,7 +1480,11 @@ namespace Take_Time_BangPhra
                                                     {
                                                         createReceipt(id, totalAmount, dtReserve, IsDeposit, docCreatedDate,CheckBox5.Checked);
                                                     }
-                                                    code.DatabaseInsert(conn, "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = " + id);
+                                                    // SECURE: Parameterized UPDATE for reservation (checkin with partial deposit)
+                                                    var updateReservationPartialDepositParams = new Dictionary<string, object> { { "@ID", id } };
+                                                    code.DatabaseInsertSafe(conn,
+                                                        "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว',[Deposit] = [TotalPrice] WHERE ID = @ID",
+                                                        updateReservationPartialDepositParams);
                                                 }
 
                                                 
@@ -1215,24 +1503,84 @@ namespace Take_Time_BangPhra
                                         {
                                             if (Session["permission"].ToString() == "True")
                                             {
-                                                Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES ('" + TextBox1.Text + "','" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "','" + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "', N'" + Session["UserName"].ToString() + "','" + DateTime.Now + "','"+CheckBox4.Checked+"','"+CheckBox3.Checked+"') SELECT SCOPE_IDENTITY(); ");
-                                                
-                                                
+                                                // SECURE: Parameterized INSERT for new reservation (with permission, valid date)
+                                                var insertReservation1Params = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") },
+                                                    { "@CheckoutDate", Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                    { "@Deposit", TextBox5.Text },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@Reserve_By", Session["UserName"].ToString() },
+                                                    { "@Created_Date", DateTime.Now },
+                                                    { "@NoCreateReceipt", CheckBox4.Checked },
+                                                    { "@NoNameinReceipt", CheckBox3.Checked }
+                                                };
+                                                Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                    "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,@CheckinDate,@CheckoutDate,@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,@Reserve_By,@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                    insertReservation1Params);
                                             }
                                             else
                                             {
-                                                Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES ('" + TextBox1.Text + "','" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "','" + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") + "'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "', N'User','" + DateTime.Now + "','"+CheckBox4.Checked+"','" + CheckBox3.Checked + "') SELECT SCOPE_IDENTITY(); ");
+                                                // SECURE: Parameterized INSERT for new reservation (no permission, valid date)
+                                                var insertReservation2Params = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") },
+                                                    { "@CheckoutDate", Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                    { "@Deposit", TextBox5.Text },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@Created_Date", DateTime.Now },
+                                                    { "@NoCreateReceipt", CheckBox4.Checked },
+                                                    { "@NoNameinReceipt", CheckBox3.Checked }
+                                                };
+                                                Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                    "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,@CheckinDate,@CheckoutDate,@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,N'User',@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                    insertReservation2Params);
                                             }
                                         }
                                         else
                                         {
                                             if (Session["permission"].ToString() == "True")
                                             {
-                                                Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES ('" + TextBox1.Text + "','1990-01-01','1990-01-01'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "',N'" + Session["UserName"].ToString() + "','" + DateTime.Now + "','"+CheckBox4.Checked+"','" + CheckBox3.Checked + "') SELECT SCOPE_IDENTITY(); ");
+                                                // SECURE: Parameterized INSERT for new reservation (with permission, no date)
+                                                var insertReservation3Params = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                    { "@Deposit", TextBox5.Text },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@Reserve_By", Session["UserName"].ToString() },
+                                                    { "@Created_Date", DateTime.Now },
+                                                    { "@NoCreateReceipt", CheckBox4.Checked },
+                                                    { "@NoNameinReceipt", CheckBox3.Checked }
+                                                };
+                                                Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                    "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,'1990-01-01','1990-01-01',@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,@Reserve_By,@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                    insertReservation3Params);
                                             }
                                             else
                                             {
-                                                Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES ('" + TextBox1.Text + "','1990-01-01','1990-01-01'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "',N'User','" + DateTime.Now + "','"+CheckBox4.Checked+"','" + CheckBox3.Checked + "') SELECT SCOPE_IDENTITY(); ");
+                                                // SECURE: Parameterized INSERT for new reservation (no permission, no date)
+                                                var insertReservation4Params = new Dictionary<string, object>
+                                                {
+                                                    { "@MobilePhone", TextBox1.Text },
+                                                    { "@StayDays", DropDownList1.SelectedValue },
+                                                    { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                    { "@Deposit", TextBox5.Text },
+                                                    { "@Remark", TextBox6.Text },
+                                                    { "@Created_Date", DateTime.Now },
+                                                    { "@NoCreateReceipt", CheckBox4.Checked },
+                                                    { "@NoNameinReceipt", CheckBox3.Checked }
+                                                };
+                                                Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                    "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,'1990-01-01','1990-01-01',@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,N'User',@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                    insertReservation4Params);
                                             }
                                         }
 
@@ -1241,11 +1589,40 @@ namespace Take_Time_BangPhra
                                     {
                                         if (Session["permission"].ToString() == "True")
                                         {
-                                            Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt)) VALUES ('" + TextBox1.Text + "','1990-01-01','1990-01-01'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "',N'" + Session["UserName"].ToString() + "','" + DateTime.Now + "','"+CheckBox4.Checked+"','" + CheckBox3.Checked + "') SELECT SCOPE_IDENTITY(); ");
+                                            // SECURE: Parameterized INSERT for new reservation (fallback with permission)
+                                            var insertReservationFallback1Params = new Dictionary<string, object>
+                                            {
+                                                { "@MobilePhone", TextBox1.Text },
+                                                { "@StayDays", DropDownList1.SelectedValue },
+                                                { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                { "@Deposit", TextBox5.Text },
+                                                { "@Remark", TextBox6.Text },
+                                                { "@Reserve_By", Session["UserName"].ToString() },
+                                                { "@Created_Date", DateTime.Now },
+                                                { "@NoCreateReceipt", CheckBox4.Checked },
+                                                { "@NoNameinReceipt", CheckBox3.Checked }
+                                            };
+                                            Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,'1990-01-01','1990-01-01',@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,@Reserve_By,@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                insertReservationFallback1Params);
                                         }
                                         else
                                         {
-                                            Reservation_ID = code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt)) VALUES ('" + TextBox1.Text + "','1990-01-01','1990-01-01'," + DropDownList1.SelectedValue + ",N'มัดจำแล้ว'," + Session["totalPrice"].ToString() + "," + TextBox5.Text + ",N'" + TextBox6.Text + "',N'User','" + DateTime.Now + "','"+CheckBox4.Checked+"','" + CheckBox3.Checked + "') SELECT SCOPE_IDENTITY(); ");
+                                            // SECURE: Parameterized INSERT for new reservation (fallback no permission)
+                                            var insertReservationFallback2Params = new Dictionary<string, object>
+                                            {
+                                                { "@MobilePhone", TextBox1.Text },
+                                                { "@StayDays", DropDownList1.SelectedValue },
+                                                { "@TotalPrice", Session["totalPrice"].ToString() },
+                                                { "@Deposit", TextBox5.Text },
+                                                { "@Remark", TextBox6.Text },
+                                                { "@Created_Date", DateTime.Now },
+                                                { "@NoCreateReceipt", CheckBox4.Checked },
+                                                { "@NoNameinReceipt", CheckBox3.Checked }
+                                            };
+                                            Reservation_ID = code.DatabaseInsertReturnSafe(conn,
+                                                "INSERT INTO [dbo].[Reservation] ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],[Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt) VALUES (@MobilePhone,'1990-01-01','1990-01-01',@StayDays,N'มัดจำแล้ว',@TotalPrice,@Deposit,@Remark,N'User',@Created_Date,@NoCreateReceipt,@NoNameinReceipt)",
+                                                insertReservationFallback2Params);
                                         }
                                     }
                                     string ID = "";
@@ -1277,8 +1654,23 @@ namespace Take_Time_BangPhra
                                                 {
                                                     for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
                                                     {
-                                                        DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
-                                                        DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString());
+                                                        // SECURE: Parameterized queries for holiday and regular pricing
+                                                        var holidayPriceQueryParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                                                            { "@DateNewPrice", Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") }
+                                                        };
+                                                        DataTable dtHolidayPrice = code.DatabaseQuerySafe(conn,
+                                                            "Select * from Accommodation_HolidayPrice Where Accommodation_ID = @AccommodationID AND  DateNewPrice = @DateNewPrice",
+                                                            holidayPriceQueryParams);
+
+                                                        var accomPriceQueryParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@ID", dtAccommodation.Rows[i]["ID"].ToString() }
+                                                        };
+                                                        DataTable dtPrice = code.DatabaseQuerySafe(conn,
+                                                            "SELECT [Price] FROM [Accommodation] Where ID = @ID",
+                                                            accomPriceQueryParams);
                                                         if (dtHolidayPrice.Rows.Count > 0)
                                                         {
                                                             if(Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtPrice.Rows[0][0].ToString()) || Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtHolidayPrice.Rows[0]["Price"].ToString()))
@@ -1311,8 +1703,23 @@ namespace Take_Time_BangPhra
                                                 {
                                                     for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
                                                     {
-                                                        DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") + "'");
-                                                        DataTable dtPrice = code.DatabaseQuery(conn, "SELECT [Price] FROM [Accommodation] Where ID = " + dtAccommodation.Rows[i]["ID"].ToString()); 
+                                                        // SECURE: Parameterized queries for holiday and regular pricing
+                                                        var holidayPriceQueryParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                                                            { "@DateNewPrice", Convert.ToDateTime(TextBox12.Text).AddDays(k).ToString("yyyy-MM-dd") }
+                                                        };
+                                                        DataTable dtHolidayPrice = code.DatabaseQuerySafe(conn,
+                                                            "Select * from Accommodation_HolidayPrice Where Accommodation_ID = @AccommodationID AND  DateNewPrice = @DateNewPrice",
+                                                            holidayPriceQueryParams);
+
+                                                        var accomPriceQueryParams = new Dictionary<string, object>
+                                                        {
+                                                            { "@ID", dtAccommodation.Rows[i]["ID"].ToString() }
+                                                        };
+                                                        DataTable dtPrice = code.DatabaseQuerySafe(conn,
+                                                            "SELECT [Price] FROM [Accommodation] Where ID = @ID",
+                                                            accomPriceQueryParams); 
                                                         if (dtHolidayPrice.Rows.Count > 0)
                                                         {
                                                             if (Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtPrice.Rows[0][0].ToString()) || Convert.ToInt32(row.Cells[4].Text) == Convert.ToInt32(dtHolidayPrice.Rows[0]["Price"].ToString()))
@@ -1372,7 +1779,17 @@ namespace Take_Time_BangPhra
                                                     dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", dtAccommodation.Rows[i]["ID"].ToString(), dtAccommodation.Rows[i]["AccomName"].ToString() + " เช็คอิน " + Convert.ToDateTime(TextBox12.Text).ToString("dd MMMM yyyy") + " เช็คเอ้าท์ " + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue.ToString())).ToString("dd MMMM yyyy"), DropDownList1.SelectedValue, dtAccommodation.Rows[i]["Unit"].ToString(), row.Cells[4].Text, Price);
                                                     }
                                             }
-                                            code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (" + Reservation_ID + "," + dtAccommodation.Rows[i]["ID"].ToString() + "," + txtPeopleStay.Text + "," + Price + ") ");
+                                            // SECURE: Parameterized INSERT for reservation accommodation
+                                            var insertReservationAccomParams = new Dictionary<string, object>
+                                            {
+                                                { "@ReservationID", Reservation_ID },
+                                                { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                                                { "@Amount", txtPeopleStay.Text },
+                                                { "@Price", Price }
+                                            };
+                                            code.DatabaseInsertSafe(conn,
+                                                "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (@ReservationID,@AccommodationID,@Amount,@Price)",
+                                                insertReservationAccomParams);
                                         }
                                         i++;
                                     }
@@ -1404,19 +1821,50 @@ namespace Take_Time_BangPhra
                                                 dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "2", dtItems.Rows[i]["ID"].ToString(), dtItems.Rows[i]["ItemName"].ToString() + " เช็คอิน " + Convert.ToDateTime(TextBox12.Text).ToString("dd MMMM yyyy") + " เช็คเอ้าท์ " + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue.ToString())).ToString("dd MMMM yyyy"), txtAmount.Text, dtItems.Rows[i]["Unit"].ToString(), row.Cells[4].Text, Price);
 
                                             }
-                                            code.DatabaseInsert(conn, "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (" + Reservation_ID + "," + dtItems.Rows[i]["ID"].ToString() + "," + txtAmount.Text + "," + Price + ") ");
+                                            // SECURE: Parameterized INSERT for reservation items
+                                            var insertReservationItemParams = new Dictionary<string, object>
+                                            {
+                                                { "@ReservationID", Reservation_ID },
+                                                { "@ItemsID", dtItems.Rows[i]["ID"].ToString() },
+                                                { "@Amount", txtAmount.Text },
+                                                { "@Price", Price }
+                                            };
+                                            code.DatabaseInsertSafe(conn,
+                                                "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (@ReservationID,@ItemsID,@Amount,@Price)",
+                                                insertReservationItemParams);
                                             try { msg += "- " + dtItems.Rows[i]["ItemName"].ToString() + " " + txtAmount.Text + " ชิ้น"; } catch { }
                                         }
                                         i++;
                                     }
-                                    DataTable dtCustomer = code.DatabaseQuery(conn, "Select * From Customer Where MobilePhone = '" + TextBox1.Text + "'");
+                                    // SECURE: Parameterized query for customer check
+                                    var customerCheckReserveParams = new Dictionary<string, object> { { "@MobilePhone", TextBox1.Text } };
+                                    DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                                        "Select * From Customer Where MobilePhone = @MobilePhone",
+                                        customerCheckReserveParams);
                                     if (dtCustomer.Rows.Count == 1)
                                     {
 
                                     }
                                     else
                                     {
-                                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES ('" + TextBox1.Text + "',N'" + TextBox2.Text.Replace("'", "''") + "',N'" + TextBox3.Text.Replace("'", "''") + "','','',N'" + TextBox2.Text + "',N'" + ValidationHelper.CleanText(TextBox8.Text) + "',N'" + TextBox9.Text + "',N'" + TextBox13.Text + "'," + DropDownList8.SelectedValue + "," + _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) + ",N'" + TextBox17.Text.Replace("'", "''") + "',N'" + TextBox18.Text.Replace("'", "''") + "')");
+                                        // SECURE: Parameterized INSERT for new customer (reserve)
+                                        var insertCustomerReserveParams = new Dictionary<string, object>
+                                        {
+                                            { "@MobilePhone", TextBox1.Text },
+                                            { "@Name", TextBox2.Text },
+                                            { "@NickName", TextBox3.Text },
+                                            { "@FullName", TextBox2.Text },
+                                            { "@Address", ValidationHelper.CleanText(TextBox8.Text) },
+                                            { "@IDNumber", TextBox9.Text },
+                                            { "@Email", TextBox13.Text },
+                                            { "@Customer_Type_ID", DropDownList8.SelectedValue },
+                                            { "@Address_ID", _addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text) },
+                                            { "@Address1", TextBox17.Text },
+                                            { "@Branch_Number", TextBox18.Text }
+                                        };
+                                        code.DatabaseInsertSafe(conn,
+                                            "INSERT INTO [dbo].[Customer]([MobilePhone],[Name],[NickName],[ComeFrom],[Remark],FullName,Address,IDNumber,Email,Customer_Type_ID,Address_ID,Address1,Branch_Number) VALUES (@MobilePhone,@Name,@NickName,'','',@FullName,@Address,@IDNumber,@Email,@Customer_Type_ID,@Address_ID,@Address1,@Branch_Number)",
+                                            insertCustomerReserveParams);
                                     }
                                     
                                     try
@@ -1649,16 +2097,71 @@ namespace Take_Time_BangPhra
                 }
                 if (IsDeposit == true)
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] (ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type,Created_By_ID,Etax) VALUES ('" + ReceiptID + "','" + Reservation_ID + "','" + docDate.ToString("yyyy-MM-dd") + "'," + Total_Amount + "," + Vat + "," + PriceExcludeVat + ",'True','False','Normal',N'"+DropDownList2.SelectedItem.Text+"',N'"+created_By_ID+"','"+CheckBox5.Checked+"');");
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) Values ('1','" + ReceiptID + "',1,7,N'ค่ามัดจำที่พักของหมายเลขการจอง "+ Reservation_ID + " ["+ ReceiptID + "]','1',N'ครั้ง'," + Total_Amount + "," + Total_Amount + ")");
+                    // SECURE: Parameterized INSERT for receipt (deposit)
+                    var insertReceiptDepositParams = new Dictionary<string, object>
+                    {
+                        { "@ID", ReceiptID },
+                        { "@ReservationID", Reservation_ID },
+                        { "@CreatedDate", docDate.ToString("yyyy-MM-dd") },
+                        { "@TotalAmount", Total_Amount },
+                        { "@Vat", Vat },
+                        { "@TotalAmountExcludeVat", PriceExcludeVat },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", created_By_ID },
+                        { "@Etax", CheckBox5.Checked }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt] (ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type,Created_By_ID,Etax) VALUES (@ID,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,'True','False','Normal',@PaidType,@CreatedByID,@Etax)",
+                        insertReceiptDepositParams);
+
+                    // SECURE: Parameterized INSERT for receipt detail (deposit)
+                    var insertReceiptDetailDepositParams = new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", ReceiptID },
+                        { "@ReservationID", Reservation_ID },
+                        { "@TotalAmount", Total_Amount }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) Values ('1',@ReceiptID,1,7,N'ค่ามัดจำที่พักของหมายเลขการจอง '+ CAST(@ReservationID AS NVARCHAR) + ' ['+ @ReceiptID + ']','1',N'ครั้ง',@TotalAmount,@TotalAmount)",
+                        insertReceiptDetailDepositParams);
                 }
                 else
                 {
-                    code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt] (ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type,Created_By_ID,Etax) VALUES ('" + ReceiptID + "','" + Reservation_ID + "','" + docDate.ToString("yyyy-MM-dd") + "'," + Total_Amount + "," + Vat + "," + PriceExcludeVat + ",'False','False','Normal',N'" + DropDownList2.SelectedItem.Text + "',N'" + created_By_ID + "','"+CheckBox5.Checked+"');");
+                    // SECURE: Parameterized INSERT for receipt (non-deposit)
+                    var insertReceiptParams = new Dictionary<string, object>
+                    {
+                        { "@ID", ReceiptID },
+                        { "@ReservationID", Reservation_ID },
+                        { "@CreatedDate", docDate.ToString("yyyy-MM-dd") },
+                        { "@TotalAmount", Total_Amount },
+                        { "@Vat", Vat },
+                        { "@TotalAmountExcludeVat", PriceExcludeVat },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", created_By_ID },
+                        { "@Etax", CheckBox5.Checked }
+                    };
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Receipt] (ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type,Created_By_ID,Etax) VALUES (@ID,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,'False','False','Normal',@PaidType,@CreatedByID,@Etax)",
+                        insertReceiptParams);
 
+                    // SECURE: Parameterized INSERT for receipt details
                     for (int i = 0;i<dtReserve.Rows.Count;i++)
                     {
-                        code.DatabaseInsert(conn, "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) Values ('"+dtReserve.Rows[i]["Number"].ToString()+ "','" + ReceiptID + "'," + dtReserve.Rows[i]["ProductType_ID"].ToString() + "," + dtReserve.Rows[i]["Product_ID"].ToString() + ",N'" + dtReserve.Rows[i]["Product_Data"].ToString() + "'," + dtReserve.Rows[i]["Product_Amount"].ToString() + ",N'" + dtReserve.Rows[i]["Product_Unit"].ToString() + "'," + dtReserve.Rows[i]["Price_PerPeice"].ToString() + "," + dtReserve.Rows[i]["Price_Amount"].ToString() + ")");
+                        var insertReceiptDetailParams = new Dictionary<string, object>
+                        {
+                            { "@Number", dtReserve.Rows[i]["Number"].ToString() },
+                            { "@ReceiptID", ReceiptID },
+                            { "@ProductTypeID", dtReserve.Rows[i]["ProductType_ID"].ToString() },
+                            { "@ProductID", dtReserve.Rows[i]["Product_ID"].ToString() },
+                            { "@ProductData", dtReserve.Rows[i]["Product_Data"].ToString() },
+                            { "@ProductAmount", dtReserve.Rows[i]["Product_Amount"].ToString() },
+                            { "@ProductUnit", dtReserve.Rows[i]["Product_Unit"].ToString() },
+                            { "@PricePerPeice", dtReserve.Rows[i]["Price_PerPeice"].ToString() },
+                            { "@PriceAmount", dtReserve.Rows[i]["Price_Amount"].ToString() }
+                        };
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) Values (@Number,@ReceiptID,@ProductTypeID,@ProductID,@ProductData,@ProductAmount,@ProductUnit,@PricePerPeice,@PriceAmount)",
+                            insertReceiptDetailParams);
                     }
                 }
                 if (CheckBox4.Checked == false)
@@ -1668,7 +2171,11 @@ namespace Take_Time_BangPhra
 
                 if (etax == true)
                 {
-                    DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");
+                    // SECURE: Parameterized query for receipt
+                    var receiptEtaxParams = new Dictionary<string, object> { { "@ReservationID", Reservation_ID } };
+                    DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                        "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = @ReservationID",
+                        receiptEtaxParams);
 
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
                     string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
@@ -1737,9 +2244,20 @@ namespace Take_Time_BangPhra
             string RecNumber = DocNumber;
             DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info left join Customer_Type on Business_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID");
 
-            DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '" + RecNumber + "' order by Number ASC");
-            DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber + "'");
-            DataTable dtcustomer = code.DatabaseQuery(conn, "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() + "'");
+            // SECURE: Parameterized queries for receipt details and customer
+            var receiptDetailParams = new Dictionary<string, object> { { "@ReceiptID", RecNumber } };
+            DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = @ReceiptID order by Number ASC",
+                receiptDetailParams);
+
+            DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = @ReceiptID",
+                receiptDetailParams);
+
+            var customerParams = new Dictionary<string, object> { { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() } };
+            DataTable dtcustomer = code.DatabaseQuerySafe(conn,
+                "Select * from Customer left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = @MobilePhone",
+                customerParams);
 
             DataTable dtCustomerReport = new DataTable();
             dtCustomerReport = dtcustomer.Copy();
@@ -1825,7 +2343,11 @@ namespace Take_Time_BangPhra
             string createdsigpath = "";
             try
             {
-                dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                // SECURE: Parameterized query for admin/creator
+                var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"].ToString() } };
+                dtCreator = code.DatabaseQuerySafe(conn,
+                    "Select * from Admin Where ID = @UserID",
+                    creatorParams);
                 CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
                 createdsigpath = "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png";
             }
@@ -2134,8 +2656,12 @@ namespace Take_Time_BangPhra
 
 
             TextBox1.Text = TextBox1.Text.Replace(" ", "").Replace("-", "");
-            DataTable dtCustomer = code.DatabaseQuery(conn, "SELECT * FROM [Customer] left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = '" + TextBox1.Text + "'");
-            
+            // SECURE: Parameterized query for customer lookup
+            var customerLookupParams = new Dictionary<string, object> { { "@MobilePhone", TextBox1.Text } };
+            DataTable dtCustomer = code.DatabaseQuerySafe(conn,
+                "SELECT * FROM [Customer] left join Customer_Type on Customer_Type_ID = Customer_Type.ID left join Address on Address.ID = Address_ID Where MobilePhone = @MobilePhone",
+                customerLookupParams);
+
             if (dtCustomer.Rows.Count >= 1)
             {
                 try //Address
@@ -2170,7 +2696,12 @@ namespace Take_Time_BangPhra
                 if (Session["permission"].ToString() == "True")
                 {
                     Button5.Visible = true;
-                    Button5.Text = "เคยมาแล้ว "+ code.DatabaseQuery(conn, "SELECT count([Customer_MobilePhone]) as CountReserved FROM [Reservation] Where Customer_MobilePhone = '" + TextBox1.Text + "' AND Status = N'เช็คอินแล้ว'").Rows[0][0].ToString()+" ครั้ง" ;
+                    // SECURE: Parameterized query for reservation count
+                    var reservationCountParams = new Dictionary<string, object> { { "@MobilePhone", TextBox1.Text } };
+                    DataTable dtReservationCount = code.DatabaseQuerySafe(conn,
+                        "SELECT count([Customer_MobilePhone]) as CountReserved FROM [Reservation] Where Customer_MobilePhone = @MobilePhone AND Status = N'เช็คอินแล้ว'",
+                        reservationCountParams);
+                    Button5.Text = "เคยมาแล้ว "+ dtReservationCount.Rows[0][0].ToString()+" ครั้ง" ;
                 }
             }
             else
@@ -2188,7 +2719,14 @@ namespace Take_Time_BangPhra
 
         protected void Calendar1_DayRender(object sender, DayRenderEventArgs e)
         {
-            DataTable dtReservation = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + e.Day.Date.ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + e.Day.Date.ToString("yyyy-MM-dd") + "' < CheckoutDate");
+            // SECURE: Parameterized query for calendar day render
+            var calendarParams = new Dictionary<string, object>
+            {
+                { "@DayDate", e.Day.Date.ToString("yyyy-MM-dd") }
+            };
+            DataTable dtReservation = code.DatabaseQuerySafe(conn,
+                "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where @DayDate >= CheckinDate AND @DayDate < CheckoutDate",
+                calendarParams);
             DataTable dtAccommodation = code.DatabaseQuery(conn, "Select * From Accommodation Where Status = 1");
             int maxAccommodation = dtAccommodation.Rows.Count;
             int totalAmount = 0;
@@ -2422,7 +2960,11 @@ namespace Take_Time_BangPhra
                 string id = Request.QueryString["id"];
                 string command = Request.QueryString["command"];
 
-                DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + id + "'");
+                // SECURE: Parameterized query for receipt check
+                var receiptCheckParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtReceipt = code.DatabaseQuerySafe(conn,
+                    "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = @ReservationID",
+                    receiptCheckParams);
                 if ((command == "edit" || command == "checkin" || command == "rentmore") && dtReceipt.Rows.Count > 0)
                 {
                     CheckBox4.Checked = false;
@@ -2497,11 +3039,26 @@ namespace Take_Time_BangPhra
                 DataTable dtAccommodation = code.DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 order by OrderID asc");
                 for (int x = 0; x < Convert.ToInt32(DropDownList1.SelectedValue); x++)
                 {
-                    DataTable dtReservation = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where '" + Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' < CheckoutDate");
+                    // SECURE: Parameterized query for reservations on specific date
+                    var reservationDateParams = new Dictionary<string, object>
+                    {
+                        { "@CheckDate", Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") }
+                    };
+                    DataTable dtReservation = code.DatabaseQuerySafe(conn,
+                        "Select * From Reservation right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID Where @CheckDate >= CheckinDate AND @CheckDate < CheckoutDate",
+                        reservationDateParams);
 
                     if (command == "edit" || command == "checkin" || command == "rentmore")
                     {
-                        DataTable dtAccom = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+                        // SECURE: Parameterized query for existing reservation accommodations
+                        var existingReservationParams = new Dictionary<string, object>
+                        {
+                            { "@ID", id },
+                            { "@MobilePhone", check }
+                        };
+                        DataTable dtAccom = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation_Accommodation.Reservation_ID = Reservation.ID Where Reservation.ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                            existingReservationParams);
                         for (int i = 0; i < dtReservation.Rows.Count; i++)
                         {
                             for (int j = 0; j < dtAccom.Rows.Count; j++)
@@ -2569,7 +3126,11 @@ namespace Take_Time_BangPhra
                                     catch
                                     {
                                         int checkk = 0;
-                                        DataTable dtReserveAmount = code.DatabaseQuery(conn, "SELECT * FROM [Reservation_Accommodation] Where Reservation_ID = " + id);
+                                        // SECURE: Parameterized query for reservation amount
+                                        var reserveAmountParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                                        DataTable dtReserveAmount = code.DatabaseQuerySafe(conn,
+                                            "SELECT * FROM [Reservation_Accommodation] Where Reservation_ID = @ReservationID",
+                                            reserveAmountParams);
                                         for (int l = 0; l < dtReserveAmount.Rows.Count; l++)
                                         {
                                             if (dtReserveAmount.Rows[l]["Accommodation_ID"].ToString() == dtAccommodation.Rows[j]["ID"].ToString())
@@ -2601,7 +3162,15 @@ namespace Take_Time_BangPhra
 
                 for (int i = 0; i < dtAccommodation.Rows.Count; i++)
                 {
-                    DataTable dtHolidayPrice = code.DatabaseQuery(conn, "Select * from Accommodation_HolidayPrice Where Accommodation_ID = " + dtAccommodation.Rows[i]["ID"].ToString() + " AND  DateNewPrice = '" + Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") + "'");
+                    // SECURE: Parameterized query for holiday price
+                    var holidayPriceParams = new Dictionary<string, object>
+                    {
+                        { "@AccommodationID", dtAccommodation.Rows[i]["ID"].ToString() },
+                        { "@DateNewPrice", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") }
+                    };
+                    DataTable dtHolidayPrice = code.DatabaseQuerySafe(conn,
+                        "Select * from Accommodation_HolidayPrice Where Accommodation_ID = @AccommodationID AND  DateNewPrice = @DateNewPrice",
+                        holidayPriceParams);
                     for (int j = 0; j < dtHolidayPrice.Rows.Count; j++)
                     {
                         if (dtAccommodation.Rows[i]["ID"].ToString() == dtHolidayPrice.Rows[j]["Accommodation_ID"].ToString())
@@ -2619,11 +3188,26 @@ namespace Take_Time_BangPhra
                 DataTable dtItems = code.DatabaseQuery(conn, "Select * From Items Where Status = 1 order by OrderID asc");
                 for (int x = 0; x < Convert.ToInt32(DropDownList1.SelectedValue); x++)
                 {
-                    DataTable dtReservation_Items = code.DatabaseQuery(conn, "Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID Where '" + Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" + Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' < CheckoutDate");
+                    // SECURE: Parameterized query for reservation items on specific date
+                    var reservationItemsDateParams = new Dictionary<string, object>
+                    {
+                        { "@CheckDate", Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") }
+                    };
+                    DataTable dtReservation_Items = code.DatabaseQuerySafe(conn,
+                        "Select * From Reservation right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID Where @CheckDate >= CheckinDate AND @CheckDate < CheckoutDate",
+                        reservationItemsDateParams);
 
                     if (command == "edit" || command == "checkin")
                     {
-                        DataTable dtItem = code.DatabaseQuery(conn, "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+                        // SECURE: Parameterized query for existing reservation items
+                        var existingReservationItemsParams = new Dictionary<string, object>
+                        {
+                            { "@ID", id },
+                            { "@MobilePhone", check }
+                        };
+                        DataTable dtItem = code.DatabaseQuerySafe(conn,
+                            "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID Where Reservation.ID = @ID AND Customer_MobilePhone = @MobilePhone",
+                            existingReservationItemsParams);
                         for (int i = 0; i < dtReservation_Items.Rows.Count; i++)
                         {
                             for (int j = 0; j < dtItems.Rows.Count; j++)
@@ -2732,8 +3316,8 @@ namespace Take_Time_BangPhra
         protected void Button6_Click(object sender, EventArgs e)
         {
             TextBox16.Enabled = false;
-            getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' order by SubDistrict ASC");
-
+            // SECURE: Pass postal code as parameter instead of building SQL string
+            getAddressByPostalCode(TextBox16.Text);
         }
 
         protected void Button7_Click(object sender, EventArgs e)
@@ -2747,13 +3331,24 @@ namespace Take_Time_BangPhra
 
         }
 
-        public void getAddress(string commp, string commd, string commsd)
+        // SECURE: New helper method for postal code lookup
+        public void getAddressByPostalCode(string postalCode)
+        {
+            var postalParams = new Dictionary<string, object> { { "@PostalCode", postalCode } };
+            getAddress(
+                "SELECT DISTINCT [Province] FROM [Address] Where PostalCode = @PostalCode order by Province ASC",
+                "SELECT DISTINCT [District] FROM [Address] Where PostalCode = @PostalCode order by District ASC",
+                "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = @PostalCode order by SubDistrict ASC",
+                postalParams);
+        }
+
+        public void getAddress(string commp, string commd, string commsd, Dictionary<string, object> parameters = null)
         {
             string Command = Request.QueryString["Command"];
             string ID = Request.QueryString["ID"];
-            DataTable dtProvince = code.DatabaseQuery(conn, commp);
-            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
-            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
+            DataTable dtProvince = parameters != null ? code.DatabaseQuerySafe(conn, commp, parameters) : code.DatabaseQuery(conn, commp);
+            DataTable dtDistrict = parameters != null ? code.DatabaseQuerySafe(conn, commd, parameters) : code.DatabaseQuery(conn, commd);
+            DataTable dtSubDistrict = parameters != null ? code.DatabaseQuerySafe(conn, commsd, parameters) : code.DatabaseQuery(conn, commsd);
             try
             {
                 if (dtProvince.Rows.Count <= 0)
@@ -2813,11 +3408,27 @@ namespace Take_Time_BangPhra
         {
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = '" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = '" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND District = '" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Parameterized query for address lookup by postal code and district
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text },
+                    { "@District", DropDownList6.SelectedValue }
+                };
+                getAddress(
+                    "SELECT DISTINCT [Province] FROM [Address] Where PostalCode = @PostalCode AND District = @District order by Province ASC",
+                    "SELECT DISTINCT [District] FROM [Address] Where PostalCode = @PostalCode AND District = @District order by District ASC",
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = @PostalCode AND District = @District order by SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = N'" + DropDownList6.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Parameterized query for address lookup by district
+                var addressParams = new Dictionary<string, object> { { "@District", DropDownList6.SelectedValue } };
+                getAddress(
+                    "SELECT DISTINCT [Province] FROM [Address] Where District = @District order by Province ASC",
+                    "SELECT DISTINCT [District] FROM [Address] Where District = @District order by District ASC",
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] Where District = @District order by SubDistrict ASC",
+                    addressParams);
             }
         }
 
@@ -2826,11 +3437,27 @@ namespace Take_Time_BangPhra
 
             if (TextBox16.Enabled == false)
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = '" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = '" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = '" + TextBox16.Text + "' AND Province = '" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Parameterized query for address lookup by postal code and province
+                var addressParams = new Dictionary<string, object>
+                {
+                    { "@PostalCode", TextBox16.Text },
+                    { "@Province", DropDownList5.SelectedValue }
+                };
+                getAddress(
+                    "SELECT DISTINCT [Province] FROM [Address] Where PostalCode = @PostalCode AND Province = @Province order by Province ASC",
+                    "SELECT DISTINCT [District] FROM [Address] Where PostalCode = @PostalCode AND Province = @Province order by District ASC",
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] Where PostalCode = @PostalCode AND Province = @Province order by SubDistrict ASC",
+                    addressParams);
             }
             else
             {
-                getAddress("SELECT DISTINCT [Province] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by Province ASC", "SELECT DISTINCT [District] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = N'" + DropDownList5.SelectedValue + "' order by SubDistrict ASC");
+                // SECURE: Parameterized query for address lookup by province
+                var addressParams = new Dictionary<string, object> { { "@Province", DropDownList5.SelectedValue } };
+                getAddress(
+                    "SELECT DISTINCT [Province] FROM [Address] Where Province = @Province order by Province ASC",
+                    "SELECT DISTINCT [District] FROM [Address] Where Province = @Province order by District ASC",
+                    "SELECT DISTINCT [SubDistrict] FROM [Address] Where Province = @Province order by SubDistrict ASC",
+                    addressParams);
             }
         }
 
