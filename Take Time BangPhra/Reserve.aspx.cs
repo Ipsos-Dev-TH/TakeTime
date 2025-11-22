@@ -1795,11 +1795,14 @@ namespace Take_Time_BangPhra
                                                 }
 
                                                 Deposit += additionalDeposit;
-                                                IsDeposit = true;
+
+                                                // ✅ Check if payment is FULL or DEPOSIT
+                                                decimal totalPrice = Convert.ToDecimal(TextBox4.Text);
+                                                IsDeposit = Deposit < totalPrice;  // true = มัดจำ, false = ยอดเต็ม
 
                                                 // 📝 Log before receipt creation
                                                 code2.Logs(conn, "Reserve Edit - Creating Additional Deposit Receipt",
-                                                    $"Reservation ID: {id}, Amount: {additionalDeposit}, CheckBox4: {CheckBox4.Checked}",
+                                                    $"Reservation ID: {id}, Amount: {additionalDeposit}, Total: {totalPrice}, NewDeposit: {Deposit}, IsDeposit: {IsDeposit}, CheckBox4: {CheckBox4.Checked}",
                                                     Session["User"]?.ToString());
 
                                                 if (CheckBox4.Checked == false)
@@ -2292,7 +2295,10 @@ namespace Take_Time_BangPhra
                                                         code.DatabaseInsert(conn, cmds[i]);
                                                     }
                                                     Deposit += Convert.ToDecimal(TextBox10.Text);
-                                                    IsDeposit = true;  // ✅ FIXED: Set to true (additional deposit, same as EDIT mode)
+
+                                                    // ✅ Check if payment is FULL or DEPOSIT (same logic as EDIT mode)
+                                                    decimal totalPrice = Convert.ToDecimal(TextBox4.Text);
+                                                    IsDeposit = Deposit < totalPrice;  // true = มัดจำ, false = ยอดเต็ม
 
                                                     if (CheckBox4.Checked == false)
                                                     {
