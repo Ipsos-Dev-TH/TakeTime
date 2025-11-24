@@ -457,11 +457,26 @@ namespace Take_Time_BangPhra.Voucher
                 // Use AddressHelper to get Address ID
                 string addressIdStr = _addressHelper.GetAddressIdString(
                     TextBox16.Text,
-                    DropDownList5.SelectedItem.Text,
-                    DropDownList6.SelectedItem.Text,
-                    DropDownList7.SelectedItem.Text);
-                int addressId = string.IsNullOrEmpty(addressIdStr) ? 0 : Convert.ToInt32(addressIdStr);
-                int customerTypeId = string.IsNullOrEmpty(DropDownList8.SelectedValue) ? 0 : Convert.ToInt32(DropDownList8.SelectedValue);
+                    DropDownList5.SelectedItem?.Text ?? "",
+                    DropDownList6.SelectedItem?.Text ?? "",
+                    DropDownList7.SelectedItem?.Text ?? "");
+
+                // ✅ Validate Address_ID with int.TryParse
+                int addressId = 0;
+                if (!string.IsNullOrEmpty(addressIdStr))
+                {
+                    int.TryParse(addressIdStr, out addressId);
+                }
+
+                // ✅ Validate Customer_Type_ID with int.TryParse
+                int customerTypeId = 1; // Default: บุคคลธรรมดา
+                if (!string.IsNullOrEmpty(DropDownList8.SelectedValue))
+                {
+                    if (!int.TryParse(DropDownList8.SelectedValue, out customerTypeId))
+                    {
+                        customerTypeId = 1; // Fallback
+                    }
+                }
 
                 long customerId = code.UpsertCustomer(
                     conn,

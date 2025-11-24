@@ -568,6 +568,40 @@ namespace Take_Time_BangPhra.Account.Report
                 string RecNumber = docNum;
                 int reservation_id = 0;
 
+                // ✅ Validate Customer_Type_ID with fallback to default
+                int customerTypeId = 1; // Default: บุคคลธรรมดา
+                if (!string.IsNullOrEmpty(DropDownList8.SelectedValue))
+                {
+                    if (!int.TryParse(DropDownList8.SelectedValue, out customerTypeId))
+                    {
+                        customerTypeId = 1; // Fallback
+                    }
+                }
+
+                // ✅ Validate Address_ID with fallback to 0
+                int addressId = 0;
+                try
+                {
+                    string addressIdString = _addressHelper.GetAddressIdString(
+                        TextBox16.Text,
+                        DropDownList5.SelectedItem?.Text ?? "",
+                        DropDownList6.SelectedItem?.Text ?? "",
+                        DropDownList7.SelectedItem?.Text ?? ""
+                    );
+
+                    if (!string.IsNullOrEmpty(addressIdString))
+                    {
+                        if (!int.TryParse(addressIdString, out addressId))
+                        {
+                            addressId = 0; // Fallback
+                        }
+                    }
+                }
+                catch
+                {
+                    addressId = 0; // Fallback on error
+                }
+
                 // Upsert customer data (insert or update) - ensures no duplicates and always latest data
                 // ALWAYS matches by MobilePhone - ensures only 1 record per phone number
                 // If customer type changes from Individual to Corporate (or vice versa), it updates the existing record
@@ -582,8 +616,8 @@ namespace Take_Time_BangPhra.Account.Report
                     ValidationHelper.CleanText(TextBox11.Text),  // Address
                     TextBox12.Text,  // IDNumber
                     TextBox17.Text,  // Email
-                    Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                    Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                    customerTypeId,  // Customer_Type_ID (validated)
+                    addressId,  // Address_ID (validated)
                     TextBox18.Text,  // Address1
                     TextBox7.Text  // Branch_Number
                 );
