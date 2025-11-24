@@ -118,16 +118,21 @@ namespace Take_Time_BangPhra
                     //Calendar1.DataBind();
                     //Calendar1_SelectionChanged(null, null);
                     DataTable dtAccom = (DataTable)Session["dtAccommodation"];
-                    for (int j = 0; j < dtAccom.Rows.Count; j++)
+
+                    // ✅ Safety check: Only process if dtAccom is not null
+                    if (dtAccom != null && dtAccom.Rows.Count > 0)
                     {
-                        if (dtAccom.Rows[j]["ID"].ToString() == accom)
+                        for (int j = 0; j < dtAccom.Rows.Count; j++)
                         {
-                            CheckBox chkAccom = GridView1.Rows[j].Cells[0].FindControl("chkSelect") as CheckBox;
-                            if (chkAccom != null)
+                            if (dtAccom.Rows[j]["ID"].ToString() == accom)
                             {
-                                chkAccom.Checked = true;
+                                CheckBox chkAccom = GridView1.Rows[j].Cells[0].FindControl("chkSelect") as CheckBox;
+                                if (chkAccom != null)
+                                {
+                                    chkAccom.Checked = true;
+                                }
+                                //chkAccom.Checked = true;
                             }
-                            //chkAccom.Checked = true;
                         }
                     }
                 }
@@ -293,6 +298,19 @@ namespace Take_Time_BangPhra
             DataTable dtAccommodation = (DataTable)Session["dtAccommodation"];
             DataTable dtItems = (DataTable)Session["dtItems"];
 
+            // ✅ Safety check: If Session is null, try to reload from GridView or DB
+            if (dtAccommodation == null && GridView1.DataSource != null && GridView1.DataSource is DataTable)
+            {
+                dtAccommodation = (DataTable)GridView1.DataSource;
+                Session["dtAccommodation"] = dtAccommodation;
+            }
+
+            if (dtItems == null && GridView2.DataSource != null && GridView2.DataSource is DataTable)
+            {
+                dtItems = (DataTable)GridView2.DataSource;
+                Session["dtItems"] = dtItems;
+            }
+
             int i = 0;
             double totalPrice = 0;
             double PriceAccom = 0;
@@ -331,6 +349,13 @@ namespace Take_Time_BangPhra
                 // Reload dtAccommodation after Calendar1_SelectionChanged updates it
                 dtAccommodation = (DataTable)Session["dtAccommodation"];
                 dtItems = (DataTable)Session["dtItems"];
+
+                // ✅ Safety check after reload
+                if (dtAccommodation == null && GridView1.DataSource != null && GridView1.DataSource is DataTable)
+                {
+                    dtAccommodation = (DataTable)GridView1.DataSource;
+                    Session["dtAccommodation"] = dtAccommodation;
+                }
             }
 
             // Reset loop counter
@@ -345,7 +370,10 @@ namespace Take_Time_BangPhra
                     row.BackColor = System.Drawing.ColorTranslator.FromHtml("#8D9F7F");
                     TextBox txtPeopleStay = (row.Cells[2].FindControl("txtPeopleStay") as TextBox);
                     txtPeopleStay.Enabled = true;
-                    if (dtAccommodation.Rows[i]["LimitWithPeople"].ToString() == "True")
+
+                    // ✅ Safety check: Ensure dtAccommodation is not null and index is valid
+                    if (dtAccommodation != null && i < dtAccommodation.Rows.Count &&
+                        dtAccommodation.Rows[i]["LimitWithPeople"].ToString() == "True")
                     {
                         // 🔧 FIX: Set default guest count to 1 if 0 (when checkbox first checked)
                         // Don't use max occupancy as default - let user choose the actual number
@@ -394,7 +422,7 @@ namespace Take_Time_BangPhra
                             {
                                 // basePricePerPerson ได้รับค่าจาก GridView แล้ว
                             }
-                            else
+                            else if (dtAccommodation != null && i < dtAccommodation.Rows.Count)
                             {
                                 // Fallback to query DB if invalid
                                 basePricePerPerson = Convert.ToInt32(AccomPrice(
@@ -402,7 +430,7 @@ namespace Take_Time_BangPhra
                                     code2.ParseDate(TextBox12.Text).Value));
                             }
                         }
-                        else
+                        else if (dtAccommodation != null && i < dtAccommodation.Rows.Count)
                         {
                             // Get base price per person per night from DB
                             basePricePerPerson = Convert.ToInt32(AccomPrice(
@@ -428,13 +456,17 @@ namespace Take_Time_BangPhra
                     }
                     else
                     {
-                        if (dtAccommodation.Rows[i]["ID"].ToString() == "21" || dtAccommodation.Rows[i]["ID"].ToString() == "22" || dtAccommodation.Rows[i]["ID"].ToString() == "23" || dtAccommodation.Rows[i]["ID"].ToString() == "18")
+                        // ✅ Safety check before accessing dtAccommodation
+                        if (dtAccommodation != null && i < dtAccommodation.Rows.Count)
                         {
-                            DepositAmount += 1000;
-                        }
-                        else
-                        {
-                            DepositAmount += 500;
+                            if (dtAccommodation.Rows[i]["ID"].ToString() == "21" || dtAccommodation.Rows[i]["ID"].ToString() == "22" || dtAccommodation.Rows[i]["ID"].ToString() == "23" || dtAccommodation.Rows[i]["ID"].ToString() == "18")
+                            {
+                                DepositAmount += 1000;
+                            }
+                            else
+                            {
+                                DepositAmount += 500;
+                            }
                         }
                             
                         string ReserveDate = "";
@@ -481,27 +513,35 @@ namespace Take_Time_BangPhra
                         else if (Convert.ToInt32(DropDownList1.SelectedValue) > 1 && CheckBox6.Checked == false)
                         {
                             // Initial load: Multi-day reservation, query DB for holiday prices
-                            double PriceThisAccom = 0;
-                            for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
+                            // ✅ Safety check
+                            if (dtAccommodation != null && i < dtAccommodation.Rows.Count)
                             {
-                                PriceThisAccom += Convert.ToInt32(AccomPrice(dtAccommodation.Rows[i]["ID"].ToString(), code2.ParseDate(ReserveDate).Value.AddDays(k)));
+                                double PriceThisAccom = 0;
+                                for (int k = 0; k < Convert.ToInt32(DropDownList1.SelectedValue); k++)
+                                {
+                                    PriceThisAccom += Convert.ToInt32(AccomPrice(dtAccommodation.Rows[i]["ID"].ToString(), code2.ParseDate(ReserveDate).Value.AddDays(k)));
+                                }
+                                PriceAccom += Convert.ToInt32(PriceThisAccom);
+                                GridView1.Rows[i].Cells[4].Text = (PriceThisAccom / Convert.ToInt32(DropDownList1.SelectedValue)).ToString();
                             }
-                            PriceAccom += Convert.ToInt32(PriceThisAccom);
-                            GridView1.Rows[i].Cells[4].Text = (PriceThisAccom / Convert.ToInt32(DropDownList1.SelectedValue)).ToString();
                         }
                         else if(CheckBox6.Checked == false)
                         {
                             // Initial load: Single-day reservation, query DB for price
-                            double PriceThisAccom = Convert.ToInt32(AccomPrice(dtAccommodation.Rows[i]["ID"].ToString(), code2.ParseDate(ReserveDate).Value));
-                            PriceAccom += PriceThisAccom;
-                            GridView1.Rows[i].Cells[4].Text = PriceThisAccom.ToString();
+                            // ✅ Safety check
+                            if (dtAccommodation != null && i < dtAccommodation.Rows.Count)
+                            {
+                                double PriceThisAccom = Convert.ToInt32(AccomPrice(dtAccommodation.Rows[i]["ID"].ToString(), code2.ParseDate(ReserveDate).Value));
+                                PriceAccom += PriceThisAccom;
+                                GridView1.Rows[i].Cells[4].Text = PriceThisAccom.ToString();
+                            }
                         }
                         else
                         {
                             // Permission mode: Use GridView price
                             PriceAccom += Convert.ToInt32(row.Cells[4].Text) * Convert.ToInt32(DropDownList1.SelectedValue);
                         }
-                        if (Convert.ToInt32(txtPeopleStay.Text) == 0)
+                        if (Convert.ToInt32(txtPeopleStay.Text) == 0 && dtAccommodation != null && i < dtAccommodation.Rows.Count)
                         {
                             txtPeopleStay.Text = dtAccommodation.Rows[i]["People"].ToString();
                         }
@@ -1007,6 +1047,35 @@ namespace Take_Time_BangPhra
                 int checkdup = 0;
                 DataTable dtAccom = (DataTable)Session["dtAccommodation"];
 
+                // ✅ FIX: Reload dtAccommodation if Session is null (can happen after postback/timeout)
+                if (dtAccom == null)
+                {
+                    // Try to get from GridView1.DataSource first
+                    if (GridView1.DataSource != null && GridView1.DataSource is DataTable)
+                    {
+                        dtAccom = (DataTable)GridView1.DataSource;
+                    }
+                    else
+                    {
+                        // Fallback: Query from database
+                        dtAccom = code.DatabaseQuery(conn, "SELECT * FROM Accommodation WHERE Status = 1 ORDER BY OrderID ASC");
+                    }
+
+                    // Restore to Session
+                    if (dtAccom != null)
+                    {
+                        Session["dtAccommodation"] = dtAccom;
+                    }
+                }
+
+                // ✅ Safety check: If still null, show error and exit
+                if (dtAccom == null || dtAccom.Rows.Count == 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                        "alert('ไม่พบข้อมูลห้องพัก กรุณาโหลดหน้าใหม่อีกครั้ง');", true);
+                    return;
+                }
+
                 // ✅ Use AccommodationAvailabilityService for centralized logic
                 var availabilityService = new AccommodationAvailabilityService(conn);
 
@@ -1027,7 +1096,23 @@ namespace Take_Time_BangPhra
                                 CheckBox chk = (row.Cells[0].FindControl("chkSelect") as CheckBox);
                                 if (chk != null && chk.Checked)
                                 {
-                                    accommodationId = Convert.ToInt32(dtAccom.Rows[row.RowIndex]["ID"]);
+                                    // ✅ Safety check before accessing dtAccom
+                                    if (row.RowIndex < dtAccom.Rows.Count)
+                                    {
+                                        accommodationId = Convert.ToInt32(dtAccom.Rows[row.RowIndex]["ID"]);
+                                    }
+                                    else
+                                    {
+                                        // Fallback: Search by AccomName
+                                        foreach (DataRow dr in dtAccom.Rows)
+                                        {
+                                            if (dr["AccomName"].ToString() == accomName)
+                                            {
+                                                accommodationId = Convert.ToInt32(dr["ID"]);
+                                                break;
+                                            }
+                                        }
+                                    }
 
                                     TextBox txtPeopleStay = (row.Cells[2].FindControl("txtPeopleStay") as TextBox);
                                     if (txtPeopleStay != null && !string.IsNullOrEmpty(txtPeopleStay.Text))
