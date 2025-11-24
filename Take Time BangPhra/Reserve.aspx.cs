@@ -2467,6 +2467,41 @@ namespace Take_Time_BangPhra
                                         var reservationDA = new ReservationDataAccess(conn);
 
                                         IsDeposit = false;
+
+                                        // ✅ Validate Customer_Type_ID with fallback to default
+                                        int customerTypeId = 1; // Default: บุคคลธรรมดา
+                                        if (!string.IsNullOrEmpty(DropDownList8.SelectedValue))
+                                        {
+                                            if (!int.TryParse(DropDownList8.SelectedValue, out customerTypeId))
+                                            {
+                                                customerTypeId = 1; // Fallback
+                                            }
+                                        }
+
+                                        // ✅ Validate Address_ID with fallback to 0
+                                        int addressId = 0;
+                                        try
+                                        {
+                                            string addressIdString = _addressHelper.GetAddressIdString(
+                                                TextBox16.Text,
+                                                DropDownList5.SelectedItem?.Text ?? "",
+                                                DropDownList6.SelectedItem?.Text ?? "",
+                                                DropDownList7.SelectedItem?.Text ?? ""
+                                            );
+
+                                            if (!string.IsNullOrEmpty(addressIdString))
+                                            {
+                                                if (!int.TryParse(addressIdString, out addressId))
+                                                {
+                                                    addressId = 0; // Fallback
+                                                }
+                                            }
+                                        }
+                                        catch
+                                        {
+                                            addressId = 0; // Fallback on error
+                                        }
+
                                         // Upsert customer data (insert or update) - ensures no duplicates and always latest data
                                         code.UpsertCustomer(
                                             conn,
@@ -2479,8 +2514,8 @@ namespace Take_Time_BangPhra
                                             ValidationHelper.CleanText(TextBox8.Text),  // Address
                                             TextBox9.Text,  // IDNumber
                                             TextBox13.Text,  // Email
-                                            Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                                            Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                                            customerTypeId,  // Customer_Type_ID (validated)
+                                            addressId,  // Address_ID (validated)
                                             TextBox17.Text,  // Address1
                                             TextBox18.Text  // Branch_Number
                                         );
