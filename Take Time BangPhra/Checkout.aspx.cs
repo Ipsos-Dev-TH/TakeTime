@@ -192,6 +192,7 @@ namespace Take_Time_BangPhra
                     {
                         pnlPaymentComplete.Visible = true;
                         pnlPaymentIncomplete.Visible = false;
+                        pnlPaymentForm.Visible = false;
                         lblPaymentStatus.Text = "<span class='icon-success'><i class='fa fa-check-circle'></i> ชำระครบแล้ว</span>";
                         btnCheckout.Enabled = true;
                     }
@@ -199,13 +200,15 @@ namespace Take_Time_BangPhra
                     {
                         pnlPaymentComplete.Visible = false;
                         pnlPaymentIncomplete.Visible = true;
+                        pnlPaymentForm.Visible = true;
                         lblPaymentStatus.Text = "<span class='icon-warning'><i class='fa fa-exclamation-triangle'></i> ยังไม่ครบ</span>";
+                        lblPaymentRequired.Text = remainingBalance.ToString("N2");
 
                         // 🔒 STRICT: ไม่อนุญาตให้เช็คเอาท์ถ้ายอดไม่ครบ 100%
                         ShowWarning($"⚠️ ไม่สามารถเช็คเอาท์ได้<br/>" +
                                    $"กรุณาชำระเงินให้ครบ 100% ก่อนเช็คเอาท์<br/>" +
                                    $"<strong>ยอดคงเหลือ: {remainingBalance:N2} บาท</strong><br/><br/>" +
-                                   $"💡 หมายเหตุ: ระบบต้องการยอดชำระครบถ้วนตามนโยบายของ PMS");
+                                   $"💡 สามารถชำระเงินได้ในฟอร์มด้านล่าง");
                         btnCheckout.Enabled = false;
                     }
                 }
@@ -320,6 +323,146 @@ namespace Take_Time_BangPhra
                 {
                     ShowError("การเช็คเอาท์ล้มเหลว: " + result.Message);
                 }
+            }
+            catch (Exception ex)
+            {
+                ShowError("เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+
+        protected void btnSavePayment_Click(object sender, EventArgs e)
+        {
+            if (!Page.IsValid)
+                return;
+
+            int reservationId = GetReservationId();
+            if (reservationId == 0)
+            {
+                ShowError("ไม่พบรหัสการจอง");
+                return;
+            }
+
+            try
+            {
+                decimal paymentAmount = Convert.ToDecimal(txtPaymentAmount.Text);
+                string paymentMethod = ddlPaymentMethod.SelectedValue;
+                string notes = txtPaymentNotes.Text.Trim();
+
+                if (paymentAmount <= 0)
+                {
+                    ShowError("กรุณากรอกยอดเงินให้ถูกต้อง");
+                    return;
+                }
+
+                // Get admin ID from session
+                int? adminId = null;
+                if (Session["UserID"] != null)
+                {
+                    adminId = Convert.ToInt32(Session["UserID"]);
+                }
+
+                // Get customer phone
+                string customerPhone = lblCustomerPhone.Text;
+
+                // Create payment record using PaymentService
+                var paymentService = new PaymentService();
+
+                // Determine if this is full payment or deposit
+                decimal remainingBalance = decimal.Parse(lblPaymentRequired.Text);
+                bool isFullPayment = paymentAmount >= remainingBalance;
+                string paymentType = isFullPayment ? "FULL" : "DEPOSIT";
+
+                // Insert into Payment_History
+                var paymentParams = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@ReservationId", reservationId },
+                    { "@PaymentAmount", paymentAmount },
+                    { "@PaymentType", paymentType },
+                    { "@PaymentMethod", paymentMethod },
+                    { "@AdminId", adminId ?? (object)DBNull.Value },
+                    { "@CustomerPhone", customerPhone },
+                    { "@Notes", notes }
+                };
+
+                string insertPaymentQuery = @"
+                    INSERT INTO [dbo].[Payment_History] (
+                        Reservation_ID,
+                        PaymentDate,
+                        PaymentAmount,
+                        PaymentType,
+                        PaymentMethod,
+                        Receipt_ID,
+                        ProcessedBy_AdminID,
+                        PaidBy_CustomerPhone,
+                        Status,
+                        Notes,
+                        CreatedDate,
+                        UpdatedDate
+                    ) VALUES (
+                        @ReservationId,
+                        GETDATE(),
+                        @PaymentAmount,
+                        @PaymentType,
+                        @PaymentMethod,
+                        NULL,
+                        @AdminId,
+                        @CustomerPhone,
+                        'COMPLETED',
+                        @Notes,
+                        GETDATE(),
+                        GETDATE()
+                    )";
+
+                codeInstance.DatabaseInsertSafe(connectionString, insertPaymentQuery, paymentParams);
+
+                // Handle file upload if provided
+                if (fuPaymentSlip.HasFile)
+                {
+                    try
+                    {
+                        string fileName = System.IO.Path.GetFileName(fuPaymentSlip.FileName);
+                        string fileExtension = System.IO.Path.GetExtension(fileName).ToLower();
+
+                        // Validate file type
+                        if (fileExtension == ".jpg" || fileExtension == ".jpeg" || fileExtension == ".png" || fileExtension == ".pdf")
+                        {
+                            // Validate file size (5MB)
+                            if (fuPaymentSlip.PostedFile.ContentLength <= 5242880)
+                            {
+                                string folderPath = Server.MapPath("~/Uploads/PaymentSlips/");
+                                if (!System.IO.Directory.Exists(folderPath))
+                                {
+                                    System.IO.Directory.CreateDirectory(folderPath);
+                                }
+
+                                string uniqueFileName = $"{reservationId}_{DateTime.Now:yyyyMMddHHmmss}{fileExtension}";
+                                string filePath = System.IO.Path.Combine(folderPath, uniqueFileName);
+                                fuPaymentSlip.SaveAs(filePath);
+                            }
+                            else
+                            {
+                                ShowWarning("ไฟล์มีขนาดใหญ่เกิน 5MB");
+                            }
+                        }
+                        else
+                        {
+                            ShowWarning("ไฟล์ต้องเป็น JPG, PNG หรือ PDF เท่านั้น");
+                        }
+                    }
+                    catch (Exception exFile)
+                    {
+                        // Log file upload error but don't fail the payment
+                        System.Diagnostics.Debug.WriteLine($"File upload error: {exFile.Message}");
+                    }
+                }
+
+                ShowSuccess($"บันทึกการชำระเงินสำเร็จ!<br/>" +
+                           $"ยอดชำระ: {paymentAmount:N2} บาท<br/>" +
+                           $"วิธีการชำระ: {ddlPaymentMethod.SelectedItem.Text}<br/><br/>" +
+                           $"กำลังโหลดข้อมูลใหม่...");
+
+                // Reload data after 2 seconds
+                Response.AddHeader("REFRESH", "2;URL=Checkout.aspx?id=" + reservationId);
             }
             catch (Exception ex)
             {

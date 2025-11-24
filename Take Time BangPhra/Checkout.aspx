@@ -321,6 +321,68 @@
             </div>
         </asp:Panel>
 
+        <!-- Payment Section for Remaining Balance -->
+        <asp:Panel ID="pnlPaymentForm" runat="server" CssClass="checkout-card" Visible="false">
+            <div class="card-header">
+                <i class="fa fa-credit-card"></i> ชำระเงินส่วนที่เหลือ
+            </div>
+
+            <div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                <div style="font-weight: bold; color: #856404; margin-bottom: 5px;">
+                    <i class="fa fa-info-circle"></i> ยอดที่ต้องชำระ
+                </div>
+                <div style="font-size: 24px; color: #856404; font-weight: bold;">
+                    <asp:Label ID="lblPaymentRequired" runat="server"></asp:Label> บาท
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="info-item">
+                    <label class="info-label">ยอดเงินที่ชำระ <span style="color: red;">*</span></label>
+                    <asp:TextBox ID="txtPaymentAmount" runat="server" CssClass="form-control"
+                        TextMode="Number" step="0.01" placeholder="0.00"></asp:TextBox>
+                    <asp:RequiredFieldValidator ID="rfvPaymentAmount" runat="server"
+                        ControlToValidate="txtPaymentAmount" ValidationGroup="Payment"
+                        ErrorMessage="กรุณากรอกยอดเงิน" ForeColor="Red" Display="Dynamic"></asp:RequiredFieldValidator>
+                </div>
+
+                <div class="info-item">
+                    <label class="info-label">วิธีการชำระเงิน <span style="color: red;">*</span></label>
+                    <asp:DropDownList ID="ddlPaymentMethod" runat="server" CssClass="form-control">
+                        <asp:ListItem Value="">-- เลือกวิธีการชำระเงิน --</asp:ListItem>
+                        <asp:ListItem Value="CASH">เงินสด</asp:ListItem>
+                        <asp:ListItem Value="TRANSFER">โอนเงิน</asp:ListItem>
+                        <asp:ListItem Value="CREDIT_CARD">บัตรเครดิต</asp:ListItem>
+                        <asp:ListItem Value="DEBIT_CARD">บัตรเดบิต</asp:ListItem>
+                        <asp:ListItem Value="QR_CODE">QR Code</asp:ListItem>
+                    </asp:DropDownList>
+                    <asp:RequiredFieldValidator ID="rfvPaymentMethod" runat="server"
+                        ControlToValidate="ddlPaymentMethod" ValidationGroup="Payment"
+                        InitialValue="" ErrorMessage="กรุณาเลือกวิธีการชำระเงิน" ForeColor="Red" Display="Dynamic"></asp:RequiredFieldValidator>
+                </div>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label class="info-label">อัพโหลดหลักฐานการชำระเงิน (ถ้ามี)</label>
+                <asp:FileUpload ID="fuPaymentSlip" runat="server" CssClass="form-control" />
+                <div style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">
+                    ไฟล์ที่รองรับ: JPG, PNG, PDF (ขนาดไม่เกิน 5MB)
+                </div>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label class="info-label">หมายเหตุ</label>
+                <asp:TextBox ID="txtPaymentNotes" runat="server" CssClass="form-control"
+                    TextMode="MultiLine" Rows="2" placeholder="ระบุหมายเหตุเพิ่มเติม (ถ้ามี)"></asp:TextBox>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <asp:Button ID="btnSavePayment" runat="server" Text="บันทึกการชำระเงิน"
+                    CssClass="btn-primary" OnClick="btnSavePayment_Click" ValidationGroup="Payment"
+                    style="background-color: #3498db;" />
+            </div>
+        </asp:Panel>
+
         <!-- Checkout Checklist -->
         <div class="checkout-card">
             <div class="card-header">

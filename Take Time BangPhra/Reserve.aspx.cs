@@ -6086,11 +6086,18 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
                     "Where '" + Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' >= CheckinDate AND '" +
                     Convert.ToDateTime(TextBox12.Text).AddDays((double)x).ToString("yyyy-MM-dd") + "' < CheckoutDate");
 
-                if (command == "edit" || command == "checkin")
+                if (command == "edit" || command == "checkin" || command == "rentmore")
                 {
                     DataTable dtItem = code.DatabaseQuery(conn,
                         "SELECT * FROM [Reservation] right join Reservation_Items on Reservation_Items.Reservation_ID = Reservation.ID " +
                         "Where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "'");
+
+                    // ✅ Auto-tick checkbox if reservation has rental items (EDIT/CHECKIN/RENTMORE modes)
+                    if (dtItem.Rows.Count > 0)
+                    {
+                        CheckBox7.Checked = true;
+                        Panel2.Visible = true;
+                    }
 
                     for (int i = 0; i < dtReservation_Items.Rows.Count; i++)
                     {
