@@ -252,22 +252,6 @@ namespace Take_Time_BangPhra
 
                 shouldLoadProductCharges = true;
             }
-            else if(command == "rentmore")
-            {
-                TextBox5.Enabled = false;
-                CheckBox2.Visible = true;
-                CheckBox2.Text = "จ่ายเงินเพิ่ม";
-                Button1.Text = "ยืนยันการเช่าเพิ่ม";
-                CheckBox1.Visible = false;
-                Button1.Enabled = true;
-                DropDownList1.Enabled = false;
-                Label7.Visible = false;
-
-                // 🆕 Show payment history
-                LoadPaymentHistory();
-
-                shouldLoadProductCharges = true;
-            }
             else if(command == "reserve")
             {
                 // Reserve mode: Don't show payment history (new reservation)
@@ -622,7 +606,7 @@ namespace Take_Time_BangPhra
             double ProductCharges = 0;
             try
             {
-                if ((command == "edit" || command == "checkin" || command == "rentmore") && !string.IsNullOrEmpty(id))
+                if ((command == "edit" || command == "checkin") && !string.IsNullOrEmpty(id))
                 {
                     int reservationId = Convert.ToInt32(id);
 
@@ -658,10 +642,10 @@ namespace Take_Time_BangPhra
             Session["totalPrice"] = totalPrice;
             Session["ProductCharges"] = ProductCharges;
 
-            // ⚠️ DON'T set TextBox4.Text here - it will be set later in edit/checkin/rentmore section
+            // ⚠️ DON'T set TextBox4.Text here - it will be set later in edit/checkin section
             // TextBox4.Text = Session["totalPrice"].ToString();
 
-            if ((command == "edit" || command == "checkin" || command == "rentmore") && Session["permission"].ToString() == "True")
+            if ((command == "edit" || command == "checkin") && Session["permission"].ToString() == "True")
             {
                 // 🔒 SECURE: Load data every time (even on PostBack) to ensure accuracy
                 Button1.Enabled = true;
@@ -920,7 +904,7 @@ namespace Take_Time_BangPhra
                     }
 
                     // 🔧 FIX: Recalculate total price after loading old data and checking checkboxes
-                    // This ensures TextBox4 shows the correct price on initial load in EDIT/CHECKIN/RENTMORE modes
+                    // This ensures TextBox4 shows the correct price on initial load in EDIT/CHECKIN modes
                     double recalcPriceAccom = 0;
                     int recalcPriceItems = 0;
 
@@ -993,11 +977,11 @@ namespace Take_Time_BangPhra
                     Session["OldPrice"] = finalTotalPrice.ToString();
 
                     // Load slip image
-                    // 🔧 FIX: For CheckIn/Edit/RentMore modes - don't show image (shown in GridView instead)
+                    // 🔧 FIX: For CheckIn/Edit modes - don't show image (shown in GridView instead)
                     try
                     {
                         // Use command variable from line 192 (already declared)
-                        if (command == "checkin" || command == "edit" || command == "rentmore")
+                        if (command == "checkin" || command == "edit")
                         {
                             // Hide image - payment history GridView shows slips instead
                             Image1.Visible = false;
@@ -1350,7 +1334,7 @@ namespace Take_Time_BangPhra
                 int checkpaymentselect = 0;
                 try
                 {
-                    if (Session["permission"].ToString() == "True" && (command == "reserve" || command == "checkin" || (command == "edit" && CheckBox2.Checked == true) || (command == "rentmore" && CheckBox2.Checked == true)))
+                    if (Session["permission"].ToString() == "True" && (command == "reserve" || command == "checkin" || (command == "edit" && CheckBox2.Checked == true)))
                     {
                         if (DropDownList2.SelectedIndex == 0)
                         {
@@ -1402,8 +1386,7 @@ namespace Take_Time_BangPhra
                             // 🔧 Check slip only if additional deposit is checked
                             bool needSlipValidation = (command == "edit" && CheckBox2.Checked) ||
                                                      (command == "reserve") ||
-                                                     (command == "checkin" && CheckBox2.Checked) ||
-                                                     (command == "rentmore" && CheckBox2.Checked);
+                                                     (command == "checkin" && CheckBox2.Checked);
 
                             bool hasValidPaymentProof = FileUpload1.HasFile ||
                                                        Image1.ImageUrl != "./Images/บัญชี.png" ||
@@ -1439,7 +1422,7 @@ namespace Take_Time_BangPhra
                                     //    }
                                     //    Response.Redirect("./Reservation_Confirmed?id=" + Reservation_ID + "&check=" + TextBox1.Text);
                                     //}
-                                    if ((command == "edit" || command == "rentmore") && Session["permission"].ToString() == "True")
+                                    if (command == "edit" && Session["permission"].ToString() == "True")
                                     {
                                         checkCreateCustomer();
 
@@ -2471,155 +2454,6 @@ namespace Take_Time_BangPhra
 
 
 
-                                        }
-                                        else if (command == "rentmore" && TextBox1.Text != "02")
-                                        {
-                                            decimal Deposit = Convert.ToDecimal(TextBox5.Text);
-
-                                            // ✅ Process payment if checkbox is checked AND validation passes
-                                            if (CheckBox2.Checked == true)
-                                            {
-                                                // Validate calculation before processing payment
-                                                if (checkoldAccomRemoved == 0 && checkoldItemRemoved == 0 && totalnew.ToString() == TextBox10.Text)
-                                                {
-                                                    for (int i = 0; i < cmds.Count; i++)
-                                                    {
-                                                        code.DatabaseInsert(conn, cmds[i]);
-                                                    }
-                                                    Deposit += Convert.ToDecimal(TextBox10.Text);
-
-                                                    // ✅ Check if payment is FULL or DEPOSIT (same logic as EDIT mode)
-                                                    decimal totalPrice = Convert.ToDecimal(TextBox4.Text);
-                                                    IsDeposit = Deposit < totalPrice;  // true = มัดจำ, false = ยอดเต็ม
-
-                                                    if (CheckBox4.Checked == false)
-                                                    {
-                                                        // 🏨 Add product charges to receipt
-                                                        AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
-
-                                                        string receiptId = createReceipt(id, Convert.ToDouble(TextBox10.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
-
-                                                        // ✅ Upload slip AFTER createReceipt with Receipt_ID
-                                                        uploadSlip(id, receiptId);
-                                                    }
-                                                    else
-                                                    {
-                                                        // 🏨 ไม่สร้างใบเสร็จ แต่รับเงินแล้ว → mark charges as PAID
-                                                        try
-                                                        {
-                                                            MarkProductChargesAsPaid(Convert.ToInt32(id), "MANUAL_PAYMENT");
-                                                            code2.Logs(conn, "Reserve RentMore - Manual Payment",
-                                                                $"Marked charges as PAID without receipt for Reservation {id}",
-                                                                Session["User"]?.ToString());
-
-                                                            // ✅ Create Payment_History record (without Receipt_ID)
-                                                            try
-                                                            {
-                                                                decimal depositAmount = Convert.ToDecimal(TextBox10.Text);
-                                                                string paymentMethod = DropDownList2.SelectedItem?.Text ?? "TRANSFER";
-                                                                int? adminId = Session["UserID"] != null ? (int?)Convert.ToInt32(Session["UserID"]) : null;
-
-                                                                // Determine payment type (use totalPrice from outer scope)
-                                                                string paymentType = depositAmount >= totalPrice ? "FULL" : "DEPOSIT";
-
-                                                                string insertPaymentQuery = @"
-                                                                    INSERT INTO [dbo].[Payment_History] (
-                                                                        Reservation_ID,
-                                                                        PaymentDate,
-                                                                        PaymentAmount,
-                                                                        PaymentType,
-                                                                        PaymentMethod,
-                                                                        Receipt_ID,
-                                                                        ProcessedBy_AdminID,
-                                                                        PaidBy_CustomerPhone,
-                                                                        Status,
-                                                                        Notes,
-                                                                        CreatedDate,
-                                                                        UpdatedDate
-                                                                    ) OUTPUT INSERTED.ID VALUES (
-                                                                        @ReservationId,
-                                                                        GETDATE(),
-                                                                        @PaymentAmount,
-                                                                        @PaymentType,
-                                                                        @PaymentMethod,
-                                                                        NULL,
-                                                                        @AdminId,
-                                                                        @CustomerPhone,
-                                                                        'COMPLETED',
-                                                                        N'เช่าเพิ่ม (ไม่ออกใบเสร็จ)',
-                                                                        GETDATE(),
-                                                                        GETDATE()
-                                                                    )";
-
-                                                                var paymentParams = new Dictionary<string, object>
-                                                                {
-                                                                    { "@ReservationId", id },
-                                                                    { "@PaymentAmount", depositAmount },
-                                                                    { "@PaymentType", paymentType },
-                                                                    { "@PaymentMethod", paymentMethod },
-                                                                    { "@AdminId", adminId ?? (object)DBNull.Value },
-                                                                    { "@CustomerPhone", TextBox1.Text }
-                                                                };
-
-                                                                DataTable dtPaymentId = code2.DatabaseQuerySafe(conn, insertPaymentQuery, paymentParams);
-                                                                if (dtPaymentId.Rows.Count > 0)
-                                                                {
-                                                                    long paymentHistoryId = Convert.ToInt64(dtPaymentId.Rows[0][0]);
-                                                                    Session["PaymentHistoryId"] = paymentHistoryId;
-                                                                    System.Diagnostics.Debug.WriteLine($"✅ Created Payment_History ID: {paymentHistoryId} (rentmore, no receipt)");
-                                                                }
-                                                            }
-                                                            catch (Exception exPayment)
-                                                            {
-                                                                code2.Logs(conn, "Reserve RentMore - Payment_History Insert Error",
-                                                                    $"Reservation {id}: {exPayment.Message}", "SYSTEM");
-                                                            }
-
-                                                            // ✅ Upload slip without receipt (NULL Receipt_ID)
-                                                            uploadSlip(id, null);
-                                                        }
-                                                        catch (Exception ex)
-                                                        {
-                                                            code2.Logs(conn, "Reserve RentMore - Manual Payment Error",
-                                                                $"Reservation {id}, Error: {ex.Message}",
-                                                                Session["User"]?.ToString());
-                                                        }
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    // ❌ Validation failed - show error but still update reservation below
-                                                    TextBox10.Text = "";
-                                                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('โปรแกรมคำนวนยอดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');", true);
-                                                }
-                                            }
-
-                                            // ✅ FIXED: ALWAYS update reservation (same as EDIT mode) - moved outside payment conditional
-                                            try
-                                            {
-                                                reservationDA.UpdateReservation(
-                                                    Convert.ToInt32(id),
-                                                    TextBox1.Text,
-                                                    code2.ParseDate(TextBox12.Text).Value,
-                                                    code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
-                                                    Convert.ToInt32(DropDownList1.SelectedValue),
-                                                    Convert.ToDecimal(TextBox4.Text),
-                                                    Deposit,
-                                                    TextBox6.Text
-                                                );
-
-                                                // 🛒 จองของเช่าเพิ่มสำเร็จ → ไปหน้า ReserveTable
-                                                Response.Redirect("/ReserveTable", false);
-                                                HttpContext.Current.ApplicationInstance.CompleteRequest();
-                                            }
-                                            catch (Exception ex)
-                                            {
-                                                code2.Logs(conn, "Reserve RentMore - UpdateReservation Error",
-                                                    $"Reservation {id}, Error: {ex.Message}",
-                                                    Session["User"]?.ToString());
-                                                ClientScript.RegisterStartupScript(this.GetType(), "myalert",
-                                                    "alert('เกิดข้อผิดพลาดในการอัพเดทข้อมูล กรุณาลองใหม่อีกครั้ง');", true);
-                                            }
                                         }
                                         else
                                         {

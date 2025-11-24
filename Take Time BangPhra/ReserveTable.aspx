@@ -567,14 +567,10 @@
                                                 CssClass="btn btn-danger btn-sm mb-1" 
                                                 onclientclick="return confirm('ยืนยันการยกเลิกไม่คืนเงินหรือไม่');"/>
                                             
-                                            <asp:Button ID="Button4" runat="server" Text="ยกเลิกคืนเงิน" 
+                                            <asp:Button ID="Button4" runat="server" Text="ยกเลิกคืนเงิน"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="CancelRefund"
-                                                CssClass="btn btn-secondary btn-sm mb-1" 
+                                                CssClass="btn btn-secondary btn-sm mb-1"
                                                 onclientclick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');"/>
-                                            
-                                            <asp:Button ID="Button5" runat="server" Text="เช่าเพิ่ม"
-                                                CommandArgument='<%# Eval("ID") %>' CommandName="RentMore"
-                                                CssClass="btn btn-info btn-sm mb-1" />
 
                                             <asp:Button ID="btnCheckout" runat="server" Text="เช็คเอาท์"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="Checkout"

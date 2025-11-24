@@ -156,17 +156,6 @@ namespace Take_Time_BangPhra
                 Button1.Enabled = true;
                 Label7.Visible = false;
             }
-            else if(command == "rentmore")
-            {
-                TextBox5.Enabled = false;
-                CheckBox2.Visible = true;
-                CheckBox2.Text = "จ่ายเงินเพิ่ม";
-                Button1.Text = "ยืนยันการเช่าเพิ่ม";
-                CheckBox1.Visible = false;
-                Button1.Enabled = true;
-                DropDownList1.Enabled = false;
-                Label7.Visible = false;
-            }
 
 
 
@@ -385,7 +374,7 @@ namespace Take_Time_BangPhra
 
             TextBox4.Text = Session["totalPrice"].ToString();
 
-            if ((command == "edit" || command == "checkin" || command == "rentmore") && Session["permission"].ToString() == "True")
+            if ((command == "edit" || command == "checkin") && Session["permission"].ToString() == "True")
             {
                 if (!IsPostBack)
                 {
@@ -751,7 +740,7 @@ namespace Take_Time_BangPhra
             int checkpaymentselect = 0;
             try
             {
-                if (Session["permission"].ToString() == "True" && ( command == "reserve" || command == "checkin" || (command == "edit" && CheckBox2.Checked == true) || (command == "rentmore" && CheckBox2.Checked == true) ))
+                if (Session["permission"].ToString() == "True" && ( command == "reserve" || command == "checkin" || (command == "edit" && CheckBox2.Checked == true) ))
                 {
                     if(DropDownList2.SelectedIndex == 0)
                     {
@@ -818,7 +807,7 @@ namespace Take_Time_BangPhra
                                 //    }
                                 //    Response.Redirect("./Reservation_Confirmed?id=" + Reservation_ID + "&check=" + TextBox1.Text);
                                 //}
-                                if ((command == "edit" || command == "rentmore") && Session["permission"].ToString() == "True")
+                                if (command == "edit" && Session["permission"].ToString() == "True")
                                 {
                                     // SECURE: Parameterized query to check customer existence
                                     var customerCheckParams = new Dictionary<string, object> { { "@MobilePhone", TextBox1.Text } };
@@ -1250,104 +1239,9 @@ namespace Take_Time_BangPhra
                                         SendLineNotify("แก้ไขการจองหมายเลข: "+ id+ "\r\nหมายเลขโทรศัพท์: " + TextBox1.Text + "\r\nเช็คอินวันที่: " + Convert.ToDateTime(TextBox12.Text).ToString("dd MMMM yyyy") + "\r\nเช็คเอ้าท์วันที่: " + Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("dd MMMM yyyy") + "\r\n"+msg);
                                         Response.Redirect("./Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
                                     }
-                                    else if (command == "rentmore" && TextBox1.Text != "02")
-                                    {
-                                        decimal Deposit = Convert.ToDecimal(TextBox5.Text);
-                                        if (checkoldAccomRemoved == 0 && checkoldItemRemoved == 0 && totalnew.ToString() == TextBox10.Text)
-                                        {
-                                            if (CheckBox2.Checked == true)
-                                            {
-                                                // SECURE: Process parameterized commands for rentmore
-                                                for (int i = 0; i < cmds.Count; i++)
-                                                {
-                                                    string[] parts = cmds[i].Split('|');
-                                                    if (parts[0] == "SECURE_UPDATE_ACCOM" && parts.Length == 5)
-                                                    {
-                                                        var cmdParams = new Dictionary<string, object>
-                                                        {
-                                                            { "@Amount", parts[1] },
-                                                            { "@Price", parts[2] },
-                                                            { "@AccommodationID", parts[3] },
-                                                            { "@ReservationID", parts[4] }
-                                                        };
-                                                        code.DatabaseInsertSafe(conn,
-                                                            "UPDATE [dbo].[Reservation_Accommodation] SET [Amount] = @Amount ,[Price] = @Price WHERE Accommodation_ID = @AccommodationID AND Reservation_ID = @ReservationID",
-                                                            cmdParams);
-                                                    }
-                                                    else if (parts[0] == "SECURE_INSERT_ACCOM" && parts.Length == 5)
-                                                    {
-                                                        var cmdParams = new Dictionary<string, object>
-                                                        {
-                                                            { "@ReservationID", parts[1] },
-                                                            { "@AccommodationID", parts[2] },
-                                                            { "@Amount", parts[3] },
-                                                            { "@Price", parts[4] }
-                                                        };
-                                                        code.DatabaseInsertSafe(conn,
-                                                            "INSERT INTO [dbo].[Reservation_Accommodation] ([Reservation_ID],[Accommodation_ID],[Amount],[Price]) VALUES (@ReservationID,@AccommodationID,@Amount,@Price)",
-                                                            cmdParams);
-                                                    }
-                                                    else if (parts[0] == "SECURE_UPDATE_ITEM" && parts.Length == 5)
-                                                    {
-                                                        var cmdParams = new Dictionary<string, object>
-                                                        {
-                                                            { "@Amount", parts[1] },
-                                                            { "@Price", parts[2] },
-                                                            { "@ItemsID", parts[3] },
-                                                            { "@ReservationID", parts[4] }
-                                                        };
-                                                        code.DatabaseInsertSafe(conn,
-                                                            "UPDATE [dbo].[Reservation_Items] SET [Amount] = @Amount ,[Price] = @Price WHERE Items_ID = @ItemsID AND Reservation_ID = @ReservationID",
-                                                            cmdParams);
-                                                    }
-                                                    else if (parts[0] == "SECURE_INSERT_ITEM" && parts.Length == 5)
-                                                    {
-                                                        var cmdParams = new Dictionary<string, object>
-                                                        {
-                                                            { "@ReservationID", parts[1] },
-                                                            { "@ItemsID", parts[2] },
-                                                            { "@Amount", parts[3] },
-                                                            { "@Price", parts[4] }
-                                                        };
-                                                        code.DatabaseInsertSafe(conn,
-                                                            "INSERT INTO [dbo].[Reservation_Items] ([Reservation_ID],[Items_ID],[Amount],[Price]) VALUES (@ReservationID,@ItemsID,@Amount,@Price)",
-                                                            cmdParams);
-                                                    }
-                                                }
-                                                Deposit += Convert.ToDecimal(TextBox10.Text);
-                                                IsDeposit = false;
-                                                if (CheckBox4.Checked == false)
-                                                {
-                                                    createReceipt(id, Convert.ToDouble(TextBox10.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
-                                                }
-                                                // SECURE: Parameterized UPDATE for reservation (rentmore)
-                                                var updateReservationRentmoreParams = new Dictionary<string, object>
-                                                {
-                                                    { "@MobilePhone", TextBox1.Text },
-                                                    { "@CheckinDate", Convert.ToDateTime(TextBox12.Text).ToString("yyyy-MM-dd") },
-                                                    { "@CheckoutDate", Convert.ToDateTime(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("yyyy-MM-dd") },
-                                                    { "@StayDays", DropDownList1.SelectedValue },
-                                                    { "@TotalPrice", TextBox4.Text },
-                                                    { "@Deposit", Deposit },
-                                                    { "@Remark", TextBox6.Text },
-                                                    { "@ID", id }
-                                                };
-                                                code.DatabaseInsertSafe(conn,
-                                                    "UPDATE [dbo].[Reservation] SET [Customer_MobilePhone] = @MobilePhone ,[CheckinDate] = @CheckinDate ,[CheckoutDate] = @CheckoutDate ,[StayDays] = @StayDays , [TotalPrice] = @TotalPrice ,[Deposit] = @Deposit, [Remark] = @Remark WHERE ID = @ID",
-                                                    updateReservationRentmoreParams);
-                                                Response.Redirect("./Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            TextBox10.Text = "";
-                                            ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('โปรแกรมคำนวนยอดไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');", true);
-
-                                        }
-                                    }
                                     else
                                     {
-                                        
+
                                         Response.Redirect("./Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
                                     }
                                 }

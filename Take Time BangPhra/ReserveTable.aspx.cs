@@ -291,7 +291,6 @@ namespace Take_Time_BangPhra
                         Button btnEdit = row.FindControl("Button2") as Button;
                         Button btnCancelNoRefund = row.FindControl("Button3") as Button;
                         Button btnCancelRefund = row.FindControl("Button4") as Button;
-                        Button btnRentMore = row.FindControl("Button5") as Button;
                         Button btnPayMore = row.FindControl("Button8") as Button;
                         Button btnCheckout = row.FindControl("btnCheckout") as Button;
 
@@ -299,7 +298,6 @@ namespace Take_Time_BangPhra
                         if (btnEdit != null) btnEdit.Visible = false;
                         if (btnCancelNoRefund != null) btnCancelNoRefund.Visible = false;
                         if (btnCancelRefund != null) btnCancelRefund.Visible = false;
-                        if (btnRentMore != null) btnRentMore.Visible = false;
                         if (btnPayMore != null) btnPayMore.Visible = false;
                         if (btnCheckout != null) btnCheckout.Visible = false;
 
@@ -307,33 +305,30 @@ namespace Take_Time_BangPhra
                     }
                     else if (status == "เช็คอินแล้ว")
                     {
-                        // สำหรับการจองที่เช็คอินแล้ว
-                        // Admin ทั่วไป: disable เช็คอิน/แก้ไข/ยกเลิก แต่เปิด เช่าเพิ่ม/จ่ายเพิ่ม/เช็คเอาท์/รายละเอียด
+                        // ✅ สำหรับการจองที่เช็คอินแล้ว - อนุญาตให้แก้ไขได้ทุกคน
                         SetButtonEnabled(row, "Button1", false); // Check-in - ไม่สามารถเช็คอินซ้ำได้
-                        SetButtonEnabled(row, "Button2", false); // Edit - ห้ามแก้ไขหลังเช็คอินแล้ว
+                        // Button2 (แก้ไข) - เปิดให้แก้ไขได้ (ใช้แทนปุ่มเช่าเพิ่ม)
                         SetButtonEnabled(row, "Button3", false); // Cancel no refund - ห้ามยกเลิกหลังเช็คอิน
                         SetButtonEnabled(row, "Button4", false); // Cancel with refund - ห้ามยกเลิกหลังเช็คอิน
-                        // Button5 (เช่าเพิ่ม), Button8 (จ่ายเพิ่ม), Button9 (เช็คเอาท์), Button7 (รายละเอียด) ยังใช้งานได้
+                        // Button8 (จ่ายเพิ่ม), btnCheckout (เช็คเอาท์), Button7 (รายละเอียด) ยังใช้งานได้
 
-                        // Owner permissions - สามารถแก้ไข/ยกเลิกได้แม้หลังเช็คอิน
+                        // Owner permissions - สามารถยกเลิกได้แม้หลังเช็คอิน
                         if (isOwner)
                         {
-                            SetButtonEnabled(row, "Button2", true);  // Edit
                             SetButtonEnabled(row, "Button3", true);  // Cancel no refund
                             SetButtonEnabled(row, "Button4", true);  // Cancel with refund
                         }
                     }
                     else if (status == "เช็คเอ้าท์แล้ว")
                     {
-                        // 🔧 สำหรับการจองที่เช็คเอาท์แล้ว (เสร็จสิ้น)
-                        // ทุกคน: เห็นเฉพาะ รายละเอียด และ ประวัติ
+                        // 🔧 สำหรับการจองที่เช็คเอาท์แล้ว
+                        // ทุกคน: เห็นเฉพาะ รายละเอียด และ ประวัติ (ห้ามแก้ไข เพิ่ม ยกเลิก)
                         SetButtonEnabled(row, "Button1", false); // Check-in
                         SetButtonEnabled(row, "Button2", false); // Edit
                         SetButtonEnabled(row, "Button3", false); // Cancel no refund
                         SetButtonEnabled(row, "Button4", false); // Cancel with refund
-                        SetButtonEnabled(row, "Button5", false); // Rent more
                         SetButtonEnabled(row, "Button8", false); // Pay more
-                        SetButtonEnabled(row, "Button9", false); // Checkout
+                        SetButtonEnabled(row, "btnCheckout", false); // Checkout
 
                         // Button7 (รายละเอียด) และ Button6 (ประวัติ) ยังใช้งานได้สำหรับทุกคน
                     }
@@ -459,7 +454,6 @@ namespace Take_Time_BangPhra
             {
                 case "Checkin":
                 case "EditReservation":
-                case "RentMore":
                 case "CancelNoRefund":
                 case "CancelRefund":
                 case "CountReserved":
@@ -483,10 +477,6 @@ namespace Take_Time_BangPhra
                     else if (e.CommandName == "EditReservation")
                     {
                         Response.Redirect($"./Reserve?command=edit&date={Calendar1.SelectedDate:yyyy-MM-dd}&id={commandArg}&check={customerPhone}", false);
-                    }
-                    else if (e.CommandName == "RentMore")
-                    {
-                        Response.Redirect($"./Reserve?command=rentmore&date={Calendar1.SelectedDate:yyyy-MM-dd}&id={commandArg}&check={customerPhone}", false);
                     }
                     else if (e.CommandName == "PayMore")
                     {
