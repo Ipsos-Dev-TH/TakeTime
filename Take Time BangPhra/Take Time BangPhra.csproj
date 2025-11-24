@@ -370,6 +370,10 @@
     <Content Include="Admin\Report\ProfitLoss.aspx" />
     <Content Include="Admin\Vendor.aspx" />
     <Content Include="Admin\CustomerManagement.aspx" />
+    <Content Include="Admin\CRM\GuestProfile.aspx" />
+    <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
+    <Content Include="Admin\CRM\ReviewManagement.aspx" />
+    <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -717,6 +721,37 @@
     <Compile Include="Class\RoomChargeDataAccess.cs" />
     <Compile Include="Class\RoomChargeService.cs" />
     <Compile Include="Class\TelegramService.cs" />
+    <Compile Include="Class\Services\LoyaltyService.cs" />
+    <Compile Include="Class\Services\ReviewService.cs" />
+    <Compile Include="Class\Services\TierBenefitsService.cs" />
+    <Compile Include="Account\TierBenefitsManagement.aspx.cs">
+      <DependentUpon>TierBenefitsManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\TierBenefitsManagement.aspx.designer.cs">
+      <DependentUpon>TierBenefitsManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\GuestProfile.aspx.cs">
+      <DependentUpon>GuestProfile.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\GuestProfile.aspx.designer.cs">
+      <DependentUpon>GuestProfile.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.cs">
+      <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.designer.cs">
+      <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\ReviewManagement.aspx.cs">
+      <DependentUpon>ReviewManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\ReviewManagement.aspx.designer.cs">
+      <DependentUpon>ReviewManagement.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Default_Backup.aspx.cs">
       <DependentUpon>Default_Backup.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
