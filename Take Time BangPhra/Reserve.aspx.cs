@@ -919,6 +919,79 @@ namespace Take_Time_BangPhra
                         }
                     }
 
+                    // 🔧 FIX: Recalculate total price after loading old data and checking checkboxes
+                    // This ensures TextBox4 shows the correct price on initial load in EDIT/CHECKIN/RENTMORE modes
+                    double recalcPriceAccom = 0;
+                    int recalcPriceItems = 0;
+
+                    // Recalculate accommodation prices
+                    foreach (GridViewRow row in GridView1.Rows)
+                    {
+                        CheckBox chk = (row.Cells[0].FindControl("chkSelect") as CheckBox);
+                        if (chk != null && chk.Checked)
+                        {
+                            TextBox txtPeopleStay = (row.Cells[2].FindControl("txtPeopleStay") as TextBox);
+                            double price = 0;
+                            int people = 0;
+
+                            double.TryParse(row.Cells[4].Text, out price);
+                            int.TryParse(txtPeopleStay.Text, out people);
+
+                            // Check if this is LimitWithPeople accommodation
+                            DataTable dtAccommodationCheck = (DataTable)Session["dtAccommodation"];
+                            if (dtAccommodationCheck != null && row.RowIndex < dtAccommodationCheck.Rows.Count)
+                            {
+                                if (dtAccommodationCheck.Rows[row.RowIndex]["LimitWithPeople"].ToString() == "True")
+                                {
+                                    // Price per person per night
+                                    recalcPriceAccom += price * people * Convert.ToInt32(DropDownList1.SelectedValue);
+                                }
+                                else
+                                {
+                                    // Standard room price per night
+                                    recalcPriceAccom += price * Convert.ToInt32(DropDownList1.SelectedValue);
+                                }
+                            }
+                            else
+                            {
+                                // Fallback: assume standard pricing
+                                recalcPriceAccom += price * Convert.ToInt32(DropDownList1.SelectedValue);
+                            }
+                        }
+                    }
+
+                    // Recalculate item prices
+                    foreach (GridViewRow row in GridView2.Rows)
+                    {
+                        CheckBox chk = (row.Cells[0].FindControl("chkSelect") as CheckBox);
+                        if (chk != null && chk.Checked)
+                        {
+                            TextBox txtAmount = (row.Cells[2].FindControl("txtAmount") as TextBox);
+                            int amount = 0;
+                            int price = 0;
+
+                            int.TryParse(txtAmount.Text, out amount);
+                            int.TryParse(row.Cells[4].Text, out price);
+
+                            recalcPriceItems += amount * price * Convert.ToInt32(DropDownList1.SelectedValue);
+                        }
+                    }
+
+                    // Update Session with recalculated prices
+                    Session["PriceAccom"] = recalcPriceAccom;
+                    Session["PriceItems"] = recalcPriceItems;
+
+                    // Recalculate total price including ProductCharges
+                    double recalcTotalPrice = recalcPriceAccom + recalcPriceItems + Convert.ToDouble(Session["ProductCharges"] ?? "0");
+                    Session["totalPrice"] = recalcTotalPrice;
+
+                    // Update finalTotalPrice with recalculated value
+                    finalTotalPrice = Convert.ToDecimal(recalcTotalPrice);
+
+                    // Update TextBox4 and OldPrice
+                    TextBox4.Text = finalTotalPrice.ToString();
+                    Session["OldPrice"] = finalTotalPrice.ToString();
+
                     // Load slip image
                     // 🔧 FIX: For CheckIn/Edit/RentMore modes - don't show image (shown in GridView instead)
                     try
