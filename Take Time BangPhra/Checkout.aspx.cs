@@ -19,7 +19,41 @@ namespace Take_Time_BangPhra
 
             if (!IsPostBack)
             {
+                // ✅ Load payment methods from database (same as Reserve.aspx)
+                LoadPaymentMethods();
+
                 LoadReservationData();
+            }
+        }
+
+        private void LoadPaymentMethods()
+        {
+            try
+            {
+                // Same pattern as Reserve.aspx - load from Account_Paid_How table
+                DataTable dtPaidHow = codeInstance.DatabaseQuery(
+                    SqlDataSourcePaymentMethod.ConnectionString,
+                    SqlDataSourcePaymentMethod.SelectCommand
+                );
+
+                ddlPaymentMethod.Items.Clear();
+                ddlPaymentMethod.Items.Add(new System.Web.UI.WebControls.ListItem("-- เลือกวิธีการชำระเงิน --", ""));
+
+                for (int i = 0; i < dtPaidHow.Rows.Count; i++)
+                {
+                    ddlPaymentMethod.Items.Add(new System.Web.UI.WebControls.ListItem(
+                        dtPaidHow.Rows[i]["Paid_How"].ToString(),
+                        dtPaidHow.Rows[i]["ID"].ToString()
+                    ));
+                }
+
+                ddlPaymentMethod.DataBind();
+            }
+            catch (Exception ex)
+            {
+                // Fallback to empty dropdown if database error
+                ddlPaymentMethod.Items.Clear();
+                ddlPaymentMethod.Items.Add(new System.Web.UI.WebControls.ListItem("-- เลือกวิธีการชำระเงิน --", ""));
             }
         }
 

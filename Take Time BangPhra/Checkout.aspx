@@ -140,12 +140,27 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
+            min-height: 40px; /* ป้องกัน dropdown ถูกตัด */
         }
 
         .form-control:focus {
             border-color: #3498db;
             outline: none;
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        /* ✅ Fix dropdown height issue - ensure full visibility */
+        select.form-control {
+            height: auto !important;
+            min-height: 40px;
+            overflow: visible;
+        }
+
+        /* ✅ Ensure dropdown options are fully visible */
+        .info-item {
+            overflow: visible;
+            position: relative;
+            z-index: 1;
         }
 
         .btn-primary {
@@ -348,14 +363,13 @@
 
                 <div class="info-item">
                     <label class="info-label">วิธีการชำระเงิน <span style="color: red;">*</span></label>
-                    <asp:DropDownList ID="ddlPaymentMethod" runat="server" CssClass="form-control">
+                    <asp:DropDownList ID="ddlPaymentMethod" runat="server" CssClass="form-control" AppendDataBoundItems="true">
                         <asp:ListItem Value="">-- เลือกวิธีการชำระเงิน --</asp:ListItem>
-                        <asp:ListItem Value="CASH">เงินสด</asp:ListItem>
-                        <asp:ListItem Value="TRANSFER">โอนเงิน</asp:ListItem>
-                        <asp:ListItem Value="CREDIT_CARD">บัตรเครดิต</asp:ListItem>
-                        <asp:ListItem Value="DEBIT_CARD">บัตรเดบิต</asp:ListItem>
-                        <asp:ListItem Value="QR_CODE">QR Code</asp:ListItem>
                     </asp:DropDownList>
+                    <asp:SqlDataSource ID="SqlDataSourcePaymentMethod" runat="server"
+                        ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>"
+                        SelectCommand="SELECT [ID], [Paid_How] FROM [Account_Paid_How] WHERE [Status] = 'True' ORDER BY [ID]">
+                    </asp:SqlDataSource>
                     <asp:RequiredFieldValidator ID="rfvPaymentMethod" runat="server"
                         ControlToValidate="ddlPaymentMethod" ValidationGroup="Payment"
                         InitialValue="" ErrorMessage="กรุณาเลือกวิธีการชำระเงิน" ForeColor="Red" Display="Dynamic"></asp:RequiredFieldValidator>
