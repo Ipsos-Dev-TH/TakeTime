@@ -4459,6 +4459,35 @@ namespace Take_Time_BangPhra
         }
         public void checkCreateCustomer()
         {
+            // ✅ Validate Customer_Type_ID
+            int customerTypeId = 1; // Default to 1 (Individual)
+            if (!string.IsNullOrEmpty(DropDownList8.SelectedValue))
+            {
+                int.TryParse(DropDownList8.SelectedValue, out customerTypeId);
+                if (customerTypeId == 0) customerTypeId = 1; // Fallback to 1 if parse failed
+            }
+
+            // ✅ Validate Address_ID
+            int addressId = 0;
+            try
+            {
+                string addressIdString = _addressHelper.GetAddressIdString(
+                    TextBox16.Text,
+                    DropDownList5.SelectedItem?.Text ?? "",
+                    DropDownList6.SelectedItem?.Text ?? "",
+                    DropDownList7.SelectedItem?.Text ?? ""
+                );
+
+                if (!string.IsNullOrEmpty(addressIdString))
+                {
+                    int.TryParse(addressIdString, out addressId);
+                }
+            }
+            catch
+            {
+                addressId = 0; // Fallback to 0 if any error
+            }
+
             // Upsert customer data (insert or update) - ensures no duplicates and always latest data
             // ALWAYS matches by MobilePhone - ensures only 1 record per phone number
             // If customer type changes from Individual to Corporate (or vice versa), it updates the existing record
@@ -4473,8 +4502,8 @@ namespace Take_Time_BangPhra
                 ValidationHelper.CleanText(TextBox8.Text),  // Address
                 TextBox9.Text,  // IDNumber
                 TextBox13.Text,  // Email
-                Convert.ToInt32(DropDownList8.SelectedValue),  // Customer_Type_ID
-                Convert.ToInt32(_addressHelper.GetAddressIdString(TextBox16.Text, DropDownList5.SelectedItem.Text, DropDownList6.SelectedItem.Text, DropDownList7.SelectedItem.Text)),  // Address_ID
+                customerTypeId,  // Customer_Type_ID (validated)
+                addressId,  // Address_ID (validated)
                 TextBox17.Text,  // Address1
                 TextBox18.Text  // Branch_Number
             );
