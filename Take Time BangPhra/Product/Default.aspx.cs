@@ -15,6 +15,7 @@ using System.Net.Mail;
 using Microsoft.Reporting.WebForms;
 using System.Web.UI.HtmlControls;
 using Take_Time_BangPhra.Class;
+using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Product
 {
@@ -868,7 +869,70 @@ namespace Take_Time_BangPhra.Product
                 string Year = receiptDate.Year.ToString();
                 string Month = receiptDate.Month.ToString();
 
-                total = Convert.ToDouble(TextBox2.Text);
+                // 🎁 Apply product category discounts for loyalty members
+                double originalTotal = Convert.ToDouble(TextBox2.Text);
+                double totalDiscount = 0;
+                string customerPhone = TextBox3.Text;
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(customerPhone) && CheckBox2.Checked)
+                    {
+                        var tierBenefitsService = new TierBenefitsService(conn);
+
+                        // Calculate discounts for each product based on its category
+                        foreach (DataRow orderRow in dtOrder.Rows)
+                        {
+                            long categoryId = Convert.ToInt64(orderRow["Category_ID"]);
+                            decimal itemTotal = Convert.ToDecimal(orderRow["Price_Total"]);
+
+                            var discountResult = tierBenefitsService.CalculateProductDiscount(
+                                customerPhone,
+                                categoryId,
+                                itemTotal);
+
+                            if (discountResult.Success && discountResult.DiscountAmount > 0)
+                            {
+                                totalDiscount += (double)discountResult.DiscountAmount;
+                                code.Logs(conn, "Product - Category Discount Applied",
+                                    $"Customer: {customerPhone}, Category: {categoryId}, " +
+                                    $"Original: {itemTotal:N2}, Discount: {discountResult.DiscountAmount:N2}",
+                                    Session["User"]?.ToString());
+                            }
+                        }
+
+                        // Apply total discount
+                        if (totalDiscount > 0)
+                        {
+                            originalTotal = Convert.ToDouble(TextBox2.Text);
+                            total = originalTotal - totalDiscount;
+
+                            // Show discount info to user
+                            code.Logs(conn, "Product - Total Loyalty Discount",
+                                $"Customer: {customerPhone}, Original: {originalTotal:N2}, " +
+                                $"Discount: {totalDiscount:N2}, Final: {total:N2}",
+                                Session["User"]?.ToString());
+                        }
+                        else
+                        {
+                            total = originalTotal;
+                        }
+                    }
+                    else
+                    {
+                        total = originalTotal;
+                    }
+                }
+                catch (Exception discountEx)
+                {
+                    // Log error but don't fail the receipt creation
+                    code.Logs(conn, "Product - Category Discount Error",
+                        $"Customer: {customerPhone}, Error: {discountEx.Message}",
+                        Session["User"]?.ToString());
+                    total = originalTotal;
+                }
+
+                // ✅ Use discounted total (already calculated above)
                 int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
                 double vat = Math.Round(((total * 100) / (100+vatpercent)), 2);
                 double Total_Amount_Exclude_Vat = total - vat;
@@ -996,6 +1060,56 @@ namespace Take_Time_BangPhra.Product
                     "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
                     "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
                     detailParams);
+
+                // 🎁 Log product category discount usage to Loyalty_Benefit_Usage
+                if (totalDiscount > 0 && !string.IsNullOrEmpty(customerPhone))
+                {
+                    try
+                    {
+                        // Get receipt UID to use as reference
+                        var uidParams = new Dictionary<string, object> { { "@ReceiptID", docNum } };
+                        DataTable dtUid = code.DatabaseQuerySafe(conn,
+                            "SELECT UID FROM [Account_Receipt] WHERE ID = @ReceiptID",
+                            uidParams);
+
+                        if (dtUid.Rows.Count > 0)
+                        {
+                            long receiptUid = Convert.ToInt64(dtUid.Rows[0]["UID"]);
+                            short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+
+                            var tierBenefitsService = new TierBenefitsService(conn);
+
+                            // Log discount for each product category
+                            foreach (DataRow orderRow in dtOrder.Rows)
+                            {
+                                long categoryId = Convert.ToInt64(orderRow["Category_ID"]);
+                                decimal itemTotal = Convert.ToDecimal(orderRow["Price_Total"]);
+
+                                var applyResult = tierBenefitsService.ApplyProductDiscount(
+                                    customerPhone,
+                                    categoryId,
+                                    itemTotal,
+                                    null,  // No reservation ID for POS
+                                    receiptUid,
+                                    adminId);
+
+                                if (!applyResult.Success)
+                                {
+                                    code.Logs(conn, "Product - Apply Category Discount Failed",
+                                        $"Receipt: {docNum}, Category: {categoryId}, Message: {applyResult.Message}",
+                                        Session["User"]?.ToString());
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception logEx)
+                    {
+                        // Log error but don't fail the receipt creation
+                        code.Logs(conn, "Product - Log Category Discount Error",
+                            $"Receipt: {docNum}, Error: {logEx.Message}",
+                            Session["User"]?.ToString());
+                    }
+                }
 
                 // SECURE: SELECT Receipt and Detail with parameterized query
                 var selectParams = new Dictionary<string, object> { { "@DocNum", docNum } };

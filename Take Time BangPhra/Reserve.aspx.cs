@@ -30,6 +30,7 @@ using System.Net.Http.Headers;
 using System.Net.Http;
 using Take_Time_BangPhra.Account.Report;
 using Take_Time_BangPhra.Class;
+using Take_Time_BangPhra.Services;
 using Google.Apis.Gmail.v1.Data;
 
 namespace Take_Time_BangPhra
@@ -685,7 +686,68 @@ namespace Take_Time_BangPhra
                     }
                 }
 
-                // Set TextBox and Session
+                // 🎁 Calculate and apply loyalty tier discount
+                decimal originalPrice = finalTotalPrice;
+                decimal discountAmount = 0;
+                decimal discountPercent = 0;
+                string tierName = "";
+
+                try
+                {
+                    string customerPhone = dtCustomer.Rows[0]["MobilePhone"]?.ToString();
+
+                    if (!string.IsNullOrEmpty(customerPhone))
+                    {
+                        var tierBenefitsService = new TierBenefitsService(conn);
+                        var discountResult = tierBenefitsService.CalculateAccommodationDiscount(
+                            customerPhone,
+                            originalPrice);
+
+                        if (discountResult.Success && discountResult.DiscountAmount > 0)
+                        {
+                            discountAmount = discountResult.DiscountAmount;
+                            discountPercent = discountResult.DiscountPercent;
+                            tierName = discountResult.TierName;
+                            finalTotalPrice = discountResult.FinalAmount;
+
+                            // Show discount panel
+                            pnlLoyaltyDiscount.Visible = true;
+                            lblLoyaltyTierName.Text = tierName;
+                            lblDiscountPercent.Text = discountPercent.ToString("N2");
+                            lblOriginalPrice.Text = originalPrice.ToString("N2");
+                            lblDiscountAmount.Text = discountAmount.ToString("N2");
+                            lblAfterDiscount.Visible = true;
+
+                            // Store discount info in session for later use
+                            Session["LoyaltyDiscountAmount"] = discountAmount;
+                            Session["LoyaltyOriginalPrice"] = originalPrice;
+                        }
+                        else
+                        {
+                            // No discount available - hide panel
+                            pnlLoyaltyDiscount.Visible = false;
+                            lblAfterDiscount.Visible = false;
+                            Session["LoyaltyDiscountAmount"] = 0;
+                            Session["LoyaltyOriginalPrice"] = originalPrice;
+                        }
+                    }
+                    else
+                    {
+                        pnlLoyaltyDiscount.Visible = false;
+                        lblAfterDiscount.Visible = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't break the flow
+                    code2.Logs(conn, "Reserve - Loyalty Discount Error",
+                        $"Customer: {dtCustomer.Rows[0]["MobilePhone"]}, Error: {ex.Message}",
+                        Session["User"]?.ToString());
+                    pnlLoyaltyDiscount.Visible = false;
+                    lblAfterDiscount.Visible = false;
+                }
+
+                // Set TextBox and Session (now with loyalty discount applied)
                 TextBox4.Text = finalTotalPrice.ToString();
                 Session["OldPrice"] = finalTotalPrice.ToString();
 
@@ -2165,6 +2227,39 @@ namespace Take_Time_BangPhra
                                                         Deposit,
                                                         TextBox6.Text
                                                     );
+
+                                                    // 🎁 Log loyalty discount usage if applicable
+                                                    if (Session["LoyaltyDiscountAmount"] != null &&
+                                                        Convert.ToDecimal(Session["LoyaltyDiscountAmount"]) > 0)
+                                                    {
+                                                        try
+                                                        {
+                                                            decimal originalPrice = Convert.ToDecimal(Session["LoyaltyOriginalPrice"]);
+                                                            short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+
+                                                            var tierBenefitsService = new TierBenefitsService(conn);
+                                                            var applyResult = tierBenefitsService.ApplyAccommodationDiscount(
+                                                                Convert.ToInt64(id),
+                                                                TextBox1.Text,
+                                                                originalPrice,
+                                                                adminId);
+
+                                                            if (!applyResult.Success)
+                                                            {
+                                                                // Log error but don't fail the reservation
+                                                                code2.Logs(conn, "Reserve - Apply Loyalty Discount Failed",
+                                                                    $"Reservation ID: {id}, Message: {applyResult.Message}",
+                                                                    Session["User"]?.ToString());
+                                                            }
+                                                        }
+                                                        catch (Exception discountEx)
+                                                        {
+                                                            // Log error but don't fail the reservation
+                                                            code2.Logs(conn, "Reserve - Apply Loyalty Discount Error",
+                                                                $"Reservation ID: {id}, Error: {discountEx.Message}",
+                                                                Session["User"]?.ToString());
+                                                        }
+                                                    }
                                                 }
                                                 else
                                                 {
@@ -2186,6 +2281,37 @@ namespace Take_Time_BangPhra
                                                         Deposit,
                                                         TextBox6.Text
                                                     );
+
+                                                    // 🎁 Log loyalty discount usage if applicable
+                                                    if (Session["LoyaltyDiscountAmount"] != null &&
+                                                        Convert.ToDecimal(Session["LoyaltyDiscountAmount"]) > 0)
+                                                    {
+                                                        try
+                                                        {
+                                                            decimal originalPrice = Convert.ToDecimal(Session["LoyaltyOriginalPrice"]);
+                                                            short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+
+                                                            var tierBenefitsService = new TierBenefitsService(conn);
+                                                            var applyResult = tierBenefitsService.ApplyAccommodationDiscount(
+                                                                Convert.ToInt64(id),
+                                                                TextBox1.Text,
+                                                                originalPrice,
+                                                                adminId);
+
+                                                            if (!applyResult.Success)
+                                                            {
+                                                                code2.Logs(conn, "Reserve - Apply Loyalty Discount Failed",
+                                                                    $"Reservation ID: {id}, Message: {applyResult.Message}",
+                                                                    Session["User"]?.ToString());
+                                                            }
+                                                        }
+                                                        catch (Exception discountEx)
+                                                        {
+                                                            code2.Logs(conn, "Reserve - Apply Loyalty Discount Error",
+                                                                $"Reservation ID: {id}, Error: {discountEx.Message}",
+                                                                Session["User"]?.ToString());
+                                                        }
+                                                    }
                                                 }
                                                 else
                                                 {

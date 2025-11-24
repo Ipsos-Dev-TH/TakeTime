@@ -682,11 +682,41 @@
                 </div>
             </div>
             
+            <!-- 🎁 Loyalty Discount Display -->
+            <asp:Panel ID="pnlLoyaltyDiscount" runat="server" Visible="false" CssClass="loyalty-discount-panel">
+                <div class="form-row" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="flex: 1;">
+                            <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                                <i class="fa fa-star" style="color: #FFD700;"></i>
+                                <asp:Label ID="lblLoyaltyTierName" runat="server" Text=""></asp:Label>
+                                Member Discount
+                            </div>
+                            <div style="font-size: 14px; opacity: 0.9;">
+                                ส่วนลดสมาชิก <asp:Label ID="lblDiscountPercent" runat="server" Text=""></asp:Label>%
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 14px; opacity: 0.9; text-decoration: line-through;">
+                                ราคาเดิม: ฿<asp:Label ID="lblOriginalPrice" runat="server" Text="0.00"></asp:Label>
+                            </div>
+                            <div style="font-size: 24px; font-weight: bold; color: #FFD700; margin-top: 5px;">
+                                -฿<asp:Label ID="lblDiscountAmount" runat="server" Text="0.00"></asp:Label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </asp:Panel>
+
             <div class="form-row">
                 <div class="form-label">ราคารวม:<br />Total price:</div>
                 <div class="form-controls">
                     <asp:TextBox ID="TextBox4" runat="server" Enabled="False"  Width="200px" TextMode="Number" CssClass="rounded-textbox price-display">0</asp:TextBox>
                     <span style="margin-left: 10px;">บาท</span>
+                    <asp:Label ID="lblAfterDiscount" runat="server" Text="" Visible="false"
+                        style="margin-left: 10px; color: #27ae60; font-weight: bold;">
+                        (หลังหักส่วนลดสมาชิก)
+                    </asp:Label>
                     <div style="margin-top: 5px;">
                         ยอดมัดจำจองขั้นต่ำ Minimum Deposit:
                         <asp:Label ID="Label2" runat="server" Text="" CssClass="price-display"></asp:Label>
