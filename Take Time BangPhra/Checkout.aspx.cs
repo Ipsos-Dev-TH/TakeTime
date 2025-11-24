@@ -364,9 +364,6 @@ namespace Take_Time_BangPhra
                 // Get customer phone
                 string customerPhone = lblCustomerPhone.Text;
 
-                // Create payment record using PaymentService
-                var paymentService = new PaymentService();
-
                 // Determine if this is full payment or deposit
                 decimal remainingBalance = decimal.Parse(lblPaymentRequired.Text);
                 bool isFullPayment = paymentAmount >= remainingBalance;
