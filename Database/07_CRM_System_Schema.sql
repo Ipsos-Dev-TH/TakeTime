@@ -18,7 +18,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Gu
 BEGIN
     CREATE TABLE [dbo].[Guest_Preferences] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [PreferenceType] VARCHAR(50) NOT NULL, -- ROOM, PILLOW, BED, FOOD, ALLERGY, ACTIVITY, SPECIAL_REQUEST
         [PreferenceKey] NVARCHAR(100) NOT NULL, -- e.g., 'favorite_room_type', 'pillow_firmness', 'food_allergy'
         [PreferenceValue] NVARCHAR(MAX), -- e.g., 'Deluxe Bungalow', 'Soft', 'Peanuts'
@@ -49,7 +49,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Gu
 BEGIN
     CREATE TABLE [dbo].[Guest_Notes] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [NoteType] VARCHAR(30) NOT NULL, -- GENERAL, VIP, COMPLAINT, COMPLIMENT, BEHAVIOR, HEALTH, WARNING
         [Subject] NVARCHAR(200),
         [NoteText] NVARCHAR(MAX) NOT NULL,
@@ -114,7 +114,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Cu
 BEGIN
     CREATE TABLE [dbo].[Customer_Loyalty] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL UNIQUE,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL UNIQUE,
         [CurrentTier_ID] TINYINT NOT NULL DEFAULT 1,
         [TotalPoints] INT NOT NULL DEFAULT 0,
         [AvailablePoints] INT NOT NULL DEFAULT 0, -- Points not yet used
@@ -145,7 +145,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Lo
 BEGIN
     CREATE TABLE [dbo].[Loyalty_Transactions] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [TransactionType] VARCHAR(20) NOT NULL, -- EARN, REDEEM, EXPIRE, ADJUSTMENT, BONUS
         [Points] INT NOT NULL,
         [BalanceAfter] INT NOT NULL,
@@ -227,7 +227,7 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Reviews] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Reservation_ID] BIGINT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
 
         -- Overall ratings
         [OverallRating] TINYINT NOT NULL CHECK ([OverallRating] BETWEEN 1 AND 5),
@@ -290,7 +290,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Co
 BEGIN
     CREATE TABLE [dbo].[Communication_Log] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [CommunicationType] VARCHAR(30) NOT NULL, -- EMAIL, SMS, LINE, PHONE, WHATSAPP, IN_PERSON
         [Direction] VARCHAR(10) NOT NULL, -- INBOUND, OUTBOUND
         [Subject] NVARCHAR(200),
@@ -361,7 +361,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Cu
 BEGIN
     CREATE TABLE [dbo].[Customer_Segment_Assignments] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Segment_ID] INT NOT NULL,
         [AssignedDate] DATETIME DEFAULT GETDATE(),
         [AssignedBy_AdminID] SMALLINT, -- NULL if automatic
@@ -390,7 +390,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Cu
 BEGIN
     CREATE TABLE [dbo].[Customer_Special_Dates] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [OccasionType] VARCHAR(30) NOT NULL, -- BIRTHDAY, ANNIVERSARY, WEDDING, OTHER
         [OccasionName] NVARCHAR(100),
         [OccasionDate] DATE NOT NULL, -- Store as month-day (year optional)

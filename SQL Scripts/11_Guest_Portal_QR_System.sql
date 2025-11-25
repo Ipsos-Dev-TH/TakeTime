@@ -50,7 +50,7 @@ BEGIN
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Session_Token] NVARCHAR(255) NOT NULL UNIQUE,
         [Reservation_ID] INT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Accommodation_ID] INT NOT NULL,
         [QR_Token] NVARCHAR(255) NOT NULL,
         [Check_In_Date] DATE NOT NULL,
@@ -90,7 +90,7 @@ BEGIN
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Order_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] INT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Accommodation_ID] INT NOT NULL,
         [Order_Date] DATETIME NOT NULL DEFAULT GETDATE(),
         [Delivery_Instructions] NVARCHAR(500) NULL,
@@ -166,7 +166,7 @@ BEGIN
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] INT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Accommodation_ID] INT NOT NULL,
         [Request_Type] NVARCHAR(100) NOT NULL, -- 'CLEANING', 'TOWELS', 'TOILETRIES', 'MAINTENANCE', 'OTHER'
         [Request_Description] NVARCHAR(1000) NOT NULL,
@@ -210,7 +210,7 @@ BEGIN
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] INT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Accommodation_ID] INT NOT NULL,
         [Service_Type] NVARCHAR(100) NOT NULL, -- 'TOUR', 'SPA', 'RESTAURANT', 'TRANSPORTATION', 'ACTIVITY', 'OTHER'
         [Service_Name] NVARCHAR(200) NOT NULL,
@@ -256,7 +256,7 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Chat_Messages] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Reservation_ID] INT NOT NULL,
-        [Customer_MobilePhone] NVARCHAR(20) NOT NULL,
+        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
         [Message_Text] NVARCHAR(2000) NOT NULL,
         [Sender_Type] NVARCHAR(20) NOT NULL, -- 'GUEST', 'STAFF'
         [Sender_Name] NVARCHAR(200) NOT NULL,
@@ -353,7 +353,7 @@ GO
 
 CREATE PROCEDURE sp_Verify_Guest_Portal_Access
     @QR_Token NVARCHAR(255),
-    @Customer_MobilePhone NVARCHAR(20)
+    @Customer_MobilePhone NVARCHAR(10)
 AS
 BEGIN
     SET NOCOUNT ON;
