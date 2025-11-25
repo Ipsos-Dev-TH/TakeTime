@@ -100,9 +100,7 @@ namespace Take_Time_BangPhra.Services
                     { "@ReservationID", reservationId },
                     { "@CustomerPhone", customerPhone },
                     { "@OriginalAmount", originalAmount },
-                    { "@AdminID", adminId ?? (object)DBNull.Value },
-                    { "@DiscountAmount", System.Data.SqlDbType.Decimal, System.Data.ParameterDirection.Output },
-                    { "@FinalAmount", System.Data.SqlDbType.Decimal, System.Data.ParameterDirection.Output }
+                    { "@AdminID", adminId ?? (object)DBNull.Value }
                 };
 
                 using (var conn = new System.Data.SqlClient.SqlConnection(_connectionString))
