@@ -14,7 +14,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Room_QR_Codes')
 BEGIN
     CREATE TABLE [dbo].[Room_QR_Codes] (
         [ID] INT IDENTITY(1,1) PRIMARY KEY,
-        [Accommodation_ID] INT NOT NULL,
+        [Accommodation_ID] SMALLINT NOT NULL,
         [Accommodation_Name] NVARCHAR(100) NOT NULL,
         [QR_Token] NVARCHAR(255) NOT NULL UNIQUE, -- Unique token for QR code
         [QR_Data] NVARCHAR(500) NOT NULL, -- Full QR code data (URL with token)
@@ -49,9 +49,9 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Portal_Sessions] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Session_Token] NVARCHAR(255) NOT NULL UNIQUE,
-        [Reservation_ID] INT NOT NULL,
+        [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] INT NOT NULL,
+        [Accommodation_ID] SMALLINT NOT NULL,
         [QR_Token] NVARCHAR(255) NOT NULL,
         [Check_In_Date] DATE NOT NULL,
         [Check_Out_Date] DATE NOT NULL,
@@ -89,9 +89,9 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Room_Service_Orders] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Order_Number] NVARCHAR(50) NOT NULL UNIQUE,
-        [Reservation_ID] INT NOT NULL,
+        [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] INT NOT NULL,
+        [Accommodation_ID] SMALLINT NOT NULL,
         [Order_Date] DATETIME NOT NULL DEFAULT GETDATE(),
         [Delivery_Instructions] NVARCHAR(500) NULL,
         [Total_Amount] DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -165,9 +165,9 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Housekeeping_Requests] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
-        [Reservation_ID] INT NOT NULL,
+        [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] INT NOT NULL,
+        [Accommodation_ID] SMALLINT NOT NULL,
         [Request_Type] NVARCHAR(100) NOT NULL, -- 'CLEANING', 'TOWELS', 'TOILETRIES', 'MAINTENANCE', 'OTHER'
         [Request_Description] NVARCHAR(1000) NOT NULL,
         [Priority] NVARCHAR(20) NOT NULL DEFAULT 'NORMAL', -- 'LOW', 'NORMAL', 'HIGH', 'URGENT'
@@ -209,9 +209,9 @@ BEGIN
     CREATE TABLE [dbo].[Guest_Concierge_Requests] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
-        [Reservation_ID] INT NOT NULL,
+        [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] INT NOT NULL,
+        [Accommodation_ID] SMALLINT NOT NULL,
         [Service_Type] NVARCHAR(100) NOT NULL, -- 'TOUR', 'SPA', 'RESTAURANT', 'TRANSPORTATION', 'ACTIVITY', 'OTHER'
         [Service_Name] NVARCHAR(200) NOT NULL,
         [Request_Description] NVARCHAR(1000) NOT NULL,
@@ -255,7 +255,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Guest_Chat_Messages')
 BEGIN
     CREATE TABLE [dbo].[Guest_Chat_Messages] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Reservation_ID] INT NOT NULL,
+        [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
         [Message_Text] NVARCHAR(2000) NOT NULL,
         [Sender_Type] NVARCHAR(20) NOT NULL, -- 'GUEST', 'STAFF'
@@ -292,7 +292,7 @@ IF EXISTS (SELECT * FROM sys.procedures WHERE name = 'sp_Generate_Room_QR_Code')
 GO
 
 CREATE PROCEDURE sp_Generate_Room_QR_Code
-    @Accommodation_ID INT,
+    @Accommodation_ID SMALLINT,
     @Admin_ID SMALLINT,
     @Base_URL NVARCHAR(500) = 'https://taketimebangphra.com/Guest/Portal?qr='
 AS
@@ -304,7 +304,7 @@ BEGIN
     DECLARE @QRData NVARCHAR(500);
 
     -- Get accommodation name
-    SELECT @AccomName = Name
+    SELECT @AccomName = AccomName
     FROM Accommodation
     WHERE ID = @Accommodation_ID;
 
@@ -358,7 +358,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Accommodation_ID INT;
+    DECLARE @Accommodation_ID SMALLINT;
     DECLARE @Accommodation_Name NVARCHAR(100);
 
     -- Verify QR token exists and is active
@@ -383,11 +383,12 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM Reservation R
+        INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
-          AND R.Accommodation = @Accommodation_Name
-          AND R.CheckIn <= GETDATE()
-          AND R.CheckOut >= GETDATE()
-          AND R.Status IN ('Confirm', 'CheckIn')
+          AND RA.Accommodation_ID = @Accommodation_ID
+          AND R.CheckInDate <= GETDATE()
+          AND R.CheckOutDate >= GETDATE()
+          AND R.Status IN (N'ยืนยันแล้ว', N'เช็คอินแล้ว')
     )
     BEGIN
         -- Valid access - return reservation details
@@ -396,19 +397,20 @@ BEGIN
             R.ID AS Reservation_ID,
             R.Customer_MobilePhone,
             @Accommodation_ID AS Accommodation_ID,
-            R.Accommodation AS Accommodation_Name,
-            R.CheckIn,
-            R.CheckOut,
+            @Accommodation_Name AS Accommodation_Name,
+            R.CheckInDate,
+            R.CheckOutDate,
             C.Name AS Customer_Name,
             C.Email AS Customer_Email
         FROM Reservation R
         INNER JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+        INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
-          AND R.Accommodation = @Accommodation_Name
-          AND R.CheckIn <= GETDATE()
-          AND R.CheckOut >= GETDATE()
-          AND R.Status IN ('Confirm', 'CheckIn')
-        ORDER BY R.CheckIn DESC;
+          AND RA.Accommodation_ID = @Accommodation_ID
+          AND R.CheckInDate <= GETDATE()
+          AND R.CheckOutDate >= GETDATE()
+          AND R.Status IN (N'ยืนยันแล้ว', N'เช็คอินแล้ว')
+        ORDER BY R.CheckInDate DESC;
     END
     ELSE
     BEGIN
