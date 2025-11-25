@@ -3,7 +3,7 @@
 -- Stores QR codes for room access and guest verification
 -- ============================================
 
-USE [TakeTime_Bangphra]
+USE [TakeTime]
 GO
 
 -- ============================================
