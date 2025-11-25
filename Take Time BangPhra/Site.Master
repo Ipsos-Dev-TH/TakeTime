@@ -359,6 +359,10 @@
                             <i class="fas fa-handshake"></i> Affiliate
                         </a></li>
 
+                        <li><a runat="server" href="~/Guest/Portal">
+                            <i class="fas fa-mobile-alt"></i> Guest Portal
+                        </a></li>
+
                         <!-- Admin Menu -->
                         <asp:Panel ID="pnlAdminNav" runat="server" Visible="false">
                             <li class="dropdown admin-menu">
@@ -430,6 +434,27 @@
     <asp:Label ID="Label12" runat="server" Text="ใบสำคัญจ่าย (จัดการ)"></asp:Label>
 </a></li>
 <li role="separator" class="divider"></li>
+
+                                    <!-- CRM Section -->
+                                    <li class="dropdown-header">ระบบ CRM</li>
+                                    <li><a runat="server" href="~/Admin/RoomQRGenerator">
+                                        <i class="fas fa-qrcode"></i> Room QR Codes
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/CRM/GuestProfile">
+                                        <i class="fas fa-user-circle"></i> Guest Profile 360°
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
+                                        <i class="fas fa-trophy"></i> Loyalty Dashboard
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
+                                        <i class="fas fa-star"></i> Review Management
+                                    </a></li>
+                                    <li><a runat="server" href="~/Account/TierBenefitsManagement">
+                                        <i class="fas fa-crown"></i> Tier Benefits
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/CustomerManagement">
+                                        <i class="fas fa-address-book"></i> Customer Management
+                                    </a></li>
 
                                     <!-- Owner Only Sections -->
                                     <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">

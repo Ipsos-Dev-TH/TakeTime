@@ -374,6 +374,9 @@
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
+    <Content Include="Admin\RoomQRGenerator.aspx" />
+    <Content Include="Guest\Portal.aspx" />
+    <Content Include="Guest\Dashboard.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -752,6 +755,28 @@
     <Compile Include="Admin\CRM\ReviewManagement.aspx.designer.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\RoomQRGenerator.aspx.cs">
+      <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\RoomQRGenerator.aspx.designer.cs">
+      <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Portal.aspx.cs">
+      <DependentUpon>Portal.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Portal.aspx.designer.cs">
+      <DependentUpon>Portal.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Dashboard.aspx.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Dashboard.aspx.designer.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Default_Backup.aspx.cs">
       <DependentUpon>Default_Backup.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
