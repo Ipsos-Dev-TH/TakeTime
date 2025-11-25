@@ -377,6 +377,10 @@
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
+    <Content Include="Guest\RoomService.aspx" />
+    <Content Include="Guest\Housekeeping.aspx" />
+    <Content Include="Guest\Balance.aspx" />
+    <Content Include="Guest\Concierge.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -775,6 +779,34 @@
     </Compile>
     <Compile Include="Guest\Dashboard.aspx.designer.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\RoomService.aspx.cs">
+      <DependentUpon>RoomService.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\RoomService.aspx.designer.cs">
+      <DependentUpon>RoomService.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Housekeeping.aspx.cs">
+      <DependentUpon>Housekeeping.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Housekeeping.aspx.designer.cs">
+      <DependentUpon>Housekeeping.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Balance.aspx.cs">
+      <DependentUpon>Balance.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Balance.aspx.designer.cs">
+      <DependentUpon>Balance.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Concierge.aspx.cs">
+      <DependentUpon>Concierge.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Concierge.aspx.designer.cs">
+      <DependentUpon>Concierge.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Default_Backup.aspx.cs">
