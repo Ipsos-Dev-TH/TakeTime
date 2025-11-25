@@ -2,6 +2,7 @@ using System;
 using System.Data;
 using System.Web;
 using System.Web.UI;
+using Take_Time_BangPhra;
 using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Guest
