@@ -27,7 +27,7 @@ SELECT
     LT.[MinPoints],
     LT.[PointsMultiplier],
     LT.[DiscountPercent] AS BaseDiscountPercent,
-    LT.[AccommodationDiscountPercent],
+    LT.[DiscountPercent],
 
     -- Count benefits by type
     COUNT(CASE WHEN LTB.[BenefitType] = 'ACCOMMODATION_DISCOUNT' THEN 1 END) AS AccomDiscountBenefits,
@@ -49,7 +49,7 @@ WHERE LT.[IsActive] = 1
 GROUP BY
     LT.[ID], LT.[TierName], LT.[TierNameEN], LT.[TierColor],
     LT.[MinPoints], LT.[PointsMultiplier], LT.[DiscountPercent],
-    LT.[AccommodationDiscountPercent];
+    LT.[DiscountPercent];
 GO
 
 -- View: Customer Benefits with Usage Stats
@@ -175,7 +175,7 @@ BEGIN
 
     -- Get customer's tier discount
     SELECT
-        @DiscountPercent = LT.[AccommodationDiscountPercent],
+        @DiscountPercent = LT.[DiscountPercent],
         @MaxDiscount = LTB.[MaxDiscountAmount]
     FROM [dbo].[Customer_Loyalty] CL
     INNER JOIN [dbo].[Loyalty_Tiers] LT ON LT.[ID] = CL.[CurrentTier_ID]

@@ -74,7 +74,7 @@ BEGIN
     CREATE TABLE [dbo].[Loyalty_Product_Category_Discounts] (
         [ID] INT IDENTITY(1,1) PRIMARY KEY,
         [Tier_ID] TINYINT NOT NULL,
-        [ProductCategory_ID] BIGINT NOT NULL,
+        [ProductCategory_ID] TINYINT NOT NULL,
         [DiscountPercent] DECIMAL(5,2) NOT NULL, -- e.g., 10.00 = 10%
         [MaxDiscountAmount] DECIMAL(10,2), -- Cap per transaction
         [MinPurchaseAmount] DECIMAL(10,2), -- Minimum purchase to get discount
@@ -215,19 +215,19 @@ GO
 -- ============================================================================
 
 -- Add accommodation discount column to Loyalty_Tiers for backward compatibility
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Loyalty_Tiers]') AND name = 'AccommodationDiscountPercent')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Loyalty_Tiers]') AND name = 'DiscountPercent')
 BEGIN
     ALTER TABLE [dbo].[Loyalty_Tiers]
-    ADD [AccommodationDiscountPercent] DECIMAL(5,2) DEFAULT 0;
+    ADD [DiscountPercent] DECIMAL(5,2) DEFAULT 0;
 
     -- Update with default values
-    UPDATE [dbo].[Loyalty_Tiers] SET [AccommodationDiscountPercent] = 0 WHERE [ID] = 1; -- Member
-    UPDATE [dbo].[Loyalty_Tiers] SET [AccommodationDiscountPercent] = 5 WHERE [ID] = 2; -- Silver
-    UPDATE [dbo].[Loyalty_Tiers] SET [AccommodationDiscountPercent] = 10 WHERE [ID] = 3; -- Gold
-    UPDATE [dbo].[Loyalty_Tiers] SET [AccommodationDiscountPercent] = 15 WHERE [ID] = 4; -- Platinum
-    UPDATE [dbo].[Loyalty_Tiers] SET [AccommodationDiscountPercent] = 20 WHERE [ID] = 5; -- VIP
+    UPDATE [dbo].[Loyalty_Tiers] SET [DiscountPercent] = 0 WHERE [ID] = 1; -- Member
+    UPDATE [dbo].[Loyalty_Tiers] SET [DiscountPercent] = 5 WHERE [ID] = 2; -- Silver
+    UPDATE [dbo].[Loyalty_Tiers] SET [DiscountPercent] = 10 WHERE [ID] = 3; -- Gold
+    UPDATE [dbo].[Loyalty_Tiers] SET [DiscountPercent] = 15 WHERE [ID] = 4; -- Platinum
+    UPDATE [dbo].[Loyalty_Tiers] SET [DiscountPercent] = 20 WHERE [ID] = 5; -- VIP
 
-    PRINT 'AccommodationDiscountPercent column added to Loyalty_Tiers';
+    PRINT 'DiscountPercent column added to Loyalty_Tiers';
 END
 GO
 
