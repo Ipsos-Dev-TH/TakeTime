@@ -421,15 +421,10 @@ BEGIN
     BEGIN
         DECLARE @TierID TINYINT;
         DECLARE @BenefitType VARCHAR(50) = 'PRODUCT_DISCOUNT';
-        DECLARE @CategoryName NVARCHAR(200);
 
         SELECT @TierID = [CurrentTier_ID]
         FROM [dbo].[Customer_Loyalty]
         WHERE [Customer_MobilePhone] = @CustomerPhone;
-
-        SELECT @CategoryName = [Name]
-        FROM [dbo].[Product_Category]
-        WHERE [ID] = @ProductCategoryID;
 
         INSERT INTO [dbo].[Loyalty_Benefit_Usage] (
             [Customer_MobilePhone], [Benefit_ID], [Reservation_ID], [Receipt_ID],
@@ -439,7 +434,7 @@ BEGIN
         VALUES (
             @CustomerPhone, NULL, @ReservationID, @ReceiptID,
             @BenefitType, @DiscountAmount, @OriginalAmount, @FinalAmount,
-            @AdminID, N'ส่วนลดสินค้าหมวด: ' + @CategoryName
+            @AdminID, N'ส่วนลดสินค้าหมวดที่ ' + CAST(@ProductCategoryID AS NVARCHAR(10))
         );
     END
 
