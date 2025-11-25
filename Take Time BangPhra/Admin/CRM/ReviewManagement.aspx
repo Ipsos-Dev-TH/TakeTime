@@ -133,18 +133,18 @@
                         <%# Eval("Review_Text") %>
                     </div>
 
-                    <%# !string.IsNullOrEmpty(Eval("Management_Response")?.ToString()) ? 
-                        "<div class='response-box'><strong><i class='fa fa-reply'></i> Management Response:</strong><br />" + 
-                        Eval("Management_Response") + 
-                        "<div style='font-size: 12px; color: #666; margin-top: 8px;'>Responded: " + 
-                        (Eval("Response_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Response_Date")).ToString("dd MMM yyyy") : "") + 
+                    <%# Eval("Management_Response") != null && !string.IsNullOrEmpty(Eval("Management_Response").ToString()) ?
+                        "<div class='response-box'><strong><i class='fa fa-reply'></i> Management Response:</strong><br />" +
+                        Eval("Management_Response") +
+                        "<div style='font-size: 12px; color: #666; margin-top: 8px;'>Responded: " +
+                        (Eval("Response_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Response_Date")).ToString("dd MMM yyyy") : "") +
                         "</div></div>" : "" %>
 
                     <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
-                        <%# Eval("Status").ToString() == "PENDING" ? 
+                        <%# Eval("Status").ToString() == "PENDING" ?
                             "<asp:LinkButton runat='server' CommandName='Approve' CommandArgument='" + Eval("ID") + "' CssClass='btn-approve'><i class='fa fa-check'></i> Approve</asp:LinkButton>" +
                             "<asp:LinkButton runat='server' CommandName='Reject' CommandArgument='" + Eval("ID") + "' CssClass='btn-reject'><i class='fa fa-times'></i> Reject</asp:LinkButton>" : "" %>
-                        <%# string.IsNullOrEmpty(Eval("Management_Response")?.ToString()) && Eval("Status").ToString() == "APPROVED" ? 
+                        <%# (Eval("Management_Response") == null || string.IsNullOrEmpty(Eval("Management_Response").ToString())) && Eval("Status").ToString() == "APPROVED" ?
                             "<asp:LinkButton runat='server' CommandName='Respond' CommandArgument='" + Eval("ID") + "' CssClass='btn-respond'><i class='fa fa-reply'></i> Add Response</asp:LinkButton>" : "" %>
                     </div>
                 </div>
