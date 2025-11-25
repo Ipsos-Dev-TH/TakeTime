@@ -150,7 +150,7 @@ BEGIN
         [Points] INT NOT NULL,
         [BalanceAfter] INT NOT NULL,
         [Reservation_ID] BIGINT,
-        [Receipt_ID] BIGINT,
+        [Receipt_ID] NVARCHAR(15),
         [Reward_ID] INT, -- Link to redeemed reward
         [Description] NVARCHAR(500),
         [ExpiryDate] DATE, -- For earned points

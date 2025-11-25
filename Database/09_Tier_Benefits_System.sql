@@ -111,7 +111,7 @@ BEGIN
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
         [Benefit_ID] INT NOT NULL,
         [Reservation_ID] BIGINT,
-        [Receipt_ID] BIGINT,
+        [Receipt_ID] NVARCHAR(15),
 
         -- Usage details
         [BenefitType] VARCHAR(50) NOT NULL,
