@@ -10,7 +10,7 @@ namespace Take_Time_BangPhra.Admin
 {
     public partial class RoomQRGenerator : Page
     {
-        private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TTBP"].ConnectionString;
+        private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private GuestPortalService _guestPortalService;
         private code _code;
 

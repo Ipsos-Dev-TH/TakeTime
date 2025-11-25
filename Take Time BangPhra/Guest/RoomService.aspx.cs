@@ -12,7 +12,7 @@ namespace Take_Time_BangPhra.Guest
 {
     public partial class RoomService : Page
     {
-        private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TTBP"].ConnectionString;
+        private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private GuestPortalService _guestPortalService;
         private code _code;
         private int _reservationId;
