@@ -14,12 +14,12 @@ namespace Take_Time_BangPhra.Services
     public class GuestPortalService
     {
         private readonly string _connectionString;
-        private readonly Code _code;
+        private readonly code _code;
 
         public GuestPortalService(string connectionString)
         {
             _connectionString = connectionString;
-            _code = new Code();
+            _code = new code();
         }
 
         #region QR Code Management

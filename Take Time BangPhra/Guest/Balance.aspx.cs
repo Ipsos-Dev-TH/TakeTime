@@ -13,14 +13,14 @@ namespace Take_Time_BangPhra.Guest
     {
         private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TTBP"].ConnectionString;
         private GuestPortalService _guestPortalService;
-        private Code _code;
+        private code _code;
         private int _reservationId;
         private string _guestMobilePhone;
 
         protected void Page_Load(object sender, EventArgs e)
         {
             _guestPortalService = new GuestPortalService(_connectionString);
-            _code = new Code();
+            _code = new code();
 
             // Check session
             if (!ValidateGuestSession())

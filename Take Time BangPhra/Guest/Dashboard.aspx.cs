@@ -12,7 +12,7 @@ namespace Take_Time_BangPhra.Guest
         private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TTBP"].ConnectionString;
         private GuestPortalService _guestPortalService;
         private LoyaltyService _loyaltyService;
-        private Code _code;
+        private code _code;
         private string _sessionToken;
         private string _guestMobilePhone;
         private int _reservationId;
@@ -21,7 +21,7 @@ namespace Take_Time_BangPhra.Guest
         {
             _guestPortalService = new GuestPortalService(_connectionString);
             _loyaltyService = new LoyaltyService(_connectionString);
-            _code = new Code();
+            _code = new code();
 
             // Check session
             if (!ValidateGuestSession())

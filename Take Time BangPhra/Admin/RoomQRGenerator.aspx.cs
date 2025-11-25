@@ -12,7 +12,7 @@ namespace Take_Time_BangPhra.Admin
     {
         private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TTBP"].ConnectionString;
         private GuestPortalService _guestPortalService;
-        private Code _code;
+        private code _code;
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -25,7 +25,7 @@ namespace Take_Time_BangPhra.Admin
             }
 
             _guestPortalService = new GuestPortalService(_connectionString);
-            _code = new Code();
+            _code = new code();
 
             if (!IsPostBack)
             {
