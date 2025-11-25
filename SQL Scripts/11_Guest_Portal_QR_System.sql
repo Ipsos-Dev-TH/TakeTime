@@ -14,7 +14,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Room_QR_Codes')
 BEGIN
     CREATE TABLE [dbo].[Room_QR_Codes] (
         [ID] INT IDENTITY(1,1) PRIMARY KEY,
-        [Accommodation_ID] SMALLINT NOT NULL,
+        [Accommodation_ID] TINYINT NOT NULL,
         [Accommodation_Name] NVARCHAR(100) NOT NULL,
         [QR_Token] NVARCHAR(255) NOT NULL UNIQUE, -- Unique token for QR code
         [QR_Data] NVARCHAR(500) NOT NULL, -- Full QR code data (URL with token)
@@ -51,7 +51,7 @@ BEGIN
         [Session_Token] NVARCHAR(255) NOT NULL UNIQUE,
         [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] SMALLINT NOT NULL,
+        [Accommodation_ID] TINYINT NOT NULL,
         [QR_Token] NVARCHAR(255) NOT NULL,
         [Check_In_Date] DATE NOT NULL,
         [Check_Out_Date] DATE NOT NULL,
@@ -91,7 +91,7 @@ BEGIN
         [Order_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] SMALLINT NOT NULL,
+        [Accommodation_ID] TINYINT NOT NULL,
         [Order_Date] DATETIME NOT NULL DEFAULT GETDATE(),
         [Delivery_Instructions] NVARCHAR(500) NULL,
         [Total_Amount] DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -167,7 +167,7 @@ BEGIN
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] SMALLINT NOT NULL,
+        [Accommodation_ID] TINYINT NOT NULL,
         [Request_Type] NVARCHAR(100) NOT NULL, -- 'CLEANING', 'TOWELS', 'TOILETRIES', 'MAINTENANCE', 'OTHER'
         [Request_Description] NVARCHAR(1000) NOT NULL,
         [Priority] NVARCHAR(20) NOT NULL DEFAULT 'NORMAL', -- 'LOW', 'NORMAL', 'HIGH', 'URGENT'
@@ -211,7 +211,7 @@ BEGIN
         [Request_Number] NVARCHAR(50) NOT NULL UNIQUE,
         [Reservation_ID] BIGINT NOT NULL,
         [Customer_MobilePhone] NVARCHAR(30) NOT NULL,
-        [Accommodation_ID] SMALLINT NOT NULL,
+        [Accommodation_ID] TINYINT NOT NULL,
         [Service_Type] NVARCHAR(100) NOT NULL, -- 'TOUR', 'SPA', 'RESTAURANT', 'TRANSPORTATION', 'ACTIVITY', 'OTHER'
         [Service_Name] NVARCHAR(200) NOT NULL,
         [Request_Description] NVARCHAR(1000) NOT NULL,
@@ -292,7 +292,7 @@ IF EXISTS (SELECT * FROM sys.procedures WHERE name = 'sp_Generate_Room_QR_Code')
 GO
 
 CREATE PROCEDURE sp_Generate_Room_QR_Code
-    @Accommodation_ID SMALLINT,
+    @Accommodation_ID TINYINT,
     @Admin_ID SMALLINT,
     @Base_URL NVARCHAR(500) = 'https://taketimebangphra.com/Guest/Portal?qr='
 AS
@@ -358,7 +358,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Accommodation_ID SMALLINT;
+    DECLARE @Accommodation_ID TINYINT;
     DECLARE @Accommodation_Name NVARCHAR(100);
 
     -- Verify QR token exists and is active
