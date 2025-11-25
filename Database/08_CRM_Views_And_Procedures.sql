@@ -26,7 +26,7 @@ SELECT
     C.[TaxID],
     C.[IDNumber],
     C.[Address],
-    CT.[TypeName] AS CustomerType,
+    CT.[Customer_Type] AS CustomerType,
 
     -- Loyalty Info
     CL.[CurrentTier_ID],
@@ -80,7 +80,7 @@ LEFT JOIN [dbo].[Communication_Log] CL_Log ON CL_Log.[Customer_MobilePhone] = C.
 
 GROUP BY
     C.[MobilePhone], C.[Name], C.[Email], C.[TaxID], C.[IDNumber], C.[Address],
-    CT.[TypeName], CL.[CurrentTier_ID], LT.[TierName], LT.[TierColor],
+    CT.[Customer_Type], CL.[CurrentTier_ID], LT.[TierName], LT.[TierColor],
     CL.[TotalPoints], CL.[AvailablePoints], CL.[LifetimePoints], CL.[MemberSince],
     C.[Status], C.[CreatedDate];
 GO
