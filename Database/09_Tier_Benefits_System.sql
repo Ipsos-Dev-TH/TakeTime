@@ -108,7 +108,7 @@ IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Lo
 BEGIN
     CREATE TABLE [dbo].[Loyalty_Benefit_Usage] (
         [ID] BIGINT IDENTITY(1,1) PRIMARY KEY,
-        [Customer_MobilePhone] NVARCHAR(10) NOT NULL,
+        [Customer_MobilePhone] VARCHAR(10) NOT NULL,
         [Benefit_ID] INT NOT NULL,
         [Reservation_ID] BIGINT,
         [Receipt_ID] BIGINT,
