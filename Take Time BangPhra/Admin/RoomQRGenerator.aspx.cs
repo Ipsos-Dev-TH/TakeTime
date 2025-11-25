@@ -68,7 +68,7 @@ namespace Take_Time_BangPhra.Admin
             {
                 // Get all active accommodations
                 DataTable dtAccommodations = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ID, Name FROM Accommodation WHERE Status = 1 ORDER BY OrderID, Name", null);
+                    "SELECT ID, AccomName FROM Accommodation WHERE Status = 1 ORDER BY OrderID, AccomName", null);
 
                 if (dtAccommodations.Rows.Count == 0)
                 {
@@ -81,7 +81,7 @@ namespace Take_Time_BangPhra.Admin
 
                 foreach (DataRow row in dtAccommodations.Rows)
                 {
-                    int accomId = Convert.ToInt32(row["ID"]);
+                    byte accomId = Convert.ToByte(row["ID"]);
 
                     // Generate QR code for this accommodation
                     DataTable result = _guestPortalService.GenerateRoomQRCode(accomId, adminId);

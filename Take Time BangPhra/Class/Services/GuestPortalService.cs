@@ -27,7 +27,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Generate QR code for a specific accommodation
         /// </summary>
-        public DataTable GenerateRoomQRCode(int accommodationId, short adminId, string baseUrl = "https://taketimebangphra.com/Guest/Portal?qr=")
+        public DataTable GenerateRoomQRCode(byte accommodationId, short adminId, string baseUrl = "https://taketimebangphra.com/Guest/Portal?qr=")
         {
             try
             {
@@ -56,10 +56,10 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 string query = @"
-                    SELECT RQR.*, A.Name AS Accommodation_Name, A.Status
+                    SELECT RQR.*, A.AccomName AS Accommodation_Name, A.Status
                     FROM Room_QR_Codes RQR
                     INNER JOIN Accommodation A ON A.ID = RQR.Accommodation_ID
-                    ORDER BY A.OrderID, A.Name";
+                    ORDER BY A.OrderID, A.AccomName";
 
                 return _code.DatabaseQuerySafe(_connectionString, query, null);
             }
@@ -95,7 +95,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Create guest portal session
         /// </summary>
-        public string CreateGuestSession(int reservationId, string customerMobilePhone, int accommodationId,
+        public string CreateGuestSession(long reservationId, string customerMobilePhone, byte accommodationId,
             string qrToken, DateTime checkInDate, DateTime checkOutDate, string ipAddress, string userAgent)
         {
             try
@@ -148,7 +148,7 @@ namespace Take_Time_BangPhra.Services
                 };
 
                 string query = @"
-                    SELECT GPS.*, C.Name AS Customer_Name, A.Name AS Accommodation_Name
+                    SELECT GPS.*, C.Name AS Customer_Name, A.AccomName AS Accommodation_Name
                     FROM Guest_Portal_Sessions GPS
                     INNER JOIN Customer C ON C.MobilePhone = GPS.Customer_MobilePhone
                     INNER JOIN Accommodation A ON A.ID = GPS.Accommodation_ID
@@ -186,7 +186,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Create room service order
         /// </summary>
-        public long CreateRoomServiceOrder(int reservationId, string customerMobilePhone, int accommodationId,
+        public long CreateRoomServiceOrder(long reservationId, string customerMobilePhone, byte accommodationId,
             string deliveryInstructions, decimal totalAmount, string paymentMethod, string paymentSlipPath = null)
         {
             try
@@ -264,7 +264,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get room service orders for a reservation
         /// </summary>
-        public DataTable GetRoomServiceOrders(int reservationId)
+        public DataTable GetRoomServiceOrders(long reservationId)
         {
             try
             {
@@ -355,7 +355,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Create housekeeping request
         /// </summary>
-        public long CreateHousekeepingRequest(int reservationId, string customerMobilePhone, int accommodationId,
+        public long CreateHousekeepingRequest(long reservationId, string customerMobilePhone, byte accommodationId,
             string requestType, string description, string priority = "NORMAL", string preferredTime = null)
         {
             try
@@ -396,7 +396,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get housekeeping requests for a reservation
         /// </summary>
-        public DataTable GetHousekeepingRequests(int reservationId)
+        public DataTable GetHousekeepingRequests(long reservationId)
         {
             try
             {
@@ -468,7 +468,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Create concierge service request
         /// </summary>
-        public long CreateConciergeRequest(int reservationId, string customerMobilePhone, int accommodationId,
+        public long CreateConciergeRequest(long reservationId, string customerMobilePhone, byte accommodationId,
             string serviceType, string serviceName, string description, DateTime? preferredDate = null,
             string preferredTime = null, int? numberOfGuests = null)
         {
@@ -512,7 +512,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get concierge requests for a reservation
         /// </summary>
-        public DataTable GetConciergeRequests(int reservationId)
+        public DataTable GetConciergeRequests(long reservationId)
         {
             try
             {
@@ -541,7 +541,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Send chat message
         /// </summary>
-        public long SendChatMessage(int reservationId, string customerMobilePhone, string messageText,
+        public long SendChatMessage(long reservationId, string customerMobilePhone, string messageText,
             string senderType, string senderName, short? senderId = null, string attachmentPath = null)
         {
             try
@@ -576,7 +576,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get chat messages for a reservation
         /// </summary>
-        public DataTable GetChatMessages(int reservationId, int limit = 100)
+        public DataTable GetChatMessages(long reservationId, int limit = 100)
         {
             try
             {
@@ -602,7 +602,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Mark messages as read
         /// </summary>
-        public bool MarkMessagesAsRead(int reservationId, string readerType)
+        public bool MarkMessagesAsRead(long reservationId, string readerType)
         {
             try
             {
@@ -635,7 +635,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get guest balance for current reservation
         /// </summary>
-        public DataTable GetGuestBalance(int reservationId)
+        public DataTable GetGuestBalance(long reservationId)
         {
             try
             {
