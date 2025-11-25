@@ -26,7 +26,7 @@ SELECT
     C.[TaxID],
     C.[IDNumber],
     C.[Address],
-    CT.[TypeName] AS CustomerType,
+    CT.[CustomerTypeName] AS CustomerType,
 
     -- Loyalty Info
     CL.[CurrentTier_ID],
@@ -80,7 +80,7 @@ LEFT JOIN [dbo].[Communication_Log] CL_Log ON CL_Log.[Customer_MobilePhone] = C.
 
 GROUP BY
     C.[MobilePhone], C.[Name], C.[Email], C.[TaxID], C.[IDNumber], C.[Address],
-    CT.[TypeName], CL.[CurrentTier_ID], LT.[TierName], LT.[TierColor],
+    CT.[CustomerTypeName], CL.[CurrentTier_ID], LT.[TierName], LT.[TierColor],
     CL.[TotalPoints], CL.[AvailablePoints], CL.[LifetimePoints], CL.[MemberSince],
     C.[Status], C.[CreatedDate];
 GO
@@ -107,13 +107,13 @@ SELECT
     ISNULL(SUM(PH.[PaymentAmount]), 0) AS TotalPaid,
 
     -- Frequency metrics
-    MIN(R.[BookDate]) AS FirstBookingDate,
-    MAX(R.[BookDate]) AS LastBookingDate,
-    DATEDIFF(MONTH, MIN(R.[BookDate]), MAX(R.[BookDate])) AS CustomerAge_Months,
+    MIN(R.[Created_Date]) AS FirstBookingDate,
+    MAX(R.[Created_Date]) AS LastBookingDate,
+    DATEDIFF(MONTH, MIN(R.[Created_Date]), MAX(R.[Created_Date])) AS CustomerAge_Months,
 
     CASE
-        WHEN DATEDIFF(MONTH, MIN(R.[BookDate]), MAX(R.[BookDate])) > 0
-        THEN CAST(COUNT(DISTINCT R.[ID]) AS FLOAT) / DATEDIFF(MONTH, MIN(R.[BookDate]), MAX(R.[BookDate]))
+        WHEN DATEDIFF(MONTH, MIN(R.[Created_Date]), MAX(R.[Created_Date])) > 0
+        THEN CAST(COUNT(DISTINCT R.[ID]) AS FLOAT) / DATEDIFF(MONTH, MIN(R.[Created_Date]), MAX(R.[Created_Date]))
         ELSE 0
     END AS AvgBookingsPerMonth,
 
