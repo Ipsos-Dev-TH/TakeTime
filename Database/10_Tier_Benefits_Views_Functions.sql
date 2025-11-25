@@ -427,7 +427,7 @@ BEGIN
         FROM [dbo].[Customer_Loyalty]
         WHERE [Customer_MobilePhone] = @CustomerPhone;
 
-        SELECT @CategoryName = [CategoryName]
+        SELECT @CategoryName = [Name]
         FROM [dbo].[Product_Category]
         WHERE [ID] = @ProductCategoryID;
 
