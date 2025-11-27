@@ -118,7 +118,7 @@ namespace Take_Time_BangPhra.Admin
             {
                 try
                 {
-                    int accommodationId = Convert.ToInt32(e.CommandArgument);
+                    byte accommodationId = Convert.ToByte(e.CommandArgument);
                     short adminId = Session["UserID"] != null ? Convert.ToInt16(Session["UserID"]) : (short)1;
 
                     DataTable result = _guestPortalService.GenerateRoomQRCode(accommodationId, adminId);

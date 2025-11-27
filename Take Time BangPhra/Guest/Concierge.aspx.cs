@@ -9,9 +9,9 @@ namespace Take_Time_BangPhra.Guest
     {
         private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private GuestPortalService _guestPortalService;
-        private int _reservationId;
+        private long _reservationId;
         private string _guestMobilePhone;
-        private int _accommodationId;
+        private byte _accommodationId;
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -27,9 +27,9 @@ namespace Take_Time_BangPhra.Guest
             DataTable dtSession = _guestPortalService.ValidateGuestSession(sessionToken);
             if (dtSession.Rows.Count == 0) return false;
             DataRow session = dtSession.Rows[0];
-            _reservationId = Convert.ToInt32(session["Reservation_ID"]);
+            _reservationId = Convert.ToInt64(session["Reservation_ID"]);
             _guestMobilePhone = session["Customer_MobilePhone"].ToString();
-            _accommodationId = Convert.ToInt32(session["Accommodation_ID"]);
+            _accommodationId = Convert.ToByte(session["Accommodation_ID"]);
             return true;
         }
 

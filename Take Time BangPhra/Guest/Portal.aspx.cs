@@ -94,10 +94,10 @@ namespace Take_Time_BangPhra.Guest
                 }
 
                 // Valid access - create session
-                int reservationId = Convert.ToInt32(verifyResult["Reservation_ID"]);
-                int accommodationId = Convert.ToInt32(verifyResult["Accommodation_ID"]);
-                DateTime checkInDate = Convert.ToDateTime(verifyResult["CheckIn"]);
-                DateTime checkOutDate = Convert.ToDateTime(verifyResult["CheckOut"]);
+                long reservationId = Convert.ToInt64(verifyResult["Reservation_ID"]);
+                byte accommodationId = Convert.ToByte(verifyResult["Accommodation_ID"]);
+                DateTime checkInDate = Convert.ToDateTime(verifyResult["CheckInDate"]);
+                DateTime checkOutDate = Convert.ToDateTime(verifyResult["CheckOutDate"]);
 
                 // Get client info
                 string ipAddress = GetClientIP();
