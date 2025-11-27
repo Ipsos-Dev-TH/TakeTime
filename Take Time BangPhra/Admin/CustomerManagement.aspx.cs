@@ -36,17 +36,27 @@ namespace Take_Time_BangPhra.Admin
 
         private void CheckAdminLogin()
         {
-            if (Session["Admin_ID"] == null)
+            // Check permissions
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Admin/Login.aspx");
+                Response.Redirect("/Default");
+                return;
+            }
+
+            // Check user role
+            string userType = Session["User"]?.ToString();
+            if (userType != "Owner" && userType != "Admin" && userType != "Frontdesk")
+            {
+                Response.Redirect("/Default");
+                return;
             }
         }
 
         private short? GetAdminID()
         {
-            if (Session["Admin_ID"] != null)
+            if (Session["UserID"] != null)
             {
-                return Convert.ToInt16(Session["Admin_ID"]);
+                return Convert.ToInt16(Session["UserID"]);
             }
             return null;
         }

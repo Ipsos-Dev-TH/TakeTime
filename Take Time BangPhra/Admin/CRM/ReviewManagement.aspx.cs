@@ -66,7 +66,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                     // Calculate response rate from approved reviews with management response
                     var parameters = new System.Collections.Generic.Dictionary<string, object>();
                     DataTable dtWithResponse = _code.DatabaseQuerySafe(_connectionString,
-                        "SELECT COUNT(*) AS Count FROM Guest_Reviews WHERE Status = 'APPROVED' AND Management_Response IS NOT NULL",
+                        "SELECT COUNT(*) AS Count FROM Guest_Reviews WHERE Status = 'APPROVED' AND ResponseText IS NOT NULL",
                         parameters);
 
                     int reviewsWithResponse = dtWithResponse.Rows.Count > 0 ? Convert.ToInt32(dtWithResponse.Rows[0]["Count"]) : 0;
@@ -92,18 +92,17 @@ namespace Take_Time_BangPhra.Admin.CRM
                         GR.Reservation_ID,
                         GR.Customer_MobilePhone,
                         C.Name AS Customer_Name,
-                        GR.Overall_Rating,
-                        GR.Accommodation_Rating,
-                        GR.Cleanliness_Rating,
-                        GR.Staff_Rating,
-                        GR.Value_Rating,
-                        GR.Location_Rating,
-                        GR.Facilities_Rating,
-                        GR.Review_Text,
-                        GR.Review_Date,
+                        GR.OverallRating,
+                        GR.CleanlinessRating,
+                        GR.ServiceRating,
+                        GR.ValueForMoneyRating,
+                        GR.LocationRating,
+                        GR.FacilitiesRating,
+                        GR.ReviewText,
+                        GR.SubmittedDate,
                         GR.Status,
-                        GR.Management_Response,
-                        GR.Response_Date
+                        GR.ResponseText,
+                        GR.ResponseDate
                     FROM Guest_Reviews GR
                     LEFT JOIN Customer C ON C.MobilePhone = GR.Customer_MobilePhone
                     WHERE 1=1");
@@ -133,7 +132,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                     parameters["@Search"] = "%" + txtSearchCustomer.Text + "%";
                 }
 
-                query.Append(" ORDER BY GR.Review_Date DESC");
+                query.Append(" ORDER BY GR.SubmittedDate DESC");
 
                 DataTable dtReviews = _code.DatabaseQuerySafe(_connectionString, query.ToString(), parameters);
 

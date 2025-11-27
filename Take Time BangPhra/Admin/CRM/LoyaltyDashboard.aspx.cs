@@ -75,15 +75,15 @@ namespace Take_Time_BangPhra.Admin.CRM
                 // New members this month
                 DataTable dtNewMonth = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT COUNT(*) FROM Customer_Loyalty
-                      WHERE MONTH(Created_Date) = MONTH(GETDATE())
-                        AND YEAR(Created_Date) = YEAR(GETDATE())", null);
+                      WHERE MONTH(MemberSince) = MONTH(GETDATE())
+                        AND YEAR(MemberSince) = YEAR(GETDATE())", null);
                 int newThisMonth = dtNewMonth.Rows.Count > 0 ? Convert.ToInt32(dtNewMonth.Rows[0][0]) : 0;
                 lblMembersChange.Text = newThisMonth.ToString("N0");
 
                 // Active members (had transaction in last 90 days)
                 DataTable dtActive = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT COUNT(DISTINCT Customer_MobilePhone) FROM Loyalty_Transactions
-                      WHERE Transaction_Date >= DATEADD(DAY, -90, GETDATE())", null);
+                      WHERE TransactionDate >= DATEADD(DAY, -90, GETDATE())", null);
                 int activeMembers = dtActive.Rows.Count > 0 ? Convert.ToInt32(dtActive.Rows[0][0]) : 0;
                 lblActiveMembers.Text = activeMembers.ToString("N0");
                 decimal activePercent = totalMembers > 0 ? (decimal)activeMembers / totalMembers * 100 : 0;
@@ -92,18 +92,18 @@ namespace Take_Time_BangPhra.Admin.CRM
                 // Points earned this month
                 DataTable dtEarned = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ISNULL(SUM(Points), 0) FROM Loyalty_Transactions
-                      WHERE Transaction_Type = 'EARN'
-                        AND MONTH(Transaction_Date) = MONTH(GETDATE())
-                        AND YEAR(Transaction_Date) = YEAR(GETDATE())", null);
+                      WHERE TransactionType = 'EARN'
+                        AND MONTH(TransactionDate) = MONTH(GETDATE())
+                        AND YEAR(TransactionDate) = YEAR(GETDATE())", null);
                 int pointsEarned = dtEarned.Rows.Count > 0 ? Convert.ToInt32(dtEarned.Rows[0][0]) : 0;
                 lblPointsEarned.Text = pointsEarned.ToString("N0");
 
                 // Points earned last month for comparison
                 DataTable dtEarnedLast = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ISNULL(SUM(Points), 0) FROM Loyalty_Transactions
-                      WHERE Transaction_Type = 'EARN'
-                        AND MONTH(Transaction_Date) = MONTH(DATEADD(MONTH, -1, GETDATE()))
-                        AND YEAR(Transaction_Date) = YEAR(DATEADD(MONTH, -1, GETDATE()))", null);
+                      WHERE TransactionType = 'EARN'
+                        AND MONTH(TransactionDate) = MONTH(DATEADD(MONTH, -1, GETDATE()))
+                        AND YEAR(TransactionDate) = YEAR(DATEADD(MONTH, -1, GETDATE()))", null);
                 int pointsEarnedLast = dtEarnedLast.Rows.Count > 0 ? Convert.ToInt32(dtEarnedLast.Rows[0][0]) : 0;
                 decimal earnedChange = pointsEarnedLast > 0 ? ((decimal)(pointsEarned - pointsEarnedLast) / pointsEarnedLast * 100) : 0;
                 lblPointsEarnedChange.Text = Math.Abs(earnedChange).ToString("N1");
@@ -111,9 +111,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                 // Points redeemed this month
                 DataTable dtRedeemed = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ISNULL(SUM(Points), 0) FROM Loyalty_Transactions
-                      WHERE Transaction_Type = 'REDEEM'
-                        AND MONTH(Transaction_Date) = MONTH(GETDATE())
-                        AND YEAR(Transaction_Date) = YEAR(GETDATE())", null);
+                      WHERE TransactionType = 'REDEEM'
+                        AND MONTH(TransactionDate) = MONTH(GETDATE())
+                        AND YEAR(TransactionDate) = YEAR(GETDATE())", null);
                 int pointsRedeemed = dtRedeemed.Rows.Count > 0 ? Convert.ToInt32(dtRedeemed.Rows[0][0]) : 0;
                 lblPointsRedeemed.Text = Math.Abs(pointsRedeemed).ToString("N0");
 
@@ -199,13 +199,13 @@ namespace Take_Time_BangPhra.Admin.CRM
             {
                 DataTable dtTransactions = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 20
-                        LT.Transaction_Type AS TransactionType,
+                        LT.TransactionType,
                         LT.Points,
                         LT.Description,
                         LT.Customer_MobilePhone,
-                        LT.Transaction_Date AS TransactionDate
+                        LT.TransactionDate
                       FROM Loyalty_Transactions LT
-                      ORDER BY LT.Transaction_Date DESC", null);
+                      ORDER BY LT.TransactionDate DESC", null);
 
                 if (dtTransactions.Rows.Count > 0)
                 {

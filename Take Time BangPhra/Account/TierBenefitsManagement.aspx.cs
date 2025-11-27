@@ -80,7 +80,7 @@ namespace Take_Time_BangPhra.Account
                 // Total discounts given
                 DataTable dtTotalDiscounts = _code.DatabaseQuerySafe(_connectionString,
                     "SELECT ISNULL(SUM(DiscountAmount), 0) FROM Loyalty_Benefit_Usage " +
-                    "WHERE CAST(UsedDate AS DATE) >= DATEADD(MONTH, -1, GETDATE())",
+                    "WHERE CAST(UsageDate AS DATE) >= DATEADD(MONTH, -1, GETDATE())",
                     null);
                 decimal totalDiscounts = Convert.ToDecimal(dtTotalDiscounts.Rows[0][0]);
                 lblTotalDiscounts.Text = totalDiscounts.ToString("N2");
@@ -441,7 +441,7 @@ namespace Take_Time_BangPhra.Account
                         AVG(DiscountAmount) AS AvgDiscountAmount,
                         COUNT(DISTINCT Customer_MobilePhone) AS UniqueCustomers
                       FROM Loyalty_Benefit_Usage
-                      WHERE UsedDate >= @FromDate AND UsedDate < @ToDate
+                      WHERE UsageDate >= @FromDate AND UsageDate < @ToDate
                       GROUP BY BenefitType
                       ORDER BY TotalDiscountAmount DESC",
                     parameters);

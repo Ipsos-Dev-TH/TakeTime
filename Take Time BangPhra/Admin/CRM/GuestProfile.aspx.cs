@@ -123,7 +123,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                 // Load from Guest Profile 360 view
                 var parameters = new Dictionary<string, object> { { "@Phone", customerPhone } };
                 DataTable dtProfile = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT * FROM vw_Guest_Profile_360 WHERE Customer_MobilePhone = @Phone",
+                    "SELECT * FROM vw_Guest_Profile_360 WHERE MobilePhone = @Phone",
                     parameters);
 
                 if (dtProfile.Rows.Count == 0)
@@ -140,16 +140,20 @@ namespace Take_Time_BangPhra.Admin.CRM
                 pnlNotFound.Visible = false;
 
                 // Customer Header
-                string fullName = profile["Customer_FullName"]?.ToString() ?? profile["Customer_Name"]?.ToString() ?? "N/A";
+                string fullName = profile["Name"]?.ToString() ?? "N/A";
                 lblCustomerName.Text = fullName;
                 lblInitials.Text = GetInitials(fullName);
-                lblPhone.Text = profile["Customer_MobilePhone"]?.ToString() ?? "";
-                lblEmail.Text = profile["Customer_Email"]?.ToString() ?? "Not provided";
+                lblPhone.Text = profile["MobilePhone"]?.ToString() ?? "";
+                lblEmail.Text = profile["Email"]?.ToString() ?? "Not provided";
 
                 // Member Since
-                if (profile["FirstReservationDate"] != DBNull.Value)
+                if (profile["MemberSince"] != DBNull.Value)
                 {
-                    lblMemberSince.Text = Convert.ToDateTime(profile["FirstReservationDate"]).ToString("MMM yyyy");
+                    lblMemberSince.Text = Convert.ToDateTime(profile["MemberSince"]).ToString("MMM yyyy");
+                }
+                else if (profile["FirstStayDate"] != DBNull.Value)
+                {
+                    lblMemberSince.Text = Convert.ToDateTime(profile["FirstStayDate"]).ToString("MMM yyyy");
                 }
                 else
                 {
@@ -157,7 +161,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                 }
 
                 // Loyalty Badge
-                string tierName = profile["Loyalty_TierName"]?.ToString() ?? "Member";
+                string tierName = profile["LoyaltyTier"]?.ToString() ?? "Member";
                 lblTierName.Text = tierName;
                 if (tierName == "VIP" || tierName == "สมาชิก VIP")
                 {
@@ -165,40 +169,40 @@ namespace Take_Time_BangPhra.Admin.CRM
                 }
 
                 // Statistics
-                lblPoints.Text = profile["Loyalty_PointsBalance"]?.ToString() ?? "0";
-                lblTotalBookings.Text = profile["TotalBookings"]?.ToString() ?? "0";
+                lblPoints.Text = profile["AvailablePoints"]?.ToString() ?? "0";
+                lblTotalBookings.Text = profile["TotalReservations"]?.ToString() ?? "0";
 
-                decimal lifetimeValue = profile["TotalRevenue"] != DBNull.Value
-                    ? Convert.ToDecimal(profile["TotalRevenue"])
+                decimal lifetimeValue = profile["TotalSpend"] != DBNull.Value
+                    ? Convert.ToDecimal(profile["TotalSpend"])
                     : 0;
                 lblLifetimeValue.Text = lifetimeValue.ToString("N0");
 
-                decimal avgRating = profile["AverageRating"] != DBNull.Value
-                    ? Convert.ToDecimal(profile["AverageRating"])
+                decimal avgRating = profile["AvgRating"] != DBNull.Value
+                    ? Convert.ToDecimal(profile["AvgRating"])
                     : 0;
                 lblAvgRating.Text = avgRating.ToString("N1");
 
                 // Basic Information
                 lblFullName.Text = fullName;
-                lblNickname.Text = profile["Customer_NickName"]?.ToString() ?? "N/A";
-                lblIDNumber.Text = profile["Customer_IDNumber"]?.ToString() ?? "Not provided";
-                lblAddress.Text = profile["Customer_Address"]?.ToString() ?? "Not provided";
-                lblSegment.Text = profile["SegmentName"]?.ToString() ?? "Not segmented";
+                lblNickname.Text = "N/A"; // NickName not in view
+                lblIDNumber.Text = profile["IDNumber"]?.ToString() ?? "Not provided";
+                lblAddress.Text = profile["Address"]?.ToString() ?? "Not provided";
+                lblSegment.Text = profile["Segments"]?.ToString() ?? "Not segmented";
 
                 // Loyalty Status
                 lblCurrentTier.Text = tierName;
-                lblCurrentPoints.Text = profile["Loyalty_PointsBalance"]?.ToString() ?? "0";
+                lblCurrentPoints.Text = profile["AvailablePoints"]?.ToString() ?? "0";
 
                 // Calculate next tier
-                int currentPoints = profile["Loyalty_PointsBalance"] != DBNull.Value
-                    ? Convert.ToInt32(profile["Loyalty_PointsBalance"])
+                int currentPoints = profile["AvailablePoints"] != DBNull.Value
+                    ? Convert.ToInt32(profile["AvailablePoints"])
                     : 0;
                 var nextTierInfo = GetNextTierInfo(currentPoints);
                 lblNextTier.Text = nextTierInfo.Item1;
                 lblPointsToNext.Text = nextTierInfo.Item2.ToString("N0");
 
-                lblMultiplier.Text = profile["Loyalty_PointsMultiplier"]?.ToString() ?? "1.0";
-                lblDiscountPercent.Text = profile["Loyalty_DiscountPercent"]?.ToString() ?? "0";
+                lblMultiplier.Text = "1.0"; // Not in view
+                lblDiscountPercent.Text = "0"; // Not in view
 
                 // Load related data
                 LoadBookingHistory(customerPhone);
