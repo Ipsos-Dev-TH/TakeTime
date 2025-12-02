@@ -1,83 +1,370 @@
-﻿<%@ Page Title="" Language="C#" MaintainScrollPositionOnPostback="true" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Vendor.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Vendor" %>
+<%@ Page Title="จัดการข้อมูล Vendor / ผู้ขาย" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Vendor.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Vendor" MaintainScrollPositionOnPostback="true" %>
+
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
-        tr.spaceUnder>td {
-  padding-bottom: 1em;
-}
-        .auto-style1 {
-            width: 90%;
-            height: 39px;
+        .vendor-management {
+            padding: 20px;
         }
-        .auto-style2 {
-            height: 39px;
+
+        .section-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .section-header h2 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .form-card {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .form-group label.required::after {
+            content: " *";
+            color: #d32f2f;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-control:focus {
+            border-color: #667eea;
+            outline: none;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-info {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .search-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .search-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .data-table {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .data-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+        }
+
+        .data-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        .hint.success {
+            color: #4caf50;
+        }
+
+        .hint.warning {
+            color: #d32f2f;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+            margin: 20px 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #e0e0e0;
         }
     </style>
-    <p>
-        <br />
-        <table style="width:100%;">
-            <tr class="spaceUnder">
-                <td class="auto-style1">
-                    <br />
-                    <br />
-                </td>
-                <td class="auto-style2">&nbsp;</td>
-            </tr>
-            <tr class="spaceUnder">
-                <td class="auto-style1">
-                    <asp:TextBox ID="TextBox1" runat="server" Width="40%" Placeholder="เลขประจำตัวผู้เสียภาษี 13 หลัก (ไม่บังคับ)" AutoPostBack="True" OnTextChanged="TextBox1_TextChanged" TextMode="Number"></asp:TextBox>
-                &nbsp;<asp:DropDownList ID="DropDownList5" runat="server" Width="40%">
-                    </asp:DropDownList>
-                </td>
-                <td class="auto-style2" style="color: #4caf50; font-size: 0.9em;">✓ เว้นว่างได้ถ้าไม่มีเลขผู้เสียภาษี</td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:DropDownList ID="DropDownList1" runat="server" Width="30%">
-                    </asp:DropDownList>
-                    <asp:TextBox ID="TextBox2" runat="server" Width="50%" Placeholder="ชื่อผู้เสียภาษี / ชื่อบริษัท (บังคับ) *" required></asp:TextBox>
-                </td>
-                <td>
-                    <span style="color: #d32f2f; font-weight: bold; font-size: 0.9em;">* บังคับ - ใช้เป็น unique key หลัก</span></td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:TextBox ID="TextBox3" runat="server" Width="40%" Placeholder="เลขสาขา (00000 = สำนักงานใหญ่) *" AutoPostBack="True" OnTextChanged="TextBox3_TextChanged" TextMode="Number" required></asp:TextBox>
-                    &nbsp;<asp:TextBox ID="TextBox7" runat="server" Width="40%" Placeholder="เบอร์โทรศัพท์ (ไม่บังคับ)" AutoPostBack="True" OnTextChanged="TextBox7_TextChanged"></asp:TextBox>
-                </td>
-                <td><span style="color: #4caf50; font-size: 0.9em;">✓ เบอร์โทรเว้นว่างได้ (เลขสาขาบังคับ)</span></td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:TextBox ID="TextBox4" runat="server" Width="30%" Placeholder="บ้านเลขที่"></asp:TextBox>
-                &nbsp;<asp:TextBox ID="TextBox5" runat="server" Width="50%" Placeholder="อาคาร หมู่ที่ ซอย"></asp:TextBox>
-                </td>
-                <td>&nbsp;</td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:TextBox ID="TextBox6" runat="server" Width="30%" Placeholder="รหัสไปรษณีย์"></asp:TextBox>
-                &nbsp;<asp:Button ID="Button5" runat="server" Text="ค้นหา" Width="20%" OnClick="Button5_Click" />
-                 &nbsp;<asp:Button ID="Button6" runat="server" Text="ยกเลิก" Width="20%" OnClick="Button6_Click"  />
-                </td>
-                <td>&nbsp;</td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:DropDownList ID="DropDownList2" runat="server" Width="30%" AutoPostBack="True" OnSelectedIndexChanged="DropDownList2_SelectedIndexChanged">
-                    </asp:DropDownList>
-                    &nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="30%" AutoPostBack="True" OnSelectedIndexChanged="DropDownList3_SelectedIndexChanged">
-                    </asp:DropDownList>
-                    &nbsp;<asp:DropDownList ID="DropDownList4" runat="server" Width="30%">
-                    </asp:DropDownList>
-                    </td>
-                <td>&nbsp;</td>
-            </tr>
-            <tr class="spaceUnder">
-                <td>
-                    <asp:Button ID="Button2" runat="server" Text="บันทึก / แก้ไข" Width="50%" Height="50px" OnClick="Button2_Click" />
-                </td>
-                <td>&nbsp;</td>
-            </tr>
-        </table>
-    </p>
+
+    <div class="vendor-management">
+        <div class="section-header">
+            <h2>🏢 จัดการข้อมูล Vendor / ผู้ขาย</h2>
+        </div>
+
+        <!-- Search Section -->
+        <asp:Panel ID="pnlSearch" runat="server" CssClass="search-section">
+            <h4 style="margin-top: 0;">🔍 ค้นหา Vendor</h4>
+            <div class="search-controls">
+                <asp:TextBox ID="txtSearchTax" runat="server" CssClass="form-control" placeholder="เลขผู้เสียภาษี (13 หลัก)" style="max-width: 250px;" TextMode="Number" AutoPostBack="true" OnTextChanged="txtSearchTax_TextChanged"></asp:TextBox>
+                <asp:TextBox ID="txtSearchName" runat="server" CssClass="form-control" placeholder="ชื่อผู้ขาย/บริษัท" style="max-width: 300px;"></asp:TextBox>
+                <asp:DropDownList ID="ddlSearchGroup" runat="server" CssClass="form-control" style="max-width: 200px;">
+                    <asp:ListItem Value="">ทุกประเภท</asp:ListItem>
+                </asp:DropDownList>
+                <asp:Button ID="btnSearch" runat="server" Text="ค้นหา" CssClass="btn-primary" OnClick="btnSearch_Click" />
+                <asp:Button ID="btnClearSearch" runat="server" Text="ล้างค่า" CssClass="btn-secondary" OnClick="btnClearSearch_Click" />
+                <asp:Button ID="btnNewVendor" runat="server" Text="+ เพิ่ม Vendor ใหม่" CssClass="btn-success" OnClick="btnNewVendor_Click" />
+            </div>
+        </asp:Panel>
+
+        <!-- Vendor List -->
+        <asp:Panel ID="pnlVendorList" runat="server" CssClass="data-table">
+            <asp:GridView ID="gvVendors" runat="server" AutoGenerateColumns="False"
+                CssClass="table" GridLines="None" OnRowCommand="gvVendors_RowCommand">
+                <Columns>
+                    <asp:BoundField DataField="IDNumber" HeaderText="เลขผู้เสียภาษี" />
+                    <asp:BoundField DataField="Name" HeaderText="ชื่อผู้ขาย/บริษัท" />
+                    <asp:BoundField DataField="Branch_Number" HeaderText="สาขา" />
+                    <asp:BoundField DataField="Customer_Type" HeaderText="ประเภท" />
+                    <asp:BoundField DataField="Vendor_Group" HeaderText="กลุ่ม" />
+                    <asp:BoundField DataField="Phone_Number" HeaderText="เบอร์โทร" />
+
+                    <asp:TemplateField HeaderText="ที่อยู่">
+                        <ItemTemplate>
+                            <%# GetShortAddress(Eval("Address"), Eval("Province")) %>
+                        </ItemTemplate>
+                    </asp:TemplateField>
+
+                    <asp:TemplateField HeaderText="จัดการ">
+                        <ItemTemplate>
+                            <asp:Button ID="btnEdit" runat="server" Text="แก้ไข"
+                                CssClass="btn-info" CommandName="EditVendor"
+                                CommandArgument='<%# Eval("ID") %>' />
+                            <asp:Button ID="btnDelete" runat="server" Text="ลบ"
+                                CssClass="btn-danger" CommandName="DeleteVendor"
+                                CommandArgument='<%# Eval("ID") %>'
+                                OnClientClick="return confirm('ยืนยันการลบ Vendor นี้?');" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                </Columns>
+                <EmptyDataTemplate>
+                    <div style="text-align: center; padding: 40px; color: #999;">
+                        ไม่พบข้อมูล Vendor<br/>
+                        กรุณาคลิก "เพิ่ม Vendor ใหม่" เพื่อเพิ่มข้อมูล
+                    </div>
+                </EmptyDataTemplate>
+            </asp:GridView>
+        </asp:Panel>
+
+        <!-- Vendor Form -->
+        <asp:Panel ID="pnlVendorForm" runat="server" CssClass="form-card" Visible="false">
+            <h3 style="margin-top: 0; color: #667eea;">
+                <asp:Label ID="lblFormTitle" runat="server" Text="เพิ่ม Vendor ใหม่"></asp:Label>
+            </h3>
+
+            <div class="section-title">📋 ข้อมูลทั่วไป</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>เลขประจำตัวผู้เสียภาษี (13 หลัก)</label>
+                    <asp:TextBox ID="txtTaxID" runat="server" CssClass="form-control" TextMode="Number" MaxLength="13" AutoPostBack="true" OnTextChanged="txtTaxID_TextChanged"></asp:TextBox>
+                    <div class="hint success">✓ เว้นว่างได้ถ้าไม่มีเลขผู้เสียภาษี</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="required">ประเภท Vendor</label>
+                    <asp:DropDownList ID="ddlVendorType" runat="server" CssClass="form-control"></asp:DropDownList>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="required">ชื่อผู้เสียภาษี / ชื่อบริษัท</label>
+                    <asp:TextBox ID="txtVendorName" runat="server" CssClass="form-control" required></asp:TextBox>
+                    <div class="hint warning">* บังคับ - ใช้เป็น unique key หลัก</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="required">เลขสาขา (00000 = สำนักงานใหญ่)</label>
+                    <asp:TextBox ID="txtBranchNumber" runat="server" CssClass="form-control" TextMode="Number" MaxLength="5" Text="00000" required></asp:TextBox>
+                    <div class="hint success">✓ กรอก 00000 สำหรับสำนักงานใหญ่</div>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>เบอร์โทรศัพท์</label>
+                    <asp:TextBox ID="txtPhone" runat="server" CssClass="form-control"></asp:TextBox>
+                    <div class="hint success">✓ เว้นว่างได้</div>
+                </div>
+
+                <div class="form-group">
+                    <label>กลุ่ม Vendor</label>
+                    <asp:DropDownList ID="ddlVendorGroup" runat="server" CssClass="form-control"></asp:DropDownList>
+                </div>
+            </div>
+
+            <div class="section-title">📍 ที่อยู่</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>บ้านเลขที่</label>
+                    <asp:TextBox ID="txtAddress" runat="server" CssClass="form-control"></asp:TextBox>
+                </div>
+
+                <div class="form-group">
+                    <label>อาคาร หมู่ที่ ซอย ถนน</label>
+                    <asp:TextBox ID="txtAddress1" runat="server" CssClass="form-control"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>รหัสไปรษณีย์</label>
+                    <div style="display: flex; gap: 10px;">
+                        <asp:TextBox ID="txtPostalCode" runat="server" CssClass="form-control" TextMode="Number" MaxLength="5"></asp:TextBox>
+                        <asp:Button ID="btnSearchPostal" runat="server" Text="ค้นหา" CssClass="btn-info" OnClick="btnSearchPostal_Click" style="min-width: 100px;" />
+                        <asp:Button ID="btnClearPostal" runat="server" Text="ยกเลิก" CssClass="btn-secondary" OnClick="btnClearPostal_Click" style="min-width: 100px;" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>จังหวัด</label>
+                    <asp:DropDownList ID="ddlProvince" runat="server" CssClass="form-control" AutoPostBack="true" OnSelectedIndexChanged="ddlProvince_SelectedIndexChanged"></asp:DropDownList>
+                </div>
+
+                <div class="form-group">
+                    <label>อำเภอ/เขต</label>
+                    <asp:DropDownList ID="ddlDistrict" runat="server" CssClass="form-control" AutoPostBack="true" OnSelectedIndexChanged="ddlDistrict_SelectedIndexChanged"></asp:DropDownList>
+                </div>
+
+                <div class="form-group">
+                    <label>ตำบล/แขวง</label>
+                    <asp:DropDownList ID="ddlSubDistrict" runat="server" CssClass="form-control"></asp:DropDownList>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <asp:Button ID="btnSave" runat="server" Text="💾 บันทึก" CssClass="btn-success" OnClick="btnSave_Click" />
+                <asp:Button ID="btnCancel" runat="server" Text="ยกเลิก" CssClass="btn-warning" OnClick="btnCancel_Click" />
+            </div>
+
+            <asp:HiddenField ID="hfVendorID" runat="server" />
+        </asp:Panel>
+    </div>
 </asp:Content>

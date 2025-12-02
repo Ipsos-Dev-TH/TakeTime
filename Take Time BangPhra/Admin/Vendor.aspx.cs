@@ -1,10 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Web;
+using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
-using System.Data;
 using System.Configuration;
 using Take_Time_BangPhra.Class;
 
@@ -14,463 +12,616 @@ namespace Take_Time_BangPhra.Admin
     {
         _Default code = new _Default();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-
-        // ✨ Helper Classes for refactored system
         private AddressHelper _addressHelper;
-        private CustomerHelper _customerHelper;
-        private DocumentHelper _documentHelper;
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
-            _customerHelper = new CustomerHelper(conn);
-            _documentHelper = new DocumentHelper(conn);
 
             try
             {
-                if (Session["permission"].ToString() == "True")
-                {
-
-                    if(!IsPostBack)
-                    {
-                        DataTable dtCustomerType = code.DatabaseQuery(conn, "Select [Customer_Type],ID From Customer_Type");
-                        for (int i = 0; i < dtCustomerType.Rows.Count; i++)
-                        {
-                            DropDownList1.Items.Add(new ListItem(dtCustomerType.Rows[i][0].ToString(), dtCustomerType.Rows[i][1].ToString()));
-                        }
-                        DropDownList1.DataBind();
-
-                        DataTable dtVendorCategory = code.DatabaseQuery(conn, "Select DISTINCT [Vendor_Group] From Vendor");
-                        for (int i = 0; i < dtVendorCategory.Rows.Count; i++)
-                        {
-                            DropDownList5.Items.Add(new ListItem(dtVendorCategory.Rows[i][0].ToString(), dtVendorCategory.Rows[i][0].ToString()));
-                        }
-                        DropDownList5.DataBind();
-
-                        getAddress("SELECT DISTINCT [Province] FROM [Address] order by Province ASC", "SELECT DISTINCT [District] FROM [Address] order by District ASC", "SELECT DISTINCT [SubDistrict] FROM [Address] order by SubDistrict ASC");
-
-                    }
-                }
-                else
+                if (Session["permission"]?.ToString() != "True")
                 {
                     Response.Redirect("/Default");
+                    return;
+                }
+
+                if (!IsPostBack)
+                {
+                    LoadVendorTypes();
+                    LoadVendorGroups();
+                    LoadSearchGroups();
+                    LoadAddress();
+                    LoadVendorList();
                 }
             }
-            catch { Response.Redirect("/Default");  }
-        }
-
-        protected void TextBox1_TextChanged(object sender, EventArgs e)
-        {
-            // ✅ รองรับการค้นหาด้วย Tax ID (13 หลัก)
-            if(TextBox1.Text.Length == 13)
+            catch
             {
-                // SECURE: Vendor lookup with parameterized query
-                var vendorParams = new Dictionary<string, object>
-                {
-                    { "@IDNumber", TextBox1.Text ?? "" }
-                };
-
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Vendor " +
-                    "LEFT JOIN Customer_Type ON Customer_Type.ID = Vendor_Type_ID " +
-                    "LEFT JOIN Address ON Address.ID = Address_ID " +
-                    "WHERE IDNumber = @IDNumber",
-                    vendorParams);
-
-                if(dt.Rows.Count > 0)
-                {
-                    TextBox2.Text = dt.Rows[0]["Name"].ToString();
-                    TextBox3.Text = dt.Rows[0]["Branch_Number"].ToString();
-                    TextBox7.Text = dt.Rows[0]["Phone_Number"].ToString();
-                    TextBox4.Text = dt.Rows[0]["Address"].ToString();
-                    TextBox5.Text = dt.Rows[0]["Address1"].ToString();
-
-                    try //Address
-                    {
-                        TextBox6.Text = dt.Rows[0]["PostalCode"].ToString();
-                        DropDownList2.ClearSelection();
-                        DropDownList2.Items.FindByText(dt.Rows[0]["Province"].ToString()).Selected = true;
-                        DropDownList2.SelectedIndex = DropDownList2.Items.IndexOf(DropDownList2.Items.FindByText(dt.Rows[0]["Province"].ToString()));
-                        DropDownList3.ClearSelection();
-                        DropDownList3.Items.FindByText(dt.Rows[0]["District"].ToString()).Selected = true;
-                        DropDownList3.SelectedIndex = DropDownList3.Items.IndexOf(DropDownList3.Items.FindByText(dt.Rows[0]["District"].ToString()));
-                        DropDownList4.ClearSelection();
-                        DropDownList4.Items.FindByText(dt.Rows[0]["SubDistrict"].ToString()).Selected = true;
-                        DropDownList4.SelectedIndex = DropDownList4.Items.IndexOf(DropDownList4.Items.FindByText(dt.Rows[0]["SubDistrict"].ToString()));
-
-                        DropDownList1.ClearSelection();
-                        DropDownList1.Items.FindByValue(dt.Rows[0]["Customer_Type_ID"].ToString()).Selected = true;
-                        DropDownList1.SelectedIndex = DropDownList1.Items.IndexOf(DropDownList1.Items.FindByValue(dt.Rows[0]["Customer_Type_ID"].ToString()));
-
-                    }
-                    catch { }
-
-                }
+                Response.Redirect("/Default");
             }
         }
 
-        // ✨ MIGRATED: CheckAddressID() has been replaced with AddressHelper.GetAddressIdString()
-        // See AddressHelper class in Take_Time_BangPhra.Class namespace
+        #region Load Data
 
-        public void getAddress(string commp, string commd, string commsd)
+        private void LoadVendorTypes()
         {
-            string Command = Request.QueryString["Command"];
-            string ID = Request.QueryString["ID"];
-            DataTable dtProvince = code.DatabaseQuery(conn, commp);
-            DataTable dtDistrict = code.DatabaseQuery(conn, commd);
-            DataTable dtSubDistrict = code.DatabaseQuery(conn, commsd);
             try
             {
-                if (dtProvince.Rows.Count <= 0)
+                DataTable dtTypes = code.DatabaseQuery(conn, "SELECT [Customer_Type], ID FROM Customer_Type ORDER BY [Customer_Type]");
+                ddlVendorType.Items.Clear();
+                ddlVendorType.Items.Add(new ListItem("-- เลือกประเภท --", ""));
+                foreach (DataRow row in dtTypes.Rows)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่พบหมายเลขไปรษณีย์ที่คุณระบุ');", true);
-                    TextBox6.Enabled = true;
+                    ddlVendorType.Items.Add(new ListItem(row["Customer_Type"].ToString(), row["ID"].ToString()));
                 }
-                else
+                if (ddlVendorType.Items.Count > 0)
+                    ddlVendorType.SelectedIndex = 0;
+            }
+            catch { }
+        }
+
+        private void LoadVendorGroups()
+        {
+            try
+            {
+                DataTable dtGroups = code.DatabaseQuery(conn, "SELECT DISTINCT [Vendor_Group] FROM Vendor WHERE [Vendor_Group] IS NOT NULL ORDER BY [Vendor_Group]");
+                ddlVendorGroup.Items.Clear();
+                ddlVendorGroup.Items.Add(new ListItem("-- เลือกกลุ่ม --", ""));
+                foreach (DataRow row in dtGroups.Rows)
                 {
-
-                        List<string> ddl = new List<string>();
-
-                        for (int i = 0; i < dtProvince.Rows.Count; i++)
-                        {
-                            ddl.Add(dtProvince.Rows[i][0].ToString());
-                        }
-                        DropDownList2.DataSource = ddl;
-                        DropDownList2.DataBind();
-                        //DropDownList5.SelectedIndex = 0;
-
-                        ddl.Clear();
-
-                        for (int i = 0; i < dtDistrict.Rows.Count; i++)
-                        {
-                            ddl.Add(dtDistrict.Rows[i][0].ToString());
-                        }
-                        DropDownList3.DataSource = ddl;
-                        DropDownList3.DataBind();
-                        //DropDownList6.SelectedIndex = 0;
-
-                        ddl.Clear();
-
-                        for (int i = 0; i < dtSubDistrict.Rows.Count; i++)
-                        {
-                            ddl.Add(dtSubDistrict.Rows[i][0].ToString());
-                        }
-                        DropDownList4.DataSource = ddl;
-                        DropDownList4.DataBind();
-                        //DropDownList7.SelectedIndex = 0;
+                    string group = row["Vendor_Group"].ToString();
+                    if (!string.IsNullOrEmpty(group))
+                    {
+                        ddlVendorGroup.Items.Add(new ListItem(group, group));
+                    }
                 }
             }
             catch { }
         }
 
-        protected void Button6_Click(object sender, EventArgs e)
+        private void LoadSearchGroups()
         {
-            TextBox6.Enabled = true;
-            TextBox6.Text = string.Empty;
-            DropDownList2.Items.Clear();
-            DropDownList3.Items.Clear();
-            DropDownList4.Items.Clear();
+            try
+            {
+                DataTable dtGroups = code.DatabaseQuery(conn, "SELECT DISTINCT [Vendor_Group] FROM Vendor WHERE [Vendor_Group] IS NOT NULL ORDER BY [Vendor_Group]");
+                ddlSearchGroup.Items.Clear();
+                ddlSearchGroup.Items.Add(new ListItem("ทุกประเภท", ""));
+                foreach (DataRow row in dtGroups.Rows)
+                {
+                    string group = row["Vendor_Group"].ToString();
+                    if (!string.IsNullOrEmpty(group))
+                    {
+                        ddlSearchGroup.Items.Add(new ListItem(group, group));
+                    }
+                }
+            }
+            catch { }
         }
 
-        protected void Button5_Click(object sender, EventArgs e)
+        private void LoadAddress()
         {
-            TextBox6.Enabled = false;
-
-            // SECURE: Get address with parameterized query
-            var addressParams = new Dictionary<string, object>
+            try
             {
-                { "@PostalCode", TextBox6.Text ?? "" }
+                DataTable dtProvince = code.DatabaseQuery(conn, "SELECT DISTINCT [Province] FROM [Address] ORDER BY Province ASC");
+                ddlProvince.Items.Clear();
+                ddlProvince.Items.Add(new ListItem("-- เลือกจังหวัด --", ""));
+                foreach (DataRow row in dtProvince.Rows)
+                {
+                    ddlProvince.Items.Add(new ListItem(row["Province"].ToString(), row["Province"].ToString()));
+                }
+            }
+            catch { }
+        }
+
+        private void LoadVendorList(string searchTax = "", string searchName = "", string searchGroup = "")
+        {
+            try
+            {
+                string sql = @"
+                    SELECT V.*, CT.Customer_Type
+                    FROM Vendor V
+                    LEFT JOIN Customer_Type CT ON CT.ID = V.Vendor_Type_ID
+                    WHERE V.Status = 'True'";
+
+                var parameters = new Dictionary<string, object>();
+
+                if (!string.IsNullOrEmpty(searchTax))
+                {
+                    sql += " AND V.IDNumber = @SearchTax";
+                    parameters.Add("@SearchTax", searchTax);
+                }
+
+                if (!string.IsNullOrEmpty(searchName))
+                {
+                    sql += " AND V.Name LIKE @SearchName";
+                    parameters.Add("@SearchName", "%" + searchName + "%");
+                }
+
+                if (!string.IsNullOrEmpty(searchGroup))
+                {
+                    sql += " AND V.Vendor_Group = @SearchGroup";
+                    parameters.Add("@SearchGroup", searchGroup);
+                }
+
+                sql += " ORDER BY V.Name";
+
+                DataTable dt = code.DatabaseQuerySafe(conn, sql, parameters);
+
+                // Join with Address table to get province
+                foreach (DataRow row in dt.Rows)
+                {
+                    if (row["Address_ID"] != DBNull.Value && !string.IsNullOrEmpty(row["Address_ID"].ToString()))
+                    {
+                        var addressParams = new Dictionary<string, object>
+                        {
+                            { "@AddressID", row["Address_ID"] }
+                        };
+                        DataTable dtAddress = code.DatabaseQuerySafe(conn,
+                            "SELECT Province FROM Address WHERE ID = @AddressID", addressParams);
+
+                        if (dtAddress.Rows.Count > 0)
+                        {
+                            row["Province"] = dtAddress.Rows[0]["Province"];
+                        }
+                    }
+                }
+
+                gvVendors.DataSource = dt;
+                gvVendors.DataBind();
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการโหลดรายการ Vendor: " + ex.Message, "error");
+            }
+        }
+
+        #endregion
+
+        #region Search Events
+
+        protected void btnSearch_Click(object sender, EventArgs e)
+        {
+            LoadVendorList(txtSearchTax.Text.Trim(), txtSearchName.Text.Trim(), ddlSearchGroup.SelectedValue);
+        }
+
+        protected void btnClearSearch_Click(object sender, EventArgs e)
+        {
+            txtSearchTax.Text = "";
+            txtSearchName.Text = "";
+            ddlSearchGroup.SelectedIndex = 0;
+            LoadVendorList();
+        }
+
+        protected void txtSearchTax_TextChanged(object sender, EventArgs e)
+        {
+            if (txtSearchTax.Text.Length == 13)
+            {
+                LoadVendorList(txtSearchTax.Text.Trim(), "", "");
+            }
+        }
+
+        #endregion
+
+        #region Form Events
+
+        protected void btnNewVendor_Click(object sender, EventArgs e)
+        {
+            ClearForm();
+            lblFormTitle.Text = "เพิ่ม Vendor ใหม่";
+            pnlVendorForm.Visible = true;
+            pnlVendorList.Visible = false;
+            hfVendorID.Value = "";
+        }
+
+        protected void btnCancel_Click(object sender, EventArgs e)
+        {
+            pnlVendorForm.Visible = false;
+            pnlVendorList.Visible = true;
+            ClearForm();
+        }
+
+        protected void txtTaxID_TextChanged(object sender, EventArgs e)
+        {
+            // Auto-fill if vendor exists
+            if (txtTaxID.Text.Length == 13)
+            {
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@IDNumber", txtTaxID.Text }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    @"SELECT V.*, A.Province, A.District, A.SubDistrict, A.PostalCode
+                      FROM Vendor V
+                      LEFT JOIN Address A ON A.ID = V.Address_ID
+                      WHERE V.IDNumber = @IDNumber AND V.Status = 'True'",
+                    parameters);
+
+                if (dt.Rows.Count > 0)
+                {
+                    LoadVendorToForm(dt.Rows[0]);
+                }
+            }
+        }
+
+        #endregion
+
+        #region GridView Events
+
+        protected void gvVendors_RowCommand(object sender, GridViewCommandEventArgs e)
+        {
+            string vendorId = e.CommandArgument.ToString();
+
+            if (e.CommandName == "EditVendor")
+            {
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@VendorID", vendorId }
+                };
+
+                DataTable dt = code.DatabaseQuerySafe(conn,
+                    @"SELECT V.*, A.Province, A.District, A.SubDistrict, A.PostalCode
+                      FROM Vendor V
+                      LEFT JOIN Address A ON A.ID = V.Address_ID
+                      WHERE V.ID = @VendorID",
+                    parameters);
+
+                if (dt.Rows.Count > 0)
+                {
+                    LoadVendorToForm(dt.Rows[0]);
+                    lblFormTitle.Text = "แก้ไขข้อมูล Vendor";
+                    hfVendorID.Value = vendorId;
+                    pnlVendorForm.Visible = true;
+                    pnlVendorList.Visible = false;
+                }
+            }
+            else if (e.CommandName == "DeleteVendor")
+            {
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@VendorID", vendorId }
+                };
+
+                code.DatabaseInsertSafe(conn,
+                    "UPDATE Vendor SET Status = 'False' WHERE ID = @VendorID",
+                    parameters);
+
+                ShowMessage("ลบข้อมูล Vendor สำเร็จ", "success");
+                LoadVendorList();
+            }
+        }
+
+        #endregion
+
+        #region Address Events
+
+        protected void btnSearchPostal_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(txtPostalCode.Text) || txtPostalCode.Text.Length != 5)
+            {
+                ShowMessage("กรุณากรอกรหัสไปรษณีย์ 5 หลัก", "error");
+                return;
+            }
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@PostalCode", txtPostalCode.Text }
             };
 
             DataTable dtProvince = code.DatabaseQuerySafe(conn,
                 "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY Province ASC",
-                addressParams);
+                parameters);
             DataTable dtDistrict = code.DatabaseQuerySafe(conn,
                 "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY District ASC",
-                addressParams);
+                parameters);
             DataTable dtSubDistrict = code.DatabaseQuerySafe(conn,
                 "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode ORDER BY SubDistrict ASC",
-                addressParams);
+                parameters);
 
-            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
+            if (dtProvince.Rows.Count == 0)
+            {
+                ShowMessage("ไม่พบรหัสไปรษณีย์นี้ในระบบ", "error");
+                return;
+            }
+
+            PopulateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
         }
 
-        protected void Button2_Click(object sender, EventArgs e)
+        protected void btnClearPostal_Click(object sender, EventArgs e)
         {
-            // ✅ Validation: ต้องมีชื่อ
-            if (string.IsNullOrEmpty(TextBox2.Text.Trim()))
-            {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('⚠️ กรุณากรอกชื่อผู้เสียภาษี / ชื่อบริษัท');", true);
+            txtPostalCode.Text = "";
+            LoadAddress();
+            ddlDistrict.Items.Clear();
+            ddlDistrict.Items.Add(new ListItem("-- เลือกอำเภอ/เขต --", ""));
+            ddlSubDistrict.Items.Clear();
+            ddlSubDistrict.Items.Add(new ListItem("-- เลือกตำบล/แขวง --", ""));
+        }
+
+        protected void ddlProvince_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(ddlProvince.SelectedValue))
                 return;
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Province", ddlProvince.SelectedValue }
+            };
+
+            if (!string.IsNullOrEmpty(txtPostalCode.Text))
+                parameters.Add("@PostalCode", txtPostalCode.Text);
+
+            string sql = !string.IsNullOrEmpty(txtPostalCode.Text)
+                ? "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province AND PostalCode = @PostalCode ORDER BY District ASC"
+                : "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province ORDER BY District ASC";
+
+            DataTable dtDistrict = code.DatabaseQuerySafe(conn, sql, parameters);
+
+            ddlDistrict.Items.Clear();
+            ddlDistrict.Items.Add(new ListItem("-- เลือกอำเภอ/เขต --", ""));
+            foreach (DataRow row in dtDistrict.Rows)
+            {
+                ddlDistrict.Items.Add(new ListItem(row["District"].ToString(), row["District"].ToString()));
             }
 
-            // ✅ Validation: ต้องมีเลขสาขา
-            if (string.IsNullOrEmpty(TextBox3.Text.Trim()))
-            {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('⚠️ กรุณากรอกเลขสาขา (00000 = สำนักงานใหญ่)');", true);
-                return;
-            }
+            ddlSubDistrict.Items.Clear();
+            ddlSubDistrict.Items.Add(new ListItem("-- เลือกตำบล/แขวง --", ""));
+        }
 
-            // ✅ Validation: ถ้ามี Tax ID ต้องยาว 13 หลัก
-            string taxId = TextBox1.Text.Trim();
-            if (!string.IsNullOrEmpty(taxId) && taxId.Length != 13)
-            {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('⚠️ เลขผู้เสียภาษีต้องมี 13 หลัก (หรือเว้นว่างไว้ถ้าไม่มี)');", true);
+        protected void ddlDistrict_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(ddlDistrict.SelectedValue))
                 return;
-            }
 
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Province", ddlProvince.SelectedValue },
+                { "@District", ddlDistrict.SelectedValue }
+            };
+
+            if (!string.IsNullOrEmpty(txtPostalCode.Text))
+                parameters.Add("@PostalCode", txtPostalCode.Text);
+
+            string sql = !string.IsNullOrEmpty(txtPostalCode.Text)
+                ? "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province AND District = @District AND PostalCode = @PostalCode ORDER BY SubDistrict ASC"
+                : "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province AND District = @District ORDER BY SubDistrict ASC";
+
+            DataTable dtSubDistrict = code.DatabaseQuerySafe(conn, sql, parameters);
+
+            ddlSubDistrict.Items.Clear();
+            ddlSubDistrict.Items.Add(new ListItem("-- เลือกตำบล/แขวง --", ""));
+            foreach (DataRow row in dtSubDistrict.Rows)
+            {
+                ddlSubDistrict.Items.Add(new ListItem(row["SubDistrict"].ToString(), row["SubDistrict"].ToString()));
+            }
+        }
+
+        #endregion
+
+        #region Save/Update
+
+        protected void btnSave_Click(object sender, EventArgs e)
+        {
             try
             {
-                string vendorName = TextBox2.Text.Trim();
-                string branchNumber = TextBox3.Text.Trim();
-                string addressId = _addressHelper.GetAddressIdString(TextBox6.Text, DropDownList2.SelectedValue, DropDownList3.SelectedValue, DropDownList4.SelectedValue);
-
-                // SECURE: Check duplicate by Name + Branch_Number with parameterized query
-                var checkNameParams = new Dictionary<string, object>
+                // Validation
+                if (string.IsNullOrEmpty(txtVendorName.Text.Trim()))
                 {
-                    { "@VendorName", vendorName },
-                    { "@BranchNumber", branchNumber }
-                };
-                DataTable dtCheckName = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Vendor WHERE Name = @VendorName AND Branch_Number = @BranchNumber",
-                    checkNameParams);
-                bool isDuplicateName = dtCheckName.Rows.Count > 0;
-
-                // SECURE: Check duplicate by IDNumber + Branch_Number with parameterized query (if Tax ID exists)
-                bool isDuplicateTaxId = false;
-                if (!string.IsNullOrEmpty(taxId))
-                {
-                    var checkTaxParams = new Dictionary<string, object>
-                    {
-                        { "@IDNumber", taxId },
-                        { "@BranchNumber", branchNumber }
-                    };
-                    DataTable dtCheckTax = code.DatabaseQuerySafe(conn,
-                        "SELECT * FROM Vendor WHERE IDNumber = @IDNumber AND Branch_Number = @BranchNumber",
-                        checkTaxParams);
-                    isDuplicateTaxId = dtCheckTax.Rows.Count > 0;
-
-                    // ⚠️ Check conflict: มี Tax ID ซ้ำแต่ชื่อไม่ตรงกัน
-                    if (isDuplicateTaxId && !isDuplicateName)
-                    {
-                        string existingName = dtCheckTax.Rows[0]["Name"].ToString();
-                        ClientScript.RegisterStartupScript(this.GetType(), "conflict",
-                            $"alert('⚠️ เลขผู้เสียภาษี {taxId} สาขา {branchNumber} มีอยู่แล้วในชื่อ \"{existingName}\"\\n\\nไม่สามารถใช้เลขผู้เสียภาษีซ้ำกับชื่อต่างกันได้');", true);
-                        return;
-                    }
+                    ShowMessage("กรุณากรอกชื่อ Vendor", "error");
+                    return;
                 }
 
-                if (isDuplicateName || isDuplicateTaxId)
+                if (string.IsNullOrEmpty(txtBranchNumber.Text.Trim()) || txtBranchNumber.Text.Length != 5)
                 {
-                    // SECURE: UPDATE existing vendor with parameterized query
-                    var updateVendorParams = new Dictionary<string, object>
-                    {
-                        { "@IDNumber", string.IsNullOrEmpty(taxId) ? (object)DBNull.Value : taxId },
-                        { "@VendorTypeID", DropDownList1.SelectedValue },
-                        { "@Address", TextBox4.Text.Trim() },
-                        { "@Address1", TextBox5.Text.Trim() },
-                        { "@AddressID", addressId },
-                        { "@PhoneNumber", string.IsNullOrEmpty(TextBox7.Text.Trim()) ? (object)DBNull.Value : TextBox7.Text.Trim() },
-                        { "@VendorGroup", DropDownList5.SelectedItem.Text },
-                        { "@VendorName", vendorName },
-                        { "@BranchNumber", branchNumber }
-                    };
+                    ShowMessage("กรุณากรอกเลขสาขา 5 หลัก", "error");
+                    return;
+                }
 
+                string taxId = txtTaxID.Text.Trim();
+                if (!string.IsNullOrEmpty(taxId) && taxId.Length != 13)
+                {
+                    ShowMessage("เลขผู้เสียภาษีต้องมี 13 หลัก", "error");
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(ddlVendorType.SelectedValue))
+                {
+                    ShowMessage("กรุณาเลือกประเภท Vendor", "error");
+                    return;
+                }
+
+                // Get Address ID
+                string addressId = _addressHelper.GetAddressIdString(
+                    txtPostalCode.Text.Trim(),
+                    ddlProvince.SelectedValue,
+                    ddlDistrict.SelectedValue,
+                    ddlSubDistrict.SelectedValue);
+
+                string vendorId = hfVendorID.Value;
+                bool isUpdate = !string.IsNullOrEmpty(vendorId);
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@IDNumber", string.IsNullOrEmpty(taxId) ? (object)DBNull.Value : taxId },
+                    { "@VendorTypeID", ddlVendorType.SelectedValue },
+                    { "@Name", txtVendorName.Text.Trim() },
+                    { "@BranchNumber", txtBranchNumber.Text.Trim() },
+                    { "@PhoneNumber", string.IsNullOrEmpty(txtPhone.Text.Trim()) ? (object)DBNull.Value : txtPhone.Text.Trim() },
+                    { "@Address", txtAddress.Text.Trim() },
+                    { "@Address1", txtAddress1.Text.Trim() },
+                    { "@AddressID", string.IsNullOrEmpty(addressId) ? (object)DBNull.Value : addressId },
+                    { "@VendorGroup", string.IsNullOrEmpty(ddlVendorGroup.SelectedValue) ? (object)DBNull.Value : ddlVendorGroup.SelectedValue }
+                };
+
+                if (isUpdate)
+                {
+                    parameters.Add("@VendorID", vendorId);
                     code.DatabaseInsertSafe(conn,
                         @"UPDATE [dbo].[Vendor] SET
                             [IDNumber] = @IDNumber,
                             [Vendor_Type_ID] = @VendorTypeID,
+                            [Name] = @Name,
+                            [Branch_Number] = @BranchNumber,
+                            [Phone_Number] = @PhoneNumber,
                             [Address] = @Address,
                             [Address1] = @Address1,
                             [Address_ID] = @AddressID,
-                            [Phone_Number] = @PhoneNumber,
                             [Vendor_Group] = @VendorGroup
-                        WHERE Name = @VendorName AND Branch_Number = @BranchNumber",
-                        updateVendorParams);
+                          WHERE ID = @VendorID",
+                        parameters);
 
-                    ClientScript.RegisterStartupScript(this.GetType(), "success", "alert('✅ อัพเดทข้อมูล Vendor สำเร็จ');", true);
+                    ShowMessage("อัพเดทข้อมูล Vendor สำเร็จ", "success");
                 }
                 else
                 {
-                    // SECURE: INSERT new vendor with parameterized query
-                    var insertVendorParams = new Dictionary<string, object>
-                    {
-                        { "@IDNumber", string.IsNullOrEmpty(taxId) ? (object)DBNull.Value : taxId },
-                        { "@VendorTypeID", DropDownList1.SelectedValue },
-                        { "@VendorName", vendorName },
-                        { "@BranchNumber", branchNumber },
-                        { "@PhoneNumber", string.IsNullOrEmpty(TextBox7.Text.Trim()) ? (object)DBNull.Value : TextBox7.Text.Trim() },
-                        { "@Address", TextBox4.Text.Trim() },
-                        { "@Address1", TextBox5.Text.Trim() },
-                        { "@AddressID", addressId },
-                        { "@VendorGroup", DropDownList5.SelectedItem.Text }
-                    };
-
+                    parameters.Add("@Status", "True");
                     code.DatabaseInsertSafe(conn,
                         @"INSERT INTO [dbo].[Vendor]
-                            (IDNumber, Vendor_Type_ID, Name, Branch_Number, Phone_Number, Address, Address1, Address_ID, Vendor_Group)
-                        VALUES (@IDNumber, @VendorTypeID, @VendorName, @BranchNumber, @PhoneNumber, @Address, @Address1, @AddressID, @VendorGroup)",
-                        insertVendorParams);
+                            (IDNumber, Vendor_Type_ID, Name, Branch_Number, Phone_Number,
+                             Address, Address1, Address_ID, Vendor_Group, Status)
+                          VALUES (@IDNumber, @VendorTypeID, @Name, @BranchNumber, @PhoneNumber,
+                                  @Address, @Address1, @AddressID, @VendorGroup, @Status)",
+                        parameters);
 
-                    ClientScript.RegisterStartupScript(this.GetType(), "success", "alert('✅ บันทึกข้อมูล Vendor สำเร็จ');", true);
+                    ShowMessage("บันทึกข้อมูล Vendor สำเร็จ", "success");
                 }
 
-                // Clear form after save
-                Response.Redirect("/Admin/Vendor");
+                pnlVendorForm.Visible = false;
+                pnlVendorList.Visible = true;
+                ClearForm();
+                LoadVendorList();
             }
             catch (Exception ex)
             {
-                ClientScript.RegisterStartupScript(this.GetType(), "error",
-                    $"alert('❌ เกิดข้อผิดพลาด: {ex.Message}');", true);
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
         }
 
-        protected void TextBox3_TextChanged(object sender, EventArgs e)
+        #endregion
+
+        #region Helper Methods
+
+        private void ClearForm()
         {
-            if (TextBox3.Text.Length == 5)
-            {
-                
-            }
-            else { ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('เลขสาขาไม่ครบ 5 หลัก');", true); }
+            txtTaxID.Text = "";
+            txtVendorName.Text = "";
+            txtBranchNumber.Text = "00000";
+            txtPhone.Text = "";
+            txtAddress.Text = "";
+            txtAddress1.Text = "";
+            txtPostalCode.Text = "";
+
+            if (ddlVendorType.Items.Count > 0)
+                ddlVendorType.SelectedIndex = 0;
+            if (ddlVendorGroup.Items.Count > 0)
+                ddlVendorGroup.SelectedIndex = 0;
+
+            LoadAddress();
+            ddlDistrict.Items.Clear();
+            ddlDistrict.Items.Add(new ListItem("-- เลือกอำเภอ/เขต --", ""));
+            ddlSubDistrict.Items.Clear();
+            ddlSubDistrict.Items.Add(new ListItem("-- เลือกตำบล/แขวง --", ""));
+
+            hfVendorID.Value = "";
         }
 
-        protected void TextBox7_TextChanged(object sender, EventArgs e)
+        private void LoadVendorToForm(DataRow row)
         {
-            TextBox7.Text = TextBox7.Text.Replace("-","").Replace(" ", "");
-        }
+            txtTaxID.Text = row["IDNumber"] != DBNull.Value ? row["IDNumber"].ToString() : "";
+            txtVendorName.Text = row["Name"].ToString();
+            txtBranchNumber.Text = row["Branch_Number"].ToString();
+            txtPhone.Text = row["Phone_Number"] != DBNull.Value ? row["Phone_Number"].ToString() : "";
+            txtAddress.Text = row["Address"] != DBNull.Value ? row["Address"].ToString() : "";
+            txtAddress1.Text = row["Address1"] != DBNull.Value ? row["Address1"].ToString() : "";
 
-        protected void DropDownList2_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            DataTable dtProvince, dtDistrict, dtSubDistrict;
-
-            if (TextBox6.Enabled == false)
+            if (ddlVendorType.Items.FindByValue(row["Vendor_Type_ID"].ToString()) != null)
             {
-                // SECURE: Filter by PostalCode and Province with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@PostalCode", TextBox6.Text ?? "" },
-                    { "@Province", DropDownList2.SelectedValue ?? "" }
-                };
-
-                dtProvince = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY Province ASC",
-                    addressParams);
-                dtDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY District ASC",
-                    addressParams);
-                dtSubDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND Province = @Province ORDER BY SubDistrict ASC",
-                    addressParams);
-            }
-            else
-            {
-                // SECURE: Filter by Province only with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@Province", DropDownList2.SelectedValue ?? "" }
-                };
-
-                dtProvince = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [Province] FROM [Address] WHERE Province = @Province ORDER BY Province ASC",
-                    addressParams);
-                dtDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [District] FROM [Address] WHERE Province = @Province ORDER BY District ASC",
-                    addressParams);
-                dtSubDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE Province = @Province ORDER BY SubDistrict ASC",
-                    addressParams);
+                ddlVendorType.SelectedValue = row["Vendor_Type_ID"].ToString();
             }
 
-            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
-        }
-
-        protected void DropDownList3_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            DataTable dtProvince, dtDistrict, dtSubDistrict;
-
-            if (TextBox6.Enabled == false)
+            if (row["Vendor_Group"] != DBNull.Value && !string.IsNullOrEmpty(row["Vendor_Group"].ToString()))
             {
-                // SECURE: Filter by PostalCode and District with parameterized query
-                var addressParams = new Dictionary<string, object>
+                if (ddlVendorGroup.Items.FindByValue(row["Vendor_Group"].ToString()) == null)
                 {
-                    { "@PostalCode", TextBox6.Text ?? "" },
-                    { "@District", DropDownList3.SelectedValue ?? "" }
-                };
-
-                dtProvince = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [Province] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY Province ASC",
-                    addressParams);
-                dtDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [District] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY District ASC",
-                    addressParams);
-                dtSubDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE PostalCode = @PostalCode AND District = @District ORDER BY SubDistrict ASC",
-                    addressParams);
-            }
-            else
-            {
-                // SECURE: Filter by District only with parameterized query
-                var addressParams = new Dictionary<string, object>
-                {
-                    { "@District", DropDownList3.SelectedValue ?? "" }
-                };
-
-                dtProvince = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [Province] FROM [Address] WHERE District = @District ORDER BY Province ASC",
-                    addressParams);
-                dtDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [District] FROM [Address] WHERE District = @District ORDER BY District ASC",
-                    addressParams);
-                dtSubDistrict = code.DatabaseQuerySafe(conn,
-                    "SELECT DISTINCT [SubDistrict] FROM [Address] WHERE District = @District ORDER BY SubDistrict ASC",
-                    addressParams);
-            }
-
-            populateAddressDropdowns(dtProvince, dtDistrict, dtSubDistrict);
-        }
-
-        // ✨ SECURE: Helper method to populate address dropdowns
-        private void populateAddressDropdowns(DataTable dtProvince, DataTable dtDistrict, DataTable dtSubDistrict)
-        {
-            try
-            {
-                if (dtProvince.Rows.Count <= 0)
-                {
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่พบหมายเลขไปรษณีย์ที่คุณระบุ');", true);
-                    TextBox6.Enabled = true;
+                    ddlVendorGroup.Items.Add(new ListItem(row["Vendor_Group"].ToString(), row["Vendor_Group"].ToString()));
                 }
-                else
+                ddlVendorGroup.SelectedValue = row["Vendor_Group"].ToString();
+            }
+
+            // Load Address
+            if (row.Table.Columns.Contains("Province") && row["Province"] != DBNull.Value)
+            {
+                txtPostalCode.Text = row["PostalCode"] != DBNull.Value ? row["PostalCode"].ToString() : "";
+
+                if (ddlProvince.Items.FindByValue(row["Province"].ToString()) != null)
                 {
-                    List<string> ddl = new List<string>();
+                    ddlProvince.SelectedValue = row["Province"].ToString();
+                    ddlProvince_SelectedIndexChanged(null, null);
 
-                    for (int i = 0; i < dtProvince.Rows.Count; i++)
+                    if (row["District"] != DBNull.Value && ddlDistrict.Items.FindByValue(row["District"].ToString()) != null)
                     {
-                        ddl.Add(dtProvince.Rows[i][0].ToString());
+                        ddlDistrict.SelectedValue = row["District"].ToString();
+                        ddlDistrict_SelectedIndexChanged(null, null);
+
+                        if (row["SubDistrict"] != DBNull.Value && ddlSubDistrict.Items.FindByValue(row["SubDistrict"].ToString()) != null)
+                        {
+                            ddlSubDistrict.SelectedValue = row["SubDistrict"].ToString();
+                        }
                     }
-                    DropDownList2.DataSource = ddl;
-                    DropDownList2.DataBind();
-
-                    ddl.Clear();
-
-                    for (int i = 0; i < dtDistrict.Rows.Count; i++)
-                    {
-                        ddl.Add(dtDistrict.Rows[i][0].ToString());
-                    }
-                    DropDownList3.DataSource = ddl;
-                    DropDownList3.DataBind();
-
-                    ddl.Clear();
-
-                    for (int i = 0; i < dtSubDistrict.Rows.Count; i++)
-                    {
-                        ddl.Add(dtSubDistrict.Rows[i][0].ToString());
-                    }
-                    DropDownList4.DataSource = ddl;
-                    DropDownList4.DataBind();
                 }
             }
-            catch { }
         }
+
+        private void PopulateAddressDropdowns(DataTable dtProvince, DataTable dtDistrict, DataTable dtSubDistrict)
+        {
+            ddlProvince.Items.Clear();
+            ddlProvince.Items.Add(new ListItem("-- เลือกจังหวัด --", ""));
+            foreach (DataRow row in dtProvince.Rows)
+            {
+                ddlProvince.Items.Add(new ListItem(row["Province"].ToString(), row["Province"].ToString()));
+            }
+
+            ddlDistrict.Items.Clear();
+            ddlDistrict.Items.Add(new ListItem("-- เลือกอำเภอ/เขต --", ""));
+            foreach (DataRow row in dtDistrict.Rows)
+            {
+                ddlDistrict.Items.Add(new ListItem(row["District"].ToString(), row["District"].ToString()));
+            }
+
+            ddlSubDistrict.Items.Clear();
+            ddlSubDistrict.Items.Add(new ListItem("-- เลือกตำบล/แขวง --", ""));
+            foreach (DataRow row in dtSubDistrict.Rows)
+            {
+                ddlSubDistrict.Items.Add(new ListItem(row["SubDistrict"].ToString(), row["SubDistrict"].ToString()));
+            }
+
+            if (dtProvince.Rows.Count > 0)
+                ddlProvince.SelectedIndex = 1;
+            if (dtDistrict.Rows.Count > 0)
+                ddlDistrict.SelectedIndex = 1;
+            if (dtSubDistrict.Rows.Count > 0)
+                ddlSubDistrict.SelectedIndex = 1;
+        }
+
+        protected string GetShortAddress(object address, object province)
+        {
+            string addr = address != DBNull.Value ? address.ToString() : "";
+            string prov = province != DBNull.Value ? province.ToString() : "";
+
+            if (string.IsNullOrEmpty(addr) && string.IsNullOrEmpty(prov))
+                return "-";
+
+            if (!string.IsNullOrEmpty(addr) && addr.Length > 50)
+                addr = addr.Substring(0, 47) + "...";
+
+            return !string.IsNullOrEmpty(prov) ? $"{addr} ({prov})" : addr;
+        }
+
+        private void ShowMessage(string message, string type)
+        {
+            string script = $"alert('{message.Replace("'", "\\'")}');";
+            ClientScript.RegisterStartupScript(this.GetType(), "alert", script, true);
+        }
+
+        #endregion
     }
 }
