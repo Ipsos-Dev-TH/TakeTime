@@ -1191,14 +1191,23 @@ namespace Take_Time_BangPhra.Product
                         }
                         try
                         {
-
-                            if (DropDownList3.SelectedValue.Contains("กรุงเทพ"))
+                            // Check if Address_ID exists - if not, use Address field as-is (complete address already stored)
+                            if (dtcustomer.Rows[0]["Address_ID"] == DBNull.Value || string.IsNullOrEmpty(dtcustomer.Rows[0]["Address_ID"].ToString()))
                             {
-                                dtCustomerReport.Rows[0]["Address"] = TextBox7.Text + " " + TextBox8.Text + " แขวง " + DropDownList5.SelectedValue + " เขต " + DropDownList4.SelectedValue + " " + DropDownList3.SelectedValue + " " + dtcustomer.Rows[0]["PostalCode"].ToString();
+                                // No Address_ID - use complete address from Address field without adding prefixes
+                                dtCustomerReport.Rows[0]["Address"] = dtcustomer.Rows[0]["Address"].ToString();
                             }
                             else
                             {
-                                dtCustomerReport.Rows[0]["Address"] = TextBox7.Text + " " + TextBox8.Text + " ต." + DropDownList5.SelectedValue + " อ." + DropDownList4.SelectedValue + " จ." + DropDownList3.SelectedValue + " " + dtcustomer.Rows[0]["PostalCode"].ToString();
+                                // Has Address_ID - build address from form inputs with appropriate prefixes
+                                if (DropDownList3.SelectedValue.Contains("กรุงเทพ"))
+                                {
+                                    dtCustomerReport.Rows[0]["Address"] = TextBox7.Text + " " + TextBox8.Text + " แขวง " + DropDownList5.SelectedValue + " เขต " + DropDownList4.SelectedValue + " " + DropDownList3.SelectedValue + " " + dtcustomer.Rows[0]["PostalCode"].ToString();
+                                }
+                                else
+                                {
+                                    dtCustomerReport.Rows[0]["Address"] = TextBox7.Text + " " + TextBox8.Text + " ต." + DropDownList5.SelectedValue + " อ." + DropDownList4.SelectedValue + " จ." + DropDownList3.SelectedValue + " " + dtcustomer.Rows[0]["PostalCode"].ToString();
+                                }
                             }
                         }
                         catch
@@ -1214,13 +1223,23 @@ namespace Take_Time_BangPhra.Product
 
                     try
                     {
-                        if (dtbusinessinfo.Rows[0]["Province"].ToString().Contains("กรุงเทพ"))
+                        // Check if Address_ID exists - if not, use Address field as-is (complete address already stored)
+                        if (dtbusinessinfo.Rows[0]["Address_ID"] == DBNull.Value || string.IsNullOrEmpty(dtbusinessinfo.Rows[0]["Address_ID"].ToString()))
                         {
-                            dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString() + " " + dtbusinessinfo.Rows[0]["Address1"].ToString() + " แขวง " + dtbusinessinfo.Rows[0]["SubDistrict"].ToString() + " เขต " + dtbusinessinfo.Rows[0]["District"].ToString() + " " + dtbusinessinfo.Rows[0]["Province"].ToString() + " " + dtbusinessinfo.Rows[0]["PostalCode"].ToString();
+                            // No Address_ID - use complete address from Address field without adding prefixes
+                            dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString();
                         }
                         else
                         {
-                            dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString() + " " + dtbusinessinfo.Rows[0]["Address1"].ToString() + " ต." + dtbusinessinfo.Rows[0]["SubDistrict"].ToString() + " อ." + dtbusinessinfo.Rows[0]["District"].ToString() + " จ." + dtbusinessinfo.Rows[0]["Province"].ToString() + " " + dtbusinessinfo.Rows[0]["PostalCode"].ToString();
+                            // Has Address_ID - build address from structured fields with appropriate prefixes
+                            if (dtbusinessinfo.Rows[0]["Province"].ToString().Contains("กรุงเทพ"))
+                            {
+                                dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString() + " " + dtbusinessinfo.Rows[0]["Address1"].ToString() + " แขวง " + dtbusinessinfo.Rows[0]["SubDistrict"].ToString() + " เขต " + dtbusinessinfo.Rows[0]["District"].ToString() + " " + dtbusinessinfo.Rows[0]["Province"].ToString() + " " + dtbusinessinfo.Rows[0]["PostalCode"].ToString();
+                            }
+                            else
+                            {
+                                dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString() + " " + dtbusinessinfo.Rows[0]["Address1"].ToString() + " ต." + dtbusinessinfo.Rows[0]["SubDistrict"].ToString() + " อ." + dtbusinessinfo.Rows[0]["District"].ToString() + " จ." + dtbusinessinfo.Rows[0]["Province"].ToString() + " " + dtbusinessinfo.Rows[0]["PostalCode"].ToString();
+                            }
                         }
                     }
                     catch
