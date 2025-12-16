@@ -1130,31 +1130,12 @@ namespace Take_Time_BangPhra.Product
                 //GridView1.DataSource = dt;
                 //GridView1.DataBind();
 
-                DataTable dtSignature = new DataTable();
-                try
-                {
-                    dtSignature.Columns.Add("AuthorizeName");
-                    dtSignature.Columns.Add("AuthorizeSignaturePath");
-                    dtSignature.Columns.Add("CreatedName");
-                    dtSignature.Columns.Add("CreatedSignaturePath");
-                }
-                catch { }
+                // Use SignatureService for centralized signature management
+                SignatureService signatureService = new SignatureService();
+                short creatorAdminId = 0;
+                short.TryParse(Session["UserID"]?.ToString() ?? "0", out creatorAdminId);
 
-                string Signaturepath = System.Configuration.ConfigurationSettings.AppSettings["StaffSignatureFolderPath"].ToString();
-
-                // SECURE: SELECT Admin with parameterized query
-                DataTable dtApprover = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE IsCEO = 'True'",
-                    null);
-                string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
-
-                var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"].ToString() } };
-                DataTable dtCreator = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE ID = @UserID",
-                    creatorParams);
-                string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
-
-                dtSignature.Rows.Add(ApproverFullName, "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png", CreatorFullName, "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png");
+                DataTable dtSignature = signatureService.GetSignatureDataWithCEO(creatorAdminId);
 
                 DataTable dtCustomerReport = new DataTable();
                 dtCustomerReport = dtcustomer.Copy();

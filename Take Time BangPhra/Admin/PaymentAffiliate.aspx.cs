@@ -376,57 +376,14 @@ namespace Take_Time_BangPhra.Admin
 
                 //GridView1.DataSource = dt;
                 //GridView1.DataBind();
-                DataTable dtSignature = new DataTable();
-                try
-                {
-                    dtSignature.Columns.Add("CreatedName");
-                    dtSignature.Columns.Add("Created");
-                    dtSignature.Columns.Add("ApprovedName");
-                    dtSignature.Columns.Add("Approved");
-                    dtSignature.Columns.Add("CheckedName");
-                    dtSignature.Columns.Add("Checked");
-                    dtSignature.Columns.Add("ReceivedName");
-                    dtSignature.Columns.Add("Received");
-                }
-                catch
-                {
 
-                }
-                string Signaturepath = System.Configuration.ConfigurationSettings.AppSettings["StaffSignatureFolderPath"].ToString();
+                // Use SignatureService for centralized signature management
+                SignatureService signatureService = new SignatureService();
+                short creatorAdminId = 0;
+                short.TryParse(Session["UserID"]?.ToString() ?? "0", out creatorAdminId);
+                string receiverIdNumber = dtVendor.Rows.Count > 0 ? dtVendor.Rows[0]["IDNumber"]?.ToString() ?? "" : "";
 
-                // SECURE: Creator/Admin lookup with parameterized query
-                var creatorParams = new Dictionary<string, object>
-                {
-                    { "@UserID", Session["UserID"].ToString() }
-                };
-
-                DataTable dtCreator = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE ID = @UserID",
-                    creatorParams);
-
-                string CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
-
-                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
-                string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
-
-                // SECURE: Employee lookup by IDNumber with parameterized query
-                var employeeParams = new Dictionary<string, object>
-                {
-                    { "@IDNumber", dtVendor.Rows[0]["IDNumber"].ToString() }
-                };
-
-                DataTable dtEmployee = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE IDNumber = @IDNumber",
-                    employeeParams);
-
-                string ReceivedFullName = "";
-                string ReceivedPath = "";
-                if(dtEmployee.Rows.Count > 0)
-                {
-                    ReceivedFullName = dtEmployee.Rows[0]["FirstName"].ToString() + " " + dtEmployee.Rows[0]["LastName"].ToString();
-                    ReceivedPath = Signaturepath + "\\" + ReceivedFullName.ToLower() + ".png";
-                }
-                dtSignature.Rows.Add(CreatorFullName,"File:\\"+Signaturepath+"\\"+CreatorFullName.ToLower()+".png",ApproverFullName,"File:\\"+Signaturepath+"\\"+ApproverFullName.ToLower()+".png","","",ReceivedFullName, "File:\\"+ReceivedPath);
+                DataTable dtSignature = signatureService.GetPaymentVoucherSignatureData(creatorAdminId, receiverIdNumber);
 
                 DataTable dtUpload = (DataTable)Session["dtUpload"];
                 try

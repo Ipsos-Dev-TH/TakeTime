@@ -255,6 +255,7 @@
                     <button type="button" class="tab" onclick="showTab('salary')">เงินเดือน</button>
                     <button type="button" class="tab" onclick="showTab('leave')">การลา</button>
                     <button type="button" class="tab" onclick="showTab('training')">การอบรม</button>
+                    <button type="button" class="tab" onclick="showTab('signature')">ลายเซ็น</button>
                 </div>
 
                 <!-- Personal Info Tab -->
@@ -435,6 +436,56 @@
                                 <div style="text-align: center; padding: 20px; color: #999;">ไม่มีประวัติการอบรม</div>
                             </EmptyDataTemplate>
                         </asp:GridView>
+                    </div>
+                </div>
+
+                <!-- Signature Tab -->
+                <div id="tab-signature" class="tab-content" style="display: none;">
+                    <div class="info-group">
+                        <h4>ลายเซ็นพนักงาน</h4>
+                        <p style="color: #666; font-size: 13px; margin-bottom: 20px;">
+                            ลายเซ็นนี้จะใช้แสดงในเอกสาร PDF ทุกประเภท เช่น ใบเสร็จ, ใบสำคัญจ่าย, ใบจอง เป็นต้น
+                        </p>
+
+                        <div class="signature-container" style="text-align: center; padding: 20px;">
+                            <!-- Current Signature Display -->
+                            <div id="currentSignatureSection" runat="server" style="margin-bottom: 20px;">
+                                <asp:Image ID="imgCurrentSignature" runat="server"
+                                    Style="max-width: 300px; max-height: 150px; border: 2px dashed #ddd; border-radius: 8px; padding: 10px; background: #fafafa;" />
+                                <div style="margin-top: 10px; color: #666; font-size: 12px;">
+                                    <asp:Label ID="lblSignatureStatus" runat="server" Text="ลายเซ็นปัจจุบัน"></asp:Label>
+                                </div>
+                            </div>
+
+                            <!-- No Signature Placeholder -->
+                            <div id="noSignatureSection" runat="server" visible="false"
+                                style="padding: 40px; border: 2px dashed #ddd; border-radius: 8px; background: #fafafa; margin-bottom: 20px;">
+                                <i class="fas fa-signature" style="font-size: 48px; color: #ccc;"></i>
+                                <p style="color: #999; margin-top: 10px;">ยังไม่มีลายเซ็น</p>
+                            </div>
+
+                            <!-- Upload Section -->
+                            <div class="upload-section" style="padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                                <h5 style="color: #667eea; margin-bottom: 15px;">อัพโหลดลายเซ็นใหม่</h5>
+                                <asp:FileUpload ID="fuSignature" runat="server"
+                                    accept=".png,.jpg,.jpeg"
+                                    Style="margin-bottom: 15px;" />
+                                <div style="font-size: 12px; color: #999; margin-bottom: 15px;">
+                                    รองรับไฟล์ PNG, JPG, JPEG ขนาดไม่เกิน 2MB<br/>
+                                    แนะนำ: ลายเซ็นบนพื้นหลังสีขาวหรือโปร่งใส
+                                </div>
+                                <asp:Button ID="btnUploadSignature" runat="server" Text="อัพโหลด"
+                                    CssClass="btn-edit" OnClick="btnUploadSignature_Click" />
+                                <asp:Button ID="btnDeleteSignature" runat="server" Text="ลบลายเซ็น"
+                                    CssClass="btn-delete" OnClick="btnDeleteSignature_Click"
+                                    OnClientClick="return confirm('คุณต้องการลบลายเซ็นนี้หรือไม่?');"
+                                    Style="background: #dc3545; margin-left: 10px;" />
+                            </div>
+
+                            <!-- Message -->
+                            <asp:Label ID="lblSignatureMessage" runat="server"
+                                Style="display: block; margin-top: 15px; padding: 10px; border-radius: 5px;"></asp:Label>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -688,23 +688,10 @@ namespace Take_Time_BangPhra.Services
 
         private DataTable GetSignatureData()
         {
-            DataTable dtSignature = new DataTable();
-            dtSignature.Columns.Add("AuthorizeName");
-            dtSignature.Columns.Add("AuthorizeSignaturePath");
-            dtSignature.Columns.Add("CreatedName");
-            dtSignature.Columns.Add("CreatedSignaturePath");
-
-            // Get approver and creator data (simplified version)
-            DataTable dtApprover = _dbHelper.ExecuteQuery("SELECT * FROM Admin WHERE IsCEO = 'True'");
-            if (dtApprover.Rows.Count > 0)
-            {
-                string approverName = $"{dtApprover.Rows[0]["FirstName"]} {dtApprover.Rows[0]["LastName"]}";
-                string approverSignature = $"File:\\{_staffSignatureFolderPath}\\{approverName.ToLower()}.png";
-
-                dtSignature.Rows.Add(approverName, approverSignature, approverName, approverSignature);
-            }
-
-            return dtSignature;
+            // Use SignatureService for centralized signature management
+            SignatureService signatureService = new SignatureService();
+            // For service-based calls, use CEO signature for both approver and creator
+            return signatureService.GetSignatureDataWithCEO(0);
         }
 
         private void GeneratePdfReport(string receiptId, DataTable dtReceipt, DataTable dtReceiptDetail,

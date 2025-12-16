@@ -4805,44 +4805,12 @@ namespace Take_Time_BangPhra
                 dtCustomerReport.Rows[0]["IDNumber"] = "";
             }
 
-            DataTable dtSignature = new DataTable();
-            try
-            {
-                dtSignature.Columns.Add("AuthorizeName");
-                dtSignature.Columns.Add("AuthorizeSignaturePath");
-                dtSignature.Columns.Add("CreatedName");
-                dtSignature.Columns.Add("CreatedSignaturePath");
-            }
-            catch { }
-            string Signaturepath = System.Configuration.ConfigurationSettings.AppSettings["StaffSignatureFolderPath"].ToString();
-            DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
-            string ApproverFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
+            // Use SignatureService for centralized signature management
+            SignatureService signatureService = new SignatureService();
+            short creatorAdminId = 0;
+            short.TryParse(Session["UserID"]?.ToString() ?? "0", out creatorAdminId);
 
-            DataTable dtCreator = new DataTable();
-            string CreatorFullName = "";
-            string createdsigpath = "";
-            try
-            {
-                // SECURE: Admin lookup with parameterized query
-                var adminParams = new Dictionary<string, object>
-                {
-                    { "@UserID", Session["UserID"].ToString() }
-                };
-
-                dtCreator = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE ID = @UserID",
-                    adminParams);
-
-                CreatorFullName = dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString();
-                createdsigpath = "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png";
-            }
-            catch
-            {
-                CreatorFullName = dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString();
-                createdsigpath = "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png";
-            }
-
-            dtSignature.Rows.Add(ApproverFullName, "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png", CreatorFullName,createdsigpath);
+            DataTable dtSignature = signatureService.GetSignatureDataWithCEO(creatorAdminId);
 
             //GridView1.DataSource = dt;
             //GridView1.DataBind();

@@ -9,6 +9,7 @@ namespace Take_Time_BangPhra.Admin.HR
         private EmployeeService employeeService;
         private LeaveService leaveService;
         private PayrollService payrollService;
+        private SignatureService signatureService;
         private short adminId = 0;
 
         protected void Page_Load(object sender, EventArgs e)
@@ -16,11 +17,13 @@ namespace Take_Time_BangPhra.Admin.HR
             employeeService = new EmployeeService();
             leaveService = new LeaveService();
             payrollService = new PayrollService();
+            signatureService = new SignatureService();
 
             if (!IsPostBack)
             {
                 CheckAdminLogin();
                 LoadEmployeeData();
+                LoadSignature();
             }
         }
 
@@ -235,8 +238,112 @@ namespace Take_Time_BangPhra.Admin.HR
 
         private void ShowMessage(string message, string type)
         {
-            string script = $"alert('{message.Replace("'", "\\'")}');";
+            string script = "alert('" + message.Replace("'", "\\'") + "');";
             ClientScript.RegisterStartupScript(this.GetType(), "alert", script, true);
+        }
+
+        #endregion
+
+        #region Signature Management
+
+        private void LoadSignature()
+        {
+            try
+            {
+                if (adminId == 0) return;
+
+                bool hasSignature = signatureService.HasSignature(adminId);
+
+                if (hasSignature)
+                {
+                    string signatureUrl = signatureService.GetSignatureUrl(adminId);
+                    imgCurrentSignature.ImageUrl = ResolveUrl(signatureUrl);
+                    imgCurrentSignature.Visible = true;
+                    currentSignatureSection.Visible = true;
+                    noSignatureSection.Visible = false;
+                    lblSignatureStatus.Text = "ลายเซ็นปัจจุบัน";
+                    btnDeleteSignature.Visible = true;
+                }
+                else
+                {
+                    currentSignatureSection.Visible = false;
+                    noSignatureSection.Visible = true;
+                    btnDeleteSignature.Visible = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                lblSignatureMessage.Text = "ไม่สามารถโหลดลายเซ็นได้: " + ex.Message;
+                lblSignatureMessage.Style["background"] = "#f8d7da";
+                lblSignatureMessage.Style["color"] = "#721c24";
+            }
+        }
+
+        protected void btnUploadSignature_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!fuSignature.HasFile)
+                {
+                    ShowSignatureMessage("กรุณาเลือกไฟล์ลายเซ็น", false);
+                    return;
+                }
+
+                string message;
+                bool success = signatureService.UploadSignature(adminId, fuSignature.PostedFile, out message);
+
+                if (success)
+                {
+                    ShowSignatureMessage("อัพโหลดลายเซ็นสำเร็จ", true);
+                    LoadSignature();
+                }
+                else
+                {
+                    ShowSignatureMessage(message, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowSignatureMessage("เกิดข้อผิดพลาด: " + ex.Message, false);
+            }
+        }
+
+        protected void btnDeleteSignature_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string message;
+                bool success = signatureService.DeleteSignature(adminId, out message);
+
+                if (success)
+                {
+                    ShowSignatureMessage("ลบลายเซ็นสำเร็จ", true);
+                    LoadSignature();
+                }
+                else
+                {
+                    ShowSignatureMessage(message, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowSignatureMessage("เกิดข้อผิดพลาด: " + ex.Message, false);
+            }
+        }
+
+        private void ShowSignatureMessage(string message, bool isSuccess)
+        {
+            lblSignatureMessage.Text = message;
+            if (isSuccess)
+            {
+                lblSignatureMessage.Style["background"] = "#d4edda";
+                lblSignatureMessage.Style["color"] = "#155724";
+            }
+            else
+            {
+                lblSignatureMessage.Style["background"] = "#f8d7da";
+                lblSignatureMessage.Style["color"] = "#721c24";
+            }
         }
 
         #endregion

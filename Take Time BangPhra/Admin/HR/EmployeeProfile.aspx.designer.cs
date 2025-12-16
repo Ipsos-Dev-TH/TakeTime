@@ -144,5 +144,45 @@ namespace Take_Time_BangPhra.Admin.HR
         /// gvTraining control.
         /// </summary>
         protected global::System.Web.UI.WebControls.GridView gvTraining;
+
+        /// <summary>
+        /// currentSignatureSection control.
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl currentSignatureSection;
+
+        /// <summary>
+        /// imgCurrentSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Image imgCurrentSignature;
+
+        /// <summary>
+        /// lblSignatureStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblSignatureStatus;
+
+        /// <summary>
+        /// noSignatureSection control.
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl noSignatureSection;
+
+        /// <summary>
+        /// fuSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.FileUpload fuSignature;
+
+        /// <summary>
+        /// btnUploadSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnUploadSignature;
+
+        /// <summary>
+        /// btnDeleteSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnDeleteSignature;
+
+        /// <summary>
+        /// lblSignatureMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblSignatureMessage;
     }
 }
