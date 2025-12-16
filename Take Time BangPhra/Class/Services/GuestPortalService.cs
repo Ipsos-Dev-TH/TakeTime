@@ -55,6 +55,27 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
+                // Check if Room_QR_Codes table exists
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Room_QR_Codes'",
+                    checkParams);
+
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    // Table doesn't exist, return empty DataTable with expected columns
+                    DataTable emptyDt = new DataTable();
+                    emptyDt.Columns.Add("ID", typeof(int));
+                    emptyDt.Columns.Add("Accommodation_ID", typeof(byte));
+                    emptyDt.Columns.Add("Accommodation_Name", typeof(string));
+                    emptyDt.Columns.Add("QR_Token", typeof(string));
+                    emptyDt.Columns.Add("QR_Data", typeof(string));
+                    emptyDt.Columns.Add("Is_Active", typeof(bool));
+                    emptyDt.Columns.Add("Created_Date", typeof(DateTime));
+                    emptyDt.Columns.Add("Status", typeof(bool));
+                    return emptyDt;
+                }
+
                 string query = @"
                     SELECT RQR.*, A.AccomName AS Accommodation_Name, A.Status
                     FROM Room_QR_Codes RQR
