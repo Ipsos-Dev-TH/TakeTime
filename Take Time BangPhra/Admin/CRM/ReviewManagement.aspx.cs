@@ -349,6 +349,12 @@ namespace Take_Time_BangPhra.Admin.CRM
                     parameters["@EndDate"] = DateTime.Parse(txtCheckoutEndDate.Text).AddDays(1);
                 }
 
+                // Filter by has notes
+                if (chkHasNotes.Checked)
+                {
+                    query.Append(" AND CH.Notes IS NOT NULL AND CH.Notes <> ''");
+                }
+
                 query.Append(" ORDER BY CH.CheckoutDate DESC");
 
                 DataTable dtCheckoutReviews = _code.DatabaseQuerySafe(_connectionString, query.ToString(), parameters);
@@ -378,6 +384,11 @@ namespace Take_Time_BangPhra.Admin.CRM
         }
 
         protected void btnFilterCheckout_Click(object sender, EventArgs e)
+        {
+            LoadCheckoutReviews();
+        }
+
+        protected void chkHasNotes_CheckedChanged(object sender, EventArgs e)
         {
             LoadCheckoutReviews();
         }

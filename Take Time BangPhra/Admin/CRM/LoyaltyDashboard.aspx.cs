@@ -142,7 +142,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                         LT.TierNameEN,
                         LT.MinPoints,
                         LT.PointsMultiplier,
-                        LT.AccommodationDiscountPercent,
+                        LT.DiscountPercent,
                         LT.TierColor,
                         COUNT(CL.Customer_MobilePhone) AS MemberCount,
                         CAST(COUNT(CL.Customer_MobilePhone) * 100.0 / NULLIF((SELECT COUNT(*) FROM Customer_Loyalty), 0) AS DECIMAL(5,2)) AS MemberPercent
@@ -150,7 +150,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                       LEFT JOIN Customer_Loyalty CL ON CL.CurrentTier_ID = LT.ID
                       WHERE LT.IsActive = 1
                       GROUP BY LT.ID, LT.TierName, LT.TierNameEN, LT.MinPoints, LT.PointsMultiplier,
-                               LT.AccommodationDiscountPercent, LT.TierColor, LT.DisplayOrder
+                               LT.DiscountPercent, LT.TierColor, LT.DisplayOrder
                       ORDER BY LT.DisplayOrder", null);
 
                 int totalCount = 0;

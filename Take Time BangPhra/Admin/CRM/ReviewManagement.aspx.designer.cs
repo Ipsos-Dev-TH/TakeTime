@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Admin.CRM
         protected global::System.Web.UI.WebControls.DropDownList ddlCheckoutRatingFilter;
         protected global::System.Web.UI.WebControls.TextBox txtCheckoutStartDate;
         protected global::System.Web.UI.WebControls.TextBox txtCheckoutEndDate;
+        protected global::System.Web.UI.WebControls.CheckBox chkHasNotes;
         protected global::System.Web.UI.WebControls.Button btnFilterCheckout;
         protected global::System.Web.UI.WebControls.Repeater rptCheckoutReviews;
         protected global::System.Web.UI.WebControls.Label lblNoCheckoutReviews;

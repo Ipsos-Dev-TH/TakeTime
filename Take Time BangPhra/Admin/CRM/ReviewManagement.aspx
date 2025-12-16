@@ -208,6 +208,10 @@
                 </asp:DropDownList>
                 <asp:TextBox ID="txtCheckoutStartDate" runat="server" TextMode="Date" style="padding: 8px; border-radius: 6px; border: 1px solid #ddd;" placeholder="Start Date"></asp:TextBox>
                 <asp:TextBox ID="txtCheckoutEndDate" runat="server" TextMode="Date" style="padding: 8px; border-radius: 6px; border: 1px solid #ddd;" placeholder="End Date"></asp:TextBox>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <asp:CheckBox ID="chkHasNotes" runat="server" AutoPostBack="true" OnCheckedChanged="chkHasNotes_CheckedChanged" />
+                    <span>มี Notes</span>
+                </label>
                 <asp:Button ID="btnFilterCheckout" runat="server" Text="Filter" OnClick="btnFilterCheckout_Click" style="padding: 8px 20px; background: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer;" />
             </div>
 

@@ -297,10 +297,23 @@ namespace Take_Time_BangPhra.Admin.CRM
         {
             try
             {
+                // Check if table exists first
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Guest_Preferences'",
+                    checkParams);
+
+                if (dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    lblNoPreferences.Visible = true;
+                    return;
+                }
+
                 var parameters = new Dictionary<string, object> { { "@Phone", customerPhone } };
                 DataTable dtPrefs = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         PreferenceType,
+                        PreferenceKey,
                         PreferenceValue,
                         Notes
                       FROM Guest_Preferences
@@ -317,13 +330,13 @@ namespace Take_Time_BangPhra.Admin.CRM
 
                         Label prefLabel = new Label
                         {
-                            Text = row["PreferenceType"].ToString(),
+                            Text = row["PreferenceType"].ToString() + " - " + row["PreferenceKey"].ToString(),
                             CssClass = "preference-label"
                         };
 
                         Label prefValue = new Label
                         {
-                            Text = row["PreferenceValue"].ToString(),
+                            Text = Convert.ToString(row["PreferenceValue"]),
                             CssClass = "preference-value"
                         };
 
@@ -340,9 +353,10 @@ namespace Take_Time_BangPhra.Admin.CRM
                     lblNoPreferences.Visible = true;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                ShowAlert("Error loading preferences: " + ex.Message, "error");
+                // Silently fail if table doesn't exist
+                lblNoPreferences.Visible = true;
             }
         }
 
@@ -350,16 +364,28 @@ namespace Take_Time_BangPhra.Admin.CRM
         {
             try
             {
+                // Check if table exists first
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Customer_Special_Dates'",
+                    checkParams);
+
+                if (dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    lblNoSpecialDates.Visible = true;
+                    return;
+                }
+
                 var parameters = new Dictionary<string, object> { { "@Phone", customerPhone } };
                 DataTable dtDates = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
-                        DateType,
-                        SpecialDate,
-                        Notes
+                        OccasionType,
+                        OccasionName,
+                        OccasionDate,
+                        SpecialNotes
                       FROM Customer_Special_Dates
                       WHERE Customer_MobilePhone = @Phone
-                        AND IsActive = 1
-                      ORDER BY MONTH(SpecialDate), DAY(SpecialDate)",
+                      ORDER BY MONTH(OccasionDate), DAY(OccasionDate)",
                     parameters);
 
                 if (dtDates.Rows.Count > 0)
@@ -368,13 +394,17 @@ namespace Take_Time_BangPhra.Admin.CRM
                     {
                         Panel dateItem = new Panel { CssClass = "info-row" };
 
+                        string occasionName = Convert.ToString(row["OccasionName"]);
+                        string occasionType = Convert.ToString(row["OccasionType"]);
+                        string labelText = !string.IsNullOrEmpty(occasionName) ? occasionName : occasionType;
+
                         Label dateLabel = new Label
                         {
-                            Text = row["DateType"].ToString() + ":",
+                            Text = labelText + ":",
                             CssClass = "info-label"
                         };
 
-                        DateTime specialDate = Convert.ToDateTime(row["SpecialDate"]);
+                        DateTime specialDate = Convert.ToDateTime(row["OccasionDate"]);
                         Label dateValue = new Label
                         {
                             Text = specialDate.ToString("dd MMMM"),

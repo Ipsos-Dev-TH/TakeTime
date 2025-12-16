@@ -19,16 +19,24 @@ namespace Take_Time_BangPhra.Admin.Report
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // Check permissions
+            try
+            {
+                if (Session["permission"]?.ToString() != "True" ||
+                    (Session["User"]?.ToString() != "Owner" && Session["User"]?.ToString() != "Admin"))
+                {
+                    Response.Redirect("/Default");
+                    return;
+                }
+            }
+            catch
+            {
+                Response.Redirect("/Default");
+                return;
+            }
 
             if (!IsPostBack)
             {
-                // Check permissions
-                if (Session["user_name"] == null)
-                {
-                    Response.Redirect("~/Login.aspx");
-                    return;
-                }
-
                 InitializeFilters();
                 LoadPLStatement();
             }

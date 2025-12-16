@@ -323,7 +323,7 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                string query = "SELECT ID, CustomerTypeName FROM Customer_Type WHERE Status = 1 ORDER BY CustomerTypeName";
+                string query = "SELECT ID, Customer_Type AS CustomerTypeName FROM Customer_Type ORDER BY Customer_Type";
 
                 using (SqlCommand cmd = new SqlCommand(query, _conn))
                 {
