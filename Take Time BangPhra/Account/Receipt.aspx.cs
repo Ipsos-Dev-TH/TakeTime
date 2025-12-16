@@ -185,41 +185,86 @@ namespace Take_Time_BangPhra.Account.Report
 
                     }
 
+                    // 🔧 FIX: Check if customer data exists before loading
+                    bool hasCustomerData = dtcustomer != null && dtcustomer.Rows.Count > 0;
+
                     try //Address
                     {
-                        try
+                        if (hasCustomerData)
                         {
-                            TextBox16.Text = dtcustomer.Rows[0]["PostalCode"].ToString();
+                            try
+                            {
+                                TextBox16.Text = dtcustomer.Rows[0]["PostalCode"]?.ToString() ?? "";
 
-                            DropDownList5.ClearSelection();
-                            DropDownList5.Items.FindByText(dtcustomer.Rows[0]["Province"].ToString()).Selected = true;
-                            DropDownList5.SelectedIndex = DropDownList5.Items.IndexOf(DropDownList5.Items.FindByText(dtcustomer.Rows[0]["Province"].ToString()));
-                            DropDownList6.ClearSelection();
-                            DropDownList6.Items.FindByText(dtcustomer.Rows[0]["District"].ToString()).Selected = true;
-                            DropDownList6.SelectedIndex = DropDownList6.Items.IndexOf(DropDownList6.Items.FindByText(dtcustomer.Rows[0]["District"].ToString()));
-                            DropDownList7.ClearSelection();
-                            DropDownList7.Items.FindByText(dtcustomer.Rows[0]["SubDistrict"].ToString()).Selected = true;
-                            DropDownList7.SelectedIndex = DropDownList7.Items.IndexOf(DropDownList7.Items.FindByText(dtcustomer.Rows[0]["SubDistrict"].ToString()));
-                        }
-                        catch { }
+                                if (!string.IsNullOrEmpty(dtcustomer.Rows[0]["Province"]?.ToString()))
+                                {
+                                    DropDownList5.ClearSelection();
+                                    var provinceItem = DropDownList5.Items.FindByText(dtcustomer.Rows[0]["Province"].ToString());
+                                    if (provinceItem != null)
+                                    {
+                                        provinceItem.Selected = true;
+                                        DropDownList5.SelectedIndex = DropDownList5.Items.IndexOf(provinceItem);
+                                    }
+                                }
+                                if (!string.IsNullOrEmpty(dtcustomer.Rows[0]["District"]?.ToString()))
+                                {
+                                    DropDownList6.ClearSelection();
+                                    var districtItem = DropDownList6.Items.FindByText(dtcustomer.Rows[0]["District"].ToString());
+                                    if (districtItem != null)
+                                    {
+                                        districtItem.Selected = true;
+                                        DropDownList6.SelectedIndex = DropDownList6.Items.IndexOf(districtItem);
+                                    }
+                                }
+                                if (!string.IsNullOrEmpty(dtcustomer.Rows[0]["SubDistrict"]?.ToString()))
+                                {
+                                    DropDownList7.ClearSelection();
+                                    var subDistrictItem = DropDownList7.Items.FindByText(dtcustomer.Rows[0]["SubDistrict"].ToString());
+                                    if (subDistrictItem != null)
+                                    {
+                                        subDistrictItem.Selected = true;
+                                        DropDownList7.SelectedIndex = DropDownList7.Items.IndexOf(subDistrictItem);
+                                    }
+                                }
+                            }
+                            catch { }
 
-                        DropDownList8.ClearSelection();
-                        DropDownList8.Items.FindByValue(dtcustomer.Rows[0]["Customer_Type_ID"].ToString()).Selected = true;
-                        DropDownList8.SelectedIndex = DropDownList8.Items.IndexOf(DropDownList8.Items.FindByValue(dtcustomer.Rows[0]["Customer_Type_ID"].ToString()));
-                        DropDownList8.DataBind();
-                        if(DropDownList8.SelectedIndex == 0)
-                        {
-                            TextBox7.Visible = true;
-                            TextBox7.Text = dtcustomer.Rows[0]["Branch_Number"].ToString();
+                            string customerTypeId = dtcustomer.Rows[0]["Customer_Type_ID"]?.ToString() ?? "2";
+                            DropDownList8.ClearSelection();
+                            var typeItem = DropDownList8.Items.FindByValue(customerTypeId);
+                            if (typeItem != null)
+                            {
+                                typeItem.Selected = true;
+                                DropDownList8.SelectedIndex = DropDownList8.Items.IndexOf(typeItem);
+                            }
+                            DropDownList8.DataBind();
+                            if (DropDownList8.SelectedIndex == 0)
+                            {
+                                TextBox7.Visible = true;
+                                TextBox7.Text = dtcustomer.Rows[0]["Branch_Number"]?.ToString() ?? "";
+                            }
+                            else
+                            {
+                                TextBox7.Visible = false;
+                            }
                         }
                         else
                         {
-                            TextBox7.Visible =false;
+                            // 🔧 No customer found - set defaults
+                            DropDownList8.ClearSelection();
+                            var defaultTypeItem = DropDownList8.Items.FindByValue("2"); // บุคคลธรรมดา
+                            if (defaultTypeItem != null)
+                            {
+                                defaultTypeItem.Selected = true;
+                                DropDownList8.SelectedIndex = DropDownList8.Items.IndexOf(defaultTypeItem);
+                            }
+                            DropDownList8.DataBind();
+                            TextBox7.Visible = false;
                         }
 
-                            DropDownList2.SelectedIndex = DropDownList2.Items.IndexOf(DropDownList2.Items.FindByText(dtReceipt.Rows[0]["Paid_Type"].ToString()));
+                        DropDownList2.SelectedIndex = DropDownList2.Items.IndexOf(DropDownList2.Items.FindByText(dtReceipt.Rows[0]["Paid_Type"].ToString()));
                         DropDownList2.DataBind();
-                       
+
                         DropDownList4.SelectedIndex = DropDownList4.Items.IndexOf(DropDownList4.Items.FindByValue("1"));
                         DropDownList4.DataBind();
                     }
@@ -276,8 +321,15 @@ namespace Take_Time_BangPhra.Account.Report
                             CheckBox5.Checked = true;
                             CheckBox5.DataBind();
                             TextBox7.Visible = true;
-                            TextBox7.Text = dtcustomer.Rows[0]["Branch_Number"].ToString();
-                            
+                            // 🔧 FIX: Check if customer data exists before accessing Branch_Number
+                            if (hasCustomerData)
+                            {
+                                TextBox7.Text = dtcustomer.Rows[0]["Branch_Number"]?.ToString() ?? "00000";
+                            }
+                            else
+                            {
+                                TextBox7.Text = "00000";
+                            }
                         }
                     }
                     catch { }
@@ -292,12 +344,21 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                     else
                     {
-                        TextBox10.Text = dtcustomer.Rows[0]["FullName"].ToString();
-                        TextBox11.Text = dtcustomer.Rows[0]["Address"].ToString();
-                        TextBox12.Text = dtcustomer.Rows[0]["IDNumber"].ToString();
-                        TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"].ToString();
-                        TextBox17.Text = dtcustomer.Rows[0]["Email"].ToString();
-                        TextBox18.Text = dtcustomer.Rows[0]["Address1"].ToString();
+                        // 🔧 FIX: Check if customer data exists before loading
+                        if (hasCustomerData)
+                        {
+                            TextBox10.Text = dtcustomer.Rows[0]["FullName"]?.ToString() ?? "";
+                            TextBox11.Text = dtcustomer.Rows[0]["Address"]?.ToString() ?? "";
+                            TextBox12.Text = dtcustomer.Rows[0]["IDNumber"]?.ToString() ?? "";
+                            TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"]?.ToString() ?? "";
+                            TextBox17.Text = dtcustomer.Rows[0]["Email"]?.ToString() ?? "";
+                            TextBox18.Text = dtcustomer.Rows[0]["Address1"]?.ToString() ?? "";
+                        }
+                        else
+                        {
+                            // No customer found - use phone from reservation as default
+                            TextBox13.Text = dtReceipt.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
+                        }
                     }
                     
 
@@ -1677,6 +1738,53 @@ namespace Take_Time_BangPhra.Account.Report
                 TextBox5.ReadOnly = true;
                 TextBox5.BackColor = System.Drawing.Color.LightGray;
                 System.Diagnostics.Debug.WriteLine($"[CheckBox2_CheckedChanged] Set TextBox5.ReadOnly=true (readonly)");
+            }
+        }
+
+        /// <summary>
+        /// 🔧 FIX: เมื่อเปลี่ยนวันที่ใบกำกับภาษี ให้รันเลขใบกำกับใหม่จากวันนั้น
+        /// เพื่อให้เลขใบกำกับภาษีเรียงต่อจากใบกำกับภาษีในวันที่เลือก
+        /// </summary>
+        protected void TextBox8_TextChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                // ดึง command จาก ViewState
+                string command = ViewState["EditCommand"]?.ToString() ?? "";
+
+                // ถ้าไม่ใช่ mode edit หรือ CheckBox2 ไม่ได้ check → ไม่รันเลขใหม่
+                // เพราะถ้า user ไม่ได้ติ๊ก edit แสดงว่าไม่ต้องการเปลี่ยนเลข
+                if (command != "edit" && !CheckBox2.Checked)
+                {
+                    // สร้างเลขใหม่สำหรับ create mode
+                    DateTime newDate = Convert.ToDateTime(TextBox8.Text);
+                    string newDocNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", newDate);
+                    TextBox5.Text = newDocNum;
+                    System.Diagnostics.Debug.WriteLine($"[TextBox8_TextChanged] CREATE mode - Generated new doc number: {newDocNum}");
+                    return;
+                }
+
+                // ถ้าเป็น edit mode และ CheckBox2 checked (user ต้องการแก้เลข)
+                // หรือถ้า user ติ๊ก CheckBox2 → รันเลขใบกำกับใหม่จากวันที่เลือก
+                if (CheckBox2.Checked)
+                {
+                    DateTime newDate = Convert.ToDateTime(TextBox8.Text);
+                    string newDocNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", newDate);
+
+                    TextBox5.Text = newDocNum;
+                    TextBox5.ReadOnly = false;
+                    TextBox5.BackColor = System.Drawing.Color.White;
+
+                    System.Diagnostics.Debug.WriteLine($"[TextBox8_TextChanged] Generated new doc number for date {newDate:yyyy-MM-dd}: {newDocNum}");
+
+                    // แจ้งเตือน user ว่าเลขใบกำกับภาษีถูกเปลี่ยน
+                    ClientScript.RegisterStartupScript(this.GetType(), "dateChanged",
+                        $"alert('🔄 เปลี่ยนวันที่เป็น {newDate:dd/MM/yyyy}\\n\\nเลขใบกำกับภาษีใหม่: {newDocNum}\\n\\nคุณสามารถแก้ไขเลขที่ได้ตามต้องการ');", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TextBox8_TextChanged] Error: {ex.Message}");
             }
         }
 

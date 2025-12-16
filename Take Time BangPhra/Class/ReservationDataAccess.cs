@@ -55,10 +55,11 @@ namespace Take_Time_BangPhra
                 { "@phoneNumber", phoneNumber }
             };
 
+            // 🔧 FIX: Use Reservation.Customer_MobilePhone for clarity
             return _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT * FROM [Reservation]
                   RIGHT JOIN Reservation_Accommodation ON Reservation_Accommodation.Reservation_ID = Reservation.ID
-                  WHERE Reservation.ID = @reservationId AND Customer_MobilePhone = @phoneNumber",
+                  WHERE Reservation.ID = @reservationId AND Reservation.Customer_MobilePhone = @phoneNumber",
                 parameters);
         }
 
@@ -73,10 +74,11 @@ namespace Take_Time_BangPhra
                 { "@phoneNumber", phoneNumber }
             };
 
+            // 🔧 FIX: Use Reservation.Customer_MobilePhone for clarity
             return _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT * FROM [Reservation]
                   RIGHT JOIN Reservation_Items ON Reservation_Items.Reservation_ID = Reservation.ID
-                  WHERE Reservation.ID = @reservationId AND Customer_MobilePhone = @phoneNumber",
+                  WHERE Reservation.ID = @reservationId AND Reservation.Customer_MobilePhone = @phoneNumber",
                 parameters);
         }
 
@@ -91,12 +93,15 @@ namespace Take_Time_BangPhra
                 { "@phoneNumber", phoneNumber }
             };
 
+            // 🔧 FIX: Changed INNER JOIN to LEFT JOIN for Customer table
+            // This allows reservations to be loaded even if Customer record doesn't exist
+            // (e.g., when booking with placeholder phone like "02")
             return _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT
                     Reservation.*,
                     -- ⚠️ ระบุ Customer columns ทั้งหมด ยกเว้น Province, District, Subdistrict, Postcode (เพื่อไม่ให้ซ้ำกับ Address table)
                     Customer.ID AS Customer_ID,
-                    Customer.MobilePhone,
+                    ISNULL(Customer.MobilePhone, Reservation.Customer_MobilePhone) AS MobilePhone,
                     Customer.Name,
                     Customer.NickName,
                     Customer.ComeFrom,
@@ -108,7 +113,7 @@ namespace Take_Time_BangPhra
                     Customer.Address_ID,
                     Customer.IDNumber,
                     Customer.Email,
-                    Customer.Customer_Type_ID,
+                    ISNULL(Customer.Customer_Type_ID, 2) AS Customer_Type_ID,
                     Customer.Branch_Number,
                     Customer.TaxID,
                     Customer.LastUpdated,
@@ -131,11 +136,11 @@ namespace Take_Time_BangPhra
                     Address.PostalCode AS PostalCode,
                     Address.Address_Code
                   FROM [Reservation]
-                  INNER JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone
+                  LEFT JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone
                   LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID
                   LEFT JOIN Address ON Address.ID = Customer.Address_ID
                   LEFT JOIN Account_Receipt ON Account_Receipt.Reservation_ID = Reservation.ID
-                  WHERE Reservation.ID = @reservationId AND Customer_MobilePhone = @phoneNumber",
+                  WHERE Reservation.ID = @reservationId AND Reservation.Customer_MobilePhone = @phoneNumber",
                 parameters);
         }
 

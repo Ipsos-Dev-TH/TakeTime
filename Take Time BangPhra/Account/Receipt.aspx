@@ -38,7 +38,7 @@
              <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบกำกับภาษี:</td>
                 <td>
-                    &nbsp;<asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date"></asp:TextBox>
+                    &nbsp;<asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date" AutoPostBack="True" OnTextChanged="TextBox8_TextChanged"></asp:TextBox>
                  </td>
             </tr>
             <tr>

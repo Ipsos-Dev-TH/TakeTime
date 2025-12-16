@@ -410,22 +410,41 @@ namespace Take_Time_BangPhra.Admin
                     return;
                 }
 
-                if (string.IsNullOrEmpty(txtBranchNumber.Text.Trim()) || txtBranchNumber.Text.Length != 5)
+                if (string.IsNullOrEmpty(ddlVendorType.SelectedValue))
                 {
-                    ShowMessage("กรุณากรอกเลขสาขา 5 หลัก", "error");
+                    ShowMessage("กรุณาเลือกประเภท Vendor", "error");
                     return;
+                }
+
+                // 🔧 FIX: Branch number validation based on vendor type
+                // - นิติบุคคล (Corporate, Type ID = 1): ต้องกรอกเลขสาขา 5 หลัก
+                // - บุคคลธรรมดา (Individual, Type ID = 2): ไม่จำเป็นต้องกรอก ใช้ค่าเริ่มต้น "00000"
+                string vendorTypeId = ddlVendorType.SelectedValue;
+                bool isCorporate = vendorTypeId == "1"; // 1 = นิติบุคคล
+
+                string branchNumber = txtBranchNumber.Text.Trim();
+                if (isCorporate)
+                {
+                    // นิติบุคคลต้องกรอกเลขสาขา 5 หลัก
+                    if (string.IsNullOrEmpty(branchNumber) || branchNumber.Length != 5)
+                    {
+                        ShowMessage("กรุณากรอกเลขสาขา 5 หลัก (สำหรับนิติบุคคล)", "error");
+                        return;
+                    }
+                }
+                else
+                {
+                    // บุคคลธรรมดา: ใช้ค่าเริ่มต้น "00000" ถ้าไม่ได้กรอก
+                    if (string.IsNullOrEmpty(branchNumber))
+                    {
+                        branchNumber = "00000";
+                    }
                 }
 
                 string taxId = txtTaxID.Text.Trim();
                 if (!string.IsNullOrEmpty(taxId) && taxId.Length != 13)
                 {
                     ShowMessage("เลขผู้เสียภาษีต้องมี 13 หลัก", "error");
-                    return;
-                }
-
-                if (string.IsNullOrEmpty(ddlVendorType.SelectedValue))
-                {
-                    ShowMessage("กรุณาเลือกประเภท Vendor", "error");
                     return;
                 }
 
@@ -442,9 +461,9 @@ namespace Take_Time_BangPhra.Admin
                 var parameters = new Dictionary<string, object>
                 {
                     { "@IDNumber", string.IsNullOrEmpty(taxId) ? (object)DBNull.Value : taxId },
-                    { "@VendorTypeID", ddlVendorType.SelectedValue },
+                    { "@VendorTypeID", vendorTypeId },
                     { "@Name", txtVendorName.Text.Trim() },
-                    { "@BranchNumber", txtBranchNumber.Text.Trim() },
+                    { "@BranchNumber", branchNumber }, // 🔧 FIX: Use processed branchNumber variable
                     { "@PhoneNumber", string.IsNullOrEmpty(txtPhone.Text.Trim()) ? (object)DBNull.Value : txtPhone.Text.Trim() },
                     { "@Address", txtAddress.Text.Trim() },
                     { "@Address1", txtAddress1.Text.Trim() },
