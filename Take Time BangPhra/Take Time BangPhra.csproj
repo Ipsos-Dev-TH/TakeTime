@@ -376,6 +376,7 @@
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
     <Content Include="Admin\Leave\LeaveManagement.aspx" />
+    <Content Include="Admin\Payroll\PayrollManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Guest\Portal.aspx" />
@@ -772,6 +773,13 @@
     </Compile>
     <Compile Include="Admin\Leave\LeaveManagement.aspx.designer.cs">
       <DependentUpon>LeaveManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Payroll\PayrollManagement.aspx.cs">
+      <DependentUpon>PayrollManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Payroll\PayrollManagement.aspx.designer.cs">
+      <DependentUpon>PayrollManagement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
