@@ -73,6 +73,21 @@
             border-radius: 6px;
             font-size: 14px;
             min-width: 150px;
+            min-height: 44px;
+            line-height: 1.6;
+        }
+
+        /* Fix Thai text display in dropdowns */
+        select.form-control {
+            height: auto;
+            min-height: 44px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+        }
+
+        select.form-control option {
+            padding: 8px 10px;
+            line-height: 1.6;
         }
 
         .form-control:focus {
