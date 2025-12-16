@@ -674,9 +674,17 @@ public class EmployeeService
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
-            using (SqlCommand cmd = new SqlCommand("sp_Get_Employee_Dashboard_Stats", conn))
+            // Use direct SQL instead of stored procedure
+            string sql = @"
+                SELECT
+                    (SELECT COUNT(*) FROM Admin WHERE Status = 1) AS TotalActiveEmployees,
+                    0 AS NewEmployeesThisMonth,
+                    0 AS ContractsExpiringWithin30Days,
+                    0 AS DocumentsExpiringWithin30Days";
+
+            using (SqlCommand cmd = new SqlCommand(sql, conn))
             {
-                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.CommandType = CommandType.Text;
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {

@@ -135,36 +135,28 @@ public class PayrollService
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
-            using (SqlCommand cmd = new SqlCommand("sp_Calculate_OT_Amount", conn))
+            // Get employee's monthly salary to calculate OT rate
+            using (SqlCommand cmd = new SqlCommand())
             {
-                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT TOP 1 ISNULL(MonthlySalary, 0) AS MonthlySalary
+                    FROM Employee_Salary
+                    WHERE Admin_ID = @AdminID AND IsActive = 1
+                    ORDER BY EffectiveDate DESC";
                 cmd.Parameters.AddWithValue("@AdminID", adminId);
-                cmd.Parameters.AddWithValue("@OTHours", otHours);
-                cmd.Parameters.AddWithValue("@CalculationMonth", calculationMonth);
-
-                SqlParameter otRateParam = new SqlParameter("@OTRate", SqlDbType.Decimal)
-                {
-                    Precision = 10,
-                    Scale = 2,
-                    Direction = ParameterDirection.Output
-                };
-                cmd.Parameters.Add(otRateParam);
-
-                SqlParameter otAmountParam = new SqlParameter("@OTAmount", SqlDbType.Decimal)
-                {
-                    Precision = 10,
-                    Scale = 2,
-                    Direction = ParameterDirection.Output
-                };
-                cmd.Parameters.Add(otAmountParam);
 
                 conn.Open();
-                cmd.ExecuteNonQuery();
+                object result = cmd.ExecuteScalar();
+                decimal monthlySalary = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
 
-                decimal otRate = otRateParam.Value != DBNull.Value ? Convert.ToDecimal(otRateParam.Value) : 0;
-                decimal otAmount = otAmountParam.Value != DBNull.Value ? Convert.ToDecimal(otAmountParam.Value) : 0;
+                // Calculate OT rate (1.5x hourly rate)
+                // Hourly rate = Monthly salary / (30 days * 8 hours)
+                decimal hourlyRate = monthlySalary / 240m;
+                decimal otRate = hourlyRate * 1.5m;
+                decimal otAmount = otRate * otHours;
 
-                return (otRate, otAmount, "Success");
+                return (Math.Round(otRate, 2), Math.Round(otAmount, 2), "Success");
             }
         }
     }
@@ -239,33 +231,130 @@ public class PayrollService
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
-            using (SqlCommand cmd = new SqlCommand("sp_Generate_Payroll_For_Period", conn))
+            conn.Open();
+            using (SqlTransaction transaction = conn.BeginTransaction())
             {
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.AddWithValue("@Year", year);
-                cmd.Parameters.AddWithValue("@Month", month);
-                cmd.Parameters.AddWithValue("@CreatedBy_AdminID", createdByAdminId);
-
-                SqlParameter outputParam = new SqlParameter("@PayrollPeriodID", SqlDbType.Int)
+                try
                 {
-                    Direction = ParameterDirection.Output
-                };
-                cmd.Parameters.Add(outputParam);
-
-                conn.Open();
-                using (SqlDataReader reader = cmd.ExecuteReader())
-                {
-                    if (reader.Read())
+                    // Check if period already exists
+                    using (SqlCommand checkCmd = new SqlCommand(
+                        "SELECT ID FROM Payroll_Periods WHERE Year = @Year AND Month = @Month", conn, transaction))
                     {
-                        string result = reader["Result"].ToString();
-                        string message = reader["Message"].ToString();
-                        int periodId = result == "Success" ? Convert.ToInt32(reader["PayrollPeriodID"]) : 0;
-                        return new PayrollOperationResult(result == "Success", message, periodId);
+                        checkCmd.Parameters.AddWithValue("@Year", year);
+                        checkCmd.Parameters.AddWithValue("@Month", month);
+                        object existingId = checkCmd.ExecuteScalar();
+                        if (existingId != null)
+                        {
+                            return new PayrollOperationResult(false, "รอบเงินเดือนนี้มีอยู่แล้ว", 0);
+                        }
                     }
+
+                    // Generate period code
+                    string periodCode = $"PAY{year}{month:D2}";
+                    string[] thaiMonths = { "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                                           "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม" };
+                    string periodName = $"{thaiMonths[month]} {year + 543}";
+
+                    // Create payroll period
+                    int periodId;
+                    using (SqlCommand insertCmd = new SqlCommand(@"
+                        INSERT INTO Payroll_Periods (PeriodCode, Year, Month, PeriodName, Status, CreatedBy_AdminID, CreatedDate)
+                        VALUES (@Code, @Year, @Month, @Name, 'DRAFT', @CreatedBy, GETDATE());
+                        SELECT SCOPE_IDENTITY();", conn, transaction))
+                    {
+                        insertCmd.Parameters.AddWithValue("@Code", periodCode);
+                        insertCmd.Parameters.AddWithValue("@Year", year);
+                        insertCmd.Parameters.AddWithValue("@Month", month);
+                        insertCmd.Parameters.AddWithValue("@Name", periodName);
+                        insertCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                        periodId = Convert.ToInt32(insertCmd.ExecuteScalar());
+                    }
+
+                    // Get all active employees with salary and create payroll records
+                    decimal totalGross = 0, totalDeductions = 0, totalNet = 0;
+                    int employeeCount = 0;
+
+                    using (SqlCommand empCmd = new SqlCommand(@"
+                        SELECT A.ID, ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
+                               ISNULL(ES.MonthlySalary, 0) AS Salary
+                        FROM Admin A
+                        LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                        WHERE A.Status = 1", conn, transaction))
+                    {
+                        using (SqlDataReader reader = empCmd.ExecuteReader())
+                        {
+                            var employees = new System.Collections.Generic.List<(int Id, string Name, decimal Salary)>();
+                            while (reader.Read())
+                            {
+                                employees.Add((
+                                    Convert.ToInt32(reader["ID"]),
+                                    reader["Name"].ToString(),
+                                    Convert.ToDecimal(reader["Salary"])
+                                ));
+                            }
+                            reader.Close();
+
+                            foreach (var emp in employees)
+                            {
+                                decimal baseSalary = emp.Salary;
+                                decimal socialSecurity = baseSalary * 0.05m; // 5% social security
+                                if (socialSecurity > 750) socialSecurity = 750; // Max 750 baht
+                                decimal netSalary = baseSalary - socialSecurity;
+
+                                using (SqlCommand recCmd = new SqlCommand(@"
+                                    INSERT INTO Payroll_Records
+                                    (PayrollPeriod_ID, Admin_ID, EmployeeName, BaseSalary, WorkDays, LeaveDays,
+                                     OTHours, OTAmount, BonusAmount, AllowanceAmount, TotalEarnings,
+                                     LeaveDeduction, SocialSecurity, Tax, OtherDeductions, TotalDeductions, NetSalary,
+                                     VoucherGenerated, CreatedDate)
+                                    VALUES
+                                    (@PeriodID, @AdminID, @Name, @Salary, 30, 0,
+                                     0, 0, 0, 0, @Salary,
+                                     0, @SS, 0, 0, @SS, @Net,
+                                     0, GETDATE())", conn, transaction))
+                                {
+                                    recCmd.Parameters.AddWithValue("@PeriodID", periodId);
+                                    recCmd.Parameters.AddWithValue("@AdminID", emp.Id);
+                                    recCmd.Parameters.AddWithValue("@Name", emp.Name);
+                                    recCmd.Parameters.AddWithValue("@Salary", baseSalary);
+                                    recCmd.Parameters.AddWithValue("@SS", socialSecurity);
+                                    recCmd.Parameters.AddWithValue("@Net", netSalary);
+                                    recCmd.ExecuteNonQuery();
+                                }
+
+                                totalGross += baseSalary;
+                                totalDeductions += socialSecurity;
+                                totalNet += netSalary;
+                                employeeCount++;
+                            }
+                        }
+                    }
+
+                    // Update period totals
+                    using (SqlCommand updateCmd = new SqlCommand(@"
+                        UPDATE Payroll_Periods
+                        SET TotalEmployees = @Count, TotalGrossPay = @Gross,
+                            TotalDeductions = @Deductions, TotalNetPay = @Net
+                        WHERE ID = @PeriodID", conn, transaction))
+                    {
+                        updateCmd.Parameters.AddWithValue("@PeriodID", periodId);
+                        updateCmd.Parameters.AddWithValue("@Count", employeeCount);
+                        updateCmd.Parameters.AddWithValue("@Gross", totalGross);
+                        updateCmd.Parameters.AddWithValue("@Deductions", totalDeductions);
+                        updateCmd.Parameters.AddWithValue("@Net", totalNet);
+                        updateCmd.ExecuteNonQuery();
+                    }
+
+                    transaction.Commit();
+                    return new PayrollOperationResult(true, $"สร้างรอบเงินเดือนสำเร็จ ({employeeCount} คน)", periodId);
+                }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    return new PayrollOperationResult(false, "เกิดข้อผิดพลาด: " + ex.Message, 0);
                 }
             }
         }
-        return new PayrollOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>

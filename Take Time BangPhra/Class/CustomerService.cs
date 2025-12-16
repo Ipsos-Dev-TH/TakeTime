@@ -268,14 +268,51 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_GetCustomerAuditHistory", _conn))
+                // Check if Customer_Audit table exists
+                string checkSql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Customer_Audit'";
+                using (SqlCommand checkCmd = new SqlCommand(checkSql, _conn))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
-                    cmd.Parameters.AddWithValue("@MaxResults", maxResults);
-
                     if (_conn.State != ConnectionState.Open)
                         _conn.Open();
+
+                    int tableExists = (int)checkCmd.ExecuteScalar();
+                    if (tableExists == 0)
+                    {
+                        // Table doesn't exist - return empty DataTable with expected columns
+                        DataTable emptyDt = new DataTable();
+                        emptyDt.Columns.Add("ChangeDate", typeof(DateTime));
+                        emptyDt.Columns.Add("Action", typeof(string));
+                        emptyDt.Columns.Add("FieldChanged", typeof(string));
+                        emptyDt.Columns.Add("OldValue", typeof(string));
+                        emptyDt.Columns.Add("NewValue", typeof(string));
+                        emptyDt.Columns.Add("ChangedByName", typeof(string));
+                        emptyDt.Columns.Add("ChangedBy_Source", typeof(string));
+                        emptyDt.Columns.Add("IPAddress", typeof(string));
+                        emptyDt.Columns.Add("Notes", typeof(string));
+                        return emptyDt;
+                    }
+                }
+
+                // Table exists - query audit history
+                string sql = $@"
+                    SELECT TOP {maxResults}
+                        CA.AuditDate AS ChangeDate,
+                        CA.Action,
+                        CA.FieldName AS FieldChanged,
+                        CA.OldValue,
+                        CA.NewValue,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS ChangedByName,
+                        CA.Source AS ChangedBy_Source,
+                        CA.IPAddress,
+                        CA.Notes
+                    FROM Customer_Audit CA
+                    LEFT JOIN Admin A ON A.ID = CA.ChangedBy_AdminID
+                    WHERE CA.Customer_MobilePhone = @MobilePhone
+                    ORDER BY CA.AuditDate DESC";
+
+                using (SqlCommand cmd = new SqlCommand(sql, _conn))
+                {
+                    cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
 
                     using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                     {
@@ -298,19 +335,40 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_DeleteCustomer", _conn))
+                if (_conn.State != ConnectionState.Open)
+                    _conn.Open();
+
+                // Check if customer has reservations
+                string checkSql = "SELECT COUNT(*) FROM Reservation WHERE Customer_MobilePhone = @MobilePhone";
+                int reservationCount;
+                using (SqlCommand checkCmd = new SqlCommand(checkSql, _conn))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
-                    cmd.Parameters.AddWithValue("@DeletedBy_ID", deletedById ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Reason", reason ?? (object)DBNull.Value);
-
-                    if (_conn.State != ConnectionState.Open)
-                        _conn.Open();
-
-                    cmd.ExecuteNonQuery();
-                    return true;
+                    checkCmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
+                    reservationCount = (int)checkCmd.ExecuteScalar();
                 }
+
+                if (reservationCount > 0)
+                {
+                    // Soft delete - set Status to 0
+                    string softDeleteSql = "UPDATE Customer SET Status = 0 WHERE MobilePhone = @MobilePhone";
+                    using (SqlCommand cmd = new SqlCommand(softDeleteSql, _conn))
+                    {
+                        cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                else
+                {
+                    // Hard delete - remove from database
+                    string deleteSql = "DELETE FROM Customer WHERE MobilePhone = @MobilePhone";
+                    using (SqlCommand cmd = new SqlCommand(deleteSql, _conn))
+                    {
+                        cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
