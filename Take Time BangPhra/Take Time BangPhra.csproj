@@ -721,6 +721,7 @@
     <Compile Include="Class\ProductDataAccess.cs" />
     <Compile Include="Class\ProductService.cs" />
     <Compile Include="Class\ReceiptService.cs" />
+    <Compile Include="Class\SignatureService.cs" />
     <Compile Include="Class\ReservationDataAccess.cs" />
     <Compile Include="Class\ReservationPriceCalculationService.cs" />
     <Compile Include="Class\ReservationService.cs" />
