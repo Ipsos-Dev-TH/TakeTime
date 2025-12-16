@@ -147,6 +147,12 @@ namespace Take_Time_BangPhra.Admin
 
                 DataTable dt = code.DatabaseQuerySafe(conn, sql, parameters);
 
+                // Add Province column to DataTable
+                if (!dt.Columns.Contains("Province"))
+                {
+                    dt.Columns.Add("Province", typeof(string));
+                }
+
                 // Join with Address table to get province
                 foreach (DataRow row in dt.Rows)
                 {
