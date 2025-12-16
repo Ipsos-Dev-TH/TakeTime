@@ -31,7 +31,7 @@ public class PayrollService
 
     public PayrollService()
     {
-        connectionString = ConfigurationManager.ConnectionStrings["TakeTime_DB"].ConnectionString;
+        connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
     }
 
     #region Salary Management

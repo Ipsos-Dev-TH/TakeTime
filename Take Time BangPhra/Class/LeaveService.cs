@@ -48,7 +48,7 @@ public class LeaveService
 
     public LeaveService()
     {
-        connectionString = ConfigurationManager.ConnectionStrings["TakeTime_DB"].ConnectionString;
+        connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
     }
 
     #region Leave Types Management

@@ -16,7 +16,7 @@ public class SignatureService
 
     public SignatureService()
     {
-        connectionString = ConfigurationManager.ConnectionStrings["TakeTime_DB"].ConnectionString;
+        connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         signatureFolderPath = ConfigurationManager.AppSettings["StaffSignatureFolderPath"] ?? "~/Documents/Staff/Signature";
     }
 
