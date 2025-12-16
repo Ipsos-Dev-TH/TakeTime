@@ -33,7 +33,7 @@ public class LeaveService
                     SELECT
                         ID, LeaveTypeName, LeaveTypeCode, Description,
                         DeductSalary, RequiresMedicalCert, AnnualQuota,
-                        MaxConsecutiveDays, IsActive, DisplayOrder
+                        RequiresApproval, IsActive, DisplayOrder
                     FROM Leave_Types
                     WHERE IsActive = 1
                     ORDER BY DisplayOrder, LeaveTypeName";
@@ -260,7 +260,7 @@ public class LeaveService
                                 RequestNumber, Admin_ID, LeaveType_ID,
                                 StartDate, EndDate, TotalDays, Reason,
                                 DeductSalary, DeductionAmount, MedicalCertPath,
-                                Status, SubmittedBy_AdminID, SubmittedDate
+                                Status, CreatedBy_AdminID, CreatedDate
                             )
                             VALUES (
                                 @RequestNumber, @AdminID, @LeaveTypeID,
@@ -341,7 +341,7 @@ public class LeaveService
                         LT.LeaveTypeName, LT.LeaveTypeCode,
                         LR.StartDate, LR.EndDate, LR.TotalDays,
                         LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
-                        LR.MedicalCertPath, LR.SubmittedDate,
+                        LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
                         LR.ApprovedBy_AdminID, LR.ApprovedDate,
                         LR.RejectedReason,
                         ApprovedBy.Name AS ApprovedByName
@@ -350,7 +350,7 @@ public class LeaveService
                     INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
                     LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
                     {whereClause}
-                    ORDER BY LR.SubmittedDate DESC";
+                    ORDER BY LR.CreatedDate DESC";
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {

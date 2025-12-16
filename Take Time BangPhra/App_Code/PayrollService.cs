@@ -164,7 +164,7 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     INSERT INTO Payroll_OT_Details
-                        (PayrollRecord_ID, OTDate, OTHours, OTRate, OTAmount, CreatedBy_AdminID, CreatedDate)
+                        (PayrollRecord_ID, OTDate, OTHours, OTRate, OTAmount, RecordedBy_AdminID, RecordedDate)
                     VALUES
                         (@PayrollRecordID, @OTDate, @OTHours, @OTRate, @OTAmount, @CreatedBy, GETDATE())";
 
@@ -265,7 +265,7 @@ public class PayrollService
                     SELECT
                         ID, PeriodCode, Year, Month, PeriodName, Status,
                         TotalEmployees, TotalGrossPay, TotalDeductions, TotalNetPay,
-                        CreatedDate, ApprovedDate
+                        CreatedDate, ProcessedDate AS ApprovedDate
                     FROM Payroll_Periods" +
                     (year.HasValue ? " WHERE Year = @Year" : "") + @"
                     ORDER BY Year DESC, Month DESC";
@@ -297,10 +297,10 @@ public class PayrollService
                     SELECT
                         PR.ID, PR.Admin_ID, PR.EmployeeName, PR.BaseSalary,
                         PR.WorkDays, PR.LeaveDays, PR.OTHours, PR.OTAmount,
-                        PR.Bonus, PR.Allowances, PR.TotalEarnings,
+                        PR.BonusAmount AS Bonus, PR.AllowanceAmount AS Allowances, PR.TotalEarnings,
                         PR.LeaveDeduction, PR.SocialSecurity, PR.Tax,
                         PR.OtherDeductions, PR.TotalDeductions, PR.NetSalary,
-                        PR.VoucherGenerated, PR.VoucherNumber,
+                        PR.VoucherGenerated, CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
                         A.NickName, ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
@@ -420,9 +420,9 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     UPDATE Payroll_Periods
-                    SET Status = 'APPROVED',
-                        ApprovedBy_AdminID = @ApprovedBy,
-                        ApprovedDate = GETDATE()
+                    SET Status = 'COMPLETED',
+                        ClosedBy_AdminID = @ApprovedBy,
+                        ClosedDate = GETDATE()
                     WHERE ID = @PeriodID";
                 cmd.Parameters.AddWithValue("@PeriodID", payrollPeriodId);
                 cmd.Parameters.AddWithValue("@ApprovedBy", approvedByAdminId);

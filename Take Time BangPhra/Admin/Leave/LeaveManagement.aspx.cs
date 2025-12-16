@@ -106,8 +106,10 @@ namespace Take_Time_BangPhra.Admin.Leave
                 string searchTerm = txtSearchEmployee.Text.Trim();
                 if (!string.IsNullOrEmpty(searchTerm))
                 {
+                    // Sanitize search term to prevent DataView filter injection
+                    string sanitizedSearchTerm = searchTerm.Replace("'", "''").Replace("[", "[[]").Replace("%", "[%]").Replace("*", "[*]");
                     DataView dv = dt.DefaultView;
-                    dv.RowFilter = $"EmployeeName LIKE '%{searchTerm}%' OR NickName LIKE '%{searchTerm}%'";
+                    dv.RowFilter = $"EmployeeName LIKE '*{sanitizedSearchTerm}*' OR NickName LIKE '*{sanitizedSearchTerm}*'";
                     dt = dv.ToTable();
                 }
 
