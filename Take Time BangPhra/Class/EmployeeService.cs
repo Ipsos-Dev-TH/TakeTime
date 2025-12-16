@@ -709,7 +709,9 @@ public class EmployeeService
                         A.Email AS WorkEmail,
                         NULL AS CurrentSalary,
                         NULL AS PhotoPath,
-                        '-' AS ServiceAgeText
+                        0 AS TotalServiceYears,
+                        0 AS TotalServiceMonths,
+                        NULL AS ContractDaysUntilExpiry
                     FROM Admin A
                     WHERE A.Status = 1
                       AND (@SearchTerm = '' OR A.FirstName LIKE '%' + @SearchTerm + '%'

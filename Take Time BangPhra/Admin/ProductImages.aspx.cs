@@ -8,7 +8,7 @@ namespace Take_Time_BangPhra.Admin
 {
     public partial class ProductImages : System.Web.UI.Page
     {
-        private readonly string connectionString = ConfigurationManager.ConnectionStrings["ATATB"].ConnectionString;
+        private readonly string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private ProductService productService;
         private ProductDataAccess productDataAccess;
         private code codeInstance = new code();
