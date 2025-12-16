@@ -483,9 +483,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                     @"SELECT
                         LT.TierName,
                         COUNT(DISTINCT CL.Customer_MobilePhone) AS MemberCount,
-                        ISNULL(SUM(CASE WHEN LTR.Transaction_Type = 'EARN' THEN LTR.Points ELSE 0 END), 0) AS TotalPointsEarned,
-                        ISNULL(SUM(CASE WHEN LTR.Transaction_Type = 'REDEEM' THEN ABS(LTR.Points) ELSE 0 END), 0) AS TotalPointsRedeemed,
-                        ISNULL(AVG(CL.Points_Balance), 0) AS AvgPointsBalance,
+                        ISNULL(SUM(CASE WHEN LTR.TransactionType = 'EARN' THEN LTR.Points ELSE 0 END), 0) AS TotalPointsEarned,
+                        ISNULL(SUM(CASE WHEN LTR.TransactionType = 'REDEEM' THEN ABS(LTR.Points) ELSE 0 END), 0) AS TotalPointsRedeemed,
+                        ISNULL(AVG(CL.TotalPoints), 0) AS AvgPointsBalance,
                         ISNULL(SUM(R.TotalPrice), 0) AS TotalRevenue,
                         CASE
                             WHEN COUNT(DISTINCT CL.Customer_MobilePhone) > 0

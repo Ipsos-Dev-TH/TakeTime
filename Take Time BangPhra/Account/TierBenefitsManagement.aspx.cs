@@ -209,10 +209,10 @@ namespace Take_Time_BangPhra.Account
 
                 // Load Product Categories
                 DataTable dtCategories = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ID, CategoryName FROM Product_Category WHERE Status = 'True' ORDER BY CategoryName",
+                    "SELECT ID, Category_Name FROM Product_Category WHERE Status = 'True' ORDER BY Category_Name",
                     null);
                 ddlProductCategory.DataSource = dtCategories;
-                ddlProductCategory.DataTextField = "CategoryName";
+                ddlProductCategory.DataTextField = "Category_Name";
                 ddlProductCategory.DataValueField = "ID";
                 ddlProductCategory.DataBind();
                 ddlProductCategory.Items.Insert(0, new ListItem("-- Select Category --", "0"));
@@ -231,7 +231,7 @@ namespace Take_Time_BangPhra.Account
                     @"SELECT
                         LPCD.ID,
                         LT.TierName,
-                        PC.CategoryName,
+                        PC.Category_Name AS CategoryName,
                         LPCD.DiscountPercent,
                         LPCD.MaxDiscountAmount,
                         LPCD.MinPurchaseAmount,
@@ -241,7 +241,7 @@ namespace Take_Time_BangPhra.Account
                       FROM Loyalty_Product_Category_Discounts LPCD
                       INNER JOIN Loyalty_Tiers LT ON LT.ID = LPCD.Tier_ID
                       INNER JOIN Product_Category PC ON PC.ID = LPCD.ProductCategory_ID
-                      ORDER BY LT.DisplayOrder, PC.CategoryName",
+                      ORDER BY LT.DisplayOrder, PC.Category_Name",
                     null);
 
                 gvCategoryDiscounts.DataSource = dtDiscounts;

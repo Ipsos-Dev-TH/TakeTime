@@ -180,7 +180,7 @@ namespace Take_Time_BangPhra.Services
                         [dbo].[fn_GetProductCategoryDiscount](@CustomerPhone, @ProductCategoryID, @OriginalAmount) AS DiscountAmount,
                         LPCD.DiscountPercent,
                         LPCD.MaxDiscountAmount,
-                        PC.CategoryName
+                        PC.Category_Name AS CategoryName
                       FROM Customer_Loyalty CL
                       LEFT JOIN Loyalty_Product_Category_Discounts LPCD
                         ON LPCD.Tier_ID = CL.CurrentTier_ID
@@ -453,7 +453,7 @@ namespace Take_Time_BangPhra.Services
             {
                 var parameters = new Dictionary<string, object>();
                 string query = @"
-                    SELECT LPCD.*, LT.TierName, PC.CategoryName
+                    SELECT LPCD.*, LT.TierName, PC.Category_Name AS CategoryName
                     FROM Loyalty_Product_Category_Discounts LPCD
                     INNER JOIN Loyalty_Tiers LT ON LT.ID = LPCD.Tier_ID
                     INNER JOIN Product_Category PC ON PC.ID = LPCD.ProductCategory_ID
@@ -465,7 +465,7 @@ namespace Take_Time_BangPhra.Services
                     parameters["@TierID"] = tierId.Value;
                 }
 
-                query += " ORDER BY LPCD.Tier_ID, PC.CategoryName";
+                query += " ORDER BY LPCD.Tier_ID, PC.Category_Name";
 
                 return _code.DatabaseQuerySafe(_connectionString, query, parameters);
             }

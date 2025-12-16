@@ -409,9 +409,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                         GN.Note_Type AS NoteType,
                         GN.Note_Text AS NoteText,
                         GN.Created_Date AS CreatedDate,
-                        ISNULL(U.Name, 'System') AS CreatedByName
+                        ISNULL(A.FirstName + ' ' + A.LastName, 'System') AS CreatedByName
                       FROM Guest_Notes GN
-                      LEFT JOIN [User] U ON U.ID = GN.Created_By_ID
+                      LEFT JOIN Admin A ON A.ID = GN.Created_By_ID
                       WHERE GN.Customer_MobilePhone = @Phone
                         AND GN.IsActive = 1
                       ORDER BY

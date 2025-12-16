@@ -172,12 +172,42 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_SearchCustomers", _conn))
+                string sql = "SELECT TOP " + maxResults + @"
+                    Customer_MobilePhone,
+                    Customer_FirstName,
+                    Customer_LastName,
+                    Customer_FirstName + ' ' + Customer_LastName AS FullName,
+                    Customer_Email,
+                    Customer_IDCard,
+                    Customer_Status
+                FROM Customer
+                WHERE 1=1";
+
+                if (!string.IsNullOrEmpty(searchTerm))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@SearchTerm", searchTerm ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@ActiveOnly", activeOnly);
-                    cmd.Parameters.AddWithValue("@MaxResults", maxResults);
+                    sql += @" AND (
+                        Customer_MobilePhone LIKE @SearchTerm
+                        OR Customer_FirstName LIKE @SearchTerm
+                        OR Customer_LastName LIKE @SearchTerm
+                        OR Customer_Email LIKE @SearchTerm
+                        OR Customer_IDCard LIKE @SearchTerm
+                    )";
+                }
+
+                if (activeOnly)
+                {
+                    sql += " AND Customer_Status = 'Active'";
+                }
+
+                sql += " ORDER BY Customer_FirstName, Customer_LastName";
+
+                using (SqlCommand cmd = new SqlCommand(sql, _conn))
+                {
+                    cmd.CommandType = CommandType.Text;
+                    if (!string.IsNullOrEmpty(searchTerm))
+                    {
+                        cmd.Parameters.AddWithValue("@SearchTerm", "%" + searchTerm + "%");
+                    }
 
                     if (_conn.State != ConnectionState.Open)
                         _conn.Open();
