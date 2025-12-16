@@ -37,18 +37,16 @@ namespace Take_Time_BangPhra.Admin
             try
             {
                 // Query to get accommodations with image count
+                // Accommodation table uses ID (not AccommodationID) and Status = 1 for active
                 string query = @"
                     SELECT
-                        a.AccommodationID,
+                        a.ID AS AccommodationID,
                         a.AccomName,
                         a.Price,
-                        ISNULL(COUNT(pi.ID), 0) AS TotalImages
+                        0 AS TotalImages
                     FROM Accommodation a
-                    LEFT JOIN Product_Images pi ON pi.ProductType = 'ACCOMMODATION'
-                        AND pi.ProductID = a.AccommodationID
-                    WHERE a.Status = 'AVAILABLE'
-                    GROUP BY a.AccommodationID, a.AccomName, a.Price
-                    ORDER BY a.AccomName";
+                    WHERE a.Status = 1
+                    ORDER BY a.OrderID, a.AccomName";
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
                 rptAccommodations.DataSource = dt;
@@ -65,17 +63,15 @@ namespace Take_Time_BangPhra.Admin
             try
             {
                 // Query to get items with image count
+                // Items table uses ID (not ItemID)
                 string query = @"
                     SELECT
-                        i.ItemID,
+                        i.ID AS ItemID,
                         i.ItemName,
                         i.Price,
-                        ISNULL(COUNT(pi.ID), 0) AS TotalImages
+                        0 AS TotalImages
                     FROM Items i
-                    LEFT JOIN Product_Images pi ON pi.ProductType = 'ITEM'
-                        AND pi.ProductID = i.ItemID
-                    WHERE i.Status = 'AVAILABLE'
-                    GROUP BY i.ItemID, i.ItemName, i.Price
+                    WHERE i.Status = 1
                     ORDER BY i.ItemName";
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
@@ -105,10 +101,10 @@ namespace Take_Time_BangPhra.Admin
                 if (productType == "ACCOMMODATION")
                 {
                     string query = @"
-                        SELECT AccommodationID, AccomName
+                        SELECT ID, AccomName
                         FROM Accommodation
-                        WHERE Status = 'AVAILABLE'
-                        ORDER BY AccomName";
+                        WHERE Status = 1
+                        ORDER BY OrderID, AccomName";
 
                     dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
 
@@ -116,16 +112,16 @@ namespace Take_Time_BangPhra.Admin
                     {
                         ddlProduct.Items.Add(new ListItem(
                             row["AccomName"].ToString(),
-                            row["AccommodationID"].ToString()
+                            row["ID"].ToString()
                         ));
                     }
                 }
                 else if (productType == "ITEM")
                 {
                     string query = @"
-                        SELECT ItemID, ItemName
+                        SELECT ID, ItemName
                         FROM Items
-                        WHERE Status = 'AVAILABLE'
+                        WHERE Status = 1
                         ORDER BY ItemName";
 
                     dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
@@ -134,7 +130,7 @@ namespace Take_Time_BangPhra.Admin
                     {
                         ddlProduct.Items.Add(new ListItem(
                             row["ItemName"].ToString(),
-                            row["ItemID"].ToString()
+                            row["ID"].ToString()
                         ));
                     }
                 }

@@ -29,70 +29,78 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_UpsertCustomer", _conn))
+                if (_conn.State != ConnectionState.Open)
+                    _conn.Open();
+
+                // Check if customer exists
+                bool isNew = false;
+                string checkSql = "SELECT COUNT(*) FROM Customer WHERE MobilePhone = @MobilePhone";
+                using (SqlCommand checkCmd = new SqlCommand(checkSql, _conn))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.CommandTimeout = 30;
-
-                    // Input parameters
-                    cmd.Parameters.AddWithValue("@MobilePhone", customer.MobilePhone ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Name", customer.Name ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Email", customer.Email ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@TaxID", customer.TaxID ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Address", customer.Address ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@District", customer.District ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Subdistrict", customer.Subdistrict ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Province", customer.Province ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@Postcode", customer.Postcode ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@CustomerType_ID", customer.CustomerTypeID ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@ChangedBy_ID", changedById ?? (object)DBNull.Value);
-                    cmd.Parameters.AddWithValue("@ChangeSource", changeSource ?? (object)DBNull.Value);
-
-                    // Get IP address
-                    string ipAddress = GetClientIPAddress();
-                    cmd.Parameters.AddWithValue("@IPAddress", ipAddress ?? (object)DBNull.Value);
-
-                    // Output parameter
-                    SqlParameter isNewParam = new SqlParameter("@IsNewCustomer", SqlDbType.Bit)
-                    {
-                        Direction = ParameterDirection.Output
-                    };
-                    cmd.Parameters.Add(isNewParam);
-
-                    // Execute
-                    if (_conn.State != ConnectionState.Open)
-                        _conn.Open();
-
-                    int returnValue = cmd.ExecuteNonQuery();
-
-                    bool isNew = (bool)isNewParam.Value;
-
-                    return new CustomerUpsertResult
-                    {
-                        Success = true,
-                        IsNewCustomer = isNew,
-                        MobilePhone = customer.MobilePhone,
-                        Message = isNew ? "สร้างข้อมูลลูกค้าใหม่สำเร็จ" : "อัปเดตข้อมูลลูกค้าสำเร็จ"
-                    };
+                    checkCmd.Parameters.AddWithValue("@MobilePhone", customer.MobilePhone);
+                    int count = (int)checkCmd.ExecuteScalar();
+                    isNew = (count == 0);
                 }
+
+                if (isNew)
+                {
+                    // Insert new customer
+                    string insertSql = @"
+                        INSERT INTO Customer (MobilePhone, FullName, Email, IDNumber, Address, Customer_Type_ID, Status)
+                        VALUES (@MobilePhone, @Name, @Email, @TaxID, @Address, @CustomerType_ID, 1)";
+
+                    using (SqlCommand insertCmd = new SqlCommand(insertSql, _conn))
+                    {
+                        insertCmd.Parameters.AddWithValue("@MobilePhone", customer.MobilePhone ?? (object)DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@Name", customer.Name ?? (object)DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@Email", customer.Email ?? (object)DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@TaxID", customer.TaxID ?? (object)DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@Address", customer.Address ?? (object)DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@CustomerType_ID", customer.CustomerTypeID ?? (object)DBNull.Value);
+                        insertCmd.ExecuteNonQuery();
+                    }
+                }
+                else
+                {
+                    // Update existing customer
+                    string updateSql = @"
+                        UPDATE Customer SET
+                            FullName = ISNULL(@Name, FullName),
+                            Email = ISNULL(@Email, Email),
+                            IDNumber = ISNULL(@TaxID, IDNumber),
+                            Address = ISNULL(@Address, Address),
+                            Customer_Type_ID = ISNULL(@CustomerType_ID, Customer_Type_ID)
+                        WHERE MobilePhone = @MobilePhone";
+
+                    using (SqlCommand updateCmd = new SqlCommand(updateSql, _conn))
+                    {
+                        updateCmd.Parameters.AddWithValue("@MobilePhone", customer.MobilePhone ?? (object)DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@Name", customer.Name ?? (object)DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@Email", customer.Email ?? (object)DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@TaxID", customer.TaxID ?? (object)DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@Address", customer.Address ?? (object)DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@CustomerType_ID", customer.CustomerTypeID ?? (object)DBNull.Value);
+                        updateCmd.ExecuteNonQuery();
+                    }
+                }
+
+                return new CustomerUpsertResult
+                {
+                    Success = true,
+                    IsNewCustomer = isNew,
+                    MobilePhone = customer.MobilePhone,
+                    Message = isNew ? "สร้างข้อมูลลูกค้าใหม่สำเร็จ" : "อัปเดตข้อมูลลูกค้าสำเร็จ"
+                };
             }
             catch (SqlException ex)
             {
                 // Handle specific errors
-                if (ex.Message.Contains("Email already exists"))
+                if (ex.Message.Contains("UNIQUE") || ex.Message.Contains("duplicate"))
                 {
                     return new CustomerUpsertResult
                     {
                         Success = false,
-                        Message = "อีเมลนี้ถูกใช้งานโดยลูกค้าท่านอื่นแล้ว"
-                    };
-                }
-                else if (ex.Message.Contains("Tax ID already exists"))
-                {
-                    return new CustomerUpsertResult
-                    {
-                        Success = false,
-                        Message = "เลขประจำตัวผู้เสียภาษีนี้ถูกใช้งานโดยลูกค้าท่านอื่นแล้ว"
+                        Message = "ข้อมูลซ้ำกับลูกค้าท่านอื่น"
                     };
                 }
                 else
