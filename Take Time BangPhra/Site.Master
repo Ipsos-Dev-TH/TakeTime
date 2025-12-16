@@ -156,6 +156,132 @@
             color: #FFD54F !important;
         }
 
+        /* ============================================
+           MEGA MENU STYLING
+           ============================================ */
+        .mega-menu {
+            position: static !important;
+        }
+
+        .mega-menu .mega-dropdown {
+            position: absolute;
+            left: 0;
+            right: 0;
+            width: 100%;
+            padding: 20px 30px;
+            background: linear-gradient(135deg, #5D4037 0%, #4E342E 100%);
+            border: none;
+            border-radius: 0 0 12px 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            display: none;
+        }
+
+        .mega-menu:hover .mega-dropdown,
+        .mega-menu.open .mega-dropdown {
+            display: block;
+        }
+
+        .mega-menu-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .mega-menu-column {
+            min-width: 200px;
+        }
+
+        .mega-menu-column h4 {
+            color: #FFD54F;
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 0 12px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid rgba(255,213,79,0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .mega-menu-column h4 i {
+            margin-right: 8px;
+        }
+
+        .mega-menu-column ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .mega-menu-column ul li {
+            margin-bottom: 4px;
+        }
+
+        .mega-menu-column ul li a {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            color: #F8F4E9 !important;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            font-size: 13px;
+        }
+
+        .mega-menu-column ul li a:hover {
+            background: rgba(255,255,255,0.1);
+            color: #FFD54F !important;
+            transform: translateX(5px);
+        }
+
+        .mega-menu-column ul li a i {
+            width: 20px;
+            margin-right: 10px;
+            text-align: center;
+            opacity: 0.8;
+        }
+
+        .mega-menu-column.owner-section {
+            background: rgba(255, 193, 7, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 3px solid #FFC107;
+        }
+
+        .mega-menu-column.owner-section h4 {
+            color: #FFC107;
+        }
+
+        /* Mobile Mega Menu */
+        @media (max-width: 1199px) {
+            .mega-menu .mega-dropdown {
+                position: relative;
+                padding: 10px;
+                max-height: 60vh;
+                overflow-y: auto;
+            }
+
+            .mega-menu-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            }
+
+            .mega-menu-column {
+                min-width: auto;
+            }
+        }
+
+        @media (max-width: 767px) {
+            .mega-menu-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .mega-menu-column {
+                margin-bottom: 15px;
+            }
+        }
+
         /* Footer Icon Styling - Fixed Size */
         .footer-icons {
             display: flex;
@@ -363,118 +489,142 @@
                             <i class="fas fa-mobile-alt"></i> Guest Portal
                         </a></li>
 
-                        <!-- Admin Menu -->
+                        <!-- Admin Mega Menu -->
                         <asp:Panel ID="pnlAdminNav" runat="server" Visible="false">
-                            <li class="dropdown admin-menu">
+                            <li class="dropdown admin-menu mega-menu">
                                 <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true">
                                     <i class="fas fa-user-cog"></i> ผู้ดูแลระบบ <span class="caret"></span>
                                 </a>
-                                <ul class="dropdown-menu">
-                                    <!-- Guest Management Section -->
-                                    <li class="dropdown-header">การจัดการผู้เข้าพัก</li>
-                                    <li><a runat="server" href="~/ReserveTable">
-                                        <i class="fas fa-users"></i> 
-                                        <asp:Label ID="Label1" runat="server" Text="ผู้เข้าพักรายวัน"></asp:Label>
-                                    </a></li>
-                                    <li><a runat="server" href="~/DisplayReserve">
-                                        <i class="fas fa-calendar-alt"></i> 
-                                        <asp:Label ID="Label2" runat="server" Text="ผู้เข้าพักรายเดือน"></asp:Label>
-                                    </a></li>
-                                    <li><a runat="server" href="~/PostponeList">
-                                        <i class="fas fa-clock"></i> 
-                                        <asp:Label ID="Label3" runat="server" Text="ผู้เลื่อนเข้าพัก"></asp:Label>
-                                    </a></li>
-                                    
-                                    <li role="separator" class="divider"></li>
-                                    
-                                    <!-- Product Management Section -->
-                                    <li class="dropdown-header">จัดการสินค้า</li>
-                                    <li><a runat="server" href="~/Product">
-                                        <i class="fas fa-shopping-cart"></i> ขายสินค้า
-                                    </a></li>
-                                    <li><a runat="server" href="~/Product/In">
-                                        <i class="fas fa-arrow-down"></i> นำสินค้าเข้าคลัง
-                                    </a></li>
-                                    <li><a runat="server" href="~/Product/Stock">
-                                        <i class="fas fa-warehouse"></i> สินค้าคงคลัง
-                                    </a></li>
-                                    <li><a runat="server" href="~/Product/SellReport">
-                                        <i class="fas fa-chart-line"></i> รายงานการขาย
-                                    </a></li>
-                                    
-                                    <li role="separator" class="divider"></li>
-                                    
-                                    
-                                    <!-- Financial Section - Owner Only -->
-<li class="dropdown-header">การเงิน</li>
-<li><a runat="server" href="~/Voucher">
-    <i class="fas fa-ticket-alt"></i>
-    <asp:Label ID="Label5" runat="server" Text="ขาย Voucher"></asp:Label>
-</a></li>
-<li><a runat="server" href="~/Account/PaymentVoucher">
-    <i class="fas fa-file-invoice-dollar"></i>
-    <asp:Label ID="Label7" runat="server" Text="ใบสำคัญจ่าย (สร้าง)"></asp:Label>
-</a></li>
-<li><a runat="server" href="~/Account/Receipt">
-    <i class="fas fa-receipt"></i>
-    <asp:Label ID="Label9" runat="server" Text="ใบเสร็จรับเงิน (สร้าง)"></asp:Label>
-</a></li>
-<li><a runat="server" href="~/Admin/PaymentAffiliate">
-    <i class="fas fa-money-bill-wave"></i>
-    <asp:Label ID="Label11" runat="server" Text="จ่ายเงิน Affiliate"></asp:Label>
-</a></li>
-<li role="separator" class="divider"></li>
-<li class="dropdown-header">ระบบบัญชี</li>
-<li><a runat="server" href="~/Account/CheckDocument_New">
-    <i class="fas fa-file-invoice"></i>
-    <asp:Label ID="Label8" runat="server" Text="ใบเสร็จรับเงิน (จัดการ)"></asp:Label>
-</a></li>
-<li><a runat="server" href="~/Account/CheckPayment_New">
-    <i class="fas fa-file-invoice-dollar"></i>
-    <asp:Label ID="Label12" runat="server" Text="ใบสำคัญจ่าย (จัดการ)"></asp:Label>
-</a></li>
-<li role="separator" class="divider"></li>
+                                <div class="mega-dropdown dropdown-menu">
+                                    <div class="mega-menu-grid">
+                                        <!-- Column 1: Guest & Booking Management -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-bed"></i> การจองและผู้เข้าพัก</h4>
+                                            <ul>
+                                                <li><a runat="server" href="~/ReserveTable">
+                                                    <i class="fas fa-users"></i> ผู้เข้าพักรายวัน
+                                                </a></li>
+                                                <li><a runat="server" href="~/DisplayReserve">
+                                                    <i class="fas fa-calendar-alt"></i> ผู้เข้าพักรายเดือน
+                                                </a></li>
+                                                <li><a runat="server" href="~/PostponeList">
+                                                    <i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/RoomQRGenerator">
+                                                    <i class="fas fa-qrcode"></i> Room QR Codes
+                                                </a></li>
+                                            </ul>
+                                        </div>
 
-                                    <!-- CRM Section -->
-                                    <li class="dropdown-header">ระบบ CRM</li>
-                                    <li><a runat="server" href="~/Admin/RoomQRGenerator">
-                                        <i class="fas fa-qrcode"></i> Room QR Codes
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/CRM/GuestProfile">
-                                        <i class="fas fa-user-circle"></i> Guest Profile 360°
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
-                                        <i class="fas fa-trophy"></i> Loyalty Dashboard
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
-                                        <i class="fas fa-star"></i> Review Management
-                                    </a></li>
-                                    <li><a runat="server" href="~/Account/TierBenefitsManagement">
-                                        <i class="fas fa-crown"></i> Tier Benefits
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/CustomerManagement">
-                                        <i class="fas fa-address-book"></i> Customer Management
-                                    </a></li>
+                                        <!-- Column 2: Product & Stock -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-box"></i> สินค้าและคลัง</h4>
+                                            <ul>
+                                                <li><a runat="server" href="~/Product">
+                                                    <i class="fas fa-shopping-cart"></i> ขายสินค้า
+                                                </a></li>
+                                                <li><a runat="server" href="~/Product/In">
+                                                    <i class="fas fa-arrow-down"></i> นำสินค้าเข้าคลัง
+                                                </a></li>
+                                                <li><a runat="server" href="~/Product/Stock">
+                                                    <i class="fas fa-warehouse"></i> สินค้าคงคลัง
+                                                </a></li>
+                                                <li><a runat="server" href="~/Product/SellReport">
+                                                    <i class="fas fa-chart-line"></i> รายงานการขาย
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/ProductImages">
+                                                    <i class="fas fa-images"></i> จัดการรูปสินค้า
+                                                </a></li>
+                                            </ul>
+                                        </div>
 
-                                    <!-- Owner Only Sections -->
-                                    <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
-                                        <li role="separator" class="divider"></li>
-                                        
-                                        
-                                        
-                                        <!-- System Section - Owner Only -->
-                                        <li class="dropdown-header owner-only">ระบบ (Owner Only)</li>
-                                        <li class="owner-only"><a runat="server" href="~/Admin/Report/Report">
-    <i class="fas fa-chart-bar"></i> 
-    <asp:Label ID="Label4" runat="server" Text="รายงานระบบ"></asp:Label>
-</a></li>
-                                        <li class="owner-only"><a runat="server" href="~/Admin/Edit_Home">
-                                            <i class="fas fa-database"></i> 
-                                            <asp:Label ID="Label6" runat="server" Text="ฐานข้อมูล"></asp:Label>
-                                        </a></li>
-                                       
-                                    </asp:Panel>
-                                </ul>
+                                        <!-- Column 3: Finance & Accounting -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-coins"></i> การเงินและบัญชี</h4>
+                                            <ul>
+                                                <li><a runat="server" href="~/Voucher">
+                                                    <i class="fas fa-ticket-alt"></i> ขาย Voucher
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/Receipt">
+                                                    <i class="fas fa-receipt"></i> สร้างใบเสร็จรับเงิน
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/CheckDocument_New">
+                                                    <i class="fas fa-file-invoice"></i> จัดการใบเสร็จ
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/PaymentVoucher">
+                                                    <i class="fas fa-file-invoice-dollar"></i> สร้างใบสำคัญจ่าย
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/CheckPayment_New">
+                                                    <i class="fas fa-file-alt"></i> จัดการใบสำคัญจ่าย
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/PaymentAffiliate">
+                                                    <i class="fas fa-money-bill-wave"></i> จ่ายเงิน Affiliate
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/Vendor">
+                                                    <i class="fas fa-store"></i> จัดการ Vendor
+                                                </a></li>
+                                            </ul>
+                                        </div>
+
+                                        <!-- Column 4: CRM -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-heart"></i> ระบบ CRM</h4>
+                                            <ul>
+                                                <li><a runat="server" href="~/Admin/CustomerManagement">
+                                                    <i class="fas fa-address-book"></i> Customer Management
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/GuestProfile">
+                                                    <i class="fas fa-user-circle"></i> Guest Profile 360
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
+                                                    <i class="fas fa-trophy"></i> Loyalty Dashboard
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
+                                                    <i class="fas fa-star"></i> Review Management
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/TierBenefitsManagement">
+                                                    <i class="fas fa-crown"></i> Tier Benefits
+                                                </a></li>
+                                            </ul>
+                                        </div>
+
+                                        <!-- Column 5: Owner Only -->
+                                        <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
+                                            <div class="mega-menu-column owner-section">
+                                                <h4><i class="fas fa-shield-alt"></i> ระบบ (Owner)</h4>
+                                                <ul>
+                                                    <li><a runat="server" href="~/Admin/Dashboard">
+                                                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Report/Report">
+                                                        <i class="fas fa-chart-bar"></i> รายงานระบบ
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Report/ProfitLoss">
+                                                        <i class="fas fa-balance-scale"></i> กำไร/ขาดทุน
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
+                                                        <i class="fas fa-chart-pie"></i> Customer Analytics
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/HolidayPrice">
+                                                        <i class="fas fa-calendar-day"></i> ราคาวันหยุด
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Edit_Home">
+                                                        <i class="fas fa-database"></i> ฐานข้อมูล
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
+                                                        <i class="fas fa-user-tie"></i> จัดการพนักงาน
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
+                                                        <i class="fas fa-calendar-minus"></i> จัดการการลา
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
+                                                        <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
+                                                    </a></li>
+                                                </ul>
+                                            </div>
+                                        </asp:Panel>
+                                    </div>
+                                </div>
                             </li>
                         </asp:Panel>
                     </ul>
