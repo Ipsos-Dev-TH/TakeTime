@@ -125,13 +125,13 @@ public class EmployeeService
                 var updateFields = new List<string>();
                 foreach (var field in profileData)
                 {
-                    updateFields.Add($"[{field.Key}] = @{field.Key}");
-                    cmd.Parameters.AddWithValue($"@{field.Key}", field.Value ?? DBNull.Value);
+                    updateFields.Add("[" + field.Key + "] = @" + field.Key);
+                    cmd.Parameters.AddWithValue("@" + field.Key, field.Value ?? DBNull.Value);
                 }
 
-                cmd.CommandText = $@"
+                cmd.CommandText = @"
                     UPDATE Employee_Profile
-                    SET {string.Join(", ", updateFields)},
+                    SET " + string.Join(", ", updateFields) + @",
                         UpdatedDate = GETDATE(),
                         UpdatedBy_AdminID = @UpdatedBy_AdminID
                     WHERE Admin_ID = @Admin_ID";

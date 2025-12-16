@@ -201,7 +201,7 @@ public class LeaveService
                     try
                     {
                         // Generate request number
-                        string requestNumber = $"LR-{DateTime.Now:yyyyMMdd}-{adminId}-{DateTime.Now:HHmmss}";
+                        string requestNumber = "LR-" + DateTime.Now.ToString("yyyyMMdd") + "-" + adminId + "-" + DateTime.Now.ToString("HHmmss");
 
                         // Get leave type details
                         cmd.CommandText = @"
@@ -334,7 +334,7 @@ public class LeaveService
 
                 string whereClause = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
 
-                cmd.CommandText = $@"
+                cmd.CommandText = @"
                     SELECT
                         LR.ID, LR.RequestNumber, LR.Admin_ID,
                         A.Name AS EmployeeName, A.NickName,
@@ -349,7 +349,7 @@ public class LeaveService
                     INNER JOIN Admin A ON A.ID = LR.Admin_ID
                     INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
                     LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
-                    {whereClause}
+                    " + whereClause + @"
                     ORDER BY LR.CreatedDate DESC";
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))

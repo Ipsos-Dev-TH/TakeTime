@@ -366,13 +366,13 @@ public class PayrollService
                 var fields = new List<string>();
                 foreach (var field in updateFields)
                 {
-                    fields.Add($"[{field.Key}] = @{field.Key}");
-                    cmd.Parameters.AddWithValue($"@{field.Key}", field.Value ?? DBNull.Value);
+                    fields.Add("[" + field.Key + "] = @" + field.Key);
+                    cmd.Parameters.AddWithValue("@" + field.Key, field.Value ?? DBNull.Value);
                 }
 
-                cmd.CommandText = $@"
+                cmd.CommandText = @"
                     UPDATE Payroll_Records
-                    SET {string.Join(", ", fields)},
+                    SET " + string.Join(", ", fields) + @",
                         UpdatedDate = GETDATE()
                     WHERE ID = @RecordID";
                 cmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
