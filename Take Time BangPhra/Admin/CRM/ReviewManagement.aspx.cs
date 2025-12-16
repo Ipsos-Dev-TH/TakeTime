@@ -47,6 +47,8 @@ namespace Take_Time_BangPhra.Admin.CRM
             {
                 LoadStatistics();
                 LoadReviews();
+                LoadCheckoutStatistics();
+                LoadCheckoutReviews();
             }
         }
 
@@ -249,5 +251,150 @@ namespace Take_Time_BangPhra.Admin.CRM
 
             alertBox.Attributes["class"] = cssClass;
         }
+
+        #region Checkout History Reviews
+
+        private void LoadCheckoutStatistics()
+        {
+            try
+            {
+                var parameters = new Dictionary<string, object>();
+
+                // Check if Checkout_History table exists
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Checkout_History'",
+                    parameters);
+
+                if (dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    lblCheckoutReviews.Text = "0";
+                    lblCheckoutAvg.Text = "0.0";
+                    return;
+                }
+
+                // Get checkout statistics
+                DataTable dtStats = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        COUNT(*) AS TotalCheckouts,
+                        ISNULL(AVG(CAST(GuestSatisfaction AS DECIMAL(10,2))), 0) AS AvgRating
+                      FROM Checkout_History
+                      WHERE GuestSatisfaction IS NOT NULL",
+                    parameters);
+
+                if (dtStats.Rows.Count > 0)
+                {
+                    lblCheckoutReviews.Text = Convert.ToInt32(dtStats.Rows[0]["TotalCheckouts"]).ToString("N0");
+                    lblCheckoutAvg.Text = Convert.ToDecimal(dtStats.Rows[0]["AvgRating"]).ToString("N1");
+                }
+            }
+            catch (Exception ex)
+            {
+                lblCheckoutReviews.Text = "0";
+                lblCheckoutAvg.Text = "0.0";
+                System.Diagnostics.Debug.WriteLine("Error loading checkout statistics: " + ex.Message);
+            }
+        }
+
+        private void LoadCheckoutReviews()
+        {
+            try
+            {
+                // Check if Checkout_History table exists
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Checkout_History'",
+                    checkParams);
+
+                if (dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    rptCheckoutReviews.DataSource = null;
+                    rptCheckoutReviews.DataBind();
+                    lblNoCheckoutReviews.Visible = true;
+                    return;
+                }
+
+                StringBuilder query = new StringBuilder(@"
+                    SELECT
+                        CH.ID,
+                        CH.Reservation_ID,
+                        CH.CheckoutDate,
+                        CH.FinalAmount,
+                        CH.PaymentStatus,
+                        CH.RoomDamage,
+                        CH.DamageDescription,
+                        CH.DamageCharge,
+                        CH.MissingItems,
+                        CH.MissingItemsDescription,
+                        CH.MissingItemsCharge,
+                        CH.KeyReturned,
+                        CH.CleaningStatus,
+                        CH.GuestSatisfaction,
+                        CH.Notes,
+                        R.Customer_MobilePhone,
+                        ISNULL(C.Name, C.FullName) AS CustomerName,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS AdminName
+                    FROM Checkout_History CH
+                    INNER JOIN Reservation R ON R.ID = CH.Reservation_ID
+                    LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                    LEFT JOIN Admin A ON A.ID = CH.CheckedOutBy_AdminID
+                    WHERE CH.GuestSatisfaction IS NOT NULL");
+
+                var parameters = new Dictionary<string, object>();
+
+                // Filter by rating
+                if (ddlCheckoutRatingFilter.SelectedValue != "0")
+                {
+                    int rating = Convert.ToInt32(ddlCheckoutRatingFilter.SelectedValue);
+                    query.Append(" AND CH.GuestSatisfaction = @Rating");
+                    parameters["@Rating"] = rating;
+                }
+
+                // Filter by date range
+                if (!string.IsNullOrEmpty(txtCheckoutStartDate.Text))
+                {
+                    query.Append(" AND CH.CheckoutDate >= @StartDate");
+                    parameters["@StartDate"] = DateTime.Parse(txtCheckoutStartDate.Text);
+                }
+
+                if (!string.IsNullOrEmpty(txtCheckoutEndDate.Text))
+                {
+                    query.Append(" AND CH.CheckoutDate < @EndDate");
+                    parameters["@EndDate"] = DateTime.Parse(txtCheckoutEndDate.Text).AddDays(1);
+                }
+
+                query.Append(" ORDER BY CH.CheckoutDate DESC");
+
+                DataTable dtCheckoutReviews = _code.DatabaseQuerySafe(_connectionString, query.ToString(), parameters);
+
+                if (dtCheckoutReviews.Rows.Count > 0)
+                {
+                    rptCheckoutReviews.DataSource = dtCheckoutReviews;
+                    rptCheckoutReviews.DataBind();
+                    lblNoCheckoutReviews.Visible = false;
+                }
+                else
+                {
+                    rptCheckoutReviews.DataSource = null;
+                    rptCheckoutReviews.DataBind();
+                    lblNoCheckoutReviews.Visible = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("Error loading checkout reviews: " + ex.Message, "error");
+            }
+        }
+
+        protected void ddlCheckoutRatingFilter_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            LoadCheckoutReviews();
+        }
+
+        protected void btnFilterCheckout_Click(object sender, EventArgs e)
+        {
+            LoadCheckoutReviews();
+        }
+
+        #endregion
     }
 }
