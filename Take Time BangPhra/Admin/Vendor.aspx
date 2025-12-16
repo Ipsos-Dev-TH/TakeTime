@@ -403,9 +403,9 @@
                 var isIndividual = ddl.value === '2';
 
                 if (isIndividual) {
-                    // บุคคลธรรมดา - disable and set default
+                    // บุคคลธรรมดา - disable and clear value
                     txtBranch.disabled = true;
-                    txtBranch.value = '00000';
+                    txtBranch.value = '';
                     txtBranch.style.backgroundColor = '#f0f0f0';
                     lblBranch.innerHTML = 'เลขสาขา <small style="color:#888;">(ไม่จำเป็นสำหรับบุคคลธรรมดา)</small>';
                     hintBranch.innerHTML = '<span style="color:#888;">ไม่ต้องกรอกสำหรับบุคคลธรรมดา</span>';
