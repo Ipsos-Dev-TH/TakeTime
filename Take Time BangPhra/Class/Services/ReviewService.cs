@@ -395,20 +395,20 @@ namespace Take_Time_BangPhra.Services
                     DataRow row = dt.Rows[0];
                     return new ReviewAnalytics
                     {
-                        TotalReviews = Convert.ToInt32(row["TotalReviews"]),
-                        ApprovedReviews = Convert.ToInt32(row["ApprovedReviews"]),
-                        PendingReviews = Convert.ToInt32(row["PendingReviews"]),
+                        TotalReviews = row["TotalReviews"] != DBNull.Value ? Convert.ToInt32(row["TotalReviews"]) : 0,
+                        ApprovedReviews = row["ApprovedReviews"] != DBNull.Value ? Convert.ToInt32(row["ApprovedReviews"]) : 0,
+                        PendingReviews = row["PendingReviews"] != DBNull.Value ? Convert.ToInt32(row["PendingReviews"]) : 0,
                         AvgOverallRating = row["AvgOverallRating"] != DBNull.Value ? Convert.ToDouble(row["AvgOverallRating"]) : 0,
                         AvgCleanlinessRating = row["AvgCleanlinessRating"] != DBNull.Value ? Convert.ToDouble(row["AvgCleanlinessRating"]) : 0,
                         AvgServiceRating = row["AvgServiceRating"] != DBNull.Value ? Convert.ToDouble(row["AvgServiceRating"]) : 0,
                         AvgFacilitiesRating = row["AvgFacilitiesRating"] != DBNull.Value ? Convert.ToDouble(row["AvgFacilitiesRating"]) : 0,
                         AvgLocationRating = row["AvgLocationRating"] != DBNull.Value ? Convert.ToDouble(row["AvgLocationRating"]) : 0,
                         AvgValueForMoneyRating = row["AvgValueForMoneyRating"] != DBNull.Value ? Convert.ToDouble(row["AvgValueForMoneyRating"]) : 0,
-                        FiveStarCount = Convert.ToInt32(row["FiveStarCount"]),
-                        FourStarCount = Convert.ToInt32(row["FourStarCount"]),
-                        ThreeStarCount = Convert.ToInt32(row["ThreeStarCount"]),
-                        TwoStarCount = Convert.ToInt32(row["TwoStarCount"]),
-                        OneStarCount = Convert.ToInt32(row["OneStarCount"]),
+                        FiveStarCount = row["FiveStarCount"] != DBNull.Value ? Convert.ToInt32(row["FiveStarCount"]) : 0,
+                        FourStarCount = row["FourStarCount"] != DBNull.Value ? Convert.ToInt32(row["FourStarCount"]) : 0,
+                        ThreeStarCount = row["ThreeStarCount"] != DBNull.Value ? Convert.ToInt32(row["ThreeStarCount"]) : 0,
+                        TwoStarCount = row["TwoStarCount"] != DBNull.Value ? Convert.ToInt32(row["TwoStarCount"]) : 0,
+                        OneStarCount = row["OneStarCount"] != DBNull.Value ? Convert.ToInt32(row["OneStarCount"]) : 0,
                         PercentPositive = row["PercentPositive"] != DBNull.Value ? Convert.ToDouble(row["PercentPositive"]) : 0
                     };
                 }
