@@ -172,7 +172,7 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                string sql = "SELECT TOP " + maxResults + @"
+                string sql = "SELECT TOP " + maxResults.ToString() + @"
                     C.MobilePhone,
                     C.FullName,
                     C.Email,

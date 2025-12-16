@@ -297,10 +297,10 @@
                     <div class="hint warning">* บังคับ - ใช้เป็น unique key หลัก</div>
                 </div>
 
-                <div class="form-group">
-                    <label class="required">เลขสาขา (00000 = สำนักงานใหญ่)</label>
-                    <asp:TextBox ID="txtBranchNumber" runat="server" CssClass="form-control" TextMode="Number" MaxLength="5" Text="00000" required></asp:TextBox>
-                    <div class="hint success">✓ กรอก 00000 สำหรับสำนักงานใหญ่</div>
+                <div class="form-group" id="branchNumberGroup">
+                    <label id="lblBranch">เลขสาขา (00000 = สำนักงานใหญ่)</label>
+                    <asp:TextBox ID="txtBranchNumber" runat="server" CssClass="form-control" TextMode="Number" MaxLength="5" Text="00000"></asp:TextBox>
+                    <div class="hint success" id="hintBranch">✓ กรอก 00000 สำหรับสำนักงานใหญ่</div>
                 </div>
             </div>
 
@@ -367,4 +367,57 @@
             <asp:HiddenField ID="hfVendorID" runat="server" />
         </asp:Panel>
     </div>
+
+    <script type="text/javascript">
+        // Toggle branch number field based on vendor type
+        function toggleBranchNumber() {
+            var ddl = document.getElementById('<%= ddlVendorType.ClientID %>');
+            var txtBranch = document.getElementById('<%= txtBranchNumber.ClientID %>');
+            var branchGroup = document.getElementById('branchNumberGroup');
+            var lblBranch = document.getElementById('lblBranch');
+            var hintBranch = document.getElementById('hintBranch');
+
+            if (ddl && txtBranch) {
+                // Type ID 1 = นิติบุคคล (Corporate), Type ID 2 = บุคคลธรรมดา (Individual)
+                var isCorporate = ddl.value === '1';
+                var isIndividual = ddl.value === '2';
+
+                if (isIndividual) {
+                    // บุคคลธรรมดา - disable and set default
+                    txtBranch.disabled = true;
+                    txtBranch.value = '00000';
+                    txtBranch.style.backgroundColor = '#f0f0f0';
+                    lblBranch.innerHTML = 'เลขสาขา <small style="color:#888;">(ไม่จำเป็นสำหรับบุคคลธรรมดา)</small>';
+                    hintBranch.innerHTML = '<span style="color:#888;">ไม่ต้องกรอกสำหรับบุคคลธรรมดา</span>';
+                } else {
+                    // นิติบุคคล หรือ ยังไม่เลือก - enable
+                    txtBranch.disabled = false;
+                    txtBranch.style.backgroundColor = '';
+                    lblBranch.innerHTML = 'เลขสาขา (00000 = สำนักงานใหญ่)';
+                    hintBranch.innerHTML = '✓ กรอก 00000 สำหรับสำนักงานใหญ่';
+                    if (isCorporate) {
+                        lblBranch.className = 'required';
+                    } else {
+                        lblBranch.className = '';
+                    }
+                }
+            }
+        }
+
+        // Run on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            toggleBranchNumber();
+            var ddl = document.getElementById('<%= ddlVendorType.ClientID %>');
+            if (ddl) {
+                ddl.addEventListener('change', toggleBranchNumber);
+            }
+        });
+
+        // Also run after postback
+        if (typeof Sys !== 'undefined') {
+            Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function() {
+                toggleBranchNumber();
+            });
+        }
+    </script>
 </asp:Content>
