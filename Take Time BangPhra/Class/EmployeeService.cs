@@ -698,18 +698,27 @@ public class EmployeeService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
+                // Use direct query to Admin table to avoid dependency on view columns
                 cmd.CommandText = @"
                     SELECT
-                        Admin_ID, Name, CurrentPosition, Department,
-                        MobilePhone, WorkEmail, CurrentSalary, PhotoPath,
-                        ServiceAgeText = CAST(TotalServiceYears AS VARCHAR) + ' ปี ' +
-                                        CAST(TotalServiceMonths % 12 AS VARCHAR) + ' เดือน'
-                    FROM vw_Employee_Complete_Profile
-                    WHERE (@SearchTerm = '' OR Name LIKE '%' + @SearchTerm + '%'
-                           OR MobilePhone LIKE '%' + @SearchTerm + '%')
-                      AND (@Position = '' OR CurrentPosition LIKE '%' + @Position + '%')
-                      AND (@Department = '' OR Department LIKE '%' + @Department + '%')
-                    ORDER BY Name";
+                        A.ID AS Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
+                        A.Position AS CurrentPosition,
+                        A.Department,
+                        A.MobilePhone,
+                        A.Email AS WorkEmail,
+                        NULL AS CurrentSalary,
+                        NULL AS PhotoPath,
+                        '-' AS ServiceAgeText
+                    FROM Admin A
+                    WHERE A.Status = 1
+                      AND (@SearchTerm = '' OR A.FirstName LIKE '%' + @SearchTerm + '%'
+                           OR A.LastName LIKE '%' + @SearchTerm + '%'
+                           OR A.Username LIKE '%' + @SearchTerm + '%'
+                           OR A.MobilePhone LIKE '%' + @SearchTerm + '%')
+                      AND (@Position = '' OR A.Position LIKE '%' + @Position + '%')
+                      AND (@Department = '' OR A.Department LIKE '%' + @Department + '%')
+                    ORDER BY A.FirstName, A.LastName";
 
                 cmd.Parameters.AddWithValue("@SearchTerm", searchTerm ?? "");
                 cmd.Parameters.AddWithValue("@Position", position ?? "");
