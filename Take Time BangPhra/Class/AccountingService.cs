@@ -42,16 +42,14 @@ namespace Take_Time_BangPhra.Services
                     {
                         // Generate Credit Note Number
                         string creditNoteNumber;
-                        using (SqlCommand cmdNumber = new SqlCommand("sp_GenerateCreditNoteNumber", _conn, transaction))
+                        using (SqlCommand cmdNumber = new SqlCommand(@"
+                            SELECT 'CN' + FORMAT(GETDATE(), 'yyyyMM') + '-' +
+                                RIGHT('0000' + CAST(ISNULL((SELECT MAX(CAST(RIGHT(CreditNoteNumber, 4) AS INT))
+                                FROM Credit_Note WHERE CreditNoteNumber LIKE 'CN' + FORMAT(GETDATE(), 'yyyyMM') + '%'), 0) + 1 AS VARCHAR), 4)
+                            AS NewNumber", _conn, transaction))
                         {
-                            cmdNumber.CommandType = CommandType.StoredProcedure;
-                            SqlParameter outParam = new SqlParameter("@CreditNoteNumber", SqlDbType.NVarChar, 20)
-                            {
-                                Direction = ParameterDirection.Output
-                            };
-                            cmdNumber.Parameters.Add(outParam);
-                            cmdNumber.ExecuteNonQuery();
-                            creditNoteNumber = outParam.Value.ToString();
+                            object result = cmdNumber.ExecuteScalar();
+                            creditNoteNumber = result?.ToString() ?? ("CN" + DateTime.Now.ToString("yyyyMMddHHmmss"));
                         }
 
                         // Insert Credit Note
@@ -194,16 +192,14 @@ namespace Take_Time_BangPhra.Services
                     {
                         // Generate Debit Note Number
                         string debitNoteNumber;
-                        using (SqlCommand cmdNumber = new SqlCommand("sp_GenerateDebitNoteNumber", _conn, transaction))
+                        using (SqlCommand cmdNumber = new SqlCommand(@"
+                            SELECT 'DN' + FORMAT(GETDATE(), 'yyyyMM') + '-' +
+                                RIGHT('0000' + CAST(ISNULL((SELECT MAX(CAST(RIGHT(DebitNoteNumber, 4) AS INT))
+                                FROM Debit_Note WHERE DebitNoteNumber LIKE 'DN' + FORMAT(GETDATE(), 'yyyyMM') + '%'), 0) + 1 AS VARCHAR), 4)
+                            AS NewNumber", _conn, transaction))
                         {
-                            cmdNumber.CommandType = CommandType.StoredProcedure;
-                            SqlParameter outParam = new SqlParameter("@DebitNoteNumber", SqlDbType.NVarChar, 20)
-                            {
-                                Direction = ParameterDirection.Output
-                            };
-                            cmdNumber.Parameters.Add(outParam);
-                            cmdNumber.ExecuteNonQuery();
-                            debitNoteNumber = outParam.Value.ToString();
+                            object result = cmdNumber.ExecuteScalar();
+                            debitNoteNumber = result?.ToString() ?? ("DN" + DateTime.Now.ToString("yyyyMMddHHmmss"));
                         }
 
                         // Insert Debit Note
@@ -300,9 +296,23 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_GetFrontTeamDailySummary", _conn))
+                using (SqlCommand cmd = new SqlCommand())
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Connection = _conn;
+                    cmd.CommandType = CommandType.Text;
+                    cmd.CommandText = @"
+                        SELECT
+                            CAST(R.CheckinDate AS DATE) AS SummaryDate,
+                            COUNT(DISTINCT R.ID) AS TotalReservations,
+                            ISNULL(SUM(R.TotalPrice), 0) AS TotalRevenue,
+                            COUNT(DISTINCT CASE WHEN R.Status = 'CHECKIN' THEN R.ID END) AS CheckedInCount,
+                            COUNT(DISTINCT CASE WHEN R.Status = 'CHECKOUT' THEN R.ID END) AS CheckedOutCount,
+                            ISNULL(SUM(R.Deposit), 0) AS TotalDeposits
+                        FROM Reservation R
+                        WHERE R.CheckinDate >= @StartDate
+                          AND R.CheckinDate <= @EndDate
+                        GROUP BY CAST(R.CheckinDate AS DATE)
+                        ORDER BY SummaryDate DESC";
                     cmd.Parameters.AddWithValue("@StartDate", startDate ?? DateTime.Today);
                     cmd.Parameters.AddWithValue("@EndDate", endDate ?? DateTime.Today);
 
