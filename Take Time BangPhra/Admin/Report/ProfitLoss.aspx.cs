@@ -421,55 +421,107 @@ namespace Take_Time_BangPhra.Admin.Report
 
         private decimal GetExpenseByType(DateTime startDate, DateTime endDate, string expenseType)
         {
-            string query = @"
-                SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
-                FROM Account_Payment
-                WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                  AND Type = @ExpenseType
-                  AND Status = 'Normal'";
-
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "@StartDate", startDate },
-                { "@EndDate", endDate },
-                { "@ExpenseType", expenseType }
-            };
+                // Check if Type column exists in Account_Payment
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS ColumnExists FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment' AND COLUMN_NAME = 'Type'",
+                    checkParams);
 
-            DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalExpense"]) : 0;
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["ColumnExists"]) == 0)
+                {
+                    // Type column doesn't exist, return 0 for individual expense types
+                    return 0;
+                }
+
+                string query = @"
+                    SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
+                    FROM Account_Payment
+                    WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                      AND Type = @ExpenseType
+                      AND Status = 'Normal'";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate },
+                    { "@ExpenseType", expenseType }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalExpense"]) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private decimal GetOtherExpenses(DateTime startDate, DateTime endDate, string[] excludeTypes)
         {
-            StringBuilder typeCondition = new StringBuilder();
-            for (int i = 0; i < excludeTypes.Length; i++)
+            try
             {
-                if (i > 0) typeCondition.Append(" AND ");
-                typeCondition.Append($"Type != @ExcludeType{i}");
+                // Check if Type column exists in Account_Payment
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS ColumnExists FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment' AND COLUMN_NAME = 'Type'",
+                    checkParams);
+
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["ColumnExists"]) == 0)
+                {
+                    // Type column doesn't exist, return total expenses
+                    string totalQuery = @"
+                        SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
+                        FROM Account_Payment
+                        WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                          AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                          AND Status = 'Normal'";
+
+                    var totalParams = new Dictionary<string, object>
+                    {
+                        { "@StartDate", startDate },
+                        { "@EndDate", endDate }
+                    };
+
+                    DataTable dtTotal = codeInstance.DatabaseQuerySafe(conn, totalQuery, totalParams);
+                    return dtTotal != null && dtTotal.Rows.Count > 0 ? Convert.ToDecimal(dtTotal.Rows[0]["TotalExpense"]) : 0;
+                }
+
+                StringBuilder typeCondition = new StringBuilder();
+                for (int i = 0; i < excludeTypes.Length; i++)
+                {
+                    if (i > 0) typeCondition.Append(" AND ");
+                    typeCondition.Append($"Type != @ExcludeType{i}");
+                }
+
+                string query = $@"
+                    SELECT ISNULL(SUM(Total_Amount), 0) as OtherExpense
+                    FROM Account_Payment
+                    WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                      AND {typeCondition}
+                      AND Status = 'Normal'";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate }
+                };
+
+                for (int i = 0; i < excludeTypes.Length; i++)
+                {
+                    parameters.Add($"@ExcludeType{i}", excludeTypes[i]);
+                }
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["OtherExpense"]) : 0;
             }
-
-            string query = $@"
-                SELECT ISNULL(SUM(Total_Amount), 0) as OtherExpense
-                FROM Account_Payment
-                WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                  AND {typeCondition}
-                  AND Status = 'Normal'";
-
-            var parameters = new Dictionary<string, object>
+            catch
             {
-                { "@StartDate", startDate },
-                { "@EndDate", endDate }
-            };
-
-            for (int i = 0; i < excludeTypes.Length; i++)
-            {
-                parameters.Add($"@ExcludeType{i}", excludeTypes[i]);
+                return 0;
             }
-
-            DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["OtherExpense"]) : 0;
         }
 
         private void LoadComparisonChart(DateTime currentStartDate, DateTime currentEndDate)

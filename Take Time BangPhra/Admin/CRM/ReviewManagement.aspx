@@ -240,6 +240,18 @@
                             </div>
                         </div>
 
+                        <div style="background: #e8f4fd; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <i class="fa fa-home" style="color: #3498db; font-size: 18px;"></i>
+                                <strong style="color: #2c3e50;"><%# Eval("AccommodationNames") %></strong>
+                            </div>
+                            <div style="display: flex; gap: 20px; font-size: 13px; color: #666;">
+                                <span><i class="fa fa-calendar"></i> Check-in: <%# Eval("CheckinDate", "{0:dd MMM yyyy}") %></span>
+                                <span><i class="fa fa-calendar-check-o"></i> Check-out: <%# Eval("CheckoutDate", "{0:dd MMM yyyy}") %></span>
+                                <span><i class="fa fa-moon-o"></i> <%# Eval("StayDays") %> คืน</span>
+                            </div>
+                        </div>
+
                         <div class="checkout-meta">
                             <div class="checkout-meta-item">
                                 <span class="checkout-meta-label"><i class="fa fa-calendar-check-o"></i> Checkout Date</span>

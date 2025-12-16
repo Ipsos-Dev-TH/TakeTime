@@ -318,8 +318,16 @@ namespace Take_Time_BangPhra.Admin.CRM
                         CH.GuestSatisfaction,
                         CH.Notes,
                         R.Customer_MobilePhone,
+                        R.CheckinDate,
+                        R.StayDays,
                         ISNULL(C.Name, C.FullName) AS CustomerName,
-                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS AdminName
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS AdminName,
+                        STUFF((
+                            SELECT ', ' + ACC.AccomName
+                            FROM Reservation_Accommodation RA
+                            INNER JOIN Accommodation ACC ON ACC.ID = RA.Accommodation_ID
+                            WHERE RA.Reservation_ID = CH.Reservation_ID
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS AccommodationNames
                     FROM Checkout_History CH
                     INNER JOIN Reservation R ON R.ID = CH.Reservation_ID
                     LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone

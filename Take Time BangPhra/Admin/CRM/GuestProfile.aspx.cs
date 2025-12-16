@@ -231,7 +231,7 @@ namespace Take_Time_BangPhra.Admin.CRM
                         R.TotalPrice AS TotalAmount,
                         R.Status,
                         STUFF((
-                            SELECT ', ' + A.Name
+                            SELECT ', ' + A.AccomName
                             FROM Reservation_Accommodation RA
                             INNER JOIN Accommodation A ON A.ID = RA.Accommodation_ID
                             WHERE RA.Reservation_ID = R.ID
