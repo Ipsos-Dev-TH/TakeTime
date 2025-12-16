@@ -275,17 +275,17 @@ namespace Take_Time_BangPhra.Admin.CRM
                 DataTable dtRewards = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         ID,
-                        Reward_Name AS RewardName,
-                        Reward_Name_EN AS RewardNameEN,
+                        RewardName,
+                        RewardNameEN,
                         Description,
-                        Points_Required AS PointsRequired,
-                        Available_Quantity AS AvailableQuantity,
-                        Valid_From AS ValidFrom,
-                        Valid_To AS ValidTo,
+                        PointsCost AS PointsRequired,
+                        StockQuantity AS AvailableQuantity,
+                        CreatedDate AS ValidFrom,
+                        DATEADD(DAY, ISNULL(ValidityDays, 365), CreatedDate) AS ValidTo,
                         IsActive,
-                        'General' AS CategoryName
+                        ISNULL(Category, 'General') AS CategoryName
                       FROM Loyalty_Rewards
-                      ORDER BY Display_Order, Reward_Name", null);
+                      ORDER BY DisplayOrder, RewardName", null);
 
                 if (dtRewards.Rows.Count > 0)
                 {

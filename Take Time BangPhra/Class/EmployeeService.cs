@@ -68,7 +68,7 @@ public class EmployeeService
 
     public EmployeeService()
     {
-        connectionString = ConfigurationManager.ConnectionStrings["TakeTime_DB"].ConnectionString;
+        connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
     }
 
     #region Employee Profile Management

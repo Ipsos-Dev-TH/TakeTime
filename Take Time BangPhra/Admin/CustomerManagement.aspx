@@ -559,7 +559,7 @@
                 EmptyDataText="ไม่พบข้อมูลลูกค้า">
                 <Columns>
                     <asp:BoundField DataField="MobilePhone" HeaderText="เบอร์โทร" />
-                    <asp:BoundField DataField="Name" HeaderText="ชื่อ-นามสกุล" />
+                    <asp:BoundField DataField="FullName" HeaderText="ชื่อ-นามสกุล" />
                     <asp:BoundField DataField="Email" HeaderText="อีเมล" NullDisplayText="-" />
                     <asp:BoundField DataField="Province" HeaderText="จังหวัด" NullDisplayText="-" />
                     <asp:BoundField DataField="CustomerTypeName" HeaderText="ประเภท" NullDisplayText="-" />

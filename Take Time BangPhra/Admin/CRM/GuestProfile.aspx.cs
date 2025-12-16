@@ -403,24 +403,35 @@ namespace Take_Time_BangPhra.Admin.CRM
         {
             try
             {
+                // Check if Guest_Notes table exists first
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Guest_Notes'", null);
+
+                if (dtCheck.Rows.Count == 0)
+                {
+                    // Table doesn't exist yet - show no notes message
+                    lblNoNotes.Visible = true;
+                    return;
+                }
+
                 var parameters = new Dictionary<string, object> { { "@Phone", customerPhone } };
                 DataTable dtNotes = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
-                        GN.Note_Type AS NoteType,
-                        GN.Note_Text AS NoteText,
-                        GN.Created_Date AS CreatedDate,
+                        NoteType,
+                        NoteText,
+                        CreatedDate,
                         ISNULL(A.FirstName + ' ' + A.LastName, 'System') AS CreatedByName
                       FROM Guest_Notes GN
-                      LEFT JOIN Admin A ON A.ID = GN.Created_By_ID
-                      WHERE GN.Customer_MobilePhone = @Phone
+                      LEFT JOIN Admin A ON A.ID = GN.CreatedBy_AdminID
+                      WHERE GN.CustomerPhone = @Phone
                         AND GN.IsActive = 1
                       ORDER BY
-                        CASE GN.Note_Type
+                        CASE GN.NoteType
                             WHEN 'WARNING' THEN 1
                             WHEN 'VIP' THEN 2
                             ELSE 3
                         END,
-                        GN.Created_Date DESC",
+                        GN.CreatedDate DESC",
                     parameters);
 
                 if (dtNotes.Rows.Count > 0)
@@ -434,9 +445,10 @@ namespace Take_Time_BangPhra.Admin.CRM
                     lblNoNotes.Visible = true;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                ShowAlert("Error loading notes: " + ex.Message, "error");
+                // Table doesn't exist or has different schema - show no notes
+                lblNoNotes.Visible = true;
             }
         }
 

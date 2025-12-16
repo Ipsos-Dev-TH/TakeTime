@@ -274,13 +274,13 @@
 
                     <asp:TemplateField HeaderText="สถานะ">
                         <ItemTemplate>
-                            <%# GetStatusBadge(Eval("Status")?.ToString()) %>
+                            <%# GetStatusBadge(Convert.ToString(Eval("Status"))) %>
                         </ItemTemplate>
                     </asp:TemplateField>
 
                     <asp:TemplateField HeaderText="จัดการ">
                         <ItemTemplate>
-                            <asp:Panel ID="pnlActions" runat="server" Visible='<%# Eval("Status")?.ToString() == "PENDING" %>'>
+                            <asp:Panel ID="pnlActions" runat="server" Visible='<%# Convert.ToString(Eval("Status")) == "PENDING" %>'>
                                 <asp:Button ID="btnApprove" runat="server" Text="อนุมัติ"
                                     CssClass="btn-success" CommandName="Approve"
                                     CommandArgument='<%# Eval("ID") %>'
@@ -290,7 +290,7 @@
                                     CommandArgument='<%# Eval("ID") %>'
                                     OnClientClick="return confirm('ยืนยันการปฏิเสธคำขอลานี้?');" />
                             </asp:Panel>
-                            <asp:Panel ID="pnlApproved" runat="server" Visible='<%# Eval("Status")?.ToString() != "PENDING" %>'>
+                            <asp:Panel ID="pnlApproved" runat="server" Visible='<%# Convert.ToString(Eval("Status")) != "PENDING" %>'>
                                 <small style="color: #666;">
                                     <%# Eval("ApprovedByName") != DBNull.Value ? "โดย " + Eval("ApprovedByName") : "" %><br />
                                     <%# Eval("ApprovedDate") != DBNull.Value ? Convert.ToDateTime(Eval("ApprovedDate")).ToString("dd/MM/yyyy HH:mm") : "" %>
