@@ -528,7 +528,7 @@
                                     <div class="tier-stats">
                                         Min Points: <%# Eval("MinPoints") %> |
                                         Multiplier: <%# Eval("PointsMultiplier") %>x |
-                                        Discount: <%# Eval("AccommodationDiscountPercent") %>%
+                                        Discount: <%# Eval("DiscountPercent") %>%
                                     </div>
                                     <div class="progress-bar">
                                         <div class="progress-fill" style='width: <%# Eval("MemberPercent") %>%'></div>

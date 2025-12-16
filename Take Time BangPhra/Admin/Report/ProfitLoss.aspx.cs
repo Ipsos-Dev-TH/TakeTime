@@ -306,63 +306,117 @@ namespace Take_Time_BangPhra.Admin.Report
 
         private decimal GetProductRevenue(DateTime startDate, DateTime endDate)
         {
-            // Revenue from product sales
-            string query = @"
-                SELECT ISNULL(SUM(TotalPrice), 0) as ProductRevenue
-                FROM Product_Sell
-                WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
-
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "@StartDate", startDate },
-                { "@EndDate", endDate }
-            };
+                // Check if Product_Sell table exists
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Sell'",
+                    checkParams);
 
-            DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["ProductRevenue"]) : 0;
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    return 0;
+                }
+
+                // Revenue from product sales
+                string query = @"
+                    SELECT ISNULL(SUM(TotalPrice), 0) as ProductRevenue
+                    FROM Product_Sell
+                    WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["ProductRevenue"]) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private decimal GetServiceRevenue(DateTime startDate, DateTime endDate)
         {
-            // Revenue from additional services charged to rooms
-            string query = @"
-                SELECT ISNULL(SUM(ps.Total_Price), 0) as ServiceRevenue
-                FROM Product_Sell ps
-                INNER JOIN Reservation r ON ps.Reservation_ID = r.ID
-                WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                  AND ps.Reservation_ID IS NOT NULL";
-
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "@StartDate", startDate },
-                { "@EndDate", endDate }
-            };
+                // Check if Product_Sell table exists
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Sell'",
+                    checkParams);
 
-            DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["ServiceRevenue"]) : 0;
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
+                {
+                    return 0;
+                }
+
+                // Revenue from additional services charged to rooms
+                string query = @"
+                    SELECT ISNULL(SUM(ps.Total_Price), 0) as ServiceRevenue
+                    FROM Product_Sell ps
+                    INNER JOIN Reservation r ON ps.Reservation_ID = r.ID
+                    WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                      AND ps.Reservation_ID IS NOT NULL";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["ServiceRevenue"]) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private decimal CalculateCOGS(DateTime startDate, DateTime endDate)
         {
-            // Calculate COGS from products sold
-            string query = @"
-                SELECT ISNULL(SUM(psd.Quantity * p.Cost_Price), 0) as TotalCOGS
-                FROM Product_Sell_Detail psd
-                INNER JOIN Product_Sell ps ON psd.Product_Sell_ID = ps.ID
-                INNER JOIN Product p ON psd.Product_ID = p.ID
-                WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
-
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "@StartDate", startDate },
-                { "@EndDate", endDate }
-            };
+                // Check if Product_Sell and Product_Sell_Detail tables exist
+                var checkParams = new Dictionary<string, object>();
+                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('Product_Sell', 'Product_Sell_Detail')",
+                    checkParams);
 
-            DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalCOGS"]) : 0;
+                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) < 2)
+                {
+                    return 0;
+                }
+
+                // Calculate COGS from products sold
+                string query = @"
+                    SELECT ISNULL(SUM(psd.Quantity * p.Cost_Price), 0) as TotalCOGS
+                    FROM Product_Sell_Detail psd
+                    INNER JOIN Product_Sell ps ON psd.Product_Sell_ID = ps.ID
+                    INNER JOIN Product p ON psd.Product_ID = p.ID
+                    WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalCOGS"]) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private decimal GetExpenseByType(DateTime startDate, DateTime endDate, string expenseType)

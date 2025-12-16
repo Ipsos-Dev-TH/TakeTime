@@ -266,14 +266,14 @@ namespace Take_Time_BangPhra.Admin.CRM
                 DataTable dtReviews = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         GR.Reservation_ID AS ReservationID,
-                        GR.Overall_Rating AS OverallRating,
-                        GR.Review_Text AS ReviewText,
-                        GR.Review_Date AS ReviewDate,
+                        GR.OverallRating,
+                        GR.ReviewText,
+                        GR.SubmittedDate AS ReviewDate,
                         GR.Status
                       FROM Guest_Reviews GR
                       WHERE GR.Customer_MobilePhone = @Phone
                         AND GR.Status = 'APPROVED'
-                      ORDER BY GR.Review_Date DESC",
+                      ORDER BY GR.SubmittedDate DESC",
                     parameters);
 
                 if (dtReviews.Rows.Count > 0)

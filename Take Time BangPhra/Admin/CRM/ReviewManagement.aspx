@@ -88,12 +88,15 @@
             </div>
         </div>
 
+        <!-- Hidden field to preserve tab state across postbacks -->
+        <asp:HiddenField ID="hdnActiveTab" runat="server" Value="guest-reviews" />
+
         <!-- Tab Navigation -->
         <div class="tab-nav">
-            <button type="button" class="tab-btn active" onclick="showTab('guest-reviews')">
+            <button type="button" class="tab-btn active" id="btn-guest-reviews" onclick="showTab('guest-reviews')">
                 <i class="fa fa-comments"></i> Guest Reviews
             </button>
-            <button type="button" class="tab-btn" onclick="showTab('checkout-reviews')">
+            <button type="button" class="tab-btn" id="btn-checkout-reviews" onclick="showTab('checkout-reviews')">
                 <i class="fa fa-sign-out"></i> Checkout Reviews
             </button>
         </div>
@@ -302,7 +305,21 @@
             document.getElementById(tabId).classList.add('active');
 
             // Add active class to clicked button
-            event.target.closest('.tab-btn').classList.add('active');
+            document.getElementById('btn-' + tabId).classList.add('active');
+
+            // Save tab state to hidden field
+            var hdnField = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnField) {
+                hdnField.value = tabId;
+            }
         }
+
+        // Restore tab state on page load (for postbacks)
+        document.addEventListener('DOMContentLoaded', function() {
+            var hdnField = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnField && hdnField.value) {
+                showTab(hdnField.value);
+            }
+        });
     </script>
 </asp:Content>

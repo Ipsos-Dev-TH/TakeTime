@@ -121,9 +121,33 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                using (SqlCommand cmd = new SqlCommand("sp_GetCustomer", _conn))
+                string sql = @"
+                    SELECT
+                        C.MobilePhone,
+                        ISNULL(C.Name, C.FullName) AS Name,
+                        C.Email,
+                        C.IDNumber AS TaxID,
+                        ISNULL(A.Address, C.Address) AS Address,
+                        ISNULL(A.District, C.District) AS District,
+                        ISNULL(A.SubDistrict, C.SubDistrict) AS Subdistrict,
+                        ISNULL(A.Province, C.Province) AS Province,
+                        ISNULL(A.PostalCode, C.PostalCode) AS Postcode,
+                        C.Customer_Type_ID AS CustomerType_ID,
+                        ISNULL(CT.Customer_Type, '-') AS CustomerTypeName,
+                        C.Status,
+                        CASE WHEN C.Status = 1 THEN 1 ELSE 0 END AS IsActive,
+                        C.Created_Date AS CreatedDate,
+                        C.LastUpdated,
+                        ISNULL((SELECT COUNT(*) FROM Reservation R WHERE R.Customer_MobilePhone = C.MobilePhone), 0) AS TotalReservations,
+                        (SELECT TOP 1 R2.Created_Date FROM Reservation R2 WHERE R2.Customer_MobilePhone = C.MobilePhone ORDER BY R2.Created_Date DESC) AS LastReservationDate
+                    FROM Customer C
+                    LEFT JOIN Address A ON A.ID = C.Address_ID
+                    LEFT JOIN Customer_Type CT ON CT.ID = C.Customer_Type_ID
+                    WHERE C.MobilePhone = @MobilePhone";
+
+                using (SqlCommand cmd = new SqlCommand(sql, _conn))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.CommandType = CommandType.Text;
                     cmd.Parameters.AddWithValue("@MobilePhone", mobilePhone);
 
                     if (_conn.State != ConnectionState.Open)
@@ -136,7 +160,7 @@ namespace Take_Time_BangPhra.Services
                             return new CustomerData
                             {
                                 MobilePhone = reader["MobilePhone"].ToString(),
-                                Name = reader["Name"].ToString(),
+                                Name = reader["Name"] != DBNull.Value ? reader["Name"].ToString() : null,
                                 Email = reader["Email"] != DBNull.Value ? reader["Email"].ToString() : null,
                                 TaxID = reader["TaxID"] != DBNull.Value ? reader["TaxID"].ToString() : null,
                                 Address = reader["Address"] != DBNull.Value ? reader["Address"].ToString() : null,

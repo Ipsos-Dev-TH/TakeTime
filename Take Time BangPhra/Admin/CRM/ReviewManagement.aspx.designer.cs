@@ -16,6 +16,7 @@ namespace Take_Time_BangPhra.Admin.CRM
         protected global::System.Web.UI.WebControls.Label lblPending;
         protected global::System.Web.UI.WebControls.Label lblCheckoutReviews;
         protected global::System.Web.UI.WebControls.Label lblCheckoutAvg;
+        protected global::System.Web.UI.WebControls.HiddenField hdnActiveTab;
         protected global::System.Web.UI.WebControls.DropDownList ddlStatusFilter;
         protected global::System.Web.UI.WebControls.DropDownList ddlRatingFilter;
         protected global::System.Web.UI.WebControls.TextBox txtSearchCustomer;
