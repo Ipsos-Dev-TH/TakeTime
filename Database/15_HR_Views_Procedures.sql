@@ -27,11 +27,11 @@ AS
 SELECT
     -- ข้อมูลพื้นฐานจาก Admin
     A.[ID] AS Admin_ID,
-    A.[Name],
-    A.[NickName] AS AdminNickName,
-    A.[User] AS UserType,
+    A.[FirstName] + ' ' + A.[LastName] AS Name,
+    A.[FirstName] AS AdminNickName,
+    A.[Role] AS UserType,
     A.[Status],
-    A.[RegisterDate],
+    ES.[EffectiveDate] AS RegisterDate,
 
     -- ข้อมูลส่วนตัว
     EP.[FullNameTH],
@@ -66,9 +66,9 @@ SELECT
     EC.[Department],
 
     -- อายุงาน (Days, Months, Years)
-    DATEDIFF(DAY, A.[RegisterDate], GETDATE()) AS TotalServiceDays,
-    DATEDIFF(MONTH, A.[RegisterDate], GETDATE()) AS TotalServiceMonths,
-    DATEDIFF(YEAR, A.[RegisterDate], GETDATE()) AS TotalServiceYears,
+    DATEDIFF(DAY, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) AS TotalServiceDays,
+    DATEDIFF(MONTH, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) AS TotalServiceMonths,
+    DATEDIFF(YEAR, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) AS TotalServiceYears,
 
     -- สถิติการลาปีนี้
     (SELECT ISNULL(SUM(LR.[TotalDays]), 0)
@@ -115,36 +115,36 @@ CREATE VIEW [dbo].[vw_Employee_Service_Age]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name],
-    A.[RegisterDate] AS HireDate,
+    A.[FirstName] + ' ' + A.[LastName] AS Name,
+    COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)) AS HireDate,
 
     -- คำนวณอายุงานแบบละเอียด
-    DATEDIFF(DAY, A.[RegisterDate], GETDATE()) AS TotalDays,
-    DATEDIFF(MONTH, A.[RegisterDate], GETDATE()) AS TotalMonths,
+    DATEDIFF(DAY, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) AS TotalDays,
+    DATEDIFF(MONTH, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) AS TotalMonths,
 
     -- Years
-    DATEDIFF(YEAR, A.[RegisterDate], GETDATE()) -
-    CASE WHEN MONTH(A.[RegisterDate]) > MONTH(GETDATE()) OR
-         (MONTH(A.[RegisterDate]) = MONTH(GETDATE()) AND DAY(A.[RegisterDate]) > DAY(GETDATE()))
+    DATEDIFF(YEAR, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) -
+    CASE WHEN MONTH(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) > MONTH(GETDATE()) OR
+         (MONTH(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) = MONTH(GETDATE()) AND DAY(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) > DAY(GETDATE()))
     THEN 1 ELSE 0 END AS Years,
 
     -- Months (remaining after years)
-    (DATEDIFF(MONTH, A.[RegisterDate], GETDATE()) % 12) AS Months,
+    (DATEDIFF(MONTH, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) % 12) AS Months,
 
     -- Days (approximate remaining after months)
     DATEDIFF(DAY,
-        DATEADD(MONTH, DATEDIFF(MONTH, A.[RegisterDate], GETDATE()), A.[RegisterDate]),
+        DATEADD(MONTH, DATEDIFF(MONTH, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()), COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))),
         GETDATE()
     ) AS Days,
 
     -- Formatted text
     CAST(
-        DATEDIFF(YEAR, A.[RegisterDate], GETDATE()) -
-        CASE WHEN MONTH(A.[RegisterDate]) > MONTH(GETDATE()) OR
-             (MONTH(A.[RegisterDate]) = MONTH(GETDATE()) AND DAY(A.[RegisterDate]) > DAY(GETDATE()))
+        DATEDIFF(YEAR, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) -
+        CASE WHEN MONTH(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) > MONTH(GETDATE()) OR
+             (MONTH(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) = MONTH(GETDATE()) AND DAY(COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE))) > DAY(GETDATE()))
         THEN 1 ELSE 0 END AS VARCHAR(10)
-    ) + ' ปี ' +
-    CAST((DATEDIFF(MONTH, A.[RegisterDate], GETDATE()) % 12) AS VARCHAR(10)) + ' เดือน' AS ServiceAgeText,
+    ) + N' ปี ' +
+    CAST((DATEDIFF(MONTH, COALESCE(ES.[EffectiveDate], CAST(GETDATE() AS DATE)), GETDATE()) % 12) AS VARCHAR(10)) + N' เดือน' AS ServiceAgeText,
 
     ES.[Position],
     ES.[MonthlySalary]
@@ -166,7 +166,7 @@ CREATE VIEW [dbo].[vw_Employee_Documents_Expiry_Alert]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name] AS EmployeeName,
+    A.[FirstName] + ' ' + A.[LastName] AS EmployeeName,
     ED.[ID] AS Document_ID,
     ED.[DocumentType],
     ED.[DocumentName],
@@ -200,7 +200,7 @@ CREATE VIEW [dbo].[vw_Employee_Contracts_Expiry_Alert]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name] AS EmployeeName,
+    A.[FirstName] + ' ' + A.[LastName] AS EmployeeName,
     EC.[ID] AS Contract_ID,
     EC.[ContractNumber],
     EC.[ContractType],
@@ -238,7 +238,7 @@ CREATE VIEW [dbo].[vw_Employee_Training_Summary]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name] AS EmployeeName,
+    A.[FirstName] + ' ' + A.[LastName] AS EmployeeName,
     ES.[Position],
 
     -- สถิติการอบรม
@@ -597,10 +597,11 @@ BEGIN
         (SELECT COUNT(*) FROM [dbo].[Admin] WHERE [Status] = 1) AS TotalActiveEmployees,
 
         -- พนักงานใหม่เดือนนี้
-        (SELECT COUNT(*) FROM [dbo].[Admin]
-         WHERE [Status] = 1
-           AND YEAR([RegisterDate]) = YEAR(GETDATE())
-           AND MONTH([RegisterDate]) = MONTH(GETDATE())) AS NewEmployeesThisMonth,
+        (SELECT COUNT(*) FROM [dbo].[Admin] A
+         INNER JOIN [dbo].[Employee_Salary] ES ON ES.[Admin_ID] = A.[ID] AND ES.[IsActive] = 1
+         WHERE A.[Status] = 1
+           AND YEAR(ES.[EffectiveDate]) = YEAR(GETDATE())
+           AND MONTH(ES.[EffectiveDate]) = MONTH(GETDATE())) AS NewEmployeesThisMonth,
 
         -- สัญญาที่กำลังจะหมดอายุ (30 วัน)
         (SELECT COUNT(*) FROM [dbo].[vw_Employee_Contracts_Expiry_Alert]

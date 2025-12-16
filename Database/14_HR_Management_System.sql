@@ -32,7 +32,7 @@ BEGIN
         [Age] AS (DATEDIFF(YEAR, [BirthDate], GETDATE()) -
                   CASE WHEN MONTH([BirthDate]) > MONTH(GETDATE()) OR
                        (MONTH([BirthDate]) = MONTH(GETDATE()) AND DAY([BirthDate]) > DAY(GETDATE()))
-                  THEN 1 ELSE 0 END) PERSISTED,
+                  THEN 1 ELSE 0 END),
         [Gender] VARCHAR(10), -- MALE, FEMALE, OTHER
         [Nationality] NVARCHAR(50) DEFAULT N'ไทย',
         [Religion] NVARCHAR(50),
@@ -161,7 +161,7 @@ BEGIN
         [IssueDate] DATE,
         [ExpiryDate] DATE,
         [IsExpirable] BIT DEFAULT 0,
-        [DaysUntilExpiry] AS (DATEDIFF(DAY, GETDATE(), [ExpiryDate])) PERSISTED,
+        [DaysUntilExpiry] AS (DATEDIFF(DAY, GETDATE(), [ExpiryDate])),
 
         -- สถานะ
         [IsActive] BIT DEFAULT 1,
@@ -276,7 +276,7 @@ BEGIN
         [IsCurrentJob] BIT DEFAULT 0,
         [YearsOfExperience] AS (
             DATEDIFF(MONTH, [StartDate], ISNULL([EndDate], GETDATE())) / 12.0
-        ) PERSISTED,
+        ),
 
         -- เหตุผลในการออก
         [ReasonForLeaving] NVARCHAR(1000),
@@ -354,7 +354,7 @@ BEGIN
         [Age] AS (DATEDIFF(YEAR, [BirthDate], GETDATE()) -
                   CASE WHEN MONTH([BirthDate]) > MONTH(GETDATE()) OR
                        (MONTH([BirthDate]) = MONTH(GETDATE()) AND DAY([BirthDate]) > DAY(GETDATE()))
-                  THEN 1 ELSE 0 END) PERSISTED,
+                  THEN 1 ELSE 0 END),
         [IDCardNumber] VARCHAR(13),
         [Occupation] NVARCHAR(200),
         [Employer] NVARCHAR(300),
@@ -529,7 +529,7 @@ BEGIN
         [EndDate] DATE,
         [SignedDate] DATE,
         [IsIndefinite] BIT DEFAULT 0, -- สัญญาไม่มีกำหนด
-        [DaysUntilExpiry] AS (DATEDIFF(DAY, GETDATE(), [EndDate])) PERSISTED,
+        [DaysUntilExpiry] AS (DATEDIFF(DAY, GETDATE(), [EndDate])),
 
         -- ข้อมูลตำแหน่ง
         [Position] NVARCHAR(200) NOT NULL,
