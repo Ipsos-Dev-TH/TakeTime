@@ -701,7 +701,7 @@ public class EmployeeService
                 cmd.CommandText = @"
                     SELECT
                         Admin_ID, Name, CurrentPosition, Department,
-                        MobilePhone, WorkEmail, CurrentSalary,
+                        MobilePhone, WorkEmail, CurrentSalary, PhotoPath,
                         ServiceAgeText = CAST(TotalServiceYears AS VARCHAR) + ' ปี ' +
                                         CAST(TotalServiceMonths % 12 AS VARCHAR) + ' เดือน'
                     FROM vw_Employee_Complete_Profile
