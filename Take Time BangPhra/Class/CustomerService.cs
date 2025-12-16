@@ -173,33 +173,30 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 string sql = "SELECT TOP " + maxResults + @"
-                    Customer_MobilePhone,
-                    Customer_FirstName,
-                    Customer_LastName,
-                    Customer_FirstName + ' ' + Customer_LastName AS FullName,
-                    Customer_Email,
-                    Customer_IDCard,
-                    Customer_Status
+                    MobilePhone,
+                    FullName,
+                    Email,
+                    IDNumber,
+                    Status
                 FROM Customer
                 WHERE 1=1";
 
                 if (!string.IsNullOrEmpty(searchTerm))
                 {
                     sql += @" AND (
-                        Customer_MobilePhone LIKE @SearchTerm
-                        OR Customer_FirstName LIKE @SearchTerm
-                        OR Customer_LastName LIKE @SearchTerm
-                        OR Customer_Email LIKE @SearchTerm
-                        OR Customer_IDCard LIKE @SearchTerm
+                        MobilePhone LIKE @SearchTerm
+                        OR FullName LIKE @SearchTerm
+                        OR Email LIKE @SearchTerm
+                        OR IDNumber LIKE @SearchTerm
                     )";
                 }
 
                 if (activeOnly)
                 {
-                    sql += " AND Customer_Status = 'Active'";
+                    sql += " AND Status = 1";
                 }
 
-                sql += " ORDER BY Customer_FirstName, Customer_LastName";
+                sql += " ORDER BY FullName";
 
                 using (SqlCommand cmd = new SqlCommand(sql, _conn))
                 {

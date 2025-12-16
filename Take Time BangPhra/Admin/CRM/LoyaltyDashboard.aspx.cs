@@ -262,21 +262,30 @@ namespace Take_Time_BangPhra.Admin.CRM
         {
             try
             {
+                // Check if Loyalty_Rewards table exists first
+                DataTable dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Loyalty_Rewards'", null);
+
+                if (dtCheck.Rows.Count == 0)
+                {
+                    lblNoRewards.Visible = true;
+                    return;
+                }
+
                 DataTable dtRewards = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
-                        LR.ID,
-                        LR.Reward_Name AS RewardName,
-                        LR.Reward_Name_EN AS RewardNameEN,
-                        LR.Description,
-                        LR.Points_Required AS PointsRequired,
-                        LR.Available_Quantity AS AvailableQuantity,
-                        LR.Valid_From AS ValidFrom,
-                        LR.Valid_To AS ValidTo,
-                        LR.IsActive,
-                        ISNULL(LRC.Category_Name, 'General') AS CategoryName
-                      FROM Loyalty_Rewards LR
-                      LEFT JOIN Loyalty_Reward_Categories LRC ON LRC.ID = LR.Category_ID
-                      ORDER BY LR.Display_Order, LR.Reward_Name", null);
+                        ID,
+                        Reward_Name AS RewardName,
+                        Reward_Name_EN AS RewardNameEN,
+                        Description,
+                        Points_Required AS PointsRequired,
+                        Available_Quantity AS AvailableQuantity,
+                        Valid_From AS ValidFrom,
+                        Valid_To AS ValidTo,
+                        IsActive,
+                        'General' AS CategoryName
+                      FROM Loyalty_Rewards
+                      ORDER BY Display_Order, Reward_Name", null);
 
                 if (dtRewards.Rows.Count > 0)
                 {
@@ -292,6 +301,7 @@ namespace Take_Time_BangPhra.Admin.CRM
             catch (Exception ex)
             {
                 ShowAlert("Error loading rewards: " + ex.Message, "error");
+                lblNoRewards.Visible = true;
             }
         }
 

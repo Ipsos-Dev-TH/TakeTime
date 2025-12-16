@@ -100,7 +100,7 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 DataTable dtTiers = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT * FROM Loyalty_Tiers WHERE IsActive = 1 ORDER BY DisplayOrder",
+                    "SELECT *, DiscountPercent AS AccommodationDiscountPercent FROM Loyalty_Tiers WHERE IsActive = 1 ORDER BY DisplayOrder",
                     null);
 
                 rptTiers.DataSource = dtTiers;

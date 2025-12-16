@@ -373,6 +373,9 @@
     <Content Include="Admin\CRM\GuestProfile.aspx" />
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
+    <Content Include="Admin\HR\EmployeeManagement.aspx" />
+    <Content Include="Admin\HR\EmployeeProfile.aspx" />
+    <Content Include="Admin\Leave\LeaveManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Guest\Portal.aspx" />
@@ -748,6 +751,27 @@
     </Compile>
     <Compile Include="Admin\CRM\GuestProfile.aspx.designer.cs">
       <DependentUpon>GuestProfile.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\HR\EmployeeManagement.aspx.cs">
+      <DependentUpon>EmployeeManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\HR\EmployeeManagement.aspx.designer.cs">
+      <DependentUpon>EmployeeManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\HR\EmployeeProfile.aspx.cs">
+      <DependentUpon>EmployeeProfile.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\HR\EmployeeProfile.aspx.designer.cs">
+      <DependentUpon>EmployeeProfile.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveManagement.aspx.cs">
+      <DependentUpon>LeaveManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveManagement.aspx.designer.cs">
+      <DependentUpon>LeaveManagement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
