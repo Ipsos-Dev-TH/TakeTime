@@ -173,30 +173,36 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 string sql = "SELECT TOP " + maxResults + @"
-                    MobilePhone,
-                    FullName,
-                    Email,
-                    IDNumber,
-                    Status
-                FROM Customer
+                    C.MobilePhone,
+                    C.FullName,
+                    C.Email,
+                    C.IDNumber,
+                    C.Status,
+                    CASE WHEN C.Status = 1 THEN 1 ELSE 0 END AS IsActive,
+                    ISNULL(A.Province, '-') AS Province,
+                    ISNULL(CT.Customer_Type, '-') AS CustomerTypeName,
+                    ISNULL((SELECT COUNT(*) FROM Reservation R WHERE R.Customer_MobilePhone = C.MobilePhone), 0) AS TotalReservations
+                FROM Customer C
+                LEFT JOIN Address A ON A.ID = C.Address_ID
+                LEFT JOIN Customer_Type CT ON CT.ID = C.Customer_Type_ID
                 WHERE 1=1";
 
                 if (!string.IsNullOrEmpty(searchTerm))
                 {
                     sql += @" AND (
-                        MobilePhone LIKE @SearchTerm
-                        OR FullName LIKE @SearchTerm
-                        OR Email LIKE @SearchTerm
-                        OR IDNumber LIKE @SearchTerm
+                        C.MobilePhone LIKE @SearchTerm
+                        OR C.FullName LIKE @SearchTerm
+                        OR C.Email LIKE @SearchTerm
+                        OR C.IDNumber LIKE @SearchTerm
                     )";
                 }
 
                 if (activeOnly)
                 {
-                    sql += " AND Status = 1";
+                    sql += " AND C.Status = 1";
                 }
 
-                sql += " ORDER BY FullName";
+                sql += " ORDER BY C.FullName";
 
                 using (SqlCommand cmd = new SqlCommand(sql, _conn))
                 {
