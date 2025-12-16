@@ -6,6 +6,59 @@ using System.Configuration;
 using System.Web;
 
 /// <summary>
+/// Result class for operations returning an ID
+/// </summary>
+public class EmployeeOperationResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public int ID { get; set; }
+
+    public EmployeeOperationResult(bool success, string message, int id)
+    {
+        Success = success;
+        Message = message;
+        ID = id;
+    }
+}
+
+/// <summary>
+/// Result class for operations returning a long ID
+/// </summary>
+public class EmployeeOperationResultLong
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public long ID { get; set; }
+
+    public EmployeeOperationResultLong(bool success, string message, long id)
+    {
+        Success = success;
+        Message = message;
+        ID = id;
+    }
+}
+
+/// <summary>
+/// Result class for contract renewal
+/// </summary>
+public class ContractRenewalResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public int NewContractID { get; set; }
+    public string NewContractNumber { get; set; }
+
+    public ContractRenewalResult(bool success, string message, int newContractId, string newContractNumber)
+    {
+        Success = success;
+        Message = message;
+        NewContractID = newContractId;
+        NewContractNumber = newContractNumber;
+    }
+}
+
+/// <summary>
 /// Employee Service - Business logic for HR Management System
 /// Handles employee profiles, documents, service age, contracts, and training
 /// </summary>
@@ -77,7 +130,7 @@ public class EmployeeService
     /// <summary>
     /// Create new employee profile
     /// </summary>
-    public (bool Success, string Message, int ProfileID) CreateEmployeeProfile(
+    public EmployeeOperationResult CreateEmployeeProfile(
         short adminId, string fullNameTH, DateTime birthDate, string gender,
         string idCardNumber, string mobilePhone, string personalEmail, short updatedByAdminId)
     {
@@ -103,12 +156,12 @@ public class EmployeeService
                         string result = reader["Result"].ToString();
                         string message = reader["Message"].ToString();
                         int profileId = result == "Success" ? Convert.ToInt32(reader["ProfileID"]) : 0;
-                        return (result == "Success", message, profileId);
+                        return new EmployeeOperationResult(result == "Success", message, profileId);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0);
+        return new EmployeeOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>
@@ -200,7 +253,7 @@ public class EmployeeService
     /// <summary>
     /// Record employment event (hire, promotion, salary change, etc.)
     /// </summary>
-    public (bool Success, string Message, int EventID) RecordEmploymentEvent(
+    public EmployeeOperationResult RecordEmploymentEvent(
         short adminId, string eventType, DateTime eventDate,
         string positionBefore = null, string positionAfter = null,
         decimal? salaryBefore = null, decimal? salaryAfter = null,
@@ -229,12 +282,12 @@ public class EmployeeService
                         string result = reader["Result"].ToString();
                         string message = reader["Message"].ToString();
                         int eventId = result == "Success" ? Convert.ToInt32(reader["EventID"]) : 0;
-                        return (result == "Success", message, eventId);
+                        return new EmployeeOperationResult(result == "Success", message, eventId);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0);
+        return new EmployeeOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>
@@ -273,7 +326,7 @@ public class EmployeeService
     /// <summary>
     /// Upload employee document
     /// </summary>
-    public (bool Success, string Message, long DocumentID) UploadDocument(
+    public EmployeeOperationResultLong UploadDocument(
         short adminId, string documentType, string documentName,
         string filePath, long fileSize, string fileType,
         DateTime? expiryDate = null, bool isConfidential = false,
@@ -302,12 +355,12 @@ public class EmployeeService
                         string result = reader["Result"].ToString();
                         string message = reader["Message"].ToString();
                         long docId = result == "Success" ? Convert.ToInt64(reader["DocumentID"]) : 0;
-                        return (result == "Success", message, docId);
+                        return new EmployeeOperationResultLong(result == "Success", message, docId);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0);
+        return new EmployeeOperationResultLong(false, "Unknown error", 0);
     }
 
     /// <summary>
@@ -449,7 +502,7 @@ public class EmployeeService
     /// <summary>
     /// Generate contract renewal
     /// </summary>
-    public (bool Success, string Message, int NewContractID, string NewContractNumber) RenewContract(
+    public ContractRenewalResult RenewContract(
         int oldContractId, DateTime newStartDate, DateTime newEndDate,
         decimal newSalary, short createdByAdminId)
     {
@@ -476,15 +529,15 @@ public class EmployeeService
                     if (reader.Read())
                     {
                         string result = reader["Result"].ToString();
-                        string message = reader["Message"]?.ToString() ?? "";
+                        string message = reader["Message"] != null ? reader["Message"].ToString() : "";
                         int newContractId = result == "Success" ? Convert.ToInt32(reader["NewContractID"]) : 0;
-                        string newContractNumber = result == "Success" ? reader["NewContractNumber"]?.ToString() ?? "" : "";
-                        return (result == "Success", message, newContractId, newContractNumber);
+                        string newContractNumber = result == "Success" && reader["NewContractNumber"] != null ? reader["NewContractNumber"].ToString() : "";
+                        return new ContractRenewalResult(result == "Success", message, newContractId, newContractNumber);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0, "");
+        return new ContractRenewalResult(false, "Unknown error", 0, "");
     }
 
     #endregion

@@ -5,6 +5,23 @@ using System.Data.SqlClient;
 using System.Configuration;
 
 /// <summary>
+/// Result class for payroll operations
+/// </summary>
+public class PayrollOperationResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public int ID { get; set; }
+
+    public PayrollOperationResult(bool success, string message, int id)
+    {
+        Success = success;
+        Message = message;
+        ID = id;
+    }
+}
+
+/// <summary>
 /// Payroll Service - Business logic for Payroll Management
 /// Handles salary management, OT calculations, and payroll processing
 /// </summary>
@@ -217,7 +234,7 @@ public class PayrollService
     /// <summary>
     /// Generate payroll for a period
     /// </summary>
-    public (bool Success, string Message, int PayrollPeriodID) GeneratePayrollForPeriod(
+    public PayrollOperationResult GeneratePayrollForPeriod(
         short year, byte month, short createdByAdminId)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
@@ -243,12 +260,12 @@ public class PayrollService
                         string result = reader["Result"].ToString();
                         string message = reader["Message"].ToString();
                         int periodId = result == "Success" ? Convert.ToInt32(reader["PayrollPeriodID"]) : 0;
-                        return (result == "Success", message, periodId);
+                        return new PayrollOperationResult(result == "Success", message, periodId);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0);
+        return new PayrollOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>

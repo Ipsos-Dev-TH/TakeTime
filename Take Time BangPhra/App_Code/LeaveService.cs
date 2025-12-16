@@ -5,6 +5,40 @@ using System.Data.SqlClient;
 using System.Configuration;
 
 /// <summary>
+/// Result class for leave operations returning an int ID
+/// </summary>
+public class LeaveOperationResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public int ID { get; set; }
+
+    public LeaveOperationResult(bool success, string message, int id)
+    {
+        Success = success;
+        Message = message;
+        ID = id;
+    }
+}
+
+/// <summary>
+/// Result class for leave operations returning a long ID
+/// </summary>
+public class LeaveOperationResultLong
+{
+    public bool Success { get; set; }
+    public string Message { get; set; }
+    public long ID { get; set; }
+
+    public LeaveOperationResultLong(bool success, string message, long id)
+    {
+        Success = success;
+        Message = message;
+        ID = id;
+    }
+}
+
+/// <summary>
 /// Leave Service - Business logic for Leave Management
 /// Handles leave types, quotas, requests, and approvals
 /// </summary>
@@ -80,7 +114,7 @@ public class LeaveService
     /// <summary>
     /// Initialize leave quota for year
     /// </summary>
-    public (bool Success, string Message, int RecordsCreated) InitializeLeaveQuotaForYear(
+    public LeaveOperationResult InitializeLeaveQuotaForYear(
         short year, short? adminId = null)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
@@ -99,12 +133,12 @@ public class LeaveService
                         string result = reader["Result"].ToString();
                         string message = reader["Message"].ToString();
                         int recordsCreated = result == "Success" ? Convert.ToInt32(reader["RecordsCreated"]) : 0;
-                        return (result == "Success", message, recordsCreated);
+                        return new LeaveOperationResult(result == "Success", message, recordsCreated);
                     }
                 }
             }
         }
-        return (false, "Unknown error", 0);
+        return new LeaveOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>
@@ -181,7 +215,7 @@ public class LeaveService
     /// <summary>
     /// Create leave request
     /// </summary>
-    public (bool Success, string Message, long RequestID) CreateLeaveRequest(
+    public LeaveOperationResultLong CreateLeaveRequest(
         short adminId, byte leaveTypeId, DateTime startDate, DateTime endDate,
         decimal totalDays, string reason, string medicalCertPath = null,
         short? submittedByAdminId = null)
@@ -225,7 +259,7 @@ public class LeaveService
                         if (requiresMedicalCert && string.IsNullOrEmpty(medicalCertPath))
                         {
                             transaction.Rollback();
-                            return (false, "Medical certificate is required for this leave type", 0);
+                            return new LeaveOperationResultLong(false, "Medical certificate is required for this leave type", 0);
                         }
 
                         // Calculate deduction amount if applicable
@@ -285,17 +319,17 @@ public class LeaveService
                         long requestId = Convert.ToInt64(cmd.ExecuteScalar());
 
                         transaction.Commit();
-                        return (true, "Leave request created successfully", requestId);
+                        return new LeaveOperationResultLong(true, "Leave request created successfully", requestId);
                     }
                     catch (Exception ex)
                     {
                         transaction.Rollback();
-                        return (false, ex.Message, 0);
+                        return new LeaveOperationResultLong(false, ex.Message, 0);
                     }
                 }
                 catch (Exception ex)
                 {
-                    return (false, ex.Message, 0);
+                    return new LeaveOperationResultLong(false, ex.Message, 0);
                 }
             }
         }
