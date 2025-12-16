@@ -63,19 +63,6 @@ namespace Take_Time_BangPhra.Admin.CRM
                     lblTotalReviews.Text = analytics.TotalReviews.ToString("N0");
                     lblAvgRating.Text = analytics.AvgOverallRating.ToString("N1");
                     lblPending.Text = analytics.PendingReviews.ToString("N0");
-                    lblApproved.Text = analytics.ApprovedReviews.ToString("N0");
-
-                    // Calculate response rate from approved reviews with management response
-                    var parameters = new System.Collections.Generic.Dictionary<string, object>();
-                    DataTable dtWithResponse = _code.DatabaseQuerySafe(_connectionString,
-                        "SELECT COUNT(*) AS Count FROM Guest_Reviews WHERE Status = 'APPROVED' AND ResponseText IS NOT NULL",
-                        parameters);
-
-                    int reviewsWithResponse = dtWithResponse.Rows.Count > 0 ? Convert.ToInt32(dtWithResponse.Rows[0]["Count"]) : 0;
-                    decimal responseRate = analytics.TotalReviews > 0
-                        ? (decimal)reviewsWithResponse / analytics.TotalReviews * 100
-                        : 0;
-                    lblResponseRate.Text = responseRate.ToString("N0");
                 }
             }
             catch (Exception ex)

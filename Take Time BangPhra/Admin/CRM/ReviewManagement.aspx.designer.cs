@@ -14,13 +14,19 @@ namespace Take_Time_BangPhra.Admin.CRM
         protected global::System.Web.UI.WebControls.Label lblTotalReviews;
         protected global::System.Web.UI.WebControls.Label lblAvgRating;
         protected global::System.Web.UI.WebControls.Label lblPending;
-        protected global::System.Web.UI.WebControls.Label lblApproved;
-        protected global::System.Web.UI.WebControls.Label lblResponseRate;
+        protected global::System.Web.UI.WebControls.Label lblCheckoutReviews;
+        protected global::System.Web.UI.WebControls.Label lblCheckoutAvg;
         protected global::System.Web.UI.WebControls.DropDownList ddlStatusFilter;
         protected global::System.Web.UI.WebControls.DropDownList ddlRatingFilter;
         protected global::System.Web.UI.WebControls.TextBox txtSearchCustomer;
         protected global::System.Web.UI.WebControls.Button btnSearch;
         protected global::System.Web.UI.WebControls.Repeater rptReviews;
         protected global::System.Web.UI.WebControls.Label lblNoReviews;
+        protected global::System.Web.UI.WebControls.DropDownList ddlCheckoutRatingFilter;
+        protected global::System.Web.UI.WebControls.TextBox txtCheckoutStartDate;
+        protected global::System.Web.UI.WebControls.TextBox txtCheckoutEndDate;
+        protected global::System.Web.UI.WebControls.Button btnFilterCheckout;
+        protected global::System.Web.UI.WebControls.Repeater rptCheckoutReviews;
+        protected global::System.Web.UI.WebControls.Label lblNoCheckoutReviews;
     }
 }
