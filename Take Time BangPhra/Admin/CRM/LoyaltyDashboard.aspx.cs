@@ -526,16 +526,16 @@ namespace Take_Time_BangPhra.Admin.CRM
                         END AS RedemptionRate
                       FROM (
                         SELECT
-                            DATEFROMPARTS(YEAR(LT.Transaction_Date), MONTH(LT.Transaction_Date), 1) AS MonthDate,
-                            COUNT(DISTINCT CASE WHEN CL.Created_Date >= DATEFROMPARTS(YEAR(LT.Transaction_Date), MONTH(LT.Transaction_Date), 1)
-                                                  AND CL.Created_Date < DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(LT.Transaction_Date), MONTH(LT.Transaction_Date), 1))
+                            DATEFROMPARTS(YEAR(LT.TransactionDate), MONTH(LT.TransactionDate), 1) AS MonthDate,
+                            COUNT(DISTINCT CASE WHEN CL.MemberSince >= DATEFROMPARTS(YEAR(LT.TransactionDate), MONTH(LT.TransactionDate), 1)
+                                                  AND CL.MemberSince < DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(LT.TransactionDate), MONTH(LT.TransactionDate), 1))
                                                 THEN CL.Customer_MobilePhone END) AS NewMembers,
-                            SUM(CASE WHEN LT.Transaction_Type = 'EARN' THEN LT.Points ELSE 0 END) AS PointsEarned,
-                            SUM(CASE WHEN LT.Transaction_Type = 'REDEEM' THEN ABS(LT.Points) ELSE 0 END) AS PointsRedeemed
+                            SUM(CASE WHEN LT.TransactionType = 'EARN' THEN LT.Points ELSE 0 END) AS PointsEarned,
+                            SUM(CASE WHEN LT.TransactionType = 'REDEEM' THEN ABS(LT.Points) ELSE 0 END) AS PointsRedeemed
                         FROM Loyalty_Transactions LT
                         LEFT JOIN Customer_Loyalty CL ON CL.Customer_MobilePhone = LT.Customer_MobilePhone
-                        WHERE LT.Transaction_Date >= DATEADD(MONTH, -12, GETDATE())
-                        GROUP BY DATEFROMPARTS(YEAR(LT.Transaction_Date), MONTH(LT.Transaction_Date), 1)
+                        WHERE LT.TransactionDate >= DATEADD(MONTH, -12, GETDATE())
+                        GROUP BY DATEFROMPARTS(YEAR(LT.TransactionDate), MONTH(LT.TransactionDate), 1)
                       ) AS MonthlyData
                       ORDER BY Month DESC", null);
 

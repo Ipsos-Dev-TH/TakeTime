@@ -55,7 +55,7 @@ namespace Take_Time_BangPhra.Admin
             }
             catch (Exception ex)
             {
-                ShowAlert($"Error loading QR codes: {ex.Message}", "error");
+                ShowAlert("Error loading QR codes: " + ex.Message, "error");
             }
         }
 
@@ -92,12 +92,12 @@ namespace Take_Time_BangPhra.Admin
                     }
                 }
 
-                ShowAlert($"Successfully generated {count} QR codes!", "success");
+                ShowAlert("Successfully generated " + count + " QR codes!", "success");
                 LoadQRCodes();
             }
             catch (Exception ex)
             {
-                ShowAlert($"Error generating QR codes: {ex.Message}", "error");
+                ShowAlert("Error generating QR codes: " + ex.Message, "error");
             }
         }
 
@@ -135,23 +135,23 @@ namespace Take_Time_BangPhra.Admin
                 }
                 catch (Exception ex)
                 {
-                    ShowAlert($"Error regenerating QR code: {ex.Message}", "error");
+                    ShowAlert("Error regenerating QR code: " + ex.Message, "error");
                 }
             }
         }
 
         /// <summary>
-        /// Generate QR code image URL using Google Charts API
+        /// Generate QR code image URL using QR Server API
         /// </summary>
         protected string GenerateQRCodeImage(string qrData)
         {
             if (string.IsNullOrEmpty(qrData))
                 return "";
 
-            // Using Google Charts QR Code API
-            // Size: 200x200, Error correction: L
+            // Using QR Server API (free, reliable alternative to deprecated Google Charts)
+            // Size: 200x200, Format: PNG
             string encodedData = System.Web.HttpUtility.UrlEncode(qrData);
-            return $"https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl={encodedData}&choe=UTF-8";
+            return "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodedData;
         }
 
         /// <summary>

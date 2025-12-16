@@ -209,10 +209,10 @@ namespace Take_Time_BangPhra.Account
 
                 // Load Product Categories
                 DataTable dtCategories = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ID, Name FROM Product_Category WHERE Status = 'True' ORDER BY Name",
+                    "SELECT ID, CategoryName FROM Product_Category WHERE Status = 'True' ORDER BY CategoryName",
                     null);
                 ddlProductCategory.DataSource = dtCategories;
-                ddlProductCategory.DataTextField = "Name";
+                ddlProductCategory.DataTextField = "CategoryName";
                 ddlProductCategory.DataValueField = "ID";
                 ddlProductCategory.DataBind();
                 ddlProductCategory.Items.Insert(0, new ListItem("-- Select Category --", "0"));
@@ -231,7 +231,7 @@ namespace Take_Time_BangPhra.Account
                     @"SELECT
                         LPCD.ID,
                         LT.TierName,
-                        PC.Name AS CategoryName,
+                        PC.CategoryName,
                         LPCD.DiscountPercent,
                         LPCD.MaxDiscountAmount,
                         LPCD.MinPurchaseAmount,
@@ -240,8 +240,8 @@ namespace Take_Time_BangPhra.Account
                         LPCD.ValidTo
                       FROM Loyalty_Product_Category_Discounts LPCD
                       INNER JOIN Loyalty_Tiers LT ON LT.ID = LPCD.Tier_ID
-                      INNER JOIN Product_Category PC ON PC.ID = LPCD.Product_Category_ID
-                      ORDER BY LT.DisplayOrder, PC.Name",
+                      INNER JOIN Product_Category PC ON PC.ID = LPCD.ProductCategory_ID
+                      ORDER BY LT.DisplayOrder, PC.CategoryName",
                     null);
 
                 gvCategoryDiscounts.DataSource = dtDiscounts;
@@ -367,7 +367,7 @@ namespace Take_Time_BangPhra.Account
                 {
                     DataRow row = dtDiscount.Rows[0];
                     ddlTier.SelectedValue = row["Tier_ID"].ToString();
-                    ddlProductCategory.SelectedValue = row["Product_Category_ID"].ToString();
+                    ddlProductCategory.SelectedValue = row["ProductCategory_ID"].ToString();
                     txtDiscountPercent.Text = row["DiscountPercent"].ToString();
 
                     if (row["MaxDiscountAmount"] != DBNull.Value)
