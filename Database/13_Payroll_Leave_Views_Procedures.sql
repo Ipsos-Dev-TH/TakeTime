@@ -25,8 +25,8 @@ CREATE VIEW [dbo].[vw_Employee_Leave_Summary]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name] AS EmployeeName,
-    A.[User] AS UserType,
+    A.[FirstName] + ' ' + A.[LastName] AS EmployeeName,
+    A.[Role] AS UserType,
     ELQ.[Year],
     LT.[LeaveTypeName],
     LT.[LeaveTypeCode],
@@ -65,9 +65,9 @@ CREATE VIEW [dbo].[vw_Current_Payroll_Summary]
 AS
 SELECT
     A.[ID] AS Admin_ID,
-    A.[Name] AS EmployeeName,
-    A.[NickName],
-    A.[User] AS UserType,
+    A.[FirstName] + ' ' + A.[LastName] AS EmployeeName,
+    A.[FirstName] AS NickName,
+    A.[Role] AS UserType,
     ES.[MonthlySalary],
     ES.[Position],
     ES.[EffectiveDate],
@@ -293,7 +293,7 @@ BEGIN
             SELECT
                 @PayrollPeriodID,
                 A.[ID],
-                A.[Name],
+                A.[FirstName] + ' ' + A.[LastName],
                 ISNULL(ES.[MonthlySalary], 0),
                 @DaysInMonth
             FROM [dbo].[Admin] A
