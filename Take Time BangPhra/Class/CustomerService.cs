@@ -127,7 +127,7 @@ namespace Take_Time_BangPhra.Services
                         ISNULL(C.Name, C.FullName) AS Name,
                         C.Email,
                         C.IDNumber AS TaxID,
-                        ISNULL(C.Address, A.Address) AS Address,
+                        C.Address,
                         A.District,
                         A.SubDistrict AS Subdistrict,
                         A.Province,
