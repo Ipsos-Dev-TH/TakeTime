@@ -119,26 +119,80 @@ public class LeaveService
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
-            using (SqlCommand cmd = new SqlCommand("sp_Initialize_Leave_Quota_For_Year", conn))
+            conn.Open();
+            try
             {
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.AddWithValue("@Year", year);
-                cmd.Parameters.AddWithValue("@AdminID", adminId ?? (object)DBNull.Value);
+                int recordsCreated = 0;
 
-                conn.Open();
-                using (SqlDataReader reader = cmd.ExecuteReader())
+                // Get all leave types
+                DataTable leaveTypes;
+                using (SqlCommand ltCmd = new SqlCommand(
+                    "SELECT ID, AnnualQuota FROM Leave_Types WHERE IsActive = 1", conn))
                 {
-                    if (reader.Read())
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(ltCmd))
                     {
-                        string result = reader["Result"].ToString();
-                        string message = reader["Message"].ToString();
-                        int recordsCreated = result == "Success" ? Convert.ToInt32(reader["RecordsCreated"]) : 0;
-                        return new LeaveOperationResult(result == "Success", message, recordsCreated);
+                        leaveTypes = new DataTable();
+                        adapter.Fill(leaveTypes);
                     }
                 }
+
+                // Get employees - either specific or all active
+                string empSql = adminId.HasValue
+                    ? "SELECT ID FROM Admin WHERE ID = @AdminID AND Status = 1"
+                    : "SELECT ID FROM Admin WHERE Status = 1";
+                DataTable employees;
+                using (SqlCommand empCmd = new SqlCommand(empSql, conn))
+                {
+                    if (adminId.HasValue)
+                        empCmd.Parameters.AddWithValue("@AdminID", adminId.Value);
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(empCmd))
+                    {
+                        employees = new DataTable();
+                        adapter.Fill(employees);
+                    }
+                }
+
+                // Create leave quota for each employee and leave type
+                foreach (DataRow emp in employees.Rows)
+                {
+                    int empId = Convert.ToInt32(emp["ID"]);
+                    foreach (DataRow lt in leaveTypes.Rows)
+                    {
+                        int leaveTypeId = Convert.ToInt32(lt["ID"]);
+                        decimal annualQuota = lt["AnnualQuota"] != DBNull.Value ? Convert.ToDecimal(lt["AnnualQuota"]) : 0;
+
+                        // Check if quota already exists
+                        using (SqlCommand checkCmd = new SqlCommand(
+                            "SELECT COUNT(*) FROM Employee_Leave_Quota WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year", conn))
+                        {
+                            checkCmd.Parameters.AddWithValue("@AdminID", empId);
+                            checkCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                            checkCmd.Parameters.AddWithValue("@Year", year);
+                            if ((int)checkCmd.ExecuteScalar() > 0) continue;
+                        }
+
+                        // Insert new quota
+                        using (SqlCommand insertCmd = new SqlCommand(@"
+                            INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
+                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, @Total, 0)", conn))
+                        {
+                            insertCmd.Parameters.AddWithValue("@AdminID", empId);
+                            insertCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                            insertCmd.Parameters.AddWithValue("@Year", year);
+                            insertCmd.Parameters.AddWithValue("@Total", annualQuota);
+                            insertCmd.ExecuteNonQuery();
+                            recordsCreated++;
+                        }
+                    }
+                }
+
+                return new LeaveOperationResult(true, $"สร้างโควต้าวันลาสำเร็จ {recordsCreated} รายการ", recordsCreated);
+            }
+            catch (Exception ex)
+            {
+                return new LeaveOperationResult(false, "เกิดข้อผิดพลาด: " + ex.Message, 0);
             }
         }
-        return new LeaveOperationResult(false, "Unknown error", 0);
     }
 
     /// <summary>
@@ -266,24 +320,24 @@ public class LeaveService
                         decimal deductionAmount = 0;
                         if (deductSalary)
                         {
+                            // Get employee's monthly salary
                             cmd.Parameters.Clear();
-                            cmd.CommandText = "sp_Calculate_Leave_Deduction";
-                            cmd.CommandType = CommandType.StoredProcedure;
+                            cmd.CommandType = CommandType.Text;
+                            cmd.CommandText = @"
+                                SELECT TOP 1 ISNULL(MonthlySalary, 0) AS MonthlySalary
+                                FROM Employee_Salary
+                                WHERE Admin_ID = @AdminID AND IsActive = 1
+                                ORDER BY EffectiveDate DESC";
                             cmd.Parameters.AddWithValue("@AdminID", adminId);
-                            cmd.Parameters.AddWithValue("@StartDate", startDate);
-                            cmd.Parameters.AddWithValue("@EndDate", endDate);
-                            cmd.Parameters.AddWithValue("@TotalDays", totalDays);
 
-                            SqlParameter deductionParam = new SqlParameter("@DeductionAmount", SqlDbType.Decimal)
-                            {
-                                Precision = 10,
-                                Scale = 2,
-                                Direction = ParameterDirection.Output
-                            };
-                            cmd.Parameters.Add(deductionParam);
+                            object result = cmd.ExecuteScalar();
+                            decimal monthlySalary = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
 
-                            cmd.ExecuteNonQuery();
-                            deductionAmount = deductionParam.Value != DBNull.Value ? Convert.ToDecimal(deductionParam.Value) : 0;
+                            // Calculate daily rate and deduction
+                            // Daily rate = Monthly salary / days in month
+                            int daysInMonth = DateTime.DaysInMonth(startDate.Year, startDate.Month);
+                            decimal dailyRate = monthlySalary / daysInMonth;
+                            deductionAmount = Math.Round(dailyRate * totalDays, 2);
                         }
 
                         // Insert leave request
@@ -516,36 +570,28 @@ public class LeaveService
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
-            using (SqlCommand cmd = new SqlCommand("sp_Calculate_Leave_Deduction", conn))
+            using (SqlCommand cmd = new SqlCommand())
             {
-                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT TOP 1 ISNULL(MonthlySalary, 0) AS MonthlySalary
+                    FROM Employee_Salary
+                    WHERE Admin_ID = @AdminID AND IsActive = 1
+                    ORDER BY EffectiveDate DESC";
                 cmd.Parameters.AddWithValue("@AdminID", adminId);
-                cmd.Parameters.AddWithValue("@StartDate", startDate);
-                cmd.Parameters.AddWithValue("@EndDate", endDate);
-                cmd.Parameters.AddWithValue("@TotalDays", totalDays);
-
-                SqlParameter deductionParam = new SqlParameter("@DeductionAmount", SqlDbType.Decimal)
-                {
-                    Precision = 10,
-                    Scale = 2,
-                    Direction = ParameterDirection.Output
-                };
-                cmd.Parameters.Add(deductionParam);
 
                 conn.Open();
-                using (SqlDataReader reader = cmd.ExecuteReader())
-                {
-                    if (reader.Read())
-                    {
-                        decimal deduction = Convert.ToDecimal(reader["DeductionAmount"]);
-                        decimal baseSalary = Convert.ToDecimal(reader["BaseSalary"]);
-                        int daysInMonth = Convert.ToInt32(reader["DaysInMonth"]);
-                        return (deduction, baseSalary, daysInMonth, "Success");
-                    }
-                }
+                object result = cmd.ExecuteScalar();
+                decimal baseSalary = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
+
+                // Calculate daily rate and deduction
+                int daysInMonth = DateTime.DaysInMonth(startDate.Year, startDate.Month);
+                decimal dailyRate = baseSalary / daysInMonth;
+                decimal deductionAmount = Math.Round(dailyRate * totalDays, 2);
+
+                return (deductionAmount, baseSalary, daysInMonth, "Success");
             }
         }
-        return (0, 0, 0, "Error");
     }
 
     #endregion
