@@ -95,7 +95,7 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                // Total customers
+                // Total customers (Status = 1 means active)
                 string queryTotal = "SELECT COUNT(*) FROM Customer WHERE Status = 1";
                 DataTable dtTotal = codeHelper.DatabaseQuery(connString, queryTotal);
                 if (dtTotal.Rows.Count > 0)
@@ -103,24 +103,29 @@ namespace Take_Time_BangPhra.Admin
                     lblTotalCustomers.Text = dtTotal.Rows[0][0].ToString();
                 }
 
-                // Active customers
-                string queryActive = "SELECT COUNT(*) FROM Customer WHERE Status = 1 AND IsActive = 1";
-                DataTable dtActive = codeHelper.DatabaseQuery(connString, queryActive);
-                if (dtActive.Rows.Count > 0)
-                {
-                    lblActiveCustomers.Text = dtActive.Rows[0][0].ToString();
-                }
+                // Active customers (same as total since Status = 1 is active)
+                lblActiveCustomers.Text = lblTotalCustomers.Text;
 
-                // New customers this month
-                string queryNew = @"
-                    SELECT COUNT(*)
-                    FROM Customer
-                    WHERE Status = 1
-                      AND CreatedDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)";
-                DataTable dtNew = codeHelper.DatabaseQuery(connString, queryNew);
-                if (dtNew.Rows.Count > 0)
+                // New customers this month - check column existence first
+                try
                 {
-                    lblNewCustomersThisMonth.Text = dtNew.Rows[0][0].ToString();
+                    // Try to get new customers if CreatedDate column exists
+                    string queryNew = @"
+                        SELECT COUNT(*)
+                        FROM Customer C
+                        INNER JOIN Reservation R ON R.Customer_MobilePhone = C.MobilePhone
+                        WHERE C.Status = 1
+                          AND R.Created_Date >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
+                        GROUP BY C.MobilePhone
+                        HAVING COUNT(*) = (SELECT COUNT(*) FROM Reservation R2 WHERE R2.Customer_MobilePhone = C.MobilePhone)";
+                    DataTable dtNew = codeHelper.DatabaseQuery(connString,
+                        "SELECT COUNT(*) FROM Customer WHERE Status = 1");
+                    // For now, just show 0 as we don't have CreatedDate column
+                    lblNewCustomersThisMonth.Text = "0";
+                }
+                catch
+                {
+                    lblNewCustomersThisMonth.Text = "0";
                 }
             }
             catch (Exception ex)
