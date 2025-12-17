@@ -1,0 +1,1053 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="PayrollDataSource">
+      <ConnectionProperties>
+        <DataProvider>System.Data.DataSet</DataProvider>
+        <ConnectString>/* Local Connection */</ConnectString>
+      </ConnectionProperties>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="CompanyInfo">
+      <Query>
+        <DataSourceName>PayrollDataSource</DataSourceName>
+        <CommandText>/* Local Query */</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="Company_Name">
+          <DataField>Company_Name</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="Address">
+          <DataField>Address</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="Phone_Number">
+          <DataField>Phone_Number</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="LegalEntity_Number">
+          <DataField>LegalEntity_Number</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+      </Fields>
+    </DataSet>
+    <DataSet Name="EmployeeInfo">
+      <Query>
+        <DataSourceName>PayrollDataSource</DataSourceName>
+        <CommandText>/* Local Query */</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="EmployeeName">
+          <DataField>EmployeeName</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="Position">
+          <DataField>Position</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="EmployeeID">
+          <DataField>EmployeeID</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="Department">
+          <DataField>Department</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+      </Fields>
+    </DataSet>
+    <DataSet Name="PayrollDetails">
+      <Query>
+        <DataSourceName>PayrollDataSource</DataSourceName>
+        <CommandText>/* Local Query */</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="VoucherNumber">
+          <DataField>VoucherNumber</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="PeriodName">
+          <DataField>PeriodName</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="PayDate">
+          <DataField>PayDate</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="BaseSalary">
+          <DataField>BaseSalary</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="OTAmount">
+          <DataField>OTAmount</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="BonusAmount">
+          <DataField>BonusAmount</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="AllowanceAmount">
+          <DataField>AllowanceAmount</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="TotalEarnings">
+          <DataField>TotalEarnings</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="LeaveDeduction">
+          <DataField>LeaveDeduction</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="SocialSecurity">
+          <DataField>SocialSecurity</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="Tax">
+          <DataField>Tax</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="OtherDeductions">
+          <DataField>OtherDeductions</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="TotalDeductions">
+          <DataField>TotalDeductions</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="NetSalary">
+          <DataField>NetSalary</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="WorkDays">
+          <DataField>WorkDays</DataField>
+          <rd:TypeName>System.Int32</rd:TypeName>
+        </Field>
+        <Field Name="LeaveDays">
+          <DataField>LeaveDays</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+        <Field Name="OTHours">
+          <DataField>OTHours</DataField>
+          <rd:TypeName>System.Decimal</rd:TypeName>
+        </Field>
+      </Fields>
+    </DataSet>
+    <DataSet Name="Signatures">
+      <Query>
+        <DataSourceName>PayrollDataSource</DataSourceName>
+        <CommandText>/* Local Query */</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="PreparedByName">
+          <DataField>PreparedByName</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="PreparedBySignature">
+          <DataField>PreparedBySignature</DataField>
+          <rd:TypeName>System.Byte[]</rd:TypeName>
+        </Field>
+        <Field Name="ApprovedByName">
+          <DataField>ApprovedByName</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="ApprovedBySignature">
+          <DataField>ApprovedBySignature</DataField>
+          <rd:TypeName>System.Byte[]</rd:TypeName>
+        </Field>
+        <Field Name="ReceivedByName">
+          <DataField>ReceivedByName</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+        <Field Name="ReceivedBySignature">
+          <DataField>ReceivedBySignature</DataField>
+          <rd:TypeName>System.Byte[]</rd:TypeName>
+        </Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Rectangle Name="MainContainer">
+            <ReportItems>
+              <!-- Header: Company Info -->
+              <Textbox Name="txtTitle">
+                <CanGrow>true</CanGrow>
+                <KeepTogether>true</KeepTogether>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>ใบสำคัญจ่ายเงินเดือน / Payroll Voucher</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>18pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>0cm</Top>
+                <Left>0cm</Left>
+                <Height>0.8cm</Height>
+                <Width>19cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                  <PaddingLeft>2pt</PaddingLeft>
+                  <PaddingRight>2pt</PaddingRight>
+                  <PaddingTop>2pt</PaddingTop>
+                  <PaddingBottom>2pt</PaddingBottom>
+                </Style>
+              </Textbox>
+
+              <!-- Company Name -->
+              <Textbox Name="txtCompanyName">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>=First(Fields!Company_Name.Value, "CompanyInfo")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>14pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>0.8cm</Top>
+                <Left>0cm</Left>
+                <Height>0.6cm</Height>
+                <Width>19cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Voucher Number and Date -->
+              <Textbox Name="txtVoucherNo">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="เลขที่: " &amp; First(Fields!VoucherNumber.Value, "PayrollDetails")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Right</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>1.5cm</Top>
+                <Left>12cm</Left>
+                <Height>0.5cm</Height>
+                <Width>7cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtPayDate">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="วันที่: " &amp; First(Fields!PayDate.Value, "PayrollDetails")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Right</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>2cm</Top>
+                <Left>12cm</Left>
+                <Height>0.5cm</Height>
+                <Width>7cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Employee Info -->
+              <Textbox Name="txtEmployeeName">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="ชื่อพนักงาน: " &amp; First(Fields!EmployeeName.Value, "EmployeeInfo")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>2.8cm</Top>
+                <Left>0cm</Left>
+                <Height>0.5cm</Height>
+                <Width>10cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtPosition">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="ตำแหน่ง: " &amp; First(Fields!Position.Value, "EmployeeInfo")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>3.3cm</Top>
+                <Left>0cm</Left>
+                <Height>0.5cm</Height>
+                <Width>10cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtPeriod">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="งวดเงินเดือน: " &amp; First(Fields!PeriodName.Value, "PayrollDetails")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>2.8cm</Top>
+                <Left>10cm</Left>
+                <Height>0.5cm</Height>
+                <Width>9cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Earnings Section -->
+              <Textbox Name="txtEarningsHeader">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>รายได้ (Earnings)</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>4.2cm</Top>
+                <Left>0cm</Left>
+                <Height>0.5cm</Height>
+                <Width>9cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                  <BackgroundColor>LightGray</BackgroundColor>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtBaseSalary">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="เงินเดือน: " &amp; Format(First(Fields!BaseSalary.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>4.8cm</Top>
+                <Left>0.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtOTAmount">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="ค่าล่วงเวลา (OT): " &amp; Format(First(Fields!OTAmount.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>5.3cm</Top>
+                <Left>0.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtBonus">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="โบนัส: " &amp; Format(First(Fields!BonusAmount.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>5.8cm</Top>
+                <Left>0.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtAllowance">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="เบี้ยเลี้ยง: " &amp; Format(First(Fields!AllowanceAmount.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>6.3cm</Top>
+                <Left>0.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtTotalEarnings">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="รวมรายได้: " &amp; Format(First(Fields!TotalEarnings.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>6.9cm</Top>
+                <Left>0.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Deductions Section -->
+              <Textbox Name="txtDeductionsHeader">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>รายการหัก (Deductions)</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>12pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>4.2cm</Top>
+                <Left>10cm</Left>
+                <Height>0.5cm</Height>
+                <Width>9cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                  <BackgroundColor>LightGray</BackgroundColor>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtLeaveDeduction">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="หักขาด/ลา: " &amp; Format(First(Fields!LeaveDeduction.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>4.8cm</Top>
+                <Left>10.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtSocialSecurity">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="ประกันสังคม: " &amp; Format(First(Fields!SocialSecurity.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>5.3cm</Top>
+                <Left>10.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtTax">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="ภาษี: " &amp; Format(First(Fields!Tax.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>5.8cm</Top>
+                <Left>10.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtOtherDeductions">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="หักอื่นๆ: " &amp; Format(First(Fields!OtherDeductions.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>6.3cm</Top>
+                <Left>10.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtTotalDeductions">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="รวมหัก: " &amp; Format(First(Fields!TotalDeductions.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>11pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>6.9cm</Top>
+                <Left>10.5cm</Left>
+                <Height>0.5cm</Height>
+                <Width>8.5cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Net Salary -->
+              <Textbox Name="txtNetSalary">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="เงินสุทธิ (Net Pay): " &amp; Format(First(Fields!NetSalary.Value, "PayrollDetails"), "#,##0.00") &amp; " บาท"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>14pt</FontSize>
+                          <FontWeight>Bold</FontWeight>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>7.8cm</Top>
+                <Left>0cm</Left>
+                <Height>0.7cm</Height>
+                <Width>19cm</Width>
+                <Style>
+                  <Border>
+                    <Style>Solid</Style>
+                    <Width>1pt</Width>
+                  </Border>
+                  <BackgroundColor>LightYellow</BackgroundColor>
+                </Style>
+              </Textbox>
+
+              <!-- Work Info -->
+              <Textbox Name="txtWorkInfo">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>="วันทำงาน: " &amp; First(Fields!WorkDays.Value, "PayrollDetails") &amp; " วัน | วันลา: " &amp; First(Fields!LeaveDays.Value, "PayrollDetails") &amp; " วัน | OT: " &amp; First(Fields!OTHours.Value, "PayrollDetails") &amp; " ชั่วโมง"</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>8.6cm</Top>
+                <Left>0cm</Left>
+                <Height>0.5cm</Height>
+                <Width>19cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <!-- Signature Section -->
+              <Textbox Name="txtPreparedBy">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>ผู้จัดทำ</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>9.5cm</Top>
+                <Left>0cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtApprovedBy">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>ผู้อนุมัติ</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>9.5cm</Top>
+                <Left>6.5cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtReceivedBy">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>ผู้รับเงิน</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>9.5cm</Top>
+                <Left>13cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtPreparedByLine">
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>...............................</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.5cm</Top>
+                <Left>0cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtApprovedByLine">
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>...............................</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.5cm</Top>
+                <Left>6.5cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtReceivedByLine">
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>...............................</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.5cm</Top>
+                <Left>13cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtPreparedByName">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>=First(Fields!PreparedByName.Value, "Signatures")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.9cm</Top>
+                <Left>0cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtApprovedByName">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>=First(Fields!ApprovedByName.Value, "Signatures")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.9cm</Top>
+                <Left>6.5cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+              <Textbox Name="txtReceivedByName">
+                <CanGrow>true</CanGrow>
+                <Paragraphs>
+                  <Paragraph>
+                    <TextRuns>
+                      <TextRun>
+                        <Value>=First(Fields!ReceivedByName.Value, "Signatures")</Value>
+                        <Style>
+                          <FontFamily>TH Sarabun New</FontFamily>
+                          <FontSize>10pt</FontSize>
+                        </Style>
+                      </TextRun>
+                    </TextRuns>
+                    <Style>
+                      <TextAlign>Center</TextAlign>
+                    </Style>
+                  </Paragraph>
+                </Paragraphs>
+                <Top>10.9cm</Top>
+                <Left>13cm</Left>
+                <Height>0.4cm</Height>
+                <Width>6cm</Width>
+                <Style>
+                  <Border>
+                    <Style>None</Style>
+                  </Border>
+                </Style>
+              </Textbox>
+
+            </ReportItems>
+            <Top>0cm</Top>
+            <Left>0cm</Left>
+            <Height>12cm</Height>
+            <Width>19cm</Width>
+            <Style>
+              <Border>
+                <Style>Solid</Style>
+                <Width>1pt</Width>
+              </Border>
+            </Style>
+          </Rectangle>
+        </ReportItems>
+        <Height>12.5cm</Height>
+        <Style />
+      </Body>
+      <Width>19.5cm</Width>
+      <Page>
+        <PageHeight>29.7cm</PageHeight>
+        <PageWidth>21cm</PageWidth>
+        <LeftMargin>1cm</LeftMargin>
+        <RightMargin>1cm</RightMargin>
+        <TopMargin>1cm</TopMargin>
+        <BottomMargin>1cm</BottomMargin>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Cm</rd:ReportUnitType>
+  <rd:ReportID>payroll-voucher-001</rd:ReportID>
+</Report>

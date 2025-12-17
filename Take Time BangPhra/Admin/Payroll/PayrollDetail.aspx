@@ -356,6 +356,7 @@
             <!-- Action Buttons -->
             <div class="action-buttons">
                 <asp:Button ID="btnPrint" runat="server" Text="พิมพ์สลิป" CssClass="btn-print" OnClientClick="window.print(); return false;" />
+                <asp:Button ID="btnPrintVoucher" runat="server" Text="พิมพ์ใบสำคัญจ่าย (PDF)" CssClass="btn-print" OnClick="btnPrintVoucher_Click" />
                 <asp:Button ID="btnGenerateVoucher" runat="server" Text="สร้าง Payment Voucher" CssClass="btn-voucher" OnClick="btnGenerateVoucher_Click" />
             </div>
         </div>

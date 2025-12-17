@@ -521,17 +521,14 @@ namespace Take_Time_BangPhra.Admin.HR
                     }
                 }
 
-                // Hash the password
-                string hashedPassword = SecurityHelper.HashPassword(txtPassword.Text);
-
-                // Insert new employee
+                // Insert new employee (plain text password)
                 using (SqlCommand cmd = new SqlCommand(@"
                     INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status)
                     VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1);
                     SELECT SCOPE_IDENTITY();", conn))
                 {
                     cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
-                    cmd.Parameters.AddWithValue("@Password", hashedPassword);
+                    cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
