@@ -144,5 +144,25 @@ namespace Take_Time_BangPhra.Admin.HR
         /// lblMessage control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblMessage;
+
+        /// <summary>
+        /// imgSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Image imgSignature;
+
+        /// <summary>
+        /// fuSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.FileUpload fuSignature;
+
+        /// <summary>
+        /// btnUploadSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnUploadSignature;
+
+        /// <summary>
+        /// btnDeleteSignature control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnDeleteSignature;
     }
 }

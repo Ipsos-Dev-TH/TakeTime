@@ -28,10 +28,12 @@ public class PayrollOperationResult
 public class PayrollService
 {
     private readonly string connectionString;
+    private readonly DocumentHelper documentHelper;
 
     public PayrollService()
     {
         connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        documentHelper = new DocumentHelper(connectionString);
     }
 
     #region Salary Management
@@ -505,6 +507,9 @@ public class PayrollService
                         PR.ID, PR.PayrollPeriod_ID, PR.Admin_ID,
                         ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
                         ISNULL(PR.BaseSalary, 0) AS BaseSalary,
+                        ISNULL(PR.WorkDays, 0) AS WorkDays,
+                        ISNULL(PR.LeaveDays, 0) AS LeaveDays,
+                        ISNULL(PR.OTHours, 0) AS OTHours,
                         ISNULL(PR.OTAmount, 0) AS OTAmount,
                         ISNULL(PR.BonusAmount, 0) AS BonusAmount,
                         ISNULL(PR.AllowanceAmount, 0) AS AllowanceAmount,
@@ -516,7 +521,7 @@ public class PayrollService
                         ISNULL(PR.TotalDeductions, 0) AS TotalDeductions,
                         ISNULL(PR.NetSalary, 0) AS NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        'PAY' + CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
+                        PR.VoucherNumber,
                         PP.Year, PP.Month, PP.PeriodName,
                         A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
@@ -593,10 +598,11 @@ public class PayrollService
 
     /// <summary>
     /// Generate payment voucher for a payroll record
-    /// Creates a proper payment voucher number and optionally links to Account_Payment
+    /// Creates a proper payment voucher number using the same running number as Account_Payment
+    /// Always creates an Account_Payment record so it appears in the payment voucher management
     /// </summary>
     public (bool Success, string VoucherNumber, string Message) GeneratePayrollVoucher(
-        long payrollRecordId, short createdByAdminId, bool createAccountPayment = false)
+        long payrollRecordId, short createdByAdminId, bool createAccountPayment = true)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -638,27 +644,9 @@ public class PayrollService
                         return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว");
                     }
 
-                    // Generate voucher number using format: PV-YYMMDD-NNNN
-                    DateTime now = DateTime.Now;
-                    string dateCode = now.ToString("yyMMdd");
-
-                    // Get next sequence for today
-                    int sequence = 1;
-                    using (SqlCommand seqCmd = new SqlCommand(@"
-                        SELECT ISNULL(MAX(CAST(RIGHT(VoucherNumber, 4) AS INT)), 0) + 1
-                        FROM Payroll_Records
-                        WHERE VoucherNumber LIKE @Pattern
-                          AND VoucherGenerated = 1", conn, transaction))
-                    {
-                        seqCmd.Parameters.AddWithValue("@Pattern", $"PV-{dateCode}-%");
-                        object result = seqCmd.ExecuteScalar();
-                        if (result != null && result != DBNull.Value)
-                        {
-                            sequence = Convert.ToInt32(result);
-                        }
-                    }
-
-                    string voucherNumber = $"PV-{dateCode}-{sequence:D4}";
+                    // Generate voucher number using DocumentHelper - same running number as Account_Payment
+                    // Format: PAYYYMMDDNNN (e.g., PAY2512170001)
+                    string voucherNumber = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", DateTime.Now);
 
                     // Update payroll record with voucher info
                     using (SqlCommand updateCmd = new SqlCommand(@"
@@ -675,41 +663,38 @@ public class PayrollService
                         updateCmd.ExecuteNonQuery();
                     }
 
-                    // Optionally create Account_Payment record
-                    if (createAccountPayment)
+                    // Always create Account_Payment record so it appears in payment voucher management
+                    decimal netSalary = Convert.ToDecimal(payrollRecord["NetSalary"]);
+                    string employeeName = payrollRecord["EmployeeName"].ToString();
+                    int periodYear = Convert.ToInt32(payrollRecord["Year"]);
+                    int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
+                    string periodName = payrollRecord["PeriodName"].ToString();
+
+                    // Insert into Account_Payment for tracking in payment voucher management
+                    using (SqlCommand paymentCmd = new SqlCommand(@"
+                        INSERT INTO Account_Payment
+                        (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
+                         Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID, Notes)
+                        VALUES
+                        (@VoucherNumber, NULL, GETDATE(), @Amount, 1, 0,
+                         @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy, @Notes)", conn, transaction))
                     {
-                        decimal netSalary = Convert.ToDecimal(payrollRecord["NetSalary"]);
-                        string employeeName = payrollRecord["EmployeeName"].ToString();
-                        int periodYear = Convert.ToInt32(payrollRecord["Year"]);
-                        int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
-                        string periodName = payrollRecord["PeriodName"].ToString();
+                        paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                        paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
+                        paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                        paymentCmd.Parameters.AddWithValue("@Notes", $"เงินเดือน {employeeName} - {periodName}");
+                        paymentCmd.ExecuteNonQuery();
+                    }
 
-                        // Insert into Account_Payment for tracking
-                        using (SqlCommand paymentCmd = new SqlCommand(@"
-                            INSERT INTO Account_Payment
-                            (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
-                             Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID, Notes)
-                            VALUES
-                            (@VoucherNumber, NULL, GETDATE(), @Amount, 1, 0,
-                             @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy, @Notes)", conn, transaction))
-                        {
-                            paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-                            paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
-                            paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
-                            paymentCmd.Parameters.AddWithValue("@Notes", $"เงินเดือน {employeeName} - {periodName}");
-                            paymentCmd.ExecuteNonQuery();
-                        }
-
-                        // Insert payment detail
-                        using (SqlCommand detailCmd = new SqlCommand(@"
-                            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
-                            VALUES (@VoucherNumber, 1, @Detail, @Amount)", conn, transaction))
-                        {
-                            detailCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-                            detailCmd.Parameters.AddWithValue("@Detail", $"จ่ายเงินเดือน {periodName} - {employeeName}");
-                            detailCmd.Parameters.AddWithValue("@Amount", netSalary);
-                            detailCmd.ExecuteNonQuery();
-                        }
+                    // Insert payment detail
+                    using (SqlCommand detailCmd = new SqlCommand(@"
+                        INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
+                        VALUES (@VoucherNumber, 1, @Detail, @Amount)", conn, transaction))
+                    {
+                        detailCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                        detailCmd.Parameters.AddWithValue("@Detail", $"จ่ายเงินเดือน {periodName} - {employeeName}");
+                        detailCmd.Parameters.AddWithValue("@Amount", netSalary);
+                        detailCmd.ExecuteNonQuery();
                     }
 
                     transaction.Commit();
@@ -726,9 +711,10 @@ public class PayrollService
 
     /// <summary>
     /// Generate payment vouchers for all records in a payroll period
+    /// Always creates Account_Payment records so they appear in payment voucher management
     /// </summary>
     public (int SuccessCount, int FailCount, string Message) GenerateAllVouchersForPeriod(
-        int payrollPeriodId, short createdByAdminId, bool createAccountPayment = false)
+        int payrollPeriodId, short createdByAdminId, bool createAccountPayment = true)
     {
         int successCount = 0;
         int failCount = 0;

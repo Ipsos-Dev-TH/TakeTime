@@ -584,8 +584,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 short? adminId = GetAdminID();
                 if (!adminId.HasValue) return false;
 
-                // Generate proper payment voucher with tracking
-                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value, false);
+                // Generate proper payment voucher with tracking (creates Account_Payment record)
+                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value);
                 return result.Success;
             }
             catch
