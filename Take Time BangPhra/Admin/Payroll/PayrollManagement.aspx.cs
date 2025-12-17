@@ -281,17 +281,20 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 {
                     long recordId = Convert.ToInt64(row["ID"]);
                     short adminId = Convert.ToInt16(row["Admin_ID"]);
-                    decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
 
-                    // If salary is 0, try to get from Employee_Salary
+                    // Always get latest salary from Employee_Salary
+                    decimal baseSalary = GetEmployeeCurrentSalary(adminId);
+                    decimal oldSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
+
+                    if (baseSalary != oldSalary && baseSalary > 0)
+                    {
+                        salaryUpdatedCount++;
+                    }
+
+                    // If still no salary from Employee_Salary, use existing value
                     if (baseSalary == 0)
                     {
-                        decimal latestSalary = GetEmployeeCurrentSalary(adminId);
-                        if (latestSalary > 0)
-                        {
-                            baseSalary = latestSalary;
-                            salaryUpdatedCount++;
-                        }
+                        baseSalary = oldSalary;
                     }
 
                     // Get leave days and OT hours for this employee in this period
