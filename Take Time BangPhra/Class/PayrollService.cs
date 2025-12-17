@@ -540,9 +540,10 @@ public class PayrollService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
+                // Use 'APPROVED' status for consistency with summary queries and reports
                 cmd.CommandText = @"
                     UPDATE Payroll_Periods
-                    SET Status = 'COMPLETED',
+                    SET Status = 'APPROVED',
                         ClosedBy_AdminID = @ApprovedBy,
                         ClosedDate = GETDATE()
                     WHERE ID = @PeriodID";
