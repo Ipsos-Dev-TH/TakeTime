@@ -274,14 +274,19 @@ namespace Take_Time_BangPhra.Account
         private DataTable GetAllPayments(DateTime startDate, DateTime endDate, string status)
         {
             // Get all payment vouchers in the date range
+            // For payroll payments (เงินเดือน), show employee name from Payroll_Records via VoucherNumber
             string query = @"
                 SELECT ap.ID, ap.Created_Date, ap.Paid_How, ap.Paid_Type, ap.Total_Amount, ap.Vat,
                        ap.Status,
-                       ISNULL(v.Name, '-') as Vendor_Name,
+                       CASE
+                           WHEN ap.Paid_Type = N'เงินเดือน' AND pr.EmployeeName IS NOT NULL THEN pr.EmployeeName
+                           ELSE ISNULL(v.Name, '-')
+                       END as Vendor_Name,
                        a.Username as Created_By
                 FROM Account_Payment ap
                 LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
                 LEFT JOIN Admin a ON ap.Created_By_ID = a.ID
+                LEFT JOIN Payroll_Records pr ON ap.ID = pr.VoucherNumber
                 WHERE CAST(ap.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(ap.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
                   AND ap.Status LIKE @Status";
@@ -562,7 +567,11 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    throw new Exception($"ไม่พบไฟล์ PDF สำหรับเอกสาร {docNum}");
+                    // PDF not found - redirect to edit mode to regenerate PDF
+                    // This is especially important for payroll vouchers created programmatically
+                    System.Diagnostics.Debug.WriteLine($"   ⚠️ PDF not found, redirecting to edit mode to regenerate");
+                    Response.Redirect($"/Account/PaymentVoucher?command=edit&uid={uid}");
+                    return;
                 }
                 else
                 {

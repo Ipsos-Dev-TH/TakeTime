@@ -459,8 +459,39 @@ namespace Take_Time_BangPhra.Account.Report
                 catch { }
 
                 DataTable dtPaymentDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = '" + PayNumber + "' order by Number ASC");
-                
+
                 DataTable dtPayment = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = '" + PayNumber + "'");
+
+                // For payroll payments (เงินเดือน), get employee name from Payroll_Records via VoucherNumber
+                // This shows employee name instead of "เงินเดือนพนักงาน"
+                try
+                {
+                    if (dtPayment.Rows.Count > 0 && dtPayment.Rows[0]["Paid_Type"]?.ToString() == "เงินเดือน")
+                    {
+                        // Get employee name from Payroll_Records where VoucherNumber = Account_Payment.ID
+                        var empNameParams = new Dictionary<string, object>
+                        {
+                            { "@VoucherNumber", PayNumber }
+                        };
+                        DataTable dtEmployeeName = code.DatabaseQuerySafe(conn,
+                            "SELECT EmployeeName FROM Payroll_Records WHERE VoucherNumber = @VoucherNumber",
+                            empNameParams);
+
+                        if (dtEmployeeName != null && dtEmployeeName.Rows.Count > 0 &&
+                            dtEmployeeName.Rows[0]["EmployeeName"] != DBNull.Value &&
+                            !string.IsNullOrEmpty(dtEmployeeName.Rows[0]["EmployeeName"].ToString()))
+                        {
+                            // Override vendor name with employee name for payroll vouchers
+                            dtVendorReport.Rows[0]["Name"] = dtEmployeeName.Rows[0]["EmployeeName"].ToString();
+                            dtVendorReport.Rows[0]["Address"] = ""; // Clear address for employee payments
+                            System.Diagnostics.Debug.WriteLine($"Payroll voucher: Using employee name '{dtVendorReport.Rows[0]["Name"]}' instead of vendor");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error getting employee name for payroll payment: {ex.Message}");
+                }
                 uid = dtPayment.Rows[0]["UID"].ToString();
                 //GridView1.DataSource = dt;
                 //GridView1.DataBind();

@@ -731,6 +731,7 @@ public class PayrollService
                     }
 
                     // Insert into Account_Payment for tracking in payment voucher management
+                    // Employee name is retrieved via JOIN to Payroll_Records.VoucherNumber = Account_Payment.ID
                     using (SqlCommand paymentCmd = new SqlCommand(@"
                         INSERT INTO Account_Payment
                         (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
