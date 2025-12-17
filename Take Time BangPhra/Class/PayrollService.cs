@@ -412,7 +412,7 @@ public class PayrollService
                         ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
                         PR.TotalDeductions, PR.NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        ISNULL(PR.VoucherNumber, 'PAY' + CAST(PR.ID AS VARCHAR(20))) AS VoucherNumber,
+                        'PAY' + CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
                         A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
@@ -457,7 +457,7 @@ public class PayrollService
                         ISNULL(PR.TotalDeductions, 0) AS TotalDeductions,
                         ISNULL(PR.NetSalary, 0) AS NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        PR.VoucherNumber,
+                        'PAY' + CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
                         PP.Year, PP.Month, PP.PeriodName,
                         A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
@@ -520,12 +520,9 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     UPDATE Payroll_Records
-                    SET VoucherGenerated = 1,
-                        VoucherNumber = @VoucherNumber,
-                        UpdatedDate = GETDATE()
+                    SET VoucherGenerated = 1
                     WHERE ID = @RecordID";
                 cmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
-                cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
 
                 conn.Open();
                 return cmd.ExecuteNonQuery() > 0;
