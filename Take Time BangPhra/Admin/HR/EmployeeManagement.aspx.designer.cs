@@ -164,5 +164,60 @@ namespace Take_Time_BangPhra.Admin.HR
         /// btnDeleteSignature control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnDeleteSignature;
+
+        /// <summary>
+        /// txtIDCard control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtIDCard;
+
+        /// <summary>
+        /// txtBirthDate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtBirthDate;
+
+        /// <summary>
+        /// txtPhone control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPhone;
+
+        /// <summary>
+        /// txtEmail control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEmail;
+
+        /// <summary>
+        /// txtAddress control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAddress;
+
+        /// <summary>
+        /// txtHireDate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtHireDate;
+
+        /// <summary>
+        /// ddlBank control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlBank;
+
+        /// <summary>
+        /// txtBankAccountNumber control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtBankAccountNumber;
+
+        /// <summary>
+        /// txtBankAccountName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtBankAccountName;
+
+        /// <summary>
+        /// txtEmergencyContact control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEmergencyContact;
+
+        /// <summary>
+        /// txtEmergencyPhone control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEmergencyPhone;
     }
 }
