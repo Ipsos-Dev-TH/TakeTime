@@ -816,7 +816,8 @@ public class PayrollService
     /// Always creates Account_Payment records so they appear in payment voucher management
     /// </summary>
     public (int SuccessCount, int FailCount, string Message) GenerateAllVouchersForPeriod(
-        int payrollPeriodId, short createdByAdminId, bool createAccountPayment = true)
+        int payrollPeriodId, short createdByAdminId,
+        string paidHow = "โอน", string paidType = "ค่าจ้าง", int vatTypeId = 0)
     {
         int successCount = 0;
         int failCount = 0;
@@ -831,7 +832,7 @@ public class PayrollService
             if (!alreadyGenerated)
             {
                 long recordId = Convert.ToInt64(row["ID"]);
-                var result = GeneratePayrollVoucher(recordId, createdByAdminId, createAccountPayment);
+                var result = GeneratePayrollVoucher(recordId, createdByAdminId, paidHow, paidType, vatTypeId);
 
                 if (result.Success)
                     successCount++;
