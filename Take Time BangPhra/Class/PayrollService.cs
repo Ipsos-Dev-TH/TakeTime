@@ -705,18 +705,31 @@ public class PayrollService
                     // Get or create payroll vendor ID
                     int payrollVendorId = GetOrCreatePayrollVendorId(conn, transaction);
 
+                    // Get valid Vat_Type_ID (prefer 0% VAT for salary payments)
+                    int vatTypeId = 1;
+                    using (SqlCommand vatCmd = new SqlCommand(
+                        "SELECT TOP 1 ID FROM Account_Vat_Type WHERE Status = 'True' ORDER BY Vat_Percent ASC", conn, transaction))
+                    {
+                        object vatResult = vatCmd.ExecuteScalar();
+                        if (vatResult != null && vatResult != DBNull.Value)
+                        {
+                            vatTypeId = Convert.ToInt32(vatResult);
+                        }
+                    }
+
                     // Insert into Account_Payment for tracking in payment voucher management
                     using (SqlCommand paymentCmd = new SqlCommand(@"
                         INSERT INTO Account_Payment
                         (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
                          Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID)
                         VALUES
-                        (@VoucherNumber, @VendorID, GETDATE(), @Amount, 1, 0,
+                        (@VoucherNumber, @VendorID, GETDATE(), @Amount, @VatTypeID, 0,
                          @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy)", conn, transaction))
                     {
                         paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
                         paymentCmd.Parameters.AddWithValue("@VendorID", payrollVendorId);
                         paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
+                        paymentCmd.Parameters.AddWithValue("@VatTypeID", vatTypeId);
                         paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
                         paymentCmd.ExecuteNonQuery();
                     }
