@@ -331,8 +331,36 @@
             margin-bottom: 20px;
         }
 
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-success {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 1px solid #b7d7a8;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.15);
+        }
+        .alert-success::before { content: "✓ "; font-weight: bold; }
+
+        .alert-error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border: 1px solid #f1b0b7;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
+        }
+        .alert-error::before { content: "⚠ "; font-weight: bold; }
+
+        .alert-info {
+            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+            color: #0c5460;
+            border: 1px solid #a2d3e0;
+            box-shadow: 0 2px 8px rgba(23, 162, 184, 0.15);
+        }
+        .alert-info::before { content: "ℹ "; font-weight: bold; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert { animation: fadeIn 0.3s ease-out; }
 
         .employee-name-cell {
             display: flex;
@@ -674,5 +702,17 @@
                 event.target.style.display = 'none';
             }
         }
+
+        // Auto-dismiss alert messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            var alerts = document.querySelectorAll('.alert');
+            alerts.forEach(function(alert) {
+                setTimeout(function() {
+                    alert.style.transition = 'opacity 0.5s ease-out';
+                    alert.style.opacity = '0';
+                    setTimeout(function() { alert.style.display = 'none'; }, 500);
+                }, 5000);
+            });
+        });
     </script>
 </asp:Content>
