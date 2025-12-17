@@ -149,14 +149,18 @@ namespace Take_Time_BangPhra.Account.Report
                     DropDownList1.DataBind();
 
                     string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
-                    string[] dirs = Directory.GetFiles(path+"\\"+docdate.Year+"\\"+docdate.Month, id + "_" + uid + "*");
-                    foreach (string file in dirs)
+                    string paymentPath = path + "\\" + docdate.Year + "\\" + docdate.Month;
+                    if (Directory.Exists(paymentPath))
                     {
-                        if(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id, "").Replace("_" + uid, "").Length > 0)
+                        string[] dirs = Directory.GetFiles(paymentPath, id + "_" + uid + "*");
+                        foreach (string file in dirs)
                         {
-                            dtUpload.Rows.Add(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id+"_", "").Replace( uid+"_", "")+"."+ System.IO.Path.GetFileName(file).Split('.')[1]);
+                            if(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id, "").Replace("_" + uid, "").Length > 0)
+                            {
+                                dtUpload.Rows.Add(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id+"_", "").Replace( uid+"_", "")+"."+ System.IO.Path.GetFileName(file).Split('.')[1]);
+                            }
+
                         }
-                        
                     }
                     GridView2.DataSource = dtUpload;
                     GridView2.DataBind();
