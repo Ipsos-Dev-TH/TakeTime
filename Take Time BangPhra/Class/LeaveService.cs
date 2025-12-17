@@ -432,7 +432,7 @@ public class LeaveService
                         LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
                         LR.ApprovedBy_AdminID, LR.ApprovedDate,
                         LR.RejectedReason,
-                        ApprovedBy.Name AS ApprovedByName
+                        ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName
                     FROM Leave_Requests LR
                     INNER JOIN Admin A ON A.ID = LR.Admin_ID
                     INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
@@ -653,6 +653,386 @@ public class LeaveService
                     GROUP BY LT.LeaveTypeName
                     ORDER BY TotalDays DESC";
                 cmd.Parameters.AddWithValue("@Year", year);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    #endregion
+
+    #region Supervisor Leave Operations
+
+    /// <summary>
+    /// Get pending leave requests for supervisor's subordinates
+    /// </summary>
+    public DataTable GetPendingLeaveRequestsForSupervisor(short supervisorAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT
+                        LR.ID, LR.RequestNumber, LR.Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        A.Username AS NickName,
+                        LT.LeaveTypeName, LT.LeaveTypeCode,
+                        LR.StartDate, LR.EndDate, LR.TotalDays,
+                        LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
+                        LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
+                        ES.IsPrimary AS IsPrimarySupervisor,
+                        ISNULL(Salary.Position, A.Role) AS EmployeePosition
+                    FROM Leave_Requests LR
+                    INNER JOIN Admin A ON A.ID = LR.Admin_ID
+                    INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                    INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = LR.Admin_ID
+                    LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
+                    WHERE ES.Supervisor_AdminID = @SupervisorID
+                      AND ES.IsActive = 1
+                      AND ES.CanApproveLeave = 1
+                      AND LR.Status = 'PENDING'
+                    ORDER BY LR.CreatedDate ASC";
+                cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get all leave requests for supervisor's subordinates (with filters)
+    /// </summary>
+    public DataTable GetLeaveRequestsForSupervisor(short supervisorAdminId, string status = null, short? year = null)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+
+                var whereClauses = new List<string>();
+                whereClauses.Add("ES.Supervisor_AdminID = @SupervisorID");
+                whereClauses.Add("ES.IsActive = 1");
+                cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+
+                if (!string.IsNullOrEmpty(status))
+                {
+                    whereClauses.Add("LR.Status = @Status");
+                    cmd.Parameters.AddWithValue("@Status", status);
+                }
+
+                if (year.HasValue)
+                {
+                    whereClauses.Add("YEAR(LR.StartDate) = @Year");
+                    cmd.Parameters.AddWithValue("@Year", year.Value);
+                }
+
+                string whereClause = "WHERE " + string.Join(" AND ", whereClauses);
+
+                cmd.CommandText = @"
+                    SELECT
+                        LR.ID, LR.RequestNumber, LR.Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        A.Username AS NickName,
+                        LT.LeaveTypeName, LT.LeaveTypeCode,
+                        LR.StartDate, LR.EndDate, LR.TotalDays,
+                        LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
+                        LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
+                        LR.ApprovedBy_AdminID, LR.ApprovedDate,
+                        LR.RejectedReason,
+                        ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                        ES.IsPrimary AS IsPrimarySupervisor,
+                        ES.CanApproveLeave
+                    FROM Leave_Requests LR
+                    INNER JOIN Admin A ON A.ID = LR.Admin_ID
+                    INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                    INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = LR.Admin_ID
+                    LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
+                    " + whereClause + @"
+                    ORDER BY LR.CreatedDate DESC";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if supervisor can approve leave for employee
+    /// </summary>
+    public bool CanApproveLeaveFor(short supervisorAdminId, short employeeAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT COUNT(*) FROM Employee_Supervisor
+                WHERE Supervisor_AdminID = @SupID AND Employee_AdminID = @EmpID
+                AND IsActive = 1 AND CanApproveLeave = 1", conn))
+            {
+                cmd.Parameters.AddWithValue("@SupID", supervisorAdminId);
+                cmd.Parameters.AddWithValue("@EmpID", employeeAdminId);
+
+                conn.Open();
+                return (int)cmd.ExecuteScalar() > 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Approve leave request (with supervisor validation)
+    /// </summary>
+    public (bool Success, string Message) ApproveLeaveRequestBySupervisor(long requestId, short approverAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+            SqlTransaction transaction = conn.BeginTransaction();
+
+            try
+            {
+                // Get request details and verify approver has permission
+                SqlCommand cmd = new SqlCommand();
+                cmd.Connection = conn;
+                cmd.Transaction = transaction;
+                cmd.CommandText = @"
+                    SELECT LR.Admin_ID, LR.LeaveType_ID, LR.TotalDays, YEAR(LR.StartDate) AS Year, LR.Status
+                    FROM Leave_Requests LR
+                    WHERE LR.ID = @RequestID";
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                short adminId = 0;
+                byte leaveTypeId = 0;
+                decimal totalDays = 0;
+                short year = 0;
+                string currentStatus = "";
+
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        adminId = Convert.ToInt16(reader["Admin_ID"]);
+                        leaveTypeId = Convert.ToByte(reader["LeaveType_ID"]);
+                        totalDays = Convert.ToDecimal(reader["TotalDays"]);
+                        year = Convert.ToInt16(reader["Year"]);
+                        currentStatus = reader["Status"].ToString();
+                    }
+                    else
+                    {
+                        transaction.Rollback();
+                        return (false, "ไม่พบคำขอลานี้");
+                    }
+                }
+
+                if (currentStatus != "PENDING")
+                {
+                    transaction.Rollback();
+                    return (false, "คำขอลานี้ได้รับการดำเนินการแล้ว");
+                }
+
+                // Check if approver is supervisor of this employee (or is Admin/Owner)
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    SELECT
+                        (SELECT COUNT(*) FROM Employee_Supervisor
+                         WHERE Supervisor_AdminID = @ApproverID AND Employee_AdminID = @EmpID
+                         AND IsActive = 1 AND CanApproveLeave = 1) AS IsSupervisor,
+                        (SELECT Role FROM Admin WHERE ID = @ApproverID) AS ApproverRole";
+                cmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                cmd.Parameters.AddWithValue("@EmpID", adminId);
+
+                bool canApprove = false;
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        int isSupervisor = Convert.ToInt32(reader["IsSupervisor"]);
+                        string approverRole = reader["ApproverRole"]?.ToString() ?? "";
+
+                        // Can approve if: is supervisor, or is Admin/Owner
+                        canApprove = isSupervisor > 0 || approverRole == "Admin" || approverRole == "Owner";
+                    }
+                }
+
+                if (!canApprove)
+                {
+                    transaction.Rollback();
+                    return (false, "คุณไม่มีสิทธิ์อนุมัติคำขอลานี้");
+                }
+
+                // Update leave request status
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    UPDATE Leave_Requests
+                    SET Status = 'APPROVED',
+                        ApprovedBy_AdminID = @ApproverID,
+                        ApprovedDate = GETDATE()
+                    WHERE ID = @RequestID";
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+                cmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                cmd.ExecuteNonQuery();
+
+                // Update leave quota
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    UPDATE Employee_Leave_Quota
+                    SET UsedDays = UsedDays + @TotalDays,
+                        RemainingDays = RemainingDays - @TotalDays
+                    WHERE Admin_ID = @AdminID
+                      AND LeaveType_ID = @LeaveTypeID
+                      AND Year = @Year";
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                cmd.Parameters.AddWithValue("@Year", year);
+                cmd.Parameters.AddWithValue("@TotalDays", totalDays);
+                cmd.ExecuteNonQuery();
+
+                transaction.Commit();
+                return (true, "อนุมัติคำขอลาสำเร็จ");
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reject leave request (with supervisor validation)
+    /// </summary>
+    public (bool Success, string Message) RejectLeaveRequestBySupervisor(long requestId, string rejectedReason, short rejectorAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+
+            try
+            {
+                // Get employee ID and current status
+                SqlCommand cmd = new SqlCommand();
+                cmd.Connection = conn;
+                cmd.CommandText = @"SELECT Admin_ID, Status FROM Leave_Requests WHERE ID = @RequestID";
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                short adminId = 0;
+                string currentStatus = "";
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        adminId = Convert.ToInt16(reader["Admin_ID"]);
+                        currentStatus = reader["Status"].ToString();
+                    }
+                    else
+                    {
+                        return (false, "ไม่พบคำขอลานี้");
+                    }
+                }
+
+                if (currentStatus != "PENDING")
+                {
+                    return (false, "คำขอลานี้ได้รับการดำเนินการแล้ว");
+                }
+
+                // Check if rejector is supervisor of this employee (or is Admin/Owner)
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    SELECT
+                        (SELECT COUNT(*) FROM Employee_Supervisor
+                         WHERE Supervisor_AdminID = @RejectorID AND Employee_AdminID = @EmpID
+                         AND IsActive = 1 AND CanApproveLeave = 1) AS IsSupervisor,
+                        (SELECT Role FROM Admin WHERE ID = @RejectorID) AS RejectorRole";
+                cmd.Parameters.AddWithValue("@RejectorID", rejectorAdminId);
+                cmd.Parameters.AddWithValue("@EmpID", adminId);
+
+                bool canReject = false;
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        int isSupervisor = Convert.ToInt32(reader["IsSupervisor"]);
+                        string rejectorRole = reader["RejectorRole"]?.ToString() ?? "";
+                        canReject = isSupervisor > 0 || rejectorRole == "Admin" || rejectorRole == "Owner";
+                    }
+                }
+
+                if (!canReject)
+                {
+                    return (false, "คุณไม่มีสิทธิ์ปฏิเสธคำขอลานี้");
+                }
+
+                // Update leave request status
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    UPDATE Leave_Requests
+                    SET Status = 'REJECTED',
+                        RejectedReason = @RejectedReason,
+                        ApprovedBy_AdminID = @RejectorID,
+                        ApprovedDate = GETDATE()
+                    WHERE ID = @RequestID";
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+                cmd.Parameters.AddWithValue("@RejectedReason", rejectedReason ?? "ไม่ได้ระบุเหตุผล");
+                cmd.Parameters.AddWithValue("@RejectorID", rejectorAdminId);
+
+                int affected = cmd.ExecuteNonQuery();
+                if (affected > 0)
+                    return (true, "ปฏิเสธคำขอลาสำเร็จ");
+                else
+                    return (false, "ไม่สามารถปฏิเสธคำขอลาได้");
+            }
+            catch (Exception ex)
+            {
+                return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get leave requests for a specific employee (for supervisor or self-view)
+    /// </summary>
+    public DataTable GetLeaveRequestsForEmployee(short employeeAdminId, short? year = null)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+
+                string yearFilter = year.HasValue ? " AND YEAR(LR.StartDate) = @Year" : "";
+
+                cmd.CommandText = @"
+                    SELECT
+                        LR.ID, LR.RequestNumber,
+                        LT.LeaveTypeName, LT.LeaveTypeCode,
+                        LR.StartDate, LR.EndDate, LR.TotalDays,
+                        LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
+                        LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
+                        LR.ApprovedBy_AdminID, LR.ApprovedDate, LR.RejectedReason,
+                        ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName
+                    FROM Leave_Requests LR
+                    INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                    LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
+                    WHERE LR.Admin_ID = @AdminID" + yearFilter + @"
+                    ORDER BY LR.CreatedDate DESC";
+                cmd.Parameters.AddWithValue("@AdminID", employeeAdminId);
+                if (year.HasValue)
+                    cmd.Parameters.AddWithValue("@Year", year.Value);
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
