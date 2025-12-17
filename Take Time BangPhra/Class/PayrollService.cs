@@ -453,6 +453,7 @@ public class PayrollService
 
     /// <summary>
     /// Get payroll records for a period
+    /// Uses Employee_Salary as fallback when Payroll_Records.BaseSalary is 0
     /// </summary>
     public DataTable GetPayrollRecords(int payrollPeriodId)
     {
@@ -463,7 +464,8 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     SELECT
-                        PR.ID, PR.Admin_ID, PR.EmployeeName, PR.BaseSalary,
+                        PR.ID, PR.Admin_ID, PR.EmployeeName,
+                        CASE WHEN ISNULL(PR.BaseSalary, 0) = 0 THEN ISNULL(ES.MonthlySalary, 0) ELSE PR.BaseSalary END AS BaseSalary,
                         PR.WorkDays, PR.LeaveDays, PR.OTHours, PR.OTAmount,
                         ISNULL(PR.BonusAmount, 0) AS BonusAmount,
                         ISNULL(PR.AllowanceAmount, 0) AS AllowanceAmount,
@@ -474,8 +476,9 @@ public class PayrollService
                         ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
                         PR.TotalDeductions, PR.NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        'PAY' + CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
-                        A.Username AS NickName, ES.Position
+                        PR.VoucherNumber,
+                        A.Username AS NickName, ES.Position,
+                        ES.MonthlySalary AS CurrentSalary
                     FROM Payroll_Records PR
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
                     LEFT JOIN Employee_Salary ES ON ES.Admin_ID = PR.Admin_ID AND ES.IsActive = 1
@@ -495,6 +498,7 @@ public class PayrollService
 
     /// <summary>
     /// Get payroll record by ID
+    /// Uses Employee_Salary as fallback when Payroll_Records.BaseSalary is 0
     /// </summary>
     public DataTable GetPayrollRecord(long payrollRecordId)
     {
@@ -507,7 +511,7 @@ public class PayrollService
                     SELECT
                         PR.ID, PR.PayrollPeriod_ID, PR.Admin_ID,
                         ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
-                        ISNULL(PR.BaseSalary, 0) AS BaseSalary,
+                        CASE WHEN ISNULL(PR.BaseSalary, 0) = 0 THEN ISNULL(ES.MonthlySalary, 0) ELSE PR.BaseSalary END AS BaseSalary,
                         ISNULL(PR.WorkDays, 0) AS WorkDays,
                         ISNULL(PR.LeaveDays, 0) AS LeaveDays,
                         ISNULL(PR.OTHours, 0) AS OTHours,
@@ -524,7 +528,8 @@ public class PayrollService
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
                         PR.VoucherNumber,
                         PP.Year, PP.Month, PP.PeriodName,
-                        A.Username AS NickName, ES.Position
+                        A.Username AS NickName, ES.Position,
+                        ES.MonthlySalary AS CurrentSalary
                     FROM Payroll_Records PR
                     INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
