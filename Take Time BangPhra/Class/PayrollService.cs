@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
+using Take_Time_BangPhra.Class;
 
 /// <summary>
 /// Result class for payroll operations
