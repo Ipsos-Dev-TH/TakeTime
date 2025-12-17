@@ -110,7 +110,7 @@ public class PaymentVoucherPdfService
 
                 // Generate PDF
                 string year = createdDate.Year.ToString();
-                string month = createdDate.Month.ToString();
+                string month = createdDate.Month.ToString("D2"); // Zero-padded month to match document ID format
                 string outputBasePath = GetOutputBasePath();
                 string outputDir = Path.Combine(outputBasePath, year, month);
                 string outputFile = Path.Combine(outputDir, $"{paymentId}_{uid}.pdf");

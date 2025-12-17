@@ -149,5 +149,40 @@ namespace Take_Time_BangPhra.Admin.Payroll
         /// btnSavePayroll control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnSavePayroll;
+
+        /// <summary>
+        /// lblPayEmployeeName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblPayEmployeeName;
+
+        /// <summary>
+        /// lblPayAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblPayAmount;
+
+        /// <summary>
+        /// ddlPaidHow control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlPaidHow;
+
+        /// <summary>
+        /// ddlPaidType control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlPaidType;
+
+        /// <summary>
+        /// ddlVatType control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlVatType;
+
+        /// <summary>
+        /// hdnPayRecordId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnPayRecordId;
+
+        /// <summary>
+        /// btnConfirmPayment control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnConfirmPayment;
     }
 }

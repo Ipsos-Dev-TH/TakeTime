@@ -525,8 +525,8 @@ public class SignatureService
                         cmd.CommandText = @"
                             SELECT ID, FirstName, LastName
                             FROM Admin
-                            WHERE IDNumber = @IDNumber";
-                        cmd.Parameters.AddWithValue("@IDNumber", receiverIdNumber);
+                            WHERE IDCard = @IDCard";
+                        cmd.Parameters.AddWithValue("@IDCard", receiverIdNumber);
 
                         conn.Open();
                         using (SqlDataReader reader = cmd.ExecuteReader())
