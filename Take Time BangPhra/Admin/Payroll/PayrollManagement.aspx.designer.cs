@@ -11,6 +11,16 @@ namespace Take_Time_BangPhra.Admin.Payroll
     public partial class PayrollManagement
     {
         /// <summary>
+        /// pnlMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlMessage;
+
+        /// <summary>
+        /// lblMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblMessage;
+
+        /// <summary>
         /// ddlYear control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlYear;
@@ -24,11 +34,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
         /// btnGeneratePayroll control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnGeneratePayroll;
-
-        /// <summary>
-        /// btnApprovePayroll control.
-        /// </summary>
-        protected global::System.Web.UI.WebControls.Button btnApprovePayroll;
 
         /// <summary>
         /// pnlStats control.
@@ -46,9 +51,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected global::System.Web.UI.WebControls.Label lblTotalGrossPay;
 
         /// <summary>
-        /// lblTotalDeductions control.
+        /// lblTotalOT control.
         /// </summary>
-        protected global::System.Web.UI.WebControls.Label lblTotalDeductions;
+        protected global::System.Web.UI.WebControls.Label lblTotalOT;
+
+        /// <summary>
+        /// lblTotalSS control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTotalSS;
 
         /// <summary>
         /// lblTotalNetPay control.
@@ -56,8 +66,88 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected global::System.Web.UI.WebControls.Label lblTotalNetPay;
 
         /// <summary>
+        /// btnRecalculate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnRecalculate;
+
+        /// <summary>
+        /// btnApprovePayroll control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnApprovePayroll;
+
+        /// <summary>
+        /// btnProcessAll control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnProcessAll;
+
+        /// <summary>
+        /// btnExportSS control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnExportSS;
+
+        /// <summary>
         /// gvPayroll control.
         /// </summary>
         protected global::System.Web.UI.WebControls.GridView gvPayroll;
+
+        /// <summary>
+        /// hdnPayrollRecordId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnPayrollRecordId;
+
+        /// <summary>
+        /// hdnPayrollPeriodId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnPayrollPeriodId;
+
+        /// <summary>
+        /// lblEditEmployeeName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblEditEmployeeName;
+
+        /// <summary>
+        /// txtEditBaseSalary control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditBaseSalary;
+
+        /// <summary>
+        /// txtEditOTAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditOTAmount;
+
+        /// <summary>
+        /// txtEditBonus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditBonus;
+
+        /// <summary>
+        /// txtEditAllowance control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditAllowance;
+
+        /// <summary>
+        /// txtEditSocialSecurity control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditSocialSecurity;
+
+        /// <summary>
+        /// txtEditLeaveDeduction control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditLeaveDeduction;
+
+        /// <summary>
+        /// txtEditTax control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditTax;
+
+        /// <summary>
+        /// txtEditOtherDeductions control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditOtherDeductions;
+
+        /// <summary>
+        /// btnSavePayroll control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnSavePayroll;
     }
 }

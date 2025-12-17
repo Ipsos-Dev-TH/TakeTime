@@ -539,6 +539,31 @@ public class PayrollService
         }
     }
 
+    /// <summary>
+    /// Update period totals from records
+    /// </summary>
+    public bool UpdatePeriodTotals(int payrollPeriodId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    UPDATE Payroll_Periods
+                    SET TotalEmployees = (SELECT COUNT(*) FROM Payroll_Records WHERE PayrollPeriod_ID = @PeriodID),
+                        TotalGrossPay = (SELECT ISNULL(SUM(TotalEarnings), 0) FROM Payroll_Records WHERE PayrollPeriod_ID = @PeriodID),
+                        TotalDeductions = (SELECT ISNULL(SUM(TotalDeductions), 0) FROM Payroll_Records WHERE PayrollPeriod_ID = @PeriodID),
+                        TotalNetPay = (SELECT ISNULL(SUM(NetSalary), 0) FROM Payroll_Records WHERE PayrollPeriod_ID = @PeriodID)
+                    WHERE ID = @PeriodID";
+                cmd.Parameters.AddWithValue("@PeriodID", payrollPeriodId);
+
+                conn.Open();
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+    }
+
     #endregion
 
     #region Statistics & Reports
