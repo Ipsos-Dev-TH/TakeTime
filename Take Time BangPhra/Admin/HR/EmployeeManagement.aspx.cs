@@ -536,7 +536,7 @@ namespace Take_Time_BangPhra.Admin.HR
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
 
-                    int newAdminId = Convert.ToInt32(cmd.ExecuteScalar());
+                    short newAdminId = Convert.ToInt16(cmd.ExecuteScalar());
 
                     // Add salary if provided
                     if (salary > 0)

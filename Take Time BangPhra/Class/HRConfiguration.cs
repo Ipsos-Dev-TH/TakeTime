@@ -276,13 +276,44 @@ public static class HRConfiguration
     }
 
     /// <summary>
-    /// Calculate OT amount
+    /// Calculate OT amount with multiplier (1.5x normal, 3x holiday)
     /// </summary>
     public static decimal CalculateOTAmount(decimal monthlySalary, decimal otHours, bool isHoliday = false)
     {
         decimal hourlyRate = CalculateHourlyRate(monthlySalary);
         decimal multiplier = isHoliday ? OTRateHoliday : OTRateNormal;
         return Math.Round(hourlyRate * multiplier * otHours, 2);
+    }
+
+    /// <summary>
+    /// Calculate basic OT amount without multiplier
+    /// Formula: (salary / days in month / 8) * OT hours
+    /// </summary>
+    public static decimal CalculateBasicOTAmount(decimal monthlySalary, decimal otHours, int daysInMonth = 0)
+    {
+        if (daysInMonth <= 0) daysInMonth = WorkingDaysPerMonth;
+        decimal hourlyRate = monthlySalary / daysInMonth / WorkingHoursPerDay;
+        return Math.Round(hourlyRate * otHours, 0);
+    }
+
+    /// <summary>
+    /// Calculate leave deduction
+    /// Formula: (salary / days in month) * leave days (rounded)
+    /// </summary>
+    public static decimal CalculateLeaveDeduction(decimal monthlySalary, decimal leaveDays, int daysInMonth = 0)
+    {
+        if (daysInMonth <= 0) daysInMonth = WorkingDaysPerMonth;
+        if (leaveDays <= 0) return 0;
+        decimal dailyRate = monthlySalary / daysInMonth;
+        return Math.Round(dailyRate * leaveDays, 0);
+    }
+
+    /// <summary>
+    /// Get number of days in a specific month
+    /// </summary>
+    public static int GetDaysInMonth(int year, int month)
+    {
+        return DateTime.DaysInMonth(year, month);
     }
 
     #endregion
