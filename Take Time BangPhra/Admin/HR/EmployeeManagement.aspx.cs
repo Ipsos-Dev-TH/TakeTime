@@ -2,6 +2,7 @@ using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
+using System.IO;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 
@@ -282,6 +283,10 @@ namespace Take_Time_BangPhra.Admin.HR
                                 string role = reader["Role"]?.ToString() ?? "Staff";
                                 string salary = reader["MonthlySalary"] != DBNull.Value ? Convert.ToDecimal(reader["MonthlySalary"]).ToString("0") : "";
                                 string position = reader["Position"]?.ToString() ?? "";
+
+                                // Load signature preview
+                                string employeeFullName = string.IsNullOrEmpty(lastName) ? firstName : firstName + " " + lastName;
+                                LoadSignaturePreview(employeeFullName);
 
                                 // Register JavaScript to open modal with data
                                 string script = $@"
@@ -775,6 +780,167 @@ namespace Take_Time_BangPhra.Admin.HR
             txtSalary.Text = "";
             txtPosition.Text = "";
             ddlRole.SelectedIndex = 0;
+
+            // Clear signature preview
+            imgSignature.Visible = false;
+            btnDeleteSignature.Visible = false;
+        }
+
+        #endregion
+
+        #region Signature Management
+
+        protected void btnUploadSignature_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!fuSignature.HasFile)
+                {
+                    ShowMessage("กรุณาเลือกไฟล์ลายเซ็น", "error");
+                    return;
+                }
+
+                // Validate file type
+                string fileExtension = Path.GetExtension(fuSignature.FileName).ToLower();
+                if (fileExtension != ".png" && fileExtension != ".jpg" && fileExtension != ".jpeg")
+                {
+                    ShowMessage("รองรับเฉพาะไฟล์ PNG, JPG เท่านั้น", "error");
+                    return;
+                }
+
+                // Validate file size (2MB max)
+                if (fuSignature.PostedFile.ContentLength > 2 * 1024 * 1024)
+                {
+                    ShowMessage("ไฟล์ต้องมีขนาดไม่เกิน 2MB", "error");
+                    return;
+                }
+
+                // Get employee name for filename
+                string employeeName = GetEmployeeFullName();
+                if (string.IsNullOrEmpty(employeeName))
+                {
+                    ShowMessage("กรุณาระบุชื่อพนักงานก่อน", "error");
+                    return;
+                }
+
+                // Create directory if not exists
+                string signatureDir = Server.MapPath("~/Documents/Staff/Signature");
+                if (!Directory.Exists(signatureDir))
+                {
+                    Directory.CreateDirectory(signatureDir);
+                }
+
+                // Delete existing signature files for this employee
+                DeleteExistingSignatureFiles(signatureDir, employeeName);
+
+                // Save new signature file
+                string newFileName = employeeName + ".png";
+                string filePath = Path.Combine(signatureDir, newFileName);
+                fuSignature.SaveAs(filePath);
+
+                // Update UI
+                LoadSignaturePreview(employeeName);
+                ShowMessage("อัพโหลดลายเซ็นสำเร็จ", "success");
+
+                // Keep modal open
+                string script = "document.getElementById('employeeModal').style.display = 'flex';";
+                ScriptManager.RegisterStartupScript(this, GetType(), "OpenModal", script, true);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการอัพโหลด: " + ex.Message, "error");
+            }
+        }
+
+        protected void btnDeleteSignature_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string employeeName = GetEmployeeFullName();
+                if (string.IsNullOrEmpty(employeeName))
+                {
+                    ShowMessage("ไม่สามารถระบุพนักงานได้", "error");
+                    return;
+                }
+
+                string signatureDir = Server.MapPath("~/Documents/Staff/Signature");
+                DeleteExistingSignatureFiles(signatureDir, employeeName);
+
+                // Update UI
+                imgSignature.Visible = false;
+                btnDeleteSignature.Visible = false;
+                ShowMessage("ลบลายเซ็นสำเร็จ", "success");
+
+                // Keep modal open
+                string script = "document.getElementById('employeeModal').style.display = 'flex'; document.getElementById('noSignatureText').style.display = 'block';";
+                ScriptManager.RegisterStartupScript(this, GetType(), "OpenModal", script, true);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการลบ: " + ex.Message, "error");
+            }
+        }
+
+        private string GetEmployeeFullName()
+        {
+            string firstName = txtFirstName.Text.Trim();
+            string lastName = txtLastName.Text.Trim();
+
+            if (string.IsNullOrEmpty(firstName))
+                return null;
+
+            return string.IsNullOrEmpty(lastName) ? firstName : firstName + " " + lastName;
+        }
+
+        private void DeleteExistingSignatureFiles(string signatureDir, string employeeName)
+        {
+            if (!Directory.Exists(signatureDir))
+                return;
+
+            // Delete any existing signature files for this employee
+            string[] extensions = { ".png", ".jpg", ".jpeg" };
+            foreach (var ext in extensions)
+            {
+                string filePath = Path.Combine(signatureDir, employeeName + ext);
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+        }
+
+        private void LoadSignaturePreview(string employeeName)
+        {
+            if (string.IsNullOrEmpty(employeeName))
+            {
+                imgSignature.Visible = false;
+                btnDeleteSignature.Visible = false;
+                return;
+            }
+
+            string signatureDir = Server.MapPath("~/Documents/Staff/Signature");
+            string[] extensions = { ".png", ".jpg", ".jpeg" };
+
+            foreach (var ext in extensions)
+            {
+                string filePath = Path.Combine(signatureDir, employeeName + ext);
+                if (File.Exists(filePath))
+                {
+                    // Add timestamp to prevent caching
+                    imgSignature.ImageUrl = $"~/Documents/Staff/Signature/{employeeName}{ext}?t={DateTime.Now.Ticks}";
+                    imgSignature.Visible = true;
+                    btnDeleteSignature.Visible = true;
+
+                    // Hide "no signature" text
+                    string script = "document.getElementById('noSignatureText').style.display = 'none';";
+                    ScriptManager.RegisterStartupScript(this, GetType(), "HideNoSignature", script, true);
+                    return;
+                }
+            }
+
+            // No signature found
+            imgSignature.Visible = false;
+            btnDeleteSignature.Visible = false;
         }
 
         #endregion

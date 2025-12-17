@@ -507,6 +507,9 @@ public class PayrollService
                         PR.ID, PR.PayrollPeriod_ID, PR.Admin_ID,
                         ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
                         ISNULL(PR.BaseSalary, 0) AS BaseSalary,
+                        ISNULL(PR.WorkDays, 0) AS WorkDays,
+                        ISNULL(PR.LeaveDays, 0) AS LeaveDays,
+                        ISNULL(PR.OTHours, 0) AS OTHours,
                         ISNULL(PR.OTAmount, 0) AS OTAmount,
                         ISNULL(PR.BonusAmount, 0) AS BonusAmount,
                         ISNULL(PR.AllowanceAmount, 0) AS AllowanceAmount,
@@ -518,7 +521,7 @@ public class PayrollService
                         ISNULL(PR.TotalDeductions, 0) AS TotalDeductions,
                         ISNULL(PR.NetSalary, 0) AS NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        'PAY' + CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
+                        PR.VoucherNumber,
                         PP.Year, PP.Month, PP.PeriodName,
                         A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR

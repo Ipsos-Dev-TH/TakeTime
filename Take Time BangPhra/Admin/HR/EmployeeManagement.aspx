@@ -406,6 +406,62 @@
             max-height: 400px;
             overflow-y: auto;
         }
+
+        /* Signature Section Styles */
+        .signature-container {
+            border: 2px dashed #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafafa;
+        }
+
+        .signature-preview {
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+            background: white;
+            border-radius: 4px;
+            padding: 10px;
+        }
+
+        .signature-image {
+            max-width: 200px;
+            max-height: 80px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+
+        .no-signature {
+            color: #999;
+            font-style: italic;
+        }
+
+        .signature-upload {
+            margin-top: 10px;
+        }
+
+        .text-muted {
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        .btn-info {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+
+        .btn-info:hover {
+            background: linear-gradient(135deg, #138496 0%, #117a8b 100%);
+        }
     </style>
 
     <div class="employee-management">
@@ -621,6 +677,27 @@
                 <div class="form-group">
                     <label>ตำแหน่งงาน</label>
                     <asp:TextBox ID="txtPosition" runat="server" CssClass="form-control" placeholder="เช่น พนักงานต้อนรับ, แม่บ้าน, ผู้จัดการ"></asp:TextBox>
+                </div>
+
+                <!-- Signature Section -->
+                <div class="form-group" id="signatureSection">
+                    <label>ลายเซ็น</label>
+                    <div class="signature-container">
+                        <div class="signature-preview" id="signaturePreview">
+                            <asp:Image ID="imgSignature" runat="server" CssClass="signature-image" Visible="false" />
+                            <span class="no-signature" id="noSignatureText">ยังไม่มีลายเซ็น</span>
+                        </div>
+                        <div class="signature-upload">
+                            <asp:FileUpload ID="fuSignature" runat="server" CssClass="form-control" accept="image/*" />
+                            <small class="text-muted">รองรับไฟล์ PNG, JPG ขนาดไม่เกิน 2MB</small>
+                        </div>
+                        <asp:Button ID="btnUploadSignature" runat="server" Text="อัพโหลดลายเซ็น"
+                            CssClass="btn btn-info btn-sm" OnClick="btnUploadSignature_Click"
+                            style="margin-top: 5px;" />
+                        <asp:Button ID="btnDeleteSignature" runat="server" Text="ลบลายเซ็น"
+                            CssClass="btn btn-danger btn-sm" OnClick="btnDeleteSignature_Click"
+                            style="margin-top: 5px; margin-left: 5px;" Visible="false" />
+                    </div>
                 </div>
 
                 <div class="modal-footer">
