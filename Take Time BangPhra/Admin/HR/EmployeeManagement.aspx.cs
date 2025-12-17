@@ -106,16 +106,14 @@ namespace Take_Time_BangPhra.Admin.HR
                     cmd.CommandText = @"
                         SELECT
                             A.ID AS Admin_ID,
+                            A.Username,
+                            A.FirstName,
+                            A.LastName,
                             ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
                             ISNULL(ES.Position, A.Role) AS CurrentPosition,
                             A.Role AS Department,
-                            A.Username AS MobilePhone,
-                            A.Username AS WorkEmail,
                             ES.MonthlySalary AS CurrentSalary,
-                            NULL AS PhotoPath,
-                            0 AS TotalServiceYears,
-                            0 AS TotalServiceMonths,
-                            NULL AS ContractDaysUntilExpiry,
+                            ES.Position AS SalaryPosition,
                             A.Status
                         FROM Admin A
                         LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
@@ -171,19 +169,164 @@ namespace Take_Time_BangPhra.Admin.HR
                 short adminId = Convert.ToInt16(e.CommandArgument);
                 ResignEmployee(adminId);
             }
+            else if (e.CommandName == "EditEmployee")
+            {
+                short adminId = Convert.ToInt16(e.CommandArgument);
+                LoadEmployeeForEdit(adminId);
+            }
+            else if (e.CommandName == "Reactivate")
+            {
+                short adminId = Convert.ToInt16(e.CommandArgument);
+                ReactivateEmployee(adminId);
+            }
+            else if (e.CommandName == "DeleteEmployee")
+            {
+                short adminId = Convert.ToInt16(e.CommandArgument);
+                DeleteEmployee(adminId);
+            }
+        }
+
+        private void LoadEmployeeForEdit(short adminId)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    using (SqlCommand cmd = new SqlCommand(@"
+                        SELECT A.ID, A.Username, A.FirstName, A.LastName, A.Role,
+                               ES.MonthlySalary, ES.Position
+                        FROM Admin A
+                        LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                        WHERE A.ID = @AdminID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                string username = reader["Username"]?.ToString() ?? "";
+                                string firstName = reader["FirstName"]?.ToString() ?? "";
+                                string lastName = reader["LastName"]?.ToString() ?? "";
+                                string role = reader["Role"]?.ToString() ?? "Staff";
+                                string salary = reader["MonthlySalary"] != DBNull.Value ? Convert.ToDecimal(reader["MonthlySalary"]).ToString("0") : "";
+                                string position = reader["Position"]?.ToString() ?? "";
+
+                                // Register JavaScript to open modal with data
+                                string script = $@"
+                                    openEditModal('{adminId}', '{EscapeJsString(username)}', '{EscapeJsString(firstName)}',
+                                                  '{EscapeJsString(lastName)}', '{EscapeJsString(role)}', '{salary}', '{EscapeJsString(position)}');";
+                                ScriptManager.RegisterStartupScript(this, GetType(), "OpenEditModal", script, true);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการโหลดข้อมูล: " + ex.Message, "error");
+            }
+        }
+
+        private string EscapeJsString(string str)
+        {
+            if (string.IsNullOrEmpty(str)) return "";
+            return str.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
+
+        private void ReactivateEmployee(short adminId)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    // Update employee status to active
+                    using (SqlCommand cmd = new SqlCommand(@"
+                        UPDATE Admin SET Status = 1 WHERE ID = @AdminID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                LoadStatistics();
+                LoadEmployees();
+                ShowMessage("เรียกพนักงานกลับเข้าทำงานสำเร็จ", "success");
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
+        }
+
+        private void DeleteEmployee(short adminId)
+        {
+            try
+            {
+                // Don't allow deleting yourself
+                short? currentUserId = GetAdminID();
+                if (currentUserId.HasValue && currentUserId.Value == adminId)
+                {
+                    ShowMessage("ไม่สามารถลบบัญชีตัวเองได้", "error");
+                    return;
+                }
+
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    // Delete salary records first
+                    using (SqlCommand salaryCmd = new SqlCommand(@"
+                        DELETE FROM Employee_Salary WHERE Admin_ID = @AdminID", conn))
+                    {
+                        salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
+                        salaryCmd.ExecuteNonQuery();
+                    }
+
+                    // Delete supervisor relationships
+                    using (SqlCommand supCmd = new SqlCommand(@"
+                        DELETE FROM Employee_Supervisor WHERE Employee_AdminID = @AdminID OR Supervisor_AdminID = @AdminID", conn))
+                    {
+                        supCmd.Parameters.AddWithValue("@AdminID", adminId);
+                        supCmd.ExecuteNonQuery();
+                    }
+
+                    // Delete admin record
+                    using (SqlCommand cmd = new SqlCommand(@"
+                        DELETE FROM Admin WHERE ID = @AdminID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                LoadStatistics();
+                LoadEmployees();
+                ShowMessage("ลบพนักงานสำเร็จ", "success");
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
         }
 
         protected void btnSaveEmployee_Click(object sender, EventArgs e)
         {
             try
             {
+                bool isEditMode = hdnEditMode.Value == "edit";
+
                 // Validate required fields
-                if (string.IsNullOrWhiteSpace(txtUsername.Text))
+                if (!isEditMode && string.IsNullOrWhiteSpace(txtUsername.Text))
                 {
                     ShowMessage("กรุณากรอกชื่อผู้ใช้", "error");
                     return;
                 }
-                if (string.IsNullOrWhiteSpace(txtPassword.Text))
+                if (!isEditMode && string.IsNullOrWhiteSpace(txtPassword.Text))
                 {
                     ShowMessage("กรุณากรอกรหัสผ่าน", "error");
                     return;
@@ -194,67 +337,176 @@ namespace Take_Time_BangPhra.Admin.HR
                     return;
                 }
 
-                // Check if username exists
-                using (SqlConnection conn = new SqlConnection(connectionString))
+                if (isEditMode)
                 {
-                    conn.Open();
-
-                    // Check duplicate username
-                    using (SqlCommand checkCmd = new SqlCommand("SELECT COUNT(*) FROM Admin WHERE Username = @Username", conn))
-                    {
-                        checkCmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
-                        int count = (int)checkCmd.ExecuteScalar();
-                        if (count > 0)
-                        {
-                            ShowMessage("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น", "error");
-                            return;
-                        }
-                    }
-
-                    // Insert new employee
-                    using (SqlCommand cmd = new SqlCommand(@"
-                        INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status)
-                        VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1);
-                        SELECT SCOPE_IDENTITY();", conn))
-                    {
-                        cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
-                        cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
-                        cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
-
-                        int newAdminId = Convert.ToInt32(cmd.ExecuteScalar());
-
-                        // Add salary if provided
-                        if (!string.IsNullOrWhiteSpace(txtSalary.Text))
-                        {
-                            decimal salary;
-                            if (decimal.TryParse(txtSalary.Text, out salary) && salary > 0)
-                            {
-                                using (SqlCommand salaryCmd = new SqlCommand(@"
-                                    INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
-                                    VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
-                                {
-                                    salaryCmd.Parameters.AddWithValue("@AdminID", newAdminId);
-                                    salaryCmd.Parameters.AddWithValue("@Salary", salary);
-                                    salaryCmd.Parameters.AddWithValue("@Position", txtPosition.Text.Trim());
-                                    salaryCmd.ExecuteNonQuery();
-                                }
-                            }
-                        }
-                    }
+                    // Update existing employee
+                    UpdateEmployee();
                 }
-
-                // Clear form and reload
-                ClearAddForm();
-                LoadStatistics();
-                LoadEmployees();
-                ShowMessage("เพิ่มพนักงานใหม่สำเร็จ", "success");
+                else
+                {
+                    // Add new employee
+                    AddNewEmployee();
+                }
             }
             catch (Exception ex)
             {
                 ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
+        }
+
+        private void AddNewEmployee()
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+
+                // Check duplicate username
+                using (SqlCommand checkCmd = new SqlCommand("SELECT COUNT(*) FROM Admin WHERE Username = @Username", conn))
+                {
+                    checkCmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
+                    int count = (int)checkCmd.ExecuteScalar();
+                    if (count > 0)
+                    {
+                        ShowMessage("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น", "error");
+                        return;
+                    }
+                }
+
+                // Insert new employee
+                using (SqlCommand cmd = new SqlCommand(@"
+                    INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status)
+                    VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1);
+                    SELECT SCOPE_IDENTITY();", conn))
+                {
+                    cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
+                    cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                    cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+
+                    int newAdminId = Convert.ToInt32(cmd.ExecuteScalar());
+
+                    // Add salary if provided
+                    if (!string.IsNullOrWhiteSpace(txtSalary.Text))
+                    {
+                        decimal salary;
+                        if (decimal.TryParse(txtSalary.Text, out salary) && salary > 0)
+                        {
+                            using (SqlCommand salaryCmd = new SqlCommand(@"
+                                INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
+                                VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
+                            {
+                                salaryCmd.Parameters.AddWithValue("@AdminID", newAdminId);
+                                salaryCmd.Parameters.AddWithValue("@Salary", salary);
+                                salaryCmd.Parameters.AddWithValue("@Position", txtPosition.Text.Trim());
+                                salaryCmd.ExecuteNonQuery();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Clear form and reload
+            ClearAddForm();
+            LoadStatistics();
+            LoadEmployees();
+            ShowMessage("เพิ่มพนักงานใหม่สำเร็จ", "success");
+        }
+
+        private void UpdateEmployee()
+        {
+            if (string.IsNullOrEmpty(hdnEmployeeId.Value))
+            {
+                ShowMessage("ไม่พบข้อมูลพนักงาน", "error");
+                return;
+            }
+
+            short adminId = Convert.ToInt16(hdnEmployeeId.Value);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+
+                // Update Admin record
+                string updateSql;
+                if (!string.IsNullOrWhiteSpace(txtPassword.Text))
+                {
+                    updateSql = @"UPDATE Admin SET
+                                  FirstName = @FirstName,
+                                  LastName = @LastName,
+                                  Role = @Role,
+                                  Password = @Password
+                                  WHERE ID = @AdminID";
+                }
+                else
+                {
+                    updateSql = @"UPDATE Admin SET
+                                  FirstName = @FirstName,
+                                  LastName = @LastName,
+                                  Role = @Role
+                                  WHERE ID = @AdminID";
+                }
+
+                using (SqlCommand cmd = new SqlCommand(updateSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+                    cmd.Parameters.AddWithValue("@AdminID", adminId);
+                    if (!string.IsNullOrWhiteSpace(txtPassword.Text))
+                    {
+                        cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                    }
+                    cmd.ExecuteNonQuery();
+                }
+
+                // Update or insert salary
+                decimal salary = 0;
+                decimal.TryParse(txtSalary.Text, out salary);
+                string position = txtPosition.Text.Trim();
+
+                // Check if salary record exists
+                using (SqlCommand checkCmd = new SqlCommand("SELECT COUNT(*) FROM Employee_Salary WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                {
+                    checkCmd.Parameters.AddWithValue("@AdminID", adminId);
+                    int salaryExists = (int)checkCmd.ExecuteScalar();
+
+                    if (salaryExists > 0)
+                    {
+                        // Update existing salary
+                        using (SqlCommand salaryCmd = new SqlCommand(@"
+                            UPDATE Employee_Salary SET MonthlySalary = @Salary, Position = @Position
+                            WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                        {
+                            salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
+                            salaryCmd.Parameters.AddWithValue("@Salary", salary);
+                            salaryCmd.Parameters.AddWithValue("@Position", position);
+                            salaryCmd.ExecuteNonQuery();
+                        }
+                    }
+                    else if (salary > 0 || !string.IsNullOrEmpty(position))
+                    {
+                        // Insert new salary record
+                        using (SqlCommand salaryCmd = new SqlCommand(@"
+                            INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
+                            VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
+                        {
+                            salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
+                            salaryCmd.Parameters.AddWithValue("@Salary", salary);
+                            salaryCmd.Parameters.AddWithValue("@Position", position);
+                            salaryCmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+
+            // Clear form and reload
+            ClearAddForm();
+            hdnEditMode.Value = "add";
+            hdnEmployeeId.Value = "";
+            LoadStatistics();
+            LoadEmployees();
+            ShowMessage("อัปเดตข้อมูลพนักงานสำเร็จ", "success");
         }
 
         protected void btnConfirmResign_Click(object sender, EventArgs e)

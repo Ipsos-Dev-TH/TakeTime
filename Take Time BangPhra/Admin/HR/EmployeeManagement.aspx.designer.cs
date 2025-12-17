@@ -71,6 +71,11 @@ namespace Take_Time_BangPhra.Admin.HR
         protected global::System.Web.UI.WebControls.HiddenField hdnEmployeeId;
 
         /// <summary>
+        /// hdnEditMode control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnEditMode;
+
+        /// <summary>
         /// txtUsername control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtUsername;
