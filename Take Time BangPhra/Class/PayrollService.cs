@@ -622,10 +622,23 @@ public class PayrollService
                     using (SqlCommand getCmd = new SqlCommand(@"
                         SELECT PR.*, PP.Year, PP.Month, PP.PeriodName,
                                A.Username AS NickName,
-                               ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName
+                               ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                               -- Calculate amounts with fallback to Employee_Salary
+                               CASE WHEN ISNULL(PR.BaseSalary, 0) = 0
+                                    THEN ISNULL(ES.MonthlySalary, 0)
+                                    ELSE PR.BaseSalary
+                               END AS CalcBaseSalary,
+                               ISNULL(PR.OTAmount, 0) AS CalcOTAmount,
+                               ISNULL(PR.BonusAmount, 0) AS CalcBonusAmount,
+                               ISNULL(PR.AllowanceAmount, 0) AS CalcAllowanceAmount,
+                               ISNULL(PR.SocialSecurity, 0) AS CalcSocialSecurity,
+                               ISNULL(PR.Tax, 0) AS CalcTax,
+                               ISNULL(PR.LeaveDeduction, 0) AS CalcLeaveDeduction,
+                               ISNULL(PR.OtherDeductions, 0) AS CalcOtherDeductions
                         FROM Payroll_Records PR
                         INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID
                         INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                        LEFT JOIN Employee_Salary ES ON ES.Admin_ID = PR.Admin_ID AND ES.IsActive = 1
                         WHERE PR.ID = @RecordID", conn, transaction))
                     {
                         getCmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
@@ -670,7 +683,20 @@ public class PayrollService
                     }
 
                     // Always create Account_Payment record so it appears in payment voucher management
-                    decimal netSalary = Convert.ToDecimal(payrollRecord["NetSalary"]);
+                    // Calculate NetSalary from individual components (don't rely on stored value which may be 0)
+                    decimal baseSalary = payrollRecord["CalcBaseSalary"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcBaseSalary"]) : 0;
+                    decimal otAmount = payrollRecord["CalcOTAmount"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcOTAmount"]) : 0;
+                    decimal bonus = payrollRecord["CalcBonusAmount"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcBonusAmount"]) : 0;
+                    decimal allowance = payrollRecord["CalcAllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcAllowanceAmount"]) : 0;
+                    decimal socialSecurity = payrollRecord["CalcSocialSecurity"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcSocialSecurity"]) : 0;
+                    decimal tax = payrollRecord["CalcTax"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcTax"]) : 0;
+                    decimal leaveDeduction = payrollRecord["CalcLeaveDeduction"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcLeaveDeduction"]) : 0;
+                    decimal otherDeductions = payrollRecord["CalcOtherDeductions"] != DBNull.Value ? Convert.ToDecimal(payrollRecord["CalcOtherDeductions"]) : 0;
+
+                    decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
+                    decimal totalDeductions = socialSecurity + tax + leaveDeduction + otherDeductions;
+                    decimal netSalary = totalEarnings - totalDeductions;
+
                     string employeeName = payrollRecord["EmployeeName"].ToString();
                     int periodYear = Convert.ToInt32(payrollRecord["Year"]);
                     int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
