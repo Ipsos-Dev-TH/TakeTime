@@ -706,28 +706,30 @@ public class EmployeeService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
-                // Use direct query to Admin table to avoid dependency on view columns
+                // Use direct query to Admin table with LEFT JOIN to Employee_Salary for Position
+                // Admin table only has: ID, Username, Password, FirstName, LastName, NickName, Email, Role, Status
                 cmd.CommandText = @"
                     SELECT
                         A.ID AS Admin_ID,
                         ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
-                        A.Position AS CurrentPosition,
-                        A.Department,
-                        A.MobilePhone,
+                        ISNULL(ES.Position, A.Role) AS CurrentPosition,
+                        A.Role AS Department,
+                        A.Email AS MobilePhone,
                         A.Email AS WorkEmail,
-                        NULL AS CurrentSalary,
+                        ES.MonthlySalary AS CurrentSalary,
                         NULL AS PhotoPath,
                         0 AS TotalServiceYears,
                         0 AS TotalServiceMonths,
                         NULL AS ContractDaysUntilExpiry
                     FROM Admin A
+                    LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
                     WHERE A.Status = 1
                       AND (@SearchTerm = '' OR A.FirstName LIKE '%' + @SearchTerm + '%'
                            OR A.LastName LIKE '%' + @SearchTerm + '%'
                            OR A.Username LIKE '%' + @SearchTerm + '%'
-                           OR A.MobilePhone LIKE '%' + @SearchTerm + '%')
-                      AND (@Position = '' OR A.Position LIKE '%' + @Position + '%')
-                      AND (@Department = '' OR A.Department LIKE '%' + @Department + '%')
+                           OR A.Email LIKE '%' + @SearchTerm + '%')
+                      AND (@Position = '' OR ES.Position LIKE '%' + @Position + '%' OR A.Role LIKE '%' + @Position + '%')
+                      AND (@Department = '' OR A.Role LIKE '%' + @Department + '%')
                     ORDER BY A.FirstName, A.LastName";
 
                 cmd.Parameters.AddWithValue("@SearchTerm", searchTerm ?? "");
