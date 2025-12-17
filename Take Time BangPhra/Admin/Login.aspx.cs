@@ -39,35 +39,70 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                // 🔒 SECURE: Using parameterized query to prevent SQL Injection
-                // ⚡ OPTIMIZED: Query database with WHERE clause instead of fetching all and looping
+                string username = TextBox1.Text?.Trim()?.ToLower() ?? "";
+                string password = TextBox2.Text ?? "";
+
+                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');", true);
+                    return;
+                }
+
+                // Query user by username only (not password - we verify separately)
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@username", TextBox1.Text?.Trim() ?? "" },
-                    { "@password", TextBox2.Text ?? "" }
+                    { "@username", username }
                 };
 
-                // Query only matching records instead of all active admins
                 code code2 = new code();
                 DataTable dtAdmin = code2.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE Username = @username AND Password = @password AND Status = 1",
+                    "SELECT * FROM Admin WHERE Username = @username AND Status = 1",
                     parameters);
 
                 if (dtAdmin.Rows.Count >= 1)
                 {
-                    Session["permission"] = "True";
-                    Session["UserName"] = TextBox1.Text.ToLower();
-                    Session["User"] = dtAdmin.Rows[0]["Role"].ToString();
-                    Session["UserID"] = dtAdmin.Rows[0]["ID"].ToString();
+                    string storedPassword = dtAdmin.Rows[0]["Password"]?.ToString() ?? "";
+                    string adminId = dtAdmin.Rows[0]["ID"].ToString();
 
-                    // Log successful login
-                    code2.Logs(conn, "Admin-Login-Success", TextBox1.Text, TextBox1.Text);
-                    Response.Redirect("/ReserveTable.aspx");
+                    // Verify password using SecurityHelper (supports both plain text and hashed)
+                    if (SecurityHelper.VerifyPassword(password, storedPassword))
+                    {
+                        // Check if password needs to be upgraded to hashed version
+                        if (SecurityHelper.NeedsUpgrade(storedPassword))
+                        {
+                            // Upgrade plain text password to hashed version
+                            string hashedPassword = SecurityHelper.HashPassword(password);
+                            var upgradeParams = new Dictionary<string, object>
+                            {
+                                { "@password", hashedPassword },
+                                { "@userId", adminId }
+                            };
+                            code2.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Admin] SET [Password] = @password WHERE ID = @userId",
+                                upgradeParams);
+                            code2.Logs(conn, "Admin-Password-Upgraded", "User ID: " + adminId, username);
+                        }
+
+                        Session["permission"] = "True";
+                        Session["UserName"] = username;
+                        Session["User"] = dtAdmin.Rows[0]["Role"].ToString();
+                        Session["UserID"] = adminId;
+
+                        // Log successful login
+                        code2.Logs(conn, "Admin-Login-Success", username, username);
+                        Response.Redirect("/ReserveTable.aspx");
+                    }
+                    else
+                    {
+                        // Log failed login attempt
+                        code2.Logs(conn, "Admin-Login-Failed", username, username);
+                        ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');", true);
+                    }
                 }
                 else
                 {
-                    // Log failed login attempt
-                    code2.Logs(conn, "Admin-Login-Failed", TextBox1.Text, TextBox1.Text);
+                    // Log failed login attempt (user not found)
+                    code2.Logs(conn, "Admin-Login-Failed", username, username);
                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');", true);
                 }
             }
@@ -82,31 +117,44 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                if (TextBox1.Text == TextBox2.Text)
-                {
-                    // 🔒 SECURE: Using parameterized query to prevent SQL Injection
-                    var parameters = new Dictionary<string, object>
-                    {
-                        { "@password", TextBox2.Text },
-                        { "@userId", Session["UserID"] }
-                    };
+                string newPassword = TextBox1.Text ?? "";
+                string confirmPassword = TextBox2.Text ?? "";
 
-                    code code2 = new code();
-                    code2.DatabaseInsertSafe(conn,
-                        "UPDATE [dbo].[Admin] SET [Password] = @password WHERE ID = @userId",
-                        parameters);
-
-                    // Log password change
-                    code2.Logs(conn, "Admin-Password-Changed", "User ID: " + Session["UserID"], Session["UserName"]?.ToString() ?? "Unknown");
-
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('เปลี่ยนรหัสผ่านสำเร็จ');", true);
-                    Session.Clear();
-                    Response.Redirect("/Admin/Login");
-                }
-                else
+                if (newPassword != confirmPassword)
                 {
                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('รหัสผ่านยืนยันไม่ตรงกัน');", true);
+                    return;
                 }
+
+                // Validate password strength
+                var validation = SecurityHelper.ValidatePasswordStrength(newPassword);
+                if (!validation.IsValid)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                        "alert('" + validation.Message.Replace("'", "\\'") + "');", true);
+                    return;
+                }
+
+                // Hash the new password
+                string hashedPassword = SecurityHelper.HashPassword(newPassword);
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@password", hashedPassword },
+                    { "@userId", Session["UserID"] }
+                };
+
+                code code2 = new code();
+                code2.DatabaseInsertSafe(conn,
+                    "UPDATE [dbo].[Admin] SET [Password] = @password WHERE ID = @userId",
+                    parameters);
+
+                // Log password change
+                code2.Logs(conn, "Admin-Password-Changed", "User ID: " + Session["UserID"], Session["UserName"]?.ToString() ?? "Unknown");
+
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('เปลี่ยนรหัสผ่านสำเร็จ');", true);
+                Session.Clear();
+                Response.Redirect("/Admin/Login");
             }
             catch (Exception ex)
             {

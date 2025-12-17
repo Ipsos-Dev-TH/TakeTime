@@ -294,12 +294,64 @@ public class PayrollService
                             }
                             reader.Close();
 
+                            // Get days in month for calculations
+                            int daysInMonth = DateTime.DaysInMonth(year, month);
+
                             foreach (var emp in employees)
                             {
                                 decimal baseSalary = emp.Salary;
-                                decimal socialSecurity = baseSalary * 0.05m; // 5% social security
-                                if (socialSecurity > 750) socialSecurity = 750; // Max 750 baht
-                                decimal netSalary = baseSalary - socialSecurity;
+
+                                // Get leave days for this employee and period (exclude replaced leaves)
+                                decimal leaveDays = 0;
+                                using (SqlCommand leaveCmd = new SqlCommand(@"
+                                    SELECT ISNULL(SUM(
+                                        CASE WHEN ISNULL(IsReplaced, 0) = 1 THEN 0 ELSE TotalDays END
+                                    ), 0) AS TotalLeaveDays
+                                    FROM Leave_Requests
+                                    WHERE Admin_ID = @AdminID
+                                      AND Status = 'APPROVED'
+                                      AND YEAR(StartDate) = @Year
+                                      AND MONTH(StartDate) = @Month", conn, transaction))
+                                {
+                                    leaveCmd.Parameters.AddWithValue("@AdminID", emp.Id);
+                                    leaveCmd.Parameters.AddWithValue("@Year", year);
+                                    leaveCmd.Parameters.AddWithValue("@Month", month);
+                                    object result = leaveCmd.ExecuteScalar();
+                                    leaveDays = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
+                                }
+
+                                // Get OT hours for this employee and period
+                                decimal otHours = 0;
+                                using (SqlCommand otCmd = new SqlCommand(@"
+                                    SELECT ISNULL(SUM(OTHours), 0) AS TotalOTHours
+                                    FROM OT_Entry
+                                    WHERE Admin_ID = @AdminID
+                                      AND Status = 'APPROVED'
+                                      AND YEAR(OTDate) = @Year
+                                      AND MONTH(OTDate) = @Month", conn, transaction))
+                                {
+                                    otCmd.Parameters.AddWithValue("@AdminID", emp.Id);
+                                    otCmd.Parameters.AddWithValue("@Year", year);
+                                    otCmd.Parameters.AddWithValue("@Month", month);
+                                    object result = otCmd.ExecuteScalar();
+                                    otHours = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
+                                }
+
+                                // Calculate work days
+                                int workDays = daysInMonth - (int)Math.Floor(leaveDays);
+                                if (workDays < 0) workDays = 0;
+
+                                // Calculate leave deduction and OT amount using centralized config
+                                decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
+                                decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otHours, daysInMonth);
+
+                                // Calculate social security using centralized configuration
+                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(baseSalary);
+
+                                // Calculate totals
+                                decimal totalEarnings = baseSalary + otAmount;
+                                decimal totalDeductionsForEmp = leaveDeduction + socialSecurity;
+                                decimal netSalary = totalEarnings - totalDeductionsForEmp;
 
                                 using (SqlCommand recCmd = new SqlCommand(@"
                                     INSERT INTO Payroll_Records
@@ -308,22 +360,29 @@ public class PayrollService
                                      LeaveDeduction, SocialSecurity, Tax, OtherDeductions, TotalDeductions, NetSalary,
                                      VoucherGenerated, CreatedDate)
                                     VALUES
-                                    (@PeriodID, @AdminID, @Name, @Salary, 30, 0,
-                                     0, 0, 0, 0, @Salary,
-                                     0, @SS, 0, 0, @SS, @Net,
+                                    (@PeriodID, @AdminID, @Name, @Salary, @WorkDays, @LeaveDays,
+                                     @OTHours, @OTAmount, 0, 0, @TotalEarnings,
+                                     @LeaveDeduction, @SS, 0, 0, @TotalDeductions, @Net,
                                      0, GETDATE())", conn, transaction))
                                 {
                                     recCmd.Parameters.AddWithValue("@PeriodID", periodId);
                                     recCmd.Parameters.AddWithValue("@AdminID", emp.Id);
                                     recCmd.Parameters.AddWithValue("@Name", emp.Name);
                                     recCmd.Parameters.AddWithValue("@Salary", baseSalary);
+                                    recCmd.Parameters.AddWithValue("@WorkDays", workDays);
+                                    recCmd.Parameters.AddWithValue("@LeaveDays", leaveDays);
+                                    recCmd.Parameters.AddWithValue("@OTHours", otHours);
+                                    recCmd.Parameters.AddWithValue("@OTAmount", otAmount);
+                                    recCmd.Parameters.AddWithValue("@TotalEarnings", totalEarnings);
+                                    recCmd.Parameters.AddWithValue("@LeaveDeduction", leaveDeduction);
                                     recCmd.Parameters.AddWithValue("@SS", socialSecurity);
+                                    recCmd.Parameters.AddWithValue("@TotalDeductions", totalDeductionsForEmp);
                                     recCmd.Parameters.AddWithValue("@Net", netSalary);
                                     recCmd.ExecuteNonQuery();
                                 }
 
-                                totalGross += baseSalary;
-                                totalDeductions += socialSecurity;
+                                totalGross += totalEarnings;
+                                totalDeductions += totalDeductionsForEmp;
                                 totalNet += netSalary;
                                 employeeCount++;
                             }
@@ -540,9 +599,10 @@ public class PayrollService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
+                // Use 'APPROVED' status for consistency with summary queries and reports
                 cmd.CommandText = @"
                     UPDATE Payroll_Periods
-                    SET Status = 'COMPLETED',
+                    SET Status = 'APPROVED',
                         ClosedBy_AdminID = @ApprovedBy,
                         ClosedDate = GETDATE()
                     WHERE ID = @PeriodID";

@@ -61,6 +61,7 @@
         .btn-process { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: #333; }
         .btn-edit { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 5px 10px; font-size: 11px; }
         .btn-pay { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 5px 10px; font-size: 11px; }
+        .btn-view { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 5px 10px; font-size: 11px; border-radius: 4px; text-decoration: none; display: inline-block; }
         .btn-cancel { background: #e0e0e0; color: #333; }
 
         .stats-container {
@@ -160,9 +161,28 @@
 
         .modal-footer { margin-top: 20px; padding-top: 15px; border-top: 2px solid #f0f0f0; display: flex; justify-content: flex-end; gap: 10px; }
 
-        .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .alert-success { background: #d4edda; color: #155724; }
-        .alert-error { background: #f8d7da; color: #721c24; }
+        .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; animation: fadeIn 0.3s ease-out; }
+
+        .alert-success {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 1px solid #b7d7a8;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.15);
+        }
+        .alert-success::before { content: "✓ "; font-weight: bold; }
+
+        .alert-error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border: 1px solid #f1b0b7;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
+        }
+        .alert-error::before { content: "⚠ "; font-weight: bold; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
         .ss-info { background: #e3f2fd; border-left: 4px solid #1976d2; padding: 10px 15px; margin: 10px 0; font-size: 12px; }
     </style>
@@ -248,7 +268,11 @@
                     <asp:BoundField DataField="Position" HeaderText="ตำแหน่ง" />
 
                     <asp:TemplateField HeaderText="เงินเดือน" ItemStyle-CssClass="text-right" HeaderStyle-CssClass="text-right">
-                        <ItemTemplate><%# string.Format("{0:N0}", Eval("BaseSalary")) %></ItemTemplate>
+                        <ItemTemplate>
+                            <%# Convert.ToDecimal(Eval("BaseSalary")) > 0
+                                ? string.Format("{0:N0}", Eval("BaseSalary"))
+                                : "<span style='color:#dc3545;'>ยังไม่ตั้งค่า</span>" %>
+                        </ItemTemplate>
                     </asp:TemplateField>
 
                     <asp:TemplateField HeaderText="OT" ItemStyle-CssClass="text-right" HeaderStyle-CssClass="text-right">
@@ -282,6 +306,8 @@
                     <asp:TemplateField HeaderText="จัดการ">
                         <ItemTemplate>
                             <div class="action-cell">
+                                <asp:HyperLink ID="btnViewPayslip" runat="server" Text="&#128196;" ToolTip="ดูสลิป"
+                                    CssClass="btn-view" NavigateUrl='<%# "PayrollDetail.aspx?id=" + Eval("ID") %>' />
                                 <asp:Button ID="btnEdit" runat="server" Text="&#9998;" ToolTip="แก้ไข"
                                     CssClass="btn-edit" CommandName="EditPayroll" CommandArgument='<%# Eval("ID") %>' />
                                 <asp:Button ID="btnPay" runat="server" Text="&#128179;" ToolTip="ทำจ่าย"

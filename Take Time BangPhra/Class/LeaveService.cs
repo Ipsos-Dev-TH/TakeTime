@@ -471,7 +471,7 @@ public class LeaveService
                     {
                         // Get request details
                         cmd.CommandText = @"
-                            SELECT Admin_ID, LeaveType_ID, TotalDays, YEAR(StartDate) AS Year
+                            SELECT Admin_ID, LeaveType_ID, TotalDays, YEAR(StartDate) AS Year, Status
                             FROM Leave_Requests
                             WHERE ID = @RequestID";
                         cmd.Parameters.AddWithValue("@RequestID", requestId);
@@ -480,6 +480,7 @@ public class LeaveService
                         byte leaveTypeId = 0;
                         decimal totalDays = 0;
                         short year = 0;
+                        string status = "";
 
                         using (SqlDataReader reader = cmd.ExecuteReader())
                         {
@@ -489,7 +490,40 @@ public class LeaveService
                                 leaveTypeId = Convert.ToByte(reader["LeaveType_ID"]);
                                 totalDays = Convert.ToDecimal(reader["TotalDays"]);
                                 year = Convert.ToInt16(reader["Year"]);
+                                status = reader["Status"]?.ToString() ?? "";
                             }
+                            else
+                            {
+                                transaction.Rollback();
+                                return false;
+                            }
+                        }
+
+                        // Check if already processed
+                        if (status != "PENDING")
+                        {
+                            transaction.Rollback();
+                            return false;
+                        }
+
+                        // Check leave quota before approval
+                        cmd.Parameters.Clear();
+                        cmd.CommandText = @"
+                            SELECT RemainingDays FROM Employee_Leave_Quota
+                            WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year";
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                        cmd.Parameters.AddWithValue("@Year", year);
+
+                        object remainingResult = cmd.ExecuteScalar();
+                        decimal remainingDays = remainingResult != null && remainingResult != DBNull.Value
+                            ? Convert.ToDecimal(remainingResult) : 0;
+
+                        if (remainingDays < totalDays)
+                        {
+                            // Not enough leave quota
+                            transaction.Rollback();
+                            return false;
                         }
 
                         // Update leave request status
@@ -504,11 +538,12 @@ public class LeaveService
                         cmd.Parameters.AddWithValue("@ApprovedBy", approvedByAdminId);
                         cmd.ExecuteNonQuery();
 
-                        // Update leave quota
+                        // Update leave quota (UsedDays and RemainingDays)
                         cmd.Parameters.Clear();
                         cmd.CommandText = @"
                             UPDATE Employee_Leave_Quota
-                            SET UsedDays = UsedDays + @TotalDays
+                            SET UsedDays = UsedDays + @TotalDays,
+                                RemainingDays = RemainingDays - @TotalDays
                             WHERE Admin_ID = @AdminID
                               AND LeaveType_ID = @LeaveTypeID
                               AND Year = @Year";
@@ -875,6 +910,25 @@ public class LeaveService
                     return (false, "คุณไม่มีสิทธิ์อนุมัติคำขอลานี้");
                 }
 
+                // Check leave quota before approval
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    SELECT RemainingDays FROM Employee_Leave_Quota
+                    WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year";
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                cmd.Parameters.AddWithValue("@Year", year);
+
+                object remainingResult = cmd.ExecuteScalar();
+                decimal remainingDays = remainingResult != null && remainingResult != DBNull.Value
+                    ? Convert.ToDecimal(remainingResult) : 0;
+
+                if (remainingDays < totalDays)
+                {
+                    transaction.Rollback();
+                    return (false, $"วันลาคงเหลือไม่เพียงพอ (เหลือ {remainingDays} วัน, ขอ {totalDays} วัน)");
+                }
+
                 // Update leave request status
                 cmd.Parameters.Clear();
                 cmd.CommandText = @"
@@ -1004,6 +1058,276 @@ public class LeaveService
     }
 
     /// <summary>
+    /// Mark leave request as replaced by work (ทำงานทดแทน)
+    /// When marked as replaced, the leave won't count toward payroll deductions
+    /// </summary>
+    public (bool Success, string Message) MarkLeaveAsReplaced(long requestId, short approverAdminId, DateTime replacementDate)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            try
+            {
+                conn.Open();
+
+                // Check current status and get details
+                using (SqlCommand cmd = new SqlCommand(@"
+                    SELECT Admin_ID, Status, TotalDays, LeaveType_ID, YEAR(StartDate) AS Year
+                    FROM Leave_Requests
+                    WHERE ID = @RequestID", conn))
+                {
+                    cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                    short adminId = 0;
+                    string status = "";
+                    decimal totalDays = 0;
+                    byte leaveTypeId = 0;
+                    int year = 0;
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            adminId = Convert.ToInt16(reader["Admin_ID"]);
+                            status = reader["Status"]?.ToString() ?? "";
+                            totalDays = Convert.ToDecimal(reader["TotalDays"]);
+                            leaveTypeId = Convert.ToByte(reader["LeaveType_ID"]);
+                            year = Convert.ToInt32(reader["Year"]);
+                        }
+                        else
+                        {
+                            return (false, "ไม่พบคำขอลา");
+                        }
+                    }
+
+                    // Only approved leaves can be marked as replaced
+                    if (status != "APPROVED")
+                    {
+                        return (false, "สามารถทำงานทดแทนได้เฉพาะใบลาที่อนุมัติแล้วเท่านั้น");
+                    }
+
+                    // Check if approver has permission (Admin/Owner or supervisor)
+                    using (SqlCommand checkCmd = new SqlCommand(@"
+                        SELECT
+                            (SELECT COUNT(*) FROM Employee_Supervisor
+                             WHERE Supervisor_AdminID = @ApproverID AND Employee_AdminID = @EmpID
+                             AND IsActive = 1) AS IsSupervisor,
+                            (SELECT Role FROM Admin WHERE ID = @ApproverID) AS ApproverRole", conn))
+                    {
+                        checkCmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                        checkCmd.Parameters.AddWithValue("@EmpID", adminId);
+
+                        bool canApprove = false;
+                        using (SqlDataReader permReader = checkCmd.ExecuteReader())
+                        {
+                            if (permReader.Read())
+                            {
+                                int isSupervisor = Convert.ToInt32(permReader["IsSupervisor"]);
+                                string approverRole = permReader["ApproverRole"]?.ToString() ?? "";
+                                canApprove = isSupervisor > 0 || approverRole == "Admin" || approverRole == "Owner";
+                            }
+                        }
+
+                        if (!canApprove)
+                        {
+                            return (false, "คุณไม่มีสิทธิ์จัดการการลานี้");
+                        }
+                    }
+
+                    // Begin transaction
+                    using (SqlTransaction transaction = conn.BeginTransaction())
+                    {
+                        try
+                        {
+                            // Update leave request to mark as replaced
+                            using (SqlCommand updateCmd = new SqlCommand(@"
+                                UPDATE Leave_Requests
+                                SET IsReplaced = 1,
+                                    ReplacementDate = @ReplacementDate,
+                                    ReplacementApprovedBy = @ApproverID,
+                                    ReplacementApprovedDate = GETDATE()
+                                WHERE ID = @RequestID", conn, transaction))
+                            {
+                                updateCmd.Parameters.AddWithValue("@RequestID", requestId);
+                                updateCmd.Parameters.AddWithValue("@ReplacementDate", replacementDate);
+                                updateCmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                                updateCmd.ExecuteNonQuery();
+                            }
+
+                            // Return the leave days back to the quota (since it's now replaced)
+                            using (SqlCommand quotaCmd = new SqlCommand(@"
+                                UPDATE Employee_Leave_Quota
+                                SET UsedDays = UsedDays - @TotalDays,
+                                    RemainingDays = RemainingDays + @TotalDays
+                                WHERE Admin_ID = @AdminID
+                                  AND LeaveType_ID = @LeaveTypeID
+                                  AND Year = @Year", conn, transaction))
+                            {
+                                quotaCmd.Parameters.AddWithValue("@TotalDays", totalDays);
+                                quotaCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                quotaCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                                quotaCmd.Parameters.AddWithValue("@Year", year);
+                                quotaCmd.ExecuteNonQuery();
+                            }
+
+                            transaction.Commit();
+                            return (true, $"บันทึกการทำงานทดแทนสำเร็จ วันที่ {replacementDate:dd/MM/yyyy}");
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cancel work replacement (ยกเลิกทำงานทดแทน)
+    /// </summary>
+    public (bool Success, string Message) CancelWorkReplacement(long requestId, short approverAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            try
+            {
+                conn.Open();
+
+                // Check current status and get details
+                using (SqlCommand cmd = new SqlCommand(@"
+                    SELECT Admin_ID, Status, TotalDays, LeaveType_ID, YEAR(StartDate) AS Year, ISNULL(IsReplaced, 0) AS IsReplaced
+                    FROM Leave_Requests
+                    WHERE ID = @RequestID", conn))
+                {
+                    cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                    short adminId = 0;
+                    string status = "";
+                    decimal totalDays = 0;
+                    byte leaveTypeId = 0;
+                    int year = 0;
+                    bool isReplaced = false;
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            adminId = Convert.ToInt16(reader["Admin_ID"]);
+                            status = reader["Status"]?.ToString() ?? "";
+                            totalDays = Convert.ToDecimal(reader["TotalDays"]);
+                            leaveTypeId = Convert.ToByte(reader["LeaveType_ID"]);
+                            year = Convert.ToInt32(reader["Year"]);
+                            isReplaced = Convert.ToBoolean(reader["IsReplaced"]);
+                        }
+                        else
+                        {
+                            return (false, "ไม่พบคำขอลา");
+                        }
+                    }
+
+                    if (!isReplaced)
+                    {
+                        return (false, "คำขอลานี้ไม่ได้ทำงานทดแทน");
+                    }
+
+                    // Check if approver has permission
+                    using (SqlCommand checkCmd = new SqlCommand(@"
+                        SELECT Role FROM Admin WHERE ID = @ApproverID", conn))
+                    {
+                        checkCmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                        string role = checkCmd.ExecuteScalar()?.ToString() ?? "";
+                        if (role != "Admin" && role != "Owner")
+                        {
+                            return (false, "เฉพาะ Admin หรือ Owner เท่านั้นที่สามารถยกเลิกการทำงานทดแทนได้");
+                        }
+                    }
+
+                    // Begin transaction
+                    using (SqlTransaction transaction = conn.BeginTransaction())
+                    {
+                        try
+                        {
+                            // Update leave request to cancel replacement
+                            using (SqlCommand updateCmd = new SqlCommand(@"
+                                UPDATE Leave_Requests
+                                SET IsReplaced = 0,
+                                    ReplacementDate = NULL,
+                                    ReplacementApprovedBy = NULL,
+                                    ReplacementApprovedDate = NULL
+                                WHERE ID = @RequestID", conn, transaction))
+                            {
+                                updateCmd.Parameters.AddWithValue("@RequestID", requestId);
+                                updateCmd.ExecuteNonQuery();
+                            }
+
+                            // Deduct the leave days from quota again
+                            using (SqlCommand quotaCmd = new SqlCommand(@"
+                                UPDATE Employee_Leave_Quota
+                                SET UsedDays = UsedDays + @TotalDays,
+                                    RemainingDays = RemainingDays - @TotalDays
+                                WHERE Admin_ID = @AdminID
+                                  AND LeaveType_ID = @LeaveTypeID
+                                  AND Year = @Year", conn, transaction))
+                            {
+                                quotaCmd.Parameters.AddWithValue("@TotalDays", totalDays);
+                                quotaCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                quotaCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                                quotaCmd.Parameters.AddWithValue("@Year", year);
+                                quotaCmd.ExecuteNonQuery();
+                            }
+
+                            transaction.Commit();
+                            return (true, "ยกเลิกการทำงานทดแทนสำเร็จ");
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get leave requests for a specific employee that can be replaced
+    /// </summary>
+    public DataTable GetReplaceableLeaves(short adminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT LR.ID, LR.StartDate, LR.EndDate, LR.TotalDays, LR.Reason,
+                       LT.LeaveTypeName, ISNULL(LR.IsReplaced, 0) AS IsReplaced, LR.ReplacementDate
+                FROM Leave_Requests LR
+                INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                WHERE LR.Admin_ID = @AdminID
+                  AND LR.Status = 'APPROVED'
+                ORDER BY LR.StartDate DESC", conn))
+            {
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                conn.Open();
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Get leave requests for a specific employee (for supervisor or self-view)
     /// </summary>
     public DataTable GetLeaveRequestsForEmployee(short employeeAdminId, short? year = null)
@@ -1033,6 +1357,90 @@ public class LeaveService
                 cmd.Parameters.AddWithValue("@AdminID", employeeAdminId);
                 if (year.HasValue)
                     cmd.Parameters.AddWithValue("@Year", year.Value);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get all approved leave requests for work replacement management
+    /// For Admin/Owner: returns all approved leaves
+    /// For Supervisor: returns only their subordinates' leaves
+    /// </summary>
+    public DataTable GetLeavesForWorkReplacement(short approverAdminId, short? year = null, string employeeSearch = null)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+
+                // Check approver role
+                string approverRole = "";
+                using (SqlCommand roleCmd = new SqlCommand("SELECT Role FROM Admin WHERE ID = @ApproverID", conn))
+                {
+                    roleCmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+                    conn.Open();
+                    approverRole = roleCmd.ExecuteScalar()?.ToString() ?? "";
+                    conn.Close();
+                }
+
+                bool isAdminOrOwner = approverRole == "Admin" || approverRole == "Owner";
+
+                var whereClauses = new System.Collections.Generic.List<string>();
+                whereClauses.Add("LR.Status = 'APPROVED'");
+
+                if (!isAdminOrOwner)
+                {
+                    // Supervisor - only show subordinates' leaves
+                    whereClauses.Add(@"EXISTS (SELECT 1 FROM Employee_Supervisor ES
+                                       WHERE ES.Supervisor_AdminID = @ApproverID
+                                       AND ES.Employee_AdminID = LR.Admin_ID
+                                       AND ES.IsActive = 1)");
+                }
+
+                if (year.HasValue)
+                {
+                    whereClauses.Add("YEAR(LR.StartDate) = @Year");
+                    cmd.Parameters.AddWithValue("@Year", year.Value);
+                }
+
+                if (!string.IsNullOrEmpty(employeeSearch))
+                {
+                    whereClauses.Add("(A.FirstName + ' ' + A.LastName LIKE @Search OR A.Username LIKE @Search)");
+                    cmd.Parameters.AddWithValue("@Search", "%" + employeeSearch + "%");
+                }
+
+                string whereClause = "WHERE " + string.Join(" AND ", whereClauses);
+
+                cmd.CommandText = @"
+                    SELECT LR.ID, LR.RequestNumber, LR.Admin_ID,
+                           ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                           A.Username AS NickName,
+                           LT.LeaveTypeName, LT.LeaveTypeCode,
+                           LR.StartDate, LR.EndDate, LR.TotalDays,
+                           LR.Reason, LR.Status,
+                           ISNULL(LR.IsReplaced, 0) AS IsReplaced,
+                           LR.ReplacementDate,
+                           ISNULL(ReplacedBy.FirstName + ' ' + ReplacedBy.LastName, ReplacedBy.Username) AS ReplacedByName,
+                           LR.ReplacementApprovedDate,
+                           ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                           LR.ApprovedDate
+                    FROM Leave_Requests LR
+                    INNER JOIN Admin A ON A.ID = LR.Admin_ID
+                    INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                    LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
+                    LEFT JOIN Admin ReplacedBy ON ReplacedBy.ID = LR.ReplacementApprovedBy
+                    " + whereClause + @"
+                    ORDER BY LR.StartDate DESC";
+
+                cmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {

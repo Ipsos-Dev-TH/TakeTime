@@ -331,8 +331,36 @@
             margin-bottom: 20px;
         }
 
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-success {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 1px solid #b7d7a8;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.15);
+        }
+        .alert-success::before { content: "✓ "; font-weight: bold; }
+
+        .alert-error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border: 1px solid #f1b0b7;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
+        }
+        .alert-error::before { content: "⚠ "; font-weight: bold; }
+
+        .alert-info {
+            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+            color: #0c5460;
+            border: 1px solid #a2d3e0;
+            box-shadow: 0 2px 8px rgba(23, 162, 184, 0.15);
+        }
+        .alert-info::before { content: "ℹ "; font-weight: bold; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert { animation: fadeIn 0.3s ease-out; }
 
         .employee-name-cell {
             display: flex;
@@ -346,6 +374,37 @@
         .employee-name-cell .username {
             font-size: 11px;
             color: #888;
+        }
+
+        /* Salary History Modal */
+        .salary-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .salary-history-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .salary-history-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+
+        .salary-history-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .salary-history-content {
+            max-height: 400px;
+            overflow-y: auto;
         }
     </style>
 
@@ -451,6 +510,10 @@
                                     CssClass="btn-edit" CommandName="EditEmployee"
                                     CommandArgument='<%# Eval("Admin_ID") %>' />
 
+                                <asp:Button ID="btnSalaryHistory" runat="server" Text="&#128176; ประวัติเงินเดือน"
+                                    CssClass="btn-info" CommandName="ViewSalaryHistory"
+                                    CommandArgument='<%# Eval("Admin_ID") %>' />
+
                                 <asp:Button ID="btnResign" runat="server" Text="&#128683; ลาออก"
                                     CssClass="btn-danger" CommandName="Resign"
                                     CommandArgument='<%# Eval("Admin_ID") %>'
@@ -482,6 +545,33 @@
         <!-- Hidden fields -->
         <asp:HiddenField ID="hdnEmployeeId" runat="server" />
         <asp:HiddenField ID="hdnEditMode" runat="server" Value="add" />
+
+        <!-- Salary History Modal -->
+        <div id="salaryHistoryModal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="salaryHistoryTitle">&#128176; ประวัติเงินเดือน</h3>
+                    <button type="button" class="modal-close" onclick="closeSalaryHistoryModal()">&times;</button>
+                </div>
+                <div class="salary-history-content">
+                    <table class="salary-history-table">
+                        <thead>
+                            <tr>
+                                <th>วันที่มีผล</th>
+                                <th>ตำแหน่ง</th>
+                                <th style="text-align:right">เงินเดือน</th>
+                                <th>สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salaryHistoryBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" onclick="closeSalaryHistoryModal()">ปิด</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Add/Edit Employee Modal -->
         <div id="employeeModal" class="modal-overlay">
@@ -596,11 +686,33 @@
             document.getElementById('employeeModal').style.display = 'none';
         }
 
+        function openSalaryHistoryModal(employeeName, tableRows) {
+            document.getElementById('salaryHistoryTitle').innerHTML = '&#128176; ประวัติเงินเดือน - ' + employeeName;
+            document.getElementById('salaryHistoryBody').innerHTML = tableRows;
+            document.getElementById('salaryHistoryModal').style.display = 'flex';
+        }
+
+        function closeSalaryHistoryModal() {
+            document.getElementById('salaryHistoryModal').style.display = 'none';
+        }
+
         // Close modal when clicking outside
         window.onclick = function (event) {
             if (event.target.className === 'modal-overlay') {
                 event.target.style.display = 'none';
             }
         }
+
+        // Auto-dismiss alert messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            var alerts = document.querySelectorAll('.alert');
+            alerts.forEach(function(alert) {
+                setTimeout(function() {
+                    alert.style.transition = 'opacity 0.5s ease-out';
+                    alert.style.opacity = '0';
+                    setTimeout(function() { alert.style.display = 'none'; }, 500);
+                }, 5000);
+            });
+        });
     </script>
 </asp:Content>

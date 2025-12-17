@@ -376,6 +376,7 @@
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
     <Content Include="Admin\Leave\LeaveManagement.aspx" />
+    <Content Include="Admin\Leave\LeaveReplacement.aspx" />
     <Content Include="Admin\Payroll\PayrollManagement.aspx" />
     <Content Include="Admin\Payroll\PayrollDetail.aspx" />
     <Content Include="Admin\HR\OTEntry.aspx" />
@@ -734,6 +735,8 @@
     <Compile Include="Class\EmployeeService.cs" />
     <Compile Include="Class\PayrollService.cs" />
     <Compile Include="Class\LeaveService.cs" />
+    <Compile Include="Class\SecurityHelper.cs" />
+    <Compile Include="Class\HRConfiguration.cs" />
     <Compile Include="Class\ReservationDataAccess.cs" />
     <Compile Include="Class\ReservationPriceCalculationService.cs" />
     <Compile Include="Class\ReservationService.cs" />
@@ -778,6 +781,13 @@
     </Compile>
     <Compile Include="Admin\Leave\LeaveManagement.aspx.designer.cs">
       <DependentUpon>LeaveManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveReplacement.aspx.cs">
+      <DependentUpon>LeaveReplacement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveReplacement.aspx.designer.cs">
+      <DependentUpon>LeaveReplacement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Payroll\PayrollManagement.aspx.cs">
       <DependentUpon>PayrollManagement.aspx</DependentUpon>
