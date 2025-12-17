@@ -471,7 +471,7 @@ public class LeaveService
                     {
                         // Get request details
                         cmd.CommandText = @"
-                            SELECT Admin_ID, LeaveType_ID, TotalDays, YEAR(StartDate) AS Year
+                            SELECT Admin_ID, LeaveType_ID, TotalDays, YEAR(StartDate) AS Year, Status
                             FROM Leave_Requests
                             WHERE ID = @RequestID";
                         cmd.Parameters.AddWithValue("@RequestID", requestId);
@@ -480,6 +480,7 @@ public class LeaveService
                         byte leaveTypeId = 0;
                         decimal totalDays = 0;
                         short year = 0;
+                        string status = "";
 
                         using (SqlDataReader reader = cmd.ExecuteReader())
                         {
@@ -489,7 +490,40 @@ public class LeaveService
                                 leaveTypeId = Convert.ToByte(reader["LeaveType_ID"]);
                                 totalDays = Convert.ToDecimal(reader["TotalDays"]);
                                 year = Convert.ToInt16(reader["Year"]);
+                                status = reader["Status"]?.ToString() ?? "";
                             }
+                            else
+                            {
+                                transaction.Rollback();
+                                return false;
+                            }
+                        }
+
+                        // Check if already processed
+                        if (status != "PENDING")
+                        {
+                            transaction.Rollback();
+                            return false;
+                        }
+
+                        // Check leave quota before approval
+                        cmd.Parameters.Clear();
+                        cmd.CommandText = @"
+                            SELECT RemainingDays FROM Employee_Leave_Quota
+                            WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year";
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                        cmd.Parameters.AddWithValue("@Year", year);
+
+                        object remainingResult = cmd.ExecuteScalar();
+                        decimal remainingDays = remainingResult != null && remainingResult != DBNull.Value
+                            ? Convert.ToDecimal(remainingResult) : 0;
+
+                        if (remainingDays < totalDays)
+                        {
+                            // Not enough leave quota
+                            transaction.Rollback();
+                            return false;
                         }
 
                         // Update leave request status
@@ -504,11 +538,12 @@ public class LeaveService
                         cmd.Parameters.AddWithValue("@ApprovedBy", approvedByAdminId);
                         cmd.ExecuteNonQuery();
 
-                        // Update leave quota
+                        // Update leave quota (UsedDays and RemainingDays)
                         cmd.Parameters.Clear();
                         cmd.CommandText = @"
                             UPDATE Employee_Leave_Quota
-                            SET UsedDays = UsedDays + @TotalDays
+                            SET UsedDays = UsedDays + @TotalDays,
+                                RemainingDays = RemainingDays - @TotalDays
                             WHERE Admin_ID = @AdminID
                               AND LeaveType_ID = @LeaveTypeID
                               AND Year = @Year";
@@ -873,6 +908,25 @@ public class LeaveService
                 {
                     transaction.Rollback();
                     return (false, "คุณไม่มีสิทธิ์อนุมัติคำขอลานี้");
+                }
+
+                // Check leave quota before approval
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    SELECT RemainingDays FROM Employee_Leave_Quota
+                    WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year";
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                cmd.Parameters.AddWithValue("@Year", year);
+
+                object remainingResult = cmd.ExecuteScalar();
+                decimal remainingDays = remainingResult != null && remainingResult != DBNull.Value
+                    ? Convert.ToDecimal(remainingResult) : 0;
+
+                if (remainingDays < totalDays)
+                {
+                    transaction.Rollback();
+                    return (false, $"วันลาคงเหลือไม่เพียงพอ (เหลือ {remainingDays} วัน, ขอ {totalDays} วัน)");
                 }
 
                 // Update leave request status

@@ -734,6 +734,7 @@
     <Compile Include="Class\EmployeeService.cs" />
     <Compile Include="Class\PayrollService.cs" />
     <Compile Include="Class\LeaveService.cs" />
+    <Compile Include="Class\SecurityHelper.cs" />
     <Compile Include="Class\ReservationDataAccess.cs" />
     <Compile Include="Class\ReservationPriceCalculationService.cs" />
     <Compile Include="Class\ReservationService.cs" />

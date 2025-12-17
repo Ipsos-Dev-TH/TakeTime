@@ -12,6 +12,10 @@ namespace Take_Time_BangPhra.Admin.HR
         private EmployeeService employeeService;
         private string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // Configuration constants
+        private const decimal MinimumWage = 10500; // Minimum wage per month (2024)
+        private const decimal MaximumSalary = 9999999; // Maximum allowed salary
+
         protected void Page_Load(object sender, EventArgs e)
         {
             employeeService = new EmployeeService();
@@ -279,28 +283,74 @@ namespace Take_Time_BangPhra.Admin.HR
                 {
                     conn.Open();
 
-                    // Delete salary records first
-                    using (SqlCommand salaryCmd = new SqlCommand(@"
-                        DELETE FROM Employee_Salary WHERE Admin_ID = @AdminID", conn))
+                    // Use transaction to ensure data integrity
+                    using (SqlTransaction transaction = conn.BeginTransaction())
                     {
-                        salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
-                        salaryCmd.ExecuteNonQuery();
-                    }
+                        try
+                        {
+                            // Delete leave requests
+                            using (SqlCommand leaveCmd = new SqlCommand(@"
+                                DELETE FROM Leave_Requests WHERE Admin_ID = @AdminID", conn, transaction))
+                            {
+                                leaveCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                leaveCmd.ExecuteNonQuery();
+                            }
 
-                    // Delete supervisor relationships
-                    using (SqlCommand supCmd = new SqlCommand(@"
-                        DELETE FROM Employee_Supervisor WHERE Employee_AdminID = @AdminID OR Supervisor_AdminID = @AdminID", conn))
-                    {
-                        supCmd.Parameters.AddWithValue("@AdminID", adminId);
-                        supCmd.ExecuteNonQuery();
-                    }
+                            // Delete leave quota
+                            using (SqlCommand quotaCmd = new SqlCommand(@"
+                                DELETE FROM Employee_Leave_Quota WHERE Admin_ID = @AdminID", conn, transaction))
+                            {
+                                quotaCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                quotaCmd.ExecuteNonQuery();
+                            }
 
-                    // Delete admin record
-                    using (SqlCommand cmd = new SqlCommand(@"
-                        DELETE FROM Admin WHERE ID = @AdminID", conn))
-                    {
-                        cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        cmd.ExecuteNonQuery();
+                            // Delete OT entries
+                            using (SqlCommand otCmd = new SqlCommand(@"
+                                DELETE FROM OT_Entry WHERE Admin_ID = @AdminID", conn, transaction))
+                            {
+                                otCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                otCmd.ExecuteNonQuery();
+                            }
+
+                            // Delete payroll records
+                            using (SqlCommand payrollCmd = new SqlCommand(@"
+                                DELETE FROM Payroll_Records WHERE Admin_ID = @AdminID", conn, transaction))
+                            {
+                                payrollCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                payrollCmd.ExecuteNonQuery();
+                            }
+
+                            // Delete salary records
+                            using (SqlCommand salaryCmd = new SqlCommand(@"
+                                DELETE FROM Employee_Salary WHERE Admin_ID = @AdminID", conn, transaction))
+                            {
+                                salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                salaryCmd.ExecuteNonQuery();
+                            }
+
+                            // Delete supervisor relationships
+                            using (SqlCommand supCmd = new SqlCommand(@"
+                                DELETE FROM Employee_Supervisor WHERE Employee_AdminID = @AdminID OR Supervisor_AdminID = @AdminID", conn, transaction))
+                            {
+                                supCmd.Parameters.AddWithValue("@AdminID", adminId);
+                                supCmd.ExecuteNonQuery();
+                            }
+
+                            // Delete admin record
+                            using (SqlCommand cmd = new SqlCommand(@"
+                                DELETE FROM Admin WHERE ID = @AdminID", conn, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            transaction.Commit();
+                        }
+                        catch (Exception)
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
                     }
                 }
 
@@ -356,6 +406,40 @@ namespace Take_Time_BangPhra.Admin.HR
 
         private void AddNewEmployee()
         {
+            // Validate password strength
+            var passwordValidation = SecurityHelper.ValidatePasswordStrength(txtPassword.Text);
+            if (!passwordValidation.IsValid)
+            {
+                ShowMessage(passwordValidation.Message, "error");
+                return;
+            }
+
+            // Validate salary if provided
+            decimal salary = 0;
+            if (!string.IsNullOrWhiteSpace(txtSalary.Text))
+            {
+                if (!decimal.TryParse(txtSalary.Text, out salary))
+                {
+                    ShowMessage("กรุณากรอกเงินเดือนเป็นตัวเลข", "error");
+                    return;
+                }
+                if (salary < 0)
+                {
+                    ShowMessage("เงินเดือนต้องไม่ติดลบ", "error");
+                    return;
+                }
+                if (salary > 0 && salary < MinimumWage)
+                {
+                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({MinimumWage:N0} บาท)", "error");
+                    return;
+                }
+                if (salary > MaximumSalary)
+                {
+                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({MaximumSalary:N0} บาท)", "error");
+                    return;
+                }
+            }
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
@@ -372,6 +456,9 @@ namespace Take_Time_BangPhra.Admin.HR
                     }
                 }
 
+                // Hash the password
+                string hashedPassword = SecurityHelper.HashPassword(txtPassword.Text);
+
                 // Insert new employee
                 using (SqlCommand cmd = new SqlCommand(@"
                     INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status)
@@ -379,7 +466,7 @@ namespace Take_Time_BangPhra.Admin.HR
                     SELECT SCOPE_IDENTITY();", conn))
                 {
                     cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
-                    cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                    cmd.Parameters.AddWithValue("@Password", hashedPassword);
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
@@ -387,20 +474,16 @@ namespace Take_Time_BangPhra.Admin.HR
                     int newAdminId = Convert.ToInt32(cmd.ExecuteScalar());
 
                     // Add salary if provided
-                    if (!string.IsNullOrWhiteSpace(txtSalary.Text))
+                    if (salary > 0)
                     {
-                        decimal salary;
-                        if (decimal.TryParse(txtSalary.Text, out salary) && salary > 0)
+                        using (SqlCommand salaryCmd = new SqlCommand(@"
+                            INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
+                            VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
                         {
-                            using (SqlCommand salaryCmd = new SqlCommand(@"
-                                INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
-                                VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
-                            {
-                                salaryCmd.Parameters.AddWithValue("@AdminID", newAdminId);
-                                salaryCmd.Parameters.AddWithValue("@Salary", salary);
-                                salaryCmd.Parameters.AddWithValue("@Position", txtPosition.Text.Trim());
-                                salaryCmd.ExecuteNonQuery();
-                            }
+                            salaryCmd.Parameters.AddWithValue("@AdminID", newAdminId);
+                            salaryCmd.Parameters.AddWithValue("@Salary", salary);
+                            salaryCmd.Parameters.AddWithValue("@Position", txtPosition.Text.Trim());
+                            salaryCmd.ExecuteNonQuery();
                         }
                     }
                 }
@@ -421,6 +504,43 @@ namespace Take_Time_BangPhra.Admin.HR
                 return;
             }
 
+            // Validate password if provided
+            if (!string.IsNullOrWhiteSpace(txtPassword.Text))
+            {
+                var passwordValidation = SecurityHelper.ValidatePasswordStrength(txtPassword.Text);
+                if (!passwordValidation.IsValid)
+                {
+                    ShowMessage(passwordValidation.Message, "error");
+                    return;
+                }
+            }
+
+            // Validate salary if provided
+            decimal newSalary = 0;
+            if (!string.IsNullOrWhiteSpace(txtSalary.Text))
+            {
+                if (!decimal.TryParse(txtSalary.Text, out newSalary))
+                {
+                    ShowMessage("กรุณากรอกเงินเดือนเป็นตัวเลข", "error");
+                    return;
+                }
+                if (newSalary < 0)
+                {
+                    ShowMessage("เงินเดือนต้องไม่ติดลบ", "error");
+                    return;
+                }
+                if (newSalary > 0 && newSalary < MinimumWage)
+                {
+                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({MinimumWage:N0} บาท)", "error");
+                    return;
+                }
+                if (newSalary > MaximumSalary)
+                {
+                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({MaximumSalary:N0} บาท)", "error");
+                    return;
+                }
+            }
+
             short adminId = Convert.ToInt16(hdnEmployeeId.Value);
 
             using (SqlConnection conn = new SqlConnection(connectionString))
@@ -431,12 +551,25 @@ namespace Take_Time_BangPhra.Admin.HR
                 string updateSql;
                 if (!string.IsNullOrWhiteSpace(txtPassword.Text))
                 {
+                    // Hash the new password
+                    string hashedPassword = SecurityHelper.HashPassword(txtPassword.Text);
+
                     updateSql = @"UPDATE Admin SET
                                   FirstName = @FirstName,
                                   LastName = @LastName,
                                   Role = @Role,
                                   Password = @Password
                                   WHERE ID = @AdminID";
+
+                    using (SqlCommand cmd = new SqlCommand(updateSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
+                        cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
+                        cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.Parameters.AddWithValue("@Password", hashedPassword);
+                        cmd.ExecuteNonQuery();
+                    }
                 }
                 else
                 {
@@ -445,24 +578,18 @@ namespace Take_Time_BangPhra.Admin.HR
                                   LastName = @LastName,
                                   Role = @Role
                                   WHERE ID = @AdminID";
-                }
 
-                using (SqlCommand cmd = new SqlCommand(updateSql, conn))
-                {
-                    cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
-                    cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
-                    cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
-                    cmd.Parameters.AddWithValue("@AdminID", adminId);
-                    if (!string.IsNullOrWhiteSpace(txtPassword.Text))
+                    using (SqlCommand cmd = new SqlCommand(updateSql, conn))
                     {
-                        cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                        cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
+                        cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
+                        cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.ExecuteNonQuery();
                     }
-                    cmd.ExecuteNonQuery();
                 }
 
                 // Update or insert salary with history tracking
-                decimal newSalary = 0;
-                decimal.TryParse(txtSalary.Text, out newSalary);
                 string newPosition = txtPosition.Text.Trim();
 
                 // Check current salary
