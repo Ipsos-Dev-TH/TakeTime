@@ -83,9 +83,42 @@ public class EmployeeService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
+                // Direct query instead of view (vw_Employee_Complete_Profile doesn't exist)
+                // Admin table columns: ID, Username, Password, FirstName, LastName, Role, Status
                 cmd.CommandText = @"
-                    SELECT * FROM vw_Employee_Complete_Profile
-                    WHERE Admin_ID = @AdminID";
+                    SELECT
+                        A.ID AS Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
+                        ISNULL(ES.Position, A.Role) AS CurrentPosition,
+                        CASE WHEN A.Status = 1 THEN 1 ELSE 0 END AS IsActive,
+                        0 AS TotalServiceYears,
+                        0 AS TotalServiceMonths,
+                        'EMP' + RIGHT('000' + CAST(A.ID AS VARCHAR), 3) AS EmployeeCode,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS FullNameTH,
+                        A.Username AS FullNameEN,
+                        NULL AS IDCardNumber,
+                        NULL AS BirthDate,
+                        A.Username AS MobilePhone,
+                        A.Username AS Email,
+                        NULL AS Address,
+                        NULL AS SubDistrict,
+                        NULL AS District,
+                        NULL AS Province,
+                        NULL AS PostalCode,
+                        NULL AS EmergencyContactName,
+                        NULL AS EmergencyContactPhone,
+                        NULL AS HireDate,
+                        A.Role AS Department,
+                        'ประจำ' AS ContractType,
+                        NULL AS ContractEndDate,
+                        ISNULL(ES.MonthlySalary, 0) AS CurrentSalary,
+                        ES.EffectiveDate AS SalaryEffectiveDate,
+                        NULL AS PhotoPath,
+                        NULL AS YearToDateLeaveDays,
+                        NULL AS ContractDaysUntilExpiry
+                    FROM Admin A
+                    LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                    WHERE A.ID = @AdminID";
                 cmd.Parameters.AddWithValue("@AdminID", adminId);
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
@@ -108,14 +141,26 @@ public class EmployeeService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
+                // Direct query instead of view (vw_Employee_Complete_Profile doesn't exist)
                 cmd.CommandText = @"
                     SELECT
-                        Admin_ID, Name, CurrentPosition, CurrentSalary,
-                        Department, MobilePhone, WorkEmail, PhotoPath,
-                        TotalServiceYears, TotalServiceMonths, ContractType,
-                        ContractDaysUntilExpiry, YearToDateLeaveDays
-                    FROM vw_Employee_Complete_Profile
-                    ORDER BY Name";
+                        A.ID AS Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
+                        ISNULL(ES.Position, A.Role) AS CurrentPosition,
+                        ISNULL(ES.MonthlySalary, 0) AS CurrentSalary,
+                        A.Role AS Department,
+                        A.Username AS MobilePhone,
+                        A.Username AS WorkEmail,
+                        NULL AS PhotoPath,
+                        0 AS TotalServiceYears,
+                        0 AS TotalServiceMonths,
+                        'ประจำ' AS ContractType,
+                        NULL AS ContractDaysUntilExpiry,
+                        NULL AS YearToDateLeaveDays
+                    FROM Admin A
+                    LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                    WHERE A.Status = 1
+                    ORDER BY A.FirstName, A.LastName";
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
