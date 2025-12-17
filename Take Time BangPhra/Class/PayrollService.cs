@@ -621,7 +621,8 @@ public class PayrollService
     /// Always creates an Account_Payment record so it appears in the payment voucher management
     /// </summary>
     public (bool Success, string VoucherNumber, string Message) GeneratePayrollVoucher(
-        long payrollRecordId, short createdByAdminId, bool createAccountPayment = true)
+        long payrollRecordId, short createdByAdminId,
+        string paidHow = "โอน", string paidType = "ค่าจ้าง", int vatTypeId = 0)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -731,15 +732,22 @@ public class PayrollService
                     int employeeVendorId = GetOrCreateEmployeeVendorId(conn, transaction,
                         idCard, employeeName, empAddress, empPhone, bankCode, bankAccountNumber, bankAccountName);
 
-                    // Get valid Vat_Type_ID (prefer 0% VAT for salary payments)
-                    int vatTypeId = 1;
-                    using (SqlCommand vatCmd = new SqlCommand(
-                        "SELECT TOP 1 ID FROM Account_Vat_Type WHERE Status = 'True' ORDER BY Vat_Percent ASC", conn, transaction))
+                    // Use provided vatTypeId or get default (0% VAT for salary payments)
+                    int actualVatTypeId = vatTypeId;
+                    if (actualVatTypeId <= 0)
                     {
-                        object vatResult = vatCmd.ExecuteScalar();
-                        if (vatResult != null && vatResult != DBNull.Value)
+                        using (SqlCommand vatCmd = new SqlCommand(
+                            "SELECT TOP 1 ID FROM Account_Vat_Type WHERE Status = 'True' ORDER BY Vat_Percent ASC", conn, transaction))
                         {
-                            vatTypeId = Convert.ToInt32(vatResult);
+                            object vatResult = vatCmd.ExecuteScalar();
+                            if (vatResult != null && vatResult != DBNull.Value)
+                            {
+                                actualVatTypeId = Convert.ToInt32(vatResult);
+                            }
+                            else
+                            {
+                                actualVatTypeId = 1; // Fallback
+                            }
                         }
                     }
 
@@ -751,12 +759,14 @@ public class PayrollService
                          Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID)
                         VALUES
                         (@VoucherNumber, @VendorID, GETDATE(), @Amount, @VatTypeID, 0,
-                         @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy)", conn, transaction))
+                         @Amount, @PaidHow, @PaidType, N'Normal', @CreatedBy)", conn, transaction))
                     {
                         paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
                         paymentCmd.Parameters.AddWithValue("@VendorID", employeeVendorId);
                         paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
-                        paymentCmd.Parameters.AddWithValue("@VatTypeID", vatTypeId);
+                        paymentCmd.Parameters.AddWithValue("@VatTypeID", actualVatTypeId);
+                        paymentCmd.Parameters.AddWithValue("@PaidHow", paidHow);
+                        paymentCmd.Parameters.AddWithValue("@PaidType", paidType);
                         paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
                         paymentCmd.ExecuteNonQuery();
                     }
@@ -1037,6 +1047,69 @@ public class PayrollService
             createCmd.Parameters.AddWithValue("@Name", employeeName ?? "Unknown Employee");
             createCmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(address) ? (object)DBNull.Value : address);
             return Convert.ToInt32(createCmd.ExecuteScalar());
+        }
+    }
+
+    /// <summary>
+    /// Get payment methods (วิธีจ่ายเงิน)
+    /// </summary>
+    public DataTable GetAccountPaidHow()
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT ID, Paid_How FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", conn))
+            {
+                conn.Open();
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get payment types (ประเภทการจ่ายเงิน)
+    /// </summary>
+    public DataTable GetAccountPaidType()
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT ID, Paid_Type FROM Account_Paid_Type WHERE Status = 'True' ORDER BY ID", conn))
+            {
+                conn.Open();
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get VAT types (ประเภทภาษี)
+    /// </summary>
+    public DataTable GetAccountVatType()
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT ID, Vat_Type, Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' ORDER BY Vat_Percent ASC", conn))
+            {
+                conn.Open();
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
         }
     }
 

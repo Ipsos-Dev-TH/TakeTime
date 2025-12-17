@@ -21,6 +21,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
             {
                 CheckAdminLogin();
                 InitializeYearDropdown();
+                LoadPaymentOptions();
                 LoadPayrollData();
             }
             else
@@ -76,6 +77,49 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
             ddlYear.SelectedValue = currentYear.ToString();
             ddlMonth.SelectedValue = DateTime.Now.Month.ToString();
+        }
+
+        private void LoadPaymentOptions()
+        {
+            try
+            {
+                // Load วิธีจ่ายเงิน (Paid_How)
+                DataTable dtPaidHow = payrollService.GetAccountPaidHow();
+                ddlPaidHow.Items.Clear();
+                foreach (DataRow row in dtPaidHow.Rows)
+                {
+                    ddlPaidHow.Items.Add(new ListItem(row["Paid_How"].ToString(), row["ID"].ToString()));
+                }
+                // Default to "โอน" if exists
+                var transferItem = ddlPaidHow.Items.FindByText("โอน");
+                if (transferItem != null) ddlPaidHow.SelectedValue = transferItem.Value;
+
+                // Load ประเภทการจ่ายเงิน (Paid_Type)
+                DataTable dtPaidType = payrollService.GetAccountPaidType();
+                ddlPaidType.Items.Clear();
+                foreach (DataRow row in dtPaidType.Rows)
+                {
+                    ddlPaidType.Items.Add(new ListItem(row["Paid_Type"].ToString(), row["ID"].ToString()));
+                }
+                // Default to "ค่าจ้าง" if exists
+                var wageItem = ddlPaidType.Items.FindByText("ค่าจ้าง");
+                if (wageItem != null) ddlPaidType.SelectedValue = wageItem.Value;
+
+                // Load ประเภทภาษี (Vat_Type)
+                DataTable dtVatType = payrollService.GetAccountVatType();
+                ddlVatType.Items.Clear();
+                foreach (DataRow row in dtVatType.Rows)
+                {
+                    ddlVatType.Items.Add(new ListItem(row["Vat_Type"].ToString(), row["ID"].ToString()));
+                }
+                // Default to "ไม่มีภาษีมูลค่าเพิ่ม" if exists
+                var noVatItem = ddlVatType.Items.FindByText("ไม่มีภาษีมูลค่าเพิ่ม");
+                if (noVatItem != null) ddlVatType.SelectedValue = noVatItem.Value;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadPaymentOptions Error: {ex.Message}");
+            }
         }
 
         #endregion
@@ -474,10 +518,26 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 long payrollRecordId = Convert.ToInt64(e.CommandArgument);
                 LoadPayrollForEdit(payrollRecordId);
             }
+            else if (e.CommandName == "OpenPaymentModal")
+            {
+                // Parse command argument: ID|EmployeeName|NetSalary
+                string[] args = e.CommandArgument.ToString().Split('|');
+                if (args.Length >= 3)
+                {
+                    string recordId = args[0];
+                    string employeeName = args[1];
+                    string netSalary = args[2];
+
+                    // Open payment modal via JavaScript
+                    string script = $"openPaymentModal('{recordId}', '{EscapeJsString(employeeName)}', '{netSalary}');";
+                    ScriptManager.RegisterStartupScript(this, GetType(), "OpenPaymentModal", script, true);
+                }
+            }
             else if (e.CommandName == "ProcessPayment")
             {
+                // Legacy: Direct payment without options
                 long payrollRecordId = Convert.ToInt64(e.CommandArgument);
-                var result = ProcessSinglePayment(payrollRecordId);
+                var result = ProcessSinglePayment(payrollRecordId, "โอน", "ค่าจ้าง", 0);
                 if (result.Success)
                 {
                     ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
@@ -487,6 +547,42 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 {
                     ShowMessage(result.Message ?? "เกิดข้อผิดพลาดในการทำจ่าย", "error");
                 }
+            }
+        }
+
+        protected void btnConfirmPayment_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hdnPayRecordId.Value))
+                {
+                    ShowMessage("ไม่พบข้อมูลรายการจ่าย", "error");
+                    return;
+                }
+
+                long payrollRecordId = Convert.ToInt64(hdnPayRecordId.Value);
+                string paidHow = ddlPaidHow.SelectedItem?.Text ?? "โอน";
+                string paidType = ddlPaidType.SelectedItem?.Text ?? "ค่าจ้าง";
+                int vatTypeId = Convert.ToInt32(ddlVatType.SelectedValue);
+
+                var result = ProcessSinglePayment(payrollRecordId, paidHow, paidType, vatTypeId);
+
+                // Close modal
+                ScriptManager.RegisterStartupScript(this, GetType(), "ClosePaymentModal", "closePaymentModal();", true);
+
+                if (result.Success)
+                {
+                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    LoadPayrollData();
+                }
+                else
+                {
+                    ShowMessage(result.Message ?? "เกิดข้อผิดพลาดในการทำจ่าย", "error");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
         }
 
@@ -586,7 +682,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
             }
         }
 
-        private (bool Success, string VoucherNumber, string Message) ProcessSinglePayment(long payrollRecordId)
+        private (bool Success, string VoucherNumber, string Message) ProcessSinglePayment(
+            long payrollRecordId, string paidHow = "โอน", string paidType = "ค่าจ้าง", int vatTypeId = 0)
         {
             try
             {
@@ -597,7 +694,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 }
 
                 // Generate proper payment voucher with tracking (creates Account_Payment record)
-                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value);
+                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value, paidHow, paidType, vatTypeId);
                 return result;
             }
             catch (Exception ex)
