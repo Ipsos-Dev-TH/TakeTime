@@ -12,10 +12,6 @@ namespace Take_Time_BangPhra.Admin.HR
         private EmployeeService employeeService;
         private string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
-        // Configuration constants
-        private const decimal MinimumWage = 10500; // Minimum wage per month (2024)
-        private const decimal MaximumSalary = 9999999; // Maximum allowed salary
-
         protected void Page_Load(object sender, EventArgs e)
         {
             employeeService = new EmployeeService();
@@ -497,14 +493,14 @@ namespace Take_Time_BangPhra.Admin.HR
                     ShowMessage("เงินเดือนต้องไม่ติดลบ", "error");
                     return;
                 }
-                if (salary > 0 && salary < MinimumWage)
+                if (salary > 0 && salary < HRConfiguration.MinimumWage)
                 {
-                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({MinimumWage:N0} บาท)", "error");
+                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({HRConfiguration.MinimumWage:N0} บาท)", "error");
                     return;
                 }
-                if (salary > MaximumSalary)
+                if (salary > HRConfiguration.MaximumSalary)
                 {
-                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({MaximumSalary:N0} บาท)", "error");
+                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({HRConfiguration.MaximumSalary:N0} บาท)", "error");
                     return;
                 }
             }
@@ -598,14 +594,14 @@ namespace Take_Time_BangPhra.Admin.HR
                     ShowMessage("เงินเดือนต้องไม่ติดลบ", "error");
                     return;
                 }
-                if (newSalary > 0 && newSalary < MinimumWage)
+                if (newSalary > 0 && newSalary < HRConfiguration.MinimumWage)
                 {
-                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({MinimumWage:N0} บาท)", "error");
+                    ShowMessage($"เงินเดือนต้องไม่ต่ำกว่าค่าแรงขั้นต่ำ ({HRConfiguration.MinimumWage:N0} บาท)", "error");
                     return;
                 }
-                if (newSalary > MaximumSalary)
+                if (newSalary > HRConfiguration.MaximumSalary)
                 {
-                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({MaximumSalary:N0} บาท)", "error");
+                    ShowMessage($"เงินเดือนเกินค่าสูงสุดที่กำหนด ({HRConfiguration.MaximumSalary:N0} บาท)", "error");
                     return;
                 }
             }

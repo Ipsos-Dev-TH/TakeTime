@@ -297,14 +297,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
                     decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
-                    // Calculate social security: 5% of base salary, min 82.5 (from 1650), max 750 (from 15000)
-                    decimal socialSecurity = 0;
-                    if (baseSalary >= 1650)
-                    {
-                        decimal ssBase = Math.Min(15000, baseSalary);
-                        socialSecurity = Math.Round(ssBase * 0.05m, 0);
-                        socialSecurity = Math.Min(socialSecurity, 750);
-                    }
+                    // Calculate social security using centralized configuration
+                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(baseSalary);
 
                     // Calculate totals
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
