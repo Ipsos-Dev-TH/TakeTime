@@ -655,6 +655,15 @@ namespace Take_Time_BangPhra
                 DataTable dtReservation = reservationDA.GetReservationByIdAndPhone(Convert.ToInt32(id), check);
                 DataTable dtCustomer = reservationDA.GetReservationWithCustomerDetails(Convert.ToInt32(id), check);
 
+                // ✅ FIX: Check if reservation data exists before accessing
+                if (dtCustomer == null || dtCustomer.Rows.Count == 0 || dtReservation == null || dtReservation.Rows.Count == 0)
+                {
+                    // Reservation not found or phone number doesn't match
+                    ClientScript.RegisterStartupScript(this.GetType(), "notfound",
+                        "alert('ไม่พบข้อมูลการจอง หรือเบอร์โทรไม่ตรงกับการจอง'); window.location.href='./Default.aspx';", true);
+                    return;
+                }
+
                 // 💰 Load payment amounts (needed for PostBack validation)
                 // ✅ FIX: Reservation.TotalPrice now contains ONLY base price (accommodations + items)
                 // ProductCharges are stored separately in Reservation_Product_Charges table
@@ -6304,24 +6313,8 @@ AND r.CheckoutDate > '{checkInDate.ToString("yyyy-MM-dd")}'";
                         Panel2.Visible = true;
                     }
 
-                    for (int i = 0; i < dtReservation_Items.Rows.Count; i++)
-                    {
-                        for (int j = 0; j < dtItems.Rows.Count; j++)
-                        {
-                            if (dtItems.Rows[j].RowState == DataRowState.Deleted) continue;
-
-                            try
-                            {
-                                if (dtReservation_Items.Rows[i]["Reservation_ID"].ToString() == dtItems.Rows[j]["Reservation_ID"].ToString() &&
-                                    dtReservation_Items.Rows[i]["Accommodation_ID"].ToString() == dtItems.Rows[j]["Accommodation_ID"].ToString() &&
-                                    dtReservation_Items.Rows[i]["Amount"].ToString() == dtItems.Rows[j]["Amount"].ToString())
-                                {
-                                    // Matching rows found
-                                }
-                            }
-                            catch { }
-                        }
-                    }
+                    // Note: Removed broken comparison code that was trying to access
+                    // dtItems["Reservation_ID"] which doesn't exist in Items table
                 }
 
                 try
