@@ -773,6 +773,23 @@ public class PayrollService
                     }
 
                     transaction.Commit();
+
+                    // Generate PDF after successful commit
+                    try
+                    {
+                        var pdfService = new PaymentVoucherPdfService();
+                        var pdfResult = pdfService.GeneratePdf(voucherNumber, createdByAdminId);
+                        if (!pdfResult.Success)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Warning: PDF generation failed for {voucherNumber}: {pdfResult.Message}");
+                        }
+                    }
+                    catch (Exception pdfEx)
+                    {
+                        // Don't fail the whole operation if PDF generation fails
+                        System.Diagnostics.Debug.WriteLine($"Warning: PDF generation error for {voucherNumber}: {pdfEx.Message}");
+                    }
+
                     return (true, voucherNumber, $"สร้างใบสำคัญจ่ายสำเร็จ: {voucherNumber}");
                 }
                 catch (Exception ex)
