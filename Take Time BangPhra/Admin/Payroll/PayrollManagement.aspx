@@ -61,6 +61,7 @@
         .btn-process { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: #333; }
         .btn-edit { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 5px 10px; font-size: 11px; }
         .btn-pay { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 5px 10px; font-size: 11px; }
+        .btn-view { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 5px 10px; font-size: 11px; border-radius: 4px; text-decoration: none; display: inline-block; }
         .btn-cancel { background: #e0e0e0; color: #333; }
 
         .stats-container {
@@ -286,6 +287,8 @@
                     <asp:TemplateField HeaderText="จัดการ">
                         <ItemTemplate>
                             <div class="action-cell">
+                                <asp:HyperLink ID="btnViewPayslip" runat="server" Text="&#128196;" ToolTip="ดูสลิป"
+                                    CssClass="btn-view" NavigateUrl='<%# "PayrollDetail.aspx?id=" + Eval("ID") %>' />
                                 <asp:Button ID="btnEdit" runat="server" Text="&#9998;" ToolTip="แก้ไข"
                                     CssClass="btn-edit" CommandName="EditPayroll" CommandArgument='<%# Eval("ID") %>' />
                                 <asp:Button ID="btnPay" runat="server" Text="&#128179;" ToolTip="ทำจ่าย"
