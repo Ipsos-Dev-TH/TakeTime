@@ -1105,6 +1105,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Account\Report\Payment.rdlc" />
     <EmbeddedResource Include="Account\Report\Receipt.rdlc" />
+    <EmbeddedResource Include="Admin\Payroll\Report\PayrollVoucher.rdlc" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

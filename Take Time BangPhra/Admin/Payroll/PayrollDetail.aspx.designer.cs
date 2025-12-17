@@ -116,6 +116,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected global::System.Web.UI.WebControls.Button btnPrint;
 
         /// <summary>
+        /// btnPrintVoucher control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnPrintVoucher;
+
+        /// <summary>
         /// btnGenerateVoucher control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnGenerateVoucher;

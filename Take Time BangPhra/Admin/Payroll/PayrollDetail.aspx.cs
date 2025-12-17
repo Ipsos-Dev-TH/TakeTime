@@ -1,6 +1,9 @@
 using System;
+using System.Configuration;
 using System.Data;
+using System.IO;
 using System.Web.UI;
+using Microsoft.Reporting.WebForms;
 
 namespace Take_Time_BangPhra.Admin.Payroll
 {
@@ -171,6 +174,172 @@ namespace Take_Time_BangPhra.Admin.Payroll
             {
                 ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
+        }
+
+        #endregion
+
+        protected void btnPrintVoucher_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                GeneratePayrollVoucherPDF();
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการสร้าง PDF: " + ex.Message, "error");
+            }
+        }
+
+        private void GeneratePayrollVoucherPDF()
+        {
+            string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+            code codeHelper = new code();
+
+            // Get payroll record data
+            DataTable dtPayroll = payrollService.GetPayrollRecord(payrollRecordId);
+            if (dtPayroll == null || dtPayroll.Rows.Count == 0)
+            {
+                ShowMessage("ไม่พบข้อมูลเงินเดือน", "error");
+                return;
+            }
+
+            DataRow record = dtPayroll.Rows[0];
+
+            // 1. Create CompanyInfo DataTable
+            DataTable dtCompanyInfo = new DataTable("CompanyInfo");
+            dtCompanyInfo.Columns.Add("Company_Name", typeof(string));
+            dtCompanyInfo.Columns.Add("Address", typeof(string));
+            dtCompanyInfo.Columns.Add("Phone_Number", typeof(string));
+            dtCompanyInfo.Columns.Add("LegalEntity_Number", typeof(string));
+
+            DataTable dtBusiness = codeHelper.DatabaseQuery(conn, "SELECT * FROM Business_Info");
+            if (dtBusiness.Rows.Count > 0)
+            {
+                dtCompanyInfo.Rows.Add(
+                    dtBusiness.Rows[0]["Company_Name"]?.ToString() ?? "",
+                    dtBusiness.Rows[0]["Address"]?.ToString() ?? "",
+                    dtBusiness.Rows[0]["Phone_Number"]?.ToString() ?? "",
+                    dtBusiness.Rows[0]["LegalEntity_Number"]?.ToString() ?? ""
+                );
+            }
+            else
+            {
+                dtCompanyInfo.Rows.Add("Take Time BangPhra", "", "", "");
+            }
+
+            // 2. Create EmployeeInfo DataTable
+            DataTable dtEmployeeInfo = new DataTable("EmployeeInfo");
+            dtEmployeeInfo.Columns.Add("EmployeeName", typeof(string));
+            dtEmployeeInfo.Columns.Add("Position", typeof(string));
+            dtEmployeeInfo.Columns.Add("EmployeeID", typeof(string));
+            dtEmployeeInfo.Columns.Add("Department", typeof(string));
+
+            dtEmployeeInfo.Rows.Add(
+                record["EmployeeName"]?.ToString() ?? "-",
+                record["Position"]?.ToString() ?? "-",
+                record["Admin_ID"]?.ToString() ?? "-",
+                "-" // Department
+            );
+
+            // 3. Create PayrollDetails DataTable
+            DataTable dtPayrollDetails = new DataTable("PayrollDetails");
+            dtPayrollDetails.Columns.Add("VoucherNumber", typeof(string));
+            dtPayrollDetails.Columns.Add("PeriodName", typeof(string));
+            dtPayrollDetails.Columns.Add("PayDate", typeof(string));
+            dtPayrollDetails.Columns.Add("BaseSalary", typeof(decimal));
+            dtPayrollDetails.Columns.Add("OTAmount", typeof(decimal));
+            dtPayrollDetails.Columns.Add("BonusAmount", typeof(decimal));
+            dtPayrollDetails.Columns.Add("AllowanceAmount", typeof(decimal));
+            dtPayrollDetails.Columns.Add("TotalEarnings", typeof(decimal));
+            dtPayrollDetails.Columns.Add("LeaveDeduction", typeof(decimal));
+            dtPayrollDetails.Columns.Add("SocialSecurity", typeof(decimal));
+            dtPayrollDetails.Columns.Add("Tax", typeof(decimal));
+            dtPayrollDetails.Columns.Add("OtherDeductions", typeof(decimal));
+            dtPayrollDetails.Columns.Add("TotalDeductions", typeof(decimal));
+            dtPayrollDetails.Columns.Add("NetSalary", typeof(decimal));
+            dtPayrollDetails.Columns.Add("WorkDays", typeof(int));
+            dtPayrollDetails.Columns.Add("LeaveDays", typeof(decimal));
+            dtPayrollDetails.Columns.Add("OTHours", typeof(decimal));
+
+            string voucherNumber = record["VoucherNumber"] != DBNull.Value ? record["VoucherNumber"].ToString() : "PV-" + DateTime.Now.ToString("yyMMdd") + "-XXXX";
+            string payDate = DateTime.Now.ToString("dd/MM/yyyy");
+
+            dtPayrollDetails.Rows.Add(
+                voucherNumber,
+                record["PeriodName"]?.ToString() ?? "",
+                payDate,
+                record["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(record["BaseSalary"]) : 0,
+                record["OTAmount"] != DBNull.Value ? Convert.ToDecimal(record["OTAmount"]) : 0,
+                record["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(record["BonusAmount"]) : 0,
+                record["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(record["AllowanceAmount"]) : 0,
+                record["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(record["TotalEarnings"]) : 0,
+                record["LeaveDeduction"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDeduction"]) : 0,
+                record["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(record["SocialSecurity"]) : 0,
+                record["Tax"] != DBNull.Value ? Convert.ToDecimal(record["Tax"]) : 0,
+                record["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(record["OtherDeductions"]) : 0,
+                record["TotalDeductions"] != DBNull.Value ? Convert.ToDecimal(record["TotalDeductions"]) : 0,
+                record["NetSalary"] != DBNull.Value ? Convert.ToDecimal(record["NetSalary"]) : 0,
+                record["WorkDays"] != DBNull.Value ? Convert.ToInt32(record["WorkDays"]) : 0,
+                record["LeaveDays"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDays"]) : 0,
+                record["OTHours"] != DBNull.Value ? Convert.ToDecimal(record["OTHours"]) : 0
+            );
+
+            // 4. Create Signatures DataTable
+            DataTable dtSignatures = new DataTable("Signatures");
+            dtSignatures.Columns.Add("PreparedByName", typeof(string));
+            dtSignatures.Columns.Add("PreparedBySignature", typeof(byte[]));
+            dtSignatures.Columns.Add("ApprovedByName", typeof(string));
+            dtSignatures.Columns.Add("ApprovedBySignature", typeof(byte[]));
+            dtSignatures.Columns.Add("ReceivedByName", typeof(string));
+            dtSignatures.Columns.Add("ReceivedBySignature", typeof(byte[]));
+
+            // Get current admin name for prepared by
+            string preparedByName = Session["UserName"]?.ToString() ?? "";
+            string employeeName = record["EmployeeName"]?.ToString() ?? "";
+
+            dtSignatures.Rows.Add(
+                preparedByName,
+                null,
+                "",
+                null,
+                employeeName,
+                null
+            );
+
+            // Create LocalReport and render to PDF
+            LocalReport localReport = new LocalReport();
+            localReport.ReportPath = Server.MapPath("~/Admin/Payroll/Report/PayrollVoucher.rdlc");
+
+            localReport.DataSources.Clear();
+            localReport.DataSources.Add(new ReportDataSource("CompanyInfo", dtCompanyInfo));
+            localReport.DataSources.Add(new ReportDataSource("EmployeeInfo", dtEmployeeInfo));
+            localReport.DataSources.Add(new ReportDataSource("PayrollDetails", dtPayrollDetails));
+            localReport.DataSources.Add(new ReportDataSource("Signatures", dtSignatures));
+
+            // Render PDF
+            Warning[] warnings;
+            string[] streamIds;
+            string mimeType;
+            string encoding;
+            string extension;
+
+            byte[] bytes = localReport.Render(
+                "PDF",
+                null,
+                out mimeType,
+                out encoding,
+                out extension,
+                out streamIds,
+                out warnings
+            );
+
+            // Send PDF to browser
+            Response.Clear();
+            Response.ContentType = mimeType;
+            Response.AddHeader("Content-Disposition", $"attachment; filename=PayrollVoucher_{voucherNumber.Replace("/", "-")}_{record["EmployeeName"]?.ToString().Replace(" ", "_")}.pdf");
+            Response.BinaryWrite(bytes);
+            Response.Flush();
+            Response.End();
         }
 
         #endregion
