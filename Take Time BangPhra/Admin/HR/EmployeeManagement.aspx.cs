@@ -20,7 +20,7 @@ namespace Take_Time_BangPhra.Admin.HR
             {
                 CheckAdminLogin();
                 LoadStatistics();
-                ---LoadEmployees();
+                LoadEmployees();
             }
         }
 
