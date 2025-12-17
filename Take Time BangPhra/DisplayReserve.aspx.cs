@@ -26,14 +26,26 @@ namespace Take_Time_BangPhra
                 {
                     if (!IsPostBack)
                     {
+                        // โหลด dropdown ปีจากข้อมูลการจองจริง
+                        LoadYearDropdown();
+
                         // ตั้งค่าปีและเดือนปัจจุบัน
                         int currentYear = DateTime.Now.Year;
                         int currentMonth = DateTime.Now.Month;
 
-                        DropDownList1.SelectedValue = currentYear.ToString();
+                        // เลือกปีปัจจุบันถ้ามีในรายการ
+                        if (DropDownList1.Items.FindByValue(currentYear.ToString()) != null)
+                        {
+                            DropDownList1.SelectedValue = currentYear.ToString();
+                        }
+                        else if (DropDownList1.Items.Count > 0)
+                        {
+                            DropDownList1.SelectedIndex = 0;
+                        }
+
                         DropDownList2.SelectedValue = currentMonth.ToString();
 
-                        System.Diagnostics.Debug.WriteLine($"Initial Load: Year={currentYear}, Month={currentMonth}");
+                        System.Diagnostics.Debug.WriteLine($"Initial Load: Year={DropDownList1.SelectedValue}, Month={currentMonth}");
 
                         // โหลดข้อมูล
                         LoadReservationData();
@@ -47,6 +59,57 @@ namespace Take_Time_BangPhra
             catch (Exception ex)
             {
                 Response.Redirect("~/Default.aspx");
+            }
+        }
+
+        /// <summary>
+        /// โหลดรายการปีจากข้อมูลการจองจริง (distinct years from Reservation)
+        /// </summary>
+        private void LoadYearDropdown()
+        {
+            try
+            {
+                DropDownList1.Items.Clear();
+
+                using (SqlConnection connection = new SqlConnection(conn))
+                {
+                    // ดึงปีที่มีข้อมูลการจองจริง รวมกับปีปัจจุบัน
+                    string sql = @"
+                        SELECT DISTINCT YEAR(CheckinDate) AS Year
+                        FROM Reservation
+                        WHERE CheckinDate IS NOT NULL
+                        UNION
+                        SELECT YEAR(GETDATE()) AS Year
+                        ORDER BY Year DESC";
+
+                    using (SqlCommand command = new SqlCommand(sql, connection))
+                    {
+                        connection.Open();
+                        using (SqlDataReader reader = command.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string year = reader["Year"].ToString();
+                                DropDownList1.Items.Add(new ListItem(year, year));
+                            }
+                        }
+                    }
+                }
+
+                // ถ้าไม่มีข้อมูลเลย ให้ใส่ปีปัจจุบัน
+                if (DropDownList1.Items.Count == 0)
+                {
+                    string currentYear = DateTime.Now.Year.ToString();
+                    DropDownList1.Items.Add(new ListItem(currentYear, currentYear));
+                }
+            }
+            catch (Exception ex)
+            {
+                // ถ้า error ให้ใส่ปีปัจจุบันเป็น fallback
+                string currentYear = DateTime.Now.Year.ToString();
+                DropDownList1.Items.Clear();
+                DropDownList1.Items.Add(new ListItem(currentYear, currentYear));
+                System.Diagnostics.Debug.WriteLine($"LoadYearDropdown Error: {ex.Message}");
             }
         }
 

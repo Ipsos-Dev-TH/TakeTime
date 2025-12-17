@@ -178,11 +178,6 @@
                     <div class="form-group">
                         <label for="DropDownList1">ปี:</label>
                         <asp:DropDownList ID="DropDownList1" runat="server" CssClass="form-control">
-                            <asp:ListItem>2021</asp:ListItem>
-                            <asp:ListItem>2022</asp:ListItem>
-                            <asp:ListItem>2023</asp:ListItem>
-                            <asp:ListItem>2024</asp:ListItem>
-                            <asp:ListItem>2025</asp:ListItem>
                         </asp:DropDownList>
                     </div>
                 </div>
