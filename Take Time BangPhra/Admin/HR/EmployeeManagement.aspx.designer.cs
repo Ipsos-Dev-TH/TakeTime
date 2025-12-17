@@ -31,6 +31,11 @@ namespace Take_Time_BangPhra.Admin.HR
         protected global::System.Web.UI.WebControls.Label lblExpiringDocuments;
 
         /// <summary>
+        /// btnAddEmployee control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnAddEmployee;
+
+        /// <summary>
         /// txtSearch control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtSearch;
@@ -39,6 +44,11 @@ namespace Take_Time_BangPhra.Admin.HR
         /// ddlDepartment control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlDepartment;
+
+        /// <summary>
+        /// ddlStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlStatus;
 
         /// <summary>
         /// btnSearch control.
@@ -54,5 +64,80 @@ namespace Take_Time_BangPhra.Admin.HR
         /// gvEmployees control.
         /// </summary>
         protected global::System.Web.UI.WebControls.GridView gvEmployees;
+
+        /// <summary>
+        /// hdnEmployeeId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnEmployeeId;
+
+        /// <summary>
+        /// txtUsername control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtUsername;
+
+        /// <summary>
+        /// txtPassword control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPassword;
+
+        /// <summary>
+        /// txtFirstName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtFirstName;
+
+        /// <summary>
+        /// txtLastName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtLastName;
+
+        /// <summary>
+        /// ddlRole control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlRole;
+
+        /// <summary>
+        /// txtSalary control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtSalary;
+
+        /// <summary>
+        /// txtPosition control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPosition;
+
+        /// <summary>
+        /// btnSaveEmployee control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnSaveEmployee;
+
+        /// <summary>
+        /// txtResignDate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtResignDate;
+
+        /// <summary>
+        /// ddlResignType control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlResignType;
+
+        /// <summary>
+        /// txtResignReason control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtResignReason;
+
+        /// <summary>
+        /// btnConfirmResign control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnConfirmResign;
+
+        /// <summary>
+        /// pnlMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlMessage;
+
+        /// <summary>
+        /// lblMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblMessage;
     }
 }
