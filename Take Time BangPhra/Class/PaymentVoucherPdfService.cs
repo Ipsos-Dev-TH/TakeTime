@@ -4,6 +4,8 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
 using System.IO;
+using System.Web;
+using System.Web.Hosting;
 using Microsoft.Reporting.WebForms;
 
 /// <summary>
@@ -13,16 +15,47 @@ using Microsoft.Reporting.WebForms;
 public class PaymentVoucherPdfService
 {
     private readonly string connectionString;
-    private readonly string reportPath;
-    private readonly string outputBasePath;
 
     public PaymentVoucherPdfService()
     {
         connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-        // Report path - relative to web root
-        reportPath = ConfigurationManager.AppSettings["ReportBasePath"] ?? AppDomain.CurrentDomain.BaseDirectory;
-        outputBasePath = ConfigurationManager.AppSettings["PaymentFolderPath"] ??
-                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Documents", "Payment");
+    }
+
+    /// <summary>
+    /// Get the web application root path
+    /// </summary>
+    private string GetWebRootPath()
+    {
+        // Try HttpContext first
+        if (HttpContext.Current != null)
+        {
+            return HttpContext.Current.Server.MapPath("~");
+        }
+        // Fallback to HostingEnvironment
+        if (HostingEnvironment.IsHosted)
+        {
+            return HostingEnvironment.MapPath("~");
+        }
+        // Last resort - use AppDomain base directory and remove bin folder if present
+        string basePath = AppDomain.CurrentDomain.BaseDirectory;
+        if (basePath.EndsWith("\\bin\\") || basePath.EndsWith("/bin/"))
+        {
+            basePath = Directory.GetParent(basePath.TrimEnd('\\', '/')).Parent.FullName;
+        }
+        return basePath;
+    }
+
+    /// <summary>
+    /// Get the output folder path for payment PDFs
+    /// </summary>
+    private string GetOutputBasePath()
+    {
+        string configPath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+        if (!string.IsNullOrEmpty(configPath))
+        {
+            return configPath;
+        }
+        return Path.Combine(GetWebRootPath(), "Documents", "Payment");
     }
 
     /// <summary>
@@ -78,8 +111,11 @@ public class PaymentVoucherPdfService
                 // Generate PDF
                 string year = createdDate.Year.ToString();
                 string month = createdDate.Month.ToString();
+                string outputBasePath = GetOutputBasePath();
                 string outputDir = Path.Combine(outputBasePath, year, month);
                 string outputFile = Path.Combine(outputDir, $"{paymentId}_{uid}.pdf");
+
+                System.Diagnostics.Debug.WriteLine($"PaymentVoucherPdfService: OutputDir={outputDir}, OutputFile={outputFile}");
 
                 // Ensure directory exists
                 if (!Directory.Exists(outputDir))
@@ -292,17 +328,15 @@ public class PaymentVoucherPdfService
             // Create LocalReport
             LocalReport localReport = new LocalReport();
 
-            // Set report path
-            string rdlcPath = Path.Combine(reportPath, "Account", "Report", "Payment.rdlc");
-            if (!File.Exists(rdlcPath))
-            {
-                // Try alternative path
-                rdlcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Account", "Report", "Payment.rdlc");
-            }
+            // Set report path - use GetWebRootPath() for correct path resolution
+            string webRoot = GetWebRootPath();
+            string rdlcPath = Path.Combine(webRoot, "Account", "Report", "Payment.rdlc");
+
+            System.Diagnostics.Debug.WriteLine($"PaymentVoucherPdfService: WebRoot={webRoot}, RdlcPath={rdlcPath}");
 
             if (!File.Exists(rdlcPath))
             {
-                System.Diagnostics.Debug.WriteLine($"Report file not found: {rdlcPath}");
+                System.Diagnostics.Debug.WriteLine($"Report file not found at: {rdlcPath}");
                 return null;
             }
 
