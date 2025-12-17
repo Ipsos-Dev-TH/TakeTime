@@ -568,7 +568,7 @@ public class PayrollService
     }
 
     /// <summary>
-    /// Mark voucher as generated for payroll record
+    /// Mark voucher as generated for payroll record and store voucher number
     /// </summary>
     public bool MarkVoucherGenerated(long payrollRecordId, string voucherNumber)
     {
@@ -579,14 +579,181 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     UPDATE Payroll_Records
-                    SET VoucherGenerated = 1
+                    SET VoucherGenerated = 1,
+                        VoucherNumber = @VoucherNumber
                     WHERE ID = @RecordID";
                 cmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
+                cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber ?? (object)DBNull.Value);
 
                 conn.Open();
                 return cmd.ExecuteNonQuery() > 0;
             }
         }
+    }
+
+    /// <summary>
+    /// Generate payment voucher for a payroll record
+    /// Creates a proper payment voucher number and optionally links to Account_Payment
+    /// </summary>
+    public (bool Success, string VoucherNumber, string Message) GeneratePayrollVoucher(
+        long payrollRecordId, short createdByAdminId, bool createAccountPayment = false)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+            using (SqlTransaction transaction = conn.BeginTransaction())
+            {
+                try
+                {
+                    // Get payroll record details
+                    DataRow payrollRecord = null;
+                    using (SqlCommand getCmd = new SqlCommand(@"
+                        SELECT PR.*, PP.Year, PP.Month, PP.PeriodName,
+                               A.Username AS NickName,
+                               ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName
+                        FROM Payroll_Records PR
+                        INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID
+                        INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                        WHERE PR.ID = @RecordID", conn, transaction))
+                    {
+                        getCmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
+                        using (SqlDataAdapter adapter = new SqlDataAdapter(getCmd))
+                        {
+                            DataTable dt = new DataTable();
+                            adapter.Fill(dt);
+                            if (dt.Rows.Count == 0)
+                            {
+                                return (false, null, "ไม่พบข้อมูล Payroll Record");
+                            }
+                            payrollRecord = dt.Rows[0];
+                        }
+                    }
+
+                    // Check if already generated
+                    bool alreadyGenerated = payrollRecord["VoucherGenerated"] != DBNull.Value
+                        && Convert.ToBoolean(payrollRecord["VoucherGenerated"]);
+                    if (alreadyGenerated)
+                    {
+                        string existingVoucher = payrollRecord["VoucherNumber"]?.ToString() ?? "";
+                        return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว");
+                    }
+
+                    // Generate voucher number using format: PV-YYMMDD-NNNN
+                    DateTime now = DateTime.Now;
+                    string dateCode = now.ToString("yyMMdd");
+
+                    // Get next sequence for today
+                    int sequence = 1;
+                    using (SqlCommand seqCmd = new SqlCommand(@"
+                        SELECT ISNULL(MAX(CAST(RIGHT(VoucherNumber, 4) AS INT)), 0) + 1
+                        FROM Payroll_Records
+                        WHERE VoucherNumber LIKE @Pattern
+                          AND VoucherGenerated = 1", conn, transaction))
+                    {
+                        seqCmd.Parameters.AddWithValue("@Pattern", $"PV-{dateCode}-%");
+                        object result = seqCmd.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            sequence = Convert.ToInt32(result);
+                        }
+                    }
+
+                    string voucherNumber = $"PV-{dateCode}-{sequence:D4}";
+
+                    // Update payroll record with voucher info
+                    using (SqlCommand updateCmd = new SqlCommand(@"
+                        UPDATE Payroll_Records
+                        SET VoucherGenerated = 1,
+                            VoucherNumber = @VoucherNumber,
+                            VoucherGeneratedDate = GETDATE(),
+                            VoucherGeneratedBy = @CreatedBy
+                        WHERE ID = @RecordID", conn, transaction))
+                    {
+                        updateCmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
+                        updateCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                        updateCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                        updateCmd.ExecuteNonQuery();
+                    }
+
+                    // Optionally create Account_Payment record
+                    if (createAccountPayment)
+                    {
+                        decimal netSalary = Convert.ToDecimal(payrollRecord["NetSalary"]);
+                        string employeeName = payrollRecord["EmployeeName"].ToString();
+                        int periodYear = Convert.ToInt32(payrollRecord["Year"]);
+                        int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
+                        string periodName = payrollRecord["PeriodName"].ToString();
+
+                        // Insert into Account_Payment for tracking
+                        using (SqlCommand paymentCmd = new SqlCommand(@"
+                            INSERT INTO Account_Payment
+                            (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
+                             Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID, Notes)
+                            VALUES
+                            (@VoucherNumber, NULL, GETDATE(), @Amount, 1, 0,
+                             @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy, @Notes)", conn, transaction))
+                        {
+                            paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                            paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
+                            paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                            paymentCmd.Parameters.AddWithValue("@Notes", $"เงินเดือน {employeeName} - {periodName}");
+                            paymentCmd.ExecuteNonQuery();
+                        }
+
+                        // Insert payment detail
+                        using (SqlCommand detailCmd = new SqlCommand(@"
+                            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
+                            VALUES (@VoucherNumber, 1, @Detail, @Amount)", conn, transaction))
+                        {
+                            detailCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                            detailCmd.Parameters.AddWithValue("@Detail", $"จ่ายเงินเดือน {periodName} - {employeeName}");
+                            detailCmd.Parameters.AddWithValue("@Amount", netSalary);
+                            detailCmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    transaction.Commit();
+                    return (true, voucherNumber, $"สร้างใบสำคัญจ่ายสำเร็จ: {voucherNumber}");
+                }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    return (false, null, "เกิดข้อผิดพลาด: " + ex.Message);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generate payment vouchers for all records in a payroll period
+    /// </summary>
+    public (int SuccessCount, int FailCount, string Message) GenerateAllVouchersForPeriod(
+        int payrollPeriodId, short createdByAdminId, bool createAccountPayment = false)
+    {
+        int successCount = 0;
+        int failCount = 0;
+
+        DataTable records = GetPayrollRecords(payrollPeriodId);
+
+        foreach (DataRow row in records.Rows)
+        {
+            bool alreadyGenerated = row["VoucherGenerated"] != DBNull.Value
+                && Convert.ToBoolean(row["VoucherGenerated"]);
+
+            if (!alreadyGenerated)
+            {
+                long recordId = Convert.ToInt64(row["ID"]);
+                var result = GeneratePayrollVoucher(recordId, createdByAdminId, createAccountPayment);
+
+                if (result.Success)
+                    successCount++;
+                else
+                    failCount++;
+            }
+        }
+
+        return (successCount, failCount, $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ" +
+            (failCount > 0 ? $", ล้มเหลว {failCount} รายการ" : ""));
     }
 
     /// <summary>

@@ -581,10 +581,12 @@ namespace Take_Time_BangPhra.Admin.Payroll
         {
             try
             {
-                // Generate voucher number
-                string voucherNumber = $"PAY{DateTime.Now:yyyyMMddHHmmss}{payrollRecordId}";
+                short? adminId = GetAdminID();
+                if (!adminId.HasValue) return false;
 
-                return payrollService.MarkVoucherGenerated(payrollRecordId, voucherNumber);
+                // Generate proper payment voucher with tracking
+                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value, false);
+                return result.Success;
             }
             catch
             {
@@ -604,6 +606,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (generated)
                 {
+                    string voucherNo = voucherNumber != DBNull.Value ? voucherNumber.ToString() : "";
+                    if (!string.IsNullOrEmpty(voucherNo))
+                    {
+                        return $"<span class='badge badge-paid'>จ่ายแล้ว</span><br/><small style='color:#28a745;'>{voucherNo}</small>";
+                    }
                     return "<span class='badge badge-paid'>จ่ายแล้ว</span>";
                 }
                 else
