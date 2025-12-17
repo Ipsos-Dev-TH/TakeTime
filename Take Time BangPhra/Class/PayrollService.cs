@@ -297,8 +297,15 @@ public class PayrollService
                             foreach (var emp in employees)
                             {
                                 decimal baseSalary = emp.Salary;
-                                decimal socialSecurity = baseSalary * 0.05m; // 5% social security
-                                if (socialSecurity > 750) socialSecurity = 750; // Max 750 baht
+                                // Calculate social security: 5% of base salary
+                                // Min base 1,650, Max base 15,000, Max deduction 750 baht
+                                decimal socialSecurity = 0;
+                                if (baseSalary >= 1650)
+                                {
+                                    decimal ssBase = Math.Min(15000, baseSalary);
+                                    socialSecurity = Math.Round(ssBase * 0.05m, 0);
+                                    socialSecurity = Math.Min(socialSecurity, 750);
+                                }
                                 decimal netSalary = baseSalary - socialSecurity;
 
                                 using (SqlCommand recCmd = new SqlCommand(@"

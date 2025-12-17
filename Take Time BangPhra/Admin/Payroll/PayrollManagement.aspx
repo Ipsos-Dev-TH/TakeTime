@@ -248,7 +248,11 @@
                     <asp:BoundField DataField="Position" HeaderText="ตำแหน่ง" />
 
                     <asp:TemplateField HeaderText="เงินเดือน" ItemStyle-CssClass="text-right" HeaderStyle-CssClass="text-right">
-                        <ItemTemplate><%# string.Format("{0:N0}", Eval("BaseSalary")) %></ItemTemplate>
+                        <ItemTemplate>
+                            <%# Convert.ToDecimal(Eval("BaseSalary")) > 0
+                                ? string.Format("{0:N0}", Eval("BaseSalary"))
+                                : "<span style='color:#dc3545;'>ยังไม่ตั้งค่า</span>" %>
+                        </ItemTemplate>
                     </asp:TemplateField>
 
                     <asp:TemplateField HeaderText="OT" ItemStyle-CssClass="text-right" HeaderStyle-CssClass="text-right">

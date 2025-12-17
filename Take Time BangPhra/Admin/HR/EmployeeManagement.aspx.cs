@@ -460,40 +460,54 @@ namespace Take_Time_BangPhra.Admin.HR
                     cmd.ExecuteNonQuery();
                 }
 
-                // Update or insert salary
-                decimal salary = 0;
-                decimal.TryParse(txtSalary.Text, out salary);
-                string position = txtPosition.Text.Trim();
+                // Update or insert salary with history tracking
+                decimal newSalary = 0;
+                decimal.TryParse(txtSalary.Text, out newSalary);
+                string newPosition = txtPosition.Text.Trim();
 
-                // Check if salary record exists
-                using (SqlCommand checkCmd = new SqlCommand("SELECT COUNT(*) FROM Employee_Salary WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                // Check current salary
+                decimal currentSalary = 0;
+                string currentPosition = "";
+                using (SqlCommand checkCmd = new SqlCommand(@"
+                    SELECT MonthlySalary, Position FROM Employee_Salary
+                    WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
                 {
                     checkCmd.Parameters.AddWithValue("@AdminID", adminId);
-                    int salaryExists = (int)checkCmd.ExecuteScalar();
-
-                    if (salaryExists > 0)
+                    using (SqlDataReader reader = checkCmd.ExecuteReader())
                     {
-                        // Update existing salary
-                        using (SqlCommand salaryCmd = new SqlCommand(@"
-                            UPDATE Employee_Salary SET MonthlySalary = @Salary, Position = @Position
-                            WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                        if (reader.Read())
                         {
-                            salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
-                            salaryCmd.Parameters.AddWithValue("@Salary", salary);
-                            salaryCmd.Parameters.AddWithValue("@Position", position);
-                            salaryCmd.ExecuteNonQuery();
+                            currentSalary = reader["MonthlySalary"] != DBNull.Value ? Convert.ToDecimal(reader["MonthlySalary"]) : 0;
+                            currentPosition = reader["Position"]?.ToString() ?? "";
                         }
                     }
-                    else if (salary > 0 || !string.IsNullOrEmpty(position))
+                }
+
+                // If salary or position changed, create new record (keep history)
+                if (newSalary != currentSalary || newPosition != currentPosition)
+                {
+                    if (currentSalary > 0)
                     {
-                        // Insert new salary record
+                        // Deactivate old salary record
+                        using (SqlCommand deactivateCmd = new SqlCommand(@"
+                            UPDATE Employee_Salary SET IsActive = 0
+                            WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                        {
+                            deactivateCmd.Parameters.AddWithValue("@AdminID", adminId);
+                            deactivateCmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    // Create new salary record
+                    if (newSalary > 0 || !string.IsNullOrEmpty(newPosition))
+                    {
                         using (SqlCommand salaryCmd = new SqlCommand(@"
                             INSERT INTO Employee_Salary (Admin_ID, MonthlySalary, Position, EffectiveDate, IsActive)
                             VALUES (@AdminID, @Salary, @Position, GETDATE(), 1)", conn))
                         {
                             salaryCmd.Parameters.AddWithValue("@AdminID", adminId);
-                            salaryCmd.Parameters.AddWithValue("@Salary", salary);
-                            salaryCmd.Parameters.AddWithValue("@Position", position);
+                            salaryCmd.Parameters.AddWithValue("@Salary", newSalary);
+                            salaryCmd.Parameters.AddWithValue("@Position", newPosition);
                             salaryCmd.ExecuteNonQuery();
                         }
                     }

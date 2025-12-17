@@ -268,14 +268,28 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     return;
                 }
 
-                // Recalculate social security for all employees
+                // Pull latest salary from Employee_Salary and recalculate
                 DataTable dt = payrollService.GetPayrollRecords(currentPayrollPeriodId);
                 int updatedCount = 0;
+                int salaryUpdatedCount = 0;
 
                 foreach (DataRow row in dt.Rows)
                 {
                     long recordId = Convert.ToInt64(row["ID"]);
+                    short adminId = Convert.ToInt16(row["Admin_ID"]);
                     decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
+
+                    // If salary is 0, try to get from Employee_Salary
+                    if (baseSalary == 0)
+                    {
+                        decimal latestSalary = GetEmployeeCurrentSalary(adminId);
+                        if (latestSalary > 0)
+                        {
+                            baseSalary = latestSalary;
+                            salaryUpdatedCount++;
+                        }
+                    }
+
                     decimal otAmount = row["OTAmount"] != DBNull.Value ? Convert.ToDecimal(row["OTAmount"]) : 0;
                     decimal bonus = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
                     decimal allowance = row["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(row["AllowanceAmount"]) : 0;
@@ -284,9 +298,13 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
                     // Calculate social security: 5% of base salary, min 82.5 (from 1650), max 750 (from 15000)
-                    decimal ssBase = Math.Max(1650, Math.Min(15000, baseSalary));
-                    decimal socialSecurity = Math.Round(ssBase * 0.05m, 0);
-                    socialSecurity = Math.Min(socialSecurity, 750);
+                    decimal socialSecurity = 0;
+                    if (baseSalary >= 1650)
+                    {
+                        decimal ssBase = Math.Min(15000, baseSalary);
+                        socialSecurity = Math.Round(ssBase * 0.05m, 0);
+                        socialSecurity = Math.Min(socialSecurity, 750);
+                    }
 
                     // Calculate totals
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
@@ -295,6 +313,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     var updateFields = new Dictionary<string, object>
                     {
+                        { "BaseSalary", baseSalary },
                         { "SocialSecurity", socialSecurity },
                         { "TotalEarnings", totalEarnings },
                         { "TotalDeductions", totalDeductions },
@@ -310,7 +329,12 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 // Update period totals
                 payrollService.UpdatePeriodTotals(currentPayrollPeriodId);
 
-                ShowMessage($"คำนวณใหม่สำเร็จ ({updatedCount} คน)", "success");
+                string msg = $"คำนวณใหม่สำเร็จ ({updatedCount} คน)";
+                if (salaryUpdatedCount > 0)
+                {
+                    msg += $" - ดึงเงินเดือนจากการตั้งค่า {salaryUpdatedCount} คน";
+                }
+                ShowMessage(msg, "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -602,6 +626,32 @@ namespace Take_Time_BangPhra.Admin.Payroll
             {
                 pnlMessage.CssClass = "alert alert-error";
             }
+        }
+
+        private decimal GetEmployeeCurrentSalary(short adminId)
+        {
+            try
+            {
+                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SqlClient.SqlCommand(@"
+                        SELECT MonthlySalary
+                        FROM Employee_Salary
+                        WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        object result = cmd.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            return Convert.ToDecimal(result);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return 0;
         }
 
         #endregion
