@@ -145,19 +145,26 @@ namespace Take_Time_BangPhra.Admin.Payroll
         {
             try
             {
-                // Generate voucher number
-                string voucherNumber = $"PV-{DateTime.Now:yyyyMMdd}-{payrollRecordId}";
-
-                bool success = payrollService.MarkVoucherGenerated(payrollRecordId, voucherNumber);
-
-                if (success)
+                short? adminId = GetAdminID();
+                if (!adminId.HasValue)
                 {
-                    ShowMessage($"สร้าง Payment Voucher สำเร็จ: {voucherNumber}", "success");
+                    ShowMessage("ไม่พบข้อมูลผู้ใช้", "error");
+                    return;
+                }
+
+                // Generate proper payment voucher with tracking
+                var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value, false);
+
+                if (result.Success)
+                {
+                    ShowMessage(result.Message, "success");
                     btnGenerateVoucher.Visible = false;
+                    // Reload to show updated voucher info
+                    LoadPayrollRecord();
                 }
                 else
                 {
-                    ShowMessage("ไม่สามารถสร้าง Payment Voucher ได้", "error");
+                    ShowMessage(result.Message, "error");
                 }
             }
             catch (Exception ex)
