@@ -894,13 +894,11 @@ public class PayrollService
             }
         }
 
-        // Create payroll vendor if not exists
+        // Create payroll vendor if not exists (ID is IDENTITY column, auto-generated)
         using (SqlCommand createCmd = new SqlCommand(@"
-            DECLARE @NextID INT;
-            SELECT @NextID = ISNULL(MAX(ID), 0) + 1 FROM Vendor;
-            INSERT INTO Vendor (ID, IDNumber, Vendor_Type_ID, Name, Address, Status)
-            VALUES (@NextID, N'0000000000000', 1, @Name, N'Internal - Payroll', N'True');
-            SELECT @NextID;", conn, transaction))
+            INSERT INTO Vendor (IDNumber, Vendor_Type_ID, Name, Address, Status)
+            VALUES (N'0000000000000', 1, @Name, N'Internal - Payroll', N'True');
+            SELECT SCOPE_IDENTITY();", conn, transaction))
         {
             createCmd.Parameters.AddWithValue("@Name", payrollVendorName);
             return Convert.ToInt32(createCmd.ExecuteScalar());

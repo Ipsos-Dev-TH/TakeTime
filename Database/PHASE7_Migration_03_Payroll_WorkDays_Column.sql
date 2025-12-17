@@ -75,14 +75,10 @@ GO
 -- Add Payroll Vendor for payroll payments (if not exists)
 IF NOT EXISTS (SELECT * FROM [dbo].[Vendor] WHERE [Name] = N'เงินเดือนพนักงาน')
 BEGIN
-    -- Get the next available ID
-    DECLARE @NextVendorID INT;
-    SELECT @NextVendorID = ISNULL(MAX(ID), 0) + 1 FROM [dbo].[Vendor];
+    INSERT INTO [dbo].[Vendor] ([IDNumber], [Vendor_Type_ID], [Name], [Address], [Status])
+    VALUES (N'0000000000000', 1, N'เงินเดือนพนักงาน', N'Internal - Payroll', N'True');
 
-    INSERT INTO [dbo].[Vendor] ([ID], [IDNumber], [Vendor_Type_ID], [Name], [Address], [Status])
-    VALUES (@NextVendorID, N'0000000000000', 1, N'เงินเดือนพนักงาน', N'Internal - Payroll', N'True');
-
-    PRINT '+ Added Payroll Vendor (เงินเดือนพนักงาน) with ID: ' + CAST(@NextVendorID AS VARCHAR);
+    PRINT '+ Added Payroll Vendor (เงินเดือนพนักงาน)';
 END
 ELSE
     PRINT '= Payroll Vendor (เงินเดือนพนักงาน) already exists';
