@@ -403,10 +403,16 @@ public class PayrollService
                     SELECT
                         PR.ID, PR.Admin_ID, PR.EmployeeName, PR.BaseSalary,
                         PR.WorkDays, PR.LeaveDays, PR.OTHours, PR.OTAmount,
-                        PR.BonusAmount AS Bonus, PR.AllowanceAmount AS Allowances, PR.TotalEarnings,
-                        PR.LeaveDeduction, PR.SocialSecurity, PR.Tax,
-                        PR.OtherDeductions, PR.TotalDeductions, PR.NetSalary,
-                        PR.VoucherGenerated, CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
+                        ISNULL(PR.BonusAmount, 0) AS BonusAmount,
+                        ISNULL(PR.AllowanceAmount, 0) AS AllowanceAmount,
+                        PR.TotalEarnings,
+                        ISNULL(PR.LeaveDeduction, 0) AS LeaveDeduction,
+                        ISNULL(PR.SocialSecurity, 0) AS SocialSecurity,
+                        ISNULL(PR.Tax, 0) AS Tax,
+                        ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
+                        PR.TotalDeductions, PR.NetSalary,
+                        ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
+                        ISNULL(PR.VoucherNumber, 'PAY' + CAST(PR.ID AS VARCHAR(20))) AS VoucherNumber,
                         A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
@@ -437,10 +443,23 @@ public class PayrollService
                 cmd.Connection = conn;
                 cmd.CommandText = @"
                     SELECT
-                        PR.*,
+                        PR.ID, PR.PayrollPeriod_ID, PR.Admin_ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        ISNULL(PR.BaseSalary, 0) AS BaseSalary,
+                        ISNULL(PR.OTAmount, 0) AS OTAmount,
+                        ISNULL(PR.BonusAmount, 0) AS BonusAmount,
+                        ISNULL(PR.AllowanceAmount, 0) AS AllowanceAmount,
+                        ISNULL(PR.SocialSecurity, 0) AS SocialSecurity,
+                        ISNULL(PR.LeaveDeduction, 0) AS LeaveDeduction,
+                        ISNULL(PR.Tax, 0) AS Tax,
+                        ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
+                        ISNULL(PR.TotalEarnings, 0) AS TotalEarnings,
+                        ISNULL(PR.TotalDeductions, 0) AS TotalDeductions,
+                        ISNULL(PR.NetSalary, 0) AS NetSalary,
+                        ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
+                        PR.VoucherNumber,
                         PP.Year, PP.Month, PP.PeriodName,
-                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name, A.Username AS NickName,
-                        ES.Position
+                        A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
