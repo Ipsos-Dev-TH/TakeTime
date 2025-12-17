@@ -1010,15 +1010,15 @@ public class PayrollService
 
         // 3. Create new vendor for this employee
         // Vendor_Type_ID = 1 (บุคคลธรรมดา), Vendor_Group = '01-พนักงานประจำ'
+        // Vendor table columns: IDNumber, Vendor_Type_ID, Name, Address, Vendor_Group, Status
         using (SqlCommand createCmd = new SqlCommand(@"
-            INSERT INTO Vendor (IDNumber, Vendor_Type_ID, Name, Address, Phone, Vendor_Group, Status)
-            VALUES (@IDNumber, 1, @Name, @Address, @Phone, N'01-พนักงานประจำ', N'True');
+            INSERT INTO Vendor (IDNumber, Vendor_Type_ID, Name, Address, Vendor_Group, Status)
+            VALUES (@IDNumber, 1, @Name, @Address, N'01-พนักงานประจำ', N'True');
             SELECT SCOPE_IDENTITY();", conn, transaction))
         {
             createCmd.Parameters.AddWithValue("@IDNumber", string.IsNullOrWhiteSpace(idCard) ? "0000000000000" : idCard);
             createCmd.Parameters.AddWithValue("@Name", employeeName ?? "Unknown Employee");
             createCmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(address) ? (object)DBNull.Value : address);
-            createCmd.Parameters.AddWithValue("@Phone", string.IsNullOrWhiteSpace(phone) ? (object)DBNull.Value : phone);
             return Convert.ToInt32(createCmd.ExecuteScalar());
         }
     }
