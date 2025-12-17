@@ -311,7 +311,7 @@
                                 <asp:Button ID="btnEdit" runat="server" Text="&#9998;" ToolTip="แก้ไข"
                                     CssClass="btn-edit" CommandName="EditPayroll" CommandArgument='<%# Eval("ID") %>' />
                                 <asp:Button ID="btnPay" runat="server" Text="&#128179;" ToolTip="ทำจ่าย"
-                                    CssClass="btn-pay" CommandName="ProcessPayment" CommandArgument='<%# Eval("ID") %>'
+                                    CssClass="btn-pay" CommandName="OpenPaymentModal" CommandArgument='<%# Eval("ID") + "|" + Eval("EmployeeName") + "|" + Eval("NetSalary") %>'
                                     Visible='<%# Eval("VoucherGenerated") == DBNull.Value || !Convert.ToBoolean(Eval("VoucherGenerated")) %>' />
                             </div>
                         </ItemTemplate>
@@ -415,6 +415,51 @@
                 </div>
             </div>
         </div>
+
+        <!-- Payment Options Modal -->
+        <div id="paymentModal" class="modal-overlay">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h3>&#128179; ตั้งค่าการจ่ายเงิน</h3>
+                    <button type="button" class="modal-close" onclick="closePaymentModal()">&times;</button>
+                </div>
+
+                <div class="form-group">
+                    <label>พนักงาน</label>
+                    <asp:Label ID="lblPayEmployeeName" runat="server" CssClass="form-control" style="background: #f0f0f0;"></asp:Label>
+                </div>
+
+                <div class="form-group">
+                    <label>จำนวนเงินสุทธิ</label>
+                    <asp:Label ID="lblPayAmount" runat="server" CssClass="form-control" style="background: #e8f5e9; color: #11998e; font-weight: bold;"></asp:Label>
+                </div>
+
+                <div class="form-group">
+                    <label>วิธีจ่ายเงิน</label>
+                    <asp:DropDownList ID="ddlPaidHow" runat="server" CssClass="form-control">
+                    </asp:DropDownList>
+                </div>
+
+                <div class="form-group">
+                    <label>ประเภทการจ่ายเงิน</label>
+                    <asp:DropDownList ID="ddlPaidType" runat="server" CssClass="form-control">
+                    </asp:DropDownList>
+                </div>
+
+                <div class="form-group">
+                    <label>ประเภทภาษี</label>
+                    <asp:DropDownList ID="ddlVatType" runat="server" CssClass="form-control">
+                    </asp:DropDownList>
+                </div>
+
+                <asp:HiddenField ID="hdnPayRecordId" runat="server" />
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" onclick="closePaymentModal()">ยกเลิก</button>
+                    <asp:Button ID="btnConfirmPayment" runat="server" Text="&#128179; ยืนยันทำจ่าย" CssClass="btn btn-success" OnClick="btnConfirmPayment_Click" />
+                </div>
+            </div>
+        </div>
     </div>
 
     <script type="text/javascript">
@@ -476,6 +521,18 @@
             if (event.target.className === 'modal-overlay') {
                 event.target.style.display = 'none';
             }
+        }
+
+        // Payment Modal Functions
+        function openPaymentModal(recordId, employeeName, netSalary) {
+            document.getElementById('<%= hdnPayRecordId.ClientID %>').value = recordId;
+            document.getElementById('<%= lblPayEmployeeName.ClientID %>').innerText = employeeName;
+            document.getElementById('<%= lblPayAmount.ClientID %>').innerText = parseFloat(netSalary).toLocaleString('th-TH', {minimumFractionDigits: 2}) + ' บาท';
+            document.getElementById('paymentModal').style.display = 'flex';
+        }
+
+        function closePaymentModal() {
+            document.getElementById('paymentModal').style.display = 'none';
         }
     </script>
 </asp:Content>
