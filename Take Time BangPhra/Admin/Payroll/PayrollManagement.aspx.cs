@@ -380,7 +380,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     if (!voucherGenerated)
                     {
                         long recordId = Convert.ToInt64(row["ID"]);
-                        if (ProcessSinglePayment(recordId))
+                        var result = ProcessSinglePayment(recordId);
+                        if (result.Success)
                         {
                             processedCount++;
                         }
@@ -476,10 +477,15 @@ namespace Take_Time_BangPhra.Admin.Payroll
             else if (e.CommandName == "ProcessPayment")
             {
                 long payrollRecordId = Convert.ToInt64(e.CommandArgument);
-                if (ProcessSinglePayment(payrollRecordId))
+                var result = ProcessSinglePayment(payrollRecordId);
+                if (result.Success)
                 {
-                    ShowMessage("ทำจ่ายสำเร็จ", "success");
+                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
+                }
+                else
+                {
+                    ShowMessage(result.Message ?? "เกิดข้อผิดพลาดในการทำจ่าย", "error");
                 }
             }
         }
@@ -580,20 +586,23 @@ namespace Take_Time_BangPhra.Admin.Payroll
             }
         }
 
-        private bool ProcessSinglePayment(long payrollRecordId)
+        private (bool Success, string VoucherNumber, string Message) ProcessSinglePayment(long payrollRecordId)
         {
             try
             {
                 short? adminId = GetAdminID();
-                if (!adminId.HasValue) return false;
+                if (!adminId.HasValue)
+                {
+                    return (false, null, "ไม่พบข้อมูลผู้ดูแลระบบ กรุณาเข้าสู่ระบบใหม่");
+                }
 
                 // Generate proper payment voucher with tracking (creates Account_Payment record)
                 var result = payrollService.GeneratePayrollVoucher(payrollRecordId, adminId.Value);
-                return result.Success;
+                return result;
             }
-            catch
+            catch (Exception ex)
             {
-                return false;
+                return (false, null, "เกิดข้อผิดพลาด: " + ex.Message);
             }
         }
 
