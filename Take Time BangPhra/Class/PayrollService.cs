@@ -552,6 +552,12 @@ public class PayrollService
     /// </summary>
     public bool UpdatePayrollRecord(long payrollRecordId, Dictionary<string, object> updateFields)
     {
+        // These columns are computed in the database and cannot be updated directly
+        var computedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "TotalEarnings", "TotalDeductions", "NetSalary"
+        };
+
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
             using (SqlCommand cmd = new SqlCommand())
@@ -561,9 +567,16 @@ public class PayrollService
                 var fields = new List<string>();
                 foreach (var field in updateFields)
                 {
+                    // Skip computed columns
+                    if (computedColumns.Contains(field.Key))
+                        continue;
+
                     fields.Add("[" + field.Key + "] = @" + field.Key);
                     cmd.Parameters.AddWithValue("@" + field.Key, field.Value ?? DBNull.Value);
                 }
+
+                if (fields.Count == 0)
+                    return true; // Nothing to update
 
                 cmd.CommandText = @"
                     UPDATE Payroll_Records
