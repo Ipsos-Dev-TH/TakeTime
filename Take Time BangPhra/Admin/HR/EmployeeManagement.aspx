@@ -280,6 +280,20 @@
             color: #999;
         }
 
+        .form-section-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin: 20px 0 15px 0;
+        }
+
+        .form-section-header h4 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
         .form-group {
             margin-bottom: 15px;
         }
@@ -679,9 +693,99 @@
                     <asp:TextBox ID="txtPosition" runat="server" CssClass="form-control" placeholder="เช่น พนักงานต้อนรับ, แม่บ้าน, ผู้จัดการ"></asp:TextBox>
                 </div>
 
+                <!-- Personal Info Section -->
+                <div class="form-section-header">
+                    <h4>&#128100; ข้อมูลส่วนตัว</h4>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>เลขบัตรประชาชน</label>
+                        <asp:TextBox ID="txtIDCard" runat="server" CssClass="form-control" placeholder="เลขบัตรประชาชน 13 หลัก" MaxLength="13"></asp:TextBox>
+                    </div>
+                    <div class="form-group">
+                        <label>วันเกิด</label>
+                        <asp:TextBox ID="txtBirthDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>เบอร์โทรศัพท์</label>
+                        <asp:TextBox ID="txtPhone" runat="server" CssClass="form-control" placeholder="0xx-xxx-xxxx" MaxLength="15"></asp:TextBox>
+                    </div>
+                    <div class="form-group">
+                        <label>อีเมล</label>
+                        <asp:TextBox ID="txtEmail" runat="server" CssClass="form-control" placeholder="email@example.com" TextMode="Email"></asp:TextBox>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>ที่อยู่</label>
+                    <asp:TextBox ID="txtAddress" runat="server" CssClass="form-control" TextMode="MultiLine" Rows="2" placeholder="ที่อยู่ปัจจุบัน"></asp:TextBox>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>วันที่เริ่มงาน</label>
+                        <asp:TextBox ID="txtHireDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                    </div>
+                </div>
+
+                <!-- Bank Info Section -->
+                <div class="form-section-header">
+                    <h4>&#127974; ข้อมูลธนาคาร</h4>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ธนาคาร</label>
+                        <asp:DropDownList ID="ddlBank" runat="server" CssClass="form-control">
+                            <asp:ListItem Value="">-- เลือกธนาคาร --</asp:ListItem>
+                            <asp:ListItem Value="002">ธนาคารกรุงเทพ</asp:ListItem>
+                            <asp:ListItem Value="004">ธนาคารกสิกรไทย</asp:ListItem>
+                            <asp:ListItem Value="006">ธนาคารกรุงไทย</asp:ListItem>
+                            <asp:ListItem Value="011">ธนาคารทหารไทยธนชาต</asp:ListItem>
+                            <asp:ListItem Value="014">ธนาคารไทยพาณิชย์</asp:ListItem>
+                            <asp:ListItem Value="025">ธนาคารกรุงศรีอยุธยา</asp:ListItem>
+                            <asp:ListItem Value="030">ธนาคารออมสิน</asp:ListItem>
+                            <asp:ListItem Value="034">ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร</asp:ListItem>
+                            <asp:ListItem Value="069">ธนาคารเกียรตินาคินภัทร</asp:ListItem>
+                        </asp:DropDownList>
+                    </div>
+                    <div class="form-group">
+                        <label>เลขบัญชี</label>
+                        <asp:TextBox ID="txtBankAccountNumber" runat="server" CssClass="form-control" placeholder="เลขบัญชีธนาคาร" MaxLength="20"></asp:TextBox>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>ชื่อบัญชี</label>
+                    <asp:TextBox ID="txtBankAccountName" runat="server" CssClass="form-control" placeholder="ชื่อบัญชีตามหน้าสมุดบัญชี"></asp:TextBox>
+                </div>
+
+                <!-- Emergency Contact Section -->
+                <div class="form-section-header">
+                    <h4>&#128222; ผู้ติดต่อกรณีฉุกเฉิน</h4>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ชื่อผู้ติดต่อ</label>
+                        <asp:TextBox ID="txtEmergencyContact" runat="server" CssClass="form-control" placeholder="ชื่อ-นามสกุล (ความสัมพันธ์)"></asp:TextBox>
+                    </div>
+                    <div class="form-group">
+                        <label>เบอร์โทรฉุกเฉิน</label>
+                        <asp:TextBox ID="txtEmergencyPhone" runat="server" CssClass="form-control" placeholder="0xx-xxx-xxxx" MaxLength="15"></asp:TextBox>
+                    </div>
+                </div>
+
                 <!-- Signature Section -->
+                <div class="form-section-header">
+                    <h4>&#9999; ลายเซ็น</h4>
+                </div>
+
                 <div class="form-group" id="signatureSection">
-                    <label>ลายเซ็น</label>
                     <div class="signature-container">
                         <div class="signature-preview" id="signaturePreview">
                             <asp:Image ID="imgSignature" runat="server" CssClass="signature-image" Visible="false" />
@@ -715,7 +819,7 @@
             document.getElementById('modalTitle').innerHTML = '&#10133; เพิ่มพนักงานใหม่';
             document.getElementById('passwordRequired').style.display = 'inline';
 
-            // Clear form
+            // Clear form - Basic info
             document.getElementById('<%= txtUsername.ClientID %>').value = '';
             document.getElementById('<%= txtPassword.ClientID %>').value = '';
             document.getElementById('<%= txtFirstName.ClientID %>').value = '';
@@ -724,25 +828,69 @@
             document.getElementById('<%= txtPosition.ClientID %>').value = '';
             document.getElementById('<%= ddlRole.ClientID %>').selectedIndex = 0;
 
+            // Clear form - Personal info
+            document.getElementById('<%= txtIDCard.ClientID %>').value = '';
+            document.getElementById('<%= txtBirthDate.ClientID %>').value = '';
+            document.getElementById('<%= txtPhone.ClientID %>').value = '';
+            document.getElementById('<%= txtEmail.ClientID %>').value = '';
+            document.getElementById('<%= txtAddress.ClientID %>').value = '';
+            document.getElementById('<%= txtHireDate.ClientID %>').value = '';
+
+            // Clear form - Bank info
+            document.getElementById('<%= ddlBank.ClientID %>').selectedIndex = 0;
+            document.getElementById('<%= txtBankAccountNumber.ClientID %>').value = '';
+            document.getElementById('<%= txtBankAccountName.ClientID %>').value = '';
+
+            // Clear form - Emergency contact
+            document.getElementById('<%= txtEmergencyContact.ClientID %>').value = '';
+            document.getElementById('<%= txtEmergencyPhone.ClientID %>').value = '';
+
             // Enable username field
             document.getElementById('<%= txtUsername.ClientID %>').disabled = false;
 
             document.getElementById('employeeModal').style.display = 'flex';
         }
 
-        function openEditModal(adminId, username, firstName, lastName, role, salary, position) {
+        function openEditModal(adminId, username, firstName, lastName, role, salary, position,
+                              idCard, birthDate, phone, email, address, hireDate,
+                              bankCode, bankAccountNumber, bankAccountName,
+                              emergencyContact, emergencyPhone) {
             document.getElementById('<%= hdnEditMode.ClientID %>').value = 'edit';
             document.getElementById('<%= hdnEmployeeId.ClientID %>').value = adminId;
             document.getElementById('modalTitle').innerHTML = '&#9998; แก้ไขข้อมูลพนักงาน';
             document.getElementById('passwordRequired').style.display = 'none';
 
-            // Fill form
+            // Fill form - Basic info
             document.getElementById('<%= txtUsername.ClientID %>').value = username;
             document.getElementById('<%= txtPassword.ClientID %>').value = '';
             document.getElementById('<%= txtFirstName.ClientID %>').value = firstName;
             document.getElementById('<%= txtLastName.ClientID %>').value = lastName;
             document.getElementById('<%= txtSalary.ClientID %>').value = salary || '';
             document.getElementById('<%= txtPosition.ClientID %>').value = position || '';
+
+            // Fill form - Personal info
+            document.getElementById('<%= txtIDCard.ClientID %>').value = idCard || '';
+            document.getElementById('<%= txtBirthDate.ClientID %>').value = birthDate || '';
+            document.getElementById('<%= txtPhone.ClientID %>').value = phone || '';
+            document.getElementById('<%= txtEmail.ClientID %>').value = email || '';
+            document.getElementById('<%= txtAddress.ClientID %>').value = address || '';
+            document.getElementById('<%= txtHireDate.ClientID %>').value = hireDate || '';
+
+            // Fill form - Bank info
+            var bankSelect = document.getElementById('<%= ddlBank.ClientID %>');
+            bankSelect.selectedIndex = 0;
+            for (var i = 0; i < bankSelect.options.length; i++) {
+                if (bankSelect.options[i].value === bankCode) {
+                    bankSelect.selectedIndex = i;
+                    break;
+                }
+            }
+            document.getElementById('<%= txtBankAccountNumber.ClientID %>').value = bankAccountNumber || '';
+            document.getElementById('<%= txtBankAccountName.ClientID %>').value = bankAccountName || '';
+
+            // Fill form - Emergency contact
+            document.getElementById('<%= txtEmergencyContact.ClientID %>').value = emergencyContact || '';
+            document.getElementById('<%= txtEmergencyPhone.ClientID %>').value = emergencyPhone || '';
 
             // Set role
             var roleSelect = document.getElementById('<%= ddlRole.ClientID %>');

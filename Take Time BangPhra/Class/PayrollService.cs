@@ -898,8 +898,8 @@ public class PayrollService
         using (SqlCommand createCmd = new SqlCommand(@"
             DECLARE @NextID INT;
             SELECT @NextID = ISNULL(MAX(ID), 0) + 1 FROM Vendor;
-            INSERT INTO Vendor (ID, Name, Address, Tax_ID, Bank_Code, Bank_Number)
-            VALUES (@NextID, @Name, N'Internal - Payroll', N'0000000000000', N'', N'');
+            INSERT INTO Vendor (ID, IDNumber, Vendor_Type_ID, Name, Address, Status)
+            VALUES (@NextID, N'0000000000000', 1, @Name, N'Internal - Payroll', N'True');
             SELECT @NextID;", conn, transaction))
         {
             createCmd.Parameters.AddWithValue("@Name", payrollVendorName);

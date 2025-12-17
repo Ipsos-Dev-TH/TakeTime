@@ -79,8 +79,8 @@ BEGIN
     DECLARE @NextVendorID INT;
     SELECT @NextVendorID = ISNULL(MAX(ID), 0) + 1 FROM [dbo].[Vendor];
 
-    INSERT INTO [dbo].[Vendor] ([ID], [Name], [Address], [Tax_ID], [Bank_Code], [Bank_Number])
-    VALUES (@NextVendorID, N'เงินเดือนพนักงาน', N'Internal - Payroll', N'0000000000000', N'', N'');
+    INSERT INTO [dbo].[Vendor] ([ID], [IDNumber], [Vendor_Type_ID], [Name], [Address], [Status])
+    VALUES (@NextVendorID, N'0000000000000', 1, N'เงินเดือนพนักงาน', N'Internal - Payroll', N'True');
 
     PRINT '+ Added Payroll Vendor (เงินเดือนพนักงาน) with ID: ' + CAST(@NextVendorID AS VARCHAR);
 END
