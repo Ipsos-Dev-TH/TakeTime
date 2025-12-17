@@ -407,7 +407,7 @@ public class PayrollService
                         PR.LeaveDeduction, PR.SocialSecurity, PR.Tax,
                         PR.OtherDeductions, PR.TotalDeductions, PR.NetSalary,
                         PR.VoucherGenerated, CAST(PR.ID AS VARCHAR(20)) AS VoucherNumber,
-                        A.NickName, ES.Position
+                        A.Username AS NickName, ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Admin A ON A.ID = PR.Admin_ID
                     LEFT JOIN Employee_Salary ES ON ES.Admin_ID = PR.Admin_ID AND ES.IsActive = 1
@@ -439,7 +439,7 @@ public class PayrollService
                     SELECT
                         PR.*,
                         PP.Year, PP.Month, PP.PeriodName,
-                        A.Name, A.NickName,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name, A.Username AS NickName,
                         ES.Position
                     FROM Payroll_Records PR
                     INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID

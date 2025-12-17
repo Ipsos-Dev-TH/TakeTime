@@ -425,7 +425,7 @@ public class LeaveService
                 cmd.CommandText = @"
                     SELECT
                         LR.ID, LR.RequestNumber, LR.Admin_ID,
-                        A.Name AS EmployeeName, A.NickName,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName, A.Username AS NickName,
                         LT.LeaveTypeName, LT.LeaveTypeCode,
                         LR.StartDate, LR.EndDate, LR.TotalDays,
                         LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,

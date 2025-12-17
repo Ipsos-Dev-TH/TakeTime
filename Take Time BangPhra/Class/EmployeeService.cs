@@ -707,7 +707,7 @@ public class EmployeeService
             {
                 cmd.Connection = conn;
                 // Use direct query to Admin table with LEFT JOIN to Employee_Salary for Position
-                // Admin table columns: ID, Username, Password, FirstName, LastName, NickName, Role, Status
+                // Admin table columns: ID, Username, Password, FirstName, LastName, Role, Status
                 cmd.CommandText = @"
                     SELECT
                         A.ID AS Admin_ID,
@@ -726,8 +726,7 @@ public class EmployeeService
                     WHERE A.Status = 1
                       AND (@SearchTerm = '' OR A.FirstName LIKE '%' + @SearchTerm + '%'
                            OR A.LastName LIKE '%' + @SearchTerm + '%'
-                           OR A.Username LIKE '%' + @SearchTerm + '%'
-                           OR A.NickName LIKE '%' + @SearchTerm + '%')
+                           OR A.Username LIKE '%' + @SearchTerm + '%')
                       AND (@Position = '' OR ES.Position LIKE '%' + @Position + '%' OR A.Role LIKE '%' + @Position + '%')
                       AND (@Department = '' OR A.Role LIKE '%' + @Department + '%')
                     ORDER BY A.FirstName, A.LastName";
