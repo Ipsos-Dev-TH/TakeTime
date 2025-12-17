@@ -178,6 +178,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         #endregion
 
+        #region PDF Generation
+
         protected void btnPrintVoucher_Click(object sender, EventArgs e)
         {
             try
