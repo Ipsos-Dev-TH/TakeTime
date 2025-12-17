@@ -48,60 +48,34 @@ namespace Take_Time_BangPhra.Admin
                     return;
                 }
 
-                // Query user by username only (not password - we verify separately)
+                // Query user by username and password (plain text comparison)
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@username", username }
+                    { "@username", username },
+                    { "@password", password }
                 };
 
                 code code2 = new code();
                 DataTable dtAdmin = code2.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE Username = @username AND Status = 1",
+                    "SELECT * FROM Admin WHERE Username = @username AND Password = @password AND Status = 1",
                     parameters);
 
                 if (dtAdmin.Rows.Count >= 1)
                 {
-                    string storedPassword = dtAdmin.Rows[0]["Password"]?.ToString() ?? "";
                     string adminId = dtAdmin.Rows[0]["ID"].ToString();
 
-                    // Verify password using SecurityHelper (supports both plain text and hashed)
-                    if (SecurityHelper.VerifyPassword(password, storedPassword))
-                    {
-                        // Check if password needs to be upgraded to hashed version
-                        if (SecurityHelper.NeedsUpgrade(storedPassword))
-                        {
-                            // Upgrade plain text password to hashed version
-                            string hashedPassword = SecurityHelper.HashPassword(password);
-                            var upgradeParams = new Dictionary<string, object>
-                            {
-                                { "@password", hashedPassword },
-                                { "@userId", adminId }
-                            };
-                            code2.DatabaseInsertSafe(conn,
-                                "UPDATE [dbo].[Admin] SET [Password] = @password WHERE ID = @userId",
-                                upgradeParams);
-                            code2.Logs(conn, "Admin-Password-Upgraded", "User ID: " + adminId, username);
-                        }
+                    Session["permission"] = "True";
+                    Session["UserName"] = username;
+                    Session["User"] = dtAdmin.Rows[0]["Role"].ToString();
+                    Session["UserID"] = adminId;
 
-                        Session["permission"] = "True";
-                        Session["UserName"] = username;
-                        Session["User"] = dtAdmin.Rows[0]["Role"].ToString();
-                        Session["UserID"] = adminId;
-
-                        // Log successful login
-                        code2.Logs(conn, "Admin-Login-Success", username, username);
-                        Response.Redirect("/ReserveTable.aspx");
-                    }
-                    else
-                    {
-                        // Log failed login attempt
-                        code2.Logs(conn, "Admin-Login-Failed", username, username);
-                        ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');", true);
-                    }
+                    // Log successful login
+                    code2.Logs(conn, "Admin-Login-Success", username, username);
+                    Response.Redirect("/ReserveTable.aspx");
                 }
                 else
                 {
-                    // Log failed login attempt (user not found)
+                    // Log failed login attempt
                     code2.Logs(conn, "Admin-Login-Failed", username, username);
                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');", true);
                 }
@@ -126,21 +100,15 @@ namespace Take_Time_BangPhra.Admin
                     return;
                 }
 
-                // Validate password strength
-                var validation = SecurityHelper.ValidatePasswordStrength(newPassword);
-                if (!validation.IsValid)
+                if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 4)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert",
-                        "alert('" + validation.Message.Replace("'", "\\'") + "');", true);
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร');", true);
                     return;
                 }
 
-                // Hash the new password
-                string hashedPassword = SecurityHelper.HashPassword(newPassword);
-
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@password", hashedPassword },
+                    { "@password", newPassword },
                     { "@userId", Session["UserID"] }
                 };
 
