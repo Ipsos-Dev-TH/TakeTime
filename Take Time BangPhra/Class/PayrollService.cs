@@ -709,16 +709,15 @@ public class PayrollService
                     using (SqlCommand paymentCmd = new SqlCommand(@"
                         INSERT INTO Account_Payment
                         (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
-                         Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID, Notes)
+                         Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID)
                         VALUES
                         (@VoucherNumber, @VendorID, GETDATE(), @Amount, 1, 0,
-                         @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy, @Notes)", conn, transaction))
+                         @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy)", conn, transaction))
                     {
                         paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
                         paymentCmd.Parameters.AddWithValue("@VendorID", payrollVendorId);
                         paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
                         paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
-                        paymentCmd.Parameters.AddWithValue("@Notes", $"เงินเดือน {employeeName} - {periodName}");
                         paymentCmd.ExecuteNonQuery();
                     }
 
