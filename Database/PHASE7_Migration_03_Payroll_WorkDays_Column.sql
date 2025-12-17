@@ -72,6 +72,22 @@ ELSE
     PRINT '= VoucherGeneratedBy column already exists in Payroll_Records';
 GO
 
+-- Add Payroll Vendor for payroll payments (if not exists)
+IF NOT EXISTS (SELECT * FROM [dbo].[Vendor] WHERE [Name] = N'เงินเดือนพนักงาน')
+BEGIN
+    -- Get the next available ID
+    DECLARE @NextVendorID INT;
+    SELECT @NextVendorID = ISNULL(MAX(ID), 0) + 1 FROM [dbo].[Vendor];
+
+    INSERT INTO [dbo].[Vendor] ([ID], [Name], [Address], [Tax_ID], [Bank_Code], [Bank_Number])
+    VALUES (@NextVendorID, N'เงินเดือนพนักงาน', N'Internal - Payroll', N'0000000000000', N'', N'');
+
+    PRINT '+ Added Payroll Vendor (เงินเดือนพนักงาน) with ID: ' + CAST(@NextVendorID AS VARCHAR);
+END
+ELSE
+    PRINT '= Payroll Vendor (เงินเดือนพนักงาน) already exists';
+GO
+
 PRINT ''
 PRINT '============================================================================'
 PRINT 'PHASE 7 Migration 03 Completed Successfully!'

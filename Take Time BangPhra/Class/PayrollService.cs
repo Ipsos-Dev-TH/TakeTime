@@ -676,16 +676,20 @@ public class PayrollService
                     int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
                     string periodName = payrollRecord["PeriodName"].ToString();
 
+                    // Get or create payroll vendor ID
+                    int payrollVendorId = GetOrCreatePayrollVendorId(conn, transaction);
+
                     // Insert into Account_Payment for tracking in payment voucher management
                     using (SqlCommand paymentCmd = new SqlCommand(@"
                         INSERT INTO Account_Payment
                         (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
                          Total_Amount_Exclude_Vat, Paid_How, Paid_Type, Status, Created_By_ID, Notes)
                         VALUES
-                        (@VoucherNumber, NULL, GETDATE(), @Amount, 1, 0,
+                        (@VoucherNumber, @VendorID, GETDATE(), @Amount, 1, 0,
                          @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy, @Notes)", conn, transaction))
                     {
                         paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                        paymentCmd.Parameters.AddWithValue("@VendorID", payrollVendorId);
                         paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
                         paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
                         paymentCmd.Parameters.AddWithValue("@Notes", $"เงินเดือน {employeeName} - {periodName}");
@@ -864,6 +868,42 @@ public class PayrollService
                     return dt;
                 }
             }
+        }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    /// <summary>
+    /// Get or create payroll vendor ID for Account_Payment entries
+    /// </summary>
+    private int GetOrCreatePayrollVendorId(SqlConnection conn, SqlTransaction transaction)
+    {
+        const string payrollVendorName = "เงินเดือนพนักงาน";
+
+        // Try to find existing payroll vendor
+        using (SqlCommand findCmd = new SqlCommand(
+            "SELECT ID FROM Vendor WHERE Name = @Name", conn, transaction))
+        {
+            findCmd.Parameters.AddWithValue("@Name", payrollVendorName);
+            object result = findCmd.ExecuteScalar();
+            if (result != null && result != DBNull.Value)
+            {
+                return Convert.ToInt32(result);
+            }
+        }
+
+        // Create payroll vendor if not exists
+        using (SqlCommand createCmd = new SqlCommand(@"
+            DECLARE @NextID INT;
+            SELECT @NextID = ISNULL(MAX(ID), 0) + 1 FROM Vendor;
+            INSERT INTO Vendor (ID, Name, Address, Tax_ID, Bank_Code, Bank_Number)
+            VALUES (@NextID, @Name, N'Internal - Payroll', N'0000000000000', N'', N'');
+            SELECT @NextID;", conn, transaction))
+        {
+            createCmd.Parameters.AddWithValue("@Name", payrollVendorName);
+            return Convert.ToInt32(createCmd.ExecuteScalar());
         }
     }
 
