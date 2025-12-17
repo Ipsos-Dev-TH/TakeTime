@@ -347,6 +347,37 @@
             font-size: 11px;
             color: #888;
         }
+
+        /* Salary History Modal */
+        .salary-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .salary-history-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .salary-history-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+
+        .salary-history-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .salary-history-content {
+            max-height: 400px;
+            overflow-y: auto;
+        }
     </style>
 
     <div class="employee-management">
@@ -451,6 +482,10 @@
                                     CssClass="btn-edit" CommandName="EditEmployee"
                                     CommandArgument='<%# Eval("Admin_ID") %>' />
 
+                                <asp:Button ID="btnSalaryHistory" runat="server" Text="&#128176; ประวัติเงินเดือน"
+                                    CssClass="btn-info" CommandName="ViewSalaryHistory"
+                                    CommandArgument='<%# Eval("Admin_ID") %>' />
+
                                 <asp:Button ID="btnResign" runat="server" Text="&#128683; ลาออก"
                                     CssClass="btn-danger" CommandName="Resign"
                                     CommandArgument='<%# Eval("Admin_ID") %>'
@@ -482,6 +517,33 @@
         <!-- Hidden fields -->
         <asp:HiddenField ID="hdnEmployeeId" runat="server" />
         <asp:HiddenField ID="hdnEditMode" runat="server" Value="add" />
+
+        <!-- Salary History Modal -->
+        <div id="salaryHistoryModal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="salaryHistoryTitle">&#128176; ประวัติเงินเดือน</h3>
+                    <button type="button" class="modal-close" onclick="closeSalaryHistoryModal()">&times;</button>
+                </div>
+                <div class="salary-history-content">
+                    <table class="salary-history-table">
+                        <thead>
+                            <tr>
+                                <th>วันที่มีผล</th>
+                                <th>ตำแหน่ง</th>
+                                <th style="text-align:right">เงินเดือน</th>
+                                <th>สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salaryHistoryBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" onclick="closeSalaryHistoryModal()">ปิด</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Add/Edit Employee Modal -->
         <div id="employeeModal" class="modal-overlay">
@@ -594,6 +656,16 @@
 
         function closeModal() {
             document.getElementById('employeeModal').style.display = 'none';
+        }
+
+        function openSalaryHistoryModal(employeeName, tableRows) {
+            document.getElementById('salaryHistoryTitle').innerHTML = '&#128176; ประวัติเงินเดือน - ' + employeeName;
+            document.getElementById('salaryHistoryBody').innerHTML = tableRows;
+            document.getElementById('salaryHistoryModal').style.display = 'flex';
+        }
+
+        function closeSalaryHistoryModal() {
+            document.getElementById('salaryHistoryModal').style.display = 'none';
         }
 
         // Close modal when clicking outside

@@ -188,6 +188,75 @@ namespace Take_Time_BangPhra.Admin.HR
                 short adminId = Convert.ToInt16(e.CommandArgument);
                 DeleteEmployee(adminId);
             }
+            else if (e.CommandName == "ViewSalaryHistory")
+            {
+                short adminId = Convert.ToInt16(e.CommandArgument);
+                LoadSalaryHistory(adminId);
+            }
+        }
+
+        private void LoadSalaryHistory(short adminId)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    // Get employee name
+                    string employeeName = "";
+                    using (SqlCommand nameCmd = new SqlCommand(@"
+                        SELECT ISNULL(FirstName + ' ' + LastName, Username) AS Name FROM Admin WHERE ID = @AdminID", conn))
+                    {
+                        nameCmd.Parameters.AddWithValue("@AdminID", adminId);
+                        employeeName = nameCmd.ExecuteScalar()?.ToString() ?? "";
+                    }
+
+                    // Get salary history
+                    using (SqlCommand cmd = new SqlCommand(@"
+                        SELECT MonthlySalary, Position, EffectiveDate, IsActive,
+                               CASE WHEN IsActive = 1 THEN 'ปัจจุบัน' ELSE 'ประวัติ' END AS StatusText
+                        FROM Employee_Salary
+                        WHERE Admin_ID = @AdminID
+                        ORDER BY EffectiveDate DESC", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            var historyItems = new System.Collections.Generic.List<string>();
+                            while (reader.Read())
+                            {
+                                decimal salary = reader["MonthlySalary"] != DBNull.Value ? Convert.ToDecimal(reader["MonthlySalary"]) : 0;
+                                string position = reader["Position"]?.ToString() ?? "-";
+                                DateTime effectiveDate = reader["EffectiveDate"] != DBNull.Value ? Convert.ToDateTime(reader["EffectiveDate"]) : DateTime.MinValue;
+                                bool isActive = reader["IsActive"] != DBNull.Value && Convert.ToBoolean(reader["IsActive"]);
+
+                                string statusBadge = isActive
+                                    ? "<span class=\"badge badge-success\">ปัจจุบัน</span>"
+                                    : "<span class=\"badge badge-secondary\">ประวัติ</span>";
+
+                                historyItems.Add($"<tr><td>{effectiveDate:dd/MM/yyyy}</td><td>{position}</td><td style=\"text-align:right\">฿{salary:N0}</td><td>{statusBadge}</td></tr>");
+                            }
+
+                            if (historyItems.Count > 0)
+                            {
+                                string tableHtml = string.Join("", historyItems);
+                                string script = $@"openSalaryHistoryModal('{EscapeJsString(employeeName)}', '{EscapeJsString(tableHtml)}');";
+                                ScriptManager.RegisterStartupScript(this, GetType(), "OpenSalaryHistory", script, true);
+                            }
+                            else
+                            {
+                                ShowMessage("ไม่พบประวัติเงินเดือน", "error");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
         }
 
         private void LoadEmployeeForEdit(short adminId)
