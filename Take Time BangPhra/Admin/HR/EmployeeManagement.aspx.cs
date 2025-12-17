@@ -266,6 +266,9 @@ namespace Take_Time_BangPhra.Admin.HR
 
                     using (SqlCommand cmd = new SqlCommand(@"
                         SELECT A.ID, A.Username, A.FirstName, A.LastName, A.Role,
+                               A.Phone, A.Email, A.IDCard, A.Address, A.HireDate, A.BirthDate,
+                               A.BankCode, A.BankAccountNumber, A.BankAccountName,
+                               A.EmergencyContact, A.EmergencyPhone,
                                ES.MonthlySalary, ES.Position
                         FROM Admin A
                         LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
@@ -284,6 +287,23 @@ namespace Take_Time_BangPhra.Admin.HR
                                 string salary = reader["MonthlySalary"] != DBNull.Value ? Convert.ToDecimal(reader["MonthlySalary"]).ToString("0") : "";
                                 string position = reader["Position"]?.ToString() ?? "";
 
+                                // Personal info
+                                string idCard = reader["IDCard"]?.ToString() ?? "";
+                                string birthDate = reader["BirthDate"] != DBNull.Value ? Convert.ToDateTime(reader["BirthDate"]).ToString("yyyy-MM-dd") : "";
+                                string phone = reader["Phone"]?.ToString() ?? "";
+                                string email = reader["Email"]?.ToString() ?? "";
+                                string address = reader["Address"]?.ToString() ?? "";
+                                string hireDate = reader["HireDate"] != DBNull.Value ? Convert.ToDateTime(reader["HireDate"]).ToString("yyyy-MM-dd") : "";
+
+                                // Bank info
+                                string bankCode = reader["BankCode"]?.ToString() ?? "";
+                                string bankAccountNumber = reader["BankAccountNumber"]?.ToString() ?? "";
+                                string bankAccountName = reader["BankAccountName"]?.ToString() ?? "";
+
+                                // Emergency contact
+                                string emergencyContact = reader["EmergencyContact"]?.ToString() ?? "";
+                                string emergencyPhone = reader["EmergencyPhone"]?.ToString() ?? "";
+
                                 // Load signature preview
                                 string employeeFullName = string.IsNullOrEmpty(lastName) ? firstName : firstName + " " + lastName;
                                 LoadSignaturePreview(employeeFullName);
@@ -291,7 +311,11 @@ namespace Take_Time_BangPhra.Admin.HR
                                 // Register JavaScript to open modal with data
                                 string script = $@"
                                     openEditModal('{adminId}', '{EscapeJsString(username)}', '{EscapeJsString(firstName)}',
-                                                  '{EscapeJsString(lastName)}', '{EscapeJsString(role)}', '{salary}', '{EscapeJsString(position)}');";
+                                                  '{EscapeJsString(lastName)}', '{EscapeJsString(role)}', '{salary}', '{EscapeJsString(position)}',
+                                                  '{EscapeJsString(idCard)}', '{birthDate}', '{EscapeJsString(phone)}', '{EscapeJsString(email)}',
+                                                  '{EscapeJsString(address)}', '{hireDate}',
+                                                  '{EscapeJsString(bankCode)}', '{EscapeJsString(bankAccountNumber)}', '{EscapeJsString(bankAccountName)}',
+                                                  '{EscapeJsString(emergencyContact)}', '{EscapeJsString(emergencyPhone)}');";
                                 ScriptManager.RegisterStartupScript(this, GetType(), "OpenEditModal", script, true);
                             }
                         }
@@ -528,8 +552,14 @@ namespace Take_Time_BangPhra.Admin.HR
 
                 // Insert new employee (plain text password)
                 using (SqlCommand cmd = new SqlCommand(@"
-                    INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status)
-                    VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1);
+                    INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status,
+                                       Phone, Email, IDCard, Address, HireDate, BirthDate,
+                                       BankCode, BankAccountNumber, BankAccountName,
+                                       EmergencyContact, EmergencyPhone)
+                    VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1,
+                            @Phone, @Email, @IDCard, @Address, @HireDate, @BirthDate,
+                            @BankCode, @BankAccountNumber, @BankAccountName,
+                            @EmergencyContact, @EmergencyPhone);
                     SELECT SCOPE_IDENTITY();", conn))
                 {
                     cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
@@ -537,6 +567,27 @@ namespace Take_Time_BangPhra.Admin.HR
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+
+                    // Personal info
+                    cmd.Parameters.AddWithValue("@Phone", string.IsNullOrWhiteSpace(txtPhone.Text) ? (object)DBNull.Value : txtPhone.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Email", string.IsNullOrWhiteSpace(txtEmail.Text) ? (object)DBNull.Value : txtEmail.Text.Trim());
+                    cmd.Parameters.AddWithValue("@IDCard", string.IsNullOrWhiteSpace(txtIDCard.Text) ? (object)DBNull.Value : txtIDCard.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(txtAddress.Text) ? (object)DBNull.Value : txtAddress.Text.Trim());
+
+                    // Parse dates
+                    DateTime hireDate;
+                    cmd.Parameters.AddWithValue("@HireDate", DateTime.TryParse(txtHireDate.Text, out hireDate) ? (object)hireDate : DBNull.Value);
+                    DateTime birthDate;
+                    cmd.Parameters.AddWithValue("@BirthDate", DateTime.TryParse(txtBirthDate.Text, out birthDate) ? (object)birthDate : DBNull.Value);
+
+                    // Bank info
+                    cmd.Parameters.AddWithValue("@BankCode", string.IsNullOrWhiteSpace(ddlBank.SelectedValue) ? (object)DBNull.Value : ddlBank.SelectedValue);
+                    cmd.Parameters.AddWithValue("@BankAccountNumber", string.IsNullOrWhiteSpace(txtBankAccountNumber.Text) ? (object)DBNull.Value : txtBankAccountNumber.Text.Trim());
+                    cmd.Parameters.AddWithValue("@BankAccountName", string.IsNullOrWhiteSpace(txtBankAccountName.Text) ? (object)DBNull.Value : txtBankAccountName.Text.Trim());
+
+                    // Emergency contact
+                    cmd.Parameters.AddWithValue("@EmergencyContact", string.IsNullOrWhiteSpace(txtEmergencyContact.Text) ? (object)DBNull.Value : txtEmergencyContact.Text.Trim());
+                    cmd.Parameters.AddWithValue("@EmergencyPhone", string.IsNullOrWhiteSpace(txtEmergencyPhone.Text) ? (object)DBNull.Value : txtEmergencyPhone.Text.Trim());
 
                     short newAdminId = Convert.ToInt16(cmd.ExecuteScalar());
 
@@ -615,45 +666,60 @@ namespace Take_Time_BangPhra.Admin.HR
                 conn.Open();
 
                 // Update Admin record
-                string updateSql;
-                if (!string.IsNullOrWhiteSpace(txtPassword.Text))
-                {
-                    // Hash the new password
-                    string hashedPassword = SecurityHelper.HashPassword(txtPassword.Text);
-
-                    updateSql = @"UPDATE Admin SET
+                string updateSql = @"UPDATE Admin SET
                                   FirstName = @FirstName,
                                   LastName = @LastName,
                                   Role = @Role,
-                                  Password = @Password
-                                  WHERE ID = @AdminID";
+                                  Phone = @Phone,
+                                  Email = @Email,
+                                  IDCard = @IDCard,
+                                  Address = @Address,
+                                  HireDate = @HireDate,
+                                  BirthDate = @BirthDate,
+                                  BankCode = @BankCode,
+                                  BankAccountNumber = @BankAccountNumber,
+                                  BankAccountName = @BankAccountName,
+                                  EmergencyContact = @EmergencyContact,
+                                  EmergencyPhone = @EmergencyPhone" +
+                                  (!string.IsNullOrWhiteSpace(txtPassword.Text) ? ", Password = @Password" : "") +
+                                  " WHERE ID = @AdminID";
 
-                    using (SqlCommand cmd = new SqlCommand(updateSql, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
-                        cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        cmd.Parameters.AddWithValue("@Password", hashedPassword);
-                        cmd.ExecuteNonQuery();
-                    }
-                }
-                else
+                using (SqlCommand cmd = new SqlCommand(updateSql, conn))
                 {
-                    updateSql = @"UPDATE Admin SET
-                                  FirstName = @FirstName,
-                                  LastName = @LastName,
-                                  Role = @Role
-                                  WHERE ID = @AdminID";
+                    cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
+                    cmd.Parameters.AddWithValue("@AdminID", adminId);
 
-                    using (SqlCommand cmd = new SqlCommand(updateSql, conn))
+                    // Personal info
+                    cmd.Parameters.AddWithValue("@Phone", string.IsNullOrWhiteSpace(txtPhone.Text) ? (object)DBNull.Value : txtPhone.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Email", string.IsNullOrWhiteSpace(txtEmail.Text) ? (object)DBNull.Value : txtEmail.Text.Trim());
+                    cmd.Parameters.AddWithValue("@IDCard", string.IsNullOrWhiteSpace(txtIDCard.Text) ? (object)DBNull.Value : txtIDCard.Text.Trim());
+                    cmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(txtAddress.Text) ? (object)DBNull.Value : txtAddress.Text.Trim());
+
+                    // Parse dates
+                    DateTime hireDate;
+                    cmd.Parameters.AddWithValue("@HireDate", DateTime.TryParse(txtHireDate.Text, out hireDate) ? (object)hireDate : DBNull.Value);
+                    DateTime birthDate;
+                    cmd.Parameters.AddWithValue("@BirthDate", DateTime.TryParse(txtBirthDate.Text, out birthDate) ? (object)birthDate : DBNull.Value);
+
+                    // Bank info
+                    cmd.Parameters.AddWithValue("@BankCode", string.IsNullOrWhiteSpace(ddlBank.SelectedValue) ? (object)DBNull.Value : ddlBank.SelectedValue);
+                    cmd.Parameters.AddWithValue("@BankAccountNumber", string.IsNullOrWhiteSpace(txtBankAccountNumber.Text) ? (object)DBNull.Value : txtBankAccountNumber.Text.Trim());
+                    cmd.Parameters.AddWithValue("@BankAccountName", string.IsNullOrWhiteSpace(txtBankAccountName.Text) ? (object)DBNull.Value : txtBankAccountName.Text.Trim());
+
+                    // Emergency contact
+                    cmd.Parameters.AddWithValue("@EmergencyContact", string.IsNullOrWhiteSpace(txtEmergencyContact.Text) ? (object)DBNull.Value : txtEmergencyContact.Text.Trim());
+                    cmd.Parameters.AddWithValue("@EmergencyPhone", string.IsNullOrWhiteSpace(txtEmergencyPhone.Text) ? (object)DBNull.Value : txtEmergencyPhone.Text.Trim());
+
+                    // Password if provided
+                    if (!string.IsNullOrWhiteSpace(txtPassword.Text))
                     {
-                        cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
-                        cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
-                        cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        cmd.ExecuteNonQuery();
+                        string hashedPassword = SecurityHelper.HashPassword(txtPassword.Text);
+                        cmd.Parameters.AddWithValue("@Password", hashedPassword);
                     }
+
+                    cmd.ExecuteNonQuery();
                 }
 
                 // Update or insert salary with history tracking
@@ -773,6 +839,7 @@ namespace Take_Time_BangPhra.Admin.HR
 
         private void ClearAddForm()
         {
+            // Basic info
             txtUsername.Text = "";
             txtPassword.Text = "";
             txtFirstName.Text = "";
@@ -780,6 +847,23 @@ namespace Take_Time_BangPhra.Admin.HR
             txtSalary.Text = "";
             txtPosition.Text = "";
             ddlRole.SelectedIndex = 0;
+
+            // Personal info
+            txtIDCard.Text = "";
+            txtBirthDate.Text = "";
+            txtPhone.Text = "";
+            txtEmail.Text = "";
+            txtAddress.Text = "";
+            txtHireDate.Text = "";
+
+            // Bank info
+            ddlBank.SelectedIndex = 0;
+            txtBankAccountNumber.Text = "";
+            txtBankAccountName.Text = "";
+
+            // Emergency contact
+            txtEmergencyContact.Text = "";
+            txtEmergencyPhone.Text = "";
 
             // Clear signature preview
             imgSignature.Visible = false;
