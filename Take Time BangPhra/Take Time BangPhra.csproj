@@ -377,6 +377,11 @@
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
     <Content Include="Admin\Leave\LeaveManagement.aspx" />
     <Content Include="Admin\Payroll\PayrollManagement.aspx" />
+    <Content Include="Admin\Payroll\PayrollDetail.aspx" />
+    <Content Include="Admin\HR\OTEntry.aspx" />
+    <Content Include="Admin\HR\SupervisorManagement.aspx" />
+    <Content Include="Admin\Leave\LeaveRequest.aspx" />
+    <Content Include="Admin\Leave\SupervisorLeaveApproval.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Guest\Portal.aspx" />
@@ -781,6 +786,43 @@
     <Compile Include="Admin\Payroll\PayrollManagement.aspx.designer.cs">
       <DependentUpon>PayrollManagement.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Payroll\PayrollDetail.aspx.cs">
+      <DependentUpon>PayrollDetail.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Payroll\PayrollDetail.aspx.designer.cs">
+      <DependentUpon>PayrollDetail.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\HR\OTEntry.aspx.cs">
+      <DependentUpon>OTEntry.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\HR\OTEntry.aspx.designer.cs">
+      <DependentUpon>OTEntry.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\HR\SupervisorManagement.aspx.cs">
+      <DependentUpon>SupervisorManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\HR\SupervisorManagement.aspx.designer.cs">
+      <DependentUpon>SupervisorManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveRequest.aspx.cs">
+      <DependentUpon>LeaveRequest.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveRequest.aspx.designer.cs">
+      <DependentUpon>LeaveRequest.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Leave\SupervisorLeaveApproval.aspx.cs">
+      <DependentUpon>SupervisorLeaveApproval.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Leave\SupervisorLeaveApproval.aspx.designer.cs">
+      <DependentUpon>SupervisorLeaveApproval.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\OTService.cs" />
+    <Compile Include="Class\SupervisorService.cs" />
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
