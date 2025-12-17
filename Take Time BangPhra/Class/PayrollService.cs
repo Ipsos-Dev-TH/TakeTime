@@ -771,15 +771,78 @@ public class PayrollService
                         paymentCmd.ExecuteNonQuery();
                     }
 
-                    // Insert payment detail
-                    using (SqlCommand detailCmd = new SqlCommand(@"
-                        INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
-                        VALUES (@VoucherNumber, 1, @Detail, @Amount)", conn, transaction))
+                    // Insert payment details - break down into individual line items
+                    int lineNumber = 0;
+
+                    // 1. Base Salary (always show if > 0)
+                    if (baseSalary > 0)
                     {
-                        detailCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-                        detailCmd.Parameters.AddWithValue("@Detail", $"จ่ายเงินเดือน {periodName} - {employeeName}");
-                        detailCmd.Parameters.AddWithValue("@Amount", netSalary);
-                        detailCmd.ExecuteNonQuery();
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            $"เงินเดือน {periodName}", baseSalary);
+                    }
+
+                    // 2. OT Amount
+                    if (otAmount > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "ค่าล่วงเวลา (OT)", otAmount);
+                    }
+
+                    // 3. Bonus
+                    if (bonus > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "โบนัส", bonus);
+                    }
+
+                    // 4. Allowance
+                    if (allowance > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "เบี้ยขยัน/ค่าเดินทาง", allowance);
+                    }
+
+                    // 5. Social Security Deduction (show as negative)
+                    if (socialSecurity > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "หัก ประกันสังคม", -socialSecurity);
+                    }
+
+                    // 6. Tax Deduction
+                    if (tax > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "หัก ภาษี ณ ที่จ่าย", -tax);
+                    }
+
+                    // 7. Leave Deduction
+                    if (leaveDeduction > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "หัก ขาด/ลา", -leaveDeduction);
+                    }
+
+                    // 8. Other Deductions
+                    if (otherDeductions > 0)
+                    {
+                        lineNumber++;
+                        InsertPaymentDetail(conn, transaction, voucherNumber, lineNumber,
+                            "หัก อื่นๆ", -otherDeductions);
+                    }
+
+                    // If no items were added (shouldn't happen), add a single line
+                    if (lineNumber == 0)
+                    {
+                        InsertPaymentDetail(conn, transaction, voucherNumber, 1,
+                            $"จ่ายเงินเดือน {periodName} - {employeeName}", netSalary);
                     }
 
                     transaction.Commit();
@@ -1048,6 +1111,24 @@ public class PayrollService
             createCmd.Parameters.AddWithValue("@Name", employeeName ?? "Unknown Employee");
             createCmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(address) ? (object)DBNull.Value : address);
             return Convert.ToInt32(createCmd.ExecuteScalar());
+        }
+    }
+
+    /// <summary>
+    /// Insert a payment detail line item
+    /// </summary>
+    private void InsertPaymentDetail(SqlConnection conn, SqlTransaction transaction,
+        string voucherNumber, int lineNumber, string detail, decimal amount)
+    {
+        using (SqlCommand cmd = new SqlCommand(@"
+            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
+            VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount)", conn, transaction))
+        {
+            cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+            cmd.Parameters.AddWithValue("@LineNumber", lineNumber);
+            cmd.Parameters.AddWithValue("@Detail", detail);
+            cmd.Parameters.AddWithValue("@Amount", amount);
+            cmd.ExecuteNonQuery();
         }
     }
 
