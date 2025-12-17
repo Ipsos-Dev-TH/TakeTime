@@ -630,12 +630,16 @@ public class PayrollService
             {
                 try
                 {
-                    // Get payroll record details
+                    // Get payroll record details including employee info for vendor creation
                     DataRow payrollRecord = null;
                     using (SqlCommand getCmd = new SqlCommand(@"
                         SELECT PR.*, PP.Year, PP.Month, PP.PeriodName,
                                A.Username AS NickName,
+                               A.ID AS AdminID,
+                               A.FirstName, A.LastName,
                                ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                               A.IDCard, A.Address AS EmpAddress, A.Phone AS EmpPhone,
+                               A.BankCode, A.BankAccountNumber, A.BankAccountName,
                                -- Calculate amounts with fallback to Employee_Salary
                                CASE WHEN ISNULL(PR.BaseSalary, 0) = 0
                                     THEN ISNULL(ES.MonthlySalary, 0)
@@ -715,8 +719,17 @@ public class PayrollService
                     int periodMonth = Convert.ToInt32(payrollRecord["Month"]);
                     string periodName = payrollRecord["PeriodName"].ToString();
 
-                    // Get or create payroll vendor ID
-                    int payrollVendorId = GetOrCreatePayrollVendorId(conn, transaction);
+                    // Get employee info for vendor creation
+                    string idCard = payrollRecord["IDCard"] != DBNull.Value ? payrollRecord["IDCard"].ToString() : "";
+                    string empAddress = payrollRecord["EmpAddress"] != DBNull.Value ? payrollRecord["EmpAddress"].ToString() : "";
+                    string empPhone = payrollRecord["EmpPhone"] != DBNull.Value ? payrollRecord["EmpPhone"].ToString() : "";
+                    string bankCode = payrollRecord["BankCode"] != DBNull.Value ? payrollRecord["BankCode"].ToString() : "";
+                    string bankAccountNumber = payrollRecord["BankAccountNumber"] != DBNull.Value ? payrollRecord["BankAccountNumber"].ToString() : "";
+                    string bankAccountName = payrollRecord["BankAccountName"] != DBNull.Value ? payrollRecord["BankAccountName"].ToString() : "";
+
+                    // Get or create vendor for this employee (by IDCard or Name)
+                    int employeeVendorId = GetOrCreateEmployeeVendorId(conn, transaction,
+                        idCard, employeeName, empAddress, empPhone, bankCode, bankAccountNumber, bankAccountName);
 
                     // Get valid Vat_Type_ID (prefer 0% VAT for salary payments)
                     int vatTypeId = 1;
@@ -731,6 +744,7 @@ public class PayrollService
                     }
 
                     // Insert into Account_Payment for tracking in payment voucher management
+                    // Uses employee's own Vendor record (created/found by IDCard or Name)
                     using (SqlCommand paymentCmd = new SqlCommand(@"
                         INSERT INTO Account_Payment
                         (ID, Vendor_ID, Created_Date, Total_Amount, Vat_Type_ID, Vat,
@@ -740,7 +754,7 @@ public class PayrollService
                          @Amount, N'โอน', N'เงินเดือน', N'Normal', @CreatedBy)", conn, transaction))
                     {
                         paymentCmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-                        paymentCmd.Parameters.AddWithValue("@VendorID", payrollVendorId);
+                        paymentCmd.Parameters.AddWithValue("@VendorID", employeeVendorId);
                         paymentCmd.Parameters.AddWithValue("@Amount", netSalary);
                         paymentCmd.Parameters.AddWithValue("@VatTypeID", vatTypeId);
                         paymentCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
@@ -927,7 +941,7 @@ public class PayrollService
     #region Helper Methods
 
     /// <summary>
-    /// Get or create payroll vendor ID for Account_Payment entries
+    /// Get or create payroll vendor ID for Account_Payment entries (fallback generic vendor)
     /// </summary>
     private int GetOrCreatePayrollVendorId(SqlConnection conn, SqlTransaction transaction)
     {
@@ -952,6 +966,59 @@ public class PayrollService
             SELECT SCOPE_IDENTITY();", conn, transaction))
         {
             createCmd.Parameters.AddWithValue("@Name", payrollVendorName);
+            return Convert.ToInt32(createCmd.ExecuteScalar());
+        }
+    }
+
+    /// <summary>
+    /// Get or create vendor for an employee (for payroll payments)
+    /// Searches by IDCard first, then by Name. Creates new vendor if not found.
+    /// </summary>
+    private int GetOrCreateEmployeeVendorId(SqlConnection conn, SqlTransaction transaction,
+        string idCard, string employeeName, string address, string phone,
+        string bankCode, string bankAccountNumber, string bankAccountName)
+    {
+        // 1. Try to find by IDCard (IDNumber in Vendor table)
+        if (!string.IsNullOrWhiteSpace(idCard))
+        {
+            using (SqlCommand findByIdCmd = new SqlCommand(
+                "SELECT ID FROM Vendor WHERE IDNumber = @IDNumber AND Status = 'True'", conn, transaction))
+            {
+                findByIdCmd.Parameters.AddWithValue("@IDNumber", idCard);
+                object result = findByIdCmd.ExecuteScalar();
+                if (result != null && result != DBNull.Value)
+                {
+                    return Convert.ToInt32(result);
+                }
+            }
+        }
+
+        // 2. Try to find by Name
+        if (!string.IsNullOrWhiteSpace(employeeName))
+        {
+            using (SqlCommand findByNameCmd = new SqlCommand(
+                "SELECT ID FROM Vendor WHERE Name = @Name AND Vendor_Group = N'01-พนักงานประจำ' AND Status = 'True'", conn, transaction))
+            {
+                findByNameCmd.Parameters.AddWithValue("@Name", employeeName);
+                object result = findByNameCmd.ExecuteScalar();
+                if (result != null && result != DBNull.Value)
+                {
+                    return Convert.ToInt32(result);
+                }
+            }
+        }
+
+        // 3. Create new vendor for this employee
+        // Vendor_Type_ID = 1 (บุคคลธรรมดา), Vendor_Group = '01-พนักงานประจำ'
+        using (SqlCommand createCmd = new SqlCommand(@"
+            INSERT INTO Vendor (IDNumber, Vendor_Type_ID, Name, Address, Phone, Vendor_Group, Status)
+            VALUES (@IDNumber, 1, @Name, @Address, @Phone, N'01-พนักงานประจำ', N'True');
+            SELECT SCOPE_IDENTITY();", conn, transaction))
+        {
+            createCmd.Parameters.AddWithValue("@IDNumber", string.IsNullOrWhiteSpace(idCard) ? "0000000000000" : idCard);
+            createCmd.Parameters.AddWithValue("@Name", employeeName ?? "Unknown Employee");
+            createCmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(address) ? (object)DBNull.Value : address);
+            createCmd.Parameters.AddWithValue("@Phone", string.IsNullOrWhiteSpace(phone) ? (object)DBNull.Value : phone);
             return Convert.ToInt32(createCmd.ExecuteScalar());
         }
     }
