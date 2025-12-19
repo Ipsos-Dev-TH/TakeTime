@@ -1,4 +1,4 @@
-name: Deploy Code Only (No Build)
+name: Quick Deploy (Cached Build)
 
 on:
   workflow_dispatch:
@@ -12,15 +12,72 @@ on:
           - production
           - staging
 
+env:
+  SOLUTION_FILE: 'Take Time BangPhra.sln'
+  PROJECT_FILE: 'Take Time BangPhra/Take Time BangPhra.csproj'
+  BUILD_CONFIGURATION: 'Release'
+
 jobs:
-  deploy:
-    name: Deploy Code to IIS
-    runs-on: self-hosted
-    environment: production
+  build:
+    name: Build Application
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: Build solution
+        run: |
+          msbuild "${{ env.PROJECT_FILE }}" `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /p:DeployOnBuild=true `
+            /p:WebPublishMethod=Package `
+            /p:PackageAsSingleFile=true `
+            /p:SkipInvalidConfigurations=true `
+            /p:PackageLocation="${{ github.workspace }}/publish"
+
+      - name: Extract Package
+        run: |
+          $packagePath = Get-ChildItem -Path "${{ github.workspace }}/publish" -Filter "*.zip" | Select-Object -First 1
+          Expand-Archive -Path $packagePath.FullName -DestinationPath "${{ github.workspace }}/deploy" -Force
+        shell: powershell
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/deploy/Content/C_C/a/s/w/1/s/Take Time BangPhra/
+          retention-days: 1
+
+  deploy:
+    name: Deploy to IIS
+    needs: build
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/webapp
 
       - name: Stop IIS Application Pool
         run: |
@@ -42,37 +99,14 @@ jobs:
           }
         shell: powershell
 
-      - name: Deploy Code Files
+      - name: Deploy to IIS
         run: |
-          $sourcePath = "${{ github.workspace }}\Take Time BangPhra"
+          $sourcePath = "${{ github.workspace }}/webapp"
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
 
-          # Files/folders to exclude from deployment
-          $excludeFiles = @(
-            "Web.config",
-            "Web.Debug.config",
-            "Web.Release.config",
-            "packages.config",
-            "*.csproj",
-            "*.csproj.user",
-            "*.sln",
-            "obj",
-            "Properties"
-          )
-
-          # Copy source files
+          # Copy all files EXCEPT Web.config
           Get-ChildItem -Path $sourcePath -Recurse |
-            Where-Object {
-              $item = $_
-              $exclude = $false
-              foreach ($pattern in $excludeFiles) {
-                if ($item.Name -like $pattern) {
-                  $exclude = $true
-                  break
-                }
-              }
-              -not $exclude
-            } |
+            Where-Object { $_.Name -ne "Web.config" } |
             ForEach-Object {
               $relativePath = $_.FullName.Substring($sourcePath.Length)
               $destPath = Join-Path $sitePath $relativePath
@@ -90,8 +124,7 @@ jobs:
               }
             }
 
-          Write-Host "Code deployed to: $sitePath"
-          Write-Host "Excluded: Web.config, project files, obj folder"
+          Write-Host "Deployed to: $sitePath (Web.config preserved)"
         shell: powershell
 
       - name: Start IIS Application Pool
@@ -131,31 +164,10 @@ jobs:
           exit 1
         shell: powershell
 
-      - name: Notify on Success
+      - name: Deployment Complete
         if: success()
         run: |
-          Write-Host "Code deployment successful!"
+          Write-Host "Deployment successful!"
           Write-Host "Site URL: ${{ vars.SITE_URL }}"
           Write-Host "Deployed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        shell: powershell
-
-      - name: Rollback on Failure
-        if: failure()
-        run: |
-          Write-Host "Deployment failed! Initiating rollback..."
-
-          $backupPath = "${{ vars.BACKUP_PATH }}"
-          $latestBackup = Get-ChildItem -Path $backupPath -Directory |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-
-          if ($latestBackup) {
-            $sitePath = "${{ vars.IIS_SITE_PATH }}"
-            Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
-            Write-Host "Rolled back to: $($latestBackup.Name)"
-
-            Import-Module WebAdministration
-            $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-            Restart-WebAppPool -Name $appPoolName
-          }
         shell: powershell
