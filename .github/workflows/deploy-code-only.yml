@@ -1,0 +1,161 @@
+name: Deploy Code Only (No Build)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  deploy:
+    name: Deploy Code to IIS
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Stop IIS Application Pool
+        run: |
+          Import-Module WebAdministration
+          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+          if ((Get-WebAppPoolState -Name $appPoolName).Value -eq 'Started') {
+            Stop-WebAppPool -Name $appPoolName
+            Write-Host "Stopped App Pool: $appPoolName"
+          }
+        shell: powershell
+
+      - name: Backup current deployment
+        run: |
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          if (Test-Path $sitePath) {
+            Copy-Item -Path $sitePath -Destination $backupPath -Recurse -Force
+            Write-Host "Backup created at: $backupPath"
+          }
+        shell: powershell
+
+      - name: Deploy Code Files
+        run: |
+          $sourcePath = "${{ github.workspace }}\Take Time BangPhra"
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+
+          # Files/folders to exclude from deployment
+          $excludeFiles = @(
+            "Web.config",
+            "Web.Debug.config",
+            "Web.Release.config",
+            "packages.config",
+            "*.csproj",
+            "*.csproj.user",
+            "*.sln",
+            "obj",
+            "Properties"
+          )
+
+          # Copy source files
+          Get-ChildItem -Path $sourcePath -Recurse |
+            Where-Object {
+              $item = $_
+              $exclude = $false
+              foreach ($pattern in $excludeFiles) {
+                if ($item.Name -like $pattern) {
+                  $exclude = $true
+                  break
+                }
+              }
+              -not $exclude
+            } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($sourcePath.Length)
+              $destPath = Join-Path $sitePath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+            }
+
+          Write-Host "Code deployed to: $sitePath"
+          Write-Host "Excluded: Web.config, project files, obj folder"
+        shell: powershell
+
+      - name: Start IIS Application Pool
+        run: |
+          Import-Module WebAdministration
+          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+          Start-WebAppPool -Name $appPoolName
+          Write-Host "Started App Pool: $appPoolName"
+
+          Start-Sleep -Seconds 5
+
+          $state = (Get-WebAppPoolState -Name $appPoolName).Value
+          Write-Host "App Pool Status: $state"
+        shell: powershell
+
+      - name: Health Check
+        run: |
+          $siteUrl = "${{ vars.SITE_URL }}"
+          $maxRetries = 5
+          $retryCount = 0
+
+          while ($retryCount -lt $maxRetries) {
+            try {
+              $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed! Status: $($response.StatusCode)"
+                exit 0
+              }
+            } catch {
+              $retryCount++
+              Write-Host "Attempt $retryCount failed. Retrying in 10 seconds..."
+              Start-Sleep -Seconds 10
+            }
+          }
+
+          Write-Host "Health check failed after $maxRetries attempts"
+          exit 1
+        shell: powershell
+
+      - name: Notify on Success
+        if: success()
+        run: |
+          Write-Host "Code deployment successful!"
+          Write-Host "Site URL: ${{ vars.SITE_URL }}"
+          Write-Host "Deployed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        shell: powershell
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          Write-Host "Deployment failed! Initiating rollback..."
+
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+          $latestBackup = Get-ChildItem -Path $backupPath -Directory |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if ($latestBackup) {
+            $sitePath = "${{ vars.IIS_SITE_PATH }}"
+            Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
+            Write-Host "Rolled back to: $($latestBackup.Name)"
+
+            Import-Module WebAdministration
+            $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+            Restart-WebAppPool -Name $appPoolName
+          }
+        shell: powershell
