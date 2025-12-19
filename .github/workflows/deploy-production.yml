@@ -40,14 +40,60 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore "${{ env.SOLUTION_FILE }}"
 
-      - name: Build and Publish
+      - name: Build Project
         run: |
           msbuild "${{ env.PROJECT_FILE }}" `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
-            /p:DeployOnBuild=true `
-            /p:WebPublishMethod=FileSystem `
-            /p:PublishUrl="${{ github.workspace }}/publish" `
-            /p:DeleteExistingFiles=true
+            /p:OutDir="${{ github.workspace }}\build\bin\" `
+            /verbosity:minimal
+
+      - name: Prepare Publish Folder
+        run: |
+          $projectPath = "${{ github.workspace }}\Take Time BangPhra"
+          $publishPath = "${{ github.workspace }}\publish"
+          $buildBin = "${{ github.workspace }}\build\bin\_PublishedWebsites\Take Time BangPhra"
+
+          # Check if _PublishedWebsites exists (Web Application Project)
+          if (Test-Path $buildBin) {
+            Write-Host "Using _PublishedWebsites output..."
+            Copy-Item -Path $buildBin -Destination $publishPath -Recurse -Force
+          } else {
+            # Fallback: Copy project files + bin folder
+            Write-Host "Copying project files manually..."
+            New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
+
+            # Copy web files (aspx, ascx, css, js, images, etc.)
+            $webExtensions = @("*.aspx", "*.ascx", "*.ashx", "*.asmx", "*.asax", "*.master",
+                              "*.css", "*.js", "*.html", "*.htm", "*.json", "*.xml",
+                              "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico", "*.svg",
+                              "*.woff", "*.woff2", "*.ttf", "*.eot", "*.pdf")
+
+            Get-ChildItem -Path $projectPath -Recurse -Include $webExtensions |
+              Where-Object { $_.FullName -notmatch "\\(obj|packages|\.git)\\" } |
+              ForEach-Object {
+                $relativePath = $_.FullName.Substring($projectPath.Length)
+                $destPath = Join-Path $publishPath $relativePath
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+
+            # Copy bin folder with DLLs
+            $binSource = "${{ github.workspace }}\build\bin"
+            $binDest = Join-Path $publishPath "bin"
+            if (Test-Path $binSource) {
+              New-Item -ItemType Directory -Path $binDest -Force | Out-Null
+              Copy-Item -Path "$binSource\*.dll" -Destination $binDest -Force
+              Copy-Item -Path "$binSource\*.pdb" -Destination $binDest -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          Write-Host "Publish folder contents:"
+          Get-ChildItem -Path $publishPath -Recurse | Measure-Object | Select-Object -ExpandProperty Count
+          Write-Host "files copied"
+        shell: powershell
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -55,6 +101,7 @@ jobs:
           name: webapp-package
           path: ${{ github.workspace }}/publish/
           retention-days: 5
+          if-no-files-found: error
 
   deploy:
     name: Deploy to IIS
