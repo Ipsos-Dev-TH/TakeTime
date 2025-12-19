@@ -40,17 +40,6 @@ jobs:
           msbuild "${{ env.PROJECT_FILE }}" /p:Configuration=${{ env.BUILD_CONFIGURATION }} /verbosity:minimal
         shell: powershell
 
-      - name: Stop IIS Application Pool
-        run: |
-          Import-Module WebAdministration
-          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-          if ((Get-WebAppPoolState -Name $appPoolName).Value -eq 'Started') {
-            Stop-WebAppPool -Name $appPoolName
-            Write-Host "Stopped App Pool: $appPoolName"
-            Start-Sleep -Seconds 3
-          }
-        shell: powershell
-
       - name: Backup current site
         run: |
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
@@ -108,18 +97,6 @@ jobs:
             }
 
           Write-Host "Deployment complete (Web.config preserved)"
-        shell: powershell
-
-      - name: Start IIS Application Pool
-        run: |
-          Import-Module WebAdministration
-          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-          Start-WebAppPool -Name $appPoolName
-          Write-Host "Started App Pool: $appPoolName"
-
-          Start-Sleep -Seconds 5
-          $state = (Get-WebAppPoolState -Name $appPoolName).Value
-          Write-Host "App Pool Status: $state"
         shell: powershell
 
       - name: Health Check
