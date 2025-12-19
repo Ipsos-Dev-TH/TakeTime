@@ -123,16 +123,6 @@ jobs:
           name: webapp-package
           path: ${{ github.workspace }}/deploy
 
-      - name: Stop IIS Application Pool
-        run: |
-          Import-Module WebAdministration
-          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-          if ((Get-WebAppPoolState -Name $appPoolName).Value -eq 'Started') {
-            Stop-WebAppPool -Name $appPoolName
-            Write-Host "Stopped App Pool: $appPoolName"
-          }
-        shell: powershell
-
       - name: Backup current deployment
         run: |
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
@@ -169,21 +159,6 @@ jobs:
             }
 
           Write-Host "Deployed to: $sitePath (Web.config preserved)"
-        shell: powershell
-
-      - name: Start IIS Application Pool
-        run: |
-          Import-Module WebAdministration
-          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-          Start-WebAppPool -Name $appPoolName
-          Write-Host "Started App Pool: $appPoolName"
-
-          # Wait for app pool to start
-          Start-Sleep -Seconds 5
-
-          # Verify status
-          $state = (Get-WebAppPoolState -Name $appPoolName).Value
-          Write-Host "App Pool Status: $state"
         shell: powershell
 
       - name: Health Check
@@ -233,10 +208,5 @@ jobs:
             $sitePath = "${{ vars.IIS_SITE_PATH }}"
             Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
             Write-Host "Rolled back to: $($latestBackup.Name)"
-
-            # Restart app pool
-            Import-Module WebAdministration
-            $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
-            Restart-WebAppPool -Name $appPoolName
           }
         shell: powershell
