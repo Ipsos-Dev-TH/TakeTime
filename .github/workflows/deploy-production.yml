@@ -98,32 +98,31 @@ jobs:
           $zipFile = Get-ChildItem -Path $packagePath | Select-Object -First 1
           Expand-Archive -Path $zipFile.FullName -DestinationPath "${{ github.workspace }}\extracted" -Force
 
-          # Copy files to IIS site
+          # Find PackageTmp folder
           $sourceContent = Get-ChildItem -Path "${{ github.workspace }}\extracted" -Recurse |
             Where-Object { $_.FullName -match "PackageTmp" } |
             Select-Object -First 1 -ExpandProperty Parent
 
           if ($sourceContent) {
-            $sourcePath = Join-Path $sourceContent.FullName "PackageTmp\*"
-            Copy-Item -Path $sourcePath -Destination $sitePath -Recurse -Force
-            Write-Host "Deployed to: $sitePath"
-          }
-        shell: powershell
+            $sourcePath = Join-Path $sourceContent.FullName "PackageTmp"
 
-      - name: Update Web.config for Production
-        run: |
-          $webConfigPath = "${{ vars.IIS_SITE_PATH }}\Web.config"
-          if (Test-Path $webConfigPath) {
-            # Update connection string if needed
-            $xml = [xml](Get-Content $webConfigPath)
+            # Copy all files EXCEPT Web.config
+            Get-ChildItem -Path $sourcePath -Recurse |
+              Where-Object { $_.Name -ne "Web.config" } |
+              ForEach-Object {
+                $destPath = $_.FullName.Replace($sourcePath, $sitePath)
+                if ($_.PSIsContainer) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                } else {
+                  $destDir = Split-Path -Parent $destPath
+                  if (!(Test-Path $destDir)) {
+                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                  }
+                  Copy-Item -Path $_.FullName -Destination $destPath -Force
+                }
+              }
 
-            # Update any production-specific settings here
-            # Example: $xml.configuration.connectionStrings.add |
-            #   Where-Object { $_.name -eq "TaketimeConnectionString" } |
-            #   ForEach-Object { $_.connectionString = "${{ secrets.PROD_CONNECTION_STRING }}" }
-
-            $xml.Save($webConfigPath)
-            Write-Host "Web.config updated"
+            Write-Host "Deployed to: $sitePath (Web.config preserved)"
           }
         shell: powershell
 
