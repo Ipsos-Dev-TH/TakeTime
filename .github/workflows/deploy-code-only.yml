@@ -43,27 +43,20 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore "${{ env.SOLUTION_FILE }}"
 
-      - name: Build solution
+      - name: Build and Publish
         run: |
           msbuild "${{ env.PROJECT_FILE }}" `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:DeployOnBuild=true `
-            /p:WebPublishMethod=Package `
-            /p:PackageAsSingleFile=true `
-            /p:SkipInvalidConfigurations=true `
-            /p:PackageLocation="${{ github.workspace }}/publish"
-
-      - name: Extract Package
-        run: |
-          $packagePath = Get-ChildItem -Path "${{ github.workspace }}/publish" -Filter "*.zip" | Select-Object -First 1
-          Expand-Archive -Path $packagePath.FullName -DestinationPath "${{ github.workspace }}/deploy" -Force
-        shell: powershell
+            /p:WebPublishMethod=FileSystem `
+            /p:PublishUrl="${{ github.workspace }}/publish" `
+            /p:DeleteExistingFiles=true
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: webapp-package
-          path: ${{ github.workspace }}/deploy/Content/C_C/a/s/w/1/s/Take Time BangPhra/
+          path: ${{ github.workspace }}/publish/
           retention-days: 1
 
   deploy:

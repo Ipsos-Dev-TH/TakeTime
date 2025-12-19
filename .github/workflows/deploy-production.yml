@@ -40,21 +40,20 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore "${{ env.SOLUTION_FILE }}"
 
-      - name: Build solution
+      - name: Build and Publish
         run: |
           msbuild "${{ env.PROJECT_FILE }}" `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:DeployOnBuild=true `
-            /p:WebPublishMethod=Package `
-            /p:PackageAsSingleFile=true `
-            /p:SkipInvalidConfigurations=true `
-            /p:PackageLocation="${{ github.workspace }}/publish"
+            /p:WebPublishMethod=FileSystem `
+            /p:PublishUrl="${{ github.workspace }}/publish" `
+            /p:DeleteExistingFiles=true
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: webapp-package
-          path: ${{ github.workspace }}/publish
+          path: ${{ github.workspace }}/publish/
           retention-days: 5
 
   deploy:
@@ -92,39 +91,30 @@ jobs:
 
       - name: Deploy to IIS
         run: |
-          $packagePath = "${{ github.workspace }}\deploy\*.zip"
+          $sourcePath = "${{ github.workspace }}\deploy"
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
 
-          # Extract package
-          $zipFile = Get-ChildItem -Path $packagePath | Select-Object -First 1
-          Expand-Archive -Path $zipFile.FullName -DestinationPath "${{ github.workspace }}\extracted" -Force
+          # Copy all files EXCEPT Web.config
+          Get-ChildItem -Path $sourcePath -Recurse |
+            Where-Object { $_.Name -ne "Web.config" } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($sourcePath.Length)
+              $destPath = Join-Path $sitePath $relativePath
 
-          # Find PackageTmp folder
-          $sourceContent = Get-ChildItem -Path "${{ github.workspace }}\extracted" -Recurse |
-            Where-Object { $_.FullName -match "PackageTmp" } |
-            Select-Object -First 1 -ExpandProperty Parent
-
-          if ($sourceContent) {
-            $sourcePath = Join-Path $sourceContent.FullName "PackageTmp"
-
-            # Copy all files EXCEPT Web.config
-            Get-ChildItem -Path $sourcePath -Recurse |
-              Where-Object { $_.Name -ne "Web.config" } |
-              ForEach-Object {
-                $destPath = $_.FullName.Replace($sourcePath, $sitePath)
-                if ($_.PSIsContainer) {
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
                   New-Item -ItemType Directory -Path $destPath -Force | Out-Null
-                } else {
-                  $destDir = Split-Path -Parent $destPath
-                  if (!(Test-Path $destDir)) {
-                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                  }
-                  Copy-Item -Path $_.FullName -Destination $destPath -Force
                 }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
               }
+            }
 
-            Write-Host "Deployed to: $sitePath (Web.config preserved)"
-          }
+          Write-Host "Deployed to: $sitePath (Web.config preserved)"
         shell: powershell
 
       - name: Start IIS Application Pool
