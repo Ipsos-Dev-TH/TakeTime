@@ -1,0 +1,198 @@
+name: Deploy to Production IIS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  SOLUTION_FILE: 'Take Time BangPhra/Take Time BangPhra.csproj'
+  BUILD_CONFIGURATION: 'Release'
+  DOTNET_VERSION: '4.7.2'
+
+jobs:
+  build:
+    name: Build Application
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: Build solution
+        run: |
+          msbuild "${{ env.SOLUTION_FILE }}" `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /p:DeployOnBuild=true `
+            /p:WebPublishMethod=Package `
+            /p:PackageAsSingleFile=true `
+            /p:SkipInvalidConfigurations=true `
+            /p:PackageLocation="${{ github.workspace }}/publish"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/publish
+          retention-days: 5
+
+  deploy:
+    name: Deploy to IIS
+    needs: build
+    runs-on: self-hosted  # ใช้ self-hosted runner บนเครื่อง production
+    environment: production
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/deploy
+
+      - name: Stop IIS Application Pool
+        run: |
+          Import-Module WebAdministration
+          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+          if ((Get-WebAppPoolState -Name $appPoolName).Value -eq 'Started') {
+            Stop-WebAppPool -Name $appPoolName
+            Write-Host "Stopped App Pool: $appPoolName"
+          }
+        shell: powershell
+
+      - name: Backup current deployment
+        run: |
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          if (Test-Path $sitePath) {
+            Copy-Item -Path $sitePath -Destination $backupPath -Recurse -Force
+            Write-Host "Backup created at: $backupPath"
+          }
+        shell: powershell
+
+      - name: Deploy to IIS
+        run: |
+          $packagePath = "${{ github.workspace }}\deploy\*.zip"
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+
+          # Extract package
+          $zipFile = Get-ChildItem -Path $packagePath | Select-Object -First 1
+          Expand-Archive -Path $zipFile.FullName -DestinationPath "${{ github.workspace }}\extracted" -Force
+
+          # Copy files to IIS site
+          $sourceContent = Get-ChildItem -Path "${{ github.workspace }}\extracted" -Recurse |
+            Where-Object { $_.FullName -match "PackageTmp" } |
+            Select-Object -First 1 -ExpandProperty Parent
+
+          if ($sourceContent) {
+            $sourcePath = Join-Path $sourceContent.FullName "PackageTmp\*"
+            Copy-Item -Path $sourcePath -Destination $sitePath -Recurse -Force
+            Write-Host "Deployed to: $sitePath"
+          }
+        shell: powershell
+
+      - name: Update Web.config for Production
+        run: |
+          $webConfigPath = "${{ vars.IIS_SITE_PATH }}\Web.config"
+          if (Test-Path $webConfigPath) {
+            # Update connection string if needed
+            $xml = [xml](Get-Content $webConfigPath)
+
+            # Update any production-specific settings here
+            # Example: $xml.configuration.connectionStrings.add |
+            #   Where-Object { $_.name -eq "TaketimeConnectionString" } |
+            #   ForEach-Object { $_.connectionString = "${{ secrets.PROD_CONNECTION_STRING }}" }
+
+            $xml.Save($webConfigPath)
+            Write-Host "Web.config updated"
+          }
+        shell: powershell
+
+      - name: Start IIS Application Pool
+        run: |
+          Import-Module WebAdministration
+          $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+          Start-WebAppPool -Name $appPoolName
+          Write-Host "Started App Pool: $appPoolName"
+
+          # Wait for app pool to start
+          Start-Sleep -Seconds 5
+
+          # Verify status
+          $state = (Get-WebAppPoolState -Name $appPoolName).Value
+          Write-Host "App Pool Status: $state"
+        shell: powershell
+
+      - name: Health Check
+        run: |
+          $siteUrl = "${{ vars.SITE_URL }}"
+          $maxRetries = 5
+          $retryCount = 0
+
+          while ($retryCount -lt $maxRetries) {
+            try {
+              $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed! Status: $($response.StatusCode)"
+                exit 0
+              }
+            } catch {
+              $retryCount++
+              Write-Host "Attempt $retryCount failed. Retrying in 10 seconds..."
+              Start-Sleep -Seconds 10
+            }
+          }
+
+          Write-Host "Health check failed after $maxRetries attempts"
+          exit 1
+        shell: powershell
+
+      - name: Notify on Success
+        if: success()
+        run: |
+          Write-Host "Deployment successful!"
+          Write-Host "Site URL: ${{ vars.SITE_URL }}"
+          Write-Host "Deployed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        shell: powershell
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          Write-Host "Deployment failed! Initiating rollback..."
+
+          # Find latest backup
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+          $latestBackup = Get-ChildItem -Path $backupPath -Directory |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if ($latestBackup) {
+            $sitePath = "${{ vars.IIS_SITE_PATH }}"
+            Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
+            Write-Host "Rolled back to: $($latestBackup.Name)"
+
+            # Restart app pool
+            Import-Module WebAdministration
+            $appPoolName = "${{ vars.IIS_APP_POOL_NAME }}"
+            Restart-WebAppPool -Name $appPoolName
+          }
+        shell: powershell
