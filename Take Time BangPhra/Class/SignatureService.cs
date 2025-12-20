@@ -457,6 +457,21 @@ public class SignatureService
 
     private string MapPath(string virtualPath)
     {
+        if (string.IsNullOrEmpty(virtualPath))
+        {
+            return string.Empty;
+        }
+
+        // Check if already a physical path (starts with drive letter like D:\ or C:\)
+        if (virtualPath.Length >= 2 && virtualPath[1] == ':')
+        {
+            return virtualPath;
+        }
+
+        // Normalize path - replace backslashes with forward slashes for virtual paths
+        // This handles mixed format paths like "~/path\file.png"
+        virtualPath = virtualPath.Replace('\\', '/');
+
         if (HttpContext.Current != null)
         {
             return HttpContext.Current.Server.MapPath(virtualPath);
