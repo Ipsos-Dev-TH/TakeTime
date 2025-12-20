@@ -351,39 +351,44 @@ public class SignatureService
         string creatorName = "";
         string creatorSignature = "";
 
-        // Get CEO as approver
-        short ceoId = 0;
         try
         {
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
-                using (SqlCommand cmd = new SqlCommand())
-                {
-                    cmd.Connection = conn;
-                    cmd.CommandText = @"
-                        SELECT TOP 1 ID, FirstName, LastName, SignaturePath
-                        FROM Admin
-                        WHERE IsCEO = 'True' OR IsOwner = 'True'
-                        ORDER BY IsCEO DESC";
+                conn.Open();
 
-                    conn.Open();
+                // Get CEO as approver (matches master: "Select * from Admin Where IsCEO = 'True'")
+                using (SqlCommand cmd = new SqlCommand("SELECT FirstName, LastName FROM Admin WHERE IsCEO = 'True'", conn))
+                {
                     using (SqlDataReader reader = cmd.ExecuteReader())
                     {
                         if (reader.Read())
                         {
-                            ceoId = Convert.ToInt16(reader["ID"]);
                             approverName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
+                        }
+                    }
+                }
 
-                            // Build signature path using name-based fallback for backward compatibility
-                            string physicalPath = MapPath(signatureFolderPath);
-                            string signatureFile = Path.Combine(physicalPath, approverName.ToLower() + ".png");
-
-                            if (File.Exists(signatureFile))
+                // Get creator info
+                if (creatorAdminId > 0)
+                {
+                    using (SqlCommand cmd = new SqlCommand("SELECT FirstName, LastName FROM Admin WHERE ID = @ID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@ID", creatorAdminId);
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
                             {
-                                approverSignature = "File:\\" + signatureFile;
+                                creatorName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
                             }
                         }
                     }
+                }
+
+                // If creatorAdminId is 0 or creator not found, use CEO for creator
+                if (string.IsNullOrEmpty(creatorName))
+                {
+                    creatorName = approverName;
                 }
             }
         }
@@ -392,29 +397,17 @@ public class SignatureService
             // Silently fail
         }
 
-        // If creatorAdminId is 0, use CEO for both approver and creator (backward compatibility)
-        if (creatorAdminId == 0 || creatorAdminId == ceoId)
+        // Build signature paths - ALWAYS set path like master (no File.Exists check)
+        // Master format: "File:\\" + Signaturepath + "\\" + name.ToLower() + ".png"
+        string signaturePath = signatureFolderPath.TrimEnd('\\');
+
+        if (!string.IsNullOrEmpty(approverName))
         {
-            creatorName = approverName;
-            creatorSignature = approverSignature;
+            approverSignature = "File:\\" + signaturePath + "\\" + approverName.ToLower() + ".png";
         }
-        else
+        if (!string.IsNullOrEmpty(creatorName))
         {
-            // Get creator info
-            DataRow creatorInfo = GetAdminInfo(creatorAdminId);
-            if (creatorInfo != null)
-            {
-                creatorName = creatorInfo["FirstName"].ToString() + " " + creatorInfo["LastName"].ToString();
-
-                // Build signature path using name-based fallback
-                string physicalPath = MapPath(signatureFolderPath);
-                string signatureFile = Path.Combine(physicalPath, creatorName.ToLower() + ".png");
-
-                if (File.Exists(signatureFile))
-                {
-                    creatorSignature = "File:\\" + signatureFile;
-                }
-            }
+            creatorSignature = "File:\\" + signaturePath + "\\" + creatorName.ToLower() + ".png";
         }
 
         dtSignature.Rows.Add(approverName, approverSignature, creatorName, creatorSignature);
