@@ -87,15 +87,38 @@ public class SignatureService
     /// </summary>
     public string GetSignaturePathForPdf(short adminId)
     {
-        string path = GetSignaturePath(adminId);
-        if (!string.IsNullOrEmpty(path))
+        try
         {
-            string mappedPath = MapPath(path);
-            if (File.Exists(mappedPath))
+            // First try to get from database SignaturePath column
+            string path = GetSignaturePath(adminId);
+            if (!string.IsNullOrEmpty(path))
             {
-                return "File:\\" + mappedPath;
+                string mappedPath = MapPath(path);
+                if (File.Exists(mappedPath))
+                {
+                    return "File:\\" + mappedPath;
+                }
+            }
+
+            // Fallback: Try name-based path (backward compatibility)
+            DataRow adminInfo = GetAdminInfo(adminId);
+            if (adminInfo != null)
+            {
+                string fullName = (adminInfo["FirstName"].ToString() + " " + adminInfo["LastName"].ToString()).ToLower();
+                string physicalPath = MapPath(signatureFolderPath);
+                string signatureFile = Path.Combine(physicalPath, fullName + ".png");
+
+                if (File.Exists(signatureFile))
+                {
+                    return "File:\\" + signatureFile;
+                }
             }
         }
+        catch (Exception)
+        {
+            // Silently fail
+        }
+
         return string.Empty;
     }
 
@@ -326,6 +349,7 @@ public class SignatureService
         string creatorSignature = "";
 
         // Get CEO as approver
+        short ceoId = 0;
         try
         {
             using (SqlConnection conn = new SqlConnection(connectionString))
@@ -344,9 +368,17 @@ public class SignatureService
                     {
                         if (reader.Read())
                         {
-                            short ceoId = Convert.ToInt16(reader["ID"]);
+                            ceoId = Convert.ToInt16(reader["ID"]);
                             approverName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
-                            approverSignature = GetSignaturePathForPdf(ceoId);
+
+                            // Build signature path using name-based fallback for backward compatibility
+                            string physicalPath = MapPath(signatureFolderPath);
+                            string signatureFile = Path.Combine(physicalPath, approverName.ToLower() + ".png");
+
+                            if (File.Exists(signatureFile))
+                            {
+                                approverSignature = "File:\\" + signatureFile;
+                            }
                         }
                     }
                 }
@@ -357,12 +389,29 @@ public class SignatureService
             // Silently fail
         }
 
-        // Get creator info
-        DataRow creatorInfo = GetAdminInfo(creatorAdminId);
-        if (creatorInfo != null)
+        // If creatorAdminId is 0, use CEO for both approver and creator (backward compatibility)
+        if (creatorAdminId == 0 || creatorAdminId == ceoId)
         {
-            creatorName = creatorInfo["FirstName"].ToString() + " " + creatorInfo["LastName"].ToString();
-            creatorSignature = GetSignaturePathForPdf(creatorAdminId);
+            creatorName = approverName;
+            creatorSignature = approverSignature;
+        }
+        else
+        {
+            // Get creator info
+            DataRow creatorInfo = GetAdminInfo(creatorAdminId);
+            if (creatorInfo != null)
+            {
+                creatorName = creatorInfo["FirstName"].ToString() + " " + creatorInfo["LastName"].ToString();
+
+                // Build signature path using name-based fallback
+                string physicalPath = MapPath(signatureFolderPath);
+                string signatureFile = Path.Combine(physicalPath, creatorName.ToLower() + ".png");
+
+                if (File.Exists(signatureFile))
+                {
+                    creatorSignature = "File:\\" + signatureFile;
+                }
+            }
         }
 
         dtSignature.Rows.Add(approverName, approverSignature, creatorName, creatorSignature);
