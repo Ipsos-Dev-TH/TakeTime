@@ -63,8 +63,10 @@ public class SignatureService
 
                             if (!string.IsNullOrEmpty(fullName))
                             {
-                                string fallbackPath = Path.Combine(signatureFolderPath, fullName + ".png");
-                                if (File.Exists(MapPath(fallbackPath)))
+                                // Use virtual path format (not Path.Combine which adds backslashes)
+                                string fallbackPath = signatureFolderPath.TrimEnd('/') + "/" + fullName + ".png";
+                                string physicalFallback = MapPath(fallbackPath);
+                                if (File.Exists(physicalFallback))
                                 {
                                     return fallbackPath;
                                 }
@@ -158,9 +160,9 @@ public class SignatureService
             // Silently fail
         }
 
-        // Fallback to traditional name-based path
+        // Fallback to traditional name-based path (use forward slash for virtual paths)
         string fullName = ((firstName ?? "") + " " + (lastName ?? "")).Trim().ToLower();
-        return Path.Combine(signatureFolderPath, fullName + ".png");
+        return signatureFolderPath.TrimEnd('/') + "/" + fullName + ".png";
     }
 
     #endregion
@@ -208,7 +210,8 @@ public class SignatureService
             // Generate unique filename
             string fileName = "sig_" + adminId + "_" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".png";
             string filePath = Path.Combine(physicalPath, fileName);
-            string relativePath = Path.Combine(signatureFolderPath, fileName);
+            // Use forward slash for virtual paths (not Path.Combine which adds backslashes)
+            string relativePath = signatureFolderPath.TrimEnd('/') + "/" + fileName;
 
             // Save file
             file.SaveAs(filePath);
