@@ -253,6 +253,22 @@ namespace Take_Time_BangPhra
 
                 shouldLoadProductCharges = true;
             }
+            else if(command == "rentmore")
+            {
+                TextBox5.Enabled = false;
+                CheckBox2.Visible = true;
+                CheckBox2.Text = "จ่ายเงินเพิ่ม";
+                Button1.Text = "ยืนยันการเช่าเพิ่ม";
+                CheckBox1.Visible = false;
+                Button1.Enabled = true;
+                DropDownList1.Enabled = false;
+                Label7.Visible = false;
+
+                // 🆕 Show payment history
+                LoadPaymentHistory();
+
+                shouldLoadProductCharges = true;
+            }
             else if(command == "reserve")
             {
                 // Reserve mode: Don't show payment history (new reservation)
@@ -7342,8 +7358,19 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
 
                         if (dtReservation.Rows.Count > 0)
                         {
-                            // Update displayed total price
-                            TextBox4.Text = dtReservation.Rows[0]["TotalPrice"].ToString();
+                            // Update displayed total price including remaining ProductCharges
+                            double basePrice = Convert.ToDouble(dtReservation.Rows[0]["TotalPrice"]);
+
+                            // Get remaining ProductCharges (all non-CANCELLED)
+                            decimal remainingCharges = _roomChargeDA.GetTotalProductCharges(Convert.ToInt32(id));
+
+                            // Calculate new total
+                            double newTotal = basePrice + (double)remainingCharges;
+                            TextBox4.Text = newTotal.ToString("N2");
+
+                            // Update session
+                            Session["ProductCharges"] = (double)remainingCharges;
+                            Session["totalPrice"] = newTotal;
                         }
                     }
 
