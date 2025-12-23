@@ -1,0 +1,125 @@
+name: Build and Deploy to IIS
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  SOLUTION_FILE: 'Take Time BangPhra.sln'
+  PROJECT_FILE: 'Take Time BangPhra/Take Time BangPhra.csproj'
+  BUILD_CONFIGURATION: 'Release'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: Build Project
+        run: |
+          msbuild "${{ env.PROJECT_FILE }}" /p:Configuration=${{ env.BUILD_CONFIGURATION }} /verbosity:minimal
+        shell: powershell
+
+      - name: Backup current site
+        run: |
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+
+          if (Test-Path $sitePath) {
+            New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+            Copy-Item -Path "$sitePath\*" -Destination $backupPath -Recurse -Force
+            Write-Host "Backup created: $backupPath"
+          }
+        shell: powershell
+
+      - name: Deploy to IIS
+        run: |
+          $projectPath = "${{ github.workspace }}\Take Time BangPhra"
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+
+          Write-Host "Deploying from: $projectPath"
+          Write-Host "Deploying to: $sitePath"
+
+          # Get all files to deploy (exclude source code, project files, obj folder)
+          Get-ChildItem -Path $projectPath -Recurse |
+            Where-Object {
+              $item = $_
+              $exclude = $false
+
+              # Exclude folders
+              if ($item.FullName -match "\\obj\\") { $exclude = $true }
+              if ($item.FullName -match "\\Properties\\") { $exclude = $true }
+              if ($item.FullName -match "\\.vs\\") { $exclude = $true }
+
+              # Exclude files
+              if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
+              if ($item.Extension -eq ".csproj") { $exclude = $true }
+              if ($item.Name -eq "packages.config") { $exclude = $true }
+              if ($item.Name -eq "Web.config") { $exclude = $true }
+
+              -not $exclude
+            } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($projectPath.Length)
+              $destPath = Join-Path $sitePath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+            }
+
+          Write-Host "Deployment complete (Web.config preserved)"
+        shell: powershell
+
+      - name: Health Check
+        run: |
+          $siteUrl = "${{ vars.SITE_URL }}"
+          if ($siteUrl) {
+            try {
+              $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
+              Write-Host "Health check passed! Status: $($response.StatusCode)"
+            } catch {
+              Write-Host "Health check warning: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "SITE_URL not configured, skipping health check"
+          }
+        shell: powershell
+
+      - name: Deployment Summary
+        run: |
+          Write-Host "================================"
+          Write-Host "Deployment Complete!"
+          Write-Host "Site: ${{ vars.IIS_SITE_PATH }}"
+          Write-Host "URL: ${{ vars.SITE_URL }}"
+          Write-Host "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          Write-Host "================================"
+        shell: powershell

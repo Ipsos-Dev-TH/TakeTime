@@ -74,6 +74,7 @@ namespace Take_Time_BangPhra
 
         /// <summary>
         /// Get all charges for a reservation
+        /// Query directly from table to avoid view dependency
         /// </summary>
         public DataTable GetReservationCharges(int reservationId, string status = null)
         {
@@ -82,17 +83,34 @@ namespace Take_Time_BangPhra
                 { "@reservationId", reservationId }
             };
 
+            // Query directly from table - no view dependency
             string query = @"
-                SELECT * FROM vw_ReservationProductCharges
-                WHERE Reservation_ID = @reservationId";
+                SELECT
+                    rpc.ID,
+                    rpc.Reservation_ID,
+                    rpc.Product_ID,
+                    rpc.Product_Name,
+                    rpc.Product_Barcode,
+                    rpc.Quantity,
+                    rpc.UnitPrice,
+                    rpc.TotalAmount,
+                    rpc.Status,
+                    rpc.ChargeType,
+                    rpc.IsPaid,
+                    rpc.ChargedDate,
+                    rpc.Receipt_ID,
+                    rpc.PaymentDate,
+                    rpc.Notes
+                FROM Reservation_Product_Charges rpc
+                WHERE rpc.Reservation_ID = @reservationId";
 
             if (!string.IsNullOrEmpty(status))
             {
-                query += " AND Status = @status";
+                query += " AND rpc.Status = @status";
                 parameters.Add("@status", status);
             }
 
-            query += " ORDER BY ChargedDate DESC";
+            query += " ORDER BY rpc.ChargedDate DESC";
 
             return _code.DatabaseQuerySafe(_connectionString, query, parameters);
         }

@@ -476,6 +476,115 @@
         .btn-info:hover {
             background: linear-gradient(135deg, #138496 0%, #117a8b 100%);
         }
+
+        /* Document Section Styles */
+        .document-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+
+        .document-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+
+        .document-item:last-child {
+            border-bottom: none;
+        }
+
+        .document-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .document-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .document-name {
+            font-weight: 500;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .document-meta {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .document-type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .doc-type-id_card { background: #e3f2fd; color: #1565c0; }
+        .doc-type-house_reg { background: #f3e5f5; color: #7b1fa2; }
+        .doc-type-bank_book { background: #e8f5e9; color: #2e7d32; }
+        .doc-type-contract { background: #fff3e0; color: #ef6c00; }
+        .doc-type-resume { background: #e0f7fa; color: #00838f; }
+        .doc-type-certificate { background: #fce4ec; color: #c2185b; }
+        .doc-type-medical { background: #ffebee; color: #c62828; }
+        .doc-type-other { background: #f5f5f5; color: #616161; }
+
+        .document-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-view-doc {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .btn-delete-doc {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .upload-section {
+            background: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .no-documents {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-style: italic;
+        }
+
+        .btn-docs {
+            background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
+            color: white;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
     </style>
 
     <div class="employee-management">
@@ -584,6 +693,10 @@
                                     CssClass="btn-info" CommandName="ViewSalaryHistory"
                                     CommandArgument='<%# Eval("Admin_ID") %>' />
 
+                                <asp:Button ID="btnDocuments" runat="server" Text="&#128194; เอกสาร"
+                                    CssClass="btn-docs" CommandName="ViewDocuments"
+                                    CommandArgument='<%# Eval("Admin_ID") %>' />
+
                                 <asp:Button ID="btnResign" runat="server" Text="&#128683; ลาออก"
                                     CssClass="btn-danger" CommandName="Resign"
                                     CommandArgument='<%# Eval("Admin_ID") %>'
@@ -639,6 +752,106 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-cancel" onclick="closeSalaryHistoryModal()">ปิด</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Documents Modal -->
+        <div id="documentsModal" class="modal-overlay">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h3 id="documentsTitle">&#128194; เอกสารพนักงาน</h3>
+                    <button type="button" class="modal-close" onclick="closeDocumentsModal()">&times;</button>
+                </div>
+
+                <asp:HiddenField ID="hdnDocEmployeeId" runat="server" />
+
+                <!-- Existing Documents List -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #555;">&#128196; รายการเอกสาร</h4>
+                    <asp:Panel ID="pnlDocumentList" runat="server" CssClass="document-list">
+                        <asp:Repeater ID="rptDocuments" runat="server" OnItemCommand="rptDocuments_ItemCommand">
+                            <ItemTemplate>
+                                <div class="document-item">
+                                    <div class="document-info">
+                                        <span class='document-type-badge doc-type-<%# Eval("DocumentType").ToString().ToLower() %>'>
+                                            <%# GetDocumentTypeText(Eval("DocumentType").ToString()) %>
+                                        </span>
+                                        <span class="document-name"><%# Eval("DocumentName") %></span>
+                                        <div class="document-meta">
+                                            อัพโหลด: <%# Eval("UploadedDate", "{0:dd/MM/yyyy HH:mm}") %>
+                                            <%# Eval("ExpiryDate") != DBNull.Value ? " | หมดอายุ: " + Convert.ToDateTime(Eval("ExpiryDate")).ToString("dd/MM/yyyy") : "" %>
+                                        </div>
+                                    </div>
+                                    <div class="document-actions">
+                                        <asp:LinkButton ID="btnViewDoc" runat="server" CssClass="btn-view-doc"
+                                            CommandName="ViewDocument" CommandArgument='<%# Eval("ID") + "|" + Eval("FilePath") %>'>
+                                            &#128065; ดู
+                                        </asp:LinkButton>
+                                        <asp:LinkButton ID="btnDeleteDoc" runat="server" CssClass="btn-delete-doc"
+                                            CommandName="DeleteDocument" CommandArgument='<%# Eval("ID") %>'
+                                            OnClientClick="return confirm('ยืนยันการลบเอกสารนี้?');">
+                                            &#128465; ลบ
+                                        </asp:LinkButton>
+                                    </div>
+                                </div>
+                            </ItemTemplate>
+                        </asp:Repeater>
+                        <asp:Panel ID="pnlNoDocuments" runat="server" CssClass="no-documents" Visible="false">
+                            &#128230; ยังไม่มีเอกสาร
+                        </asp:Panel>
+                    </asp:Panel>
+                </div>
+
+                <!-- Upload New Document -->
+                <div class="upload-section">
+                    <h4 style="margin: 0 0 15px 0; font-size: 14px; color: #555;">&#128228; อัพโหลดเอกสารใหม่</h4>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>ประเภทเอกสาร <span class="required">*</span></label>
+                            <asp:DropDownList ID="ddlDocumentType" runat="server" CssClass="form-control">
+                                <asp:ListItem Value="ID_CARD">สำเนาบัตรประชาชน</asp:ListItem>
+                                <asp:ListItem Value="HOUSE_REG">สำเนาทะเบียนบ้าน</asp:ListItem>
+                                <asp:ListItem Value="BANK_BOOK">สำเนาหน้าสมุดบัญชี</asp:ListItem>
+                                <asp:ListItem Value="CONTRACT">สัญญาจ้างงาน</asp:ListItem>
+                                <asp:ListItem Value="RESUME">ประวัติย่อ/Resume</asp:ListItem>
+                                <asp:ListItem Value="CERTIFICATE">ใบรับรอง/Certificate</asp:ListItem>
+                                <asp:ListItem Value="MEDICAL">ใบรับรองแพทย์</asp:ListItem>
+                                <asp:ListItem Value="OTHER">เอกสารอื่นๆ</asp:ListItem>
+                            </asp:DropDownList>
+                        </div>
+                        <div class="form-group">
+                            <label>ชื่อเอกสาร</label>
+                            <asp:TextBox ID="txtDocumentName" runat="server" CssClass="form-control" placeholder="ระบุชื่อเอกสาร (ถ้าว่างจะใช้ชื่อไฟล์)"></asp:TextBox>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>วันหมดอายุ (ถ้ามี)</label>
+                            <asp:TextBox ID="txtDocExpiryDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                        </div>
+                        <div class="form-group">
+                            <label>หมายเหตุ</label>
+                            <asp:TextBox ID="txtDocDescription" runat="server" CssClass="form-control" placeholder="หมายเหตุเพิ่มเติม"></asp:TextBox>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>เลือกไฟล์ <span class="required">*</span></label>
+                        <asp:FileUpload ID="fuDocument" runat="server" CssClass="form-control" />
+                        <small class="text-muted">รองรับไฟล์ PDF, รูปภาพ (JPG, PNG), Word, Excel ขนาดไม่เกิน 10MB</small>
+                    </div>
+
+                    <div style="text-align: right; margin-top: 15px;">
+                        <asp:Button ID="btnUploadDocument" runat="server" Text="&#128228; อัพโหลดเอกสาร"
+                            CssClass="btn btn-success" OnClick="btnUploadDocument_Click" />
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" onclick="closeDocumentsModal()">ปิด</button>
                 </div>
             </div>
         </div>
@@ -919,6 +1132,15 @@
 
         function closeSalaryHistoryModal() {
             document.getElementById('salaryHistoryModal').style.display = 'none';
+        }
+
+        function openDocumentsModal(employeeName) {
+            document.getElementById('documentsTitle').innerHTML = '&#128194; เอกสาร - ' + employeeName;
+            document.getElementById('documentsModal').style.display = 'flex';
+        }
+
+        function closeDocumentsModal() {
+            document.getElementById('documentsModal').style.display = 'none';
         }
 
         // Close modal when clicking outside

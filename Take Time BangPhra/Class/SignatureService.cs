@@ -63,8 +63,10 @@ public class SignatureService
 
                             if (!string.IsNullOrEmpty(fullName))
                             {
-                                string fallbackPath = Path.Combine(signatureFolderPath, fullName + ".png");
-                                if (File.Exists(MapPath(fallbackPath)))
+                                // Use virtual path format (not Path.Combine which adds backslashes)
+                                string fallbackPath = signatureFolderPath.TrimEnd('/') + "/" + fullName + ".png";
+                                string physicalFallback = MapPath(fallbackPath);
+                                if (File.Exists(physicalFallback))
                                 {
                                     return fallbackPath;
                                 }
@@ -87,15 +89,38 @@ public class SignatureService
     /// </summary>
     public string GetSignaturePathForPdf(short adminId)
     {
-        string path = GetSignaturePath(adminId);
-        if (!string.IsNullOrEmpty(path))
+        try
         {
-            string mappedPath = MapPath(path);
-            if (File.Exists(mappedPath))
+            // First try to get from database SignaturePath column
+            string path = GetSignaturePath(adminId);
+            if (!string.IsNullOrEmpty(path))
             {
-                return "File:\\" + mappedPath;
+                string mappedPath = MapPath(path);
+                if (File.Exists(mappedPath))
+                {
+                    return "File:\\" + mappedPath;
+                }
+            }
+
+            // Fallback: Try name-based path (backward compatibility)
+            DataRow adminInfo = GetAdminInfo(adminId);
+            if (adminInfo != null)
+            {
+                string fullName = (adminInfo["FirstName"].ToString() + " " + adminInfo["LastName"].ToString()).ToLower();
+                string physicalPath = MapPath(signatureFolderPath);
+                string signatureFile = Path.Combine(physicalPath, fullName + ".png");
+
+                if (File.Exists(signatureFile))
+                {
+                    return "File:\\" + signatureFile;
+                }
             }
         }
+        catch (Exception)
+        {
+            // Silently fail
+        }
+
         return string.Empty;
     }
 
@@ -135,9 +160,9 @@ public class SignatureService
             // Silently fail
         }
 
-        // Fallback to traditional name-based path
+        // Fallback to traditional name-based path (use forward slash for virtual paths)
         string fullName = ((firstName ?? "") + " " + (lastName ?? "")).Trim().ToLower();
-        return Path.Combine(signatureFolderPath, fullName + ".png");
+        return signatureFolderPath.TrimEnd('/') + "/" + fullName + ".png";
     }
 
     #endregion
@@ -185,7 +210,8 @@ public class SignatureService
             // Generate unique filename
             string fileName = "sig_" + adminId + "_" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".png";
             string filePath = Path.Combine(physicalPath, fileName);
-            string relativePath = Path.Combine(signatureFolderPath, fileName);
+            // Use forward slash for virtual paths (not Path.Combine which adds backslashes)
+            string relativePath = signatureFolderPath.TrimEnd('/') + "/" + fileName;
 
             // Save file
             file.SaveAs(filePath);
@@ -325,30 +351,44 @@ public class SignatureService
         string creatorName = "";
         string creatorSignature = "";
 
-        // Get CEO as approver
         try
         {
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
-                using (SqlCommand cmd = new SqlCommand())
-                {
-                    cmd.Connection = conn;
-                    cmd.CommandText = @"
-                        SELECT TOP 1 ID, FirstName, LastName, SignaturePath
-                        FROM Admin
-                        WHERE IsCEO = 'True' OR IsOwner = 'True'
-                        ORDER BY IsCEO DESC";
+                conn.Open();
 
-                    conn.Open();
+                // Get CEO as approver (matches master: "Select * from Admin Where IsCEO = 'True'")
+                using (SqlCommand cmd = new SqlCommand("SELECT FirstName, LastName FROM Admin WHERE IsCEO = 'True'", conn))
+                {
                     using (SqlDataReader reader = cmd.ExecuteReader())
                     {
                         if (reader.Read())
                         {
-                            short ceoId = Convert.ToInt16(reader["ID"]);
                             approverName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
-                            approverSignature = GetSignaturePathForPdf(ceoId);
                         }
                     }
+                }
+
+                // Get creator info
+                if (creatorAdminId > 0)
+                {
+                    using (SqlCommand cmd = new SqlCommand("SELECT FirstName, LastName FROM Admin WHERE ID = @ID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@ID", creatorAdminId);
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                creatorName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
+                            }
+                        }
+                    }
+                }
+
+                // If creatorAdminId is 0 or creator not found, use CEO for creator
+                if (string.IsNullOrEmpty(creatorName))
+                {
+                    creatorName = approverName;
                 }
             }
         }
@@ -357,12 +397,17 @@ public class SignatureService
             // Silently fail
         }
 
-        // Get creator info
-        DataRow creatorInfo = GetAdminInfo(creatorAdminId);
-        if (creatorInfo != null)
+        // Build signature paths - ALWAYS set path like master (no File.Exists check)
+        // Master format: "File:\\" + Signaturepath + "\\" + name.ToLower() + ".png"
+        string signaturePath = signatureFolderPath.TrimEnd('\\');
+
+        if (!string.IsNullOrEmpty(approverName))
         {
-            creatorName = creatorInfo["FirstName"].ToString() + " " + creatorInfo["LastName"].ToString();
-            creatorSignature = GetSignaturePathForPdf(creatorAdminId);
+            approverSignature = "File:\\" + signaturePath + "\\" + approverName.ToLower() + ".png";
+        }
+        if (!string.IsNullOrEmpty(creatorName))
+        {
+            creatorSignature = "File:\\" + signaturePath + "\\" + creatorName.ToLower() + ".png";
         }
 
         dtSignature.Rows.Add(approverName, approverSignature, creatorName, creatorSignature);
@@ -405,6 +450,21 @@ public class SignatureService
 
     private string MapPath(string virtualPath)
     {
+        if (string.IsNullOrEmpty(virtualPath))
+        {
+            return string.Empty;
+        }
+
+        // Check if already a physical path (starts with drive letter like D:\ or C:\)
+        if (virtualPath.Length >= 2 && virtualPath[1] == ':')
+        {
+            return virtualPath;
+        }
+
+        // Normalize path - replace backslashes with forward slashes for virtual paths
+        // This handles mixed format paths like "~/path\file.png"
+        virtualPath = virtualPath.Replace('\\', '/');
+
         if (HttpContext.Current != null)
         {
             return HttpContext.Current.Server.MapPath(virtualPath);

@@ -316,8 +316,8 @@ namespace Take_Time_BangPhra
                     btnCheckout.Enabled = false;
                     DisableChecklistItems();
 
-                    // Redirect after 3 seconds
-                    Response.AddHeader("REFRESH", "3;URL=ReserveTable.aspx");
+                    // Redirect after 1.5 seconds (faster response)
+                    Response.AddHeader("REFRESH", "1;URL=ReserveTable.aspx");
                 }
                 else
                 {

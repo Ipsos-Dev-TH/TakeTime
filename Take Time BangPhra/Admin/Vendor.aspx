@@ -181,12 +181,14 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 800px;
         }
 
         .data-table th {
@@ -228,6 +230,58 @@
             padding-bottom: 5px;
             border-bottom: 2px solid #e0e0e0;
         }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .vendor-management {
+                padding: 10px;
+            }
+
+            .section-header h2 {
+                font-size: 18px;
+            }
+
+            .search-controls {
+                flex-direction: column;
+            }
+
+            .search-controls .form-control,
+            .search-controls .btn-primary,
+            .search-controls .btn-secondary,
+            .search-controls .btn-success {
+                width: 100%;
+                max-width: 100% !important;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            .button-group button,
+            .button-group input[type="submit"] {
+                width: 100%;
+            }
+
+            .scroll-hint {
+                display: block;
+                text-align: center;
+                padding: 8px;
+                background: #fff3cd;
+                color: #856404;
+                font-size: 13px;
+                border-radius: 4px 4px 0 0;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .scroll-hint {
+                display: none;
+            }
+        }
     </style>
 
     <div class="vendor-management">
@@ -251,6 +305,7 @@
         </asp:Panel>
 
         <!-- Vendor List -->
+        <div class="scroll-hint">👆 เลื่อนซ้าย-ขวาเพื่อดูข้อมูลเพิ่มเติม</div>
         <asp:Panel ID="pnlVendorList" runat="server" CssClass="data-table">
             <asp:GridView ID="gvVendors" runat="server" AutoGenerateColumns="False"
                 CssClass="table" GridLines="None" OnRowCommand="gvVendors_RowCommand">

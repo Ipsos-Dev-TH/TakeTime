@@ -1,0 +1,208 @@
+name: Quick Deploy (Cached Build)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  SOLUTION_FILE: 'Take Time BangPhra.sln'
+  PROJECT_FILE: 'Take Time BangPhra/Take Time BangPhra.csproj'
+  BUILD_CONFIGURATION: 'Release'
+
+jobs:
+  build:
+    name: Build Application
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: Build Project
+        run: |
+          msbuild "${{ env.PROJECT_FILE }}" `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /verbosity:minimal
+
+      - name: Prepare Publish Folder
+        run: |
+          $projectPath = "${{ github.workspace }}\Take Time BangPhra"
+          $publishPath = "${{ github.workspace }}\publish"
+
+          Write-Host "Creating publish folder..."
+          New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
+
+          # Files/folders to exclude
+          $excludePatterns = @(
+            "*.csproj",
+            "*.csproj.user",
+            "*.cs",
+            "packages.config",
+            "obj",
+            "Properties",
+            ".vs"
+          )
+
+          # Copy all files except excluded ones
+          Get-ChildItem -Path $projectPath -Recurse |
+            Where-Object {
+              $item = $_
+              $exclude = $false
+
+              # Check if in obj folder
+              if ($item.FullName -match "\\obj\\") { $exclude = $true }
+              if ($item.FullName -match "\\Properties\\") { $exclude = $true }
+              if ($item.FullName -match "\\.vs\\") { $exclude = $true }
+
+              # Check file extensions
+              if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
+              if ($item.Extension -eq ".csproj") { $exclude = $true }
+              if ($item.Name -eq "packages.config") { $exclude = $true }
+
+              -not $exclude
+            } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($projectPath.Length)
+              $destPath = Join-Path $publishPath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+            }
+
+          $fileCount = (Get-ChildItem -Path $publishPath -Recurse -File).Count
+          Write-Host "Publish folder ready: $fileCount files"
+
+          # Verify bin folder exists
+          $binPath = Join-Path $publishPath "bin"
+          if (Test-Path $binPath) {
+            $dllCount = (Get-ChildItem -Path $binPath -Filter "*.dll").Count
+            Write-Host "DLLs in bin folder: $dllCount"
+          } else {
+            Write-Host "WARNING: bin folder not found!"
+          }
+        shell: powershell
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/publish/
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to IIS
+    needs: build
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/webapp
+
+      - name: Backup current deployment
+        run: |
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          if (Test-Path $sitePath) {
+            Copy-Item -Path $sitePath -Destination $backupPath -Recurse -Force
+            Write-Host "Backup created at: $backupPath"
+          }
+        shell: powershell
+
+      - name: Deploy to IIS
+        run: |
+          $sourcePath = "${{ github.workspace }}/webapp"
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+
+          # Copy all files EXCEPT Web.config
+          Get-ChildItem -Path $sourcePath -Recurse |
+            Where-Object { $_.Name -ne "Web.config" } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($sourcePath.Length)
+              $destPath = Join-Path $sitePath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+            }
+
+          Write-Host "Deployed to: $sitePath (Web.config preserved)"
+        shell: powershell
+
+      - name: Health Check
+        run: |
+          $siteUrl = "${{ vars.SITE_URL }}"
+          $maxRetries = 5
+          $retryCount = 0
+
+          while ($retryCount -lt $maxRetries) {
+            try {
+              $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed! Status: $($response.StatusCode)"
+                exit 0
+              }
+            } catch {
+              $retryCount++
+              Write-Host "Attempt $retryCount failed. Retrying in 10 seconds..."
+              Start-Sleep -Seconds 10
+            }
+          }
+
+          Write-Host "Health check failed after $maxRetries attempts"
+          exit 1
+        shell: powershell
+
+      - name: Deployment Complete
+        if: success()
+        run: |
+          Write-Host "Deployment successful!"
+          Write-Host "Site URL: ${{ vars.SITE_URL }}"
+          Write-Host "Deployed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        shell: powershell
