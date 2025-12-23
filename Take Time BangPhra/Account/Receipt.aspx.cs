@@ -716,24 +716,26 @@ namespace Take_Time_BangPhra.Account.Report
                     if (command == "edit")
                     {
                         // SECURE: Get receipt by UID with parameterized query
+                        // ✅ Use LEFT JOIN because POS receipts may not have Reservation_ID
                         var receiptUidParams = new Dictionary<string, object>
                         {
                             { "@UID", uid ?? "" }
                         };
                         dtReceipt = code.DatabaseQuerySafe(conn,
-                            "SELECT * FROM [Account_Receipt] INNER JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
+                            "SELECT * FROM [Account_Receipt] LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.UID = @UID",
                             receiptUidParams);
                         System.Diagnostics.Debug.WriteLine($"[Edit Mode] Query Receipt by UID: {uid}");
                     }
                     else
                     {
                         // SECURE: Get receipt by ID with parameterized query
+                        // ✅ Use LEFT JOIN because POS receipts may not have Reservation_ID
                         var receiptIdParams = new Dictionary<string, object>
                         {
                             { "@ID", RecNumber }
                         };
                         dtReceipt = code.DatabaseQuerySafe(conn,
-                            "SELECT * FROM [Account_Receipt] INNER JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.ID = @ID",
+                            "SELECT * FROM [Account_Receipt] LEFT JOIN Reservation ON Reservation.ID = Reservation_ID WHERE Account_Receipt.ID = @ID",
                             receiptIdParams);
                         System.Diagnostics.Debug.WriteLine($"[Create Mode] Query Receipt by ID: {RecNumber}");
                     }
@@ -746,8 +748,18 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                     else
                     {
-                        reservation_id = Convert.ToInt32(dtReceipt.Rows[0]["Reservation_ID"].ToString());
-                        System.Diagnostics.Debug.WriteLine($"✅ Found Receipt - Reservation_ID: {reservation_id}");
+                        // ✅ Handle NULL Reservation_ID (POS receipts without reservation)
+                        var resIdValue = dtReceipt.Rows[0]["Reservation_ID"];
+                        if (resIdValue != null && resIdValue != DBNull.Value && !string.IsNullOrEmpty(resIdValue.ToString()))
+                        {
+                            reservation_id = Convert.ToInt32(resIdValue);
+                            System.Diagnostics.Debug.WriteLine($"✅ Found Receipt - Reservation_ID: {reservation_id}");
+                        }
+                        else
+                        {
+                            reservation_id = 0;
+                            System.Diagnostics.Debug.WriteLine($"✅ Found Receipt (POS) - No Reservation_ID");
+                        }
                     }
                 }
                 catch (Exception ex)
