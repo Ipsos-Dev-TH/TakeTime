@@ -190,6 +190,11 @@ namespace Take_Time_BangPhra.Admin.HR
                 short adminId = Convert.ToInt16(e.CommandArgument);
                 LoadSalaryHistory(adminId);
             }
+            else if (e.CommandName == "ViewDocuments")
+            {
+                short adminId = Convert.ToInt16(e.CommandArgument);
+                LoadEmployeeDocuments(adminId);
+            }
         }
 
         private void LoadSalaryHistory(short adminId)
@@ -1090,6 +1095,293 @@ namespace Take_Time_BangPhra.Admin.HR
                 pnlMessage.Style["background"] = "#f8d7da";
                 pnlMessage.Style["color"] = "#721c24";
                 pnlMessage.Style["border"] = "1px solid #f5c6cb";
+            }
+        }
+
+        #endregion
+
+        #region Document Management
+
+        private void LoadEmployeeDocuments(short adminId)
+        {
+            try
+            {
+                hdnDocEmployeeId.Value = adminId.ToString();
+
+                // Get employee name
+                string employeeName = "";
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+                    using (SqlCommand cmd = new SqlCommand(
+                        "SELECT ISNULL(FirstName + ' ' + LastName, Username) AS Name FROM Admin WHERE ID = @AdminID", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        employeeName = cmd.ExecuteScalar()?.ToString() ?? "";
+                    }
+                }
+
+                // Load documents
+                DataTable dtDocuments = GetEmployeeDocuments(adminId);
+
+                if (dtDocuments.Rows.Count > 0)
+                {
+                    rptDocuments.DataSource = dtDocuments;
+                    rptDocuments.DataBind();
+                    pnlNoDocuments.Visible = false;
+                }
+                else
+                {
+                    rptDocuments.DataSource = null;
+                    rptDocuments.DataBind();
+                    pnlNoDocuments.Visible = true;
+                }
+
+                // Open modal
+                string script = $"openDocumentsModal('{EscapeJsString(employeeName)}');";
+                ScriptManager.RegisterStartupScript(this, GetType(), "OpenDocuments", script, true);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการโหลดเอกสาร: " + ex.Message, "error");
+            }
+        }
+
+        private DataTable GetEmployeeDocuments(short adminId)
+        {
+            DataTable dt = new DataTable();
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand(@"
+                    SELECT ID, DocumentType, DocumentName, FileName, FilePath, FileSize,
+                           UploadedDate, ExpiryDate, Description
+                    FROM Employee_Documents
+                    WHERE Admin_ID = @AdminID AND IsActive = 1
+                    ORDER BY UploadedDate DESC", conn))
+                {
+                    cmd.Parameters.AddWithValue("@AdminID", adminId);
+                    conn.Open();
+
+                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
+                    {
+                        da.Fill(dt);
+                    }
+                }
+            }
+
+            return dt;
+        }
+
+        protected void btnUploadDocument_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hdnDocEmployeeId.Value))
+                {
+                    ShowMessage("ไม่พบข้อมูลพนักงาน", "error");
+                    return;
+                }
+
+                if (!fuDocument.HasFile)
+                {
+                    ShowMessage("กรุณาเลือกไฟล์ที่ต้องการอัพโหลด", "error");
+                    KeepDocumentsModalOpen();
+                    return;
+                }
+
+                short adminId = Convert.ToInt16(hdnDocEmployeeId.Value);
+
+                // Validate file
+                string[] allowedExtensions = { ".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx" };
+                string fileExtension = Path.GetExtension(fuDocument.FileName).ToLower();
+
+                if (Array.IndexOf(allowedExtensions, fileExtension) < 0)
+                {
+                    ShowMessage("ไม่รองรับไฟล์ประเภทนี้ (รองรับ: PDF, JPG, PNG, Word, Excel)", "error");
+                    KeepDocumentsModalOpen();
+                    return;
+                }
+
+                // Check file size (10MB max)
+                if (fuDocument.PostedFile.ContentLength > 10 * 1024 * 1024)
+                {
+                    ShowMessage("ขนาดไฟล์เกิน 10MB", "error");
+                    KeepDocumentsModalOpen();
+                    return;
+                }
+
+                // Create directory
+                string documentsDir = Server.MapPath($"~/Documents/Staff/Employees/{adminId}");
+                if (!Directory.Exists(documentsDir))
+                {
+                    Directory.CreateDirectory(documentsDir);
+                }
+
+                // Generate unique filename
+                string uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
+                string filePath = Path.Combine(documentsDir, uniqueFileName);
+                string relativePath = $"~/Documents/Staff/Employees/{adminId}/{uniqueFileName}";
+
+                // Save file
+                fuDocument.SaveAs(filePath);
+
+                // Get document name
+                string documentName = txtDocumentName.Text.Trim();
+                if (string.IsNullOrEmpty(documentName))
+                {
+                    documentName = Path.GetFileNameWithoutExtension(fuDocument.FileName);
+                }
+
+                // Parse expiry date
+                DateTime? expiryDate = null;
+                if (!string.IsNullOrEmpty(txtDocExpiryDate.Text))
+                {
+                    expiryDate = DateTime.Parse(txtDocExpiryDate.Text);
+                }
+
+                // Save to database
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+                    using (SqlCommand cmd = new SqlCommand(@"
+                        INSERT INTO Employee_Documents
+                        (Admin_ID, DocumentType, DocumentName, FileName, FilePath, FileSize,
+                         ContentType, Description, UploadedBy, ExpiryDate)
+                        VALUES
+                        (@AdminID, @DocumentType, @DocumentName, @FileName, @FilePath, @FileSize,
+                         @ContentType, @Description, @UploadedBy, @ExpiryDate)", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@AdminID", adminId);
+                        cmd.Parameters.AddWithValue("@DocumentType", ddlDocumentType.SelectedValue);
+                        cmd.Parameters.AddWithValue("@DocumentName", documentName);
+                        cmd.Parameters.AddWithValue("@FileName", fuDocument.FileName);
+                        cmd.Parameters.AddWithValue("@FilePath", relativePath);
+                        cmd.Parameters.AddWithValue("@FileSize", fuDocument.PostedFile.ContentLength);
+                        cmd.Parameters.AddWithValue("@ContentType", fuDocument.PostedFile.ContentType);
+                        cmd.Parameters.AddWithValue("@Description", string.IsNullOrEmpty(txtDocDescription.Text) ? (object)DBNull.Value : txtDocDescription.Text);
+                        cmd.Parameters.AddWithValue("@UploadedBy", GetAdminID() ?? (object)DBNull.Value);
+                        cmd.Parameters.AddWithValue("@ExpiryDate", expiryDate ?? (object)DBNull.Value);
+
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                // Clear form
+                txtDocumentName.Text = "";
+                txtDocExpiryDate.Text = "";
+                txtDocDescription.Text = "";
+                ddlDocumentType.SelectedIndex = 0;
+
+                ShowMessage("อัพโหลดเอกสารสำเร็จ", "success");
+
+                // Reload documents list
+                LoadEmployeeDocuments(adminId);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการอัพโหลด: " + ex.Message, "error");
+                KeepDocumentsModalOpen();
+            }
+        }
+
+        protected void rptDocuments_ItemCommand(object source, System.Web.UI.WebControls.RepeaterCommandEventArgs e)
+        {
+            if (e.CommandName == "ViewDocument")
+            {
+                string[] args = e.CommandArgument.ToString().Split('|');
+                if (args.Length >= 2)
+                {
+                    string filePath = args[1];
+                    string physicalPath = Server.MapPath(filePath);
+
+                    if (File.Exists(physicalPath))
+                    {
+                        // Open in new window
+                        string script = $"window.open('{ResolveUrl(filePath)}', '_blank');";
+                        ScriptManager.RegisterStartupScript(this, GetType(), "ViewDoc", script, true);
+                    }
+                    else
+                    {
+                        ShowMessage("ไม่พบไฟล์เอกสาร", "error");
+                    }
+                }
+                KeepDocumentsModalOpen();
+            }
+            else if (e.CommandName == "DeleteDocument")
+            {
+                try
+                {
+                    long documentId = Convert.ToInt64(e.CommandArgument);
+
+                    // Get file path before deleting
+                    string filePath = "";
+                    using (SqlConnection conn = new SqlConnection(connectionString))
+                    {
+                        conn.Open();
+
+                        // Get file path
+                        using (SqlCommand getCmd = new SqlCommand(
+                            "SELECT FilePath FROM Employee_Documents WHERE ID = @ID", conn))
+                        {
+                            getCmd.Parameters.AddWithValue("@ID", documentId);
+                            filePath = getCmd.ExecuteScalar()?.ToString() ?? "";
+                        }
+
+                        // Soft delete from database
+                        using (SqlCommand cmd = new SqlCommand(
+                            "UPDATE Employee_Documents SET IsActive = 0 WHERE ID = @ID", conn))
+                        {
+                            cmd.Parameters.AddWithValue("@ID", documentId);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    // Optional: Delete physical file
+                    if (!string.IsNullOrEmpty(filePath))
+                    {
+                        string physicalPath = Server.MapPath(filePath);
+                        if (File.Exists(physicalPath))
+                        {
+                            File.Delete(physicalPath);
+                        }
+                    }
+
+                    ShowMessage("ลบเอกสารสำเร็จ", "success");
+
+                    // Reload documents
+                    if (!string.IsNullOrEmpty(hdnDocEmployeeId.Value))
+                    {
+                        LoadEmployeeDocuments(Convert.ToInt16(hdnDocEmployeeId.Value));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage("เกิดข้อผิดพลาดในการลบ: " + ex.Message, "error");
+                    KeepDocumentsModalOpen();
+                }
+            }
+        }
+
+        private void KeepDocumentsModalOpen()
+        {
+            string script = "document.getElementById('documentsModal').style.display = 'flex';";
+            ScriptManager.RegisterStartupScript(this, GetType(), "KeepDocModal", script, true);
+        }
+
+        protected string GetDocumentTypeText(string documentType)
+        {
+            switch (documentType.ToUpper())
+            {
+                case "ID_CARD": return "บัตรประชาชน";
+                case "HOUSE_REG": return "ทะเบียนบ้าน";
+                case "BANK_BOOK": return "สมุดบัญชี";
+                case "CONTRACT": return "สัญญาจ้าง";
+                case "RESUME": return "Resume";
+                case "CERTIFICATE": return "ใบรับรอง";
+                case "MEDICAL": return "ใบแพทย์";
+                case "OTHER": return "อื่นๆ";
+                default: return documentType;
             }
         }
 
