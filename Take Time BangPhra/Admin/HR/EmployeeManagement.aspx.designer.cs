@@ -219,5 +219,55 @@ namespace Take_Time_BangPhra.Admin.HR
         /// txtEmergencyPhone control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtEmergencyPhone;
+
+        /// <summary>
+        /// hdnDocEmployeeId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnDocEmployeeId;
+
+        /// <summary>
+        /// pnlDocumentList control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDocumentList;
+
+        /// <summary>
+        /// rptDocuments control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Repeater rptDocuments;
+
+        /// <summary>
+        /// pnlNoDocuments control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlNoDocuments;
+
+        /// <summary>
+        /// ddlDocumentType control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlDocumentType;
+
+        /// <summary>
+        /// txtDocumentName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDocumentName;
+
+        /// <summary>
+        /// txtDocExpiryDate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDocExpiryDate;
+
+        /// <summary>
+        /// txtDocDescription control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDocDescription;
+
+        /// <summary>
+        /// fuDocument control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.FileUpload fuDocument;
+
+        /// <summary>
+        /// btnUploadDocument control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnUploadDocument;
     }
 }
