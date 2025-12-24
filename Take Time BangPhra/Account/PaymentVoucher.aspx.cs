@@ -175,6 +175,9 @@ namespace Take_Time_BangPhra.Account.Report
 
                     Session["dtDetail"] = dtPaymentDetail;
 
+                    // Check if there's an asset linked to this payment voucher
+                    LoadExistingAssetData(id);
+
                 }
                 DataTable dtDetail = new DataTable();
                 try
@@ -844,6 +847,64 @@ namespace Take_Time_BangPhra.Account.Report
         }
 
         /// <summary>
+        /// Load existing asset data if payment voucher was linked to an asset
+        /// </summary>
+        private void LoadExistingAssetData(string paymentVoucherId)
+        {
+            try
+            {
+                DataTable dtAsset = assetService.GetAssetsByPaymentVoucherId(paymentVoucherId);
+                if (dtAsset != null && dtAsset.Rows.Count > 0)
+                {
+                    // Asset exists - check the checkbox and show the panel
+                    chkRecordAsset.Checked = true;
+                    pnlAssetDetails.Visible = true;
+
+                    DataRow asset = dtAsset.Rows[0];
+
+                    // Populate asset fields
+                    txtAssetName.Text = asset["AssetName"]?.ToString() ?? "";
+                    txtAssetBrand.Text = asset["Brand"]?.ToString() ?? "";
+                    txtAssetModel.Text = asset["Model"]?.ToString() ?? "";
+                    txtAssetSerial.Text = asset["SerialNumber"]?.ToString() ?? "";
+                    txtAssetLocation.Text = asset["Location"]?.ToString() ?? "";
+
+                    // Set category dropdown
+                    if (asset["CategoryID"] != DBNull.Value)
+                    {
+                        string categoryId = asset["CategoryID"].ToString();
+                        var categoryItem = ddlAssetCategory.Items.FindByValue(categoryId);
+                        if (categoryItem != null)
+                        {
+                            ddlAssetCategory.SelectedValue = categoryId;
+                        }
+                    }
+
+                    // Set useful life and residual value
+                    if (asset["UsefulLifeYears"] != DBNull.Value)
+                    {
+                        txtAssetUsefulLife.Text = asset["UsefulLifeYears"].ToString();
+                    }
+                    if (asset["ResidualValue"] != DBNull.Value)
+                    {
+                        txtAssetResidual.Text = Convert.ToDecimal(asset["ResidualValue"]).ToString("0");
+                    }
+
+                    // Store the existing asset ID in ViewState (to prevent duplicate creation)
+                    ViewState["ExistingAssetID"] = asset["ID"].ToString();
+
+                    // Disable checkbox to prevent unchecking (asset already created)
+                    chkRecordAsset.Enabled = false;
+                    chkRecordAsset.ToolTip = "สินทรัพย์ถูกบันทึกแล้ว ไม่สามารถยกเลิกได้";
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadExistingAssetData Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Create asset from payment voucher
         /// </summary>
         private void CreateAssetFromPaymentVoucher(string paymentVoucherId, decimal purchasePrice, DateTime purchaseDate, int vendorId)
@@ -852,6 +913,13 @@ namespace Take_Time_BangPhra.Account.Report
             {
                 if (!chkRecordAsset.Checked)
                     return;
+
+                // Check if asset already exists (from edit mode)
+                if (ViewState["ExistingAssetID"] != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"⚠️ Asset already exists (ID: {ViewState["ExistingAssetID"]}), skipping creation");
+                    return;
+                }
 
                 if (string.IsNullOrWhiteSpace(txtAssetName.Text))
                 {
