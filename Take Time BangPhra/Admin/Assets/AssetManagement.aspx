@@ -40,22 +40,25 @@
         }
 
         .summary-card h4 {
-            margin: 0 0 8px 0;
+            margin: 0 0 10px 0;
             color: #666;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 500;
+            line-height: 1.5;
         }
 
         .summary-card .value {
             font-size: 28px;
             font-weight: 700;
             color: #333;
+            line-height: 1.2;
         }
 
         .summary-card .sub-value {
-            font-size: 12px;
+            font-size: 13px;
             color: #888;
-            margin-top: 5px;
+            margin-top: 6px;
+            line-height: 1.4;
         }
 
         .summary-card.success { border-left-color: #28a745; }
@@ -80,7 +83,7 @@
 
         .filter-group {
             flex: 1;
-            min-width: 200px;
+            min-width: 220px;
         }
 
         .filter-group select,
@@ -90,20 +93,43 @@
 
         .filter-group label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             font-weight: 500;
             color: #555;
-            font-size: 13px;
+            font-size: 14px;
         }
 
         .form-control {
             width: 100%;
-            padding: 10px 12px;
+            padding: 12px 14px;
             border: 2px solid #e0e0e0;
             border-radius: 6px;
-            font-size: 14px;
+            font-size: 15px;
             transition: border-color 0.2s;
             box-sizing: border-box;
+            line-height: 1.5;
+        }
+
+        /* Fix Thai text display in dropdowns */
+        select.form-control {
+            height: auto;
+            min-height: 48px;
+            padding: 10px 14px;
+            font-size: 15px;
+            line-height: 1.6;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+        }
+
+        select.form-control option {
+            padding: 12px 14px;
+            font-size: 15px;
+            line-height: 1.6;
         }
 
         .form-control:focus {
@@ -112,13 +138,14 @@
         }
 
         .btn {
-            padding: 10px 20px;
+            padding: 12px 22px;
             border: none;
             border-radius: 6px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
-            font-size: 14px;
+            font-size: 15px;
+            line-height: 1.5;
         }
 
         .btn-primary {
@@ -171,6 +198,7 @@
             margin: 0;
             font-size: 16px;
             color: #333;
+            line-height: 1.5;
         }
 
         .asset-table {
@@ -181,16 +209,19 @@
         .asset-table th {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 12px 15px;
+            padding: 14px 16px;
             text-align: left;
             font-weight: 500;
-            font-size: 13px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: nowrap;
         }
 
         .asset-table td {
-            padding: 12px 15px;
+            padding: 14px 16px;
             border-bottom: 1px solid #f0f0f0;
-            font-size: 13px;
+            font-size: 14px;
+            line-height: 1.5;
         }
 
         .asset-table tr:hover {
@@ -199,10 +230,11 @@
 
         .badge {
             display: inline-block;
-            padding: 4px 10px;
+            padding: 6px 12px;
             border-radius: 20px;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 500;
+            line-height: 1.4;
         }
 
         .badge-active { background: #d4edda; color: #155724; }
@@ -212,9 +244,10 @@
         .category-badge {
             background: #e3f2fd;
             color: #1976d2;
-            padding: 4px 8px;
+            padding: 6px 10px;
             border-radius: 4px;
-            font-size: 11px;
+            font-size: 13px;
+            line-height: 1.4;
         }
 
         .text-right { text-align: right; }
@@ -277,18 +310,35 @@
         }
 
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 18px;
         }
 
         .form-group label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             font-weight: 500;
             color: #333;
+            font-size: 14px;
+            line-height: 1.5;
         }
 
         .form-group label .required {
             color: #dc3545;
+        }
+
+        /* Modal form controls */
+        .modal-body .form-control {
+            font-size: 15px;
+            padding: 12px 14px;
+            min-height: 48px;
+        }
+
+        .modal-body select.form-control {
+            min-height: 48px;
+        }
+
+        .modal-body textarea.form-control {
+            min-height: auto;
         }
 
         .form-group.full-width {
@@ -321,16 +371,25 @@
                 flex-direction: column;
             }
 
+            .filter-group {
+                min-width: 100%;
+            }
+
             .summary-cards {
                 grid-template-columns: 1fr 1fr;
             }
 
             .asset-table {
-                font-size: 12px;
+                font-size: 13px;
             }
 
             .asset-table th, .asset-table td {
-                padding: 8px 10px;
+                padding: 10px 12px;
+            }
+
+            select.form-control {
+                min-height: 44px;
+                font-size: 14px;
             }
         }
     </style>
