@@ -383,6 +383,7 @@
     <Content Include="Admin\HR\SupervisorManagement.aspx" />
     <Content Include="Admin\Leave\LeaveRequest.aspx" />
     <Content Include="Admin\Leave\SupervisorLeaveApproval.aspx" />
+    <Content Include="Admin\Assets\AssetManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Guest\Portal.aspx" />
@@ -736,6 +737,7 @@
     <Compile Include="Class\PayrollService.cs" />
     <Compile Include="Class\PaymentVoucherPdfService.cs" />
     <Compile Include="Class\LeaveService.cs" />
+    <Compile Include="Class\AssetService.cs" />
     <Compile Include="Class\SecurityHelper.cs" />
     <Compile Include="Class\HRConfiguration.cs" />
     <Compile Include="Class\ReservationDataAccess.cs" />
@@ -782,6 +784,13 @@
     </Compile>
     <Compile Include="Admin\Leave\LeaveManagement.aspx.designer.cs">
       <DependentUpon>LeaveManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Assets\AssetManagement.aspx.cs">
+      <DependentUpon>AssetManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Assets\AssetManagement.aspx.designer.cs">
+      <DependentUpon>AssetManagement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Leave\LeaveReplacement.aspx.cs">
       <DependentUpon>LeaveReplacement.aspx</DependentUpon>
