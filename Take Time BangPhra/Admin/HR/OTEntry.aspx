@@ -336,7 +336,6 @@
                         <asp:DropDownList ID="ddlOTRate" runat="server" CssClass="form-control">
                             <asp:ListItem Value="1.5">1.5 เท่า (ปกติ)</asp:ListItem>
                             <asp:ListItem Value="2">2 เท่า (วันหยุด)</asp:ListItem>
-                            <asp:ListItem Value="3">3 เท่า (วันหยุดนักขัตฤกษ์)</asp:ListItem>
                         </asp:DropDownList>
                     </div>
                 </div>
