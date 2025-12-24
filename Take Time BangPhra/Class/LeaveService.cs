@@ -282,7 +282,7 @@ public class LeaveService
                         A.ID AS AdminID,
                         A.UserName,
                         ISNULL(A.FirstName, '') + ' ' + ISNULL(A.LastName, '') AS EmployeeName,
-                        A.NickName,
+                        A.UserName AS NickName,
                         LT.ID AS LeaveTypeID,
                         LT.LeaveTypeName,
                         ISNULL(ELQ.TotalDays, LT.AnnualQuota) AS TotalDays,
