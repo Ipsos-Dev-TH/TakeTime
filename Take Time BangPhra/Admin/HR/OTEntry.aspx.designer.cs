@@ -12,6 +12,11 @@ namespace Take_Time_BangPhra.Admin.HR
     public partial class OTEntry
     {
         /// <summary>
+        /// hdnActiveTab control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnActiveTab;
+
+        /// <summary>
         /// pnlMessage control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Panel pnlMessage;
@@ -110,6 +115,11 @@ namespace Take_Time_BangPhra.Admin.HR
         /// ddlApprovalMonth control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlApprovalMonth;
+
+        /// <summary>
+        /// ddlApprovalYear control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlApprovalYear;
 
         /// <summary>
         /// gvSubordinateOT control.
