@@ -83,6 +83,12 @@ namespace Take_Time_BangPhra.Admin.Report
                 // Load chart data
                 LoadChartData(selectedYear);
 
+                // Load additional analytics
+                LoadAdditionalStats(selectedYear);
+
+                // Load monthly trend
+                LoadMonthlyTrendData(selectedYear);
+
                 System.Diagnostics.Debug.WriteLine($"✅ Customer data loaded successfully");
             }
             catch (Exception ex)
@@ -368,6 +374,78 @@ namespace Take_Time_BangPhra.Admin.Report
             LoadCustomerData();
         }
 
+        protected void gvAllCustomers_RowCommand(object sender, GridViewCommandEventArgs e)
+        {
+            if (e.CommandName == "ViewReservations")
+            {
+                string phoneNumber = e.CommandArgument.ToString();
+                LoadReservationDetail(phoneNumber);
+            }
+        }
+
+        protected void btnCloseDetail_Click(object sender, EventArgs e)
+        {
+            pnlReservationDetail.Visible = false;
+        }
+
+        private void LoadReservationDetail(string phoneNumber)
+        {
+            try
+            {
+                int selectedYear = Convert.ToInt32(ddlYear.SelectedValue);
+
+                // Get customer name
+                string nameQuery = @"SELECT ISNULL(FullName, Name) as CustomerName FROM Customer WHERE MobilePhone = @Phone";
+                var nameParams = new Dictionary<string, object> { { "@Phone", phoneNumber } };
+                DataTable nameDt = codeInstance.DatabaseQuerySafe(conn, nameQuery, nameParams);
+                litSelectedCustomer.Text = nameDt != null && nameDt.Rows.Count > 0
+                    ? nameDt.Rows[0]["CustomerName"].ToString() + " (" + phoneNumber + ")"
+                    : phoneNumber;
+
+                // Get all reservations for this customer
+                string query = @"
+                    SELECT
+                        r.ID,
+                        r.CheckIn_Date,
+                        r.CheckOut_Date,
+                        r.TotalPrice,
+                        r.Status,
+                        r.Created_Date,
+                        ISNULL(r.Remark, '-') as Remark,
+                        STUFF((
+                            SELECT ', ' + a.AccomName
+                            FROM Reservation_Accommodation ra
+                            INNER JOIN Accommodation a ON ra.Accommodation_ID = a.ID
+                            WHERE ra.Reservation_ID = r.ID
+                            FOR XML PATH('')
+                        ), 1, 2, '') as AccommodationList
+                    FROM Reservation r
+                    WHERE r.Customer_MobilePhone = @Phone
+                      AND YEAR(r.Created_Date) = @Year
+                    ORDER BY r.Created_Date DESC";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@Phone", phoneNumber },
+                    { "@Year", selectedYear }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                gvReservationDetail.DataSource = dt;
+                gvReservationDetail.DataBind();
+
+                pnlReservationDetail.Visible = true;
+
+                System.Diagnostics.Debug.WriteLine($"📝 Loaded {dt?.Rows.Count ?? 0} reservations for {phoneNumber}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadReservationDetail Error: {ex.Message}");
+                pnlReservationDetail.Visible = false;
+            }
+        }
+
         protected void btnExport_Click(object sender, EventArgs e)
         {
             try
@@ -517,6 +595,152 @@ namespace Take_Time_BangPhra.Admin.Report
             string icon = type == "success" ? "✅" : "❌";
             ScriptManager.RegisterStartupScript(this, GetType(), "message",
                 $"alert('{icon} {message}');", true);
+        }
+
+        protected string GetStatusBadgeClass(string status)
+        {
+            switch (status)
+            {
+                case "ยืนยันแล้ว":
+                case "จองแล้ว":
+                    return "status-badge status-confirmed";
+                case "เช็คอินแล้ว":
+                    return "status-badge status-checkedin";
+                case "เช็คเอาท์แล้ว":
+                    return "status-badge status-checkedout";
+                case "ยกเลิกคืนเงิน":
+                case "ยกเลิกไม่คืนเงิน":
+                    return "status-badge status-cancelled";
+                default:
+                    return "status-badge";
+            }
+        }
+
+        private void LoadAdditionalStats(int year)
+        {
+            try
+            {
+                string query = @"
+                    SELECT
+                        ISNULL(AVG(CustomerTotal), 0) as AvgSpending,
+                        SUM(TotalReservations) as TotalReservations,
+                        CASE WHEN COUNT(*) > 0 THEN
+                            CAST(SUM(CASE WHEN TotalReservations > 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DECIMAL(5,2))
+                        ELSE 0 END as ReturnRate
+                    FROM (
+                        SELECT
+                            c.MobilePhone,
+                            COUNT(*) as TotalReservations,
+                            SUM(r.TotalPrice) as CustomerTotal
+                        FROM Reservation r
+                        INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                        WHERE YEAR(r.Created_Date) = @Year
+                          AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        GROUP BY c.MobilePhone
+                    ) as CustomerStats";
+
+                var parameters = new Dictionary<string, object> { { "@Year", year } };
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    DataRow row = dt.Rows[0];
+                    litAvgSpendingPerCustomer.Text = row["AvgSpending"] != DBNull.Value
+                        ? Convert.ToDecimal(row["AvgSpending"]).ToString("N0") : "0";
+                    litTotalReservations.Text = row["TotalReservations"] != DBNull.Value
+                        ? row["TotalReservations"].ToString() : "0";
+                    litReturnRate.Text = row["ReturnRate"] != DBNull.Value
+                        ? Convert.ToDecimal(row["ReturnRate"]).ToString("N1") : "0";
+                }
+
+                // Calculate average days between visits for returning customers
+                string daysQuery = @"
+                    SELECT AVG(DaysBetween) as AvgDays
+                    FROM (
+                        SELECT
+                            c.MobilePhone,
+                            DATEDIFF(DAY, MIN(r.Created_Date), MAX(r.Created_Date)) / NULLIF(COUNT(*) - 1, 0) as DaysBetween
+                        FROM Reservation r
+                        INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                        WHERE YEAR(r.Created_Date) = @Year
+                          AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        GROUP BY c.MobilePhone
+                        HAVING COUNT(*) > 1
+                    ) as VisitStats
+                    WHERE DaysBetween IS NOT NULL";
+
+                DataTable daysDt = codeInstance.DatabaseQuerySafe(conn, daysQuery, parameters);
+                if (daysDt != null && daysDt.Rows.Count > 0 && daysDt.Rows[0]["AvgDays"] != DBNull.Value)
+                {
+                    litAvgDaysBetweenVisits.Text = Convert.ToInt32(daysDt.Rows[0]["AvgDays"]).ToString();
+                }
+                else
+                {
+                    litAvgDaysBetweenVisits.Text = "-";
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadAdditionalStats Error: {ex.Message}");
+                litAvgSpendingPerCustomer.Text = "0";
+                litTotalReservations.Text = "0";
+                litReturnRate.Text = "0";
+                litAvgDaysBetweenVisits.Text = "-";
+            }
+        }
+
+        private void LoadMonthlyTrendData(int year)
+        {
+            try
+            {
+                string query = @"
+                    SELECT
+                        MONTH(r.Created_Date) as Month,
+                        SUM(r.TotalPrice) as TotalSpent,
+                        COUNT(DISTINCT r.Customer_MobilePhone) as CustomerCount
+                    FROM Reservation r
+                    WHERE YEAR(r.Created_Date) = @Year
+                      AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    GROUP BY MONTH(r.Created_Date)
+                    ORDER BY Month";
+
+                var parameters = new Dictionary<string, object> { { "@Year", year } };
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                // Initialize arrays for all 12 months
+                decimal[] monthlyAmounts = new decimal[12];
+                int[] monthlyCustomers = new int[12];
+                string[] monthLabels = { "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                                         "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค." };
+
+                if (dt != null)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        int monthIndex = Convert.ToInt32(row["Month"]) - 1;
+                        if (monthIndex >= 0 && monthIndex < 12)
+                        {
+                            monthlyAmounts[monthIndex] = Convert.ToDecimal(row["TotalSpent"]);
+                            monthlyCustomers[monthIndex] = Convert.ToInt32(row["CustomerCount"]);
+                        }
+                    }
+                }
+
+                // Create JSON arrays
+                List<string> labels = monthLabels.Select(l => $"\"{l}\"").ToList();
+                hfMonthlyTrendLabels.Value = "[" + string.Join(",", labels) + "]";
+                hfMonthlyTrendData.Value = "[" + string.Join(",", monthlyAmounts) + "]";
+                hfMonthlyTrendCustomers.Value = "[" + string.Join(",", monthlyCustomers) + "]";
+
+                System.Diagnostics.Debug.WriteLine($"📈 Monthly Trend: {dt?.Rows.Count ?? 0} months with data");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadMonthlyTrendData Error: {ex.Message}");
+                hfMonthlyTrendLabels.Value = "";
+                hfMonthlyTrendData.Value = "";
+                hfMonthlyTrendCustomers.Value = "";
+            }
         }
 
         #endregion

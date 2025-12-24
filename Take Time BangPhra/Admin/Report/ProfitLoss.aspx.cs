@@ -308,23 +308,13 @@ namespace Take_Time_BangPhra.Admin.Report
         {
             try
             {
-                // Check if Product_Sell table exists
-                var checkParams = new Dictionary<string, object>();
-                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Sell'",
-                    checkParams);
-
-                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
-                {
-                    return 0;
-                }
-
-                // Revenue from product sales
+                // Revenue from product sales (using Product_Out table for sales marked as 'ขาย')
                 string query = @"
-                    SELECT ISNULL(SUM(TotalPrice), 0) as ProductRevenue
-                    FROM Product_Sell
-                    WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                      AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
+                    SELECT ISNULL(SUM(po.Amount * po.PricePerUnit), 0) as ProductRevenue
+                    FROM Product_Out po
+                    WHERE CAST(po.DateTime_Out AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(po.DateTime_Out AS DATE) <= CAST(@EndDate AS DATE)
+                      AND po.Remark = N'ขาย'";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -345,25 +335,13 @@ namespace Take_Time_BangPhra.Admin.Report
         {
             try
             {
-                // Check if Product_Sell table exists
-                var checkParams = new Dictionary<string, object>();
-                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Sell'",
-                    checkParams);
-
-                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) == 0)
-                {
-                    return 0;
-                }
-
-                // Revenue from additional services charged to rooms
+                // Revenue from additional services/products charged to rooms (Room_Charge table)
                 string query = @"
-                    SELECT ISNULL(SUM(ps.Total_Price), 0) as ServiceRevenue
-                    FROM Product_Sell ps
-                    INNER JOIN Reservation r ON ps.Reservation_ID = r.ID
-                    WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                      AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                      AND ps.Reservation_ID IS NOT NULL";
+                    SELECT ISNULL(SUM(rc.TotalPrice), 0) as ServiceRevenue
+                    FROM Room_Charge rc
+                    WHERE CAST(rc.ChargedAt AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(rc.ChargedAt AS DATE) <= CAST(@EndDate AS DATE)
+                      AND rc.IsPaid = 1";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -372,7 +350,24 @@ namespace Take_Time_BangPhra.Admin.Report
                 };
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["ServiceRevenue"]) : 0;
+
+                // If Room_Charge table doesn't exist or returns null, try alternate calculation
+                if (dt == null || dt.Rows.Count == 0 || dt.Rows[0]["ServiceRevenue"] == DBNull.Value)
+                {
+                    // Calculate from Product_Out with room-related remarks
+                    string altQuery = @"
+                        SELECT ISNULL(SUM(po.Amount * po.PricePerUnit), 0) as ServiceRevenue
+                        FROM Product_Out po
+                        WHERE CAST(po.DateTime_Out AS DATE) >= CAST(@StartDate AS DATE)
+                          AND CAST(po.DateTime_Out AS DATE) <= CAST(@EndDate AS DATE)
+                          AND po.Remark != N'ขาย'
+                          AND po.Remark IS NOT NULL";
+
+                    dt = codeInstance.DatabaseQuerySafe(conn, altQuery, parameters);
+                }
+
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["ServiceRevenue"] != DBNull.Value
+                    ? Convert.ToDecimal(dt.Rows[0]["ServiceRevenue"]) : 0;
             }
             catch
             {
@@ -384,25 +379,18 @@ namespace Take_Time_BangPhra.Admin.Report
         {
             try
             {
-                // Check if Product_Sell and Product_Sell_Detail tables exist
-                var checkParams = new Dictionary<string, object>();
-                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT COUNT(*) AS TableExists FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('Product_Sell', 'Product_Sell_Detail')",
-                    checkParams);
-
-                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["TableExists"]) < 2)
-                {
-                    return 0;
-                }
-
-                // Calculate COGS from products sold
+                // Calculate COGS from products sold (using Product_Out and Product_In for cost)
+                // First try to get cost from Product_In (average cost method)
                 string query = @"
-                    SELECT ISNULL(SUM(psd.Quantity * p.Cost_Price), 0) as TotalCOGS
-                    FROM Product_Sell_Detail psd
-                    INNER JOIN Product_Sell ps ON psd.Product_Sell_ID = ps.ID
-                    INNER JOIN Product p ON psd.Product_ID = p.ID
-                    WHERE CAST(ps.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                      AND CAST(ps.Created_Date AS DATE) <= CAST(@EndDate AS DATE)";
+                    SELECT ISNULL(SUM(po.Amount * ISNULL(
+                        (SELECT TOP 1 pi.PricePerUnit
+                         FROM Product_In pi
+                         WHERE pi.Product_ID = po.Product_ID
+                         ORDER BY pi.DateTime_In DESC), 0)), 0) as TotalCOGS
+                    FROM Product_Out po
+                    WHERE CAST(po.DateTime_Out AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(po.DateTime_Out AS DATE) <= CAST(@EndDate AS DATE)
+                      AND po.Remark = N'ขาย'";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -411,7 +399,8 @@ namespace Take_Time_BangPhra.Admin.Report
                 };
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalCOGS"]) : 0;
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["TotalCOGS"] != DBNull.Value
+                    ? Convert.ToDecimal(dt.Rows[0]["TotalCOGS"]) : 0;
             }
             catch
             {

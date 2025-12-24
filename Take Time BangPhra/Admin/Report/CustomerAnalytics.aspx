@@ -291,6 +291,53 @@
             margin: 0;
         }
 
+        /* View Detail Button */
+        .btn-view-detail {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .btn-view-detail:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+            color: white;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-confirmed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-checkedin {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-checkedout {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .status-cancelled {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .analytics-header h1 {
@@ -442,7 +489,7 @@
             </div>
         </div>
 
-        <!-- All Customers Table -->
+        <!-- All Customers Table with View Reservations -->
         <div class="data-table">
             <h3>
                 <span>📋 รายชื่อลูกค้าทั้งหมด</span>
@@ -453,7 +500,8 @@
             <div class="table-responsive">
                 <asp:GridView ID="gvAllCustomers" runat="server" AutoGenerateColumns="False"
                     CssClass="customer-table" AllowPaging="True" PageSize="25"
-                    OnPageIndexChanging="gvAllCustomers_PageIndexChanging">
+                    OnPageIndexChanging="gvAllCustomers_PageIndexChanging"
+                    OnRowCommand="gvAllCustomers_RowCommand">
                     <Columns>
                         <asp:TemplateField HeaderText="#">
                             <ItemTemplate>
@@ -471,9 +519,94 @@
                         </asp:TemplateField>
                         <asp:BoundField DataField="TotalSpent" HeaderText="ยอดใช้จ่ายรวม" DataFormatString="฿{0:N2}" />
                         <asp:BoundField DataField="LastVisit" HeaderText="มาครั้งล่าสุด" DataFormatString="{0:dd/MM/yyyy}" />
+                        <asp:TemplateField HeaderText="ดูรายละเอียด">
+                            <ItemTemplate>
+                                <asp:LinkButton ID="lnkViewReservations" runat="server"
+                                    CommandName="ViewReservations" CommandArgument='<%# Eval("PhoneNumber") %>'
+                                    CssClass="btn-view-detail" ToolTip="ดูประวัติการจอง">
+                                    🔍 ดูประวัติ
+                                </asp:LinkButton>
+                            </ItemTemplate>
+                        </asp:TemplateField>
                     </Columns>
                     <PagerStyle CssClass="pagination" HorizontalAlign="Center" />
                 </asp:GridView>
+            </div>
+        </div>
+
+        <!-- Customer Reservations Detail Panel -->
+        <asp:Panel ID="pnlReservationDetail" runat="server" Visible="false" CssClass="data-table">
+            <h3>
+                <span>📝 ประวัติการจองของ: <asp:Literal ID="litSelectedCustomer" runat="server" /></span>
+                <asp:Button ID="btnCloseDetail" runat="server" Text="❌ ปิด" CssClass="btn-custom"
+                    OnClick="btnCloseDetail_Click" style="float: right; background: #ef4444; color: white;" />
+            </h3>
+            <div class="table-responsive">
+                <asp:GridView ID="gvReservationDetail" runat="server" AutoGenerateColumns="False"
+                    CssClass="customer-table" EmptyDataText="ไม่พบประวัติการจอง">
+                    <Columns>
+                        <asp:BoundField DataField="ID" HeaderText="รหัส" />
+                        <asp:TemplateField HeaderText="วันที่เข้าพัก">
+                            <ItemTemplate>
+                                <%# Convert.ToDateTime(Eval("CheckIn_Date")).ToString("dd/MM/yyyy") %> -
+                                <%# Convert.ToDateTime(Eval("CheckOut_Date")).ToString("dd/MM/yyyy") %>
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                        <asp:BoundField DataField="AccommodationList" HeaderText="ที่พัก" />
+                        <asp:BoundField DataField="TotalPrice" HeaderText="ยอดรวม" DataFormatString="฿{0:N2}" />
+                        <asp:TemplateField HeaderText="สถานะ">
+                            <ItemTemplate>
+                                <span class='<%# GetStatusBadgeClass(Eval("Status").ToString()) %>'>
+                                    <%# Eval("Status") %>
+                                </span>
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                        <asp:BoundField DataField="Created_Date" HeaderText="วันที่จอง" DataFormatString="{0:dd/MM/yyyy HH:mm}" />
+                        <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ" />
+                    </Columns>
+                </asp:GridView>
+            </div>
+        </asp:Panel>
+
+        <!-- Monthly Spending Trend Chart -->
+        <div class="charts-section">
+            <div class="chart-card" style="grid-column: span 2;">
+                <div class="chart-card-header">
+                    <h3 class="chart-card-title">📈 แนวโน้มการใช้จ่ายรายเดือน</h3>
+                </div>
+                <div id="monthlyTrendChart"></div>
+            </div>
+        </div>
+
+        <!-- Additional Analytics Cards -->
+        <div class="summary-grid">
+            <div class="summary-card" style="border-left-color: #06b6d4;">
+                <div class="summary-card-icon">💰</div>
+                <div class="summary-card-label">ยอดใช้จ่ายเฉลี่ย/ลูกค้า</div>
+                <div class="summary-card-value" style="font-size: 1.5rem;">
+                    ฿<asp:Literal ID="litAvgSpendingPerCustomer" runat="server" Text="0" />
+                </div>
+            </div>
+            <div class="summary-card" style="border-left-color: #ec4899;">
+                <div class="summary-card-icon">🏨</div>
+                <div class="summary-card-label">จำนวนการจองทั้งหมด</div>
+                <div class="summary-card-value">
+                    <asp:Literal ID="litTotalReservations" runat="server" Text="0" />
+                </div>
+            </div>
+            <div class="summary-card" style="border-left-color: #14b8a6;">
+                <div class="summary-card-icon">🔄</div>
+                <div class="summary-card-label">อัตราการกลับมาใช้บริการ</div>
+                <div class="summary-card-value" style="font-size: 1.5rem;">
+                    <asp:Literal ID="litReturnRate" runat="server" Text="0" />%
+                </div>
+            </div>
+            <div class="summary-card" style="border-left-color: #f97316;">
+                <div class="summary-card-icon">⏰</div>
+                <div class="summary-card-label">ระยะเวลาเฉลี่ยก่อนกลับมา</div>
+                <div class="summary-card-value" style="font-size: 1.5rem;">
+                    <asp:Literal ID="litAvgDaysBetweenVisits" runat="server" Text="0" /> วัน
+                </div>
             </div>
         </div>
     </div>
@@ -482,6 +615,9 @@
     <asp:HiddenField ID="hfSegmentationData" runat="server" />
     <asp:HiddenField ID="hfTopCustomersData" runat="server" />
     <asp:HiddenField ID="hfTopCustomersLabels" runat="server" />
+    <asp:HiddenField ID="hfMonthlyTrendLabels" runat="server" />
+    <asp:HiddenField ID="hfMonthlyTrendData" runat="server" />
+    <asp:HiddenField ID="hfMonthlyTrendCustomers" runat="server" />
 
     <!-- Charts Script -->
     <script type="text/javascript">
@@ -554,6 +690,64 @@
         };
         var topCustomersChart = new ApexCharts(document.querySelector("#topCustomersChart"), topCustomersOptions);
         topCustomersChart.render();
+
+        // Monthly Trend Chart (Line + Bar)
+        var monthlyTrendLabels = <%= hfMonthlyTrendLabels.Value != "" ? hfMonthlyTrendLabels.Value : "['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']" %>;
+        var monthlyTrendData = <%= hfMonthlyTrendData.Value != "" ? hfMonthlyTrendData.Value : "[0,0,0,0,0,0,0,0,0,0,0,0]" %>;
+        var monthlyTrendCustomers = <%= hfMonthlyTrendCustomers.Value != "" ? hfMonthlyTrendCustomers.Value : "[0,0,0,0,0,0,0,0,0,0,0,0]" %>;
+
+        var monthlyTrendOptions = {
+            series: [{
+                name: 'ยอดใช้จ่าย (฿)',
+                type: 'column',
+                data: monthlyTrendData
+            }, {
+                name: 'จำนวนลูกค้า',
+                type: 'line',
+                data: monthlyTrendCustomers
+            }],
+            chart: {
+                height: 350,
+                type: 'line',
+                toolbar: { show: false }
+            },
+            stroke: {
+                width: [0, 4]
+            },
+            colors: ['#667eea', '#f093fb'],
+            plotOptions: {
+                bar: {
+                    columnWidth: '50%',
+                    borderRadius: 5
+                }
+            },
+            dataLabels: {
+                enabled: false
+            },
+            xaxis: {
+                categories: monthlyTrendLabels
+            },
+            yaxis: [{
+                title: {
+                    text: 'ยอดใช้จ่าย (฿)'
+                },
+                labels: {
+                    formatter: function(val) {
+                        return '฿' + val.toLocaleString();
+                    }
+                }
+            }, {
+                opposite: true,
+                title: {
+                    text: 'จำนวนลูกค้า'
+                }
+            }],
+            legend: {
+                position: 'top'
+            }
+        };
+        var monthlyTrendChart = new ApexCharts(document.querySelector("#monthlyTrendChart"), monthlyTrendOptions);
+        monthlyTrendChart.render();
     </script>
 
 </asp:Content>

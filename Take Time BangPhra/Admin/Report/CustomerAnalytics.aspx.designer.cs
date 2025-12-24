@@ -95,5 +95,60 @@ namespace Take_Time_BangPhra.Admin.Report
         /// hfTopCustomersLabels control.
         /// </summary>
         protected global::System.Web.UI.WebControls.HiddenField hfTopCustomersLabels;
+
+        /// <summary>
+        /// pnlReservationDetail control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlReservationDetail;
+
+        /// <summary>
+        /// litSelectedCustomer control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litSelectedCustomer;
+
+        /// <summary>
+        /// btnCloseDetail control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnCloseDetail;
+
+        /// <summary>
+        /// gvReservationDetail control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.GridView gvReservationDetail;
+
+        /// <summary>
+        /// hfMonthlyTrendLabels control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfMonthlyTrendLabels;
+
+        /// <summary>
+        /// hfMonthlyTrendData control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfMonthlyTrendData;
+
+        /// <summary>
+        /// hfMonthlyTrendCustomers control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfMonthlyTrendCustomers;
+
+        /// <summary>
+        /// litAvgSpendingPerCustomer control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litAvgSpendingPerCustomer;
+
+        /// <summary>
+        /// litTotalReservations control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litTotalReservations;
+
+        /// <summary>
+        /// litReturnRate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litReturnRate;
+
+        /// <summary>
+        /// litAvgDaysBetweenVisits control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litAvgDaysBetweenVisits;
     }
 }

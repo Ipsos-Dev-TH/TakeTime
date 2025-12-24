@@ -336,11 +336,10 @@ public class LeaveService
 
                     if (count > 0)
                     {
-                        // Update existing
+                        // Update existing (RemainingDays is computed column, no need to update)
                         using (SqlCommand updateCmd = new SqlCommand(@"
                             UPDATE Employee_Leave_Quota SET
                                 TotalDays = @Total,
-                                RemainingDays = @Total - UsedDays,
                                 CarryForwardDays = @Carry
                             WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year", conn))
                         {
@@ -354,11 +353,11 @@ public class LeaveService
                     }
                     else
                     {
-                        // Insert new
+                        // Insert new (RemainingDays is computed column, excluded from INSERT)
                         using (SqlCommand insertCmd = new SqlCommand(@"
                             INSERT INTO Employee_Leave_Quota
-                            (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
-                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, @Total, @Carry)", conn))
+                            (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, CarryForwardDays)
+                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, @Carry)", conn))
                         {
                             insertCmd.Parameters.AddWithValue("@AdminID", adminId);
                             insertCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
@@ -390,9 +389,9 @@ public class LeaveService
             {
                 conn.Open();
                 using (SqlCommand cmd = new SqlCommand(@"
-                    INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
+                    INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, CarryForwardDays)
                     SELECT
-                        A.ID, LT.ID, @Year, LT.AnnualQuota, 0, LT.AnnualQuota, 0
+                        A.ID, LT.ID, @Year, LT.AnnualQuota, 0, 0
                     FROM Admin A
                     CROSS JOIN Leave_Types LT
                     WHERE A.Status = 1 AND LT.IsActive = 1
@@ -477,10 +476,10 @@ public class LeaveService
                             if ((int)checkCmd.ExecuteScalar() > 0) continue;
                         }
 
-                        // Insert new quota
+                        // Insert new quota (RemainingDays is computed column, excluded from INSERT)
                         using (SqlCommand insertCmd = new SqlCommand(@"
-                            INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
-                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, @Total, 0)", conn))
+                            INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, CarryForwardDays)
+                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, 0)", conn))
                         {
                             insertCmd.Parameters.AddWithValue("@AdminID", empId);
                             insertCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
@@ -844,12 +843,11 @@ public class LeaveService
                         cmd.Parameters.AddWithValue("@ApprovedBy", approvedByAdminId);
                         cmd.ExecuteNonQuery();
 
-                        // Update leave quota (UsedDays and RemainingDays)
+                        // Update leave quota (UsedDays only - RemainingDays is computed)
                         cmd.Parameters.Clear();
                         cmd.CommandText = @"
                             UPDATE Employee_Leave_Quota
-                            SET UsedDays = UsedDays + @TotalDays,
-                                RemainingDays = RemainingDays - @TotalDays
+                            SET UsedDays = UsedDays + @TotalDays
                             WHERE Admin_ID = @AdminID
                               AND LeaveType_ID = @LeaveTypeID
                               AND Year = @Year";
@@ -1238,11 +1236,11 @@ public class LeaveService
                     decimal annualQuota = annualQuotaResult != null && annualQuotaResult != DBNull.Value
                         ? Convert.ToDecimal(annualQuotaResult) : 0;
 
-                    // Create quota record for this employee
+                    // Create quota record for this employee (RemainingDays is computed column)
                     cmd.Parameters.Clear();
                     cmd.CommandText = @"
-                        INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
-                        VALUES (@AdminID, @LeaveTypeID, @Year, @AnnualQuota, 0, @AnnualQuota, 0)";
+                        INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, CarryForwardDays)
+                        VALUES (@AdminID, @LeaveTypeID, @Year, @AnnualQuota, 0, 0)";
                     cmd.Parameters.AddWithValue("@AdminID", adminId);
                     cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
                     cmd.Parameters.AddWithValue("@Year", year);
@@ -1274,12 +1272,11 @@ public class LeaveService
                 cmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
                 cmd.ExecuteNonQuery();
 
-                // Update leave quota
+                // Update leave quota (RemainingDays is computed column)
                 cmd.Parameters.Clear();
                 cmd.CommandText = @"
                     UPDATE Employee_Leave_Quota
-                    SET UsedDays = UsedDays + @TotalDays,
-                        RemainingDays = RemainingDays - @TotalDays
+                    SET UsedDays = UsedDays + @TotalDays
                     WHERE Admin_ID = @AdminID
                       AND LeaveType_ID = @LeaveTypeID
                       AND Year = @Year";
@@ -1486,11 +1483,10 @@ public class LeaveService
                                 updateCmd.ExecuteNonQuery();
                             }
 
-                            // Return the leave days back to the quota (since it's now replaced)
+                            // Return the leave days back to the quota (RemainingDays is computed)
                             using (SqlCommand quotaCmd = new SqlCommand(@"
                                 UPDATE Employee_Leave_Quota
-                                SET UsedDays = UsedDays - @TotalDays,
-                                    RemainingDays = RemainingDays + @TotalDays
+                                SET UsedDays = UsedDays - @TotalDays
                                 WHERE Admin_ID = @AdminID
                                   AND LeaveType_ID = @LeaveTypeID
                                   AND Year = @Year", conn, transaction))
@@ -1598,11 +1594,10 @@ public class LeaveService
                                 updateCmd.ExecuteNonQuery();
                             }
 
-                            // Deduct the leave days from quota again
+                            // Deduct the leave days from quota again (RemainingDays is computed)
                             using (SqlCommand quotaCmd = new SqlCommand(@"
                                 UPDATE Employee_Leave_Quota
-                                SET UsedDays = UsedDays + @TotalDays,
-                                    RemainingDays = RemainingDays - @TotalDays
+                                SET UsedDays = UsedDays + @TotalDays
                                 WHERE Admin_ID = @AdminID
                                   AND LeaveType_ID = @LeaveTypeID
                                   AND Year = @Year", conn, transaction))
