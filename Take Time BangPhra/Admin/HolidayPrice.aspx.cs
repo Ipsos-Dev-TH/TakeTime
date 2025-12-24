@@ -123,7 +123,9 @@ namespace Take_Time_BangPhra.Admin
                         }
                     }
                 }
-                Response.Redirect("./HolidayPrice");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกราคาวันหยุดเรียบร้อยแล้ว'); window.location.href='./HolidayPrice';", true);
             }
         }
 

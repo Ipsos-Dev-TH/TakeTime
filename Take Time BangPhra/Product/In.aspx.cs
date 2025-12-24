@@ -270,7 +270,9 @@ namespace Take_Time_BangPhra.Product
                         "VALUES (@DateTimeIn,@ProductID,@Amount,@PricePerUnit)",
                         insertParams);
                 }
-                Response.Redirect("/Product/In");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกการนำเข้าสินค้าเรียบร้อยแล้ว'); window.location.href='/Product/In';", true);
             }
             else
             {

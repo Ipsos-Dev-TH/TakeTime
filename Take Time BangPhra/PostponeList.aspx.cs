@@ -83,7 +83,9 @@ namespace Take_Time_BangPhra
                     "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = @ID",
                     reservationUpdateParams);
 
-                Response.Redirect("/PostponeList");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ ลบรายการเลื่อนวันเข้าพักเรียบร้อยแล้ว'); window.location.href='/PostponeList';", true);
             }
         }
 
@@ -104,8 +106,10 @@ namespace Take_Time_BangPhra
                 "UPDATE [dbo].[Reservation] SET [Status] = N'ลบจากการเลื่อนวันเข้าพัก' WHERE ID = @ID",
                 reservationUpdateParams);
 
-            Response.Redirect("/PostponeList");
-            
+            // Show success message then redirect
+            ClientScript.RegisterStartupScript(this.GetType(), "success",
+                "alert('✅ ลบรายการเลื่อนวันเข้าพักเรียบร้อยแล้ว'); window.location.href='/PostponeList';", true);
+
         }
 
     }

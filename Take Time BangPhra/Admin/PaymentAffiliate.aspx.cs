@@ -435,7 +435,9 @@ namespace Take_Time_BangPhra.Admin
                     }
                 }
                 catch { }
-                Response.Redirect("/Account/PaymentVoucher");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกใบสำคัญจ่าย Affiliate เรียบร้อยแล้ว'); window.location.href='/Account/PaymentVoucher';", true);
             }
             else
             {

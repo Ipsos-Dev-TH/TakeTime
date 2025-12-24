@@ -573,7 +573,9 @@ namespace Take_Time_BangPhra.Account.Report
                     CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
                 }
 
-                Response.Redirect("/Account/PaymentVoucher");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/PaymentVoucher';", true);
             }
             else
             {

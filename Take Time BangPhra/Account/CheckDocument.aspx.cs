@@ -417,7 +417,9 @@ namespace Take_Time_BangPhra.Account
                     }
                 }
 
-                Response.Redirect("/Account/CheckDocument");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ ลบเอกสารเรียบร้อยแล้ว'); window.location.href='/Account/CheckDocument';", true);
             }
         }
 

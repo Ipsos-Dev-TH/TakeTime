@@ -1610,7 +1610,9 @@ namespace Take_Time_BangPhra.Account.Report
                 catch { }
 
 
-                Response.Redirect("/Account/Receipt");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
             }
             else
             {
@@ -1895,7 +1897,9 @@ namespace Take_Time_BangPhra.Account.Report
 
                 }
 
-                Response.Redirect("/Account/Receipt");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ เพิ่มลายเซ็นอิเล็กทรอนิกส์เรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
             }
         }
 

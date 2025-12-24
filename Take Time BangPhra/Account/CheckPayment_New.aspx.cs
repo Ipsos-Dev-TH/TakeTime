@@ -487,7 +487,9 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    Response.Redirect("/Account/CheckPayment_New");
+                    // Show success message then redirect
+                    ClientScript.RegisterStartupScript(this.GetType(), "success",
+                        "alert('✅ ลบใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/CheckPayment_New';", true);
                 }
                 else
                 {

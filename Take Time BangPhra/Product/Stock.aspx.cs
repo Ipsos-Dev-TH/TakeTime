@@ -293,7 +293,9 @@ namespace Take_Time_BangPhra.Product
                         "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,'0',@Remark)",
                         productOutParams);
                 }
-                Response.Redirect("/Product/Stock");
+                // Show success message then redirect
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกการเบิกสินค้าเรียบร้อยแล้ว'); window.location.href='/Product/Stock';", true);
             }
             else
             {

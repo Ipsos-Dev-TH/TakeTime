@@ -1515,7 +1515,9 @@ namespace Take_Time_BangPhra.Product
                         productOutParams);
                 }
             }
-            Response.Redirect("/Product");
+            // Show success message then redirect
+            ClientScript.RegisterStartupScript(this.GetType(), "success",
+                "alert('✅ บันทึกการขายเรียบร้อยแล้ว'); window.location.href='/Product';", true);
         }
 
         // ✨ MIGRATED: cleantext() method has been replaced with ValidationHelper.CleanText()
