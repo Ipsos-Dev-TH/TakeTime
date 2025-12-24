@@ -324,5 +324,10 @@ namespace Take_Time_BangPhra.Account.Report
         /// txtAssetLocation control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtAssetLocation;
+
+        /// <summary>
+        /// txtAssetQuantity control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetQuantity;
     }
 }
