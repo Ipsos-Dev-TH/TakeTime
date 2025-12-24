@@ -1789,8 +1789,8 @@ namespace Take_Time_BangPhra.Product
             if (ddlGuestReservation.SelectedValue != "0")
             {
                 // Guest selected - show charge mode options
-                trChargeMode.Visible = true;
-                trGuestInfo.Visible = true;
+                pnlChargeMode.Visible = true;
+                pnlGuestInfo.Visible = true;
 
                 // Load and display guest info
                 int reservationId = Convert.ToInt32(ddlGuestReservation.SelectedValue);
@@ -1811,8 +1811,8 @@ namespace Take_Time_BangPhra.Product
             else
             {
                 // No guest selected - hide charge mode and guest info
-                trChargeMode.Visible = false;
-                trGuestInfo.Visible = false;
+                pnlChargeMode.Visible = false;
+                pnlGuestInfo.Visible = false;
                 DropDownList1.Enabled = true;
                 CheckBox1.Enabled = true;
                 CheckBox2.Enabled = true;

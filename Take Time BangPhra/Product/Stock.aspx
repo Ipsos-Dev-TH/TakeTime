@@ -64,15 +64,15 @@
                         <ItemTemplate>
                             <%# Convert.ToInt32(Eval("CurrentStock")) %>
                         </ItemTemplate>
-                        <ItemStyle HorizontalAlign="Right" />
-                        <HeaderStyle HorizontalAlign="Right" />
+                        <ItemStyle HorizontalAlign="Center" />
+                        <HeaderStyle HorizontalAlign="Center" />
                     </asp:TemplateField>
                     <asp:TemplateField HeaderText="ใช้เฉลี่ย/สัปดาห์">
                         <ItemTemplate>
                             <%# string.Format("{0:N1}", Eval("WeeklyUsage")) %>
                         </ItemTemplate>
-                        <ItemStyle HorizontalAlign="Right" />
-                        <HeaderStyle HorizontalAlign="Right" />
+                        <ItemStyle HorizontalAlign="Center" />
+                        <HeaderStyle HorizontalAlign="Center" />
                     </asp:TemplateField>
                     <asp:TemplateField HeaderText="คาดว่าจะหมดใน">
                         <ItemTemplate>
@@ -93,8 +93,24 @@
                 <h3>📋 รายการสต็อกปัจจุบัน</h3>
             </div>
             <div class="product-card-body" style="padding: 0;">
-                <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="true"
-                    CssClass="product-table" GridLines="None">
+                <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False"
+                    CssClass="product-table" GridLines="None"
+                    AllowSorting="True" OnSorting="GridView2_Sorting">
+                    <Columns>
+                        <asp:BoundField DataField="ID" HeaderText="รหัส" SortExpression="ID" />
+                        <asp:BoundField DataField="Barcode" HeaderText="บาร์โค้ด" SortExpression="Barcode" />
+                        <asp:BoundField DataField="Category_ID" HeaderText="หมวดหมู่" SortExpression="Category_ID" />
+                        <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" SortExpression="Product_Name" />
+                        <asp:TemplateField HeaderText="จำนวนคงเหลือ" SortExpression="Amount">
+                            <ItemTemplate>
+                                <span class='<%# Convert.ToInt32(Eval("Amount")) < 5 ? "stock-badge stock-critical" : Convert.ToInt32(Eval("Amount")) < 10 ? "stock-badge stock-warning" : "stock-badge stock-normal" %>'>
+                                    <%# Eval("Amount") %>
+                                </span>
+                            </ItemTemplate>
+                            <ItemStyle HorizontalAlign="Center" />
+                            <HeaderStyle HorizontalAlign="Center" />
+                        </asp:TemplateField>
+                    </Columns>
                 </asp:GridView>
             </div>
         </div>

@@ -52,14 +52,14 @@
                     </div>
 
                     <!-- Guest Info Display -->
-                    <tr id="trGuestInfo" runat="server" visible="false">
+                    <asp:Panel ID="pnlGuestInfo" runat="server" Visible="false">
                         <div class="guest-info-panel" style="background: #fff8e1; padding: 15px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 15px;">
                             <asp:Label ID="lblGuestInfo" runat="server" style="color: #5d4037; line-height: 1.6;"></asp:Label>
                         </div>
-                    </tr>
+                    </asp:Panel>
 
                     <!-- Charge Mode Selection -->
-                    <tr id="trChargeMode" runat="server" visible="false">
+                    <asp:Panel ID="pnlChargeMode" runat="server" Visible="false">
                         <div class="form-group">
                             <label>💰 โหมดการชำระเงิน</label>
                             <asp:RadioButtonList ID="rblChargeMode" runat="server" RepeatDirection="Horizontal"
@@ -73,7 +73,7 @@
                                 💡 <strong>ชำระเงินทันที:</strong> ตัดสต๊อกและเก็บเงินเลย + ออกใบเสร็จ
                             </div>
                         </div>
-                    </tr>
+                    </asp:Panel>
 
                     <!-- Product Search -->
                     <div class="form-row">

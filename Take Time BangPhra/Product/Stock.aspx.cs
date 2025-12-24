@@ -57,6 +57,9 @@ namespace Take_Time_BangPhra.Product
                         }
                     }
                 }
+                // Store in ViewState for sorting
+                ViewState["dtStock"] = dtIn;
+
                 GridView2.DataSource = dtIn;
                 GridView2.DataBind();
 
@@ -320,6 +323,44 @@ namespace Take_Time_BangPhra.Product
             TextBox2.Text = string.Empty;
             TextBox3.Text = "0";
             TextBox4.Text = string.Empty;
+        }
+
+        /// <summary>
+        /// Handle GridView2 sorting
+        /// </summary>
+        protected void GridView2_Sorting(object sender, GridViewSortEventArgs e)
+        {
+            DataTable dtStock = ViewState["dtStock"] as DataTable;
+            if (dtStock != null)
+            {
+                string sortDirection = GetSortDirection(e.SortExpression);
+                DataView dv = new DataView(dtStock);
+                dv.Sort = e.SortExpression + " " + sortDirection;
+                GridView2.DataSource = dv;
+                GridView2.DataBind();
+            }
+        }
+
+        /// <summary>
+        /// Toggle sort direction
+        /// </summary>
+        private string GetSortDirection(string column)
+        {
+            string sortDirection = "ASC";
+            string lastSortExpression = ViewState["SortExpression"] as string;
+
+            if (lastSortExpression != null && lastSortExpression == column)
+            {
+                string lastSortDirection = ViewState["SortDirection"] as string;
+                if (lastSortDirection != null && lastSortDirection == "ASC")
+                {
+                    sortDirection = "DESC";
+                }
+            }
+
+            ViewState["SortDirection"] = sortDirection;
+            ViewState["SortExpression"] = column;
+            return sortDirection;
         }
 
         /// <summary>

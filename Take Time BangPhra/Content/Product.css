@@ -634,6 +634,46 @@ textarea.form-control {
     color: #212121;
 }
 
+/* Stock Badge for current stock table */
+.stock-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 40px;
+    text-align: center;
+}
+
+.stock-normal {
+    background: var(--product-success-light);
+    color: #1b5e20;
+}
+
+.stock-warning {
+    background: var(--product-warning);
+    color: #5d4037;
+}
+
+.stock-critical {
+    background: var(--product-danger);
+    color: white;
+}
+
+/* Sortable table headers */
+.product-table th a {
+    color: white !important;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    justify-content: inherit;
+}
+
+.product-table th a:hover {
+    text-decoration: underline;
+}
+
 /* Barcode Scanner */
 .scanner-btn {
     background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);

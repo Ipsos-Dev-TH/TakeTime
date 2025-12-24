@@ -42,13 +42,13 @@ namespace Take_Time_BangPhra.Product
         protected global::System.Web.UI.WebControls.Label lblActiveGuestCount;
 
         /// <summary>
-        /// trGuestInfo control.
+        /// pnlGuestInfo control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.HtmlControls.HtmlTableRow trGuestInfo;
+        protected global::System.Web.UI.WebControls.Panel pnlGuestInfo;
 
         /// <summary>
         /// lblGuestInfo control.
@@ -60,13 +60,13 @@ namespace Take_Time_BangPhra.Product
         protected global::System.Web.UI.WebControls.Label lblGuestInfo;
 
         /// <summary>
-        /// trChargeMode control.
+        /// pnlChargeMode control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.HtmlControls.HtmlTableRow trChargeMode;
+        protected global::System.Web.UI.WebControls.Panel pnlChargeMode;
 
         /// <summary>
         /// rblChargeMode control.
