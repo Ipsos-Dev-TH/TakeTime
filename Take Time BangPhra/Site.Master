@@ -40,7 +40,12 @@
             background-color: #5D4037 !important;
             border-color: #3E2723 !important;
             min-height: 50px;
-            margin-bottom: 20px;
+            margin-bottom: 0;
+        }
+
+        /* Fixed navbar requires body padding */
+        body {
+            padding-top: 70px;
         }
         
         .navbar-inverse .navbar-nav > li > a {
@@ -350,11 +355,10 @@
                 display: block !important;
             }
             
-            /* Prevent navbar from covering content */
+            /* Mobile padding adjustments */
             body {
-                padding-top: 70px;
-                padding-left:10px !important;
-                padding-right:10px !important;
+                padding-left: 10px !important;
+                padding-right: 10px !important;
             }
 
             .auth-buttons {
