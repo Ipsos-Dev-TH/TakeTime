@@ -281,8 +281,8 @@ public class LeaveService
                     SELECT
                         A.ID AS AdminID,
                         A.UserName,
-                        E.Name AS EmployeeName,
-                        E.NickName,
+                        ISNULL(A.FirstName, '') + ' ' + ISNULL(A.LastName, '') AS EmployeeName,
+                        A.NickName,
                         LT.ID AS LeaveTypeID,
                         LT.LeaveTypeName,
                         ISNULL(ELQ.TotalDays, LT.AnnualQuota) AS TotalDays,
@@ -290,13 +290,12 @@ public class LeaveService
                         ISNULL(ELQ.RemainingDays, LT.AnnualQuota) AS RemainingDays,
                         ISNULL(ELQ.CarryForwardDays, 0) AS CarryForwardDays
                     FROM Admin A
-                    INNER JOIN Employee E ON E.Admin_ID = A.ID
                     CROSS JOIN Leave_Types LT
                     LEFT JOIN Employee_Leave_Quota ELQ ON ELQ.Admin_ID = A.ID
                         AND ELQ.LeaveType_ID = LT.ID
                         AND ELQ.Year = @Year
-                    WHERE A.Status = 'True' AND LT.IsActive = 1
-                    ORDER BY E.Name, LT.DisplayOrder";
+                    WHERE A.Status = 1 AND LT.IsActive = 1
+                    ORDER BY A.FirstName, A.LastName, LT.DisplayOrder";
                 cmd.Parameters.AddWithValue("@Year", year);
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
@@ -395,9 +394,8 @@ public class LeaveService
                     SELECT
                         A.ID, LT.ID, @Year, LT.AnnualQuota, 0, LT.AnnualQuota, 0
                     FROM Admin A
-                    INNER JOIN Employee E ON E.Admin_ID = A.ID
                     CROSS JOIN Leave_Types LT
-                    WHERE A.Status = 'True' AND LT.IsActive = 1
+                    WHERE A.Status = 1 AND LT.IsActive = 1
                         AND NOT EXISTS (
                             SELECT 1 FROM Employee_Leave_Quota ELQ
                             WHERE ELQ.Admin_ID = A.ID AND ELQ.LeaveType_ID = LT.ID AND ELQ.Year = @Year
