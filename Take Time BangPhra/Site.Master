@@ -631,6 +631,9 @@
                                                     <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
                                                         <i class="fas fa-calendar-minus"></i> จัดการการลา
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
+                                                        <i class="fas fa-user-check"></i> อนุมัติการลา
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
                                                         <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
                                                     </a></li>
@@ -653,9 +656,6 @@
                                 <ul class="dropdown-menu">
                                     <li><a runat="server" href="~/Admin/Leave/LeaveRequest">
                                         <i class="fas fa-calendar-minus"></i> ขอลางาน
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/HR/EmployeeProfile">
-                                        <i class="fas fa-id-card"></i> ข้อมูลส่วนตัว
                                     </a></li>
                                 </ul>
                             </li>

@@ -80,7 +80,12 @@
 
         .filter-group {
             flex: 1;
-            min-width: 150px;
+            min-width: 200px;
+        }
+
+        .filter-group select,
+        .filter-group .form-control {
+            min-width: 100%;
         }
 
         .filter-group label {
