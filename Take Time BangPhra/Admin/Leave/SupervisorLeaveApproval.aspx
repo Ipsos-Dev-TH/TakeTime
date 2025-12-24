@@ -293,6 +293,31 @@
         .no-subordinates p {
             color: #999;
         }
+
+        .attachment-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .attachment-link:hover {
+            background: #bbdefb;
+            color: #1565c0;
+            text-decoration: none;
+        }
+
+        .no-attachment {
+            color: #999;
+            font-size: 12px;
+        }
     </style>
 
     <div class="supervisor-leave">
@@ -402,6 +427,12 @@
                         </asp:TemplateField>
 
                         <asp:BoundField DataField="Reason" HeaderText="เหตุผล" />
+
+                        <asp:TemplateField HeaderText="ไฟล์แนบ">
+                            <ItemTemplate>
+                                <%# GetAttachmentLink(Eval("MedicalCertPath")) %>
+                            </ItemTemplate>
+                        </asp:TemplateField>
 
                         <asp:TemplateField HeaderText="วันที่ส่ง">
                             <ItemTemplate>

@@ -332,6 +332,20 @@ namespace Take_Time_BangPhra.Admin.Leave
             }
         }
 
+        protected string GetAttachmentLink(object medicalCertPath)
+        {
+            if (medicalCertPath == null || medicalCertPath == DBNull.Value || string.IsNullOrEmpty(medicalCertPath.ToString()))
+            {
+                return "<span class='no-attachment'>-</span>";
+            }
+
+            string path = medicalCertPath.ToString();
+            string fileName = System.IO.Path.GetFileName(path);
+            string fullPath = ResolveUrl("~/" + path);
+
+            return $"<a href='{fullPath}' target='_blank' class='attachment-link'><i class='fas fa-file-medical'></i> {fileName}</a>";
+        }
+
         private void ShowMessage(string message, string type)
         {
             pnlMessage.Visible = true;
