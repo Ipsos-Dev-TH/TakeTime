@@ -18,6 +18,9 @@ namespace Take_Time_BangPhra
                     btnLogout.Visible = true;
                     hlLogin.Visible = false;
 
+                    // Show employee menu for all logged-in users
+                    pnlEmployeeNav.Visible = true;
+
                     // Check if user is Owner to show owner-only menus
                     bool isOwner = Session["User"]?.ToString() == "Owner";
                     pnlOwnerOnly.Visible = isOwner;
@@ -27,6 +30,7 @@ namespace Take_Time_BangPhra
                     // Hide admin controls
                     pnlAdminNav.Visible = false;
                     pnlOwnerOnly.Visible = false;
+                    pnlEmployeeNav.Visible = false;
                     btnLogout.Visible = false;
                     hlLogin.Visible = true;
                 }
@@ -36,6 +40,7 @@ namespace Take_Time_BangPhra
                 // Hide admin controls on error
                 pnlAdminNav.Visible = false;
                 pnlOwnerOnly.Visible = false;
+                pnlEmployeeNav.Visible = false;
                 btnLogout.Visible = false;
                 hlLogin.Visible = true;
             }

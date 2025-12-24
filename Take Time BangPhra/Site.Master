@@ -634,6 +634,9 @@
                                                     <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
                                                         <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Assets/AssetManagement">
+                                                        <i class="fas fa-boxes"></i> จัดการสินทรัพย์
+                                                    </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
@@ -641,8 +644,24 @@
                                 </div>
                             </li>
                         </asp:Panel>
+                        <!-- Employee Menu (visible to all logged-in users) -->
+                        <asp:Panel ID="pnlEmployeeNav" runat="server" Visible="false">
+                            <li class="dropdown">
+                                <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" style="background: rgba(102, 126, 234, 0.2); border-radius: 5px;">
+                                    <i class="fas fa-user-circle"></i> พนักงาน <span class="caret"></span>
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><a runat="server" href="~/Admin/Leave/LeaveRequest">
+                                        <i class="fas fa-calendar-minus"></i> ขอลางาน
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/HR/EmployeeProfile">
+                                        <i class="fas fa-id-card"></i> ข้อมูลส่วนตัว
+                                    </a></li>
+                                </ul>
+                            </li>
+                        </asp:Panel>
                     </ul>
-                    
+
                     <!-- Authentication Buttons -->
                     <div class="auth-buttons">
                         <!-- Login Button (Visible when not logged in) -->

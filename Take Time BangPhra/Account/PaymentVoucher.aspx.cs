@@ -20,11 +20,13 @@ namespace Take_Time_BangPhra.Account.Report
         _Default code = new _Default();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         DocumentHelper documentHelper;
+        AssetService assetService;
 
         protected void Page_Load(object sender, EventArgs e)
         {
             this.MaintainScrollPositionOnPostBack = true;
             documentHelper = new DocumentHelper(conn);
+            assetService = new AssetService();
             try
             {
                 if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
@@ -88,6 +90,9 @@ namespace Take_Time_BangPhra.Account.Report
                     DropDownList1.Items.Add(new ListItem( dtVendor.Rows[i]["Name"].ToString() , dtVendor.Rows[i]["ID"].ToString()));
                 }
                 DropDownList1.DataBind();
+
+                // Load Asset Categories
+                LoadAssetCategories();
 
                 string command = Request.QueryString["command"];
                 string uid = Request.QueryString["uid"];
@@ -559,7 +564,15 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                 }
                 catch { }
-                
+
+                // Create asset if checkbox is checked
+                if (chkRecordAsset.Checked)
+                {
+                    decimal purchasePrice = decimal.Parse(TextBox6.Text);
+                    int vendorId = Convert.ToInt32(DropDownList1.SelectedValue);
+                    CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
+                }
+
                 Response.Redirect("/Account/PaymentVoucher");
             }
             else
@@ -767,5 +780,126 @@ namespace Take_Time_BangPhra.Account.Report
                 }
             }
         }
+
+        #region Asset Management Integration
+
+        /// <summary>
+        /// Load asset categories into dropdown
+        /// </summary>
+        private void LoadAssetCategories()
+        {
+            try
+            {
+                DataTable dt = assetService.GetAssetCategories();
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    ddlAssetCategory.Items.Clear();
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        string text = row["CategoryCode"].ToString() + " - " + row["CategoryName"].ToString();
+                        ddlAssetCategory.Items.Add(new System.Web.UI.WebControls.ListItem(text, row["ID"].ToString()));
+                    }
+
+                    // Set default useful life from first category
+                    if (ddlAssetCategory.Items.Count > 0)
+                    {
+                        int defaultLife = Convert.ToInt32(dt.Rows[0]["DefaultUsefulLifeYears"]);
+                        txtAssetUsefulLife.Text = defaultLife.ToString();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadAssetCategories Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle checkbox change for recording asset
+        /// </summary>
+        protected void chkRecordAsset_CheckedChanged(object sender, EventArgs e)
+        {
+            pnlAssetDetails.Visible = chkRecordAsset.Checked;
+        }
+
+        /// <summary>
+        /// Handle category change to update default useful life
+        /// </summary>
+        protected void ddlAssetCategory_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(ddlAssetCategory.SelectedValue))
+                {
+                    DataTable dt = assetService.GetCategoryById(Convert.ToInt32(ddlAssetCategory.SelectedValue));
+                    if (dt != null && dt.Rows.Count > 0)
+                    {
+                        txtAssetUsefulLife.Text = dt.Rows[0]["DefaultUsefulLifeYears"].ToString();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Create asset from payment voucher
+        /// </summary>
+        private void CreateAssetFromPaymentVoucher(string paymentVoucherId, decimal purchasePrice, DateTime purchaseDate, int vendorId)
+        {
+            try
+            {
+                if (!chkRecordAsset.Checked)
+                    return;
+
+                if (string.IsNullOrWhiteSpace(txtAssetName.Text))
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "assetwarning",
+                        "alert('กรุณาระบุชื่อสินทรัพย์');", true);
+                    return;
+                }
+
+                short userId = Convert.ToInt16(Session["UserID"]);
+                int categoryId = Convert.ToInt32(ddlAssetCategory.SelectedValue);
+                int usefulLife = string.IsNullOrEmpty(txtAssetUsefulLife.Text) ? 5 : Convert.ToInt32(txtAssetUsefulLife.Text);
+                decimal residualValue = string.IsNullOrEmpty(txtAssetResidual.Text) ? 0 : decimal.Parse(txtAssetResidual.Text);
+
+                var result = assetService.CreateAsset(
+                    assetName: txtAssetName.Text.Trim(),
+                    description: null,
+                    categoryId: categoryId,
+                    serialNumber: txtAssetSerial.Text.Trim(),
+                    brand: txtAssetBrand.Text.Trim(),
+                    model: txtAssetModel.Text.Trim(),
+                    purchaseDate: purchaseDate,
+                    purchasePrice: purchasePrice,
+                    vendorId: vendorId,
+                    paymentVoucherId: paymentVoucherId,
+                    invoiceNumber: null,
+                    warrantyExpireDate: null,
+                    usefulLifeYears: usefulLife,
+                    residualValue: residualValue,
+                    location: txtAssetLocation.Text.Trim(),
+                    department: null,
+                    responsiblePersonId: null,
+                    notes: $"สร้างจากใบสำคัญจ่าย: {paymentVoucherId}",
+                    createdBy: userId
+                );
+
+                if (result.Success)
+                {
+                    System.Diagnostics.Debug.WriteLine($"✅ Asset created: {result.Message}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ Asset creation failed: {result.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"CreateAssetFromPaymentVoucher Error: {ex.Message}");
+            }
+        }
+
+        #endregion
     }
 }

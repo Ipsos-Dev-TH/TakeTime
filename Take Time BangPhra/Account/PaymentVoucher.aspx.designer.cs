@@ -274,5 +274,55 @@ namespace Take_Time_BangPhra.Account.Report
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::Microsoft.Reporting.WebForms.ReportViewer ReportViewer2;
+
+        /// <summary>
+        /// chkRecordAsset control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkRecordAsset;
+
+        /// <summary>
+        /// pnlAssetDetails control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlAssetDetails;
+
+        /// <summary>
+        /// ddlAssetCategory control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlAssetCategory;
+
+        /// <summary>
+        /// txtAssetName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetName;
+
+        /// <summary>
+        /// txtAssetBrand control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetBrand;
+
+        /// <summary>
+        /// txtAssetModel control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetModel;
+
+        /// <summary>
+        /// txtAssetSerial control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetSerial;
+
+        /// <summary>
+        /// txtAssetUsefulLife control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetUsefulLife;
+
+        /// <summary>
+        /// txtAssetResidual control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetResidual;
+
+        /// <summary>
+        /// txtAssetLocation control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtAssetLocation;
     }
 }

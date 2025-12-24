@@ -354,6 +354,70 @@
                     &nbsp;บาท</td>
             </tr>
 
+            <!-- Asset Recording Section -->
+            <tr>
+                <td colspan="2" style="padding: 15px 0;">
+                    <div style="border: 2px solid #667eea; border-radius: 8px; padding: 15px; background: linear-gradient(135deg, #f8f9ff 0%, #eef2ff 100%);">
+                        <div style="margin-bottom: 10px;">
+                            <asp:CheckBox ID="chkRecordAsset" runat="server" Text=" บันทึกเป็นสินทรัพย์ถาวร"
+                                Font-Bold="true" Font-Size="14px" AutoPostBack="true"
+                                OnCheckedChanged="chkRecordAsset_CheckedChanged" />
+                            <span style="color: #666; font-size: 12px; margin-left: 10px;">
+                                (สำหรับการซื้อทรัพย์สิน เช่น คอมพิวเตอร์ เฟอร์นิเจอร์ ยานพาหนะ ฯลฯ)
+                            </span>
+                        </div>
+                        <asp:Panel ID="pnlAssetDetails" runat="server" Visible="false">
+                            <table style="width: 100%;">
+                                <tr>
+                                    <td style="width: 20%; text-align: right; padding: 5px;">หมวดหมู่สินทรัพย์:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:DropDownList ID="ddlAssetCategory" runat="server" Width="50%"
+                                            AutoPostBack="true" OnSelectedIndexChanged="ddlAssetCategory_SelectedIndexChanged">
+                                        </asp:DropDownList>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: right; padding: 5px;">ชื่อสินทรัพย์:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetName" runat="server" Width="60%"
+                                            placeholder="เช่น คอมพิวเตอร์ตั้งโต๊ะ, แอร์ห้องประชุม"></asp:TextBox>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: right; padding: 5px;">ยี่ห้อ/รุ่น:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetBrand" runat="server" Width="30%" placeholder="ยี่ห้อ"></asp:TextBox>
+                                        <asp:TextBox ID="txtAssetModel" runat="server" Width="28%" placeholder="รุ่น"></asp:TextBox>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: right; padding: 5px;">หมายเลขซีเรียล:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetSerial" runat="server" Width="40%"></asp:TextBox>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: right; padding: 5px;">อายุการใช้งาน:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetUsefulLife" runat="server" Width="15%" TextMode="Number" Text="5"></asp:TextBox>
+                                        &nbsp;ปี
+                                        <span style="margin-left: 20px;">มูลค่าซาก:</span>
+                                        <asp:TextBox ID="txtAssetResidual" runat="server" Width="20%" TextMode="Number" Text="0"></asp:TextBox>
+                                        &nbsp;บาท
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: right; padding: 5px;">สถานที่ตั้ง:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetLocation" runat="server" Width="40%" placeholder="เช่น สำนักงาน, ห้องประชุม"></asp:TextBox>
+                                    </td>
+                                </tr>
+                            </table>
+                        </asp:Panel>
+                    </div>
+                </td>
+            </tr>
+
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">อัพโหลดไฟล์ที่เกี่ยวข้อง: </td>
                 <td class="upload-section">
