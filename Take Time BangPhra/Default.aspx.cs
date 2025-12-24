@@ -75,37 +75,85 @@ namespace Take_Time_BangPhra
                     Calendar1.DataBind();
                     Calendar1_SelectionChanged(null, null);
                 }
-                // SECURE: Get recent reviews with parameterized query
-                var reviewParams = new Dictionary<string, object>
-                {
-                    { "@WeekAgoDate", DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd") }
-                };
-                DataTable dtReviews = DatabaseQuerySafe(conn,
-                    code.AdaptSql("SELECT * FROM Reviews WHERE [Date] > @WeekAgoDate"),
-                    reviewParams);
-
+                // 🔄 Google Reviews - ดึงข้อมูลใหม่ทุก 7 วัน
                 string jsonResponse = "";
-                if ( dtReviews.Rows.Count > 0)
+                try
                 {
-                    jsonResponse = dtReviews.Rows[0]["json"].ToString();
-                }
-                else
-                {
-                    jsonResponse = await FetchGoogleReviews();
+                    // ดึงข้อมูล review ล่าสุด (TOP 1)
+                    DataTable dtReviews = DatabaseQuery(conn,
+                        code.AdaptSql("SELECT TOP 1 * FROM Reviews ORDER BY [Date] DESC"));
 
-                    // SECURE: Insert new review with parameterized query
-                    var insertReviewParams = new Dictionary<string, object>
+                    bool needRefresh = true;
+                    const int CACHE_DAYS = 7;  // Refresh every 7 days
+                    const double CACHE_HOURS = CACHE_DAYS * 24;  // 168 hours
+
+                    if (dtReviews.Rows.Count > 0)
                     {
-                        { "@ReviewDate", DateTime.Now },
-                        { "@JsonData", jsonResponse }
-                    };
-                    DatabaseInsertSafe(conn,
-                        code.AdaptSql("INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES (@ReviewDate,@JsonData)"),
-                        insertReviewParams);
+                        DateTime lastFetchDate = Convert.ToDateTime(dtReviews.Rows[0]["Date"]);
+                        double hoursSinceLastFetch = (DateTime.Now - lastFetchDate).TotalHours;
+                        double daysSinceLastFetch = hoursSinceLastFetch / 24;
+
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] Last fetch: {lastFetchDate:yyyy-MM-dd HH:mm}, Age: {daysSinceLastFetch:F1} days");
+
+                        // ใช้ cached ถ้าดึงมาภายใน 7 วัน
+                        if (hoursSinceLastFetch < CACHE_HOURS)
+                        {
+                            jsonResponse = dtReviews.Rows[0]["json"].ToString();
+                            needRefresh = false;
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ✅ Using cached data (age: {daysSinceLastFetch:F1} days, next refresh in {(CACHE_HOURS - hoursSinceLastFetch) / 24:F1} days)");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ⏰ Cache expired ({daysSinceLastFetch:F1} days > {CACHE_DAYS} days), need refresh");
+                        }
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ No cached data found, need to fetch");
+                    }
+
+                    if (needRefresh)
+                    {
+                        System.Diagnostics.Debug.WriteLine("[Google Reviews] 🔄 Fetching new data from Google API...");
+                        jsonResponse = await FetchGoogleReviews();
+
+                        // Check if fetch was successful (not error)
+                        if (!jsonResponse.Contains("\"error\""))
+                        {
+                            // ลบข้อมูลเก่าทั้งหมด แล้ว insert ใหม่
+                            DatabaseQuery(conn, code.AdaptSql("DELETE FROM Reviews"));
+
+                            var insertReviewParams = new Dictionary<string, object>
+                            {
+                                { "@ReviewDate", DateTime.Now },
+                                { "@JsonData", jsonResponse }
+                            };
+                            DatabaseInsertSafe(conn,
+                                code.AdaptSql("INSERT INTO [dbo].[Reviews] ([Date],[json]) VALUES (@ReviewDate,@JsonData)"),
+                                insertReviewParams);
+
+                            System.Diagnostics.Debug.WriteLine("[Google Reviews] ✅ New data saved to cache");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API Error: {jsonResponse}");
+                            // ถ้า API error แต่มี cached data เก่า → ใช้ cached แทน
+                            if (dtReviews.Rows.Count > 0)
+                            {
+                                jsonResponse = dtReviews.Rows[0]["json"].ToString();
+                                System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ Using old cached data due to API error");
+                            }
+                        }
+                    }
                 }
-                 
-            // Assign the response to a Literal as a JavaScript variable
-            Literal1.Text = $"<script>var jsoninput = {jsonResponse};</script>";
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ Exception: {ex.Message}");
+                    jsonResponse = "{\"error\": \"Unable to load reviews\"}";
+                }
+
+                // Assign the response to a Literal as a JavaScript variable
+                Literal1.Text = $"<script>var jsoninput = {jsonResponse};</script>";
 
             }
             try
