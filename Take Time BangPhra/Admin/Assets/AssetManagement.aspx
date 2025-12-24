@@ -397,7 +397,10 @@
     <div class="asset-management">
         <div class="page-header">
             <h2><i class="fas fa-boxes"></i> จัดการสินทรัพย์ถาวร</h2>
-            <asp:Button ID="btnAddNew" runat="server" Text="+ เพิ่มสินทรัพย์" CssClass="btn btn-success" OnClientClick="showAddModal(); return false;" />
+            <div style="display: flex; gap: 10px;">
+                <asp:Button ID="btnExportExcel" runat="server" Text="📥 Export Excel" CssClass="btn btn-secondary" OnClick="btnExportExcel_Click" ToolTip="ส่งออกข้อมูลสำหรับสำนักงานบัญชี/สรรพากร" />
+                <asp:Button ID="btnAddNew" runat="server" Text="+ เพิ่มสินทรัพย์" CssClass="btn btn-success" OnClientClick="showAddModal(); return false;" />
+            </div>
         </div>
 
         <!-- Message Panel -->

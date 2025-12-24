@@ -321,7 +321,8 @@ namespace Take_Time_BangPhra.Admin.Assets
 
         private void LoadAssetForEdit(int assetId)
         {
-            DataTable dt = assetService.GetAssetById(assetId);
+            // Use GetAssetFullDetails to get all columns including WarrantyExpireDate
+            DataTable dt = assetService.GetAssetFullDetails(assetId);
             if (dt != null && dt.Rows.Count > 0)
             {
                 DataRow row = dt.Rows[0];
@@ -349,11 +350,31 @@ namespace Take_Time_BangPhra.Admin.Assets
                 if (row["ResidualValue"] != DBNull.Value)
                     txtResidualValue.Text = Convert.ToDecimal(row["ResidualValue"]).ToString("0.00");
 
-                if (row["WarrantyExpireDate"] != DBNull.Value)
+                // Safely check for WarrantyExpireDate column
+                if (dt.Columns.Contains("WarrantyExpireDate") && row["WarrantyExpireDate"] != DBNull.Value)
                     txtWarrantyExpire.Text = Convert.ToDateTime(row["WarrantyExpireDate"]).ToString("yyyy-MM-dd");
+
+                // Set category dropdown
+                if (row["CategoryID"] != DBNull.Value)
+                {
+                    string categoryId = row["CategoryID"].ToString();
+                    var item = ddlCategory.Items.FindByValue(categoryId);
+                    if (item != null)
+                        ddlCategory.SelectedValue = categoryId;
+                }
+
+                // Set vendor dropdown
+                if (row["VendorID"] != DBNull.Value)
+                {
+                    string vendorId = row["VendorID"].ToString();
+                    var item = ddlVendor.Items.FindByValue(vendorId);
+                    if (item != null)
+                        ddlVendor.SelectedValue = vendorId;
+                }
 
                 // Category and Vendor are disabled for editing
                 ddlCategory.Enabled = false;
+                ddlVendor.Enabled = false;
                 txtPurchaseDate.Enabled = false;
                 txtPurchasePrice.Enabled = false;
                 txtUsefulLife.Enabled = false;
@@ -411,10 +432,87 @@ namespace Take_Time_BangPhra.Admin.Assets
 
             // Re-enable fields
             ddlCategory.Enabled = true;
+            ddlVendor.Enabled = true;
             txtPurchaseDate.Enabled = true;
             txtPurchasePrice.Enabled = true;
             txtUsefulLife.Enabled = true;
             txtResidualValue.Enabled = true;
+        }
+
+        /// <summary>
+        /// Export assets to Excel for accounting office and revenue department
+        /// ส่งออกข้อมูลสินทรัพย์สำหรับสำนักงานบัญชีและสรรพากร
+        /// </summary>
+        protected void btnExportExcel_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // Get filter values
+                string status = ddlFilterStatus.SelectedValue;
+                int? categoryId = string.IsNullOrEmpty(ddlFilterCategory.SelectedValue)
+                    ? (int?)null
+                    : Convert.ToInt32(ddlFilterCategory.SelectedValue);
+
+                // Get data for export
+                DataTable dt = assetService.GetAssetsForExport(DateTime.Now.Year, status, categoryId);
+
+                if (dt == null || dt.Rows.Count == 0)
+                {
+                    ShowMessage("ไม่พบข้อมูลสำหรับส่งออก", "error");
+                    return;
+                }
+
+                // Create Excel file
+                string fileName = $"ทะเบียนสินทรัพย์_{DateTime.Now:yyyyMMdd_HHmmss}.xls";
+
+                Response.Clear();
+                Response.Buffer = true;
+                Response.AddHeader("content-disposition", $"attachment;filename={fileName}");
+                Response.Charset = "";
+                Response.ContentType = "application/vnd.ms-excel";
+                Response.ContentEncoding = System.Text.Encoding.UTF8;
+
+                // Write BOM for UTF-8
+                Response.BinaryWrite(new byte[] { 0xEF, 0xBB, 0xBF });
+
+                using (System.IO.StringWriter sw = new System.IO.StringWriter())
+                {
+                    using (System.Web.UI.HtmlTextWriter hw = new System.Web.UI.HtmlTextWriter(sw))
+                    {
+                        // Create a form to export
+                        System.Web.UI.WebControls.GridView gv = new System.Web.UI.WebControls.GridView();
+                        gv.DataSource = dt;
+                        gv.DataBind();
+
+                        // Style the grid for Excel
+                        gv.HeaderStyle.BackColor = System.Drawing.Color.FromArgb(102, 126, 234);
+                        gv.HeaderStyle.ForeColor = System.Drawing.Color.White;
+                        gv.HeaderStyle.Font.Bold = true;
+                        gv.RowStyle.BackColor = System.Drawing.Color.White;
+                        gv.AlternatingRowStyle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+
+                        // Write title
+                        hw.Write("<h2 style='font-family: TH Sarabun New, Arial; text-align: center;'>ทะเบียนสินทรัพย์ถาวร</h2>");
+                        hw.Write($"<p style='font-family: TH Sarabun New, Arial; text-align: center;'>วันที่ส่งออก: {DateTime.Now:dd/MM/yyyy HH:mm}</p>");
+                        hw.Write("<br/>");
+
+                        gv.RenderControl(hw);
+
+                        Response.Output.Write(sw.ToString());
+                        Response.Flush();
+                        Response.End();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการส่งออก: " + ex.Message, "error");
+            }
+        }
+
+        public override void VerifyRenderingInServerForm(System.Web.UI.Control control)
+        {
+            // Required for GridView export
         }
 
         #endregion

@@ -77,7 +77,7 @@ namespace Take_Time_BangPhra.Class
         }
 
         /// <summary>
-        /// Get asset by ID
+        /// Get asset by ID (from summary view)
         /// </summary>
         public DataTable GetAssetById(int assetId)
         {
@@ -86,6 +86,26 @@ namespace Take_Time_BangPhra.Class
                 { "@ID", assetId }
             };
             return code.DatabaseQuerySafe(conn, "SELECT * FROM vw_AssetSummary WHERE ID = @ID", parameters);
+        }
+
+        /// <summary>
+        /// Get full asset details by ID (including all columns from Asset table)
+        /// </summary>
+        public DataTable GetAssetFullDetails(int assetId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@ID", assetId }
+            };
+            string query = @"
+                SELECT a.*,
+                       c.CategoryName, c.CategoryCode,
+                       v.Name as VendorName
+                FROM Asset a
+                LEFT JOIN Asset_Category c ON a.CategoryID = c.ID
+                LEFT JOIN Vendor v ON a.VendorID = v.ID
+                WHERE a.ID = @ID";
+            return code.DatabaseQuerySafe(conn, query, parameters);
         }
 
         /// <summary>
@@ -517,6 +537,80 @@ namespace Take_Time_BangPhra.Class
                 ORDER BY c.AccountCode, a.AssetCode";
 
             return code.DatabaseQuerySafe(conn, query, parameters);
+        }
+
+        /// <summary>
+        /// Get assets for export to Excel (full details for accounting office and revenue department)
+        /// รายละเอียดสินทรัพย์สำหรับส่งสำนักงานบัญชีและสรรพากร
+        /// </summary>
+        public DataTable GetAssetsForExport(int? year = null, string status = null, int? categoryId = null)
+        {
+            var parameters = new Dictionary<string, object>();
+            string whereClause = "WHERE 1=1";
+
+            if (year.HasValue)
+            {
+                whereClause += " AND YEAR(a.PurchaseDate) <= @Year";
+                parameters.Add("@Year", year.Value);
+            }
+
+            if (!string.IsNullOrEmpty(status))
+            {
+                whereClause += " AND a.Status = @Status";
+                parameters.Add("@Status", status);
+            }
+
+            if (categoryId.HasValue)
+            {
+                whereClause += " AND a.CategoryID = @CategoryID";
+                parameters.Add("@CategoryID", categoryId.Value);
+            }
+
+            string query = $@"
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY c.CategoryCode, a.AssetCode) AS ลำดับ,
+                    a.AssetCode AS รหัสสินทรัพย์,
+                    a.AssetName AS ชื่อสินทรัพย์,
+                    a.Brand AS ยี่ห้อ,
+                    a.Model AS รุ่น,
+                    a.SerialNumber AS หมายเลขซีเรียล,
+                    c.CategoryCode AS รหัสหมวดหมู่,
+                    c.CategoryName AS หมวดหมู่,
+                    c.AccountCode AS รหัสบัญชี,
+                    CONVERT(VARCHAR(10), a.PurchaseDate, 103) AS วันที่ซื้อ,
+                    a.PurchasePrice AS ราคาซื้อ,
+                    a.UsefulLifeYears AS อายุใช้งาน_ปี,
+                    a.ResidualValue AS มูลค่าซาก,
+                    a.MonthlyDepreciation AS ค่าเสื่อมรายเดือน,
+                    a.AccumulatedDepreciation AS ค่าเสื่อมสะสม,
+                    a.BookValue AS มูลค่าตามบัญชี,
+                    a.Location AS สถานที่ตั้ง,
+                    a.Department AS แผนก,
+                    v.Name AS ผู้ขาย,
+                    a.InvoiceNumber AS เลขที่ใบกำกับ,
+                    a.PaymentVoucherID AS เลขที่ใบสำคัญจ่าย,
+                    CONVERT(VARCHAR(10), a.WarrantyExpireDate, 103) AS วันหมดประกัน,
+                    CASE a.Status
+                        WHEN 'ACTIVE' THEN N'ใช้งานอยู่'
+                        WHEN 'DISPOSED' THEN N'จำหน่ายแล้ว'
+                        WHEN 'SOLD' THEN N'ขายแล้ว'
+                        WHEN 'WRITTEN_OFF' THEN N'ตัดจำหน่าย'
+                        ELSE a.Status
+                    END AS สถานะ,
+                    CONVERT(VARCHAR(10), a.DisposalDate, 103) AS วันที่จำหน่าย,
+                    a.DisposalPrice AS ราคาจำหน่าย,
+                    a.DisposalReason AS เหตุผลการจำหน่าย,
+                    a.Notes AS หมายเหตุ
+                FROM Asset a
+                INNER JOIN Asset_Category c ON a.CategoryID = c.ID
+                LEFT JOIN Vendor v ON a.VendorID = v.ID
+                {whereClause}
+                ORDER BY c.CategoryCode, a.AssetCode";
+
+            if (parameters.Count > 0)
+                return code.DatabaseQuerySafe(conn, query, parameters);
+            else
+                return code.DatabaseQuery(conn, query);
         }
 
         #endregion
