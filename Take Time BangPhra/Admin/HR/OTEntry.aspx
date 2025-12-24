@@ -268,6 +268,9 @@
             <h2>&#128337; บันทึกชั่วโมง OT</h2>
         </div>
 
+        <!-- Hidden field for tab state -->
+        <asp:HiddenField ID="hdnActiveTab" runat="server" Value="entry" />
+
         <!-- Message Panel -->
         <asp:Panel ID="pnlMessage" runat="server" Visible="false" CssClass="alert">
             <asp:Label ID="lblMessage" runat="server"></asp:Label>
@@ -497,6 +500,18 @@
                 document.getElementById('tabApproval').classList.add('active');
                 document.querySelectorAll('.tab')[2].classList.add('active');
             }
+
+            // Save to hidden field
+            var hdnTab = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnTab) hdnTab.value = tabName;
         }
+
+        // Restore tab on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            var hdnTab = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnTab && hdnTab.value) {
+                showTab(hdnTab.value);
+            }
+        });
     </script>
 </asp:Content>

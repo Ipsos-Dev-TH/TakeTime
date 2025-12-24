@@ -247,6 +247,9 @@
                 </div>
             </div>
 
+            <!-- Hidden field for tab state -->
+            <asp:HiddenField ID="hdnActiveTab" runat="server" Value="personal" />
+
             <!-- Details Tabs -->
             <div class="profile-details">
                 <div class="tabs">
@@ -493,6 +496,8 @@
     </div>
 
     <script type="text/javascript">
+        var tabNames = ['personal', 'employment', 'salary', 'leave', 'training', 'signature'];
+
         function showTab(tabName) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(function(tab) {
@@ -500,15 +505,36 @@
             });
 
             // Remove active from all buttons
-            document.querySelectorAll('.tab').forEach(function(btn) {
+            document.querySelectorAll('.tabs .tab').forEach(function(btn) {
                 btn.classList.remove('active');
             });
 
             // Show selected tab
-            document.getElementById('tab-' + tabName).style.display = 'block';
+            var tabElement = document.getElementById('tab-' + tabName);
+            if (tabElement) {
+                tabElement.style.display = 'block';
+            }
 
             // Set active button
-            event.target.classList.add('active');
+            var tabIndex = tabNames.indexOf(tabName);
+            if (tabIndex >= 0) {
+                var buttons = document.querySelectorAll('.tabs .tab');
+                if (buttons[tabIndex]) {
+                    buttons[tabIndex].classList.add('active');
+                }
+            }
+
+            // Save to hidden field
+            var hdnTab = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnTab) hdnTab.value = tabName;
         }
+
+        // Restore tab on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            var hdnTab = document.getElementById('<%= hdnActiveTab.ClientID %>');
+            if (hdnTab && hdnTab.value) {
+                showTab(hdnTab.value);
+            }
+        });
     </script>
 </asp:Content>
