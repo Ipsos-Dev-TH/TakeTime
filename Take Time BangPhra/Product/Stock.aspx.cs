@@ -60,6 +60,9 @@ namespace Take_Time_BangPhra.Product
                 GridView2.DataSource = dtIn;
                 GridView2.DataBind();
 
+                // Load statistics
+                LoadStatistics(dtIn);
+
                 // Load predicted low stock items (will run out in 3-4 weeks based on usage rate)
                 LoadPredictedLowStock();
 
@@ -294,6 +297,84 @@ namespace Take_Time_BangPhra.Product
                 ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีข้อมูลนำเข้า');", true);
             }
 
+        }
+
+        /// <summary>
+        /// Clear all items from cart
+        /// </summary>
+        protected void btnClear_Click(object sender, EventArgs e)
+        {
+            DataTable dtOrder = new DataTable();
+            dtOrder.Columns.Add("ID");
+            dtOrder.Columns.Add("Barcode");
+            dtOrder.Columns.Add("Product_Name");
+            dtOrder.Columns.Add("Amount");
+            dtOrder.Columns.Add("Sell_Price");
+            dtOrder.Columns.Add("Price_Total");
+            dtOrder.Columns.Add("Category_ID");
+            dtOrder.Columns.Add("Remark");
+            Session["dtOrder"] = dtOrder;
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+            TextBox1.Text = string.Empty;
+            TextBox2.Text = string.Empty;
+            TextBox3.Text = "0";
+            TextBox4.Text = string.Empty;
+        }
+
+        /// <summary>
+        /// Load stock statistics into stat cards
+        /// </summary>
+        private void LoadStatistics(DataTable dtStock)
+        {
+            try
+            {
+                int totalProducts = dtStock.Rows.Count;
+                int normalStock = 0;
+                int lowStock = 0;
+                int criticalStock = 0;
+
+                foreach (DataRow row in dtStock.Rows)
+                {
+                    int amount = Convert.ToInt32(row["Amount"]);
+                    if (amount < 5)
+                    {
+                        criticalStock++;
+                    }
+                    else
+                    {
+                        normalStock++;
+                    }
+                }
+
+                // Get predicted low stock count
+                string query = @"
+                    SELECT COUNT(*) as LowCount FROM (
+                        SELECT p.ID,
+                            ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) as CurrentStock,
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                    WHERE Product_ID = p.ID
+                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 as WeeklyUsage
+                        FROM Product p WHERE p.Status = 'True'
+                    ) AS StockAnalysis
+                    WHERE CurrentStock > 0 AND WeeklyUsage > 0 AND (CurrentStock / WeeklyUsage) <= 4";
+
+                DataTable dtLow = code.DatabaseQuery(conn, query);
+                if (dtLow != null && dtLow.Rows.Count > 0)
+                {
+                    lowStock = Convert.ToInt32(dtLow.Rows[0]["LowCount"]);
+                }
+
+                lblTotalProducts.Text = totalProducts.ToString();
+                lblNormalStock.Text = normalStock.ToString();
+                lblLowStock.Text = lowStock.ToString();
+                lblCriticalStock.Text = criticalStock.ToString();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadStatistics Error: {ex.Message}");
+            }
         }
 
         /// <summary>

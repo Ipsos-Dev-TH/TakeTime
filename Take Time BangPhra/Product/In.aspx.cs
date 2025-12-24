@@ -276,7 +276,25 @@ namespace Take_Time_BangPhra.Product
             {
                 ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีข้อมูลนำเข้า');", true);
             }
-            
+
+        }
+
+        protected void btnClear_Click(object sender, EventArgs e)
+        {
+            DataTable dtOrder = new DataTable();
+            dtOrder.Columns.Add("ID");
+            dtOrder.Columns.Add("Barcode");
+            dtOrder.Columns.Add("Product_Name");
+            dtOrder.Columns.Add("Amount");
+            dtOrder.Columns.Add("Sell_Price");
+            dtOrder.Columns.Add("Price_Total");
+            dtOrder.Columns.Add("Category_ID");
+            Session["dtOrder"] = dtOrder;
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+            TextBox1.Text = string.Empty;
+            TextBox2.Text = string.Empty;
+            TextBox3.Text = string.Empty;
         }
     }
 }

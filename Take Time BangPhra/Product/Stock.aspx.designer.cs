@@ -13,6 +13,25 @@ namespace Take_Time_BangPhra.Product
 
     public partial class Stock
     {
+        /// <summary>
+        /// lblTotalProducts control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTotalProducts;
+
+        /// <summary>
+        /// lblNormalStock control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblNormalStock;
+
+        /// <summary>
+        /// lblLowStock control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblLowStock;
+
+        /// <summary>
+        /// lblCriticalStock control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblCriticalStock;
 
         /// <summary>
         /// pnlPredictedLowStock control.
@@ -96,6 +115,11 @@ namespace Take_Time_BangPhra.Product
         protected global::System.Web.UI.WebControls.Button Button3;
 
         /// <summary>
+        /// pnlCart control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlCart;
+
+        /// <summary>
         /// GridView1 control.
         /// </summary>
         /// <remarks>
@@ -112,6 +136,11 @@ namespace Take_Time_BangPhra.Product
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Panel Panel1;
+
+        /// <summary>
+        /// btnClear control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnClear;
 
         /// <summary>
         /// Button2 control.

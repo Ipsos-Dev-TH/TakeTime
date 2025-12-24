@@ -303,6 +303,15 @@ namespace Take_Time_BangPhra.Product
         protected global::System.Web.UI.WebControls.TextBox TextBox11;
 
         /// <summary>
+        /// btnClear control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnClear;
+
+        /// <summary>
         /// Button2 control.
         /// </summary>
         /// <remarks>

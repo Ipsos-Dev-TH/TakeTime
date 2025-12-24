@@ -42,6 +42,51 @@ namespace Take_Time_BangPhra.Product
         protected global::System.Web.UI.WebControls.Button Button3;
 
         /// <summary>
+        /// pnlStats control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlStats;
+
+        /// <summary>
+        /// lblTotalSales control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Label lblTotalSales;
+
+        /// <summary>
+        /// lblTotalItems control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Label lblTotalItems;
+
+        /// <summary>
+        /// lblTotalQuantity control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Label lblTotalQuantity;
+
+        /// <summary>
+        /// lblTotalReceipts control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Label lblTotalReceipts;
+
+        /// <summary>
         /// GridView1 control.
         /// </summary>
         /// <remarks>

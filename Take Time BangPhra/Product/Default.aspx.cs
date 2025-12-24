@@ -1623,6 +1623,23 @@ namespace Take_Time_BangPhra.Product
             Page.SetFocus(TextBox1);
         }
 
+        protected void btnClear_Click(object sender, EventArgs e)
+        {
+            DataTable dtOrder = new DataTable();
+            dtOrder.Columns.Add("ID");
+            dtOrder.Columns.Add("Barcode");
+            dtOrder.Columns.Add("Product_Name");
+            dtOrder.Columns.Add("Amount");
+            dtOrder.Columns.Add("Sell_Price");
+            dtOrder.Columns.Add("Price_Total");
+            dtOrder.Columns.Add("Category_ID");
+            Session["dtOrder"] = dtOrder;
+            GridView1.DataSource = dtOrder;
+            GridView1.DataBind();
+            TextBox1.Text = string.Empty;
+            TextBox2.Text = "0";
+        }
+
         protected void TextBox1_TextChanged(object sender, EventArgs e)
         {
             renderProduct();

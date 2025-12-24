@@ -113,6 +113,42 @@ namespace Take_Time_BangPhra.Product
             }
             GridView1.DataSource = dt;
             GridView1.DataBind();
+
+            // Calculate and display statistics
+            LoadStatistics(dt);
+        }
+
+        private void LoadStatistics(DataTable dt)
+        {
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                pnlStats.Visible = false;
+                return;
+            }
+
+            pnlStats.Visible = true;
+
+            // Calculate totals
+            double totalSales = 0;
+            int totalQuantity = 0;
+            var uniqueReceipts = new HashSet<string>();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                totalSales += Convert.ToDouble(row["Price_Total"]);
+                totalQuantity += Convert.ToInt32(row["Amount"]);
+
+                string receiptId = row["Account_Receipt_ID"]?.ToString();
+                if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
+                {
+                    uniqueReceipts.Add(receiptId);
+                }
+            }
+
+            lblTotalSales.Text = totalSales.ToString("N2");
+            lblTotalItems.Text = dt.Rows.Count.ToString("N0");
+            lblTotalQuantity.Text = totalQuantity.ToString("N0");
+            lblTotalReceipts.Text = uniqueReceipts.Count.ToString("N0");
         }
     }
 }
