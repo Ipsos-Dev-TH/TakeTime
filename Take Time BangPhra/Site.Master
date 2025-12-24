@@ -402,8 +402,22 @@
   
 </head>
 
-<body onbeforeunload="setHourglass();" onunload="setHourglass();">
-           
+<body>
+    <script>
+        // Global setHourglass function - safe for all pages
+        function setHourglass() {
+            try {
+                document.body.style.cursor = 'wait';
+                // Try to disable submit buttons to prevent double-click
+                var submitBtns = document.querySelectorAll('input[type="submit"], button[type="submit"]');
+                for (var i = 0; i < submitBtns.length; i++) {
+                    submitBtns[i].disabled = true;
+                }
+            } catch (e) {
+                // Silently ignore errors
+            }
+        }
+    </script>
     <script src="../Scripts/AutoComplete.js"></script>
     <form runat="server" class="ExampleFont"><div class="ExampleFont">
         <asp:ScriptManager runat="server">
