@@ -85,26 +85,28 @@ namespace Take_Time_BangPhra
 
                     bool needRefresh = true;
                     const int CACHE_DAYS = 7;  // Refresh every 7 days
-                    const double CACHE_HOURS = CACHE_DAYS * 24;  // 168 hours
 
                     if (dtReviews.Rows.Count > 0)
                     {
                         DateTime lastFetchDate = Convert.ToDateTime(dtReviews.Rows[0]["Date"]);
-                        double hoursSinceLastFetch = (DateTime.Now - lastFetchDate).TotalHours;
-                        double daysSinceLastFetch = hoursSinceLastFetch / 24;
+                        DateTime cacheExpiryDate = lastFetchDate.AddDays(CACHE_DAYS);
+                        DateTime now = DateTime.Now;
 
-                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] Last fetch: {lastFetchDate:yyyy-MM-dd HH:mm}, Age: {daysSinceLastFetch:F1} days");
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] Last fetch: {lastFetchDate:yyyy-MM-dd HH:mm}");
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] Cache expires: {cacheExpiryDate:yyyy-MM-dd HH:mm}");
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] Current time: {now:yyyy-MM-dd HH:mm}");
 
-                        // ใช้ cached ถ้าดึงมาภายใน 7 วัน
-                        if (hoursSinceLastFetch < CACHE_HOURS)
+                        // ✅ เช็คว่า cache ยังไม่หมดอายุ และ lastFetchDate ไม่ใช่อนาคต
+                        if (lastFetchDate <= now && now < cacheExpiryDate)
                         {
                             jsonResponse = dtReviews.Rows[0]["json"].ToString();
                             needRefresh = false;
-                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ✅ Using cached data (age: {daysSinceLastFetch:F1} days, next refresh in {(CACHE_HOURS - hoursSinceLastFetch) / 24:F1} days)");
+                            double daysUntilExpiry = (cacheExpiryDate - now).TotalDays;
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ✅ Using cached data (expires in {daysUntilExpiry:F1} days)");
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ⏰ Cache expired ({daysSinceLastFetch:F1} days > {CACHE_DAYS} days), need refresh");
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ⏰ Cache expired or invalid date, need refresh");
                         }
                     }
                     else
