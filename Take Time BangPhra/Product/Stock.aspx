@@ -170,12 +170,24 @@
                 CssClass="stock-warning-table" GridLines="None" ShowHeaderWhenEmpty="false">
                 <Columns>
                     <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" />
-                    <asp:BoundField DataField="CurrentStock" HeaderText="สต็อกปัจจุบัน" DataFormatString="{0:N0}" ItemStyle-HorizontalAlign="Right" HeaderStyle-HorizontalAlign="Right" />
-                    <asp:BoundField DataField="WeeklyUsage" HeaderText="ใช้เฉลี่ย/สัปดาห์" DataFormatString="{0:N1}" ItemStyle-HorizontalAlign="Right" HeaderStyle-HorizontalAlign="Right" />
+                    <asp:TemplateField HeaderText="สต็อกปัจจุบัน">
+                        <ItemTemplate>
+                            <%# Convert.ToInt32(Eval("CurrentStock")) %>
+                        </ItemTemplate>
+                        <ItemStyle HorizontalAlign="Right" />
+                        <HeaderStyle HorizontalAlign="Right" />
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="ใช้เฉลี่ย/สัปดาห์">
+                        <ItemTemplate>
+                            <%# string.Format("{0:N1}", Eval("WeeklyUsage")) %>
+                        </ItemTemplate>
+                        <ItemStyle HorizontalAlign="Right" />
+                        <HeaderStyle HorizontalAlign="Right" />
+                    </asp:TemplateField>
                     <asp:TemplateField HeaderText="คาดว่าจะหมดใน">
                         <ItemTemplate>
                             <span class='<%# Convert.ToDecimal(Eval("WeeksRemaining")) <= 2 ? "weeks-badge weeks-critical" : "weeks-badge weeks-warning" %>'>
-                                <%# Eval("WeeksRemaining", "{0:N1}") %> สัปดาห์
+                                <%# string.Format("{0:N1}", Eval("WeeksRemaining")) %> สัปดาห์
                             </span>
                         </ItemTemplate>
                         <ItemStyle HorizontalAlign="Center" />
