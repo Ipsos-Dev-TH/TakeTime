@@ -1216,7 +1216,7 @@ public class LeaveService
                     return (false, "คุณไม่มีสิทธิ์อนุมัติคำขอลานี้");
                 }
 
-                // Check leave quota before approval
+                // Check leave quota before approval - if no quota record exists, create one from Leave_Types.AnnualQuota
                 cmd.Parameters.Clear();
                 cmd.CommandText = @"
                     SELECT RemainingDays FROM Employee_Leave_Quota
@@ -1226,8 +1226,35 @@ public class LeaveService
                 cmd.Parameters.AddWithValue("@Year", year);
 
                 object remainingResult = cmd.ExecuteScalar();
-                decimal remainingDays = remainingResult != null && remainingResult != DBNull.Value
-                    ? Convert.ToDecimal(remainingResult) : 0;
+                decimal remainingDays = 0;
+
+                if (remainingResult == null || remainingResult == DBNull.Value)
+                {
+                    // No quota record exists - get default quota from Leave_Types and create record
+                    cmd.Parameters.Clear();
+                    cmd.CommandText = "SELECT ISNULL(AnnualQuota, 0) FROM Leave_Types WHERE ID = @LeaveTypeID";
+                    cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                    object annualQuotaResult = cmd.ExecuteScalar();
+                    decimal annualQuota = annualQuotaResult != null && annualQuotaResult != DBNull.Value
+                        ? Convert.ToDecimal(annualQuotaResult) : 0;
+
+                    // Create quota record for this employee
+                    cmd.Parameters.Clear();
+                    cmd.CommandText = @"
+                        INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
+                        VALUES (@AdminID, @LeaveTypeID, @Year, @AnnualQuota, 0, @AnnualQuota, 0)";
+                    cmd.Parameters.AddWithValue("@AdminID", adminId);
+                    cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                    cmd.Parameters.AddWithValue("@Year", year);
+                    cmd.Parameters.AddWithValue("@AnnualQuota", annualQuota);
+                    cmd.ExecuteNonQuery();
+
+                    remainingDays = annualQuota;
+                }
+                else
+                {
+                    remainingDays = Convert.ToDecimal(remainingResult);
+                }
 
                 if (remainingDays < totalDays)
                 {
