@@ -267,7 +267,7 @@ namespace Take_Time_BangPhra.Admin
                     });
                 }
 
-                // 2. Check for low stock items
+                // 2. Check for low stock items (< 5 units)
                 int lowStockCount = GetLowStockItemsCount();
                 if (lowStockCount > 0)
                 {
@@ -276,12 +276,26 @@ namespace Take_Time_BangPhra.Admin
                         Type = "danger",
                         Icon = "📦",
                         Title = "สินค้าใกล้หมด",
-                        Description = $"มีสินค้า {lowStockCount} รายการที่สต็อกเหลือน้อย",
+                        Description = $"มีสินค้า {lowStockCount} รายการที่สต็อกเหลือน้อย (< 5 หน่วย)",
                         ActionUrl = "/Product/Stock"
                     });
                 }
 
-                // 3. Check today's operations
+                // 3. Check for predicted low stock (will run out in 3-4 weeks based on usage rate)
+                int predictedLowStockCount = GetPredictedLowStockItemsCount();
+                if (predictedLowStockCount > 0)
+                {
+                    alerts.Add(new AlertItem
+                    {
+                        Type = "warning",
+                        Icon = "📊",
+                        Title = "สินค้าคาดว่าจะหมดเร็วๆนี้",
+                        Description = $"มีสินค้า {predictedLowStockCount} รายการที่คาดว่าจะหมดใน 3-4 สัปดาห์ (จากอัตราการใช้งาน)",
+                        ActionUrl = "/Product/Stock"
+                    });
+                }
+
+                // 4. Check today's operations
                 int todayCheckIns = GetCheckInsCount(DateTime.Today);
                 int todayCheckOuts = GetCheckOutsCount(DateTime.Today);
                 if (todayCheckIns > 0 || todayCheckOuts > 0)
@@ -622,6 +636,53 @@ namespace Take_Time_BangPhra.Admin
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"❌ GetLowStockItemsCount Error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Get count of items predicted to run out in 3-4 weeks based on usage rate
+        /// Formula: WeeksRemaining = CurrentStock / WeeklyUsageRate
+        /// Alert if WeeksRemaining <= 4 weeks
+        /// </summary>
+        private int GetPredictedLowStockItemsCount()
+        {
+            try
+            {
+                // Calculate based on average weekly usage over the last 8 weeks
+                // If WeeksRemaining <= 4, it's predicted to run out soon
+                string query = @"
+                    SELECT COUNT(*) as PredictedLowStockCount
+                    FROM (
+                        SELECT
+                            p.ID,
+                            p.Product_Name,
+                            -- Current stock level
+                            ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) as CurrentStock,
+                            -- Average weekly usage (last 8 weeks)
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                    WHERE Product_ID = p.ID
+                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 as WeeklyUsage
+                        FROM Product p
+                        WHERE p.Status = 'True'
+                    ) as StockAnalysis
+                    WHERE CurrentStock > 0
+                      AND WeeklyUsage > 0
+                      AND (CurrentStock / WeeklyUsage) <= 4";
+
+                DataTable dt = codeInstance.DatabaseQuery(conn, query);
+
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    return Convert.ToInt32(dt.Rows[0]["PredictedLowStockCount"]);
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ GetPredictedLowStockItemsCount Error: {ex.Message}");
                 return 0;
             }
         }

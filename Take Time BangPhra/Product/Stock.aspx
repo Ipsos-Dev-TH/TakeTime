@@ -115,12 +115,77 @@
         tr.spaceUnder>td {
   padding-bottom: 1em;
 }
-        </style>
+            /* Predicted Low Stock Alert */
+        .stock-warning-panel {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .stock-warning-panel h4 {
+            color: #856404;
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        .stock-warning-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .stock-warning-table th {
+            background-color: #ffc107;
+            color: #333;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+        }
+        .stock-warning-table td {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+        .stock-warning-table tr:hover {
+            background-color: #fffbe6;
+        }
+        .weeks-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .weeks-critical { background-color: #dc3545; color: white; }
+        .weeks-warning { background-color: #ffc107; color: #333; }
+    </style>
     <p>
         <br />
 
+        <!-- Predicted Low Stock Warning Panel -->
+        <asp:Panel ID="pnlPredictedLowStock" runat="server" CssClass="stock-warning-panel" Visible="false">
+            <h4>📊 สินค้าที่คาดว่าจะหมดใน 3-4 สัปดาห์ (คำนวณจากอัตราการใช้งาน)</h4>
+            <asp:GridView ID="gvPredictedLowStock" runat="server" AutoGenerateColumns="False"
+                CssClass="stock-warning-table" GridLines="None" ShowHeaderWhenEmpty="false">
+                <Columns>
+                    <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" />
+                    <asp:BoundField DataField="CurrentStock" HeaderText="สต็อกปัจจุบัน" DataFormatString="{0:N0}" ItemStyle-HorizontalAlign="Right" HeaderStyle-HorizontalAlign="Right" />
+                    <asp:BoundField DataField="WeeklyUsage" HeaderText="ใช้เฉลี่ย/สัปดาห์" DataFormatString="{0:N1}" ItemStyle-HorizontalAlign="Right" HeaderStyle-HorizontalAlign="Right" />
+                    <asp:TemplateField HeaderText="คาดว่าจะหมดใน">
+                        <ItemTemplate>
+                            <span class='<%# Convert.ToDecimal(Eval("WeeksRemaining")) <= 2 ? "weeks-badge weeks-critical" : "weeks-badge weeks-warning" %>'>
+                                <%# Eval("WeeksRemaining", "{0:N1}") %> สัปดาห์
+                            </span>
+                        </ItemTemplate>
+                        <ItemStyle HorizontalAlign="Center" />
+                        <HeaderStyle HorizontalAlign="Center" />
+                    </asp:TemplateField>
+                </Columns>
+            </asp:GridView>
+        </asp:Panel>
 
-       
+
      <style>
 
 

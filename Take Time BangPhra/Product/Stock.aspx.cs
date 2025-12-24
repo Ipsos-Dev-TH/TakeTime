@@ -60,6 +60,9 @@ namespace Take_Time_BangPhra.Product
                 GridView2.DataSource = dtIn;
                 GridView2.DataBind();
 
+                // Load predicted low stock items (will run out in 3-4 weeks based on usage rate)
+                LoadPredictedLowStock();
+
                 if (!IsPostBack)
                 {
                     DataTable dtOrder = new DataTable();
@@ -290,7 +293,74 @@ namespace Take_Time_BangPhra.Product
             {
                 ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีข้อมูลนำเข้า');", true);
             }
-            
+
+        }
+
+        /// <summary>
+        /// Load predicted low stock items based on usage rate
+        /// Formula: WeeksRemaining = CurrentStock / WeeklyUsageRate
+        /// Show items where WeeksRemaining <= 4 weeks
+        /// </summary>
+        private void LoadPredictedLowStock()
+        {
+            try
+            {
+                // Calculate based on average weekly usage over the last 8 weeks
+                string query = @"
+                    SELECT
+                        p.Product_Name,
+                        -- Current stock level
+                        ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                        ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) as CurrentStock,
+                        -- Average weekly usage (last 8 weeks)
+                        ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                WHERE Product_ID = p.ID
+                                AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 as WeeklyUsage,
+                        -- Weeks remaining
+                        CASE
+                            WHEN ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                    WHERE Product_ID = p.ID
+                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 > 0
+                            THEN (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                                  ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) /
+                                 (ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                        WHERE Product_ID = p.ID
+                                        AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0)
+                            ELSE 999
+                        END as WeeksRemaining
+                    FROM Product p
+                    WHERE p.Status = 'True'
+                    HAVING
+                        (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                         ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) > 0
+                        AND ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                WHERE Product_ID = p.ID
+                                AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 > 0
+                        AND ((ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                              ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) /
+                             (ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                    WHERE Product_ID = p.ID
+                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0)) <= 4
+                    ORDER BY WeeksRemaining ASC";
+
+                DataTable dtPredicted = code.DatabaseQuery(conn, query);
+
+                if (dtPredicted != null && dtPredicted.Rows.Count > 0)
+                {
+                    gvPredictedLowStock.DataSource = dtPredicted;
+                    gvPredictedLowStock.DataBind();
+                    pnlPredictedLowStock.Visible = true;
+                }
+                else
+                {
+                    pnlPredictedLowStock.Visible = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadPredictedLowStock Error: {ex.Message}");
+                pnlPredictedLowStock.Visible = false;
+            }
         }
     }
 }
