@@ -384,6 +384,16 @@
                                     </td>
                                 </tr>
                                 <tr>
+                                    <td style="text-align: right; padding: 5px;">จำนวน:</td>
+                                    <td style="padding: 5px;">
+                                        <asp:TextBox ID="txtAssetQuantity" runat="server" Width="15%" TextMode="Number" Text="1" style="text-align: center;"></asp:TextBox>
+                                        &nbsp;ชิ้น
+                                        <span style="color: #666; font-size: 12px; margin-left: 10px;">
+                                            (ถ้ามากกว่า 1 ชิ้น ระบบจะสร้างสินทรัพย์แยกแต่ละชิ้น และคำนวณราคาต่อชิ้นอัตโนมัติ)
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
                                     <td style="text-align: right; padding: 5px;">ยี่ห้อ/รุ่น:</td>
                                     <td style="padding: 5px;">
                                         <asp:TextBox ID="txtAssetBrand" runat="server" Width="30%" placeholder="ยี่ห้อ"></asp:TextBox>

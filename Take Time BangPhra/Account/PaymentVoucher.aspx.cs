@@ -905,9 +905,10 @@ namespace Take_Time_BangPhra.Account.Report
         }
 
         /// <summary>
-        /// Create asset from payment voucher
+        /// Create asset(s) from payment voucher
+        /// Supports creating multiple assets if quantity > 1
         /// </summary>
-        private void CreateAssetFromPaymentVoucher(string paymentVoucherId, decimal purchasePrice, DateTime purchaseDate, int vendorId)
+        private void CreateAssetFromPaymentVoucher(string paymentVoucherId, decimal totalPurchasePrice, DateTime purchaseDate, int vendorId)
         {
             try
             {
@@ -931,37 +932,71 @@ namespace Take_Time_BangPhra.Account.Report
                 short userId = Convert.ToInt16(Session["UserID"]);
                 int categoryId = Convert.ToInt32(ddlAssetCategory.SelectedValue);
                 int usefulLife = string.IsNullOrEmpty(txtAssetUsefulLife.Text) ? 5 : Convert.ToInt32(txtAssetUsefulLife.Text);
-                decimal residualValue = string.IsNullOrEmpty(txtAssetResidual.Text) ? 0 : decimal.Parse(txtAssetResidual.Text);
+                decimal totalResidualValue = string.IsNullOrEmpty(txtAssetResidual.Text) ? 0 : decimal.Parse(txtAssetResidual.Text);
 
-                var result = assetService.CreateAsset(
-                    assetName: txtAssetName.Text.Trim(),
-                    description: null,
-                    categoryId: categoryId,
-                    serialNumber: txtAssetSerial.Text.Trim(),
-                    brand: txtAssetBrand.Text.Trim(),
-                    model: txtAssetModel.Text.Trim(),
-                    purchaseDate: purchaseDate,
-                    purchasePrice: purchasePrice,
-                    vendorId: vendorId,
-                    paymentVoucherId: paymentVoucherId,
-                    invoiceNumber: null,
-                    warrantyExpireDate: null,
-                    usefulLifeYears: usefulLife,
-                    residualValue: residualValue,
-                    location: txtAssetLocation.Text.Trim(),
-                    department: null,
-                    responsiblePersonId: null,
-                    notes: $"สร้างจากใบสำคัญจ่าย: {paymentVoucherId}",
-                    createdBy: userId
-                );
-
-                if (result.Success)
+                // Get quantity (default to 1)
+                int quantity = 1;
+                if (!string.IsNullOrEmpty(txtAssetQuantity.Text))
                 {
-                    System.Diagnostics.Debug.WriteLine($"✅ Asset created: {result.Message}");
+                    int.TryParse(txtAssetQuantity.Text, out quantity);
+                    if (quantity < 1) quantity = 1;
                 }
-                else
+
+                // Calculate price per unit
+                decimal pricePerUnit = Math.Round(totalPurchasePrice / quantity, 2);
+                decimal residualPerUnit = Math.Round(totalResidualValue / quantity, 2);
+
+                string baseAssetName = txtAssetName.Text.Trim();
+                int successCount = 0;
+
+                for (int i = 1; i <= quantity; i++)
                 {
-                    System.Diagnostics.Debug.WriteLine($"❌ Asset creation failed: {result.Message}");
+                    // Add sequence number if multiple items
+                    string assetName = quantity > 1
+                        ? $"{baseAssetName} ({i}/{quantity})"
+                        : baseAssetName;
+
+                    // For serial number, only use for first item or leave blank for others
+                    string serialNumber = (i == 1) ? txtAssetSerial.Text.Trim() : "";
+
+                    var result = assetService.CreateAsset(
+                        assetName: assetName,
+                        description: null,
+                        categoryId: categoryId,
+                        serialNumber: serialNumber,
+                        brand: txtAssetBrand.Text.Trim(),
+                        model: txtAssetModel.Text.Trim(),
+                        purchaseDate: purchaseDate,
+                        purchasePrice: pricePerUnit,
+                        vendorId: vendorId,
+                        paymentVoucherId: paymentVoucherId,
+                        invoiceNumber: null,
+                        warrantyExpireDate: null,
+                        usefulLifeYears: usefulLife,
+                        residualValue: residualPerUnit,
+                        location: txtAssetLocation.Text.Trim(),
+                        department: null,
+                        responsiblePersonId: null,
+                        notes: quantity > 1
+                            ? $"สร้างจากใบสำคัญจ่าย: {paymentVoucherId} (ชิ้นที่ {i}/{quantity})"
+                            : $"สร้างจากใบสำคัญจ่าย: {paymentVoucherId}",
+                        createdBy: userId
+                    );
+
+                    if (result.Success)
+                    {
+                        successCount++;
+                        System.Diagnostics.Debug.WriteLine($"✅ Asset {i}/{quantity} created: {result.Message}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"❌ Asset {i}/{quantity} creation failed: {result.Message}");
+                    }
+                }
+
+                if (successCount > 0 && quantity > 1)
+                {
+                    System.Diagnostics.Debug.WriteLine($"✅ Created {successCount}/{quantity} assets successfully");
                 }
             }
             catch (Exception ex)
