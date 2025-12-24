@@ -129,6 +129,15 @@
                             </ItemTemplate>
                             <ItemStyle HorizontalAlign="Center" />
                         </asp:TemplateField>
+                        <asp:TemplateField HeaderText="จัดการ" Visible="false">
+                            <ItemTemplate>
+                                <asp:Button ID="btnDelete" runat="server" Text="🗑️ ลบ"
+                                    CommandName="DeleteItem" CommandArgument='<%# Container.DataItemIndex %>'
+                                    CssClass="btn btn-danger btn-sm"
+                                    OnClientClick="return confirm('ยืนยันการลบรายการนี้?');" />
+                            </ItemTemplate>
+                            <ItemStyle HorizontalAlign="Center" />
+                        </asp:TemplateField>
                     </Columns>
                     <EmptyDataTemplate>
                         <div class="empty-state">
