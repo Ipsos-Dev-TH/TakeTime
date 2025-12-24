@@ -628,6 +628,9 @@
                                                     <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
                                                         <i class="fas fa-user-tie"></i> จัดการพนักงาน
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/HR/SupervisorManagement">
+                                                        <i class="fas fa-sitemap"></i> กำหนดหัวหน้า-ลูกน้อง
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
                                                         <i class="fas fa-calendar-minus"></i> จัดการการลา
                                                     </a></li>
@@ -656,6 +659,9 @@
                                 <ul class="dropdown-menu">
                                     <li><a runat="server" href="~/Admin/Leave/LeaveRequest">
                                         <i class="fas fa-calendar-minus"></i> ขอลางาน
+                                    </a></li>
+                                    <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
+                                        <i class="fas fa-user-check"></i> อนุมัติการลา
                                     </a></li>
                                 </ul>
                             </li>
