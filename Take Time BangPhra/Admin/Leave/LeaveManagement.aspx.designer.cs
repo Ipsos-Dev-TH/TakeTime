@@ -10,49 +10,68 @@ namespace Take_Time_BangPhra.Admin.Leave
 {
     public partial class LeaveManagement
     {
-        /// <summary>
-        /// lblPendingRequests control.
-        /// </summary>
+        // Tab buttons
+        protected global::System.Web.UI.WebControls.Button btnTabRequests;
+        protected global::System.Web.UI.WebControls.Button btnTabLeaveTypes;
+        protected global::System.Web.UI.WebControls.Button btnTabQuotas;
+        protected global::System.Web.UI.WebControls.HiddenField hdnActiveTab;
+
+        // Tab panels
+        protected global::System.Web.UI.WebControls.Panel pnlRequests;
+        protected global::System.Web.UI.WebControls.Panel pnlLeaveTypes;
+        protected global::System.Web.UI.WebControls.Panel pnlQuotas;
+
+        // Leave Requests tab controls
         protected global::System.Web.UI.WebControls.Label lblPendingRequests;
-
-        /// <summary>
-        /// lblApprovedThisYear control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.Label lblApprovedThisYear;
-
-        /// <summary>
-        /// lblRejectedThisYear control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.Label lblRejectedThisYear;
-
-        /// <summary>
-        /// lblTotalDays control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.Label lblTotalDays;
-
-        /// <summary>
-        /// ddlStatus control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlStatus;
-
-        /// <summary>
-        /// ddlYear control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlYear;
-
-        /// <summary>
-        /// txtSearchEmployee control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtSearchEmployee;
-
-        /// <summary>
-        /// btnSearch control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.Button btnSearch;
-
-        /// <summary>
-        /// gvLeaveRequests control.
-        /// </summary>
         protected global::System.Web.UI.WebControls.GridView gvLeaveRequests;
+
+        // Leave Types tab controls
+        protected global::System.Web.UI.WebControls.Button btnAddLeaveType;
+        protected global::System.Web.UI.WebControls.GridView gvLeaveTypes;
+
+        // Employee Quotas tab controls
+        protected global::System.Web.UI.WebControls.Button btnInitializeQuotas;
+        protected global::System.Web.UI.WebControls.DropDownList ddlQuotaYear;
+        protected global::System.Web.UI.WebControls.DropDownList ddlQuotaLeaveType;
+        protected global::System.Web.UI.WebControls.TextBox txtQuotaSearch;
+        protected global::System.Web.UI.WebControls.Button btnQuotaSearch;
+        protected global::System.Web.UI.WebControls.GridView gvQuotas;
+
+        // Leave Type Modal controls
+        protected global::System.Web.UI.WebControls.Panel pnlLeaveTypeModal;
+        protected global::System.Web.UI.WebControls.Label lblLeaveTypeModalTitle;
+        protected global::System.Web.UI.WebControls.Button btnCloseLeaveTypeModal;
+        protected global::System.Web.UI.WebControls.HiddenField hdnLeaveTypeId;
+        protected global::System.Web.UI.WebControls.TextBox txtLeaveTypeCode;
+        protected global::System.Web.UI.WebControls.TextBox txtDisplayOrder;
+        protected global::System.Web.UI.WebControls.TextBox txtLeaveTypeName;
+        protected global::System.Web.UI.WebControls.TextBox txtLeaveTypeDesc;
+        protected global::System.Web.UI.WebControls.TextBox txtAnnualQuota;
+        protected global::System.Web.UI.WebControls.CheckBox chkDeductSalary;
+        protected global::System.Web.UI.WebControls.CheckBox chkRequiresMedicalCert;
+        protected global::System.Web.UI.WebControls.CheckBox chkRequiresApproval;
+        protected global::System.Web.UI.WebControls.CheckBox chkIsActive;
+        protected global::System.Web.UI.WebControls.Button btnCancelLeaveType;
+        protected global::System.Web.UI.WebControls.Button btnSaveLeaveType;
+
+        // Quota Modal controls
+        protected global::System.Web.UI.WebControls.Panel pnlQuotaModal;
+        protected global::System.Web.UI.WebControls.Button btnCloseQuotaModal;
+        protected global::System.Web.UI.WebControls.HiddenField hdnQuotaAdminId;
+        protected global::System.Web.UI.WebControls.HiddenField hdnQuotaLeaveTypeId;
+        protected global::System.Web.UI.WebControls.Label lblQuotaEmployee;
+        protected global::System.Web.UI.WebControls.Label lblQuotaLeaveType;
+        protected global::System.Web.UI.WebControls.TextBox txtQuotaTotalDays;
+        protected global::System.Web.UI.WebControls.TextBox txtQuotaCarryForward;
+        protected global::System.Web.UI.WebControls.Label lblQuotaUsed;
+        protected global::System.Web.UI.WebControls.Button btnCancelQuota;
+        protected global::System.Web.UI.WebControls.Button btnSaveQuota;
     }
 }

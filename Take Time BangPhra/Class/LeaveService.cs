@@ -107,6 +107,314 @@ public class LeaveService
         }
     }
 
+    /// <summary>
+    /// Get all leave types including inactive (for management)
+    /// </summary>
+    public DataTable GetAllLeaveTypesForManagement()
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT
+                        ID, LeaveTypeName, LeaveTypeCode, Description,
+                        DeductSalary, RequiresMedicalCert, AnnualQuota,
+                        RequiresApproval, IsActive, DisplayOrder
+                    FROM Leave_Types
+                    ORDER BY DisplayOrder, LeaveTypeName";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Create new leave type
+    /// </summary>
+    public (bool Success, string Message) CreateLeaveType(
+        string leaveTypeName,
+        string leaveTypeCode,
+        string description,
+        bool deductSalary,
+        bool requiresMedicalCert,
+        decimal annualQuota,
+        bool requiresApproval,
+        int displayOrder)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        INSERT INTO Leave_Types
+                        (LeaveTypeName, LeaveTypeCode, Description, DeductSalary,
+                         RequiresMedicalCert, AnnualQuota, RequiresApproval, IsActive, DisplayOrder)
+                        VALUES
+                        (@Name, @Code, @Desc, @Deduct, @MedCert, @Quota, @Approval, 1, @Order)";
+
+                    cmd.Parameters.AddWithValue("@Name", leaveTypeName);
+                    cmd.Parameters.AddWithValue("@Code", leaveTypeCode ?? "");
+                    cmd.Parameters.AddWithValue("@Desc", description ?? "");
+                    cmd.Parameters.AddWithValue("@Deduct", deductSalary);
+                    cmd.Parameters.AddWithValue("@MedCert", requiresMedicalCert);
+                    cmd.Parameters.AddWithValue("@Quota", annualQuota);
+                    cmd.Parameters.AddWithValue("@Approval", requiresApproval);
+                    cmd.Parameters.AddWithValue("@Order", displayOrder);
+
+                    cmd.ExecuteNonQuery();
+                    return (true, "สร้างประเภทการลาสำเร็จ");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"เกิดข้อผิดพลาด: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Update leave type
+    /// </summary>
+    public (bool Success, string Message) UpdateLeaveType(
+        byte leaveTypeId,
+        string leaveTypeName,
+        string leaveTypeCode,
+        string description,
+        bool deductSalary,
+        bool requiresMedicalCert,
+        decimal annualQuota,
+        bool requiresApproval,
+        bool isActive,
+        int displayOrder)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        UPDATE Leave_Types SET
+                            LeaveTypeName = @Name,
+                            LeaveTypeCode = @Code,
+                            Description = @Desc,
+                            DeductSalary = @Deduct,
+                            RequiresMedicalCert = @MedCert,
+                            AnnualQuota = @Quota,
+                            RequiresApproval = @Approval,
+                            IsActive = @Active,
+                            DisplayOrder = @Order
+                        WHERE ID = @ID";
+
+                    cmd.Parameters.AddWithValue("@ID", leaveTypeId);
+                    cmd.Parameters.AddWithValue("@Name", leaveTypeName);
+                    cmd.Parameters.AddWithValue("@Code", leaveTypeCode ?? "");
+                    cmd.Parameters.AddWithValue("@Desc", description ?? "");
+                    cmd.Parameters.AddWithValue("@Deduct", deductSalary);
+                    cmd.Parameters.AddWithValue("@MedCert", requiresMedicalCert);
+                    cmd.Parameters.AddWithValue("@Quota", annualQuota);
+                    cmd.Parameters.AddWithValue("@Approval", requiresApproval);
+                    cmd.Parameters.AddWithValue("@Active", isActive);
+                    cmd.Parameters.AddWithValue("@Order", displayOrder);
+
+                    cmd.ExecuteNonQuery();
+                    return (true, "อัพเดทประเภทการลาสำเร็จ");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"เกิดข้อผิดพลาด: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Delete (deactivate) leave type
+    /// </summary>
+    public (bool Success, string Message) DeleteLeaveType(byte leaveTypeId)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = "UPDATE Leave_Types SET IsActive = 0 WHERE ID = @ID";
+                    cmd.Parameters.AddWithValue("@ID", leaveTypeId);
+                    cmd.ExecuteNonQuery();
+                    return (true, "ลบประเภทการลาสำเร็จ");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"เกิดข้อผิดพลาด: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get all employees with their leave quotas for a year
+    /// </summary>
+    public DataTable GetAllEmployeeQuotas(int year)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT
+                        A.ID AS AdminID,
+                        A.UserName,
+                        E.Name AS EmployeeName,
+                        E.NickName,
+                        LT.ID AS LeaveTypeID,
+                        LT.LeaveTypeName,
+                        ISNULL(ELQ.TotalDays, LT.AnnualQuota) AS TotalDays,
+                        ISNULL(ELQ.UsedDays, 0) AS UsedDays,
+                        ISNULL(ELQ.RemainingDays, LT.AnnualQuota) AS RemainingDays,
+                        ISNULL(ELQ.CarryForwardDays, 0) AS CarryForwardDays
+                    FROM Admin A
+                    INNER JOIN Employee E ON E.Admin_ID = A.ID
+                    CROSS JOIN Leave_Types LT
+                    LEFT JOIN Employee_Leave_Quota ELQ ON ELQ.Admin_ID = A.ID
+                        AND ELQ.LeaveType_ID = LT.ID
+                        AND ELQ.Year = @Year
+                    WHERE A.Status = 'True' AND LT.IsActive = 1
+                    ORDER BY E.Name, LT.DisplayOrder";
+                cmd.Parameters.AddWithValue("@Year", year);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Update employee leave quota
+    /// </summary>
+    public (bool Success, string Message) UpdateEmployeeQuota(
+        short adminId,
+        byte leaveTypeId,
+        int year,
+        decimal totalDays,
+        decimal carryForwardDays)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+
+                // Check if quota exists
+                using (SqlCommand checkCmd = new SqlCommand(
+                    "SELECT COUNT(*) FROM Employee_Leave_Quota WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year", conn))
+                {
+                    checkCmd.Parameters.AddWithValue("@AdminID", adminId);
+                    checkCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                    checkCmd.Parameters.AddWithValue("@Year", year);
+
+                    int count = (int)checkCmd.ExecuteScalar();
+
+                    if (count > 0)
+                    {
+                        // Update existing
+                        using (SqlCommand updateCmd = new SqlCommand(@"
+                            UPDATE Employee_Leave_Quota SET
+                                TotalDays = @Total,
+                                RemainingDays = @Total - UsedDays,
+                                CarryForwardDays = @Carry
+                            WHERE Admin_ID = @AdminID AND LeaveType_ID = @LeaveTypeID AND Year = @Year", conn))
+                        {
+                            updateCmd.Parameters.AddWithValue("@AdminID", adminId);
+                            updateCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                            updateCmd.Parameters.AddWithValue("@Year", year);
+                            updateCmd.Parameters.AddWithValue("@Total", totalDays);
+                            updateCmd.Parameters.AddWithValue("@Carry", carryForwardDays);
+                            updateCmd.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        // Insert new
+                        using (SqlCommand insertCmd = new SqlCommand(@"
+                            INSERT INTO Employee_Leave_Quota
+                            (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
+                            VALUES (@AdminID, @LeaveTypeID, @Year, @Total, 0, @Total, @Carry)", conn))
+                        {
+                            insertCmd.Parameters.AddWithValue("@AdminID", adminId);
+                            insertCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                            insertCmd.Parameters.AddWithValue("@Year", year);
+                            insertCmd.Parameters.AddWithValue("@Total", totalDays);
+                            insertCmd.Parameters.AddWithValue("@Carry", carryForwardDays);
+                            insertCmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+                return (true, "อัพเดทโควต้าสำเร็จ");
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"เกิดข้อผิดพลาด: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Initialize default quotas for all employees for a year
+    /// </summary>
+    public (bool Success, string Message, int Count) InitializeQuotasForYear(int year)
+    {
+        try
+        {
+            int count = 0;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand(@"
+                    INSERT INTO Employee_Leave_Quota (Admin_ID, LeaveType_ID, Year, TotalDays, UsedDays, RemainingDays, CarryForwardDays)
+                    SELECT
+                        A.ID, LT.ID, @Year, LT.AnnualQuota, 0, LT.AnnualQuota, 0
+                    FROM Admin A
+                    INNER JOIN Employee E ON E.Admin_ID = A.ID
+                    CROSS JOIN Leave_Types LT
+                    WHERE A.Status = 'True' AND LT.IsActive = 1
+                        AND NOT EXISTS (
+                            SELECT 1 FROM Employee_Leave_Quota ELQ
+                            WHERE ELQ.Admin_ID = A.ID AND ELQ.LeaveType_ID = LT.ID AND ELQ.Year = @Year
+                        )", conn))
+                {
+                    cmd.Parameters.AddWithValue("@Year", year);
+                    count = cmd.ExecuteNonQuery();
+                }
+            }
+            return (true, $"สร้างโควต้าเริ่มต้นสำเร็จ {count} รายการ", count);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"เกิดข้อผิดพลาด: {ex.Message}", 0);
+        }
+    }
+
     #endregion
 
     #region Leave Quota Management
