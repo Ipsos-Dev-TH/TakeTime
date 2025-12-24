@@ -306,41 +306,36 @@ namespace Take_Time_BangPhra.Product
             try
             {
                 // Calculate based on average weekly usage over the last 8 weeks
+                // Use subquery with WHERE instead of HAVING (HAVING requires GROUP BY)
                 string query = @"
-                    SELECT
-                        p.Product_Name,
-                        -- Current stock level
-                        ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
-                        ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) as CurrentStock,
-                        -- Average weekly usage (last 8 weeks)
-                        ISNULL((SELECT SUM(Amount) FROM Product_Out
-                                WHERE Product_ID = p.ID
-                                AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 as WeeklyUsage,
-                        -- Weeks remaining
-                        CASE
-                            WHEN ISNULL((SELECT SUM(Amount) FROM Product_Out
+                    SELECT * FROM (
+                        SELECT
+                            p.Product_Name,
+                            -- Current stock level
+                            ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) as CurrentStock,
+                            -- Average weekly usage (last 8 weeks)
+                            ISNULL((SELECT SUM(Amount) FROM Product_Out
                                     WHERE Product_ID = p.ID
-                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 > 0
-                            THEN (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
-                                  ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) /
-                                 (ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 as WeeklyUsage,
+                            -- Weeks remaining
+                            CASE
+                                WHEN ISNULL((SELECT SUM(Amount) FROM Product_Out
                                         WHERE Product_ID = p.ID
-                                        AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0)
-                            ELSE 999
-                        END as WeeksRemaining
-                    FROM Product p
-                    WHERE p.Status = 'True'
-                    HAVING
-                        (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
-                         ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) > 0
-                        AND ISNULL((SELECT SUM(Amount) FROM Product_Out
-                                WHERE Product_ID = p.ID
-                                AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 > 0
-                        AND ((ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
-                              ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) /
-                             (ISNULL((SELECT SUM(Amount) FROM Product_Out
-                                    WHERE Product_ID = p.ID
-                                    AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0)) <= 4
+                                        AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0 > 0
+                                THEN (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                                      ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) /
+                                     (ISNULL((SELECT SUM(Amount) FROM Product_Out
+                                            WHERE Product_ID = p.ID
+                                            AND DateTime_Out >= DATEADD(WEEK, -8, GETDATE())), 0) / 8.0)
+                                ELSE 999
+                            END as WeeksRemaining
+                        FROM Product p
+                        WHERE p.Status = 'True'
+                    ) AS StockAnalysis
+                    WHERE CurrentStock > 0
+                      AND WeeklyUsage > 0
+                      AND WeeksRemaining <= 4
                     ORDER BY WeeksRemaining ASC";
 
                 DataTable dtPredicted = code.DatabaseQuery(conn, query);
