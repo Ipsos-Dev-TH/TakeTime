@@ -421,6 +421,67 @@ public class OTService
         }
     }
 
+    /// <summary>
+    /// Get distinct years from OT_Entry table
+    /// </summary>
+    public DataTable GetDistinctOTYears()
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT DISTINCT YEAR(OTDate) AS Year
+                    FROM OT_Entry
+                    UNION
+                    SELECT YEAR(GETDATE()) AS Year
+                    ORDER BY Year DESC";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get distinct years for supervisor's subordinates OT
+    /// </summary>
+    public DataTable GetDistinctOTYearsForSupervisor(short supervisorAdminId)
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT DISTINCT YEAR(O.OTDate) AS Year
+                    FROM OT_Entry O
+                    INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                    WHERE ES.Supervisor_AdminID = @SupervisorID AND ES.IsActive = 1
+                    UNION
+                    SELECT YEAR(GETDATE()) AS Year
+                    ORDER BY Year DESC";
+                cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
     #endregion
 
     #region Statistics

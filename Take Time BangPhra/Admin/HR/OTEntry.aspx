@@ -421,6 +421,8 @@
                     </asp:DropDownList>
                     <asp:DropDownList ID="ddlApprovalMonth" runat="server" CssClass="form-control" AutoPostBack="true" OnSelectedIndexChanged="ddlApprovalMonth_SelectedIndexChanged">
                     </asp:DropDownList>
+                    <asp:DropDownList ID="ddlApprovalYear" runat="server" CssClass="form-control" AutoPostBack="true" OnSelectedIndexChanged="ddlApprovalYear_SelectedIndexChanged">
+                    </asp:DropDownList>
                 </div>
                 <div class="data-table">
                     <asp:GridView ID="gvSubordinateOT" runat="server" AutoGenerateColumns="False"

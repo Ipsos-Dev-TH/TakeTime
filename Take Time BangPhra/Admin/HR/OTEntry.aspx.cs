@@ -106,24 +106,34 @@ namespace Take_Time_BangPhra.Admin.HR
             int currentYear = DateTime.Now.Year;
             int currentMonth = DateTime.Now.Month;
 
+            string[] thaiMonths = { "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                                    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม" };
+
             // My OT - Month dropdown
             ddlMyMonth.Items.Clear();
             ddlMyMonth.Items.Add(new ListItem("ทุกเดือน", ""));
-            string[] thaiMonths = { "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-                                    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม" };
             for (int i = 1; i <= 12; i++)
             {
                 ddlMyMonth.Items.Add(new ListItem(thaiMonths[i - 1], i.ToString()));
             }
             ddlMyMonth.SelectedValue = currentMonth.ToString();
 
-            // My OT - Year dropdown
+            // My OT - Year dropdown (using distinct years from data)
             ddlMyYear.Items.Clear();
-            for (int year = currentYear - 2; year <= currentYear; year++)
+            DataTable myYears = otService.GetDistinctOTYears();
+            foreach (DataRow row in myYears.Rows)
             {
+                int year = Convert.ToInt32(row["Year"]);
                 ddlMyYear.Items.Add(new ListItem((year + 543).ToString(), year.ToString()));
             }
-            ddlMyYear.SelectedValue = currentYear.ToString();
+            if (ddlMyYear.Items.FindByValue(currentYear.ToString()) != null)
+            {
+                ddlMyYear.SelectedValue = currentYear.ToString();
+            }
+            else if (ddlMyYear.Items.Count > 0)
+            {
+                ddlMyYear.SelectedIndex = 0;
+            }
 
             // Approval - Month dropdown
             ddlApprovalMonth.Items.Clear();
@@ -133,6 +143,23 @@ namespace Take_Time_BangPhra.Admin.HR
                 ddlApprovalMonth.Items.Add(new ListItem(thaiMonths[i - 1], i.ToString()));
             }
             ddlApprovalMonth.SelectedValue = currentMonth.ToString();
+
+            // Approval - Year dropdown (using distinct years from subordinates' data)
+            ddlApprovalYear.Items.Clear();
+            DataTable approvalYears = otService.GetDistinctOTYearsForSupervisor(currentAdminId);
+            foreach (DataRow row in approvalYears.Rows)
+            {
+                int year = Convert.ToInt32(row["Year"]);
+                ddlApprovalYear.Items.Add(new ListItem((year + 543).ToString(), year.ToString()));
+            }
+            if (ddlApprovalYear.Items.FindByValue(currentYear.ToString()) != null)
+            {
+                ddlApprovalYear.SelectedValue = currentYear.ToString();
+            }
+            else if (ddlApprovalYear.Items.Count > 0)
+            {
+                ddlApprovalYear.SelectedIndex = 0;
+            }
         }
 
         #endregion
@@ -195,7 +222,7 @@ namespace Take_Time_BangPhra.Admin.HR
             {
                 string status = ddlApprovalStatus.SelectedValue;
                 int? month = string.IsNullOrEmpty(ddlApprovalMonth.SelectedValue) ? (int?)null : Convert.ToInt32(ddlApprovalMonth.SelectedValue);
-                int year = DateTime.Now.Year;
+                int? year = string.IsNullOrEmpty(ddlApprovalYear.SelectedValue) ? (int?)null : Convert.ToInt32(ddlApprovalYear.SelectedValue);
 
                 DataTable dt = otService.GetOTEntriesForSupervisor(currentAdminId, status, month, year);
                 gvSubordinateOT.DataSource = dt;
@@ -303,6 +330,11 @@ namespace Take_Time_BangPhra.Admin.HR
         }
 
         protected void ddlApprovalMonth_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            LoadSubordinateOT();
+        }
+
+        protected void ddlApprovalYear_SelectedIndexChanged(object sender, EventArgs e)
         {
             LoadSubordinateOT();
         }
