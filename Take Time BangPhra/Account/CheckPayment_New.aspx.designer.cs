@@ -60,6 +60,24 @@ namespace Take_Time_BangPhra.Account
         protected global::System.Web.UI.WebControls.TextBox txtVendorSearch;
 
         /// <summary>
+        /// ddlExpenseType control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.DropDownList ddlExpenseType;
+
+        /// <summary>
+        /// txtMinAmount control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtMinAmount;
+
+        /// <summary>
         /// btnSearch control.
         /// </summary>
         /// <remarks>

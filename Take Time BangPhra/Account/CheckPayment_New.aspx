@@ -288,6 +288,17 @@
             </div>
 
             <div class="search-row">
+                <span class="search-label">ประเภทค่าใช้จ่าย:</span>
+                <asp:DropDownList ID="ddlExpenseType" runat="server" CssClass="search-input" Width="250px">
+                    <asp:ListItem Value="">-- ทั้งหมด --</asp:ListItem>
+                </asp:DropDownList>
+                <span class="search-label" style="margin-left: 20px;">ยอดรวมมากกว่า:</span>
+                <asp:TextBox ID="txtMinAmount" runat="server" CssClass="search-input"
+                    placeholder="0.00" Width="150px" TextMode="Number" step="0.01"></asp:TextBox>
+                <span style="color: #7f8c8d; font-size: 13px;">บาท</span>
+            </div>
+
+            <div class="search-row">
                 <span style="color: #7f8c8d; font-size: 14px;">
                     <i class="fa fa-info-circle"></i>
                     <strong>หมายเหตุ:</strong> ยอดรวมคำนวณเฉพาะเอกสารปกติ (ไม่รวมที่ยกเลิก) / ตารางแสดงทั้งหมดรวมเอกสารที่ยกเลิก
