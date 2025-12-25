@@ -257,7 +257,17 @@ namespace Take_Time_BangPhra.Admin.HR
                 if (hasSignature)
                 {
                     string signatureUrl = signatureService.GetSignatureUrl(adminId);
-                    imgCurrentSignature.ImageUrl = ResolveUrl(signatureUrl);
+                    // Check if it's a base64 data URL or virtual path
+                    if (signatureUrl.StartsWith("data:"))
+                    {
+                        // Base64 data URL - use directly without ResolveUrl
+                        imgCurrentSignature.ImageUrl = signatureUrl;
+                    }
+                    else
+                    {
+                        // Virtual path - resolve it
+                        imgCurrentSignature.ImageUrl = ResolveUrl(signatureUrl);
+                    }
                     imgCurrentSignature.Visible = true;
                     currentSignatureSection.Visible = true;
                     noSignatureSection.Visible = false;

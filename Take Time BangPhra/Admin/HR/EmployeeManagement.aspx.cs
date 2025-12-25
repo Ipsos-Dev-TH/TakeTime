@@ -1007,7 +1007,14 @@ namespace Take_Time_BangPhra.Admin.HR
                 return;
             }
 
-            string signatureDir = Server.MapPath("~/Documents/Staff/Signature");
+            // Use physical path from config to avoid permission issues
+            string signatureDir = ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+            if (string.IsNullOrEmpty(signatureDir))
+            {
+                // Fallback to Server.MapPath if config not set
+                signatureDir = Server.MapPath("~/Documents/Staff/Signature");
+            }
+
             string[] extensions = { ".png", ".jpg", ".jpeg" };
 
             foreach (var ext in extensions)
@@ -1015,15 +1022,29 @@ namespace Take_Time_BangPhra.Admin.HR
                 string filePath = Path.Combine(signatureDir, employeeName + ext);
                 if (File.Exists(filePath))
                 {
-                    // Add timestamp to prevent caching
-                    imgSignature.ImageUrl = $"~/Documents/Staff/Signature/{employeeName}{ext}?t={DateTime.Now.Ticks}";
-                    imgSignature.Visible = true;
-                    btnDeleteSignature.Visible = true;
+                    // Read file and convert to base64 data URL to avoid permission issues
+                    try
+                    {
+                        byte[] imageBytes = File.ReadAllBytes(filePath);
+                        string base64 = Convert.ToBase64String(imageBytes);
+                        string mimeType = ext == ".png" ? "image/png" : "image/jpeg";
+                        imgSignature.ImageUrl = $"data:{mimeType};base64,{base64}";
+                        imgSignature.Visible = true;
+                        btnDeleteSignature.Visible = true;
 
-                    // Hide "no signature" text
-                    string script = "document.getElementById('noSignatureText').style.display = 'none';";
-                    ScriptManager.RegisterStartupScript(this, GetType(), "HideNoSignature", script, true);
-                    return;
+                        // Hide "no signature" text
+                        string script = "document.getElementById('noSignatureText').style.display = 'none';";
+                        ScriptManager.RegisterStartupScript(this, GetType(), "HideNoSignature", script, true);
+                        return;
+                    }
+                    catch
+                    {
+                        // If reading fails, try virtual path as fallback
+                        imgSignature.ImageUrl = $"~/Documents/Staff/Signature/{employeeName}{ext}?t={DateTime.Now.Ticks}";
+                        imgSignature.Visible = true;
+                        btnDeleteSignature.Visible = true;
+                        return;
+                    }
                 }
             }
 
@@ -1154,7 +1175,7 @@ namespace Take_Time_BangPhra.Admin.HR
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand(@"
-                    SELECT ID, DocumentType, DocumentName, FileName, FilePath, FileSize,
+                    SELECT ID, DocumentType, DocumentName, OriginalFileName AS FileName, FilePath, FileSize,
                            UploadedDate, ExpiryDate, Description
                     FROM Employee_Documents
                     WHERE Admin_ID = @AdminID AND IsActive = 1

@@ -494,20 +494,73 @@ public class SignatureService
     }
 
     /// <summary>
-    /// Get signature URL for web display
+    /// Get signature URL for web display (returns base64 data URL to avoid permission issues)
     /// </summary>
     public string GetSignatureUrl(short adminId)
     {
         string path = GetSignaturePath(adminId);
         if (!string.IsNullOrEmpty(path))
         {
-            // Convert physical path to URL
-            if (path.StartsWith("~"))
+            // Get physical path
+            string physicalPath = MapPath(path);
+            if (File.Exists(physicalPath))
             {
-                return path;
+                try
+                {
+                    // Read file and convert to base64 data URL
+                    byte[] imageBytes = File.ReadAllBytes(physicalPath);
+                    string base64 = Convert.ToBase64String(imageBytes);
+                    string extension = Path.GetExtension(physicalPath).ToLower();
+                    string mimeType = extension == ".png" ? "image/png" : "image/jpeg";
+                    return $"data:{mimeType};base64,{base64}";
+                }
+                catch
+                {
+                    // Fallback to virtual path
+                    if (path.StartsWith("~"))
+                    {
+                        return path;
+                    }
+                    return "~/" + path.Replace("\\", "/").TrimStart('/');
+                }
             }
-            return "~/" + path.Replace("\\", "/").TrimStart('/');
         }
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Get signature as base64 data URL directly from physical path
+    /// </summary>
+    public string GetSignatureAsBase64(string employeeName)
+    {
+        if (string.IsNullOrEmpty(employeeName))
+            return string.Empty;
+
+        string[] extensions = { ".png", ".jpg", ".jpeg" };
+
+        // Use physical path directly from config
+        string signatureDir = signatureFolderPath;
+
+        foreach (var ext in extensions)
+        {
+            string filePath = Path.Combine(signatureDir, employeeName + ext);
+            if (File.Exists(filePath))
+            {
+                try
+                {
+                    byte[] imageBytes = File.ReadAllBytes(filePath);
+                    string base64 = Convert.ToBase64String(imageBytes);
+                    string mimeType = ext == ".png" ? "image/png" : "image/jpeg";
+                    return $"data:{mimeType};base64,{base64}";
+                }
+                catch
+                {
+                    // If reading fails, return empty
+                    return string.Empty;
+                }
+            }
+        }
+
         return string.Empty;
     }
 
