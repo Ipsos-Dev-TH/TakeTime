@@ -405,7 +405,7 @@ namespace Take_Time_BangPhra.Admin.Assets
                     disposePrice = decimal.Parse(txtDisposePrice.Text);
                 }
 
-                int userId = Convert.ToInt32(Session["UserID"]);
+                short userId = Convert.ToInt16(Session["UserID"]);
 
                 var result = assetService.DisposeAsset(
                     assetId: assetId,
@@ -413,7 +413,7 @@ namespace Take_Time_BangPhra.Admin.Assets
                     disposalDate: DateTime.Parse(txtDisposeDate.Text),
                     disposalPrice: disposePrice,
                     reason: txtDisposeReason.Text.Trim(),
-                    disposedBy: userId
+                    modifiedBy: userId
                 );
 
                 if (result.Success)
