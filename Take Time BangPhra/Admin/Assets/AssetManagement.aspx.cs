@@ -165,6 +165,14 @@ namespace Take_Time_BangPhra.Admin.Assets
 
         #region Event Handlers
 
+        protected void btnAddNew_Click(object sender, EventArgs e)
+        {
+            ClearForm();
+            // Show modal via script
+            ScriptManager.RegisterStartupScript(this, GetType(), "showModal",
+                "document.getElementById('assetModal').style.display = 'block'; document.body.style.overflow = 'hidden';", true);
+        }
+
         protected void ddlFilterCategory_SelectedIndexChanged(object sender, EventArgs e)
         {
             LoadAssets();

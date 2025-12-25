@@ -392,23 +392,135 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Calculate monthly depreciation for all active assets
+        /// Updates existing records and inserts new ones
         /// </summary>
         public (bool Success, string Message, int AffectedAssets) CalculateMonthlyDepreciation(int year, int month)
         {
             try
             {
+                DateTime calculationDate = new DateTime(year, month, 1);
+                DateTime endOfMonth = calculationDate.AddMonths(1).AddDays(-1);
+                int affectedCount = 0;
+
+                // Get all active assets that need depreciation calculation
+                string query = @"
+                    SELECT ID, MonthlyDepreciation, AccumulatedDepreciation, BookValue, ResidualValue,
+                           DepreciationStartDate
+                    FROM Assets
+                    WHERE Status = 'ACTIVE'
+                      AND DepreciationStartDate <= @EndOfMonth
+                      AND BookValue > ResidualValue";
+
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@Year", year },
-                    { "@Month", month }
+                    { "@EndOfMonth", endOfMonth }
                 };
 
-                DataTable dt = code.DatabaseQuerySafe(conn,
-                    "EXEC sp_CalculateMonthlyDepreciation @Year, @Month",
-                    parameters);
+                DataTable dtAssets = code.DatabaseQuerySafe(conn, query, parameters);
 
-                int affected = dt != null && dt.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["AffectedAssets"]) : 0;
-                return (true, $"คำนวณค่าเสื่อมราคาสำเร็จ {affected} รายการ", affected);
+                if (dtAssets != null && dtAssets.Rows.Count > 0)
+                {
+                    foreach (DataRow row in dtAssets.Rows)
+                    {
+                        int assetId = Convert.ToInt32(row["ID"]);
+                        decimal monthlyDep = Convert.ToDecimal(row["MonthlyDepreciation"]);
+                        decimal currentAccumulated = Convert.ToDecimal(row["AccumulatedDepreciation"]);
+                        decimal currentBookValue = Convert.ToDecimal(row["BookValue"]);
+                        decimal residualValue = Convert.ToDecimal(row["ResidualValue"]);
+
+                        // Calculate new values
+                        decimal newAccumulated = currentAccumulated + monthlyDep;
+                        decimal newBookValue = currentBookValue - monthlyDep;
+
+                        // Don't go below residual value
+                        if (newBookValue < residualValue)
+                        {
+                            newBookValue = residualValue;
+                            monthlyDep = currentBookValue - residualValue;
+                            if (monthlyDep < 0) monthlyDep = 0;
+                            newAccumulated = currentAccumulated + monthlyDep;
+                        }
+
+                        // Check if record already exists for this year/month
+                        var checkParams = new Dictionary<string, object>
+                        {
+                            { "@AssetID", assetId },
+                            { "@Year", year },
+                            { "@Month", month }
+                        };
+
+                        DataTable dtExists = code.DatabaseQuerySafe(conn,
+                            "SELECT ID FROM Asset_Depreciation WHERE AssetID = @AssetID AND [Year] = @Year AND [Month] = @Month",
+                            checkParams);
+
+                        if (dtExists != null && dtExists.Rows.Count > 0)
+                        {
+                            // Update existing record
+                            var updateParams = new Dictionary<string, object>
+                            {
+                                { "@AssetID", assetId },
+                                { "@Year", year },
+                                { "@Month", month },
+                                { "@DepreciationAmount", monthlyDep },
+                                { "@AccumulatedDepreciation", newAccumulated },
+                                { "@BookValue", newBookValue },
+                                { "@CalculatedDate", DateTime.Now }
+                            };
+
+                            code.DatabaseInsertSafe(conn,
+                                @"UPDATE Asset_Depreciation SET
+                                    DepreciationAmount = @DepreciationAmount,
+                                    AccumulatedDepreciation = @AccumulatedDepreciation,
+                                    BookValue = @BookValue,
+                                    IsCalculated = 1,
+                                    CalculatedDate = @CalculatedDate
+                                  WHERE AssetID = @AssetID AND [Year] = @Year AND [Month] = @Month",
+                                updateParams);
+                        }
+                        else
+                        {
+                            // Insert new record
+                            var insertParams = new Dictionary<string, object>
+                            {
+                                { "@AssetID", assetId },
+                                { "@Year", year },
+                                { "@Month", month },
+                                { "@DepreciationAmount", monthlyDep },
+                                { "@AccumulatedDepreciation", newAccumulated },
+                                { "@BookValue", newBookValue },
+                                { "@CalculatedDate", DateTime.Now }
+                            };
+
+                            code.DatabaseInsertSafe(conn,
+                                @"INSERT INTO Asset_Depreciation (AssetID, [Year], [Month], DepreciationAmount,
+                                    AccumulatedDepreciation, BookValue, IsCalculated, CalculatedDate)
+                                  VALUES (@AssetID, @Year, @Month, @DepreciationAmount,
+                                    @AccumulatedDepreciation, @BookValue, 1, @CalculatedDate)",
+                                insertParams);
+                        }
+
+                        // Update the Assets table
+                        var assetUpdateParams = new Dictionary<string, object>
+                        {
+                            { "@ID", assetId },
+                            { "@AccumulatedDepreciation", newAccumulated },
+                            { "@BookValue", newBookValue },
+                            { "@ModifiedDate", DateTime.Now }
+                        };
+
+                        code.DatabaseInsertSafe(conn,
+                            @"UPDATE Assets SET
+                                AccumulatedDepreciation = @AccumulatedDepreciation,
+                                BookValue = @BookValue,
+                                ModifiedDate = @ModifiedDate
+                              WHERE ID = @ID",
+                            assetUpdateParams);
+
+                        affectedCount++;
+                    }
+                }
+
+                return (true, $"คำนวณค่าเสื่อมราคาสำเร็จ {affectedCount} รายการ", affectedCount);
             }
             catch (Exception ex)
             {
