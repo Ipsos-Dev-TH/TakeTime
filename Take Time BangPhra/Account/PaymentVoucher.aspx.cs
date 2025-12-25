@@ -193,12 +193,28 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 if (command == "edit")
                 {
-
+                    // Set voucher number from existing ID (if not being edited)
+                    if (!chkEditVoucherNo.Checked)
+                    {
+                        var getIdParams = new Dictionary<string, object>
+                        {
+                            { "@UID", Request.QueryString["uid"] ?? "" }
+                        };
+                        string existingId = code.DatabaseQuerySafe(conn,
+                            "SELECT ID FROM [Account_Payment] WHERE UID = @UID",
+                            getIdParams).Rows[0][0].ToString();
+                        txtVoucherNo.Text = existingId;
+                    }
                 }
                 else
                 {
                     Session["dtDetail"] = dtDetail;
                     TextBox8.Text = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                    // Generate voucher number for new voucher
+                    DateTime docDate = DateTime.Now;
+                    string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
+                    txtVoucherNo.Text = docNum;
                 }
                 try
                 {
@@ -341,16 +357,27 @@ namespace Take_Time_BangPhra.Account.Report
                 DateTime createDate = Convert.ToDateTime(TextBox8.Text);
                 DateTime docDate = Convert.ToDateTime(TextBox8.Text);
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
-                string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
+                string docNum;
+
+                // Priority 1: If user has edited the voucher number, use their value
+                if (chkEditVoucherNo.Checked && !string.IsNullOrWhiteSpace(txtVoucherNo.Text))
+                {
+                    docNum = txtVoucherNo.Text.Trim();
+                }
+                // Priority 2: If edit mode and not editing number, use existing ID
+                else if (command == "edit")
+                {
+                    docNum = id;
+                }
+                // Priority 3: Generate new number
+                else
+                {
+                    docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
+                }
 
                 // Extract Year/Month for directory structure
                 string Year = docDate.Year.ToString();
                 string Month = docDate.Month.ToString();
-
-                if (command == "edit")
-                {
-                    docNum = id;
-                }
 
                 // SECURE: Insert payment record with parameterized query
                 var paymentInsertParams = new Dictionary<string, object>
@@ -1002,6 +1029,54 @@ namespace Take_Time_BangPhra.Account.Report
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"CreateAssetFromPaymentVoucher Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle Edit checkbox change for voucher number
+        /// Toggle ReadOnly state of txtVoucherNo
+        /// </summary>
+        protected void chkEditVoucherNo_CheckedChanged(object sender, EventArgs e)
+        {
+            if (chkEditVoucherNo.Checked)
+            {
+                // Enable editing
+                txtVoucherNo.ReadOnly = false;
+                txtVoucherNo.BackColor = System.Drawing.Color.White;
+            }
+            else
+            {
+                // Disable editing
+                txtVoucherNo.ReadOnly = true;
+                txtVoucherNo.BackColor = System.Drawing.Color.LightGray;
+            }
+        }
+
+        /// <summary>
+        /// Handle date change - regenerate voucher number based on new date
+        /// </summary>
+        protected void TextBox8_TextChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                string command = Request.QueryString["command"];
+
+                // Generate new voucher number for the selected date
+                DateTime newDate = Convert.ToDateTime(TextBox8.Text);
+                string newDocNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", newDate);
+
+                txtVoucherNo.Text = newDocNum;
+
+                // If user had Edit checkbox checked, keep it editable
+                if (chkEditVoucherNo.Checked)
+                {
+                    txtVoucherNo.ReadOnly = false;
+                    txtVoucherNo.BackColor = System.Drawing.Color.White;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"TextBox8_TextChanged Error: {ex.Message}");
             }
         }
 

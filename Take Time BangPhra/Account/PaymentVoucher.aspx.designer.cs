@@ -329,5 +329,15 @@ namespace Take_Time_BangPhra.Account.Report
         /// txtAssetQuantity control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtAssetQuantity;
+
+        /// <summary>
+        /// txtVoucherNo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtVoucherNo;
+
+        /// <summary>
+        /// chkEditVoucherNo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkEditVoucherNo;
     }
 }

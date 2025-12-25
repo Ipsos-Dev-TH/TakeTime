@@ -212,10 +212,17 @@
             <br />
         </div>
         <table style="width:100%;">
-             <tr>
+            <tr>
+                 <td class="modal-sm" style="width: 20%; text-align: right">เลขที่ใบสำคัญจ่าย:</td>
+                <td>
+                    &nbsp;<asp:TextBox ID="txtVoucherNo" runat="server" Width="30%" ReadOnly="True" BackColor="LightGray"></asp:TextBox>
+                    <asp:CheckBox ID="chkEditVoucherNo" Text="Edit" runat="server" AutoPostBack="True" OnCheckedChanged="chkEditVoucherNo_CheckedChanged" />
+                 </td>
+            </tr>
+             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบสำคัญจ่าย:</td>
                 <td>
-                    &nbsp;<asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date"></asp:TextBox>
+                    &nbsp;<asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date" AutoPostBack="True" OnTextChanged="TextBox8_TextChanged"></asp:TextBox>
                  </td>
             </tr>
             <tr style="background-color:whitesmoke;">
