@@ -399,7 +399,8 @@ public class SignatureService
 
         // Build signature paths - ALWAYS set path like master (no File.Exists check)
         // Master format: "File:\\" + PhysicalPath + "\\" + name.ToLower() + ".png"
-        string physicalSignaturePath = MapPath(signatureFolderPath);
+        // Use config path directly (no MapPath) - config already has physical path
+        string physicalSignaturePath = signatureFolderPath;
 
         if (!string.IsNullOrEmpty(approverName))
         {
@@ -532,8 +533,9 @@ public class SignatureService
         string receiverName = "";
         string receiverSignature = "";
 
-        // Get physical signature folder path for PDF (same format as GetSignatureDataWithCEO)
-        string physicalSignaturePath = MapPath(signatureFolderPath);
+        // Use signature path directly from config (same as master - no MapPath transformation)
+        // Config already contains physical path like: C:\...\Documents\Staff\Signature
+        string physicalSignaturePath = signatureFolderPath;
 
         // Get creator info
         DataRow creatorInfo = GetAdminInfo(creatorAdminId);
