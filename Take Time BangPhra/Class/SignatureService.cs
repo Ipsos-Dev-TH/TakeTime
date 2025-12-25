@@ -398,16 +398,16 @@ public class SignatureService
         }
 
         // Build signature paths - ALWAYS set path like master (no File.Exists check)
-        // Master format: "File:\\" + Signaturepath + "\\" + name.ToLower() + ".png"
-        string signaturePath = signatureFolderPath.TrimEnd('\\');
+        // Master format: "File:\\" + PhysicalPath + "\\" + name.ToLower() + ".png"
+        string physicalSignaturePath = MapPath(signatureFolderPath);
 
         if (!string.IsNullOrEmpty(approverName))
         {
-            approverSignature = "File:\\" + signaturePath + "\\" + approverName.ToLower() + ".png";
+            approverSignature = "File:\\" + physicalSignaturePath + "\\" + approverName.ToLower() + ".png";
         }
         if (!string.IsNullOrEmpty(creatorName))
         {
-            creatorSignature = "File:\\" + signaturePath + "\\" + creatorName.ToLower() + ".png";
+            creatorSignature = "File:\\" + physicalSignaturePath + "\\" + creatorName.ToLower() + ".png";
         }
 
         dtSignature.Rows.Add(approverName, approverSignature, creatorName, creatorSignature);
@@ -532,12 +532,19 @@ public class SignatureService
         string receiverName = "";
         string receiverSignature = "";
 
+        // Get physical signature folder path for PDF (same format as GetSignatureDataWithCEO)
+        string physicalSignaturePath = MapPath(signatureFolderPath);
+
         // Get creator info
         DataRow creatorInfo = GetAdminInfo(creatorAdminId);
         if (creatorInfo != null)
         {
             creatorName = creatorInfo["FirstName"].ToString() + " " + creatorInfo["LastName"].ToString();
-            creatorSignature = GetSignaturePathForPdf(creatorAdminId);
+            // Build path directly like GetSignatureDataWithCEO (no File.Exists check)
+            if (!string.IsNullOrEmpty(creatorName))
+            {
+                creatorSignature = "File:\\" + physicalSignaturePath + "\\" + creatorName.ToLower() + ".png";
+            }
         }
 
         // Get CEO as approver
@@ -559,9 +566,12 @@ public class SignatureService
                     {
                         if (reader.Read())
                         {
-                            short ceoId = Convert.ToInt16(reader["ID"]);
                             approverName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
-                            approverSignature = GetSignaturePathForPdf(ceoId);
+                            // Build path directly (no File.Exists check)
+                            if (!string.IsNullOrEmpty(approverName))
+                            {
+                                approverSignature = "File:\\" + physicalSignaturePath + "\\" + approverName.ToLower() + ".png";
+                            }
                         }
                     }
                 }
@@ -593,9 +603,12 @@ public class SignatureService
                         {
                             if (reader.Read())
                             {
-                                short receiverId = Convert.ToInt16(reader["ID"]);
                                 receiverName = reader["FirstName"].ToString() + " " + reader["LastName"].ToString();
-                                receiverSignature = GetSignaturePathForPdf(receiverId);
+                                // Build path directly (no File.Exists check)
+                                if (!string.IsNullOrEmpty(receiverName))
+                                {
+                                    receiverSignature = "File:\\" + physicalSignaturePath + "\\" + receiverName.ToLower() + ".png";
+                                }
                             }
                         }
                     }
