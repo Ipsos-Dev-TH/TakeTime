@@ -180,8 +180,27 @@ namespace Take_Time_BangPhra.Class
                 // Calculate depreciation values
                 int usefulLifeMonths = usefulLifeYears * 12;
                 decimal depreciableAmount = purchasePrice - residualValue;
-                decimal monthlyDepreciation = usefulLifeMonths > 0 ? depreciableAmount / usefulLifeMonths : 0;
+                decimal monthlyDepreciation = usefulLifeMonths > 0 ? Math.Round(depreciableAmount / usefulLifeMonths, 2) : 0;
                 DateTime depreciationStartDate = new DateTime(purchaseDate.Year, purchaseDate.Month, 1).AddMonths(1);
+
+                // Calculate accumulated depreciation from purchase date to today
+                int monthsElapsed = 0;
+                if (depreciationStartDate <= DateTime.Now)
+                {
+                    monthsElapsed = ((DateTime.Now.Year - depreciationStartDate.Year) * 12)
+                                  + (DateTime.Now.Month - depreciationStartDate.Month);
+                    if (monthsElapsed < 0) monthsElapsed = 0;
+                    // Don't exceed useful life months
+                    if (monthsElapsed > usefulLifeMonths) monthsElapsed = usefulLifeMonths;
+                }
+
+                decimal accumulatedDepreciation = Math.Round(monthlyDepreciation * monthsElapsed, 2);
+                // Don't exceed depreciable amount
+                if (accumulatedDepreciation > depreciableAmount) accumulatedDepreciation = depreciableAmount;
+
+                decimal bookValue = purchasePrice - accumulatedDepreciation;
+                // Book value cannot be less than residual value
+                if (bookValue < residualValue) bookValue = residualValue;
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -203,7 +222,8 @@ namespace Take_Time_BangPhra.Class
                     { "@ResidualValue", residualValue },
                     { "@DepreciationStartDate", depreciationStartDate },
                     { "@MonthlyDepreciation", monthlyDepreciation },
-                    { "@BookValue", purchasePrice },
+                    { "@AccumulatedDepreciation", accumulatedDepreciation },
+                    { "@BookValue", bookValue },
                     { "@Location", location ?? (object)DBNull.Value },
                     { "@Department", department ?? (object)DBNull.Value },
                     { "@ResponsiblePersonID", responsiblePersonId.HasValue ? (object)responsiblePersonId.Value : DBNull.Value },
@@ -222,7 +242,7 @@ namespace Take_Time_BangPhra.Class
                         @AssetCode, @AssetName, @Description, @CategoryID, @SerialNumber, @Brand, @Model,
                         @PurchaseDate, @PurchasePrice, @VendorID, @PaymentVoucherID, @InvoiceNumber,
                         @WarrantyExpireDate, @UsefulLifeYears, @UsefulLifeMonths, @ResidualValue,
-                        @DepreciationStartDate, @MonthlyDepreciation, 0, @BookValue,
+                        @DepreciationStartDate, @MonthlyDepreciation, @AccumulatedDepreciation, @BookValue,
                         @Location, @Department, @ResponsiblePersonID, @Notes, @CreatedBy, 'ACTIVE'
                     );
                     SELECT SCOPE_IDENTITY();";
