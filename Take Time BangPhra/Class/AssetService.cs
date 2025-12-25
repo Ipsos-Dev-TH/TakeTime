@@ -101,7 +101,7 @@ namespace Take_Time_BangPhra.Class
                 SELECT a.*,
                        c.CategoryName, c.CategoryCode,
                        v.Name as VendorName
-                FROM Asset a
+                FROM Assets a
                 LEFT JOIN Asset_Category c ON a.CategoryID = c.ID
                 LEFT JOIN Vendor v ON a.VendorID = v.ID
                 WHERE a.ID = @ID";
@@ -601,7 +601,7 @@ namespace Take_Time_BangPhra.Class
                     a.DisposalPrice AS ราคาจำหน่าย,
                     a.DisposalReason AS เหตุผลการจำหน่าย,
                     a.Notes AS หมายเหตุ
-                FROM Asset a
+                FROM Assets a
                 INNER JOIN Asset_Category c ON a.CategoryID = c.ID
                 LEFT JOIN Vendor v ON a.VendorID = v.ID
                 {whereClause}
