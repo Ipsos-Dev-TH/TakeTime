@@ -1267,21 +1267,21 @@ namespace Take_Time_BangPhra.Admin.HR
                     conn.Open();
                     using (SqlCommand cmd = new SqlCommand(@"
                         INSERT INTO Employee_Documents
-                        (Admin_ID, DocumentType, DocumentName, FileName, FilePath, FileSize,
-                         ContentType, Description, UploadedBy, ExpiryDate)
+                        (Admin_ID, DocumentType, DocumentName, OriginalFileName, FilePath, FileSize,
+                         FileType, Description, UploadedBy_AdminID, ExpiryDate)
                         VALUES
-                        (@AdminID, @DocumentType, @DocumentName, @FileName, @FilePath, @FileSize,
-                         @ContentType, @Description, @UploadedBy, @ExpiryDate)", conn))
+                        (@AdminID, @DocumentType, @DocumentName, @OriginalFileName, @FilePath, @FileSize,
+                         @FileType, @Description, @UploadedBy_AdminID, @ExpiryDate)", conn))
                     {
                         cmd.Parameters.AddWithValue("@AdminID", adminId);
                         cmd.Parameters.AddWithValue("@DocumentType", ddlDocumentType.SelectedValue);
                         cmd.Parameters.AddWithValue("@DocumentName", documentName);
-                        cmd.Parameters.AddWithValue("@FileName", fuDocument.FileName);
+                        cmd.Parameters.AddWithValue("@OriginalFileName", fuDocument.FileName);
                         cmd.Parameters.AddWithValue("@FilePath", relativePath);
                         cmd.Parameters.AddWithValue("@FileSize", fuDocument.PostedFile.ContentLength);
-                        cmd.Parameters.AddWithValue("@ContentType", fuDocument.PostedFile.ContentType);
+                        cmd.Parameters.AddWithValue("@FileType", System.IO.Path.GetExtension(fuDocument.FileName).TrimStart('.').ToUpper());
                         cmd.Parameters.AddWithValue("@Description", string.IsNullOrEmpty(txtDocDescription.Text) ? (object)DBNull.Value : txtDocDescription.Text);
-                        cmd.Parameters.AddWithValue("@UploadedBy", GetAdminID() ?? (object)DBNull.Value);
+                        cmd.Parameters.AddWithValue("@UploadedBy_AdminID", GetAdminID() ?? (object)DBNull.Value);
                         cmd.Parameters.AddWithValue("@ExpiryDate", expiryDate ?? (object)DBNull.Value);
 
                         cmd.ExecuteNonQuery();
