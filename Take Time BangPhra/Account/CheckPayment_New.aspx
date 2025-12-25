@@ -281,6 +281,13 @@
             </div>
 
             <div class="search-row">
+                <span class="search-label">ค้นหาผู้รับเงิน:</span>
+                <asp:TextBox ID="txtVendorSearch" runat="server" CssClass="search-input"
+                    placeholder="พิมพ์ชื่อ Vendor / ผู้รับเงิน" Width="300px"></asp:TextBox>
+                <span style="color: #7f8c8d; font-size: 13px;">(ค้นหาบางส่วนของชื่อได้)</span>
+            </div>
+
+            <div class="search-row">
                 <span style="color: #7f8c8d; font-size: 14px;">
                     <i class="fa fa-info-circle"></i>
                     <strong>หมายเหตุ:</strong> ยอดรวมคำนวณเฉพาะเอกสารปกติ (ไม่รวมที่ยกเลิก) / ตารางแสดงทั้งหมดรวมเอกสารที่ยกเลิก

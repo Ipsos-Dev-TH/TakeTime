@@ -104,11 +104,14 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch { /* Ignore logging errors */ }
 
+                // Get vendor search filter
+                string vendorSearch = txtVendorSearch.Text.Trim();
+
                 // Calculate expenses by payment method
                 try
                 {
                     System.Diagnostics.Debug.WriteLine($"⚙️ Calling CalculateExpenses...");
-                    CalculateExpenses(startDate, endDate);
+                    CalculateExpenses(startDate, endDate, vendorSearch);
                     System.Diagnostics.Debug.WriteLine($"✅ CalculateExpenses completed");
                 }
                 catch (Exception calcEx)
@@ -120,7 +123,7 @@ namespace Take_Time_BangPhra.Account
 
                 // Load details
                 System.Diagnostics.Debug.WriteLine($"⚙️ Calling LoadDetails...");
-                LoadDetails(startDate, endDate);
+                LoadDetails(startDate, endDate, vendorSearch);
                 System.Diagnostics.Debug.WriteLine($"✅ LoadDetails completed");
             }
             catch (Exception ex)
@@ -137,7 +140,7 @@ namespace Take_Time_BangPhra.Account
             }
         }
 
-        private void CalculateExpenses(DateTime startDate, DateTime endDate)
+        private void CalculateExpenses(DateTime startDate, DateTime endDate, string vendorSearch = "")
         {
             try
             {
@@ -153,8 +156,8 @@ namespace Take_Time_BangPhra.Account
                 int docCount = 0;
                 decimal grandTotal = 0;
 
-                // Get all payments
-                var payments = GetAllPayments(startDate, endDate, status);
+                // Get all payments (with vendor filter if provided)
+                var payments = GetAllPayments(startDate, endDate, status, vendorSearch);
 
                 if (payments != null && payments.Rows.Count > 0)
                 {
@@ -271,7 +274,7 @@ namespace Take_Time_BangPhra.Account
             }
         }
 
-        private DataTable GetAllPayments(DateTime startDate, DateTime endDate, string status)
+        private DataTable GetAllPayments(DateTime startDate, DateTime endDate, string status, string vendorSearch = "")
         {
             // Get all payment vouchers in the date range
             // For payroll payments (เงินเดือน), show employee name from Payroll_Records via VoucherNumber
@@ -291,6 +294,13 @@ namespace Take_Time_BangPhra.Account
                   AND CAST(ap.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
                   AND ap.Status LIKE @Status";
 
+            // Add vendor name filter if provided
+            if (!string.IsNullOrWhiteSpace(vendorSearch))
+            {
+                query += @" AND (v.Name LIKE @VendorSearch
+                           OR (ap.Paid_Type = N'เงินเดือน' AND pr.EmployeeName LIKE @VendorSearch))";
+            }
+
             // Admin permission check: Hide employee-related expenses
             if (Session["User"]?.ToString() == "Admin")
             {
@@ -307,11 +317,18 @@ namespace Take_Time_BangPhra.Account
                 { "@Status", status }
             };
 
+            // Add vendor search parameter if provided
+            if (!string.IsNullOrWhiteSpace(vendorSearch))
+            {
+                parameters.Add("@VendorSearch", "%" + vendorSearch.Trim() + "%");
+            }
+
             System.Diagnostics.Debug.WriteLine($"📋 GetAllPayments Query:");
             System.Diagnostics.Debug.WriteLine($"   User: {Session["User"]?.ToString() ?? "Unknown"}");
             System.Diagnostics.Debug.WriteLine($"   @StartDate = {startDate:yyyy-MM-dd HH:mm:ss}");
             System.Diagnostics.Debug.WriteLine($"   @EndDate = {endDate:yyyy-MM-dd HH:mm:ss}");
             System.Diagnostics.Debug.WriteLine($"   @Status = {status}");
+            System.Diagnostics.Debug.WriteLine($"   @VendorSearch = {vendorSearch}");
 
             var result = codeInstance.DatabaseQuerySafe(conn, query, parameters);
             System.Diagnostics.Debug.WriteLine($"   ✅ Result: {result?.Rows.Count ?? 0} rows");
@@ -319,7 +336,7 @@ namespace Take_Time_BangPhra.Account
             return result;
         }
 
-        private void LoadDetails(DateTime startDate, DateTime endDate)
+        private void LoadDetails(DateTime startDate, DateTime endDate, string vendorSearch = "")
         {
             DataTable dt = null;
             try
@@ -327,9 +344,10 @@ namespace Take_Time_BangPhra.Account
                 System.Diagnostics.Debug.WriteLine($"📊 LoadDetails called:");
                 System.Diagnostics.Debug.WriteLine($"   Start: {startDate:yyyy-MM-dd HH:mm:ss}");
                 System.Diagnostics.Debug.WriteLine($"   End: {endDate:yyyy-MM-dd HH:mm:ss}");
+                System.Diagnostics.Debug.WriteLine($"   VendorSearch: {vendorSearch}");
 
-                // Show all documents (both Normal and Cancel)
-                dt = GetAllPayments(startDate, endDate, "%");
+                // Show all documents (both Normal and Cancel) with vendor filter
+                dt = GetAllPayments(startDate, endDate, "%", vendorSearch);
                 System.Diagnostics.Debug.WriteLine($"   Retrieved {dt?.Rows.Count ?? 0} rows");
 
                 if (dt != null && dt.Rows.Count > 0)
@@ -403,8 +421,9 @@ namespace Take_Time_BangPhra.Account
                 csv.AppendLine($"รวมทั้งหมด,{lblGrandTotal.Text},{lblTotalCount.Text}");
                 csv.AppendLine();
 
-                // Detail records
-                var dt = GetAllPayments(startDate, endDate, "%");
+                // Detail records (with vendor filter)
+                string vendorSearch = txtVendorSearch.Text.Trim();
+                var dt = GetAllPayments(startDate, endDate, "%", vendorSearch);
                 csv.AppendLine("รายละเอียดเอกสาร");
                 csv.AppendLine("เลขที่เอกสาร,วันที่,ผู้รับเงิน,วิธีชำระ,ยอดรวม,VAT,สถานะ,ผู้สร้าง");
 
