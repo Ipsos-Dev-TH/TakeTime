@@ -522,6 +522,14 @@
                                 CssClass="btn btn-secondary btn-sm" ToolTip="แก้ไข" Visible='<%# Eval("Status").ToString() == "ACTIVE" %>'>
                                 <i class="fas fa-edit"></i>
                             </asp:LinkButton>
+                            <asp:LinkButton ID="btnDispose" runat="server" CommandName="DisposeAsset" CommandArgument='<%# Eval("ID") %>'
+                                CssClass="btn btn-warning btn-sm" ToolTip="ตัดจำหน่าย/ขาย/เสียหาย" Visible='<%# Eval("Status").ToString() == "ACTIVE" %>'>
+                                <i class="fas fa-archive"></i>
+                            </asp:LinkButton>
+                            <asp:LinkButton ID="btnHistory" runat="server" CommandName="ViewHistory" CommandArgument='<%# Eval("ID") %>'
+                                CssClass="btn btn-info btn-sm" ToolTip="ประวัติค่าเสื่อม">
+                                <i class="fas fa-history"></i>
+                            </asp:LinkButton>
                         </ItemTemplate>
                     </asp:TemplateField>
                 </Columns>
@@ -637,6 +645,89 @@
         </div>
     </div>
 
+    <!-- Dispose/Sell/Write-off Modal -->
+    <div id="disposeModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: #e67e22;">
+                <h3><i class="fas fa-archive"></i> จัดการสินทรัพย์</h3>
+                <button type="button" class="modal-close" onclick="closeDisposeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <asp:HiddenField ID="hdnDisposeAssetId" runat="server" Value="0" />
+
+                <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                    <strong>สินทรัพย์:</strong> <asp:Label ID="lblDisposeAssetName" runat="server"></asp:Label><br/>
+                    <strong>มูลค่าตามบัญชี:</strong> <asp:Label ID="lblDisposeBookValue" runat="server"></asp:Label> บาท
+                </div>
+
+                <div class="form-group">
+                    <label>ประเภทการจำหน่าย <span class="required">*</span></label>
+                    <asp:DropDownList ID="ddlDisposeType" runat="server" CssClass="form-control">
+                        <asp:ListItem Value="">-- เลือก --</asp:ListItem>
+                        <asp:ListItem Value="SOLD">ขาย</asp:ListItem>
+                        <asp:ListItem Value="WRITTEN_OFF">ตัดจำหน่าย (เสียหาย/สูญหาย)</asp:ListItem>
+                        <asp:ListItem Value="DISPOSED">จำหน่ายอื่นๆ (บริจาค/ทิ้ง)</asp:ListItem>
+                    </asp:DropDownList>
+                </div>
+
+                <div class="form-group">
+                    <label>วันที่จำหน่าย <span class="required">*</span></label>
+                    <asp:TextBox ID="txtDisposeDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                </div>
+
+                <div class="form-group">
+                    <label>ราคาขาย (ถ้ามี)</label>
+                    <asp:TextBox ID="txtDisposePrice" runat="server" CssClass="form-control" TextMode="Number" step="0.01" placeholder="0.00"></asp:TextBox>
+                </div>
+
+                <div class="form-group">
+                    <label>เหตุผล/หมายเหตุ <span class="required">*</span></label>
+                    <asp:TextBox ID="txtDisposeReason" runat="server" CssClass="form-control" TextMode="MultiLine" Rows="3"
+                        placeholder="เช่น เสียหายจากน้ำท่วม, ล้าสมัย, ขายให้พนักงาน"></asp:TextBox>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeDisposeModal()">ยกเลิก</button>
+                <asp:Button ID="btnConfirmDispose" runat="server" Text="ยืนยันการจำหน่าย" CssClass="btn btn-warning" OnClick="btnConfirmDispose_Click"
+                    OnClientClick="return confirm('ยืนยันการจำหน่ายสินทรัพย์นี้? การกระทำนี้ไม่สามารถย้อนกลับได้');" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Depreciation History Modal -->
+    <div id="historyModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header" style="background: #17a2b8;">
+                <h3><i class="fas fa-history"></i> ประวัติค่าเสื่อมราคา</h3>
+                <button type="button" class="modal-close" onclick="closeHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                    <strong>สินทรัพย์:</strong> <asp:Label ID="lblHistoryAssetName" runat="server"></asp:Label><br/>
+                    <strong>ค่าเสื่อมรายเดือน:</strong> <asp:Label ID="lblHistoryMonthlyDep" runat="server"></asp:Label> บาท
+                </div>
+                <asp:GridView ID="gvDepreciationHistory" runat="server" AutoGenerateColumns="False"
+                    CssClass="asset-table" GridLines="None" EmptyDataText="ยังไม่มีประวัติการคำนวณ">
+                    <Columns>
+                        <asp:BoundField DataField="Year" HeaderText="ปี" ItemStyle-CssClass="text-center" />
+                        <asp:BoundField DataField="Month" HeaderText="เดือน" ItemStyle-CssClass="text-center" />
+                        <asp:BoundField DataField="DepreciationAmount" HeaderText="ค่าเสื่อมเดือนนี้" DataFormatString="{0:N2}" ItemStyle-CssClass="text-right" />
+                        <asp:BoundField DataField="AccumulatedDepreciation" HeaderText="ค่าเสื่อมสะสม" DataFormatString="{0:N2}" ItemStyle-CssClass="text-right" />
+                        <asp:BoundField DataField="BookValue" HeaderText="มูลค่าตามบัญชี" DataFormatString="{0:N2}" ItemStyle-CssClass="text-right" />
+                        <asp:TemplateField HeaderText="วันที่คำนวณ" ItemStyle-CssClass="text-center">
+                            <ItemTemplate>
+                                <%# Eval("CalculatedDate") != DBNull.Value ? Convert.ToDateTime(Eval("CalculatedDate")).ToString("dd/MM/yyyy") : "-" %>
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                    </Columns>
+                </asp:GridView>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeHistoryModal()">ปิด</button>
+            </div>
+        </div>
+    </div>
+
     <script type="text/javascript">
         function showAddModal() {
             document.getElementById('assetModal').style.display = 'block';
@@ -645,6 +736,26 @@
 
         function closeModal() {
             document.getElementById('assetModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function showDisposeModal() {
+            document.getElementById('disposeModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDisposeModal() {
+            document.getElementById('disposeModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function showHistoryModal() {
+            document.getElementById('historyModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeHistoryModal() {
+            document.getElementById('historyModal').style.display = 'none';
             document.body.style.overflow = 'auto';
         }
 

@@ -40,5 +40,21 @@ namespace Take_Time_BangPhra.Admin.Assets
         protected global::System.Web.UI.WebControls.TextBox txtDepartment;
         protected global::System.Web.UI.WebControls.TextBox txtDescription;
         protected global::System.Web.UI.WebControls.Button btnSaveAsset;
+        protected global::System.Web.UI.WebControls.Button btnExportExcel;
+
+        // Dispose Modal
+        protected global::System.Web.UI.WebControls.HiddenField hdnDisposeAssetId;
+        protected global::System.Web.UI.WebControls.Label lblDisposeAssetName;
+        protected global::System.Web.UI.WebControls.Label lblDisposeBookValue;
+        protected global::System.Web.UI.WebControls.DropDownList ddlDisposeType;
+        protected global::System.Web.UI.WebControls.TextBox txtDisposeDate;
+        protected global::System.Web.UI.WebControls.TextBox txtDisposePrice;
+        protected global::System.Web.UI.WebControls.TextBox txtDisposeReason;
+        protected global::System.Web.UI.WebControls.Button btnConfirmDispose;
+
+        // History Modal
+        protected global::System.Web.UI.WebControls.Label lblHistoryAssetName;
+        protected global::System.Web.UI.WebControls.Label lblHistoryMonthlyDep;
+        protected global::System.Web.UI.WebControls.GridView gvDepreciationHistory;
     }
 }

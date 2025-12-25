@@ -316,14 +316,120 @@ namespace Take_Time_BangPhra.Admin.Assets
 
         protected void gvAssets_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            int assetId = Convert.ToInt32(e.CommandArgument);
+
             if (e.CommandName == "ViewAsset" || e.CommandName == "EditAsset")
             {
-                int assetId = Convert.ToInt32(e.CommandArgument);
                 LoadAssetForEdit(assetId);
 
                 // Show modal via script
                 ScriptManager.RegisterStartupScript(this, GetType(), "showModal",
                     "document.getElementById('assetModal').style.display = 'block';", true);
+            }
+            else if (e.CommandName == "DisposeAsset")
+            {
+                LoadAssetForDispose(assetId);
+
+                // Show dispose modal
+                ScriptManager.RegisterStartupScript(this, GetType(), "showDisposeModal",
+                    "document.getElementById('disposeModal').style.display = 'block';", true);
+            }
+            else if (e.CommandName == "ViewHistory")
+            {
+                LoadDepreciationHistory(assetId);
+
+                // Show history modal
+                ScriptManager.RegisterStartupScript(this, GetType(), "showHistoryModal",
+                    "document.getElementById('historyModal').style.display = 'block';", true);
+            }
+        }
+
+        private void LoadAssetForDispose(int assetId)
+        {
+            DataTable dt = assetService.GetAssetFullDetails(assetId);
+            if (dt != null && dt.Rows.Count > 0)
+            {
+                DataRow row = dt.Rows[0];
+                hdnDisposeAssetId.Value = assetId.ToString();
+                lblDisposeAssetName.Text = $"{row["AssetCode"]} - {row["AssetName"]}";
+                lblDisposeBookValue.Text = Convert.ToDecimal(row["BookValue"]).ToString("N2");
+                txtDisposeDate.Text = DateTime.Now.ToString("yyyy-MM-dd");
+                ddlDisposeType.SelectedIndex = 0;
+                txtDisposePrice.Text = "";
+                txtDisposeReason.Text = "";
+            }
+        }
+
+        private void LoadDepreciationHistory(int assetId)
+        {
+            DataTable dtAsset = assetService.GetAssetFullDetails(assetId);
+            if (dtAsset != null && dtAsset.Rows.Count > 0)
+            {
+                DataRow row = dtAsset.Rows[0];
+                lblHistoryAssetName.Text = $"{row["AssetCode"]} - {row["AssetName"]}";
+                lblHistoryMonthlyDep.Text = Convert.ToDecimal(row["MonthlyDepreciation"]).ToString("N2");
+            }
+
+            DataTable dtHistory = assetService.GetDepreciationHistory(assetId);
+            gvDepreciationHistory.DataSource = dtHistory;
+            gvDepreciationHistory.DataBind();
+        }
+
+        protected void btnConfirmDispose_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int assetId = Convert.ToInt32(hdnDisposeAssetId.Value);
+
+                if (string.IsNullOrEmpty(ddlDisposeType.SelectedValue))
+                {
+                    ShowMessage("กรุณาเลือกประเภทการจำหน่าย", "error");
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(txtDisposeDate.Text))
+                {
+                    ShowMessage("กรุณาระบุวันที่จำหน่าย", "error");
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(txtDisposeReason.Text))
+                {
+                    ShowMessage("กรุณาระบุเหตุผล/หมายเหตุ", "error");
+                    return;
+                }
+
+                decimal? disposePrice = null;
+                if (!string.IsNullOrEmpty(txtDisposePrice.Text))
+                {
+                    disposePrice = decimal.Parse(txtDisposePrice.Text);
+                }
+
+                int userId = Convert.ToInt32(Session["UserID"]);
+
+                var result = assetService.DisposeAsset(
+                    assetId: assetId,
+                    status: ddlDisposeType.SelectedValue,
+                    disposalDate: DateTime.Parse(txtDisposeDate.Text),
+                    disposalPrice: disposePrice,
+                    reason: txtDisposeReason.Text.Trim(),
+                    disposedBy: userId
+                );
+
+                if (result.Success)
+                {
+                    ShowMessage(result.Message, "success");
+                    LoadAssets();
+                    LoadSummary();
+                }
+                else
+                {
+                    ShowMessage(result.Message, "error");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
         }
 
