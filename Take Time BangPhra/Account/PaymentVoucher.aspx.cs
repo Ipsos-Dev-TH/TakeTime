@@ -530,13 +530,58 @@ namespace Take_Time_BangPhra.Account.Report
                 uid = dtPayment.Rows[0]["UID"].ToString();
                 //GridView1.DataSource = dt;
                 //GridView1.DataBind();
-                // Use SignatureService for centralized signature management
-                SignatureService signatureService = new SignatureService();
-                short creatorAdminId = 0;
-                short.TryParse(Session["UserID"]?.ToString() ?? "0", out creatorAdminId);
-                string receiverIdNumber = dtVendor.Rows.Count > 0 ? dtVendor.Rows[0]["IDNumber"]?.ToString() ?? "" : "";
 
-                DataTable dtSignature = signatureService.GetPaymentVoucherSignatureData(creatorAdminId, receiverIdNumber);
+                // Build signature DataTable directly like master (bypass SignatureService)
+                DataTable dtSignature = new DataTable();
+                dtSignature.Columns.Add("CreatedName");
+                dtSignature.Columns.Add("Created");
+                dtSignature.Columns.Add("ApprovedName");
+                dtSignature.Columns.Add("Approved");
+                dtSignature.Columns.Add("CheckedName");
+                dtSignature.Columns.Add("Checked");
+                dtSignature.Columns.Add("ReceivedName");
+                dtSignature.Columns.Add("Received");
+
+                string Signaturepath = System.Configuration.ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+
+                // Get creator name
+                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                string CreatorFullName = dtCreator.Rows.Count > 0 ?
+                    dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString() : "";
+
+                // Get approver name (CEO)
+                DataTable dtApprover = code.DatabaseQuery(conn, "Select * from Admin Where IsCEO = 'True'");
+                string ApproverFullName = dtApprover.Rows.Count > 0 ?
+                    dtApprover.Rows[0]["FirstName"].ToString() + " " + dtApprover.Rows[0]["LastName"].ToString() : "";
+
+                // Get receiver name from employee by IDNumber
+                string ReceivedFullName = "";
+                string ReceivedPath = "";
+                if (dtVendor.Rows.Count > 0 && dtVendor.Rows[0]["IDNumber"] != DBNull.Value)
+                {
+                    string idNumber = dtVendor.Rows[0]["IDNumber"].ToString();
+                    if (!string.IsNullOrEmpty(idNumber))
+                    {
+                        DataTable dtEmployee = code.DatabaseQuery(conn, "Select * From Admin Where IDNumber = '" + idNumber + "'");
+                        if (dtEmployee.Rows.Count > 0)
+                        {
+                            ReceivedFullName = dtEmployee.Rows[0]["FirstName"].ToString() + " " + dtEmployee.Rows[0]["LastName"].ToString();
+                            ReceivedPath = Signaturepath + "\\" + ReceivedFullName.ToLower() + ".png";
+                        }
+                    }
+                }
+
+                // Build signature row exactly like master
+                dtSignature.Rows.Add(
+                    CreatorFullName,
+                    "File:\\" + Signaturepath + "\\" + CreatorFullName.ToLower() + ".png",
+                    ApproverFullName,
+                    "File:\\" + Signaturepath + "\\" + ApproverFullName.ToLower() + ".png",
+                    "",
+                    "",
+                    ReceivedFullName,
+                    string.IsNullOrEmpty(ReceivedPath) ? "" : "File:\\" + ReceivedPath
+                );
 
                 DataTable dtUpload = (DataTable)Session["dtUpload"];
                 try
