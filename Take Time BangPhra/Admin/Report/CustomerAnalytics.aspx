@@ -338,6 +338,196 @@
             color: #991b1b;
         }
 
+        /* At-Risk Section */
+        .at-risk-section {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 2px solid #f59e0b;
+        }
+
+        .at-risk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .at-risk-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #92400e;
+            margin: 0;
+        }
+
+        .at-risk-badge {
+            background: #dc2626;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .at-risk-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .at-risk-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .at-risk-info {
+            flex: 1;
+        }
+
+        .at-risk-name {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 5px;
+        }
+
+        .at-risk-details {
+            font-size: 0.85rem;
+            color: #6b7280;
+        }
+
+        .at-risk-value {
+            text-align: right;
+        }
+
+        .at-risk-amount {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #dc2626;
+        }
+
+        .at-risk-days {
+            font-size: 0.8rem;
+            color: #92400e;
+        }
+
+        /* Navigation Links */
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .nav-link-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-link-profile {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+            color: white;
+        }
+
+        .nav-link-manage {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+        }
+
+        .nav-link-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            color: white;
+        }
+
+        /* CLV Distribution */
+        .clv-distribution {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .clv-tier {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .clv-tier-label {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-bottom: 5px;
+        }
+
+        .clv-tier-count {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .clv-tier-1 .clv-tier-count { color: #dc2626; }
+        .clv-tier-2 .clv-tier-count { color: #f59e0b; }
+        .clv-tier-3 .clv-tier-count { color: #10b981; }
+        .clv-tier-4 .clv-tier-count { color: #3b82f6; }
+        .clv-tier-5 .clv-tier-count { color: #8b5cf6; }
+
+        /* Accommodation Affinity */
+        .affinity-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .affinity-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .affinity-name {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+
+        .affinity-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85rem;
+        }
+
+        .affinity-stat {
+            flex: 1;
+            text-align: center;
+        }
+
+        .affinity-stat-value {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .affinity-stat-label {
+            color: #6b7280;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .analytics-header h1 {
@@ -355,6 +545,14 @@
             .filter-row {
                 grid-template-columns: 1fr;
             }
+
+            .clv-distribution {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .nav-links {
+                flex-direction: column;
+            }
         }
     </style>
 
@@ -363,6 +561,14 @@
         <div class="analytics-header">
             <h1>👥 Customer Analytics - วิเคราะห์ลูกค้า</h1>
             <p>รายงานข้อมูลลูกค้า วิเคราะห์พฤติกรรม และติดตามลูกค้าประจำ</p>
+            <div class="nav-links">
+                <a href="/Admin/CRM/GuestProfile.aspx" class="nav-link-btn nav-link-profile">
+                    🎯 Guest Profile 360°
+                </a>
+                <a href="/Admin/CustomerManagement.aspx" class="nav-link-btn nav-link-manage">
+                    ⚙️ จัดการข้อมูลลูกค้า
+                </a>
+            </div>
         </div>
 
         <!-- Filter Panel -->
@@ -435,6 +641,66 @@
             </div>
         </div>
 
+        <!-- At-Risk Customers Section -->
+        <asp:Panel ID="pnlAtRiskCustomers" runat="server" CssClass="at-risk-section">
+            <div class="at-risk-header">
+                <h3 class="at-risk-title">⚠️ ลูกค้าที่เสี่ยงสูญเสีย (ไม่กลับมา 180+ วัน)</h3>
+                <span class="at-risk-badge">
+                    <asp:Literal ID="litAtRiskCount" runat="server" Text="0" /> ราย
+                </span>
+            </div>
+            <div class="at-risk-grid">
+                <asp:Repeater ID="rptAtRiskCustomers" runat="server">
+                    <ItemTemplate>
+                        <div class="at-risk-card">
+                            <div class="at-risk-info">
+                                <div class="at-risk-name"><%# Eval("CustomerName") %></div>
+                                <div class="at-risk-details">
+                                    📞 <%# Eval("PhoneNumber") %> |
+                                    🏨 <%# Eval("TotalBookings") %> ครั้ง
+                                </div>
+                            </div>
+                            <div class="at-risk-value">
+                                <div class="at-risk-amount">฿<%# Convert.ToDecimal(Eval("LifetimeValue")).ToString("N0") %></div>
+                                <div class="at-risk-days">ไม่มาแล้ว <%# Eval("DaysSinceLastVisit") %> วัน</div>
+                            </div>
+                        </div>
+                    </ItemTemplate>
+                </asp:Repeater>
+            </div>
+            <asp:Panel ID="pnlNoAtRisk" runat="server" Visible="false" style="text-align: center; padding: 20px; color: #059669;">
+                ✅ ไม่พบลูกค้าที่เสี่ยงสูญเสีย - ลูกค้าประจำทุกรายยังคงใช้บริการอยู่
+            </asp:Panel>
+        </asp:Panel>
+
+        <!-- CLV Distribution Section -->
+        <div class="data-table">
+            <h3>💰 การกระจายมูลค่าลูกค้า (Customer Lifetime Value)</h3>
+            <div class="clv-distribution">
+                <div class="clv-tier clv-tier-1">
+                    <div class="clv-tier-label">&lt; ฿5,000</div>
+                    <div class="clv-tier-count"><asp:Literal ID="litCLVTier1" runat="server" Text="0" /></div>
+                </div>
+                <div class="clv-tier clv-tier-2">
+                    <div class="clv-tier-label">฿5,000 - ฿20,000</div>
+                    <div class="clv-tier-count"><asp:Literal ID="litCLVTier2" runat="server" Text="0" /></div>
+                </div>
+                <div class="clv-tier clv-tier-3">
+                    <div class="clv-tier-label">฿20,000 - ฿50,000</div>
+                    <div class="clv-tier-count"><asp:Literal ID="litCLVTier3" runat="server" Text="0" /></div>
+                </div>
+                <div class="clv-tier clv-tier-4">
+                    <div class="clv-tier-label">฿50,000 - ฿100,000</div>
+                    <div class="clv-tier-count"><asp:Literal ID="litCLVTier4" runat="server" Text="0" /></div>
+                </div>
+                <div class="clv-tier clv-tier-5">
+                    <div class="clv-tier-label">&gt; ฿100,000</div>
+                    <div class="clv-tier-count"><asp:Literal ID="litCLVTier5" runat="server" Text="0" /></div>
+                </div>
+            </div>
+            <div id="clvDistributionChart" style="margin-top: 20px;"></div>
+        </div>
+
         <!-- Charts -->
         <div class="charts-section">
             <!-- Customer Segmentation Pie Chart -->
@@ -451,6 +717,38 @@
                     <h3 class="chart-card-title">🏆 Top 10 ลูกค้ายอดนิยม</h3>
                 </div>
                 <div id="topCustomersChart"></div>
+            </div>
+        </div>
+
+        <!-- Accommodation Affinity Section -->
+        <div class="data-table">
+            <h3>🏨 ความนิยมที่พักตามประเภทลูกค้า</h3>
+            <div class="affinity-grid">
+                <asp:Repeater ID="rptAccommodationAffinity" runat="server">
+                    <ItemTemplate>
+                        <div class="affinity-card">
+                            <div class="affinity-name">🏠 <%# Eval("AccommodationName") %></div>
+                            <div class="affinity-stats">
+                                <div class="affinity-stat">
+                                    <div class="affinity-stat-value" style="color: #10b981;"><%# Eval("NewCustomers") %></div>
+                                    <div class="affinity-stat-label">ลูกค้าใหม่</div>
+                                </div>
+                                <div class="affinity-stat">
+                                    <div class="affinity-stat-value" style="color: #f59e0b;"><%# Eval("ReturningCustomers") %></div>
+                                    <div class="affinity-stat-label">ประจำ</div>
+                                </div>
+                                <div class="affinity-stat">
+                                    <div class="affinity-stat-value" style="color: #8b5cf6;"><%# Eval("VIPCustomers") %></div>
+                                    <div class="affinity-stat-label">VIP</div>
+                                </div>
+                                <div class="affinity-stat">
+                                    <div class="affinity-stat-value" style="color: #3b82f6;">฿<%# Convert.ToDecimal(Eval("TotalRevenue")).ToString("N0") %></div>
+                                    <div class="affinity-stat-label">รายได้</div>
+                                </div>
+                            </div>
+                        </div>
+                    </ItemTemplate>
+                </asp:Repeater>
             </div>
         </div>
 
@@ -548,8 +846,8 @@
                         <asp:BoundField DataField="ID" HeaderText="รหัส" />
                         <asp:TemplateField HeaderText="วันที่เข้าพัก">
                             <ItemTemplate>
-                                <%# Convert.ToDateTime(Eval("CheckIn_Date")).ToString("dd/MM/yyyy") %> -
-                                <%# Convert.ToDateTime(Eval("CheckOut_Date")).ToString("dd/MM/yyyy") %>
+                                <%# Convert.ToDateTime(Eval("CheckInDate")).ToString("dd/MM/yyyy") %> -
+                                <%# Convert.ToDateTime(Eval("CheckOutDate")).ToString("dd/MM/yyyy") %>
                             </ItemTemplate>
                         </asp:TemplateField>
                         <asp:BoundField DataField="AccommodationList" HeaderText="ที่พัก" />
@@ -618,6 +916,7 @@
     <asp:HiddenField ID="hfMonthlyTrendLabels" runat="server" />
     <asp:HiddenField ID="hfMonthlyTrendData" runat="server" />
     <asp:HiddenField ID="hfMonthlyTrendCustomers" runat="server" />
+    <asp:HiddenField ID="hfCLVDistribution" runat="server" />
 
     <!-- Charts Script -->
     <script type="text/javascript">
@@ -748,6 +1047,52 @@
         };
         var monthlyTrendChart = new ApexCharts(document.querySelector("#monthlyTrendChart"), monthlyTrendOptions);
         monthlyTrendChart.render();
+
+        // CLV Distribution Chart (Bar Chart)
+        var clvData = <%= hfCLVDistribution.Value != "" ? hfCLVDistribution.Value : "[0,0,0,0,0]" %>;
+        var clvOptions = {
+            series: [{
+                name: 'จำนวนลูกค้า',
+                data: clvData
+            }],
+            chart: {
+                type: 'bar',
+                height: 250,
+                toolbar: { show: false }
+            },
+            colors: ['#dc2626', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6'],
+            plotOptions: {
+                bar: {
+                    borderRadius: 8,
+                    distributed: true,
+                    horizontal: false
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                style: {
+                    colors: ['#fff']
+                }
+            },
+            xaxis: {
+                categories: ['< ฿5,000', '฿5K-20K', '฿20K-50K', '฿50K-100K', '> ฿100K'],
+                labels: {
+                    style: {
+                        fontSize: '11px'
+                    }
+                }
+            },
+            yaxis: {
+                title: {
+                    text: 'จำนวนลูกค้า (ราย)'
+                }
+            },
+            legend: {
+                show: false
+            }
+        };
+        var clvChart = new ApexCharts(document.querySelector("#clvDistributionChart"), clvOptions);
+        clvChart.render();
     </script>
 
 </asp:Content>

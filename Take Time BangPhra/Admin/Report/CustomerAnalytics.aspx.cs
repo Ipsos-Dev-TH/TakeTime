@@ -89,6 +89,15 @@ namespace Take_Time_BangPhra.Admin.Report
                 // Load monthly trend
                 LoadMonthlyTrendData(selectedYear);
 
+                // Load at-risk customers
+                LoadAtRiskCustomers();
+
+                // Load CLV distribution
+                LoadCLVDistribution(selectedYear);
+
+                // Load accommodation affinity
+                LoadAccommodationAffinity(selectedYear);
+
                 System.Diagnostics.Debug.WriteLine($"✅ Customer data loaded successfully");
             }
             catch (Exception ex)
@@ -406,8 +415,8 @@ namespace Take_Time_BangPhra.Admin.Report
                 string query = @"
                     SELECT
                         r.ID,
-                        r.CheckIn_Date,
-                        r.CheckOut_Date,
+                        r.CheckInDate,
+                        r.CheckOutDate,
                         r.TotalPrice,
                         r.Status,
                         r.Created_Date,
@@ -740,6 +749,166 @@ namespace Take_Time_BangPhra.Admin.Report
                 hfMonthlyTrendLabels.Value = "";
                 hfMonthlyTrendData.Value = "";
                 hfMonthlyTrendCustomers.Value = "";
+            }
+        }
+
+        private void LoadAtRiskCustomers()
+        {
+            try
+            {
+                // Find valuable customers who haven't visited in 180+ days
+                string query = @"
+                    SELECT TOP 10
+                        ISNULL(c.FullName, c.Name) as CustomerName,
+                        c.MobilePhone as PhoneNumber,
+                        COUNT(*) as TotalBookings,
+                        SUM(r.TotalPrice) as LifetimeValue,
+                        MAX(r.Created_Date) as LastVisit,
+                        DATEDIFF(DAY, MAX(r.Created_Date), GETDATE()) as DaysSinceLastVisit
+                    FROM Reservation r
+                    INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                    WHERE r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    GROUP BY c.FullName, c.Name, c.MobilePhone
+                    HAVING COUNT(*) >= 2  -- Only customers who visited at least twice
+                      AND DATEDIFF(DAY, MAX(r.Created_Date), GETDATE()) >= 180
+                    ORDER BY LifetimeValue DESC";
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, null);
+
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    rptAtRiskCustomers.DataSource = dt;
+                    rptAtRiskCustomers.DataBind();
+                    litAtRiskCount.Text = dt.Rows.Count.ToString();
+                    pnlNoAtRisk.Visible = false;
+                }
+                else
+                {
+                    rptAtRiskCustomers.DataSource = null;
+                    rptAtRiskCustomers.DataBind();
+                    litAtRiskCount.Text = "0";
+                    pnlNoAtRisk.Visible = true;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"⚠️ At-Risk Customers: {dt?.Rows.Count ?? 0} found");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadAtRiskCustomers Error: {ex.Message}");
+                litAtRiskCount.Text = "0";
+                pnlNoAtRisk.Visible = true;
+            }
+        }
+
+        private void LoadCLVDistribution(int year)
+        {
+            try
+            {
+                string query = @"
+                    SELECT
+                        SUM(CASE WHEN TotalSpent < 5000 THEN 1 ELSE 0 END) as Tier1,
+                        SUM(CASE WHEN TotalSpent >= 5000 AND TotalSpent < 20000 THEN 1 ELSE 0 END) as Tier2,
+                        SUM(CASE WHEN TotalSpent >= 20000 AND TotalSpent < 50000 THEN 1 ELSE 0 END) as Tier3,
+                        SUM(CASE WHEN TotalSpent >= 50000 AND TotalSpent < 100000 THEN 1 ELSE 0 END) as Tier4,
+                        SUM(CASE WHEN TotalSpent >= 100000 THEN 1 ELSE 0 END) as Tier5
+                    FROM (
+                        SELECT
+                            c.MobilePhone,
+                            SUM(r.TotalPrice) as TotalSpent
+                        FROM Reservation r
+                        INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                        WHERE YEAR(r.Created_Date) = @Year
+                          AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        GROUP BY c.MobilePhone
+                    ) as CustomerTotals";
+
+                var parameters = new Dictionary<string, object> { { "@Year", year } };
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    DataRow row = dt.Rows[0];
+                    int tier1 = row["Tier1"] != DBNull.Value ? Convert.ToInt32(row["Tier1"]) : 0;
+                    int tier2 = row["Tier2"] != DBNull.Value ? Convert.ToInt32(row["Tier2"]) : 0;
+                    int tier3 = row["Tier3"] != DBNull.Value ? Convert.ToInt32(row["Tier3"]) : 0;
+                    int tier4 = row["Tier4"] != DBNull.Value ? Convert.ToInt32(row["Tier4"]) : 0;
+                    int tier5 = row["Tier5"] != DBNull.Value ? Convert.ToInt32(row["Tier5"]) : 0;
+
+                    litCLVTier1.Text = tier1.ToString();
+                    litCLVTier2.Text = tier2.ToString();
+                    litCLVTier3.Text = tier3.ToString();
+                    litCLVTier4.Text = tier4.ToString();
+                    litCLVTier5.Text = tier5.ToString();
+
+                    hfCLVDistribution.Value = $"[{tier1},{tier2},{tier3},{tier4},{tier5}]";
+                }
+                else
+                {
+                    litCLVTier1.Text = "0";
+                    litCLVTier2.Text = "0";
+                    litCLVTier3.Text = "0";
+                    litCLVTier4.Text = "0";
+                    litCLVTier5.Text = "0";
+                    hfCLVDistribution.Value = "[0,0,0,0,0]";
+                }
+
+                System.Diagnostics.Debug.WriteLine($"💰 CLV Distribution loaded");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadCLVDistribution Error: {ex.Message}");
+                hfCLVDistribution.Value = "[0,0,0,0,0]";
+            }
+        }
+
+        private void LoadAccommodationAffinity(int year)
+        {
+            try
+            {
+                string query = @"
+                    SELECT
+                        a.AccomName as AccommodationName,
+                        SUM(CASE WHEN CustomerBookings.BookingCount = 1 THEN 1 ELSE 0 END) as NewCustomers,
+                        SUM(CASE WHEN CustomerBookings.BookingCount BETWEEN 2 AND 5 THEN 1 ELSE 0 END) as ReturningCustomers,
+                        SUM(CASE WHEN CustomerBookings.BookingCount > 5 THEN 1 ELSE 0 END) as VIPCustomers,
+                        SUM(ra.TotalPrice) as TotalRevenue
+                    FROM Reservation_Accommodation ra
+                    INNER JOIN Accommodation a ON ra.Accommodation_ID = a.ID
+                    INNER JOIN Reservation r ON ra.Reservation_ID = r.ID
+                    INNER JOIN (
+                        SELECT
+                            r2.Customer_MobilePhone,
+                            COUNT(*) as BookingCount
+                        FROM Reservation r2
+                        WHERE r2.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        GROUP BY r2.Customer_MobilePhone
+                    ) as CustomerBookings ON r.Customer_MobilePhone = CustomerBookings.Customer_MobilePhone
+                    WHERE YEAR(r.Created_Date) = @Year
+                      AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    GROUP BY a.AccomName
+                    ORDER BY TotalRevenue DESC";
+
+                var parameters = new Dictionary<string, object> { { "@Year", year } };
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    rptAccommodationAffinity.DataSource = dt;
+                    rptAccommodationAffinity.DataBind();
+                }
+                else
+                {
+                    rptAccommodationAffinity.DataSource = null;
+                    rptAccommodationAffinity.DataBind();
+                }
+
+                System.Diagnostics.Debug.WriteLine($"🏨 Accommodation Affinity: {dt?.Rows.Count ?? 0} accommodations");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ LoadAccommodationAffinity Error: {ex.Message}");
+                rptAccommodationAffinity.DataSource = null;
+                rptAccommodationAffinity.DataBind();
             }
         }
 
