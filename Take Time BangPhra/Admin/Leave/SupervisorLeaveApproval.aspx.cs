@@ -1,7 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Data.SqlClient;
+using System.Configuration;
+using System.Text;
 using System.Web.UI;
 using System.Web.UI.WebControls;
+using Newtonsoft.Json;
 
 namespace Take_Time_BangPhra.Admin.Leave
 {
@@ -10,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.Leave
         private LeaveService leaveService;
         private SupervisorService supervisorService;
         private short currentAdminId = 0;
+        private string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -81,8 +87,17 @@ namespace Take_Time_BangPhra.Admin.Leave
             pnlMainContent.Visible = true;
 
             InitializeYearDropdown();
+            InitializeCalendar();
             LoadStatistics();
             LoadLeaveRequests();
+            LoadCalendar();
+        }
+
+        private void InitializeCalendar()
+        {
+            // Set current month/year
+            hdnCalendarYear.Value = DateTime.Now.Year.ToString();
+            hdnCalendarMonth.Value = DateTime.Now.Month.ToString();
         }
 
         private void InitializeYearDropdown()
@@ -363,6 +378,229 @@ namespace Take_Time_BangPhra.Admin.Leave
             {
                 pnlMessage.CssClass = "alert alert-error";
             }
+        }
+
+        #endregion
+
+        #region Calendar Methods
+
+        protected void btnPrevMonth_Click(object sender, EventArgs e)
+        {
+            int year = int.Parse(hdnCalendarYear.Value);
+            int month = int.Parse(hdnCalendarMonth.Value);
+
+            month--;
+            if (month < 1)
+            {
+                month = 12;
+                year--;
+            }
+
+            hdnCalendarYear.Value = year.ToString();
+            hdnCalendarMonth.Value = month.ToString();
+            LoadCalendar();
+        }
+
+        protected void btnNextMonth_Click(object sender, EventArgs e)
+        {
+            int year = int.Parse(hdnCalendarYear.Value);
+            int month = int.Parse(hdnCalendarMonth.Value);
+
+            month++;
+            if (month > 12)
+            {
+                month = 1;
+                year++;
+            }
+
+            hdnCalendarYear.Value = year.ToString();
+            hdnCalendarMonth.Value = month.ToString();
+            LoadCalendar();
+        }
+
+        private void LoadCalendar()
+        {
+            try
+            {
+                int year = int.Parse(hdnCalendarYear.Value);
+                int month = int.Parse(hdnCalendarMonth.Value);
+
+                // Update month label
+                string[] thaiMonths = { "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม" };
+                lblCurrentMonth.Text = thaiMonths[month - 1] + " " + (year + 543);
+
+                // Get approved leaves for this month
+                DataTable approvedLeaves = GetApprovedLeavesForMonth(year, month);
+
+                // Build leave data dictionary for JavaScript
+                var leaveDataDict = new Dictionary<string, List<object>>();
+                foreach (DataRow row in approvedLeaves.Rows)
+                {
+                    DateTime startDate = Convert.ToDateTime(row["StartDate"]);
+                    DateTime endDate = Convert.ToDateTime(row["EndDate"]);
+                    string employeeName = row["EmployeeName"]?.ToString() ?? "";
+                    string leaveType = row["LeaveTypeName"]?.ToString() ?? "";
+                    string reason = row["Reason"]?.ToString() ?? "";
+
+                    // Add entry for each day in the leave period
+                    for (DateTime date = startDate; date <= endDate; date = date.AddDays(1))
+                    {
+                        if (date.Month == month && date.Year == year)
+                        {
+                            string dateKey = date.ToString("yyyy-MM-dd");
+                            if (!leaveDataDict.ContainsKey(dateKey))
+                            {
+                                leaveDataDict[dateKey] = new List<object>();
+                            }
+                            leaveDataDict[dateKey].Add(new { name = employeeName, type = leaveType, reason = reason });
+                        }
+                    }
+                }
+
+                hdnCalendarLeaveData.Value = JsonConvert.SerializeObject(leaveDataDict);
+
+                // Generate calendar HTML
+                litCalendarDays.Text = GenerateCalendarHtml(year, month, leaveDataDict);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาดในการโหลดปฏิทิน: " + ex.Message, "error");
+            }
+        }
+
+        private DataTable GetApprovedLeavesForMonth(int year, int month)
+        {
+            DataTable dt = new DataTable();
+
+            DateTime firstDay = new DateTime(year, month, 1);
+            DateTime lastDay = firstDay.AddMonths(1).AddDays(-1);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                string query = @"
+                    SELECT LR.ID, LR.StartDate, LR.EndDate, LR.TotalDays, LR.Reason,
+                           LT.LeaveTypeName,
+                           ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName
+                    FROM Leave_Requests LR
+                    INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                    INNER JOIN Admin A ON A.ID = LR.Admin_ID
+                    WHERE LR.Status = 'APPROVED'
+                      AND LR.StartDate <= @LastDay
+                      AND LR.EndDate >= @FirstDay";
+
+                // If not Admin/Owner, only show subordinates' leaves
+                string userRole = Session["User"]?.ToString();
+                if (userRole != "Admin" && userRole != "Owner")
+                {
+                    query += @"
+                      AND LR.Admin_ID IN (
+                          SELECT Employee_AdminID FROM Employee_Supervisor WHERE Supervisor_AdminID = @SupervisorID
+                      )";
+                }
+
+                query += " ORDER BY LR.StartDate";
+
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@FirstDay", firstDay);
+                    cmd.Parameters.AddWithValue("@LastDay", lastDay);
+                    cmd.Parameters.AddWithValue("@SupervisorID", currentAdminId);
+
+                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
+                    {
+                        da.Fill(dt);
+                    }
+                }
+            }
+
+            return dt;
+        }
+
+        private string GenerateCalendarHtml(int year, int month, Dictionary<string, List<object>> leaveData)
+        {
+            StringBuilder sb = new StringBuilder();
+            DateTime firstDay = new DateTime(year, month, 1);
+            int daysInMonth = DateTime.DaysInMonth(year, month);
+            int startDayOfWeek = (int)firstDay.DayOfWeek; // Sunday = 0
+
+            DateTime today = DateTime.Today;
+
+            // Add empty cells for days before the 1st
+            for (int i = 0; i < startDayOfWeek; i++)
+            {
+                // Show days from previous month
+                DateTime prevDate = firstDay.AddDays(-(startDayOfWeek - i));
+                bool isWeekend = prevDate.DayOfWeek == DayOfWeek.Saturday || prevDate.DayOfWeek == DayOfWeek.Sunday;
+                sb.Append($"<div class=\"calendar-day other-month{(isWeekend ? " weekend" : "")}\">");
+                sb.Append($"<div class=\"day-number\">{prevDate.Day}</div>");
+                sb.Append("</div>");
+            }
+
+            // Add days of the month
+            for (int day = 1; day <= daysInMonth; day++)
+            {
+                DateTime currentDate = new DateTime(year, month, day);
+                bool isToday = currentDate == today;
+                bool isWeekend = currentDate.DayOfWeek == DayOfWeek.Saturday || currentDate.DayOfWeek == DayOfWeek.Sunday;
+
+                string dateKey = currentDate.ToString("yyyy-MM-dd");
+                List<object> dayLeaves = leaveData.ContainsKey(dateKey) ? leaveData[dateKey] : new List<object>();
+
+                sb.Append($"<div class=\"calendar-day{(isToday ? " today" : "")}{(isWeekend ? " weekend" : "")}\"");
+                if (dayLeaves.Count > 0)
+                {
+                    sb.Append($" onclick=\"showDayDetail('{dateKey}')\" style=\"cursor: pointer;\"");
+                }
+                sb.Append(">");
+
+                sb.Append($"<div class=\"day-number\">{day}</div>");
+
+                // Show leave entries (max 3 visible)
+                int visibleCount = Math.Min(dayLeaves.Count, 3);
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    dynamic leave = dayLeaves[i];
+                    string leaveClass = GetLeaveTypeClass(leave.type.ToString());
+                    string displayName = leave.name.ToString();
+                    if (displayName.Length > 8)
+                    {
+                        displayName = displayName.Substring(0, 8) + "...";
+                    }
+                    sb.Append($"<div class=\"leave-entry {leaveClass}\" title=\"{leave.name}: {leave.type}\">{displayName}</div>");
+                }
+
+                // Show "more" link if there are more leaves
+                if (dayLeaves.Count > 3)
+                {
+                    sb.Append($"<div class=\"more-leaves\">+{dayLeaves.Count - 3} คนเพิ่มเติม</div>");
+                }
+
+                sb.Append("</div>");
+            }
+
+            // Add empty cells for days after the last day
+            int lastDayOfWeek = (int)new DateTime(year, month, daysInMonth).DayOfWeek;
+            for (int i = lastDayOfWeek + 1; i <= 6; i++)
+            {
+                DateTime nextDate = new DateTime(year, month, daysInMonth).AddDays(i - lastDayOfWeek);
+                bool isWeekend = nextDate.DayOfWeek == DayOfWeek.Saturday || nextDate.DayOfWeek == DayOfWeek.Sunday;
+                sb.Append($"<div class=\"calendar-day other-month{(isWeekend ? " weekend" : "")}\">");
+                sb.Append($"<div class=\"day-number\">{nextDate.Day}</div>");
+                sb.Append("</div>");
+            }
+
+            return sb.ToString();
+        }
+
+        private string GetLeaveTypeClass(string leaveTypeName)
+        {
+            if (leaveTypeName.Contains("ป่วย")) return "sick";
+            if (leaveTypeName.Contains("กิจ")) return "personal";
+            if (leaveTypeName.Contains("พักร้อน") || leaveTypeName.Contains("ร้อน")) return "vacation";
+            if (leaveTypeName.Contains("คลอด")) return "maternity";
+            if (leaveTypeName.Contains("บวช")) return "ordination";
+            return "other";
         }
 
         #endregion

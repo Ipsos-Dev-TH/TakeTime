@@ -318,6 +318,208 @@
             color: #999;
             font-size: 12px;
         }
+
+        /* Calendar Styles */
+        .calendar-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .calendar-header h4 {
+            margin: 0;
+            color: #333;
+        }
+
+        .calendar-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .calendar-nav .btn-nav {
+            background: #11998e;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .calendar-nav .btn-nav:hover {
+            background: #0d7a70;
+        }
+
+        .calendar-nav .current-month {
+            font-size: 18px;
+            font-weight: 600;
+            min-width: 180px;
+            text-align: center;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 2px;
+            margin-top: 10px;
+        }
+
+        .calendar-day-header {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 10px 5px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .calendar-day-header.weekend {
+            background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+        }
+
+        .calendar-day {
+            min-height: 80px;
+            padding: 5px;
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            position: relative;
+        }
+
+        .calendar-day.today {
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+        }
+
+        .calendar-day.other-month {
+            background: #fafafa;
+            opacity: 0.5;
+        }
+
+        .calendar-day .day-number {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .calendar-day.weekend .day-number {
+            color: #f5576c;
+        }
+
+        .leave-entry {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-bottom: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .leave-entry:hover {
+            opacity: 0.9;
+        }
+
+        .leave-entry.sick { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); }
+        .leave-entry.personal { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .leave-entry.vacation { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .leave-entry.maternity { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .leave-entry.ordination { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); color: #333; }
+
+        .more-leaves {
+            font-size: 10px;
+            color: #666;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .more-leaves:hover {
+            color: #11998e;
+        }
+
+        .calendar-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+
+        .legend-color.sick { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); }
+        .legend-color.personal { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .legend-color.vacation { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .legend-color.maternity { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .legend-color.ordination { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); }
+        .legend-color.other { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+
+        /* Day detail modal */
+        .day-modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            z-index: 1002;
+            min-width: 350px;
+            max-width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        }
+
+        .day-modal h4 {
+            margin: 0 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #11998e;
+        }
+
+        .day-leave-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            background: #f8f9fa;
+            border-left: 4px solid #11998e;
+        }
+
+        .day-leave-item .employee-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .day-leave-item .leave-type {
+            font-size: 12px;
+            color: #666;
+        }
     </style>
 
     <div class="supervisor-leave">
@@ -362,6 +564,40 @@
                         <asp:Label ID="lblApprovedThisYear" runat="server" Text="0"></asp:Label>
                         <span style="font-size: 14px; font-weight: normal;">รายการ</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Approved Leave Calendar -->
+            <div class="calendar-section">
+                <div class="calendar-header">
+                    <h4>&#128197; ปฏิทินวันลาที่อนุมัติแล้ว</h4>
+                    <div class="calendar-nav">
+                        <asp:Button ID="btnPrevMonth" runat="server" Text="&#9664; เดือนก่อน" CssClass="btn-nav" OnClick="btnPrevMonth_Click" />
+                        <asp:Label ID="lblCurrentMonth" runat="server" CssClass="current-month" Text="มกราคม 2568"></asp:Label>
+                        <asp:Button ID="btnNextMonth" runat="server" Text="เดือนหน้า &#9654;" CssClass="btn-nav" OnClick="btnNextMonth_Click" />
+                        <asp:HiddenField ID="hdnCalendarYear" runat="server" />
+                        <asp:HiddenField ID="hdnCalendarMonth" runat="server" />
+                    </div>
+                </div>
+
+                <div class="calendar-grid">
+                    <div class="calendar-day-header weekend">อา</div>
+                    <div class="calendar-day-header">จ</div>
+                    <div class="calendar-day-header">อ</div>
+                    <div class="calendar-day-header">พ</div>
+                    <div class="calendar-day-header">พฤ</div>
+                    <div class="calendar-day-header">ศ</div>
+                    <div class="calendar-day-header weekend">ส</div>
+                    <asp:Literal ID="litCalendarDays" runat="server"></asp:Literal>
+                </div>
+
+                <div class="calendar-legend">
+                    <div class="legend-item"><div class="legend-color sick"></div> ลาป่วย</div>
+                    <div class="legend-item"><div class="legend-color personal"></div> ลากิจ</div>
+                    <div class="legend-item"><div class="legend-color vacation"></div> ลาพักร้อน</div>
+                    <div class="legend-item"><div class="legend-color maternity"></div> ลาคลอด</div>
+                    <div class="legend-item"><div class="legend-color ordination"></div> ลาบวช</div>
+                    <div class="legend-item"><div class="legend-color other"></div> อื่นๆ</div>
                 </div>
             </div>
 
@@ -491,6 +727,19 @@
         </div>
     </div>
 
+    <!-- Day Detail Modal -->
+    <div id="dayModalBackdrop" class="modal-backdrop"></div>
+    <div id="dayModal" class="day-modal">
+        <h4 id="dayModalTitle">วันลา</h4>
+        <div id="dayModalContent"></div>
+        <div class="btn-group" style="margin-top: 15px;">
+            <button type="button" class="btn btn-primary" onclick="hideDayModal()">ปิด</button>
+        </div>
+    </div>
+
+    <!-- Hidden field for calendar leave data -->
+    <asp:HiddenField ID="hdnCalendarLeaveData" runat="server" />
+
     <script type="text/javascript">
         function showRejectModal(requestId) {
             document.getElementById('rejectModalBackdrop').style.display = 'block';
@@ -503,6 +752,45 @@
             document.getElementById('rejectModal').style.display = 'none';
         }
 
+        function showDayDetail(dateStr) {
+            var leaveDataStr = document.getElementById('<%= hdnCalendarLeaveData.ClientID %>').value;
+            if (!leaveDataStr) return;
+
+            var leaveData = JSON.parse(leaveDataStr);
+            var dayLeaves = leaveData[dateStr] || [];
+
+            if (dayLeaves.length === 0) return;
+
+            var dateObj = new Date(dateStr);
+            var thaiMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                              'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+            var thaiDate = dateObj.getDate() + ' ' + thaiMonths[dateObj.getMonth()] + ' ' + (dateObj.getFullYear() + 543);
+
+            document.getElementById('dayModalTitle').innerHTML = '&#128197; วันที่ ' + thaiDate + ' (' + dayLeaves.length + ' คน)';
+
+            var html = '';
+            for (var i = 0; i < dayLeaves.length; i++) {
+                var leave = dayLeaves[i];
+                html += '<div class="day-leave-item">';
+                html += '<div class="employee-name">' + leave.name + '</div>';
+                html += '<div class="leave-type">' + leave.type + '</div>';
+                if (leave.reason) {
+                    html += '<div style="font-size: 11px; color: #999; margin-top: 3px;">เหตุผล: ' + leave.reason + '</div>';
+                }
+                html += '</div>';
+            }
+            document.getElementById('dayModalContent').innerHTML = html;
+
+            document.getElementById('dayModalBackdrop').style.display = 'block';
+            document.getElementById('dayModal').style.display = 'block';
+        }
+
+        function hideDayModal() {
+            document.getElementById('dayModalBackdrop').style.display = 'none';
+            document.getElementById('dayModal').style.display = 'none';
+        }
+
         document.getElementById('rejectModalBackdrop').onclick = hideRejectModal;
+        document.getElementById('dayModalBackdrop').onclick = hideDayModal;
     </script>
 </asp:Content>

@@ -85,5 +85,40 @@ namespace Take_Time_BangPhra.Admin.Leave
         /// btnConfirmReject control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnConfirmReject;
+
+        /// <summary>
+        /// btnPrevMonth control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnPrevMonth;
+
+        /// <summary>
+        /// lblCurrentMonth control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblCurrentMonth;
+
+        /// <summary>
+        /// btnNextMonth control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnNextMonth;
+
+        /// <summary>
+        /// hdnCalendarYear control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnCalendarYear;
+
+        /// <summary>
+        /// hdnCalendarMonth control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnCalendarMonth;
+
+        /// <summary>
+        /// litCalendarDays control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCalendarDays;
+
+        /// <summary>
+        /// hdnCalendarLeaveData control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hdnCalendarLeaveData;
     }
 }
