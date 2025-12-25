@@ -392,7 +392,7 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Calculate monthly depreciation for all active assets
-        /// Updates existing records and inserts new ones
+        /// Calculates from DepreciationStartDate to current date (idempotent - same result when clicked multiple times)
         /// </summary>
         public (bool Success, string Message, int AffectedAssets) CalculateMonthlyDepreciation(int year, int month)
         {
@@ -402,14 +402,13 @@ namespace Take_Time_BangPhra.Class
                 DateTime endOfMonth = calculationDate.AddMonths(1).AddDays(-1);
                 int affectedCount = 0;
 
-                // Get all active assets that need depreciation calculation
+                // Get all active assets
                 string query = @"
-                    SELECT ID, MonthlyDepreciation, AccumulatedDepreciation, BookValue, ResidualValue,
-                           DepreciationStartDate
+                    SELECT ID, PurchasePrice, MonthlyDepreciation, ResidualValue,
+                           DepreciationStartDate, UsefulLifeMonths
                     FROM Assets
                     WHERE Status = 'ACTIVE'
-                      AND DepreciationStartDate <= @EndOfMonth
-                      AND BookValue > ResidualValue";
+                      AND DepreciationStartDate <= @EndOfMonth";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -423,23 +422,30 @@ namespace Take_Time_BangPhra.Class
                     foreach (DataRow row in dtAssets.Rows)
                     {
                         int assetId = Convert.ToInt32(row["ID"]);
+                        decimal purchasePrice = Convert.ToDecimal(row["PurchasePrice"]);
                         decimal monthlyDep = Convert.ToDecimal(row["MonthlyDepreciation"]);
-                        decimal currentAccumulated = Convert.ToDecimal(row["AccumulatedDepreciation"]);
-                        decimal currentBookValue = Convert.ToDecimal(row["BookValue"]);
                         decimal residualValue = Convert.ToDecimal(row["ResidualValue"]);
+                        DateTime depStartDate = Convert.ToDateTime(row["DepreciationStartDate"]);
+                        int usefulLifeMonths = Convert.ToInt32(row["UsefulLifeMonths"]);
 
-                        // Calculate new values
-                        decimal newAccumulated = currentAccumulated + monthlyDep;
-                        decimal newBookValue = currentBookValue - monthlyDep;
+                        // Calculate total months elapsed from depreciation start to now
+                        int monthsElapsed = ((year - depStartDate.Year) * 12) + (month - depStartDate.Month) + 1;
+                        if (monthsElapsed < 0) monthsElapsed = 0;
+                        if (monthsElapsed > usefulLifeMonths) monthsElapsed = usefulLifeMonths;
 
-                        // Don't go below residual value
-                        if (newBookValue < residualValue)
-                        {
-                            newBookValue = residualValue;
-                            monthlyDep = currentBookValue - residualValue;
-                            if (monthlyDep < 0) monthlyDep = 0;
-                            newAccumulated = currentAccumulated + monthlyDep;
-                        }
+                        // Calculate accumulated depreciation from scratch (not adding to existing)
+                        decimal depreciableAmount = purchasePrice - residualValue;
+                        decimal newAccumulated = Math.Round(monthlyDep * monthsElapsed, 2);
+
+                        // Don't exceed depreciable amount
+                        if (newAccumulated > depreciableAmount) newAccumulated = depreciableAmount;
+
+                        decimal newBookValue = purchasePrice - newAccumulated;
+                        if (newBookValue < residualValue) newBookValue = residualValue;
+
+                        // This month's depreciation amount for the record
+                        decimal thisMonthDep = monthlyDep;
+                        if (newBookValue <= residualValue) thisMonthDep = 0;
 
                         // Check if record already exists for this year/month
                         var checkParams = new Dictionary<string, object>
@@ -461,7 +467,7 @@ namespace Take_Time_BangPhra.Class
                                 { "@AssetID", assetId },
                                 { "@Year", year },
                                 { "@Month", month },
-                                { "@DepreciationAmount", monthlyDep },
+                                { "@DepreciationAmount", thisMonthDep },
                                 { "@AccumulatedDepreciation", newAccumulated },
                                 { "@BookValue", newBookValue },
                                 { "@CalculatedDate", DateTime.Now }
@@ -485,7 +491,7 @@ namespace Take_Time_BangPhra.Class
                                 { "@AssetID", assetId },
                                 { "@Year", year },
                                 { "@Month", month },
-                                { "@DepreciationAmount", monthlyDep },
+                                { "@DepreciationAmount", thisMonthDep },
                                 { "@AccumulatedDepreciation", newAccumulated },
                                 { "@BookValue", newBookValue },
                                 { "@CalculatedDate", DateTime.Now }
