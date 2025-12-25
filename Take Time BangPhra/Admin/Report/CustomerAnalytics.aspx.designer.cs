@@ -150,5 +150,60 @@ namespace Take_Time_BangPhra.Admin.Report
         /// litAvgDaysBetweenVisits control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Literal litAvgDaysBetweenVisits;
+
+        /// <summary>
+        /// pnlAtRiskCustomers control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlAtRiskCustomers;
+
+        /// <summary>
+        /// litAtRiskCount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litAtRiskCount;
+
+        /// <summary>
+        /// rptAtRiskCustomers control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Repeater rptAtRiskCustomers;
+
+        /// <summary>
+        /// pnlNoAtRisk control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlNoAtRisk;
+
+        /// <summary>
+        /// litCLVTier1 control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCLVTier1;
+
+        /// <summary>
+        /// litCLVTier2 control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCLVTier2;
+
+        /// <summary>
+        /// litCLVTier3 control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCLVTier3;
+
+        /// <summary>
+        /// litCLVTier4 control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCLVTier4;
+
+        /// <summary>
+        /// litCLVTier5 control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litCLVTier5;
+
+        /// <summary>
+        /// hfCLVDistribution control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfCLVDistribution;
+
+        /// <summary>
+        /// rptAccommodationAffinity control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Repeater rptAccommodationAffinity;
     }
 }

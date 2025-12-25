@@ -412,38 +412,93 @@ namespace Take_Time_BangPhra.Admin.Report
         {
             try
             {
-                // Check if Type column exists in Account_Payment
-                var checkParams = new Dictionary<string, object>();
-                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT COUNT(*) AS ColumnExists FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment' AND COLUMN_NAME = 'Type'",
-                    checkParams);
-
-                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["ColumnExists"]) == 0)
+                // Special handling for salary expenses - get from Payroll_Periods if available
+                if (expenseType == "เงินเดือนพนักงาน")
                 {
-                    // Type column doesn't exist, return 0 for individual expense types
-                    return 0;
+                    return GetSalaryExpenses(startDate, endDate);
                 }
 
-                string query = @"
+                // For other expenses, use Paid_Type column in Account_Payment
+                // Map expense type names to Paid_Type values
+                string paidTypeCondition = "";
+                switch (expenseType)
+                {
+                    case "ค่าสาธารณูปโภค":
+                        paidTypeCondition = "(Paid_Type LIKE N'%ไฟฟ้า%' OR Paid_Type LIKE N'%น้ำประปา%' OR Paid_Type LIKE N'%โทรศัพท์%' OR Paid_Type LIKE N'%อินเทอร์เน็ต%' OR Paid_Type LIKE N'%สาธารณูปโภค%')";
+                        break;
+                    case "ค่าซ่อมบำรุง":
+                        paidTypeCondition = "(Paid_Type LIKE N'%ซ่อม%' OR Paid_Type LIKE N'%บำรุง%' OR Paid_Type LIKE N'%ซ่อมแซม%')";
+                        break;
+                    default:
+                        paidTypeCondition = $"Paid_Type = N'{expenseType}'";
+                        break;
+                }
+
+                string query = $@"
                     SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
                     FROM Account_Payment
                     WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                       AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                      AND Type = @ExpenseType
-                      AND Status = 'Normal'";
+                      AND {paidTypeCondition}
+                      AND Status = N'Normal'";
 
                 var parameters = new Dictionary<string, object>
                 {
                     { "@StartDate", startDate },
-                    { "@EndDate", endDate },
-                    { "@ExpenseType", expenseType }
+                    { "@EndDate", endDate }
                 };
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalExpense"]) : 0;
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["TotalExpense"] != DBNull.Value
+                    ? Convert.ToDecimal(dt.Rows[0]["TotalExpense"]) : 0;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"GetExpenseByType error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        private decimal GetSalaryExpenses(DateTime startDate, DateTime endDate)
+        {
+            try
+            {
+                // First try to get from Payroll_Periods (approved payroll)
+                string payrollQuery = @"
+                    SELECT ISNULL(SUM(TotalNetPay), 0) as TotalSalary
+                    FROM Payroll_Periods
+                    WHERE Status IN ('APPROVED', 'COMPLETED')
+                      AND DATEFROMPARTS(Year, Month, 1) >= DATEFROMPARTS(YEAR(@StartDate), MONTH(@StartDate), 1)
+                      AND DATEFROMPARTS(Year, Month, 1) <= DATEFROMPARTS(YEAR(@EndDate), MONTH(@EndDate), 1)";
+
+                var payrollParams = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate }
+                };
+
+                DataTable dtPayroll = codeInstance.DatabaseQuerySafe(conn, payrollQuery, payrollParams);
+                decimal payrollTotal = dtPayroll != null && dtPayroll.Rows.Count > 0 && dtPayroll.Rows[0]["TotalSalary"] != DBNull.Value
+                    ? Convert.ToDecimal(dtPayroll.Rows[0]["TotalSalary"]) : 0;
+
+                if (payrollTotal > 0) return payrollTotal;
+
+                // Fallback: Get from Account_Payment where Paid_Type is salary-related
+                string paymentQuery = @"
+                    SELECT ISNULL(SUM(Total_Amount), 0) as TotalSalary
+                    FROM Account_Payment
+                    WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                      AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                      AND (Paid_Type LIKE N'%ค่าจ้าง%' OR Paid_Type LIKE N'%เงินเดือน%' OR ID LIKE 'PAY%')
+                      AND Status = N'Normal'";
+
+                DataTable dtPayment = codeInstance.DatabaseQuerySafe(conn, paymentQuery, payrollParams);
+                return dtPayment != null && dtPayment.Rows.Count > 0 && dtPayment.Rows[0]["TotalSalary"] != DBNull.Value
+                    ? Convert.ToDecimal(dtPayment.Rows[0]["TotalSalary"]) : 0;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetSalaryExpenses error: {ex.Message}");
                 return 0;
             }
         }
@@ -452,46 +507,17 @@ namespace Take_Time_BangPhra.Admin.Report
         {
             try
             {
-                // Check if Type column exists in Account_Payment
-                var checkParams = new Dictionary<string, object>();
-                DataTable dtCheck = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT COUNT(*) AS ColumnExists FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment' AND COLUMN_NAME = 'Type'",
-                    checkParams);
-
-                if (dtCheck == null || dtCheck.Rows.Count == 0 || Convert.ToInt32(dtCheck.Rows[0]["ColumnExists"]) == 0)
-                {
-                    // Type column doesn't exist, return total expenses
-                    string totalQuery = @"
-                        SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
-                        FROM Account_Payment
-                        WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                          AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                          AND Status = 'Normal'";
-
-                    var totalParams = new Dictionary<string, object>
-                    {
-                        { "@StartDate", startDate },
-                        { "@EndDate", endDate }
-                    };
-
-                    DataTable dtTotal = codeInstance.DatabaseQuerySafe(conn, totalQuery, totalParams);
-                    return dtTotal != null && dtTotal.Rows.Count > 0 ? Convert.ToDecimal(dtTotal.Rows[0]["TotalExpense"]) : 0;
-                }
-
-                StringBuilder typeCondition = new StringBuilder();
-                for (int i = 0; i < excludeTypes.Length; i++)
-                {
-                    if (i > 0) typeCondition.Append(" AND ");
-                    typeCondition.Append($"Type != @ExcludeType{i}");
-                }
-
-                string query = $@"
-                    SELECT ISNULL(SUM(Total_Amount), 0) as OtherExpense
+                // Get total expenses and subtract specific types
+                string query = @"
+                    SELECT ISNULL(SUM(Total_Amount), 0) as TotalExpense
                     FROM Account_Payment
                     WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                       AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                      AND {typeCondition}
-                      AND Status = 'Normal'";
+                      AND Status = N'Normal'
+                      AND (Paid_Type NOT LIKE N'%ค่าจ้าง%' AND Paid_Type NOT LIKE N'%เงินเดือน%')
+                      AND (Paid_Type NOT LIKE N'%ไฟฟ้า%' AND Paid_Type NOT LIKE N'%น้ำประปา%' AND Paid_Type NOT LIKE N'%โทรศัพท์%' AND Paid_Type NOT LIKE N'%อินเทอร์เน็ต%' AND Paid_Type NOT LIKE N'%สาธารณูปโภค%')
+                      AND (Paid_Type NOT LIKE N'%ซ่อม%' AND Paid_Type NOT LIKE N'%บำรุง%')
+                      AND ID NOT LIKE 'PAY%'";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -499,16 +525,13 @@ namespace Take_Time_BangPhra.Admin.Report
                     { "@EndDate", endDate }
                 };
 
-                for (int i = 0; i < excludeTypes.Length; i++)
-                {
-                    parameters.Add($"@ExcludeType{i}", excludeTypes[i]);
-                }
-
                 DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-                return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["OtherExpense"]) : 0;
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["TotalExpense"] != DBNull.Value
+                    ? Convert.ToDecimal(dt.Rows[0]["TotalExpense"]) : 0;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"GetOtherExpenses error: {ex.Message}");
                 return 0;
             }
         }

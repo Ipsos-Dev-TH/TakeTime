@@ -356,16 +356,21 @@ public class PayrollService
                                 decimal totalDeductionsForEmp = leaveDeduction + socialSecurity;
                                 decimal netSalary = totalEarnings - totalDeductionsForEmp;
 
-                                using (SqlCommand recCmd = new SqlCommand(@"
+                                // Note: TotalEarnings, TotalDeductions, and NetSalary are computed columns in the database
+                            // They are automatically calculated as:
+                            // TotalEarnings = BaseSalary + OTAmount + BonusAmount + AllowanceAmount
+                            // TotalDeductions = LeaveDeduction + SocialSecurity + Tax + OtherDeductions
+                            // NetSalary = TotalEarnings - TotalDeductions
+                            using (SqlCommand recCmd = new SqlCommand(@"
                                     INSERT INTO Payroll_Records
                                     (PayrollPeriod_ID, Admin_ID, EmployeeName, BaseSalary, WorkDays, LeaveDays,
-                                     OTHours, OTAmount, BonusAmount, AllowanceAmount, TotalEarnings,
-                                     LeaveDeduction, SocialSecurity, Tax, OtherDeductions, TotalDeductions, NetSalary,
+                                     OTHours, OTAmount, BonusAmount, AllowanceAmount,
+                                     LeaveDeduction, SocialSecurity, Tax, OtherDeductions,
                                      VoucherGenerated, CreatedDate)
                                     VALUES
                                     (@PeriodID, @AdminID, @Name, @Salary, @WorkDays, @LeaveDays,
-                                     @OTHours, @OTAmount, 0, 0, @TotalEarnings,
-                                     @LeaveDeduction, @SS, 0, 0, @TotalDeductions, @Net,
+                                     @OTHours, @OTAmount, 0, 0,
+                                     @LeaveDeduction, @SS, 0, 0,
                                      0, GETDATE())", conn, transaction))
                                 {
                                     recCmd.Parameters.AddWithValue("@PeriodID", periodId);
@@ -376,11 +381,8 @@ public class PayrollService
                                     recCmd.Parameters.AddWithValue("@LeaveDays", leaveDays);
                                     recCmd.Parameters.AddWithValue("@OTHours", otHours);
                                     recCmd.Parameters.AddWithValue("@OTAmount", otAmount);
-                                    recCmd.Parameters.AddWithValue("@TotalEarnings", totalEarnings);
                                     recCmd.Parameters.AddWithValue("@LeaveDeduction", leaveDeduction);
                                     recCmd.Parameters.AddWithValue("@SS", socialSecurity);
-                                    recCmd.Parameters.AddWithValue("@TotalDeductions", totalDeductionsForEmp);
-                                    recCmd.Parameters.AddWithValue("@Net", netSalary);
                                     recCmd.ExecuteNonQuery();
                                 }
 
