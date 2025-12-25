@@ -472,11 +472,16 @@ namespace Take_Time_BangPhra.Account
                 string docNum = gvDetails.Rows[e.RowIndex].Cells[3].Text;
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
-                string docMonth = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
+                string docMonthPadded = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
+                // Convert to non-padded month (PaymentVoucher stores as "1", "2", not "01", "02")
+                string docMonth = int.TryParse(docMonthPadded, out int monthNum) ? monthNum.ToString() : docMonthPadded;
 
                 if (docType == "PAY")
                 {
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                    // Check both non-padded and padded paths
+                    string path = basePath + "\\" + docYear + "\\" + docMonth;
+                    string pathPadded = basePath + "\\" + docYear + "\\" + docMonthPadded;
 
                     // SECURE: Delete payment details with parameterized query
                     var deleteDetailsParams = new Dictionary<string, object>
@@ -496,13 +501,16 @@ namespace Take_Time_BangPhra.Account
                         "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
                         deletePaymentParams);
 
-                    // Delete payment files
-                    if (Directory.Exists(path))
+                    // Delete payment files (check both non-padded and padded paths)
+                    foreach (string checkPath in new[] { path, pathPadded })
                     {
-                        string[] files = Directory.GetFiles(path, docNum + "*");
-                        foreach (string file in files)
+                        if (Directory.Exists(checkPath))
                         {
-                            File.Delete(file);
+                            string[] files = Directory.GetFiles(checkPath, docNum + "*");
+                            foreach (string file in files)
+                            {
+                                File.Delete(file);
+                            }
                         }
                     }
 
@@ -533,9 +541,11 @@ namespace Take_Time_BangPhra.Account
                 // Parse document info
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
-                string docMonth = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
+                string docMonthPadded = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
+                // Convert to non-padded month (PaymentVoucher stores as "1", "2", not "01", "02")
+                string docMonth = int.TryParse(docMonthPadded, out int monthNum) ? monthNum.ToString() : docMonthPadded;
 
-                System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth}");
+                System.Diagnostics.Debug.WriteLine($"   Parsed: Type={docType}, Year={docYear}, Month={docMonth} (from {docMonthPadded})");
 
                 if (docType == "PAY")
                 {
@@ -555,7 +565,7 @@ namespace Take_Time_BangPhra.Account
                         uid = uidResult.Rows[0][0].ToString();
                     }
 
-                    // Build file paths
+                    // Build file paths - check both non-padded month (1,2,...) and padded (01,02,...)
                     List<string> filesToCheck = new List<string>();
 
                     if (docStatus == "Cancel")
@@ -563,16 +573,20 @@ namespace Take_Time_BangPhra.Account
                         if (!string.IsNullOrEmpty(uid))
                         {
                             filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}_{uid}_Cancel.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{docMonthPadded}\\{docNum}_{uid}_Cancel.pdf");
                         }
                         filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}_Cancel.pdf");
+                        filesToCheck.Add($"{path}\\{docYear}\\{docMonthPadded}\\{docNum}_Cancel.pdf");
                     }
                     else
                     {
                         if (!string.IsNullOrEmpty(uid))
                         {
                             filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}_{uid}.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{docMonthPadded}\\{docNum}_{uid}.pdf");
                         }
                         filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}.pdf");
+                        filesToCheck.Add($"{path}\\{docYear}\\{docMonthPadded}\\{docNum}.pdf");
                     }
 
                     // Check and redirect
