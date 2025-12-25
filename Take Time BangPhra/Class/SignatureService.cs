@@ -582,7 +582,7 @@ public class SignatureService
             // Silently fail
         }
 
-        // Get receiver info by ID Number
+        // Get receiver info by ID Number (same column as master: IDNumber)
         if (!string.IsNullOrEmpty(receiverIdNumber))
         {
             try
@@ -595,8 +595,8 @@ public class SignatureService
                         cmd.CommandText = @"
                             SELECT ID, FirstName, LastName
                             FROM Admin
-                            WHERE IDCard = @IDCard";
-                        cmd.Parameters.AddWithValue("@IDCard", receiverIdNumber);
+                            WHERE IDNumber = @IDNumber";
+                        cmd.Parameters.AddWithValue("@IDNumber", receiverIdNumber);
 
                         conn.Open();
                         using (SqlDataReader reader = cmd.ExecuteReader())
