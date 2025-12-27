@@ -1013,8 +1013,47 @@ textarea.form-control {
         grid-template-columns: 1fr;
     }
 
+    /* Mobile-friendly form controls */
+    .form-control {
+        font-size: 16px !important; /* Prevents iOS zoom */
+        padding: 14px 16px !important;
+        min-height: 50px !important;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+    }
+
+    /* Number inputs on mobile */
+    input[type="number"].form-control {
+        font-size: 18px !important;
+        padding: 16px !important;
+        min-height: 54px !important;
+    }
+
+    /* Text inputs more tappable */
+    input[type="text"].form-control,
+    input[type="search"].form-control {
+        font-size: 16px !important;
+        padding: 14px 16px !important;
+    }
+
+    /* Select dropdowns on mobile */
+    select.form-control {
+        font-size: 16px !important;
+        min-height: 52px !important;
+        padding: 14px 40px 14px 16px !important;
+    }
+
+    /* Textarea on mobile */
+    textarea.form-control {
+        font-size: 16px !important;
+        min-height: 100px !important;
+    }
+
     .btn {
         width: 100%;
+        min-height: 48px;
+        font-size: 16px !important;
     }
 
     .btn-group {
@@ -1028,6 +1067,39 @@ textarea.form-control {
 
     .filter-bar .form-control {
         max-width: 100%;
+    }
+
+    /* Better touch targets for action buttons */
+    .product-table .actions .btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 10px;
+    }
+
+    .btn-sm {
+        min-height: 44px;
+        padding: 10px 16px;
+        font-size: 14px !important;
+    }
+
+    /* Input group on mobile */
+    .input-group {
+        flex-direction: column;
+    }
+
+    .input-group .btn {
+        width: 100%;
+    }
+
+    /* Scanner button */
+    .scanner-btn {
+        min-height: 50px;
+    }
+
+    /* Autocomplete on mobile */
+    .autocomplete-items div {
+        padding: 16px;
+        min-height: 48px;
     }
 }
 

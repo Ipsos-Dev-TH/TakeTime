@@ -204,104 +204,198 @@ namespace Take_Time_BangPhra.Product
 
         protected void Button3_Click(object sender, EventArgs e)
         {
-            // SECURE: Product lookup with parameterized query
-            var productParams = new Dictionary<string, object>
+            try
             {
-                { "@ProductName", TextBox1.Text ?? "" },
-                { "@Barcode", TextBox1.Text ?? "" }
-            };
-
-            DataTable dtProduct = code.DatabaseQuerySafe(conn,
-                "SELECT * FROM [Taketime].[dbo].[Product] " +
-                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
-                productParams);
-            if (dtProduct.Rows.Count > 0)
-            {
-                DataTable dtOrder = (DataTable)Session["dtOrder"];
-                if (dtOrder.Rows.Count == 0)
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(TextBox1.Text))
                 {
-                    int amount = Convert.ToInt32(TextBox2.Text);
-                    double total = amount * Convert.ToDouble(TextBox3.Text);
-                    dtOrder.Rows.Add(dtProduct.Rows[0]["ID"].ToString(), dtProduct.Rows[0]["Barcode"].ToString(), dtProduct.Rows[0]["Product_Name"].ToString(), amount, TextBox3.Text, total, dtProduct.Rows[0]["Category_ID"].ToString(),TextBox4.Text);
-
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุชื่อสินค้าหรือบาร์โค้ด');", true);
+                    return;
                 }
-                else
+
+                if (string.IsNullOrWhiteSpace(TextBox2.Text))
                 {
-                    int rowid = 0;
-                    int checkdup = 0;
-                    for (int i = 0; i < dtOrder.Rows.Count; i++)
-                    {
-                        if (dtOrder.Rows[i]["Product_Name"].ToString() == dtProduct.Rows[0]["Product_Name"].ToString())
-                        {
-                            checkdup = 1;
-                            rowid = i;
-                        }
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุจำนวนสินค้า');", true);
+                    return;
+                }
 
-                    }
-                    if (checkdup == 0)
-                    {
-                        int amount = Convert.ToInt32(TextBox2.Text);
-                        double total = amount * Convert.ToDouble(TextBox3.Text);
-                        dtOrder.Rows.Add(dtProduct.Rows[0]["ID"].ToString(), dtProduct.Rows[0]["Barcode"].ToString(), dtProduct.Rows[0]["Product_Name"].ToString(), amount, TextBox3.Text, total, dtProduct.Rows[0]["Category_ID"].ToString(),TextBox4.Text);
+                int amount;
+                if (!int.TryParse(TextBox2.Text, out amount) || amount <= 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('จำนวนสินค้าต้องเป็นตัวเลขมากกว่า 0');", true);
+                    return;
+                }
 
+                decimal price = 0;
+                if (!string.IsNullOrWhiteSpace(TextBox3.Text))
+                {
+                    decimal.TryParse(TextBox3.Text, out price);
+                }
+
+                // SECURE: Product lookup with parameterized query
+                var productParams = new Dictionary<string, object>
+                {
+                    { "@ProductName", TextBox1.Text.Trim() },
+                    { "@Barcode", TextBox1.Text.Trim() }
+                };
+
+                DataTable dtProduct = code.DatabaseQuerySafe(conn,
+                    "SELECT * FROM [Taketime].[dbo].[Product] " +
+                    "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                    productParams);
+
+                if (dtProduct.Rows.Count > 0)
+                {
+                    DataTable dtOrder = (DataTable)Session["dtOrder"];
+                    decimal total = amount * price;
+                    string remark = TextBox4.Text?.Trim() ?? "";
+
+                    if (dtOrder.Rows.Count == 0)
+                    {
+                        dtOrder.Rows.Add(
+                            dtProduct.Rows[0]["ID"].ToString(),
+                            dtProduct.Rows[0]["Barcode"].ToString(),
+                            dtProduct.Rows[0]["Product_Name"].ToString(),
+                            amount,
+                            price,
+                            total,
+                            dtProduct.Rows[0]["Category_ID"].ToString(),
+                            remark
+                        );
                     }
                     else
                     {
-                        int amount = Convert.ToInt32(dtOrder.Rows[rowid]["Amount"].ToString());
-                        amount = amount + Convert.ToInt32(TextBox2.Text);
-                        double total = amount * Convert.ToDouble(TextBox3.Text);
-                        dtOrder.Rows[rowid]["Amount"] = amount;
-                        dtOrder.Rows[rowid]["Price_Total"] = total;
-                    }
-                }
-                GridView1.DataSource = dtOrder;
-                GridView1.DataBind();
-                Session["dtOrder"] = dtOrder;
-                TextBox1.Text = string.Empty;
-                double pricetotal = 0;
-                for (int i = 0; i < dtOrder.Rows.Count; i++)
-                {
-                    pricetotal += Convert.ToDouble(dtOrder.Rows[i]["Price_Total"].ToString());
-                }
+                        int rowid = -1;
+                        for (int i = 0; i < dtOrder.Rows.Count; i++)
+                        {
+                            if (dtOrder.Rows[i]["Product_Name"].ToString() == dtProduct.Rows[0]["Product_Name"].ToString())
+                            {
+                                rowid = i;
+                                break;
+                            }
+                        }
 
+                        if (rowid == -1)
+                        {
+                            dtOrder.Rows.Add(
+                                dtProduct.Rows[0]["ID"].ToString(),
+                                dtProduct.Rows[0]["Barcode"].ToString(),
+                                dtProduct.Rows[0]["Product_Name"].ToString(),
+                                amount,
+                                price,
+                                total,
+                                dtProduct.Rows[0]["Category_ID"].ToString(),
+                                remark
+                            );
+                        }
+                        else
+                        {
+                            int existingAmount = Convert.ToInt32(dtOrder.Rows[rowid]["Amount"]);
+                            existingAmount += amount;
+                            decimal existingPrice = Convert.ToDecimal(dtOrder.Rows[rowid]["Sell_Price"]);
+                            dtOrder.Rows[rowid]["Amount"] = existingAmount;
+                            dtOrder.Rows[rowid]["Price_Total"] = existingAmount * existingPrice;
+                        }
+                    }
+
+                    GridView1.DataSource = dtOrder;
+                    GridView1.DataBind();
+                    Session["dtOrder"] = dtOrder;
+                    TextBox1.Text = string.Empty;
+                    TextBox2.Text = string.Empty;
+                }
+                else
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีรายชื่อสินค้าดังกล่าว');", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีรายชื่อสินค้าดังกล่าว');", true);
+                System.Diagnostics.Debug.WriteLine($"Button3_Click Error: {ex.Message}");
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", $"alert('เกิดข้อผิดพลาด: {ex.Message.Replace("'", "\\'")}');", true);
             }
         }
 
         protected void Button2_Click(object sender, EventArgs e)
         {
-            DataTable dtOrder = (DataTable)Session["dtOrder"];
-            if(dtOrder.Rows.Count > 0)
+            try
             {
-                // SECURE: INSERT Product_Out with parameterized query
-                for(int i = 0;i<dtOrder.Rows.Count;i++)
+                DataTable dtOrder = (DataTable)Session["dtOrder"];
+                if (dtOrder == null || dtOrder.Rows.Count == 0)
                 {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีรายการสินค้าที่จะบันทึก');", true);
+                    return;
+                }
+
+                int successCount = 0;
+                // SECURE: INSERT Product_Out with parameterized query
+                for (int i = 0; i < dtOrder.Rows.Count; i++)
+                {
+                    // Properly convert values to correct types
+                    int productId;
+                    int amount;
+                    decimal pricePerUnit;
+
+                    if (!int.TryParse(dtOrder.Rows[i]["ID"]?.ToString(), out productId))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Invalid ProductID at row {i}");
+                        continue;
+                    }
+
+                    if (!int.TryParse(dtOrder.Rows[i]["Amount"]?.ToString(), out amount))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Invalid Amount at row {i}");
+                        continue;
+                    }
+
+                    decimal.TryParse(dtOrder.Rows[i]["Sell_Price"]?.ToString(), out pricePerUnit);
+                    string remark = dtOrder.Rows[i]["Remark"]?.ToString() ?? "";
+
                     var productOutParams = new Dictionary<string, object>
                     {
                         { "@DateTimeOut", DateTime.Now },
-                        { "@ProductID", dtOrder.Rows[i]["ID"].ToString() },
-                        { "@Amount", dtOrder.Rows[i]["Amount"].ToString() },
-                        { "@PricePerUnit", dtOrder.Rows[i]["Sell_Price"].ToString() },
-                        { "@Remark", dtOrder.Rows[i]["Remark"].ToString() }
+                        { "@ProductID", productId },
+                        { "@Amount", amount },
+                        { "@PricePerUnit", pricePerUnit },
+                        { "@Remark", remark }
                     };
 
                     code.DatabaseInsertSafe(conn,
                         "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Remark]) " +
                         "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,'0',@Remark)",
                         productOutParams);
+                    successCount++;
                 }
-                // Show success message then redirect
-                ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ บันทึกการเบิกสินค้าเรียบร้อยแล้ว'); window.location.href='/Product/Stock';", true);
-            }
-            else
-            {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่มีข้อมูลนำเข้า');", true);
-            }
 
+                if (successCount > 0)
+                {
+                    // Clear the cart after successful save
+                    DataTable newOrder = new DataTable();
+                    newOrder.Columns.Add("ID");
+                    newOrder.Columns.Add("Barcode");
+                    newOrder.Columns.Add("Product_Name");
+                    newOrder.Columns.Add("Amount");
+                    newOrder.Columns.Add("Sell_Price");
+                    newOrder.Columns.Add("Price_Total");
+                    newOrder.Columns.Add("Category_ID");
+                    newOrder.Columns.Add("Remark");
+                    Session["dtOrder"] = newOrder;
+
+                    // Show success message then redirect
+                    ClientScript.RegisterStartupScript(this.GetType(), "success",
+                        $"alert('✅ บันทึกการเบิกสินค้าเรียบร้อยแล้ว ({successCount} รายการ)'); window.location.href='/Product/Stock';", true);
+                }
+                else
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('ไม่สามารถบันทึกรายการได้ กรุณาตรวจสอบข้อมูล');", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Button2_Click Error: {ex.Message}");
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                    $"alert('เกิดข้อผิดพลาด: {ex.Message.Replace("'", "\\'")}');", true);
+            }
         }
 
         /// <summary>
