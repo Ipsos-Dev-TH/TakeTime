@@ -200,8 +200,12 @@ namespace Take_Time_BangPhra.Class
                 // Apply coupon discount if applicable
                 if (useCoupon && price > 0)
                 {
-                    // TODO: Implement coupon logic if needed
-                    // For now, return base price
+                    // Check for active coupon/promotion
+                    var couponResult = ApplyCouponDiscount(accommodationId, checkInDate, price);
+                    if (couponResult.HasDiscount)
+                    {
+                        price = couponResult.DiscountedPrice;
+                    }
                 }
 
                 return price;
@@ -257,10 +261,239 @@ namespace Take_Time_BangPhra.Class
         }
 
         #endregion
+
+        #region Coupon/Promotion System
+
+        /// <summary>
+        /// Apply coupon or promotional discount to price
+        /// </summary>
+        private CouponResult ApplyCouponDiscount(int accommodationId, DateTime checkInDate, decimal originalPrice)
+        {
+            try
+            {
+                var parameters = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@accommodationId", accommodationId },
+                    { "@checkInDate", checkInDate },
+                    { "@today", DateTime.Today }
+                };
+
+                // Check for active promotions
+                DataTable dtPromo = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1
+                        p.ID, p.Promotion_Name, p.Discount_Type, p.Discount_Value,
+                        p.Min_Stay_Days, p.Max_Discount_Amount
+                      FROM Promotions p
+                      LEFT JOIN Promotion_Accommodations pa ON p.ID = pa.Promotion_ID
+                      WHERE p.Is_Active = 1
+                        AND p.Start_Date <= @checkInDate
+                        AND p.End_Date >= @checkInDate
+                        AND (pa.Accommodation_ID = @accommodationId OR pa.Accommodation_ID IS NULL)
+                      ORDER BY p.Priority DESC, p.Discount_Value DESC",
+                    parameters);
+
+                if (dtPromo.Rows.Count > 0)
+                {
+                    var row = dtPromo.Rows[0];
+                    string discountType = row["Discount_Type"]?.ToString() ?? "PERCENT";
+                    decimal discountValue = Convert.ToDecimal(row["Discount_Value"]);
+                    decimal maxDiscount = row["Max_Discount_Amount"] != DBNull.Value
+                        ? Convert.ToDecimal(row["Max_Discount_Amount"])
+                        : decimal.MaxValue;
+
+                    decimal discountAmount = 0;
+                    if (discountType == "PERCENT")
+                    {
+                        discountAmount = originalPrice * (discountValue / 100);
+                    }
+                    else // FIXED
+                    {
+                        discountAmount = discountValue;
+                    }
+
+                    // Apply max discount limit
+                    if (discountAmount > maxDiscount)
+                    {
+                        discountAmount = maxDiscount;
+                    }
+
+                    return new CouponResult
+                    {
+                        HasDiscount = true,
+                        PromotionId = Convert.ToInt32(row["ID"]),
+                        PromotionName = row["Promotion_Name"]?.ToString(),
+                        DiscountType = discountType,
+                        DiscountValue = discountValue,
+                        DiscountAmount = discountAmount,
+                        OriginalPrice = originalPrice,
+                        DiscountedPrice = originalPrice - discountAmount
+                    };
+                }
+
+                return new CouponResult
+                {
+                    HasDiscount = false,
+                    OriginalPrice = originalPrice,
+                    DiscountedPrice = originalPrice
+                };
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString,
+                    "ReservationPriceCalculationService.ApplyCouponDiscount Error",
+                    $"Accommodation ID: {accommodationId}, Error: {ex.Message}",
+                    "SYSTEM");
+
+                // Return original price on error
+                return new CouponResult
+                {
+                    HasDiscount = false,
+                    OriginalPrice = originalPrice,
+                    DiscountedPrice = originalPrice
+                };
+            }
+        }
+
+        /// <summary>
+        /// Validate and apply coupon code
+        /// </summary>
+        public CouponResult ValidateCouponCode(string couponCode, int accommodationId, DateTime checkInDate, int stayDays, decimal totalPrice)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(couponCode))
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = "กรุณาใส่รหัสคูปอง" };
+                }
+
+                var parameters = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@couponCode", couponCode.Trim().ToUpper() },
+                    { "@accommodationId", accommodationId },
+                    { "@checkInDate", checkInDate },
+                    { "@stayDays", stayDays }
+                };
+
+                DataTable dtCoupon = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        c.ID, c.Coupon_Code, c.Discount_Type, c.Discount_Value,
+                        c.Min_Order_Amount, c.Max_Discount_Amount, c.Min_Stay_Days,
+                        c.Usage_Limit, c.Used_Count, c.Start_Date, c.End_Date,
+                        c.Is_Active, c.Description
+                      FROM Coupons c
+                      WHERE c.Coupon_Code = @couponCode",
+                    parameters);
+
+                if (dtCoupon.Rows.Count == 0)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = "ไม่พบรหัสคูปองนี้" };
+                }
+
+                var coupon = dtCoupon.Rows[0];
+
+                // Validate coupon
+                if (Convert.ToBoolean(coupon["Is_Active"]) == false)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = "คูปองนี้ไม่สามารถใช้งานได้" };
+                }
+
+                DateTime startDate = Convert.ToDateTime(coupon["Start_Date"]);
+                DateTime endDate = Convert.ToDateTime(coupon["End_Date"]);
+                if (checkInDate < startDate || checkInDate > endDate)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = $"คูปองใช้ได้ระหว่าง {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}" };
+                }
+
+                int usageLimit = Convert.ToInt32(coupon["Usage_Limit"]);
+                int usedCount = Convert.ToInt32(coupon["Used_Count"]);
+                if (usageLimit > 0 && usedCount >= usageLimit)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = "คูปองนี้ถูกใช้งานครบแล้ว" };
+                }
+
+                decimal minOrder = coupon["Min_Order_Amount"] != DBNull.Value
+                    ? Convert.ToDecimal(coupon["Min_Order_Amount"]) : 0;
+                if (totalPrice < minOrder)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = $"ยอดขั้นต่ำสำหรับคูปองนี้คือ {minOrder:N0} บาท" };
+                }
+
+                int minStayDays = coupon["Min_Stay_Days"] != DBNull.Value
+                    ? Convert.ToInt32(coupon["Min_Stay_Days"]) : 0;
+                if (stayDays < minStayDays)
+                {
+                    return new CouponResult { HasDiscount = false, ErrorMessage = $"คูปองนี้ใช้ได้เมื่อเข้าพักอย่างน้อย {minStayDays} คืน" };
+                }
+
+                // Calculate discount
+                string discountType = coupon["Discount_Type"].ToString();
+                decimal discountValue = Convert.ToDecimal(coupon["Discount_Value"]);
+                decimal maxDiscount = coupon["Max_Discount_Amount"] != DBNull.Value
+                    ? Convert.ToDecimal(coupon["Max_Discount_Amount"]) : decimal.MaxValue;
+
+                decimal discountAmount = 0;
+                if (discountType == "PERCENT")
+                {
+                    discountAmount = totalPrice * (discountValue / 100);
+                }
+                else // FIXED
+                {
+                    discountAmount = discountValue;
+                }
+
+                if (discountAmount > maxDiscount)
+                {
+                    discountAmount = maxDiscount;
+                }
+
+                return new CouponResult
+                {
+                    HasDiscount = true,
+                    CouponId = Convert.ToInt32(coupon["ID"]),
+                    CouponCode = couponCode.Trim().ToUpper(),
+                    DiscountType = discountType,
+                    DiscountValue = discountValue,
+                    DiscountAmount = discountAmount,
+                    OriginalPrice = totalPrice,
+                    DiscountedPrice = totalPrice - discountAmount,
+                    Description = coupon["Description"]?.ToString()
+                };
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString,
+                    "ReservationPriceCalculationService.ValidateCouponCode Error",
+                    $"Coupon: {couponCode}, Error: {ex.Message}",
+                    "SYSTEM");
+
+                return new CouponResult { HasDiscount = false, ErrorMessage = "เกิดข้อผิดพลาดในการตรวจสอบคูปอง" };
+            }
+        }
+
+        #endregion
     }
 
     /// <summary>
-    /// 💰 Reservation Price Breakdown
+    /// Coupon/Promotion discount result
+    /// </summary>
+    public class CouponResult
+    {
+        public bool HasDiscount { get; set; }
+        public int CouponId { get; set; }
+        public int PromotionId { get; set; }
+        public string CouponCode { get; set; }
+        public string PromotionName { get; set; }
+        public string DiscountType { get; set; } // PERCENT or FIXED
+        public decimal DiscountValue { get; set; }
+        public decimal DiscountAmount { get; set; }
+        public decimal OriginalPrice { get; set; }
+        public decimal DiscountedPrice { get; set; }
+        public string Description { get; set; }
+        public string ErrorMessage { get; set; }
+    }
+
+    /// <summary>
+    /// Reservation Price Breakdown
     /// Contains all price components for a reservation
     /// </summary>
     public class ReservationPriceBreakdown

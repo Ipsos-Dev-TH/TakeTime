@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Configuration;
 using System.Data;
+using System.Drawing;
 using System.Web.UI;
 using System.Web.UI.WebControls;
+using OfficeOpenXml;
 
 namespace Take_Time_BangPhra.Payment
 {
@@ -156,8 +158,134 @@ namespace Take_Time_BangPhra.Payment
 
         protected void btnExport_Click(object sender, EventArgs e)
         {
-            // TODO: Implement Excel export
-            // Can use EPPlus or ClosedXML library
+            try
+            {
+                // Build query with filters
+                var parameters = new System.Collections.Generic.Dictionary<string, object>();
+                string whereClause = "WHERE 1=1";
+
+                if (!string.IsNullOrEmpty(txtReservationID.Text))
+                {
+                    whereClause += " AND ph.Reservation_ID = @reservationId";
+                    parameters.Add("@reservationId", int.Parse(txtReservationID.Text));
+                }
+
+                if (!string.IsNullOrEmpty(txtPhoneNumber.Text))
+                {
+                    whereClause += " AND ph.PaidBy_CustomerPhone LIKE @phone";
+                    parameters.Add("@phone", "%" + txtPhoneNumber.Text + "%");
+                }
+
+                if (!string.IsNullOrEmpty(txtStartDate.Text))
+                {
+                    whereClause += " AND CAST(ph.PaymentDate AS DATE) >= @startDate";
+                    parameters.Add("@startDate", DateTime.Parse(txtStartDate.Text));
+                }
+
+                if (!string.IsNullOrEmpty(txtEndDate.Text))
+                {
+                    whereClause += " AND CAST(ph.PaymentDate AS DATE) <= @endDate";
+                    parameters.Add("@endDate", DateTime.Parse(txtEndDate.Text));
+                }
+
+                if (!string.IsNullOrEmpty(ddlStatus.SelectedValue))
+                {
+                    whereClause += " AND ph.Status = @status";
+                    parameters.Add("@status", ddlStatus.SelectedValue);
+                }
+
+                string query = $@"
+                    SELECT
+                        ph.ID AS [รหัส],
+                        ph.Reservation_ID AS [เลขที่การจอง],
+                        ph.PaymentDate AS [วันที่ชำระ],
+                        ph.PaymentAmount AS [จำนวนเงิน],
+                        ph.PaymentType AS [ประเภท],
+                        ph.PaymentMethod AS [ช่องทาง],
+                        ph.Receipt_ID AS [เลขที่ใบเสร็จ],
+                        ph.RemainingBalance AS [ยอดคงเหลือ],
+                        ph.PaidBy_CustomerPhone AS [เบอร์ลูกค้า],
+                        CASE ph.Status
+                            WHEN 'COMPLETED' THEN N'สำเร็จ'
+                            WHEN 'PENDING' THEN N'รอดำเนินการ'
+                            WHEN 'CANCELLED' THEN N'ยกเลิก'
+                            WHEN 'REFUNDED' THEN N'คืนเงินแล้ว'
+                            ELSE ph.Status
+                        END AS [สถานะ]
+                    FROM Payment_History ph
+                    {whereClause}
+                    ORDER BY ph.PaymentDate DESC";
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, parameters);
+
+                if (dt.Rows.Count == 0)
+                {
+                    ScriptManager.RegisterStartupScript(this, GetType(), "alert", "alert('ไม่พบข้อมูลสำหรับส่งออก');", true);
+                    return;
+                }
+
+                // Export using EPPlus
+                using (var package = new OfficeOpenXml.ExcelPackage())
+                {
+                    var worksheet = package.Workbook.Worksheets.Add("ประวัติการชำระเงิน");
+
+                    // Add title
+                    worksheet.Cells[1, 1].Value = "รายงานประวัติการชำระเงิน";
+                    worksheet.Cells[1, 1, 1, 10].Merge = true;
+                    worksheet.Cells[1, 1].Style.Font.Size = 16;
+                    worksheet.Cells[1, 1].Style.Font.Bold = true;
+                    worksheet.Cells[1, 1].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                    // Add export date
+                    worksheet.Cells[2, 1].Value = $"ส่งออกเมื่อ: {DateTime.Now:dd/MM/yyyy HH:mm}";
+                    worksheet.Cells[2, 1, 2, 10].Merge = true;
+
+                    // Load data starting from row 4
+                    worksheet.Cells[4, 1].LoadFromDataTable(dt, true);
+
+                    // Format header row
+                    using (var headerRange = worksheet.Cells[4, 1, 4, dt.Columns.Count])
+                    {
+                        headerRange.Style.Font.Bold = true;
+                        headerRange.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                        headerRange.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(79, 129, 189));
+                        headerRange.Style.Font.Color.SetColor(System.Drawing.Color.White);
+                    }
+
+                    // Format currency columns
+                    worksheet.Column(4).Style.Numberformat.Format = "#,##0.00";
+                    worksheet.Column(8).Style.Numberformat.Format = "#,##0.00";
+
+                    // Format date column
+                    worksheet.Column(3).Style.Numberformat.Format = "dd/mm/yyyy hh:mm";
+
+                    // Auto-fit columns
+                    worksheet.Cells.AutoFitColumns();
+
+                    // Add borders
+                    using (var dataRange = worksheet.Cells[4, 1, dt.Rows.Count + 4, dt.Columns.Count])
+                    {
+                        dataRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                    }
+
+                    // Generate file
+                    string fileName = $"PaymentHistory_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+                    byte[] fileBytes = package.GetAsByteArray();
+
+                    Response.Clear();
+                    Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                    Response.AddHeader("Content-Disposition", $"attachment; filename={fileName}");
+                    Response.BinaryWrite(fileBytes);
+                    Response.End();
+                }
+            }
+            catch (Exception ex)
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "alert", $"alert('เกิดข้อผิดพลาด: {ex.Message.Replace("'", "\\'")}');", true);
+            }
         }
 
         protected void gvPaymentHistory_RowCommand(object sender, GridViewCommandEventArgs e)

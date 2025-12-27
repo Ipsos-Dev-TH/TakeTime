@@ -362,16 +362,32 @@ namespace Take_Time_BangPhra
                 string status = approved ? "APPROVED" : "REJECTED";
                 _paymentDA.UpdateSlipVerification(slipId, status, adminId, rejectionReason);
 
-                // If rejected, send notification to customer
-                if (!approved && !string.IsNullOrEmpty(rejectionReason))
+                // Get reservation ID from slip
+                var parameters = new Dictionary<string, object>
                 {
-                    // TODO: Send rejection notification
+                    { "@slipId", slipId }
+                };
+
+                var slipData = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Reservation_ID FROM Payment_Slips WHERE ID = @slipId",
+                    parameters);
+
+                if (slipData.Rows.Count > 0)
+                {
+                    int reservationId = Convert.ToInt32(slipData.Rows[0]["Reservation_ID"]);
+
+                    // If rejected, send notification to customer
+                    if (!approved && !string.IsNullOrEmpty(rejectionReason))
+                    {
+                        SendPaymentRejectionEmail(reservationId, rejectionReason);
+                    }
                 }
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                _code.Logs(_connectionString, "VerifyPaymentSlip Error", ex.Message, "SYSTEM");
                 return false;
             }
         }
@@ -513,8 +529,166 @@ namespace Take_Time_BangPhra
         /// </summary>
         private void SendPaymentConfirmationEmail(int reservationId, string receiptId, decimal amount)
         {
-            // TODO: Implement email sending
-            // Use EmailService class if available
+            try
+            {
+                // Get customer email from reservation
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId }
+                };
+
+                var customerData = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT c.Email, c.Customer_Name, r.CheckinDate, r.CheckoutDate, r.TotalPrice
+                      FROM Reservation r
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      WHERE r.ID = @reservationId",
+                    parameters);
+
+                if (customerData.Rows.Count == 0 || string.IsNullOrEmpty(customerData.Rows[0]["Email"]?.ToString()))
+                {
+                    _code.Logs(_connectionString, "Email Skipped", $"No email for reservation {reservationId}", "SYSTEM");
+                    return;
+                }
+
+                string customerEmail = customerData.Rows[0]["Email"].ToString();
+                string customerName = customerData.Rows[0]["Customer_Name"]?.ToString() ?? "ลูกค้า";
+                DateTime checkInDate = Convert.ToDateTime(customerData.Rows[0]["CheckinDate"]);
+                DateTime checkOutDate = Convert.ToDateTime(customerData.Rows[0]["CheckoutDate"]);
+                decimal totalPrice = Convert.ToDecimal(customerData.Rows[0]["TotalPrice"]);
+                decimal remaining = totalPrice - amount;
+
+                // Build email content
+                string subject = $"[Take Time] ยืนยันการชำระเงิน - ใบเสร็จ #{receiptId}";
+                string body = $@"
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: 'Sarabun', Arial, sans-serif; }}
+                            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                            .header {{ background: #2c3e50; color: white; padding: 20px; text-align: center; }}
+                            .content {{ padding: 20px; background: #f9f9f9; }}
+                            .amount {{ font-size: 24px; color: #27ae60; font-weight: bold; }}
+                            .footer {{ padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+                            table {{ width: 100%; border-collapse: collapse; }}
+                            td {{ padding: 10px; border-bottom: 1px solid #ddd; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class='container'>
+                            <div class='header'>
+                                <h1>Take Time Bang Phra</h1>
+                                <p>ยืนยันการชำระเงิน</p>
+                            </div>
+                            <div class='content'>
+                                <p>เรียน คุณ{customerName},</p>
+                                <p>ขอบคุณสำหรับการชำระเงิน ระบบได้บันทึกการชำระเงินของท่านเรียบร้อยแล้ว</p>
+
+                                <table>
+                                    <tr><td><strong>เลขที่ใบเสร็จ:</strong></td><td>{receiptId}</td></tr>
+                                    <tr><td><strong>เลขที่การจอง:</strong></td><td>{reservationId}</td></tr>
+                                    <tr><td><strong>วันเช็คอิน:</strong></td><td>{checkInDate:dd/MM/yyyy}</td></tr>
+                                    <tr><td><strong>วันเช็คเอาท์:</strong></td><td>{checkOutDate:dd/MM/yyyy}</td></tr>
+                                    <tr><td><strong>จำนวนเงินที่ชำระ:</strong></td><td class='amount'>฿{amount:N2}</td></tr>
+                                    <tr><td><strong>ยอดคงเหลือ:</strong></td><td>฿{remaining:N2}</td></tr>
+                                </table>
+
+                                <p style='margin-top: 20px;'>หากท่านมีข้อสงสัย กรุณาติดต่อเราได้ทุกช่องทาง</p>
+                            </div>
+                            <div class='footer'>
+                                <p>Take Time Bang Phra</p>
+                                <p>โทร: 038-XXX-XXX | อีเมล: taketime.bangphra@gmail.com</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>";
+
+                // Send email using EmailService
+                var emailService = new Take_Time_BangPhra.Services.EmailService();
+                emailService.SendEmail(customerEmail, subject, body);
+
+                _code.Logs(_connectionString, "Email Sent", $"Payment confirmation sent to {customerEmail} for receipt {receiptId}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Email Error", $"Failed to send payment confirmation: {ex.Message}", "SYSTEM");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Send payment rejection notification email
+        /// </summary>
+        private void SendPaymentRejectionEmail(int reservationId, string rejectionReason)
+        {
+            try
+            {
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId }
+                };
+
+                var customerData = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT c.Email, c.Customer_Name, r.TotalPrice, r.Deposit
+                      FROM Reservation r
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      WHERE r.ID = @reservationId",
+                    parameters);
+
+                if (customerData.Rows.Count == 0 || string.IsNullOrEmpty(customerData.Rows[0]["Email"]?.ToString()))
+                {
+                    return;
+                }
+
+                string customerEmail = customerData.Rows[0]["Email"].ToString();
+                string customerName = customerData.Rows[0]["Customer_Name"]?.ToString() ?? "ลูกค้า";
+
+                string subject = $"[Take Time] แจ้งเตือน - สลิปการชำระเงินไม่ผ่านการตรวจสอบ (การจอง #{reservationId})";
+                string body = $@"
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: 'Sarabun', Arial, sans-serif; }}
+                            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                            .header {{ background: #e74c3c; color: white; padding: 20px; text-align: center; }}
+                            .content {{ padding: 20px; background: #f9f9f9; }}
+                            .reason {{ background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0; }}
+                            .footer {{ padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class='container'>
+                            <div class='header'>
+                                <h1>Take Time Bang Phra</h1>
+                                <p>แจ้งเตือนการชำระเงิน</p>
+                            </div>
+                            <div class='content'>
+                                <p>เรียน คุณ{customerName},</p>
+                                <p>สลิปการชำระเงินของท่านสำหรับการจอง #{reservationId} ไม่ผ่านการตรวจสอบ</p>
+
+                                <div class='reason'>
+                                    <strong>เหตุผล:</strong> {rejectionReason}
+                                </div>
+
+                                <p>กรุณาอัปโหลดสลิปใหม่หรือติดต่อเจ้าหน้าที่เพื่อดำเนินการต่อ</p>
+                                <p>หากท่านมีข้อสงสัย กรุณาติดต่อเราได้ทุกช่องทาง</p>
+                            </div>
+                            <div class='footer'>
+                                <p>Take Time Bang Phra</p>
+                                <p>โทร: 038-XXX-XXX | อีเมล: taketime.bangphra@gmail.com</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>";
+
+                var emailService = new Take_Time_BangPhra.Services.EmailService();
+                emailService.SendEmail(customerEmail, subject, body);
+
+                _code.Logs(_connectionString, "Email Sent", $"Payment rejection notification sent to {customerEmail}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Email Error", $"Failed to send rejection notification: {ex.Message}", "SYSTEM");
+            }
         }
 
         #endregion

@@ -88,9 +88,10 @@
                 <h3>📋 รายการขาย</h3>
             </div>
             <div class="product-card-body" style="padding: 0;">
-                <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
-                    CssClass="product-table" GridLines="None"
-                    OnRowCommand="GridView1_RowCommand">
+                <div class="table-responsive">
+                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
+                        CssClass="product-table" GridLines="None"
+                        OnRowCommand="GridView1_RowCommand">
                     <Columns>
                         <asp:BoundField DataField="ID" HeaderText="ID" />
                         <asp:TemplateField HeaderText="วันที่ขาย">
@@ -147,6 +148,7 @@
                         </div>
                     </EmptyDataTemplate>
                 </asp:GridView>
+                </div>
             </div>
         </div>
 

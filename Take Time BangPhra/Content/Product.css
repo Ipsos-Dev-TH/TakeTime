@@ -408,9 +408,59 @@ textarea.form-control {
     flex-wrap: wrap;
 }
 
+/* Table Responsive Wrapper - FIX MOBILE SCROLL */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    -ms-overflow-style: -ms-autohiding-scrollbar;
+}
+
+/* Scrollbar styling for better visibility on mobile */
+.table-responsive::-webkit-scrollbar {
+    height: 8px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--product-primary);
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: var(--product-primary-dark);
+}
+
+/* Mobile scroll indicator */
+@media (max-width: 768px) {
+    .table-responsive {
+        position: relative;
+    }
+
+    .table-responsive::after {
+        content: '← เลื่อนดูข้อมูลเพิ่มเติม →';
+        display: block;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        color: var(--product-text-secondary);
+        background: linear-gradient(to right, #fff3e0, #ffe0b2, #fff3e0);
+        border-radius: 0 0 var(--product-radius) var(--product-radius);
+    }
+
+    .table-responsive.scrolled::after {
+        display: none;
+    }
+}
+
 /* Table/GridView Styling */
 .product-table {
     width: 100%;
+    min-width: 600px; /* Ensure minimum width for proper scrolling */
     border-collapse: collapse;
     background: white;
 }

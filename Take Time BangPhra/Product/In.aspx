@@ -67,50 +67,52 @@
                     <h4 style="margin-bottom: 15px; color: #2e7d32; display: flex; align-items: center; gap: 8px;">
                         📋 รายการสินค้าที่จะนำเข้า
                     </h4>
-                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
-                        CssClass="product-table" GridLines="None"
-                        OnRowCommand="GridView1_RowCommand"
-                        OnRowCancelingEdit="GridView1_RowCancelingEdit"
-                        OnRowEditing="GridView1_RowEditing"
-                        OnRowUpdating="GridView1_RowUpdating">
-                        <Columns>
-                            <asp:BoundField DataField="Product_Name" HeaderText="สินค้า" ReadOnly="True" />
-                            <asp:BoundField DataField="Amount" HeaderText="จำนวน" />
-                            <asp:BoundField DataField="Sell_Price" HeaderText="ราคา/ชิ้น" />
-                            <asp:TemplateField HeaderText="ราคารวม">
-                                <ItemTemplate>
-                                    <%# string.Format("{0:N2}", Eval("Price_Total")) %>
-                                </ItemTemplate>
-                                <ItemStyle HorizontalAlign="Right" />
-                            </asp:TemplateField>
-                            <asp:TemplateField HeaderText="จัดการ">
-                                <ItemTemplate>
-                                    <div class="actions">
-                                        <asp:Button ID="btnAdd" runat="server" Text="+"
-                                            CommandName="Add" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-success btn-sm" />
-                                        <asp:Button ID="btnReduce" runat="server" Text="-"
-                                            CommandName="Reduce" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-warning btn-sm" />
-                                        <asp:Button ID="btnDelete" runat="server" Text="🗑"
-                                            CommandName="DeleteItem" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-danger btn-sm"
-                                            OnClientClick="return confirm('ยืนยันการลบรายการนี้?');" />
-                                    </div>
-                                </ItemTemplate>
-                                <ItemStyle HorizontalAlign="Center" />
-                            </asp:TemplateField>
-                            <asp:CommandField ShowEditButton="True" ButtonType="Button"
-                                EditText="✏️" UpdateText="💾" CancelText="❌" />
-                        </Columns>
-                        <EmptyDataTemplate>
-                            <div class="empty-state">
-                                <div class="icon">📥</div>
-                                <h4>ยังไม่มีรายการ</h4>
-                                <p>เลือกสินค้าจากช่องค้นหาด้านบนเพื่อเริ่มนำเข้า</p>
-                            </div>
-                        </EmptyDataTemplate>
-                    </asp:GridView>
+                    <div class="table-responsive">
+                        <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
+                            CssClass="product-table" GridLines="None"
+                            OnRowCommand="GridView1_RowCommand"
+                            OnRowCancelingEdit="GridView1_RowCancelingEdit"
+                            OnRowEditing="GridView1_RowEditing"
+                            OnRowUpdating="GridView1_RowUpdating">
+                            <Columns>
+                                <asp:BoundField DataField="Product_Name" HeaderText="สินค้า" ReadOnly="True" />
+                                <asp:BoundField DataField="Amount" HeaderText="จำนวน" />
+                                <asp:BoundField DataField="Sell_Price" HeaderText="ราคา/ชิ้น" />
+                                <asp:TemplateField HeaderText="ราคารวม">
+                                    <ItemTemplate>
+                                        <%# string.Format("{0:N2}", Eval("Price_Total")) %>
+                                    </ItemTemplate>
+                                    <ItemStyle HorizontalAlign="Right" />
+                                </asp:TemplateField>
+                                <asp:TemplateField HeaderText="จัดการ">
+                                    <ItemTemplate>
+                                        <div class="actions">
+                                            <asp:Button ID="btnAdd" runat="server" Text="+"
+                                                CommandName="Add" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-success btn-sm" />
+                                            <asp:Button ID="btnReduce" runat="server" Text="-"
+                                                CommandName="Reduce" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-warning btn-sm" />
+                                            <asp:Button ID="btnDelete" runat="server" Text="🗑"
+                                                CommandName="DeleteItem" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-danger btn-sm"
+                                                OnClientClick="return confirm('ยืนยันการลบรายการนี้?');" />
+                                        </div>
+                                    </ItemTemplate>
+                                    <ItemStyle HorizontalAlign="Center" />
+                                </asp:TemplateField>
+                                <asp:CommandField ShowEditButton="True" ButtonType="Button"
+                                    EditText="✏️" UpdateText="💾" CancelText="❌" />
+                            </Columns>
+                            <EmptyDataTemplate>
+                                <div class="empty-state">
+                                    <div class="icon">📥</div>
+                                    <h4>ยังไม่มีรายการ</h4>
+                                    <p>เลือกสินค้าจากช่องค้นหาด้านบนเพื่อเริ่มนำเข้า</p>
+                                </div>
+                            </EmptyDataTemplate>
+                        </asp:GridView>
+                    </div>
                 </div>
 
                 <asp:Panel ID="Panel1" runat="server" Visible="false"></asp:Panel>

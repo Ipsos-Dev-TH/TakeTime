@@ -568,14 +568,105 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                // Simplified: Return placeholder data
-                // TODO: Implement actual query based on accommodation types
-                return new List<int> { 15, 12, 10, 8, 5 };
+                // Get actual booking count by accommodation type
+                string query = @"
+                    SELECT TOP (@topN)
+                        a.Accommodation_Name,
+                        COUNT(ra.ID) as BookingCount
+                    FROM Accommodation a
+                    LEFT JOIN Reservation_Accommodation ra ON a.ID = ra.Accommodation_ID
+                    LEFT JOIN Reservation r ON ra.Reservation_ID = r.ID
+                        AND CAST(r.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                        AND CAST(r.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                        AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    WHERE a.Status = 'True'
+                    GROUP BY a.ID, a.Accommodation_Name
+                    ORDER BY BookingCount DESC";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate },
+                    { "@topN", topN }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                List<int> result = new List<int>();
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        result.Add(Convert.ToInt32(row["BookingCount"]));
+                    }
+                }
+
+                // Pad with zeros if less than topN results
+                while (result.Count < topN)
+                {
+                    result.Add(0);
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"❌ GetTopAccommodations Error: {ex.Message}");
                 return new List<int> { 0, 0, 0, 0, 0 };
+            }
+        }
+
+        /// <summary>
+        /// Get accommodation names for chart labels
+        /// </summary>
+        public List<string> GetTopAccommodationNames(DateTime startDate, DateTime endDate, int topN)
+        {
+            try
+            {
+                string query = @"
+                    SELECT TOP (@topN)
+                        a.Accommodation_Name,
+                        COUNT(ra.ID) as BookingCount
+                    FROM Accommodation a
+                    LEFT JOIN Reservation_Accommodation ra ON a.ID = ra.Accommodation_ID
+                    LEFT JOIN Reservation r ON ra.Reservation_ID = r.ID
+                        AND CAST(r.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
+                        AND CAST(r.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                        AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    WHERE a.Status = 'True'
+                    GROUP BY a.ID, a.Accommodation_Name
+                    ORDER BY BookingCount DESC";
+
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@StartDate", startDate },
+                    { "@EndDate", endDate },
+                    { "@topN", topN }
+                };
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
+
+                List<string> result = new List<string>();
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        result.Add(row["Accommodation_Name"].ToString());
+                    }
+                }
+
+                // Pad with empty names if less than topN results
+                while (result.Count < topN)
+                {
+                    result.Add("N/A");
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ GetTopAccommodationNames Error: {ex.Message}");
+                return new List<string> { "N/A", "N/A", "N/A", "N/A", "N/A" };
             }
         }
 

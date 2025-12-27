@@ -56,35 +56,37 @@
         <!-- Predicted Low Stock Warning Panel -->
         <asp:Panel ID="pnlPredictedLowStock" runat="server" CssClass="stock-warning-panel" Visible="false">
             <h4>📊 สินค้าที่คาดว่าจะหมดใน 3-4 สัปดาห์ (คำนวณจากอัตราการใช้งาน)</h4>
-            <asp:GridView ID="gvPredictedLowStock" runat="server" AutoGenerateColumns="False"
-                CssClass="stock-warning-table" GridLines="None" ShowHeaderWhenEmpty="false">
-                <Columns>
-                    <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" />
-                    <asp:TemplateField HeaderText="สต็อกปัจจุบัน">
-                        <ItemTemplate>
-                            <%# Convert.ToInt32(Eval("CurrentStock")) %>
-                        </ItemTemplate>
-                        <ItemStyle HorizontalAlign="Center" />
-                        <HeaderStyle HorizontalAlign="Center" />
-                    </asp:TemplateField>
-                    <asp:TemplateField HeaderText="ใช้เฉลี่ย/สัปดาห์">
-                        <ItemTemplate>
-                            <%# string.Format("{0:N1}", Eval("WeeklyUsage")) %>
-                        </ItemTemplate>
-                        <ItemStyle HorizontalAlign="Center" />
-                        <HeaderStyle HorizontalAlign="Center" />
-                    </asp:TemplateField>
-                    <asp:TemplateField HeaderText="คาดว่าจะหมดใน">
-                        <ItemTemplate>
-                            <span class='<%# Convert.ToDecimal(Eval("WeeksRemaining")) <= 2 ? "weeks-badge weeks-critical" : "weeks-badge weeks-warning" %>'>
-                                <%# string.Format("{0:N1}", Eval("WeeksRemaining")) %> สัปดาห์
-                            </span>
-                        </ItemTemplate>
-                        <ItemStyle HorizontalAlign="Center" />
-                        <HeaderStyle HorizontalAlign="Center" />
-                    </asp:TemplateField>
-                </Columns>
-            </asp:GridView>
+            <div class="table-responsive">
+                <asp:GridView ID="gvPredictedLowStock" runat="server" AutoGenerateColumns="False"
+                    CssClass="stock-warning-table" GridLines="None" ShowHeaderWhenEmpty="false">
+                    <Columns>
+                        <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" />
+                        <asp:TemplateField HeaderText="สต็อกปัจจุบัน">
+                            <ItemTemplate>
+                                <%# Convert.ToInt32(Eval("CurrentStock")) %>
+                            </ItemTemplate>
+                            <ItemStyle HorizontalAlign="Center" />
+                            <HeaderStyle HorizontalAlign="Center" />
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="ใช้เฉลี่ย/สัปดาห์">
+                            <ItemTemplate>
+                                <%# string.Format("{0:N1}", Eval("WeeklyUsage")) %>
+                            </ItemTemplate>
+                            <ItemStyle HorizontalAlign="Center" />
+                            <HeaderStyle HorizontalAlign="Center" />
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="คาดว่าจะหมดใน">
+                            <ItemTemplate>
+                                <span class='<%# Convert.ToDecimal(Eval("WeeksRemaining")) <= 2 ? "weeks-badge weeks-critical" : "weeks-badge weeks-warning" %>'>
+                                    <%# string.Format("{0:N1}", Eval("WeeksRemaining")) %> สัปดาห์
+                                </span>
+                            </ItemTemplate>
+                            <ItemStyle HorizontalAlign="Center" />
+                            <HeaderStyle HorizontalAlign="Center" />
+                        </asp:TemplateField>
+                    </Columns>
+                </asp:GridView>
+            </div>
         </asp:Panel>
 
         <!-- Current Stock Table -->
@@ -93,25 +95,27 @@
                 <h3>📋 รายการสต็อกปัจจุบัน</h3>
             </div>
             <div class="product-card-body" style="padding: 0;">
-                <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False"
-                    CssClass="product-table" GridLines="None"
-                    AllowSorting="True" OnSorting="GridView2_Sorting">
-                    <Columns>
-                        <asp:BoundField DataField="ID" HeaderText="รหัส" SortExpression="ID" />
-                        <asp:BoundField DataField="Barcode" HeaderText="บาร์โค้ด" SortExpression="Barcode" />
-                        <asp:BoundField DataField="Category_ID" HeaderText="หมวดหมู่" SortExpression="Category_ID" />
-                        <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" SortExpression="Product_Name" />
-                        <asp:TemplateField HeaderText="จำนวนคงเหลือ" SortExpression="Amount">
-                            <ItemTemplate>
-                                <span class='<%# Convert.ToInt32(Eval("Amount")) < 5 ? "stock-badge stock-critical" : Convert.ToInt32(Eval("Amount")) < 10 ? "stock-badge stock-warning" : "stock-badge stock-normal" %>'>
-                                    <%# Eval("Amount") %>
-                                </span>
-                            </ItemTemplate>
-                            <ItemStyle HorizontalAlign="Center" />
-                            <HeaderStyle HorizontalAlign="Center" />
-                        </asp:TemplateField>
-                    </Columns>
-                </asp:GridView>
+                <div class="table-responsive">
+                    <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False"
+                        CssClass="product-table" GridLines="None"
+                        AllowSorting="True" OnSorting="GridView2_Sorting">
+                        <Columns>
+                            <asp:BoundField DataField="ID" HeaderText="รหัส" SortExpression="ID" />
+                            <asp:BoundField DataField="Barcode" HeaderText="บาร์โค้ด" SortExpression="Barcode" />
+                            <asp:BoundField DataField="Category_ID" HeaderText="หมวดหมู่" SortExpression="Category_ID" />
+                            <asp:BoundField DataField="Product_Name" HeaderText="ชื่อสินค้า" SortExpression="Product_Name" />
+                            <asp:TemplateField HeaderText="จำนวนคงเหลือ" SortExpression="Amount">
+                                <ItemTemplate>
+                                    <span class='<%# Convert.ToInt32(Eval("Amount")) < 5 ? "stock-badge stock-critical" : Convert.ToInt32(Eval("Amount")) < 10 ? "stock-badge stock-warning" : "stock-badge stock-normal" %>'>
+                                        <%# Eval("Amount") %>
+                                    </span>
+                                </ItemTemplate>
+                                <ItemStyle HorizontalAlign="Center" />
+                                <HeaderStyle HorizontalAlign="Center" />
+                            </asp:TemplateField>
+                        </Columns>
+                    </asp:GridView>
+                </div>
             </div>
         </div>
 
@@ -165,51 +169,53 @@
                 <!-- Cart Items -->
                 <asp:Panel ID="pnlCart" runat="server" Visible="true" style="margin-top: 25px;">
                     <h4 style="margin-bottom: 15px; color: #5d4037;">🛒 รายการที่เลือก</h4>
-                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
-                        CssClass="product-table" GridLines="None"
-                        OnRowCommand="GridView1_RowCommand"
-                        OnRowCancelingEdit="GridView1_RowCancelingEdit"
-                        OnRowEditing="GridView1_RowEditing"
-                        OnRowUpdating="GridView1_RowUpdating">
-                        <Columns>
-                            <asp:BoundField DataField="Product_Name" HeaderText="สินค้า" ReadOnly="True" />
-                            <asp:BoundField DataField="Amount" HeaderText="จำนวน" />
-                            <asp:BoundField DataField="Sell_Price" HeaderText="ราคา/ชิ้น" />
-                            <asp:TemplateField HeaderText="ราคารวม">
-                                <ItemTemplate>
-                                    <%# string.Format("{0:N2}", Eval("Price_Total")) %>
-                                </ItemTemplate>
-                                <ItemStyle HorizontalAlign="Right" />
-                            </asp:TemplateField>
-                            <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ" />
-                            <asp:TemplateField HeaderText="จัดการ">
-                                <ItemTemplate>
-                                    <div class="actions">
-                                        <asp:Button ID="btnAdd" runat="server" Text="+"
-                                            CommandName="Add" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-success btn-sm" />
-                                        <asp:Button ID="btnReduce" runat="server" Text="-"
-                                            CommandName="Reduce" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-warning btn-sm" />
-                                        <asp:Button ID="btnDelete" runat="server" Text="🗑"
-                                            CommandName="DeleteItem" CommandArgument='<%# Container.DataItemIndex %>'
-                                            CssClass="btn btn-danger btn-sm"
-                                            OnClientClick="return confirm('ยืนยันการลบรายการนี้?');" />
-                                    </div>
-                                </ItemTemplate>
-                                <ItemStyle HorizontalAlign="Center" />
-                            </asp:TemplateField>
-                            <asp:CommandField ShowEditButton="True" ButtonType="Button"
-                                EditText="✏️" UpdateText="💾" CancelText="❌" />
-                        </Columns>
-                        <EmptyDataTemplate>
-                            <div class="empty-state">
-                                <div class="icon">📦</div>
-                                <h4>ยังไม่มีรายการ</h4>
-                                <p>เลือกสินค้าจากช่องค้นหาด้านบน</p>
-                            </div>
-                        </EmptyDataTemplate>
-                    </asp:GridView>
+                    <div class="table-responsive">
+                        <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
+                            CssClass="product-table" GridLines="None"
+                            OnRowCommand="GridView1_RowCommand"
+                            OnRowCancelingEdit="GridView1_RowCancelingEdit"
+                            OnRowEditing="GridView1_RowEditing"
+                            OnRowUpdating="GridView1_RowUpdating">
+                            <Columns>
+                                <asp:BoundField DataField="Product_Name" HeaderText="สินค้า" ReadOnly="True" />
+                                <asp:BoundField DataField="Amount" HeaderText="จำนวน" />
+                                <asp:BoundField DataField="Sell_Price" HeaderText="ราคา/ชิ้น" />
+                                <asp:TemplateField HeaderText="ราคารวม">
+                                    <ItemTemplate>
+                                        <%# string.Format("{0:N2}", Eval("Price_Total")) %>
+                                    </ItemTemplate>
+                                    <ItemStyle HorizontalAlign="Right" />
+                                </asp:TemplateField>
+                                <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ" />
+                                <asp:TemplateField HeaderText="จัดการ">
+                                    <ItemTemplate>
+                                        <div class="actions">
+                                            <asp:Button ID="btnAdd" runat="server" Text="+"
+                                                CommandName="Add" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-success btn-sm" />
+                                            <asp:Button ID="btnReduce" runat="server" Text="-"
+                                                CommandName="Reduce" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-warning btn-sm" />
+                                            <asp:Button ID="btnDelete" runat="server" Text="🗑"
+                                                CommandName="DeleteItem" CommandArgument='<%# Container.DataItemIndex %>'
+                                                CssClass="btn btn-danger btn-sm"
+                                                OnClientClick="return confirm('ยืนยันการลบรายการนี้?');" />
+                                        </div>
+                                    </ItemTemplate>
+                                    <ItemStyle HorizontalAlign="Center" />
+                                </asp:TemplateField>
+                                <asp:CommandField ShowEditButton="True" ButtonType="Button"
+                                    EditText="✏️" UpdateText="💾" CancelText="❌" />
+                            </Columns>
+                            <EmptyDataTemplate>
+                                <div class="empty-state">
+                                    <div class="icon">📦</div>
+                                    <h4>ยังไม่มีรายการ</h4>
+                                    <p>เลือกสินค้าจากช่องค้นหาด้านบน</p>
+                                </div>
+                            </EmptyDataTemplate>
+                        </asp:GridView>
+                    </div>
                 </asp:Panel>
             </div>
             <div class="product-card-footer">
