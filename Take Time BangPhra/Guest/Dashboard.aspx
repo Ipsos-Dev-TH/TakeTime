@@ -128,6 +128,22 @@
             background: linear-gradient(135deg, #30cfd0, #330867);
         }
 
+        .service-card:nth-child(7) .service-icon {
+            background: linear-gradient(135deg, #f44336, #c62828);
+        }
+
+        .service-card:nth-child(8) .service-icon {
+            background: linear-gradient(135deg, #8bc34a, #558b2f);
+        }
+
+        .service-card:nth-child(9) .service-icon {
+            background: linear-gradient(135deg, #00bcd4, #006064);
+        }
+
+        .service-card:nth-child(10) .service-icon {
+            background: linear-gradient(135deg, #9c27b0, #4a148c);
+        }
+
         .service-card h3 {
             margin: 0 0 10px 0;
             font-size: 20px;
@@ -295,6 +311,38 @@
             </div>
             <h3>Chat with Front Desk</h3>
             <p>สนทนากับเจ้าหน้าที่แผนกต้อนรับ</p>
+        </a>
+
+        <a href="Emergency.aspx" class="service-card">
+            <div class="service-icon">
+                <i class="fas fa-phone-alt"></i>
+            </div>
+            <h3>Emergency & Contacts</h3>
+            <p>เบอร์โทรฉุกเฉิน โรงพยาบาล ตำรวจ และบริการต่างๆ</p>
+        </a>
+
+        <a href="AboutUs.aspx" class="service-card">
+            <div class="service-icon">
+                <i class="fas fa-info-circle"></i>
+            </div>
+            <h3>About Us</h3>
+            <p>ประวัติและแนวคิดของ TakeTime Nature Resort</p>
+        </a>
+
+        <a href="NearbyPlaces.aspx" class="service-card">
+            <div class="service-icon">
+                <i class="fas fa-map-marked-alt"></i>
+            </div>
+            <h3>Nearby Places</h3>
+            <p>แผนที่ สถานที่ท่องเที่ยว ร้านอาหาร คาเฟ่ใกล้เคียง</p>
+        </a>
+
+        <a href="Facilities.aspx" class="service-card">
+            <div class="service-icon">
+                <i class="fas fa-swimming-pool"></i>
+            </div>
+            <h3>Facilities</h3>
+            <p>สิ่งอำนวยความสะดวกและบริการในรีสอร์ท</p>
         </a>
     </div>
 

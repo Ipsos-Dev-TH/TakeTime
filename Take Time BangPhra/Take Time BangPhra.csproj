@@ -392,6 +392,10 @@
     <Content Include="Guest\Housekeeping.aspx" />
     <Content Include="Guest\Balance.aspx" />
     <Content Include="Guest\Concierge.aspx" />
+    <Content Include="Guest\Emergency.aspx" />
+    <Content Include="Guest\AboutUs.aspx" />
+    <Content Include="Guest\NearbyPlaces.aspx" />
+    <Content Include="Guest\Facilities.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -906,6 +910,34 @@
     </Compile>
     <Compile Include="Guest\Concierge.aspx.designer.cs">
       <DependentUpon>Concierge.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Emergency.aspx.cs">
+      <DependentUpon>Emergency.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Emergency.aspx.designer.cs">
+      <DependentUpon>Emergency.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\AboutUs.aspx.cs">
+      <DependentUpon>AboutUs.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\AboutUs.aspx.designer.cs">
+      <DependentUpon>AboutUs.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\NearbyPlaces.aspx.cs">
+      <DependentUpon>NearbyPlaces.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\NearbyPlaces.aspx.designer.cs">
+      <DependentUpon>NearbyPlaces.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Facilities.aspx.cs">
+      <DependentUpon>Facilities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Facilities.aspx.designer.cs">
+      <DependentUpon>Facilities.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Class\Services\ChannelManagerService.cs" />
