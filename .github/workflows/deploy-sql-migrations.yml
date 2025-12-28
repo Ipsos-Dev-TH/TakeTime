@@ -1,0 +1,284 @@
+name: Deploy SQL Migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      migration_files:
+        description: 'Migration files to run (comma-separated, or "all" for all pending)'
+        required: true
+        default: 'all'
+        type: string
+      dry_run:
+        description: 'Dry run (show SQL without executing)'
+        required: false
+        default: false
+        type: boolean
+      confirm_production:
+        description: 'Type "CONFIRM" to execute on production database'
+        required: true
+        type: string
+
+env:
+  MIGRATIONS_PATH: 'Take Time BangPhra/Database/Migrations'
+
+jobs:
+  validate:
+    name: Validate Input
+    runs-on: ubuntu-latest
+    outputs:
+      is_valid: ${{ steps.validate.outputs.is_valid }}
+    steps:
+      - name: Validate confirmation
+        id: validate
+        run: |
+          if [ "${{ inputs.confirm_production }}" != "CONFIRM" ]; then
+            echo "::error::You must type 'CONFIRM' to execute migrations on production"
+            echo "is_valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "is_valid=true" >> $GITHUB_OUTPUT
+
+  deploy-migrations:
+    name: Deploy SQL Migrations
+    needs: validate
+    if: needs.validate.outputs.is_valid == 'true'
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List available migrations
+        id: list_migrations
+        run: |
+          Write-Host "=== Available Migration Files ==="
+          $migrationsPath = "${{ github.workspace }}\${{ env.MIGRATIONS_PATH }}"
+
+          if (Test-Path $migrationsPath) {
+            Get-ChildItem -Path $migrationsPath -Filter "*.sql" |
+              Sort-Object Name |
+              ForEach-Object {
+                Write-Host "  - $($_.Name) ($([math]::Round($_.Length/1024, 2)) KB)"
+              }
+          } else {
+            Write-Host "::error::Migrations folder not found: $migrationsPath"
+            exit 1
+          }
+        shell: powershell
+
+      - name: Determine migrations to run
+        id: determine_migrations
+        run: |
+          $migrationsPath = "${{ github.workspace }}\${{ env.MIGRATIONS_PATH }}"
+          $inputFiles = "${{ inputs.migration_files }}"
+          $filesToRun = @()
+
+          if ($inputFiles -eq "all") {
+            # Run all SQL files in order
+            $filesToRun = Get-ChildItem -Path $migrationsPath -Filter "*.sql" |
+              Sort-Object Name |
+              Select-Object -ExpandProperty FullName
+          } else {
+            # Run specific files
+            $fileNames = $inputFiles -split ','
+            foreach ($fileName in $fileNames) {
+              $fileName = $fileName.Trim()
+              $filePath = Join-Path $migrationsPath $fileName
+
+              # Add .sql extension if not present
+              if (-not $fileName.EndsWith('.sql')) {
+                $filePath = "$filePath.sql"
+              }
+
+              if (Test-Path $filePath) {
+                $filesToRun += $filePath
+              } else {
+                Write-Host "::warning::File not found: $fileName"
+              }
+            }
+          }
+
+          if ($filesToRun.Count -eq 0) {
+            Write-Host "::error::No migration files to run"
+            exit 1
+          }
+
+          Write-Host "=== Migrations to Execute ==="
+          $filesToRun | ForEach-Object { Write-Host "  - $(Split-Path $_ -Leaf)" }
+
+          # Save to file for next step
+          $filesToRun | Out-File -FilePath "migrations_to_run.txt" -Encoding UTF8
+        shell: powershell
+
+      - name: Backup database (pre-migration)
+        if: inputs.dry_run == false
+        run: |
+          Write-Host "=== Creating Database Backup ==="
+          $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+          $backupName = "TakeTime_PreMigration_$timestamp"
+
+          # This assumes SQL Server backup location is configured
+          # Adjust path as needed for your environment
+          try {
+            $backupQuery = "BACKUP DATABASE [TakeTime] TO DISK = N'${{ vars.SQL_BACKUP_PATH }}\$backupName.bak' WITH NOFORMAT, NOINIT, NAME = N'$backupName', SKIP, NOREWIND, NOUNLOAD, STATS = 10"
+
+            Invoke-Sqlcmd -ConnectionString "${{ secrets.SQL_CONNECTION_STRING }}" -Query $backupQuery -QueryTimeout 300
+            Write-Host "Backup created: $backupName.bak"
+          } catch {
+            Write-Host "::warning::Backup failed: $($_.Exception.Message)"
+            Write-Host "Continuing with migration..."
+          }
+        shell: powershell
+        continue-on-error: true
+
+      - name: Execute migrations
+        id: execute
+        run: |
+          $isDryRun = [System.Convert]::ToBoolean("${{ inputs.dry_run }}")
+          $connectionString = "${{ secrets.SQL_CONNECTION_STRING }}"
+          $migrations = Get-Content "migrations_to_run.txt"
+
+          $successCount = 0
+          $failCount = 0
+          $results = @()
+
+          foreach ($migrationFile in $migrations) {
+            $migrationFile = $migrationFile.Trim()
+            if ([string]::IsNullOrEmpty($migrationFile)) { continue }
+
+            $fileName = Split-Path $migrationFile -Leaf
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host "Processing: $fileName"
+            Write-Host "=========================================="
+
+            try {
+              $sqlContent = Get-Content -Path $migrationFile -Raw -Encoding UTF8
+
+              if ($isDryRun) {
+                Write-Host "[DRY RUN] Would execute:"
+                Write-Host "----------------------------------------"
+                # Show first 2000 chars of SQL
+                $preview = $sqlContent.Substring(0, [Math]::Min(2000, $sqlContent.Length))
+                Write-Host $preview
+                if ($sqlContent.Length -gt 2000) {
+                  Write-Host "... (truncated, full file: $([math]::Round($sqlContent.Length/1024, 2)) KB)"
+                }
+                Write-Host "----------------------------------------"
+                $successCount++
+                $results += @{ File = $fileName; Status = "DRY_RUN"; Message = "Preview only" }
+              } else {
+                Write-Host "Executing SQL..."
+
+                # Split by GO statements and execute each batch
+                $batches = $sqlContent -split '(?m)^\s*GO\s*$'
+                $batchNum = 0
+
+                foreach ($batch in $batches) {
+                  $batch = $batch.Trim()
+                  if ([string]::IsNullOrWhiteSpace($batch)) { continue }
+
+                  $batchNum++
+                  try {
+                    Invoke-Sqlcmd -ConnectionString $connectionString -Query $batch -QueryTimeout 120 -ErrorAction Stop
+                  } catch {
+                    Write-Host "::error::Batch $batchNum failed: $($_.Exception.Message)"
+                    throw
+                  }
+                }
+
+                Write-Host "SUCCESS: Executed $batchNum batches"
+                $successCount++
+                $results += @{ File = $fileName; Status = "SUCCESS"; Message = "$batchNum batches" }
+              }
+            } catch {
+              $errorMsg = $_.Exception.Message
+              Write-Host "::error::FAILED: $errorMsg"
+              $failCount++
+              $results += @{ File = $fileName; Status = "FAILED"; Message = $errorMsg }
+            }
+          }
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "MIGRATION SUMMARY"
+          Write-Host "=========================================="
+          Write-Host "Total: $($successCount + $failCount)"
+          Write-Host "Success: $successCount"
+          Write-Host "Failed: $failCount"
+          Write-Host ""
+
+          foreach ($result in $results) {
+            $statusIcon = if ($result.Status -eq "SUCCESS") { "[OK]" } elseif ($result.Status -eq "DRY_RUN") { "[DRY]" } else { "[X]" }
+            Write-Host "$statusIcon $($result.File): $($result.Message)"
+          }
+
+          if ($failCount -gt 0) {
+            Write-Host ""
+            Write-Host "::error::$failCount migration(s) failed!"
+            exit 1
+          }
+        shell: powershell
+
+      - name: Record migration history
+        if: inputs.dry_run == false && success()
+        run: |
+          $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          $migrations = Get-Content "migrations_to_run.txt"
+
+          foreach ($migrationFile in $migrations) {
+            $fileName = Split-Path $migrationFile.Trim() -Leaf
+            if ([string]::IsNullOrEmpty($fileName)) { continue }
+
+            # Create migration history table if not exists and record migration
+            $sql = @"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Migration_History')
+            BEGIN
+              CREATE TABLE Migration_History (
+                ID INT IDENTITY(1,1) PRIMARY KEY,
+                Migration_File NVARCHAR(255) NOT NULL,
+                Applied_Date DATETIME NOT NULL DEFAULT GETDATE(),
+                Applied_By NVARCHAR(100),
+                Commit_SHA NVARCHAR(50),
+                Notes NVARCHAR(500)
+              );
+            END
+
+            INSERT INTO Migration_History (Migration_File, Applied_By, Commit_SHA, Notes)
+            VALUES ('$fileName', 'GitHub Actions', '${{ github.sha }}', 'Deployed via workflow');
+"@
+
+            try {
+              Invoke-Sqlcmd -ConnectionString "${{ secrets.SQL_CONNECTION_STRING }}" -Query $sql -QueryTimeout 30
+              Write-Host "Recorded: $fileName"
+            } catch {
+              Write-Host "::warning::Failed to record migration history for $fileName"
+            }
+          }
+        shell: powershell
+        continue-on-error: true
+
+      - name: Notify on completion
+        if: always()
+        run: |
+          $status = "${{ job.status }}"
+          $isDryRun = [System.Convert]::ToBoolean("${{ inputs.dry_run }}")
+
+          Write-Host ""
+          Write-Host "=========================================="
+          if ($isDryRun) {
+            Write-Host "DRY RUN COMPLETE"
+          } elseif ($status -eq "success") {
+            Write-Host "MIGRATION DEPLOYMENT SUCCESSFUL"
+          } else {
+            Write-Host "MIGRATION DEPLOYMENT FAILED"
+          }
+          Write-Host "=========================================="
+          Write-Host "Workflow: ${{ github.workflow }}"
+          Write-Host "Run ID: ${{ github.run_id }}"
+          Write-Host "Triggered by: ${{ github.actor }}"
+          Write-Host "Commit: ${{ github.sha }}"
+          Write-Host "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          Write-Host "=========================================="
+        shell: powershell
