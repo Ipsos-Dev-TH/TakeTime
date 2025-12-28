@@ -218,10 +218,10 @@ BEGIN
 END
 GO
 
--- Add Status column to Accommodations if not exists
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodations') AND name = 'HousekeepingStatus')
+-- Add Status column to Accommodation if not exists
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodation') AND name = 'HousekeepingStatus')
 BEGIN
-    ALTER TABLE Accommodations ADD HousekeepingStatus NVARCHAR(50) DEFAULT 'VACANT_CLEAN';
+    ALTER TABLE Accommodation ADD HousekeepingStatus NVARCHAR(50) DEFAULT 'VACANT_CLEAN';
 END
 GO
 
@@ -570,65 +570,65 @@ GO
 -- SECTION 6: MODIFY EXISTING TABLES
 -- =============================================
 
--- Add columns to Reservations table if not exist
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'BookingSource')
+-- Add columns to Reservation table if not exist
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'BookingSource')
 BEGIN
-    ALTER TABLE Reservations ADD BookingSource NVARCHAR(50);
+    ALTER TABLE Reservation ADD BookingSource NVARCHAR(50);
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'OTABookingCode')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'OTABookingCode')
 BEGIN
-    ALTER TABLE Reservations ADD OTABookingCode NVARCHAR(100);
+    ALTER TABLE Reservation ADD OTABookingCode NVARCHAR(100);
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'ReminderSent')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'ReminderSent')
 BEGIN
-    ALTER TABLE Reservations ADD ReminderSent BIT DEFAULT 0;
+    ALTER TABLE Reservation ADD ReminderSent BIT DEFAULT 0;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'FeedbackRequestSent')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'FeedbackRequestSent')
 BEGIN
-    ALTER TABLE Reservations ADD FeedbackRequestSent BIT DEFAULT 0;
+    ALTER TABLE Reservation ADD FeedbackRequestSent BIT DEFAULT 0;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'DynamicPriceApplied')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'DynamicPriceApplied')
 BEGIN
-    ALTER TABLE Reservations ADD DynamicPriceApplied BIT DEFAULT 0;
+    ALTER TABLE Reservation ADD DynamicPriceApplied BIT DEFAULT 0;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservations') AND name = 'PriceMultiplier')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Reservation') AND name = 'PriceMultiplier')
 BEGIN
-    ALTER TABLE Reservations ADD PriceMultiplier DECIMAL(5,2) DEFAULT 1.00;
+    ALTER TABLE Reservation ADD PriceMultiplier DECIMAL(5,2) DEFAULT 1.00;
 END
 GO
 
--- Add columns to Accommodations table
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodations') AND name = 'MinOccupancyRate')
+-- Add columns to Accommodation table
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodation') AND name = 'MinOccupancyRate')
 BEGIN
-    ALTER TABLE Accommodations ADD MinOccupancyRate DECIMAL(5,2) DEFAULT 0.85;
+    ALTER TABLE Accommodation ADD MinOccupancyRate DECIMAL(5,2) DEFAULT 0.85;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodations') AND name = 'MaxOccupancyRate')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodation') AND name = 'MaxOccupancyRate')
 BEGIN
-    ALTER TABLE Accommodations ADD MaxOccupancyRate DECIMAL(5,2) DEFAULT 1.50;
+    ALTER TABLE Accommodation ADD MaxOccupancyRate DECIMAL(5,2) DEFAULT 1.50;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodations') AND name = 'LastCleanedAt')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodation') AND name = 'LastCleanedAt')
 BEGIN
-    ALTER TABLE Accommodations ADD LastCleanedAt DATETIME;
+    ALTER TABLE Accommodation ADD LastCleanedAt DATETIME;
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodations') AND name = 'LastInspectedAt')
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Accommodation') AND name = 'LastInspectedAt')
 BEGIN
-    ALTER TABLE Accommodations ADD LastInspectedAt DATETIME;
+    ALTER TABLE Accommodation ADD LastInspectedAt DATETIME;
 END
 GO
 
@@ -643,14 +643,14 @@ GO
 
 CREATE VIEW vw_DailyRevenue AS
 SELECT
-    CAST(CheckInDate AS DATE) as RevenueDate,
+    CAST(CheckinDate AS DATE) as RevenueDate,
     COUNT(*) as Bookings,
     SUM(TotalPrice) as Revenue,
     AVG(TotalPrice) as AvgBookingValue,
-    SUM(DATEDIFF(day, CheckInDate, CheckOutDate)) as RoomNights
-FROM Reservations
-WHERE Status NOT IN ('Cancelled')
-GROUP BY CAST(CheckInDate AS DATE);
+    SUM(DATEDIFF(day, CheckinDate, CheckoutDate)) as RoomNights
+FROM Reservation
+WHERE Status NOT IN (N'ยกเลิก')
+GROUP BY CAST(CheckinDate AS DATE);
 GO
 
 -- Room Occupancy View
@@ -660,19 +660,21 @@ GO
 
 CREATE VIEW vw_RoomOccupancy AS
 SELECT
-    a.Id as AccommodationId,
-    a.AccommodationName,
-    a.AccommodationType,
+    a.ID as AccommodationId,
+    a.AccomName,
+    a.AccomType,
     a.HousekeepingStatus,
-    (SELECT COUNT(*) FROM Reservations r
-     WHERE r.AccommodationId = a.Id
-     AND GETDATE() BETWEEN r.CheckInDate AND r.CheckOutDate
-     AND r.Status NOT IN ('Cancelled')) as IsCurrentlyOccupied,
-    (SELECT MAX(CheckOutDate) FROM Reservations r
-     WHERE r.AccommodationId = a.Id
-     AND r.Status NOT IN ('Cancelled')) as LastCheckout
-FROM Accommodations a
-WHERE a.IsActive = 1;
+    (SELECT COUNT(*) FROM Reservation r
+     INNER JOIN Reservation_Accommodation ra ON ra.Reservation_ID = r.ID
+     WHERE ra.Accommodation_ID = a.ID
+     AND GETDATE() BETWEEN r.CheckinDate AND r.CheckoutDate
+     AND r.Status NOT IN (N'ยกเลิก')) as IsCurrentlyOccupied,
+    (SELECT MAX(r.CheckoutDate) FROM Reservation r
+     INNER JOIN Reservation_Accommodation ra ON ra.Reservation_ID = r.ID
+     WHERE ra.Accommodation_ID = a.ID
+     AND r.Status NOT IN (N'ยกเลิก')) as LastCheckout
+FROM Accommodation a
+WHERE a.Status = 1;
 GO
 
 -- Maintenance Summary View

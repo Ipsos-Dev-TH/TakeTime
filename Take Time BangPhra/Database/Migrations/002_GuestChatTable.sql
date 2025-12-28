@@ -34,7 +34,7 @@ BEGIN
 
     CREATE NONCLUSTERED INDEX IX_Guest_Chat_Unread
         ON Guest_Chat(IsFromGuest, Is_Read)
-        WHERE IsFromGuest = 1 AND (Is_Read = 0 OR Is_Read IS NULL);
+        WHERE IsFromGuest = 1 AND Is_Read = 0;
 
     PRINT 'Guest_Chat table created successfully.';
 END
