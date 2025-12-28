@@ -10,44 +10,32 @@
 namespace Take_Time_BangPhra.Guest
 {
 
-
     public partial class Chat
     {
 
         /// <summary>
         /// rptMessages control.
         /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move the field declaration from designer file to code-behind file.
-        /// </remarks>
         protected global::System.Web.UI.WebControls.Repeater rptMessages;
 
         /// <summary>
         /// pnlEmptyChat control.
         /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move the field declaration from designer file to code-behind file.
-        /// </remarks>
         protected global::System.Web.UI.WebControls.Panel pnlEmptyChat;
 
         /// <summary>
         /// txtMessage control.
         /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move the field declaration from designer file to code-behind file.
-        /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox txtMessage;
 
         /// <summary>
         /// btnSend control.
         /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move the field declaration from designer file to code-behind file.
-        /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnSend;
+
+        /// <summary>
+        /// hfReservationId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfReservationId;
     }
 }

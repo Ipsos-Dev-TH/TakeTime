@@ -386,6 +386,7 @@
     <Content Include="Admin\Assets\AssetManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
+    <Content Include="Admin\Chat\ChatManagement.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
     <Content Include="Guest\RoomService.aspx" />
@@ -870,6 +871,13 @@
     </Compile>
     <Compile Include="Admin\RoomQRGenerator.aspx.designer.cs">
       <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Chat\ChatManagement.aspx.cs">
+      <DependentUpon>ChatManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Chat\ChatManagement.aspx.designer.cs">
+      <DependentUpon>ChatManagement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Guest\Portal.aspx.cs">
       <DependentUpon>Portal.aspx</DependentUpon>

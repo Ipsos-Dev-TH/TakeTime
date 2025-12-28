@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Web.UI;
+using System.Web.Services;
 using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Guest
@@ -25,9 +26,12 @@ namespace Take_Time_BangPhra.Guest
                 return;
             }
 
+            hfReservationId.Value = _reservationId.ToString();
+
             if (!IsPostBack)
             {
                 LoadChatHistory();
+                MarkMessagesAsRead();
             }
         }
 
@@ -64,9 +68,8 @@ namespace Take_Time_BangPhra.Guest
         {
             try
             {
-                // Try to load from Guest_Chat table
                 DataTable dtMessages = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 50
+                    @"SELECT TOP 100
                         Message,
                         IsFromGuest,
                         Created_Date AS CreatedAt
@@ -97,6 +100,26 @@ namespace Take_Time_BangPhra.Guest
         }
 
         /// <summary>
+        /// Mark messages as read by guest
+        /// </summary>
+        private void MarkMessagesAsRead()
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Guest_Chat
+                      SET Guest_Read = 1, Guest_Read_Date = @ReadDate
+                      WHERE Reservation_ID = @ReservationId AND IsFromGuest = 0 AND (Guest_Read = 0 OR Guest_Read IS NULL)",
+                    new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "@ReservationId", _reservationId },
+                        { "@ReadDate", DateTime.Now }
+                    });
+            }
+            catch { }
+        }
+
+        /// <summary>
         /// Send message
         /// </summary>
         protected void btnSend_Click(object sender, EventArgs e)
@@ -124,14 +147,16 @@ namespace Take_Time_BangPhra.Guest
                     { "@GuestPhone", _guestMobilePhone },
                     { "@Message", message },
                     { "@IsFromGuest", true },
-                    { "@CreatedDate", DateTime.Now }
+                    { "@CreatedDate", DateTime.Now },
+                    { "@IsRead", false },
+                    { "@GuestRead", true }
                 };
 
                 int result = _code.DatabaseInsertSafe(_connectionString,
                     @"INSERT INTO Guest_Chat
-                      (Reservation_ID, Guest_Phone, Message, IsFromGuest, Created_Date, Is_Read)
+                      (Reservation_ID, Guest_Phone, Message, IsFromGuest, Created_Date, Is_Read, Guest_Read)
                       VALUES
-                      (@ReservationId, @GuestPhone, @Message, @IsFromGuest, @CreatedDate, 0)",
+                      (@ReservationId, @GuestPhone, @Message, @IsFromGuest, @CreatedDate, @IsRead, @GuestRead)",
                     parameters);
 
                 if (result > 0)
@@ -142,30 +167,20 @@ namespace Take_Time_BangPhra.Guest
                     // Reload chat
                     LoadChatHistory();
 
-                    // Send notification to Front Desk (optional - could use Telegram/Email)
-                    try
-                    {
-                        SendNotificationToFrontDesk(message);
-                    }
-                    catch { }
-
-                    // Add auto-reply for common questions
-                    AddAutoReply(message);
+                    // Send notification to Front Desk
+                    SendNotificationToFrontDesk(message);
                 }
             }
             catch (Exception ex)
             {
-                // Log error
                 System.Diagnostics.Debug.WriteLine($"Chat error: {ex.Message}");
-
-                // Show friendly message
                 ScriptManager.RegisterStartupScript(this, GetType(), "chatError",
                     "alert('ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง');", true);
             }
         }
 
         /// <summary>
-        /// Send notification to Front Desk
+        /// Send notification to Front Desk via Telegram
         /// </summary>
         private void SendNotificationToFrontDesk(string message)
         {
@@ -173,9 +188,10 @@ namespace Take_Time_BangPhra.Guest
             {
                 // Get room info
                 DataTable dtRoom = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT a.Name AS RoomName
+                    @"SELECT a.Name AS RoomName, c.Name AS GuestName
                       FROM Reservation r
                       JOIN Accommodation a ON r.Accommodation_ID = a.ID
+                      JOIN Customer c ON r.Customer_ID = c.ID
                       WHERE r.ID = @ReservationId",
                     new System.Collections.Generic.Dictionary<string, object>
                     {
@@ -183,60 +199,49 @@ namespace Take_Time_BangPhra.Guest
                     });
 
                 string roomName = dtRoom.Rows.Count > 0 ? dtRoom.Rows[0]["RoomName"].ToString() : "Unknown";
+                string guestName = dtRoom.Rows.Count > 0 ? dtRoom.Rows[0]["GuestName"].ToString() : "Guest";
 
-                // Send Telegram notification
+                // Send Telegram notification with alert emoji
                 var telegramBot = new TelegramBot();
-                telegramBot.SendMessage($"💬 ข้อความจากแขกห้อง {roomName}:\n\n{message}");
+                string alertMessage = $"🔔💬 ข้อความใหม่จากแขก!\n\n" +
+                                     $"🚪 ห้อง: {roomName}\n" +
+                                     $"👤 ชื่อ: {guestName}\n" +
+                                     $"📱 เบอร์: {_guestMobilePhone}\n\n" +
+                                     $"💬 ข้อความ:\n{message}\n\n" +
+                                     $"⚡ กรุณาตอบกลับที่: Admin > Chat Management";
+                telegramBot.SendMessage(alertMessage);
             }
             catch { }
         }
 
         /// <summary>
-        /// Add auto-reply for common questions
+        /// Web method to check for new messages (for AJAX polling)
         /// </summary>
-        private void AddAutoReply(string message)
+        [WebMethod]
+        public static object GetNewMessages(long reservationId)
         {
-            string autoReply = null;
-            message = message.ToLower();
+            try
+            {
+                string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var code = new code();
 
-            if (message.Contains("wifi") || message.Contains("password") || message.Contains("รหัส"))
-            {
-                autoReply = "🔐 WiFi Password: TakeTime2024\nNetwork Name: TakeTime_Guest\n\nหากมีปัญหาในการเชื่อมต่อ กรุณาติดต่อ Front Desk";
-            }
-            else if (message.Contains("check-out") || message.Contains("checkout") || message.Contains("เช็คเอาท์"))
-            {
-                autoReply = "⏰ เวลา Check-out มาตรฐาน: 12:00 น.\n\nหากต้องการ Late Check-out กรุณาแจ้งล่วงหน้า (ขึ้นอยู่กับห้องว่าง)\n- 13:00 น. ไม่มีค่าใช้จ่าย\n- 14:00 น. +300 บาท\n- หลัง 14:00 น. คิดเพิ่มครึ่งวัน";
-            }
-            else if (message.Contains("breakfast") || message.Contains("อาหารเช้า"))
-            {
-                autoReply = "🍳 อาหารเช้าให้บริการ: 07:00 - 10:00 น.\nสถานที่: ห้องอาหารชั้น 1\n\nหากต้องการรับประทานในห้อง สามารถสั่งผ่าน Room Service ได้";
-            }
-
-            if (!string.IsNullOrEmpty(autoReply))
-            {
-                try
-                {
-                    // Add auto-reply after 1 second delay simulation
-                    var parameters = new System.Collections.Generic.Dictionary<string, object>
+                DataTable dt = code.DatabaseQuerySafe(connectionString,
+                    @"SELECT COUNT(*) AS NewCount
+                      FROM Guest_Chat
+                      WHERE Reservation_ID = @ReservationId
+                        AND IsFromGuest = 0
+                        AND (Guest_Read = 0 OR Guest_Read IS NULL)",
+                    new System.Collections.Generic.Dictionary<string, object>
                     {
-                        { "@ReservationId", _reservationId },
-                        { "@GuestPhone", _guestMobilePhone },
-                        { "@Message", autoReply },
-                        { "@IsFromGuest", false },
-                        { "@CreatedDate", DateTime.Now.AddSeconds(1) }
-                    };
+                        { "@ReservationId", reservationId }
+                    });
 
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"INSERT INTO Guest_Chat
-                          (Reservation_ID, Guest_Phone, Message, IsFromGuest, Created_Date, Is_Read)
-                          VALUES
-                          (@ReservationId, @GuestPhone, @Message, @IsFromGuest, @CreatedDate, 1)",
-                        parameters);
-
-                    // Reload to show auto-reply
-                    LoadChatHistory();
-                }
-                catch { }
+                int newCount = dt.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["NewCount"]) : 0;
+                return new { hasNewMessages = newCount > 0, count = newCount };
+            }
+            catch
+            {
+                return new { hasNewMessages = false, count = 0 };
             }
         }
     }

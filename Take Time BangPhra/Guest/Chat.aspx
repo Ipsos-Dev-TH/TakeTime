@@ -89,18 +89,16 @@
             height: 8px;
             border-radius: 50%;
             background: #4CAF50;
+            animation: pulse 2s infinite;
         }
 
-        .status-dot.offline {
-            background: #9e9e9e;
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
 
         .status-text {
             color: #4CAF50;
-        }
-
-        .status-text.offline {
-            color: #9e9e9e;
         }
 
         /* Chat Messages */
@@ -153,6 +151,7 @@
             font-size: 14px;
             line-height: 1.5;
             margin-bottom: 5px;
+            white-space: pre-wrap;
         }
 
         .message-time {
@@ -163,68 +162,6 @@
 
         .message.received .message-time {
             color: #888;
-        }
-
-        /* Date Separator */
-        .date-separator {
-            text-align: center;
-            margin: 20px 0;
-        }
-
-        .date-separator span {
-            background: #e0e0e0;
-            padding: 5px 15px;
-            border-radius: 15px;
-            font-size: 12px;
-            color: #666;
-        }
-
-        /* Chat Input */
-        .chat-input-container {
-            background: white;
-            border-radius: 15px;
-            padding: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-
-        .chat-input {
-            flex: 1;
-            border: 1px solid #e0e0e0;
-            border-radius: 20px;
-            padding: 12px 18px;
-            font-size: 14px;
-            resize: none;
-            max-height: 100px;
-            font-family: inherit;
-            transition: border-color 0.3s;
-        }
-
-        .chat-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .btn-send {
-            width: 48px;
-            height: 48px;
-            border: none;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            font-size: 18px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .btn-send:hover {
-            transform: scale(1.05);
-            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
         }
 
         /* Quick Replies */
@@ -276,26 +213,142 @@
             font-size: 14px;
         }
 
+        /* Chat Input */
+        .chat-input-container {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            position: fixed;
+            bottom: 70px;
+            left: 15px;
+            right: 15px;
+            max-width: 770px;
+            margin: 0 auto;
+        }
+
+        .chat-input {
+            flex: 1;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            padding: 12px 18px;
+            font-size: 14px;
+            resize: none;
+            max-height: 100px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-send {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-send:hover {
+            transform: scale(1.05);
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
+        }
+
         /* Notice */
         .notice-card {
-            background: #fff8e1;
-            border-left: 4px solid #FFC107;
+            background: #e8f5e9;
+            border-left: 4px solid #4CAF50;
             padding: 12px 15px;
             border-radius: 8px;
             margin-bottom: 15px;
             font-size: 13px;
-            color: #666;
+            color: #2e7d32;
         }
 
         .notice-card i {
-            color: #FFC107;
             margin-right: 8px;
         }
 
-        /* Bottom Nav Space */
-        @media (max-width: 768px) {
+        /* Bottom Nav */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            box-shadow: 0 -3px 15px rgba(0,0,0,0.1);
+            z-index: 1000;
+            border-top: 1px solid #eee;
+        }
+
+        .bottom-nav a {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-decoration: none;
+            padding: 5px 15px;
+        }
+
+        .bottom-nav a i {
+            font-size: 22px;
+            margin-bottom: 4px;
+            color: #888;
+        }
+
+        .bottom-nav a.active i {
+            color: #667eea;
+        }
+
+        .bottom-nav a span {
+            font-size: 10px;
+            color: #888;
+        }
+
+        .bottom-nav a.active span {
+            color: #667eea;
+        }
+
+        /* Typing indicator */
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+            color: #888;
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        .typing-indicator.show {
+            display: block;
+        }
+
+        @media (min-width: 768px) {
+            .chat-input-container {
+                position: relative;
+                bottom: auto;
+                left: auto;
+                right: auto;
+            }
             .chat-container {
-                padding-bottom: 80px;
+                padding-bottom: 30px;
+            }
+            .bottom-nav {
+                display: none;
             }
         }
     </style>
@@ -325,14 +378,14 @@
 
         <!-- Notice -->
         <div class="notice-card">
-            <i class="fas fa-info-circle"></i>
-            ข้อความของคุณจะถูกส่งไปยังเจ้าหน้าที่ Front Desk ทันที เราจะตอบกลับโดยเร็วที่สุด
+            <i class="fas fa-bolt"></i>
+            ข้อความจะถูกส่งถึงเจ้าหน้าที่ทันที เราจะตอบกลับโดยเร็วที่สุด
         </div>
 
         <!-- Quick Replies -->
         <div class="quick-replies">
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอผ้าเช็ดตัวเพิ่มครับ/ค่ะ')">ขอผ้าเช็ดตัว</button>
-            <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอทำความสะอาดห้องครับ/ค่ะ')">ขอทำความสะอาดห้อง</button>
+            <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอทำความสะอาดห้องครับ/ค่ะ')">ทำความสะอาดห้อง</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอ Late check-out ได้ไหมครับ/ค่ะ')">Late Check-out</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('WiFi Password คืออะไรครับ/ค่ะ')">WiFi Password</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('มีบริการเรียกรถไหมครับ/ค่ะ')">เรียกรถ</button>
@@ -344,7 +397,7 @@
                 <ItemTemplate>
                     <div class='message <%# Eval("IsFromGuest").ToString() == "True" ? "sent" : "received" %>'>
                         <div class="message-bubble">
-                            <div class="message-text"><%# Eval("Message") %></div>
+                            <div class="message-text"><%# Server.HtmlEncode(Eval("Message").ToString()) %></div>
                             <div class="message-time"><%# Eval("CreatedAt", "{0:HH:mm}") %></div>
                         </div>
                     </div>
@@ -358,6 +411,10 @@
                     <p>มีคำถามหรือต้องการความช่วยเหลือ?<br>ส่งข้อความหาเราได้เลย!</p>
                 </div>
             </asp:Panel>
+
+            <div class="typing-indicator" id="typingIndicator">
+                <i class="fas fa-ellipsis-h"></i> เจ้าหน้าที่กำลังพิมพ์...
+            </div>
         </div>
 
         <!-- Chat Input -->
@@ -371,41 +428,47 @@
     </div>
 
     <!-- Bottom Navigation -->
-    <div class="bottom-nav" style="position: fixed; bottom: 0; left: 0; right: 0; background: white; display: flex; justify-content: space-around; padding: 10px 0; box-shadow: 0 -3px 15px rgba(0,0,0,0.1); z-index: 1000; border-top: 1px solid #eee;">
-        <a href="Dashboard.aspx" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; padding: 5px 15px;">
-            <i class="fas fa-home" style="font-size: 22px; margin-bottom: 4px; color: #888;"></i>
-            <span style="font-size: 10px; color: #888;">หน้าหลัก</span>
+    <div class="bottom-nav">
+        <a href="Dashboard.aspx">
+            <i class="fas fa-home"></i>
+            <span>หน้าหลัก</span>
         </a>
-        <a href="RoomService.aspx" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; padding: 5px 15px;">
-            <i class="fas fa-utensils" style="font-size: 22px; margin-bottom: 4px; color: #888;"></i>
-            <span style="font-size: 10px; color: #888;">สั่งอาหาร</span>
+        <a href="RoomService.aspx">
+            <i class="fas fa-utensils"></i>
+            <span>สั่งอาหาร</span>
         </a>
-        <a href="Housekeeping.aspx" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; padding: 5px 15px;">
-            <i class="fas fa-broom" style="font-size: 22px; margin-bottom: 4px; color: #888;"></i>
-            <span style="font-size: 10px; color: #888;">แม่บ้าน</span>
+        <a href="Housekeeping.aspx">
+            <i class="fas fa-broom"></i>
+            <span>แม่บ้าน</span>
         </a>
-        <a href="Balance.aspx" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; padding: 5px 15px;">
-            <i class="fas fa-wallet" style="font-size: 22px; margin-bottom: 4px; color: #888;"></i>
-            <span style="font-size: 10px; color: #888;">ยอดชำระ</span>
+        <a href="Balance.aspx">
+            <i class="fas fa-wallet"></i>
+            <span>ยอดชำระ</span>
         </a>
-        <a href="Review.aspx" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; padding: 5px 15px;">
-            <i class="fas fa-star" style="font-size: 22px; margin-bottom: 4px; color: #888;"></i>
-            <span style="font-size: 10px; color: #888;">รีวิว</span>
+        <a href="Review.aspx">
+            <i class="fas fa-star"></i>
+            <span>รีวิว</span>
         </a>
     </div>
+
+    <asp:HiddenField ID="hfReservationId" runat="server" />
 
     <script>
         // Auto-resize textarea
         const textarea = document.querySelector('.chat-input');
-        textarea.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 100) + 'px';
-        });
+        if (textarea) {
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+            });
+        }
 
         // Scroll to bottom of chat
         function scrollToBottom() {
             const chatMessages = document.getElementById('chatMessages');
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (chatMessages) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         }
 
         // Handle Enter key
@@ -424,11 +487,46 @@
             document.getElementById('<%= txtMessage.ClientID %>').focus();
         }
 
-        // Scroll to bottom on page load
+        // Auto-refresh chat every 5 seconds
+        var refreshInterval;
+        function startAutoRefresh() {
+            refreshInterval = setInterval(function() {
+                checkNewMessages();
+            }, 5000);
+        }
+
+        function checkNewMessages() {
+            // Use AJAX to check for new messages
+            var reservationId = document.getElementById('<%= hfReservationId.ClientID %>').value;
+            if (reservationId) {
+                fetch('Chat.aspx/GetNewMessages?reservationId=' + reservationId)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.hasNewMessages) {
+                            location.reload();
+                        }
+                    })
+                    .catch(err => console.log('Check messages error:', err));
+            }
+        }
+
+        // Page load
         window.onload = function() {
             scrollToBottom();
             // Set send button icon
-            document.getElementById('<%= btnSend.ClientID %>').innerHTML = '<i class="fas fa-paper-plane"></i>';
+            var btnSend = document.getElementById('<%= btnSend.ClientID %>');
+            if (btnSend) {
+                btnSend.innerHTML = '<i class="fas fa-paper-plane"></i>';
+            }
+            startAutoRefresh();
         };
+
+        // Play notification sound for new messages
+        function playNotificationSound() {
+            try {
+                var audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1sbJaQo5N6YWJ0lJOUlH50ZnKJhZqWlYN0Znd3e4KDmJmXjHlxe3p6f4GGiouJhYB8e35+gIOGiYuKiIaCgYGCgYOFhoaFhYSDgoKCgoKDg4ODg4OCgoKCgoKCgoKCgoKCgoKCgoKCgoKC');
+                audio.play();
+            } catch(e) {}
+        }
     </script>
 </asp:Content>
