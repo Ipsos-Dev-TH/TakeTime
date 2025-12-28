@@ -25,13 +25,17 @@ namespace Take_Time_BangPhra
                     pnlChatNotification.Visible = true;
 
                     // Check if user is Owner to show owner-only menus
+                    // Owner sees ALL menus including Hotel Management and System/HR
+                    // Owner can see ALL employees without supervisor assignment
                     bool isOwner = Session["User"]?.ToString() == "Owner";
+                    pnlHotelMgmt.Visible = isOwner;
                     pnlOwnerOnly.Visible = isOwner;
                 }
                 else
                 {
                     // Hide admin controls
                     pnlAdminNav.Visible = false;
+                    pnlHotelMgmt.Visible = false;
                     pnlOwnerOnly.Visible = false;
                     pnlEmployeeNav.Visible = false;
                     pnlChatNotification.Visible = false;
@@ -43,6 +47,7 @@ namespace Take_Time_BangPhra
             {
                 // Hide admin controls on error
                 pnlAdminNav.Visible = false;
+                pnlHotelMgmt.Visible = false;
                 pnlOwnerOnly.Visible = false;
                 pnlEmployeeNav.Visible = false;
                 pnlChatNotification.Visible = false;

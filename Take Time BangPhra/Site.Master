@@ -188,9 +188,9 @@
 
         .mega-menu-grid {
             display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 20px;
-            max-width: 1600px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
@@ -515,9 +515,9 @@
                                 </a>
                                 <div class="mega-dropdown dropdown-menu">
                                     <div class="mega-menu-grid">
-                                        <!-- Column 1: Guest & Booking Management -->
+                                        <!-- Column 1: งานประจำวัน (Daily Operations) - All Staff -->
                                         <div class="mega-menu-column">
-                                            <h4><i class="fas fa-bed"></i> การจองและผู้เข้าพัก</h4>
+                                            <h4><i class="fas fa-calendar-day"></i> งานประจำวัน</h4>
                                             <ul>
                                                 <li><a runat="server" href="~/ReserveTable">
                                                     <i class="fas fa-users"></i> ผู้เข้าพักรายวัน
@@ -528,8 +528,8 @@
                                                 <li><a runat="server" href="~/PostponeList">
                                                     <i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/RoomQRGenerator">
-                                                    <i class="fas fa-qrcode"></i> Room QR Codes
+                                                <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
+                                                    <i class="fas fa-broom"></i> Housekeeping
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
@@ -537,62 +537,44 @@
                                             </ul>
                                         </div>
 
-                                        <!-- Column 2: Product & Stock -->
+                                        <!-- Column 2: ขาย & สินค้า (Sales & Products) - All Staff -->
                                         <div class="mega-menu-column">
-                                            <h4><i class="fas fa-box"></i> สินค้าและคลัง</h4>
+                                            <h4><i class="fas fa-shopping-cart"></i> ขาย & สินค้า</h4>
                                             <ul>
                                                 <li><a runat="server" href="~/Product">
-                                                    <i class="fas fa-shopping-cart"></i> ขายสินค้า
+                                                    <i class="fas fa-cash-register"></i> POS ขายสินค้า
                                                 </a></li>
-                                                <li><a runat="server" href="~/Product/In">
-                                                    <i class="fas fa-arrow-down"></i> นำสินค้าเข้าคลัง
+                                                <li><a runat="server" href="~/Voucher">
+                                                    <i class="fas fa-ticket-alt"></i> ขาย Voucher
                                                 </a></li>
                                                 <li><a runat="server" href="~/Product/Stock">
                                                     <i class="fas fa-warehouse"></i> สินค้าคงคลัง
                                                 </a></li>
+                                                <li><a runat="server" href="~/Product/In">
+                                                    <i class="fas fa-arrow-down"></i> นำสินค้าเข้าคลัง
+                                                </a></li>
                                                 <li><a runat="server" href="~/Product/SellReport">
                                                     <i class="fas fa-chart-line"></i> รายงานการขาย
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/ProductImages">
-                                                    <i class="fas fa-images"></i> จัดการรูปสินค้า
                                                 </a></li>
                                             </ul>
                                         </div>
 
-                                        <!-- Column 3: Finance & Accounting -->
+                                        <!-- Column 3: บัญชี & CRM (Finance & CRM) - All Staff -->
                                         <div class="mega-menu-column">
-                                            <h4><i class="fas fa-coins"></i> การเงินและบัญชี</h4>
+                                            <h4><i class="fas fa-file-invoice-dollar"></i> บัญชี & CRM</h4>
                                             <ul>
-                                                <li><a runat="server" href="~/Voucher">
-                                                    <i class="fas fa-ticket-alt"></i> ขาย Voucher
-                                                </a></li>
                                                 <li><a runat="server" href="~/Account/Receipt">
-                                                    <i class="fas fa-receipt"></i> สร้างใบเสร็จรับเงิน
+                                                    <i class="fas fa-receipt"></i> สร้างใบเสร็จ
                                                 </a></li>
                                                 <li><a runat="server" href="~/Account/CheckDocument_New">
                                                     <i class="fas fa-file-invoice"></i> จัดการใบเสร็จ
                                                 </a></li>
                                                 <li><a runat="server" href="~/Account/PaymentVoucher">
-                                                    <i class="fas fa-file-invoice-dollar"></i> สร้างใบสำคัญจ่าย
+                                                    <i class="fas fa-file-alt"></i> ใบสำคัญจ่าย
                                                 </a></li>
-                                                <li><a runat="server" href="~/Account/CheckPayment_New">
-                                                    <i class="fas fa-file-alt"></i> จัดการใบสำคัญจ่าย
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/PaymentAffiliate">
-                                                    <i class="fas fa-money-bill-wave"></i> จ่ายเงิน Affiliate
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/Vendor">
-                                                    <i class="fas fa-store"></i> จัดการ Vendor
-                                                </a></li>
-                                            </ul>
-                                        </div>
-
-                                        <!-- Column 4: CRM -->
-                                        <div class="mega-menu-column">
-                                            <h4><i class="fas fa-heart"></i> ระบบ CRM</h4>
-                                            <ul>
+                                                <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
                                                 <li><a runat="server" href="~/Admin/CustomerManagement">
-                                                    <i class="fas fa-address-book"></i> Customer Management
+                                                    <i class="fas fa-address-book"></i> จัดการลูกค้า
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/CRM/GuestProfile">
                                                     <i class="fas fa-user-circle"></i> Guest Profile 360
@@ -600,48 +582,50 @@
                                                 <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
                                                     <i class="fas fa-trophy"></i> Loyalty Dashboard
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
-                                                    <i class="fas fa-star"></i> Review Management
-                                                </a></li>
-                                                <li><a runat="server" href="~/Account/TierBenefitsManagement">
-                                                    <i class="fas fa-crown"></i> Tier Benefits
-                                                </a></li>
                                             </ul>
                                         </div>
 
-                                        <!-- Column 5: Hotel Operations (NEW) -->
-                                        <div class="mega-menu-column">
-                                            <h4><i class="fas fa-hotel"></i> Hotel Operations</h4>
-                                            <ul>
-                                                <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
-                                                    <i class="fas fa-broom"></i> Housekeeping
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
-                                                    <i class="fas fa-tools"></i> Maintenance
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
-                                                    <i class="fas fa-network-wired"></i> Channel Manager
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/Pricing/DynamicPricing">
-                                                    <i class="fas fa-tags"></i> Dynamic Pricing
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/Notifications/Settings">
-                                                    <i class="fas fa-bell"></i> Notifications
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
-                                                    <i class="fas fa-concierge-bell"></i> Guest Experience
-                                                </a></li>
-                                            </ul>
-                                        </div>
-
-                                        <!-- Column 6: Owner Only -->
-                                        <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
+                                        <!-- Column 4: จัดการโรงแรม (Hotel Management) - Owner Only -->
+                                        <asp:Panel ID="pnlHotelMgmt" runat="server" Visible="false">
                                             <div class="mega-menu-column owner-section">
-                                                <h4><i class="fas fa-shield-alt"></i> ระบบ (Owner)</h4>
+                                                <h4><i class="fas fa-hotel"></i> จัดการโรงแรม</h4>
                                                 <ul>
                                                     <li><a runat="server" href="~/Admin/Dashboard">
                                                         <i class="fas fa-tachometer-alt"></i> Dashboard
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
+                                                        <i class="fas fa-network-wired"></i> Channel Manager
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Pricing/DynamicPricing">
+                                                        <i class="fas fa-tags"></i> Dynamic Pricing
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/HolidayPrice">
+                                                        <i class="fas fa-calendar-day"></i> ราคาวันหยุด
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
+                                                        <i class="fas fa-tools"></i> Maintenance
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Notifications/Settings">
+                                                        <i class="fas fa-bell"></i> Notifications
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
+                                                        <i class="fas fa-concierge-bell"></i> Guest Experience
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
+                                                        <i class="fas fa-star"></i> Review Management
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Account/TierBenefitsManagement">
+                                                        <i class="fas fa-crown"></i> Tier Benefits
+                                                    </a></li>
+                                                </ul>
+                                            </div>
+                                        </asp:Panel>
+
+                                        <!-- Column 5: ระบบ & HR (System & HR) - Owner Only -->
+                                        <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
+                                            <div class="mega-menu-column owner-section">
+                                                <h4><i class="fas fa-shield-alt"></i> ระบบ & HR</h4>
+                                                <ul>
                                                     <li><a runat="server" href="~/Admin/Report/Report">
                                                         <i class="fas fa-chart-bar"></i> รายงานระบบ
                                                     </a></li>
@@ -651,29 +635,40 @@
                                                     <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
                                                         <i class="fas fa-chart-pie"></i> Customer Analytics
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/HolidayPrice">
-                                                        <i class="fas fa-calendar-day"></i> ราคาวันหยุด
-                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Edit_Home">
                                                         <i class="fas fa-database"></i> ฐานข้อมูล
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/RoomQRGenerator">
+                                                        <i class="fas fa-qrcode"></i> Room QR Codes
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/ProductImages">
+                                                        <i class="fas fa-images"></i> จัดการรูปสินค้า
+                                                    </a></li>
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
                                                         <i class="fas fa-user-tie"></i> จัดการพนักงาน
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/HR/SupervisorManagement">
-                                                        <i class="fas fa-sitemap"></i> กำหนดหัวหน้า-ลูกน้อง
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
                                                         <i class="fas fa-calendar-minus"></i> จัดการการลา
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
-                                                        <i class="fas fa-user-check"></i> อนุมัติการลา
+                                                        <i class="fas fa-user-check"></i> อนุมัติการลา (ทั้งหมด)
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
                                                         <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
                                                     </a></li>
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Admin/Assets/AssetManagement">
-                                                        <i class="fas fa-boxes"></i> จัดการสินทรัพย์
+                                                        <i class="fas fa-boxes"></i> สินทรัพย์
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Vendor">
+                                                        <i class="fas fa-store"></i> Vendor
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/PaymentAffiliate">
+                                                        <i class="fas fa-handshake"></i> Affiliate
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Account/CheckPayment_New">
+                                                        <i class="fas fa-file-alt"></i> จัดการใบสำคัญจ่าย
                                                     </a></li>
                                                 </ul>
                                             </div>
@@ -693,7 +688,7 @@
                                         <i class="fas fa-calendar-minus"></i> ขอลางาน
                                     </a></li>
                                     <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
-                                        <i class="fas fa-user-check"></i> อนุมัติการลา
+                                        <i class="fas fa-user-check"></i> อนุมัติการลา (ลูกน้อง)
                                     </a></li>
                                     <li role="separator" class="divider"></li>
                                     <li><a runat="server" href="~/Admin/HR/OTEntry">
