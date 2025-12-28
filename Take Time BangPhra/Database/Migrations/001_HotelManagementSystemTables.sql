@@ -662,8 +662,6 @@ CREATE VIEW vw_RoomOccupancy AS
 SELECT
     a.ID as AccommodationId,
     a.AccomName,
-    a.AccomType,
-    a.HousekeepingStatus,
     (SELECT COUNT(*) FROM Reservation r
      INNER JOIN Reservation_Accommodation ra ON ra.Reservation_ID = r.ID
      WHERE ra.Accommodation_ID = a.ID
