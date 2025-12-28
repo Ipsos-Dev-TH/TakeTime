@@ -570,7 +570,10 @@
                                                     <i class="fas fa-file-invoice"></i> จัดการใบเสร็จ
                                                 </a></li>
                                                 <li><a runat="server" href="~/Account/PaymentVoucher">
-                                                    <i class="fas fa-file-alt"></i> ใบสำคัญจ่าย
+                                                    <i class="fas fa-file-alt"></i> สร้างใบสำคัญจ่าย
+                                                </a></li>
+                                                <li><a runat="server" href="~/Account/CheckPayment_New">
+                                                    <i class="fas fa-file-invoice-dollar"></i> จัดการใบสำคัญจ่าย
                                                 </a></li>
                                                 <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
                                                 <li><a runat="server" href="~/Admin/CustomerManagement">
@@ -666,9 +669,6 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/PaymentAffiliate">
                                                         <i class="fas fa-handshake"></i> Affiliate
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Account/CheckPayment_New">
-                                                        <i class="fas fa-file-alt"></i> จัดการใบสำคัญจ่าย
                                                     </a></li>
                                                 </ul>
                                             </div>
