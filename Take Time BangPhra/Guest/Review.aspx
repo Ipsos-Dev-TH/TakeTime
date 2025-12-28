@@ -626,7 +626,7 @@
                 <i class="fas fa-star" onclick="selectRating(5)"></i>
             </div>
 
-            <a href="https://search.google.com/local/writereview?placeid=YOUR_GOOGLE_PLACE_ID"
+            <a href="https://www.google.com/travel/hotels/entity/CgsIsoLIgrCxpI6cARAB/reviews"
                target="_blank"
                class="btn-google-review"
                id="btnGoogleReview"
