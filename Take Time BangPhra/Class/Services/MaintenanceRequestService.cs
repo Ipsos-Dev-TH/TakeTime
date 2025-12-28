@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 
-namespace Take_Time_BangPhra.Class.Services
+namespace Take_Time_BangPhra.Services
 {
     /// <summary>
     /// Service for managing maintenance requests and preventive maintenance

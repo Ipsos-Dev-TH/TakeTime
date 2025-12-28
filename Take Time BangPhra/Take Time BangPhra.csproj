@@ -539,6 +539,7 @@
     <Content Include="Voucher\Voucher_Confirmed.aspx" />
     <Content Include="Web.config" />
     <Content Include="Bundle.config" />
+    <Content Include="Database\Migrations\001_HotelManagementSystemTables.sql" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Account\CheckDocument.aspx.cs">
@@ -907,6 +908,12 @@
       <DependentUpon>Concierge.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
+    <Compile Include="Class\Services\ChannelManagerService.cs" />
+    <Compile Include="Class\Services\DynamicPricingService.cs" />
+    <Compile Include="Class\Services\HousekeepingService.cs" />
+    <Compile Include="Class\Services\MaintenanceRequestService.cs" />
+    <Compile Include="Class\Services\NotificationService.cs" />
+    <Compile Include="Class\Services\AdvancedAnalyticsService.cs" />
     <Compile Include="Default_Backup.aspx.cs">
       <DependentUpon>Default_Backup.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

@@ -7,7 +7,7 @@ using System.Net.Mail;
 using System.Threading.Tasks;
 using System.Web;
 
-namespace Take_Time_BangPhra.Class.Services
+namespace Take_Time_BangPhra.Services
 {
     /// <summary>
     /// Service for managing notifications (in-app, email, SMS, push)

@@ -4,7 +4,7 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 
-namespace Take_Time_BangPhra.Class.Services
+namespace Take_Time_BangPhra.Services
 {
     /// <summary>
     /// Service for advanced analytics and business intelligence
