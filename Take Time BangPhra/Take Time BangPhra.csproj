@@ -396,6 +396,7 @@
     <Content Include="Guest\AboutUs.aspx" />
     <Content Include="Guest\NearbyPlaces.aspx" />
     <Content Include="Guest\Facilities.aspx" />
+    <Content Include="Guest\Review.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -938,6 +939,13 @@
     </Compile>
     <Compile Include="Guest\Facilities.aspx.designer.cs">
       <DependentUpon>Facilities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Review.aspx.cs">
+      <DependentUpon>Review.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Review.aspx.designer.cs">
+      <DependentUpon>Review.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Class\Services\ChannelManagerService.cs" />
