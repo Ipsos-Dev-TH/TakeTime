@@ -224,30 +224,26 @@ jobs:
       - name: Record migration history
         if: inputs.dry_run == false && success()
         run: |
-          $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
           $migrations = Get-Content "migrations_to_run.txt"
+          $commitSha = "${{ github.sha }}"
 
           foreach ($migrationFile in $migrations) {
             $fileName = Split-Path $migrationFile.Trim() -Leaf
             if ([string]::IsNullOrEmpty($fileName)) { continue }
 
             # Create migration history table if not exists and record migration
-            $sql = @"
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Migration_History')
-            BEGIN
-              CREATE TABLE Migration_History (
-                ID INT IDENTITY(1,1) PRIMARY KEY,
-                Migration_File NVARCHAR(255) NOT NULL,
-                Applied_Date DATETIME NOT NULL DEFAULT GETDATE(),
-                Applied_By NVARCHAR(100),
-                Commit_SHA NVARCHAR(50),
-                Notes NVARCHAR(500)
-              );
-            END
-
-            INSERT INTO Migration_History (Migration_File, Applied_By, Commit_SHA, Notes)
-            VALUES ('$fileName', 'GitHub Actions', '${{ github.sha }}', 'Deployed via workflow');
-"@
+            $sql = "IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Migration_History') " +
+                   "BEGIN " +
+                   "CREATE TABLE Migration_History ( " +
+                   "ID INT IDENTITY(1,1) PRIMARY KEY, " +
+                   "Migration_File NVARCHAR(255) NOT NULL, " +
+                   "Applied_Date DATETIME NOT NULL DEFAULT GETDATE(), " +
+                   "Applied_By NVARCHAR(100), " +
+                   "Commit_SHA NVARCHAR(50), " +
+                   "Notes NVARCHAR(500) " +
+                   "); END; " +
+                   "INSERT INTO Migration_History (Migration_File, Applied_By, Commit_SHA, Notes) " +
+                   "VALUES ('$fileName', 'GitHub Actions', '$commitSha', 'Deployed via workflow');"
 
             try {
               Invoke-Sqlcmd -ConnectionString "${{ secrets.SQL_CONNECTION_STRING }}" -Query $sql -QueryTimeout 30
