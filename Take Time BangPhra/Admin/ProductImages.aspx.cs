@@ -27,8 +27,35 @@ namespace Take_Time_BangPhra.Admin
 
             if (!IsPostBack)
             {
+                LoadProducts();
                 LoadAccommodations();
                 LoadItems();
+            }
+        }
+
+        private void LoadProducts()
+        {
+            try
+            {
+                // Query to get products from Product table (Room Service products)
+                string query = @"
+                    SELECT
+                        p.ID AS ProductID,
+                        p.Name AS ProductName,
+                        p.Price,
+                        p.Quantity,
+                        0 AS TotalImages
+                    FROM Product p
+                    WHERE p.Status = 'True' OR p.Status = '1'
+                    ORDER BY p.Name";
+
+                DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
+                rptProducts.DataSource = dt;
+                rptProducts.DataBind();
+            }
+            catch (Exception ex)
+            {
+                ShowError("เกิดข้อผิดพลาดในการโหลดข้อมูลสินค้า: " + ex.Message);
             }
         }
 
@@ -98,7 +125,26 @@ namespace Take_Time_BangPhra.Admin
             {
                 DataTable dt;
 
-                if (productType == "ACCOMMODATION")
+                if (productType == "PRODUCT")
+                {
+                    // Load products for Room Service
+                    string query = @"
+                        SELECT ID, Name
+                        FROM Product
+                        WHERE Status = 'True' OR Status = '1'
+                        ORDER BY Name";
+
+                    dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
+
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        ddlProduct.Items.Add(new ListItem(
+                            row["Name"].ToString(),
+                            row["ID"].ToString()
+                        ));
+                    }
+                }
+                else if (productType == "ACCOMMODATION")
                 {
                     string query = @"
                         SELECT ID, AccomName
@@ -208,6 +254,7 @@ namespace Take_Time_BangPhra.Admin
                                $"ขนาดไฟล์: {(imageFile.ContentLength / 1024.0):N2} KB");
 
                     // Reload product lists
+                    LoadProducts();
                     LoadAccommodations();
                     LoadItems();
 

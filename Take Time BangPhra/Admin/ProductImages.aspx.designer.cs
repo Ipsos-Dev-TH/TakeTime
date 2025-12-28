@@ -105,6 +105,24 @@ namespace Take_Time_BangPhra.Admin
         protected global::System.Web.UI.WebControls.Button btnUpload;
 
         /// <summary>
+        /// upProducts control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.UpdatePanel upProducts;
+
+        /// <summary>
+        /// rptProducts control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptProducts;
+
+        /// <summary>
         /// rptAccommodations control.
         /// </summary>
         /// <remarks>
@@ -121,5 +139,23 @@ namespace Take_Time_BangPhra.Admin
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Repeater rptItems;
+
+        /// <summary>
+        /// hfProductType control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.HiddenField hfProductType;
+
+        /// <summary>
+        /// hfProductID control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.HiddenField hfProductID;
     }
 }

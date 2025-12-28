@@ -315,11 +315,14 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('accommodation')">
+            <button class="tab" onclick="switchTab('accommodation')">
                 <i class="fa fa-home"></i> ที่พัก
             </button>
             <button class="tab" onclick="switchTab('items')">
                 <i class="fa fa-shopping-bag"></i> อุปกรณ์/บริการ
+            </button>
+            <button class="tab active" onclick="switchTab('products')">
+                <i class="fa fa-utensils"></i> สินค้า (Room Service)
             </button>
         </div>
 
@@ -344,6 +347,7 @@
                     <asp:DropDownList ID="ddlProductType" runat="server" CssClass="form-control"
                         AutoPostBack="true" OnSelectedIndexChanged="ddlProductType_SelectedIndexChanged">
                         <asp:ListItem Value="">-- เลือกประเภท --</asp:ListItem>
+                        <asp:ListItem Value="PRODUCT">สินค้า (Room Service)</asp:ListItem>
                         <asp:ListItem Value="ACCOMMODATION">ที่พัก</asp:ListItem>
                         <asp:ListItem Value="ITEM">อุปกรณ์/บริการ</asp:ListItem>
                     </asp:DropDownList>
@@ -387,7 +391,37 @@
 
             <asp:UpdatePanel ID="upProducts" runat="server">
                 <ContentTemplate>
-                    <div id="accommodationList" class="product-grid">
+                    <div id="productsList" class="product-grid">
+                        <asp:Repeater ID="rptProducts" runat="server">
+                            <ItemTemplate>
+                                <div class="product-card">
+                                    <div class="product-card-header" style="background: #27ae60;">
+                                        <%# Eval("ProductName") %>
+                                    </div>
+                                    <div class="product-card-body">
+                                        <div class="product-info">
+                                            <span class="product-label">ราคา:</span>
+                                            <span class="product-value"><%# Convert.ToDecimal(Eval("Price")).ToString("N2") %> บาท</span>
+                                        </div>
+                                        <div class="product-info">
+                                            <span class="product-label">สต็อก:</span>
+                                            <span class="product-value"><%# Eval("Quantity") %> ชิ้น</span>
+                                        </div>
+                                        <div class="product-info">
+                                            <span class="product-label">จำนวนรูป:</span>
+                                            <span class="product-value"><%# Eval("TotalImages") %> รูป</span>
+                                        </div>
+                                        <button type="button" class="btn-manage"
+                                            onclick='openImageManager("PRODUCT", <%# Eval("ProductID") %>, "<%# Eval("ProductName") %>")'>
+                                            <i class="fa fa-edit"></i> จัดการรูปภาพ
+                                        </button>
+                                    </div>
+                                </div>
+                            </ItemTemplate>
+                        </asp:Repeater>
+                    </div>
+
+                    <div id="accommodationList" class="product-grid" style="display: none;">
                         <asp:Repeater ID="rptAccommodations" runat="server">
                             <ItemTemplate>
                                 <div class="product-card">
@@ -465,12 +499,17 @@
             tabs.forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
 
-            // Show/hide lists
-            if (type === 'accommodation') {
+            // Hide all lists
+            document.getElementById('productsList').style.display = 'none';
+            document.getElementById('accommodationList').style.display = 'none';
+            document.getElementById('itemsList').style.display = 'none';
+
+            // Show selected list
+            if (type === 'products') {
+                document.getElementById('productsList').style.display = 'grid';
+            } else if (type === 'accommodation') {
                 document.getElementById('accommodationList').style.display = 'grid';
-                document.getElementById('itemsList').style.display = 'none';
-            } else {
-                document.getElementById('accommodationList').style.display = 'none';
+            } else if (type === 'items') {
                 document.getElementById('itemsList').style.display = 'grid';
             }
         }
