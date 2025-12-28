@@ -85,12 +85,12 @@ namespace Take_Time_BangPhra.Guest
                 lblGuestName.Text = !string.IsNullOrEmpty(_customerName) ? _customerName : "Guest";
 
                 // Get loyalty points
-                var memberInfo = _loyaltyService.GetMemberInfo(_guestMobilePhone);
+                var memberInfo = _loyaltyService.GetLoyaltyInfo(_guestMobilePhone);
 
                 if (memberInfo != null)
                 {
-                    int currentPoints = Convert.ToInt32(memberInfo["TotalPoints"] ?? 0);
-                    string currentTier = memberInfo["TierName"]?.ToString() ?? "Bronze";
+                    int currentPoints = memberInfo.TotalPoints;
+                    string currentTier = memberInfo.TierName ?? "Bronze";
 
                     lblCurrentPoints.Text = currentPoints.ToString("N0");
                     lblCurrentTier.Text = currentTier;

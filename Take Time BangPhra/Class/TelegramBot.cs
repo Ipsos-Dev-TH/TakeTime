@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Configuration;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -6,6 +7,52 @@ using System.Web;
 
 namespace Take_Time_BangPhra
 {
+    /// <summary>
+    /// Simple TelegramBot wrapper for sending notifications
+    /// </summary>
+    public class TelegramBot
+    {
+        private readonly string _botToken;
+        private readonly string _chatId;
+        private static readonly HttpClient _httpClient = new HttpClient();
+
+        public TelegramBot()
+        {
+            _botToken = ConfigurationManager.AppSettings["TelegramBotToken"] ?? "";
+            _chatId = ConfigurationManager.AppSettings["TelegramChatId"] ?? "";
+        }
+
+        public void SendMessage(string message)
+        {
+            if (string.IsNullOrEmpty(_botToken) || string.IsNullOrEmpty(_chatId))
+                return;
+
+            try
+            {
+                Task.Run(async () =>
+                {
+                    string url = $"https://api.telegram.org/bot{_botToken}/sendMessage";
+
+                    var payload = new
+                    {
+                        chat_id = _chatId,
+                        text = message,
+                        parse_mode = "HTML"
+                    };
+
+                    string jsonPayload = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+                    var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                    await _httpClient.PostAsync(url, content);
+                });
+            }
+            catch
+            {
+                // Ignore errors - notification failure shouldn't break main flow
+            }
+        }
+    }
+
     public class TelegramBot2
     {
         private readonly string _botToken;
