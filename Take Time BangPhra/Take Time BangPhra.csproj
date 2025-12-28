@@ -387,6 +387,12 @@
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Admin\Chat\ChatManagement.aspx" />
+    <Content Include="Admin\Housekeeping\Dashboard.aspx" />
+    <Content Include="Admin\Maintenance\Dashboard.aspx" />
+    <Content Include="Admin\ChannelManager\Dashboard.aspx" />
+    <Content Include="Admin\Pricing\DynamicPricing.aspx" />
+    <Content Include="Admin\Notifications\Settings.aspx" />
+    <Content Include="Admin\GuestExperience\Dashboard.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
     <Content Include="Guest\RoomService.aspx" />
@@ -878,6 +884,30 @@
     </Compile>
     <Compile Include="Admin\Chat\ChatManagement.aspx.designer.cs">
       <DependentUpon>ChatManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Housekeeping\Dashboard.aspx.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Maintenance\Dashboard.aspx.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\ChannelManager\Dashboard.aspx.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Pricing\DynamicPricing.aspx.cs">
+      <DependentUpon>DynamicPricing.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Notifications\Settings.aspx.cs">
+      <DependentUpon>Settings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\GuestExperience\Dashboard.aspx.cs">
+      <DependentUpon>Dashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
     </Compile>
     <Compile Include="Guest\Portal.aspx.cs">
       <DependentUpon>Portal.aspx</DependentUpon>

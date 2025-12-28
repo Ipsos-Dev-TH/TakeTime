@@ -188,9 +188,9 @@
 
         .mega-menu-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(6, 1fr);
             gap: 20px;
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
         }
 
@@ -609,7 +609,32 @@
                                             </ul>
                                         </div>
 
-                                        <!-- Column 5: Owner Only -->
+                                        <!-- Column 5: Hotel Operations (NEW) -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-hotel"></i> Hotel Operations</h4>
+                                            <ul>
+                                                <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
+                                                    <i class="fas fa-broom"></i> Housekeeping
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
+                                                    <i class="fas fa-tools"></i> Maintenance
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
+                                                    <i class="fas fa-network-wired"></i> Channel Manager
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/Pricing/DynamicPricing">
+                                                    <i class="fas fa-tags"></i> Dynamic Pricing
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/Notifications/Settings">
+                                                    <i class="fas fa-bell"></i> Notifications
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
+                                                    <i class="fas fa-concierge-bell"></i> Guest Experience
+                                                </a></li>
+                                            </ul>
+                                        </div>
+
+                                        <!-- Column 6: Owner Only -->
                                         <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
                                             <div class="mega-menu-column owner-section">
                                                 <h4><i class="fas fa-shield-alt"></i> ระบบ (Owner)</h4>
