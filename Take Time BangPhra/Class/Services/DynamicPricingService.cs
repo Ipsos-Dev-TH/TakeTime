@@ -361,9 +361,9 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Get revenue analytics for a date range
         /// </summary>
-        public RevenueAnalytics GetRevenueAnalytics(DateTime startDate, DateTime endDate)
+        public PricingRevenueAnalytics GetRevenueAnalytics(DateTime startDate, DateTime endDate)
         {
-            var analytics = new RevenueAnalytics
+            var analytics = new PricingRevenueAnalytics
             {
                 StartDate = startDate,
                 EndDate = endDate
@@ -606,7 +606,7 @@ namespace Take_Time_BangPhra.Services
         public decimal LengthOfStayDiscount { get; set; }
     }
 
-    public class RevenueAnalytics
+    public class PricingRevenueAnalytics
     {
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
