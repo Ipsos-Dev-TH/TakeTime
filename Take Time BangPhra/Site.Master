@@ -531,6 +531,9 @@
                                                 <li><a runat="server" href="~/Admin/RoomQRGenerator">
                                                     <i class="fas fa-qrcode"></i> Room QR Codes
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/Chat/ChatManagement">
+                                                    <i class="fas fa-comments"></i> จัดการแชท
+                                                </a></li>
                                             </ul>
                                         </div>
 

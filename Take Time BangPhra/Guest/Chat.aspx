@@ -499,10 +499,16 @@
             // Use AJAX to check for new messages
             var reservationId = document.getElementById('<%= hfReservationId.ClientID %>').value;
             if (reservationId) {
-                fetch('Chat.aspx/GetNewMessages?reservationId=' + reservationId)
+                fetch('<%= ResolveUrl("~/Guest/Chat.aspx/GetNewMessages") %>', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ reservationId: parseInt(reservationId) })
+                })
                     .then(response => response.json())
                     .then(data => {
-                        if (data.hasNewMessages) {
+                        if (data.d && data.d.hasNewMessages) {
                             location.reload();
                         }
                     })
