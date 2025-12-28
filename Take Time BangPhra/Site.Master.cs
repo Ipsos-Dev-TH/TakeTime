@@ -21,6 +21,9 @@ namespace Take_Time_BangPhra
                     // Show employee menu for all logged-in users
                     pnlEmployeeNav.Visible = true;
 
+                    // Show chat notification system
+                    pnlChatNotification.Visible = true;
+
                     // Check if user is Owner to show owner-only menus
                     bool isOwner = Session["User"]?.ToString() == "Owner";
                     pnlOwnerOnly.Visible = isOwner;
@@ -31,6 +34,7 @@ namespace Take_Time_BangPhra
                     pnlAdminNav.Visible = false;
                     pnlOwnerOnly.Visible = false;
                     pnlEmployeeNav.Visible = false;
+                    pnlChatNotification.Visible = false;
                     btnLogout.Visible = false;
                     hlLogin.Visible = true;
                 }
@@ -41,6 +45,7 @@ namespace Take_Time_BangPhra
                 pnlAdminNav.Visible = false;
                 pnlOwnerOnly.Visible = false;
                 pnlEmployeeNav.Visible = false;
+                pnlChatNotification.Visible = false;
                 btnLogout.Visible = false;
                 hlLogin.Visible = true;
             }

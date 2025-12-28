@@ -733,6 +733,348 @@
             </footer>
         </div>
         </div>
+
+        <!-- Global Chat Notification System (for logged-in admin users) -->
+        <asp:Panel ID="pnlChatNotification" runat="server" Visible="false">
+            <style>
+                /* Chat Alert Overlay */
+                .global-chat-alert {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0,0,0,0.8);
+                    z-index: 99999;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .global-chat-alert.show {
+                    display: flex;
+                }
+
+                .chat-alert-box {
+                    background: white;
+                    padding: 35px 45px;
+                    border-radius: 20px;
+                    text-align: center;
+                    animation: alertShake 0.5s ease infinite;
+                    max-width: 450px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+
+                @keyframes alertShake {
+                    0%, 100% { transform: scale(1); }
+                    50% { transform: scale(1.02); }
+                }
+
+                .chat-alert-box .alert-icon {
+                    font-size: 60px;
+                    color: #f44336;
+                    margin-bottom: 15px;
+                    animation: alertBlink 0.5s infinite;
+                }
+
+                @keyframes alertBlink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.3; }
+                }
+
+                .chat-alert-box h3 {
+                    margin: 0 0 10px 0;
+                    color: #333;
+                    font-size: 24px;
+                }
+
+                .chat-alert-box p {
+                    margin: 0 0 15px 0;
+                    color: #666;
+                    font-size: 16px;
+                }
+
+                .chat-alert-box .alert-room-info {
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 12px;
+                    margin-bottom: 20px;
+                }
+
+                .chat-alert-box .alert-room-info .room-name {
+                    font-size: 20px;
+                    font-weight: 700;
+                    margin-bottom: 5px;
+                }
+
+                .chat-alert-box .alert-room-info .guest-name {
+                    font-size: 14px;
+                    opacity: 0.9;
+                }
+
+                .chat-alert-box .alert-message-preview {
+                    background: #f5f5f5;
+                    padding: 12px 15px;
+                    border-radius: 10px;
+                    margin-bottom: 20px;
+                    text-align: left;
+                    font-size: 14px;
+                    color: #333;
+                    max-height: 80px;
+                    overflow: hidden;
+                }
+
+                .chat-alert-box .btn-respond-chat {
+                    background: linear-gradient(135deg, #4CAF50, #388E3C);
+                    color: white;
+                    border: none;
+                    padding: 14px 35px;
+                    border-radius: 25px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    text-decoration: none;
+                    display: inline-block;
+                    transition: all 0.3s ease;
+                }
+
+                .chat-alert-box .btn-respond-chat:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 20px rgba(76, 175, 80, 0.4);
+                    color: white;
+                    text-decoration: none;
+                }
+
+                .chat-alert-box .btn-dismiss {
+                    background: #e0e0e0;
+                    color: #666;
+                    border: none;
+                    padding: 10px 25px;
+                    border-radius: 20px;
+                    font-size: 14px;
+                    cursor: pointer;
+                    margin-left: 10px;
+                    transition: all 0.3s ease;
+                }
+
+                .chat-alert-box .btn-dismiss:hover {
+                    background: #bdbdbd;
+                }
+
+                /* Floating Chat Badge */
+                .chat-notification-badge {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #f44336, #c62828);
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 50px;
+                    display: none;
+                    align-items: center;
+                    gap: 10px;
+                    cursor: pointer;
+                    z-index: 9998;
+                    box-shadow: 0 5px 25px rgba(244, 67, 54, 0.4);
+                    animation: badgePulse 2s infinite;
+                    text-decoration: none;
+                }
+
+                .chat-notification-badge:hover {
+                    color: white;
+                    text-decoration: none;
+                    transform: scale(1.05);
+                }
+
+                .chat-notification-badge.show {
+                    display: flex;
+                }
+
+                @keyframes badgePulse {
+                    0%, 100% { box-shadow: 0 5px 25px rgba(244, 67, 54, 0.4); }
+                    50% { box-shadow: 0 5px 35px rgba(244, 67, 54, 0.6); }
+                }
+
+                .chat-notification-badge i {
+                    font-size: 20px;
+                }
+
+                .chat-notification-badge .count {
+                    background: white;
+                    color: #f44336;
+                    padding: 2px 8px;
+                    border-radius: 10px;
+                    font-weight: 700;
+                    font-size: 14px;
+                }
+            </style>
+
+            <!-- Alert Overlay -->
+            <div class="global-chat-alert" id="globalChatAlert">
+                <div class="chat-alert-box">
+                    <i class="fas fa-comments alert-icon"></i>
+                    <h3>ข้อความใหม่จากแขก!</h3>
+                    <p>กรุณาตอบกลับโดยเร็ว</p>
+                    <div class="alert-room-info">
+                        <div class="room-name" id="alertRoomName">-</div>
+                        <div class="guest-name" id="alertGuestName">-</div>
+                    </div>
+                    <div class="alert-message-preview" id="alertMessagePreview">
+                        -
+                    </div>
+                    <div>
+                        <a href="Admin/Chat/ChatManagement.aspx" class="btn-respond-chat">
+                            <i class="fas fa-reply"></i> ตอบกลับทันที
+                        </a>
+                        <button type="button" class="btn-dismiss" onclick="dismissChatAlert()">
+                            ปิดชั่วคราว (5 นาที)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Floating Badge -->
+            <a href="Admin/Chat/ChatManagement.aspx" class="chat-notification-badge" id="chatNotificationBadge">
+                <i class="fas fa-comments"></i>
+                <span>แชทใหม่</span>
+                <span class="count" id="chatUnreadCount">0</span>
+            </a>
+
+            <!-- Audio for notification -->
+            <audio id="globalNotificationSound" preload="auto">
+                <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1sbJaQo5N6YWJ0lJOUlH50ZnKJhZqWlYN0Znd3e4KDmJmXjHlxe3p6f4GGiouJhYB8e35+gIOGiYuKiIaCgYGCgYOFhoaFhYSDgoKCgoKDg4ODg4OCgoKCgoKCgoKCgoKCgoKCgoKCgoKC" type="audio/wav">
+            </audio>
+
+            <script>
+                // Global Chat Notification System
+                var chatAlertInterval = null;
+                var chatSoundInterval = null;
+                var chatCheckInterval = null;
+                var sessionKeepAliveInterval = null;
+                var chatAlertDismissedUntil = null;
+                var lastKnownUnreadCount = 0;
+
+                // Check for unread messages
+                function checkGlobalChatMessages() {
+                    // Skip if on ChatManagement page
+                    if (window.location.href.indexOf('ChatManagement') > -1) {
+                        return;
+                    }
+
+                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/CheckUnreadMessages") %>', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({})
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.d && data.d.hasUnread && data.d.count > 0) {
+                            var count = data.d.count;
+
+                            // Update badge
+                            var badge = document.getElementById('chatNotificationBadge');
+                            var countEl = document.getElementById('chatUnreadCount');
+                            if (badge && countEl) {
+                                badge.classList.add('show');
+                                countEl.innerText = count;
+                            }
+
+                            // Show alert if not dismissed and there are new messages
+                            var now = new Date().getTime();
+                            if ((!chatAlertDismissedUntil || now > chatAlertDismissedUntil) && count > lastKnownUnreadCount) {
+                                showGlobalChatAlert(data.d.latestRoom, data.d.latestGuest, data.d.latestMessage || 'ข้อความใหม่');
+                            }
+
+                            lastKnownUnreadCount = count;
+                        } else {
+                            // Hide badge if no unread
+                            var badge = document.getElementById('chatNotificationBadge');
+                            if (badge) {
+                                badge.classList.remove('show');
+                            }
+                            hideGlobalChatAlert();
+                            lastKnownUnreadCount = 0;
+                        }
+                    })
+                    .catch(err => console.log('Chat check error:', err));
+                }
+
+                // Show alert
+                function showGlobalChatAlert(roomName, guestName, message) {
+                    document.getElementById('alertRoomName').innerText = roomName || '-';
+                    document.getElementById('alertGuestName').innerText = guestName || '-';
+                    document.getElementById('alertMessagePreview').innerText = message || '-';
+                    document.getElementById('globalChatAlert').classList.add('show');
+
+                    // Play sound
+                    playGlobalChatSound();
+
+                    // Repeat sound every 3 seconds
+                    if (!chatSoundInterval) {
+                        chatSoundInterval = setInterval(playGlobalChatSound, 3000);
+                    }
+                }
+
+                // Hide alert
+                function hideGlobalChatAlert() {
+                    document.getElementById('globalChatAlert').classList.remove('show');
+                    if (chatSoundInterval) {
+                        clearInterval(chatSoundInterval);
+                        chatSoundInterval = null;
+                    }
+                }
+
+                // Dismiss alert for 5 minutes
+                function dismissChatAlert() {
+                    hideGlobalChatAlert();
+                    chatAlertDismissedUntil = new Date().getTime() + (5 * 60 * 1000); // 5 minutes
+                }
+
+                // Play sound
+                function playGlobalChatSound() {
+                    try {
+                        var audio = document.getElementById('globalNotificationSound');
+                        if (audio) {
+                            audio.currentTime = 0;
+                            audio.play().catch(e => {});
+                        }
+                    } catch(e) {}
+                }
+
+                // Session Keep-Alive
+                function keepSessionAlive() {
+                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/KeepAlive") %>', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({})
+                    })
+                    .then(response => response.json())
+                    .catch(err => console.log('Keep-alive error:', err));
+                }
+
+                // Initialize on page load
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Check for new messages every 5 seconds
+                    checkGlobalChatMessages();
+                    chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
+
+                    // Keep session alive every 5 minutes
+                    sessionKeepAliveInterval = setInterval(keepSessionAlive, 5 * 60 * 1000);
+                });
+
+                // Cleanup on page unload
+                window.addEventListener('beforeunload', function() {
+                    if (chatCheckInterval) clearInterval(chatCheckInterval);
+                    if (chatSoundInterval) clearInterval(chatSoundInterval);
+                    if (sessionKeepAliveInterval) clearInterval(sessionKeepAliveInterval);
+                });
+            </script>
+        </asp:Panel>
     </form>
 </body>
 </html>

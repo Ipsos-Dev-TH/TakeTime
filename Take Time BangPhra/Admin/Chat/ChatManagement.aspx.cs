@@ -305,13 +305,15 @@ namespace Take_Time_BangPhra.Admin.Chat
                 // Get latest unread message info
                 string latestRoom = "";
                 string latestGuest = "";
+                string latestMessage = "";
 
                 if (unreadCount > 0)
                 {
                     DataTable dtLatest = code.DatabaseQuerySafe(connectionString,
                         @"SELECT TOP 1
                             a.Name AS RoomName,
-                            c.Name AS GuestName
+                            c.Name AS GuestName,
+                            gc.Message AS LatestMessage
                           FROM Guest_Chat gc
                           INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
                           INNER JOIN Customer c ON r.Customer_ID = c.ID
@@ -324,6 +326,12 @@ namespace Take_Time_BangPhra.Admin.Chat
                     {
                         latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
                         latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
+                        latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
+                        // Truncate message if too long
+                        if (latestMessage.Length > 100)
+                        {
+                            latestMessage = latestMessage.Substring(0, 100) + "...";
+                        }
                     }
                 }
 
@@ -332,12 +340,36 @@ namespace Take_Time_BangPhra.Admin.Chat
                     hasUnread = unreadCount > 0,
                     count = unreadCount,
                     latestRoom = latestRoom,
-                    latestGuest = latestGuest
+                    latestGuest = latestGuest,
+                    latestMessage = latestMessage
                 };
             }
             catch
             {
-                return new { hasUnread = false, count = 0, latestRoom = "", latestGuest = "" };
+                return new { hasUnread = false, count = 0, latestRoom = "", latestGuest = "", latestMessage = "" };
+            }
+        }
+
+        /// <summary>
+        /// Web method to keep session alive
+        /// </summary>
+        [WebMethod(EnableSession = true)]
+        public static object KeepAlive()
+        {
+            try
+            {
+                // Simply accessing session keeps it alive
+                var context = System.Web.HttpContext.Current;
+                if (context != null && context.Session != null)
+                {
+                    // Touch the session to keep it alive
+                    context.Session["LastActivity"] = DateTime.Now;
+                }
+                return new { success = true, timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") };
+            }
+            catch
+            {
+                return new { success = false };
             }
         }
     }
