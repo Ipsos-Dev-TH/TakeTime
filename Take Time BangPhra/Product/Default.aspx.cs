@@ -1120,9 +1120,10 @@ namespace Take_Time_BangPhra.Product
                     selectParams);
 
                 DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM [Account_Receipt_Detail] " +
-                    "INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID " +
-                    "WHERE Receipt_ID = @DocNum ORDER BY Number ASC",
+                    "SELECT ard.*, ISNULL(apt.ProductType, N'สินค้า/บริการ') AS ProductType " +
+                    "FROM [Account_Receipt_Detail] ard " +
+                    "LEFT JOIN Account_ProductType apt ON apt.ID = ard.ProductType_ID " +
+                    "WHERE ard.Receipt_ID = @DocNum ORDER BY ard.Number ASC",
                     selectParams);
                 string uid = dtReceipt.Rows[0]["UID"].ToString();
 

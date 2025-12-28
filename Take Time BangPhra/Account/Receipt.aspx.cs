@@ -1244,7 +1244,7 @@ namespace Take_Time_BangPhra.Account.Report
                     { "@ReceiptID", docNum }
                 };
                 DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
-                    "SELECT * FROM [Account_Receipt_Detail] INNER JOIN Account_ProductType ON Account_ProductType.ID = ProductType_ID WHERE Receipt_ID = @ReceiptID ORDER BY Number ASC",
+                    "SELECT ard.*, ISNULL(apt.ProductType, N'สินค้า/บริการ') AS ProductType FROM [Account_Receipt_Detail] ard LEFT JOIN Account_ProductType apt ON apt.ID = ard.ProductType_ID WHERE ard.Receipt_ID = @ReceiptID ORDER BY ard.Number ASC",
                     receiptDetailParams);
 
                 System.Diagnostics.Debug.WriteLine($"dtReceiptDetail.Rows.Count: {dtReceiptDetail.Rows.Count}");
