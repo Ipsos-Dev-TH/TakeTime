@@ -5,335 +5,497 @@
   <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView.css">
      <style>
+        .header-center { text-align: center; }
+        .header-right { text-align: right; }
+        th, td { padding: 8px 12px; }
 
+        /* Modern Form Styles */
+        .voucher-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
 
- .header-center{
-        text-align:center;
-    }
-  .header-right{
-        text-align:right;
-    }
-         </style>
-            <style>
-            th, td {
-  padding: 5px;
-}
-                .auto-style1 {
-                    width: 20%;
-                    height: 32px;
-                }
-                .auto-style2 {
-                    height: 32px;
-                }
-                .auto-style3 {
-                    color: #FF0000;
-                }
-                .auto-style4 {
-                    width: 20%;
-                    height: 30px;
-                }
-                .auto-style5 {
-                    height: 30px;
-                }
-                .auto-style6 {
-                    width: 20%;
-                    height: 35px;
-                }
-                .auto-style7 {
-                    height: 35px;
-                }
-                .auto-style8 {
-                    width: 20%;
-                    height: 37px;
-                }
-                .auto-style9 {
-                    height: 37px;
-                }
-                </style>
+        .voucher-title {
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #4CAF50;
+        }
+
+        .form-section {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .form-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .form-row:last-child {
+            border-bottom: none;
+        }
+
+        .form-row.alt {
+            background-color: #f9f9f9;
+            margin: 0 -25px;
+            padding: 12px 25px;
+        }
+
+        .form-label {
+            width: 200px;
+            text-align: right;
+            padding-right: 15px;
+            font-weight: 500;
+            color: #555;
+            flex-shrink: 0;
+        }
+
+        .form-input {
+            flex: 1;
+        }
+
+        .required-mark {
+            color: #e53935;
+            font-weight: bold;
+            margin-left: 2px;
+        }
+
+        .form-input input[type="text"],
+        .form-input input[type="number"],
+        .form-input input[type="date"],
+        .form-input select {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .form-input input:focus,
+        .form-input select:focus {
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76,175,80,0.1);
+            outline: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #45a049, #3d8b40);
+            box-shadow: 0 4px 12px rgba(76,175,80,0.3);
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #333;
+            border: 1px solid #ddd;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-add {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-add:hover {
+            background: #1976D2;
+        }
+
+        .upload-section {
+            background: #fff3e0;
+            border: 2px dashed #ff9800;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin: 15px 0;
+        }
+
+        .upload-section .upload-hint {
+            color: #e65100;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .price-summary {
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+
+        .price-total {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2e7d32;
+            border-top: 2px solid #4CAF50;
+            padding-top: 12px;
+            margin-top: 8px;
+        }
+
+        .checkbox-group {
+            padding: 10px 0;
+        }
+
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 0;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        /* Legacy styles for compatibility */
+        .auto-style1 { width: 20%; height: 32px; }
+        .auto-style2 { height: 32px; }
+        .auto-style3 { color: #FF0000; }
+        .auto-style4 { width: 20%; height: 30px; }
+        .auto-style5 { height: 30px; }
+        .auto-style6 { width: 20%; height: 35px; }
+        .auto-style7 { height: 35px; }
+        .auto-style8 { width: 20%; height: 37px; }
+        .auto-style9 { height: 37px; }
+
+        /* GridView styling */
+        .styled-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .styled-grid th {
+            background: #4CAF50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        .styled-grid td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .styled-grid tr:hover {
+            background: #f5f5f5;
+        }
+    </style>
 
     
-    <p>
-        &nbsp;</p>
-    <p class="text-center">
-        <strong>ขาย Voucher</strong><div class="text-center">
-            <br />
+    <div class="voucher-container">
+        <div class="voucher-title">ขาย Voucher</div>
+
+        <!-- ส่วนที่ 1: ข้อมูลลูกค้า -->
+        <div class="form-section">
+            <div class="section-title">ข้อมูลลูกค้า</div>
+
+            <div class="form-row alt">
+                <div class="form-label">วันที่ขาย Voucher<span class="required-mark">*</span></div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox8" runat="server" Width="200px" TextMode="Date"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">เบอร์โทร<span class="required-mark">*</span></div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox13" runat="server" Width="300px" OnTextChanged="TextBox13_TextChanged" AutoPostBack="True" placeholder="กรอกเบอร์โทรเพื่อค้นหาข้อมูลลูกค้า"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label">ชื่อลูกค้า<span class="required-mark">*</span></div>
+                <div class="form-input">
+                    <asp:DropDownList ID="DropDownList8" runat="server" Width="150px" AutoPostBack="True" OnSelectedIndexChanged="DropDownList8_SelectedIndexChanged"></asp:DropDownList>
+                    <asp:TextBox ID="TextBox10" runat="server" Width="250px" placeholder="ชื่อ-นามสกุล"></asp:TextBox>
+                    <asp:TextBox ID="TextBox7" runat="server" Width="120px" PlaceHolder="รหัสสาขา" text="00000"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">ที่อยู่</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox11" runat="server" Width="100px" placeholder="เลขที่"></asp:TextBox>
+                    <asp:TextBox ID="TextBox18" runat="server" Width="350px" placeholder="รายละเอียดที่อยู่"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label">รหัสไปรษณีย์</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox16" runat="server" Width="150px" AutoPostBack="True" OnTextChanged="TextBox16_TextChanged" TextMode="Number" placeholder="รหัสไปรษณีย์"></asp:TextBox>
+                    <asp:Button ID="Button5" runat="server" Text="ค้นหา" CssClass="btn-secondary" OnClick="Button5_Click" />
+                    <asp:Button ID="Button6" runat="server" Text="ยกเลิก" CssClass="btn-secondary" OnClick="Button6_Click" />
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">จังหวัด/อำเภอ/ตำบล</div>
+                <div class="form-input">
+                    <asp:DropDownList ID="DropDownList5" runat="server" Width="160px" AutoPostBack="True" OnSelectedIndexChanged="DropDownList5_SelectedIndexChanged"></asp:DropDownList>
+                    <asp:DropDownList ID="DropDownList6" runat="server" Width="160px" AutoPostBack="True" OnSelectedIndexChanged="DropDownList6_SelectedIndexChanged"></asp:DropDownList>
+                    <asp:DropDownList ID="DropDownList7" runat="server" Width="160px"></asp:DropDownList>
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label">เลขประจำตัวผู้เสียภาษี</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox12" runat="server" Width="300px" AutoPostBack="True" OnTextChanged="TextBox12_TextChanged" placeholder="13 หลัก"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">อีเมล์</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox17" runat="server" Width="300px" placeholder="email@example.com"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label"></div>
+                <div class="form-input checkbox-group">
+                    <asp:CheckBox ID="CheckBox4" runat="server" Text=" ไม่ออกใบกำกับภาษีในระบบ" OnCheckedChanged="CheckBox4_CheckedChanged" AutoPostBack="True" CssClass="mycheckbox"/>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label"></div>
+                <div class="form-input checkbox-group">
+                    <asp:CheckBox ID="CheckBox3" Text=" ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" runat="server" AutoPostBack="True" OnCheckedChanged="CheckBox3_CheckedChanged" Checked="true" />
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label"></div>
+                <div class="form-input checkbox-group">
+                    <asp:CheckBox ID="CheckBox5" Text=" ต้องการรับ e-Tax Invoice" runat="server" AutoPostBack="True" OnCheckedChanged="CheckBox5_CheckedChanged" />
+                </div>
+            </div>
         </div>
-        <table style="width:100%;">
-            <tr style="background-color:whitesmoke;">
-                <td class="modal-sm" style="width: 20%;  text-align: right">วันที่ขาย Voucher<span class="auto-style3">*</span>: </td>
-                <td>
-                    <asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date"></asp:TextBox>
-                 </td>
-              
-            </tr>
-            <tr>
-                <td class="modal-sm" style="width: 20%;  text-align: right">เบอร์โทร<span class="auto-style3">*</span>:</td>
-                <td>
-                    <asp:TextBox ID="TextBox13" runat="server" Width="60%" OnTextChanged="TextBox13_TextChanged" AutoPostBack="True"></asp:TextBox>
-                 </td>
-              
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                <td class="auto-style1" style="text-align: right">ชื่อลูกค้า<span class="auto-style3">*</span>:</td>
-                <td class="auto-style2">
-                    <asp:DropDownList ID="DropDownList8" runat="server" Width="20%" AutoPostBack="True" OnSelectedIndexChanged="DropDownList8_SelectedIndexChanged">
+
+        <!-- ส่วนที่ 2: เลือกประเภท Voucher -->
+        <div class="form-section">
+            <div class="section-title">เลือกประเภท Voucher<span class="required-mark">*</span></div>
+            <p class="help-text">กรุณาเลือกประเภทเรทที่พักและกดปุ่ม "เพิ่ม" เพื่อเพิ่มในรายการ</p>
+
+            <div class="form-row">
+                <div class="form-label">ประเภทเรทที่พัก</div>
+                <div class="form-input">
+                    <asp:DropDownList ID="DropDownList3" runat="server" Width="300px" DataSourceID="SqlDataSource3" DataTextField="Group_Name" DataValueField="GroupID" AppendDataBoundItems="true">
+                        <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                     </asp:DropDownList>
-                    <asp:TextBox ID="TextBox10" runat="server" Width="40%"></asp:TextBox>
-                    <asp:TextBox ID="TextBox7" runat="server" Width="20%" PlaceHolder="รหัสสาขา" text="00000"></asp:TextBox>
-                            
-                 </td>
-              
-            </tr>
-            <tr>
-                <td class="modal-sm" style="width: 20%;  text-align: right">ที่อยู่:</td>
-                <td>
-                    <asp:TextBox ID="TextBox11" runat="server" Width="20%"></asp:TextBox>
-                    <asp:TextBox ID="TextBox18" runat="server" Width="40%"></asp:TextBox>
-                 </td>
-              
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                <td class="modal-sm" style="width: 20%;  text-align: right">รหัสไปรษณีย์</td>
-                <td>
-                    <asp:TextBox ID="TextBox16" runat="server" Width="30%" AutoPostBack="True" OnTextChanged="TextBox16_TextChanged" TextMode="Number"></asp:TextBox>
-                 &nbsp;&nbsp;
-                    <asp:Button ID="Button5" runat="server" Text="ค้นหา" Width="20%" OnClick="Button5_Click" />
-                 &nbsp;&nbsp;
-                    <asp:Button ID="Button6" runat="server" Text="ยกเลิก" Width="20%" OnClick="Button6_Click" />
-                 </td>
-              
-            </tr>
-            <tr>
-                <td class="modal-sm" style="width: 20%;  text-align: right">จังหวัด/อำเภอ/ตำบล</td>
-                <td>
-                    <asp:DropDownList ID="DropDownList5" runat="server" Width="25%" AutoPostBack="True" OnSelectedIndexChanged="DropDownList5_SelectedIndexChanged">
+                    <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT Distinct([Group_Name]),GroupID FROM [Taketime].[dbo].[Accommodation_RatePlan_Group] Where [Status] = 'True'"></asp:SqlDataSource>
+                </div>
+            </div>
+
+            <div class="form-row alt">
+                <div class="form-label">ราคาที่ต้องจ่ายเพิ่มเมื่อใช้ Voucher</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox2" runat="server" Width="150px" TextMode="Number">0</asp:TextBox> บาท
+                    <asp:Button ID="Button2" runat="server" Text="+ เพิ่ม" CssClass="btn-add" OnClick="Button2_Click" />
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label"></div>
+                <div class="form-input">
+                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting" CssClass="styled-grid">
+                        <Columns>
+                            <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
+                            <asp:BoundField DataField="RatePlan_Group" HeaderText="ประเภทเรทที่พัก" />
+                            <asp:BoundField DataField="PriceTo" HeaderText="ราคาที่ต้องจ่ายเพิ่ม" DataFormatString="{0:N0} บาท" />
+                            <asp:CommandField ShowDeleteButton="True" ButtonType="Button" DeleteText="ลบ" />
+                        </Columns>
+                    </asp:GridView>
+                </div>
+            </div>
+        </div>
+
+        <!-- ส่วนที่ 3: การชำระเงิน -->
+        <div class="form-section">
+            <div class="section-title">การชำระเงิน</div>
+
+            <div class="form-row alt">
+                <div class="form-label">วิธีชำระเงิน<span class="required-mark">*</span></div>
+                <div class="form-input">
+                    <asp:DropDownList ID="DropDownList2" runat="server" Width="300px" AppendDataBoundItems="true">
+                        <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                     </asp:DropDownList>
-                &nbsp;&nbsp;
-                    <asp:DropDownList ID="DropDownList6" runat="server" Width="25%" AutoPostBack="True" OnSelectedIndexChanged="DropDownList6_SelectedIndexChanged">
-                    </asp:DropDownList>
-                &nbsp;&nbsp;
-                    <asp:DropDownList ID="DropDownList7" runat="server" Width="25%">
-                    </asp:DropDownList>
-                </td>
-              
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                <td class="modal-sm" style="width: 20%;  text-align: right">เลขประจำตัวผู้เสียภาษี:</td>
-                <td>
-                    <asp:TextBox ID="TextBox12" runat="server" Width="60%" AutoPostBack="True" OnTextChanged="TextBox12_TextChanged"></asp:TextBox>
-                 </td>
-              
-            </tr>
-            <tr>
-                <td class="modal-sm" style="width: 20%;  text-align: right">อีเมล์</td>
-                <td>
-                    <asp:TextBox ID="TextBox17" runat="server" Width="60%"></asp:TextBox>
-                 </td>
-              
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                                <asp:CheckBox ID="CheckBox4" runat="server" Text="ไม่ออกใบกำกับภาษีในระบบ !!!" OnCheckedChanged="CheckBox4_CheckedChanged" AutoPostBack="True" CssClass="mycheckbox"/>
-                 </td>
-            
-            </tr>
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    <asp:CheckBox ID="CheckBox3" Text="ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" runat="server" AutoPostBack="True" OnCheckedChanged="CheckBox3_CheckedChanged" Checked="true" />
-                 </td>
-            
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    <asp:CheckBox ID="CheckBox5" Text="ต้องการรับ e tax invoice" runat="server" AutoPostBack="True" OnCheckedChanged="CheckBox5_CheckedChanged" />
-                 &nbsp;&nbsp;
-                    </td>
-            
-            </tr>
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>&nbsp;</td>
-            
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">ประเภทเรทที่พัก:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" DataSourceID="SqlDataSource3" DataTextField="Group_Name" DataValueField="GroupID" AppendDataBoundItems="true" >
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>    
-                </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT Distinct([Group_Name]),GroupID FROM [Taketime].[dbo].[Accommodation_RatePlan_Group] Where [Status] = 'True'">
-                    </asp:SqlDataSource>
-                 </td>
-            
-            </tr>
-
-            
-
-           
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">ราคาที่ต้องจ่ายเพิ่มเมื่อใช้ Voucher: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox2" runat="server" Width="30%" TextMode="Number">0</asp:TextBox>
-                 &nbsp;บาท</td>
-            
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    &nbsp;<asp:Button ID="Button2" runat="server" Text="เพิ่ม" Width="75px" OnClick="Button2_Click" />
-                 </td>
-            
-            </tr>
-
-            <tr>
-                <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                 <td style="text-align: right">
-                     <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting">
-                         <Columns>
-                             <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
-                             <asp:BoundField DataField="RatePlan_Group" HeaderText="ประเภทเรทที่พัก" />
-                             <asp:BoundField DataField="PriceTo" HeaderText="ราคาที่ต้องจ่ายเพิ่ม" />
-                             <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
-                         </Columns>
-                     </asp:GridView>
-                     </td>
-            
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">วิธีชำระเงิน<span class="auto-style3">*</span>:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList2" runat="server" Width="60%" AppendDataBoundItems="true">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>    
-                </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource2" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = 'True')">
                         <SelectParameters>
                             <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
                         </SelectParameters>
                     </asp:SqlDataSource>
-                 </td>
-            </tr>
+                </div>
+            </div>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">ประเภทภาษี<span class="auto-style3">*</span>: </td>
-                <td>
-                    &nbsp;<asp:DropDownList ID="DropDownList4" runat="server" Width="60%" OnSelectedIndexChanged="DropDownList4_SelectedIndexChanged" AppendDataBoundItems="true" AutoPostBack="True">
-                    <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+            <div class="form-row">
+                <div class="form-label">ประเภทภาษี<span class="required-mark">*</span></div>
+                <div class="form-input">
+                    <asp:DropDownList ID="DropDownList4" runat="server" Width="300px" OnSelectedIndexChanged="DropDownList4_SelectedIndexChanged" AppendDataBoundItems="true" AutoPostBack="True">
+                        <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                     </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource4" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Vat_Type] WHERE ([Status] = 'True')">
                         <SelectParameters>
                             <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
                         </SelectParameters>
                     </asp:SqlDataSource>
-                 </td>
-            
-            </tr>
+                </div>
+            </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">หมายเหตุ:</td>
-                <td>
-                    <asp:TextBox ID="TextBox20" runat="server" Width="80%" Enabled="true" ></asp:TextBox>
-                    </td>
-            </tr>
+            <div class="form-row alt">
+                <div class="form-label">หมายเหตุ</div>
+                <div class="form-input">
+                    <asp:TextBox ID="TextBox20" runat="server" Width="400px" Enabled="true" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)"></asp:TextBox>
+                </div>
+            </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">ราคาขายต่อ1ใบ<span class="auto-style3">*</span>: </td>
-                <td>
-                    <asp:TextBox ID="TextBox6" runat="server" Width="30%" Enabled="true" OnTextChanged="TextBox6_TextChanged" AutoPostBack="True"></asp:TextBox>
-                    &nbsp;บาท</td>
-            </tr>
+            <!-- Price Summary Section -->
+            <div class="price-summary">
+                <div class="form-row">
+                    <div class="form-label">ราคาขายต่อ 1 ใบ<span class="required-mark">*</span></div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox6" runat="server" Width="150px" Enabled="true" OnTextChanged="TextBox6_TextChanged" AutoPostBack="True" placeholder="0.00"></asp:TextBox> บาท
+                    </div>
+                </div>
 
-            <tr>
-                 <td class="auto-style8" style="text-align: right">จำนวนใบที่ขาย<span class="auto-style3">*</span>: </td>
-                <td class="auto-style9">
-                    <asp:TextBox ID="TextBox19" runat="server" Width="30%" Enabled="true" AutoPostBack="True" TextMode="Number" Text="1" OnTextChanged="TextBox19_TextChanged"></asp:TextBox>
-                    &nbsp;ใบ</td>
-            </tr>
+                <div class="form-row">
+                    <div class="form-label">จำนวนใบที่ขาย<span class="required-mark">*</span></div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox19" runat="server" Width="80px" Enabled="true" AutoPostBack="True" TextMode="Number" Text="1" OnTextChanged="TextBox19_TextChanged"></asp:TextBox> ใบ
+                    </div>
+                </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="auto-style6" style="text-align: right">จำนวนรวมก่อนภาษีมุลค่าเพิ่ม: </td>
-                <td class="auto-style7">
-                    &nbsp;<asp:TextBox ID="TextBox3" runat="server" Width="30%" Enabled="false" OnTextChanged="TextBox3_TextChanged"></asp:TextBox>
-                 &nbsp;บาท</td>
-            </tr>
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">
-                     <asp:Label ID="Label1" runat="server" Text=""></asp:Label>: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox4" runat="server" Width="30%" Enabled="False" Height="16px"></asp:TextBox>
-                    &nbsp;บาท</td>
-            </tr>
+                <div class="form-row">
+                    <div class="form-label">จำนวนรวมก่อนภาษีมูลค่าเพิ่ม</div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox3" runat="server" Width="150px" Enabled="false" OnTextChanged="TextBox3_TextChanged" style="background:#fff;"></asp:TextBox> บาท
+                    </div>
+                </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="auto-style4" style="text-align: right">ราคาขาย Voucher สุทธิ: </td>
-                <td class="auto-style5">
-                    &nbsp;
-                    <asp:TextBox ID="TextBox1" runat="server" Width="30%" Enabled="False"></asp:TextBox>
-                    &nbsp;บาท</td>
-            </tr>
+                <div class="form-row">
+                    <div class="form-label"><asp:Label ID="Label1" runat="server" Text="ภาษี"></asp:Label></div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox4" runat="server" Width="150px" Enabled="False" style="background:#fff;"></asp:TextBox> บาท
+                    </div>
+                </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="auto-style4" style="text-align: right">Voucher หมดอายุ: </td>
-                <td class="auto-style5">
-                    <asp:TextBox ID="TextBox21" runat="server" Width="30%" TextMode="Date"></asp:TextBox>
-                    </td>
-            </tr>
+                <div class="form-row price-total">
+                    <div class="form-label">ราคาขาย Voucher สุทธิ</div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox1" runat="server" Width="150px" Enabled="False" style="background:#fff; font-weight:bold; font-size:16px;"></asp:TextBox> บาท
+                    </div>
+                </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="auto-style4" style="text-align: right">อัพโหลดสลิป</td>
-                <td class="auto-style5">
-                    <asp:FileUpload ID="FileUpload1" runat="server"  Width="30%" CssClass="rounded-textbox"/>
-                                            <asp:Button ID="Button7" runat="server" Text="Upload Picture" Width="127px" CssClass="rounded-textbox" OnClick="Button7_Click" />
-                                            <asp:Image ID="Image1" runat="server" width="90%" />
-                                        </td>
-            </tr>
+                <div class="form-row">
+                    <div class="form-label">Voucher หมดอายุ</div>
+                    <div class="form-input">
+                        <asp:TextBox ID="TextBox21" runat="server" Width="200px" TextMode="Date"></asp:TextBox>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    &nbsp;<asp:Button ID="Button3" runat="server" Text="บันทึก" Width="100px" Height="33px" OnClick="Button3_Click" OnClientClick="return mydialog(this)" />
-                        <div id="mypopdiv" style="display:none">
-    <br /><h2>Voucher Number = <asp:Label ID="LabelVoucher" runat="server" Text=""></asp:Label></h2>
-</div>
+        <!-- ส่วนที่ 4: อัพโหลดสลิป -->
+        <div class="form-section">
+            <div class="section-title">อัพโหลดหลักฐานการชำระเงิน<span class="required-mark">*</span></div>
+            <div class="upload-section">
+                <div class="upload-hint">กรุณาอัพโหลดสลิปการโอนเงินก่อนกดบันทึก</div>
+                <asp:FileUpload ID="FileUpload1" runat="server" Width="300px" CssClass="rounded-textbox"/>
+                <asp:Button ID="Button7" runat="server" Text="อัพโหลดรูป" CssClass="btn-add" OnClick="Button7_Click" style="margin-left:10px;" />
+                <br /><br />
+                <asp:Image ID="Image1" runat="server" Width="400px" style="max-height:300px; object-fit:contain;" />
+            </div>
+        </div>
 
-<script>
-    var myok = false
-    function mydialog(btn) {
+        <!-- ปุ่มบันทึก -->
+        <div style="text-align:center; margin: 30px 0;">
+            <asp:Button ID="Button3" runat="server" Text="บันทึก Voucher" CssClass="btn-primary" OnClick="Button3_Click" OnClientClick="return mydialog(this)" />
+        </div>
 
-        if (myok)
-            return true
+        <div id="mypopdiv" style="display:none">
+            <br /><h2>Voucher Number = <asp:Label ID="LabelVoucher" runat="server" Text=""></asp:Label></h2>
+        </div>
 
-        var mydiv = $("#mypopdiv")
-        mydiv.dialog({
-            modal: true, appendTo: "form",
-            title: "Submit", closeText: "",
-            dialogClass: "dialogWithDropShadow",
-            position: { my: 'left top', at: 'right bottom', of: btn },
-            buttons: {
-                Ok: function () {
-                    mydiv.dialog('close')
-                    myok = true
-                    btn.click()
-                }
+        <script>
+            var myok = false
+            function mydialog(btn) {
+                if (myok)
+                    return true
+
+                var mydiv = $("#mypopdiv")
+                mydiv.dialog({
+                    modal: true, appendTo: "form",
+                    title: "ยืนยันการบันทึก Voucher", closeText: "",
+                    dialogClass: "dialogWithDropShadow",
+                    position: { my: 'center', at: 'center', of: window },
+                    buttons: {
+                        "ยืนยัน": function () {
+                            mydiv.dialog('close')
+                            myok = true
+                            btn.click()
+                        },
+                        "ยกเลิก": function () {
+                            mydiv.dialog('close')
+                        }
+                    }
+                });
+
+                return false
             }
-        });
+        </script>
+    </div>
 
-        return false
-    }
-</script>
-                 </td>
-            </tr>
-
-        </table>
-    </p>
     <rsweb:reportviewer Visible="false" ID="ReportViewer2" runat="server" BackColor="" ClientIDMode="AutoID" HighlightBackgroundColor="" InternalBorderColor="204, 204, 204" InternalBorderStyle="Solid" InternalBorderWidth="1px" LinkActiveColor="" LinkActiveHoverColor="" LinkDisabledColor="" PrimaryButtonBackgroundColor="" PrimaryButtonForegroundColor="" PrimaryButtonHoverBackgroundColor="" PrimaryButtonHoverForegroundColor="" SecondaryButtonBackgroundColor="" SecondaryButtonForegroundColor="" SecondaryButtonHoverBackgroundColor="" SecondaryButtonHoverForegroundColor="" SplitterBackColor="" ToolbarDividerColor="" ToolbarForegroundColor="" ToolbarForegroundDisabledColor="" ToolbarHoverBackgroundColor="" ToolbarHoverForegroundColor="" ToolBarItemBorderColor="" ToolBarItemBorderStyle="Solid" ToolBarItemBorderWidth="1px" ToolBarItemHoverBackColor="" ToolBarItemPressedBorderColor="51, 102, 153" ToolBarItemPressedBorderStyle="Solid" ToolBarItemPressedBorderWidth="1px" ToolBarItemPressedHoverBackColor="153, 187, 226" Height="500px" CssClass="auto-style5" style="margin-top: 10px">
         <LocalReport EnableExternalImages="true" ReportPath="Account\Report\Receipt.rdlc">
             

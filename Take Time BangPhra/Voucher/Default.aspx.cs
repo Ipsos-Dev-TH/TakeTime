@@ -1167,7 +1167,43 @@ namespace Take_Time_BangPhra.Voucher
             }
             else
             {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุข้อมูลให้ครบถ้วน');", true);
+                // สร้างข้อความแจ้งเตือนแบบละเอียดว่าขาดข้อมูลอะไรบ้าง
+                System.Collections.Generic.List<string> missingFields = new System.Collections.Generic.List<string>();
+
+                if (string.IsNullOrWhiteSpace(TextBox6.Text))
+                {
+                    missingFields.Add("ราคาขายต่อ 1 ใบ");
+                }
+
+                if (DropDownList2.SelectedIndex <= 0)
+                {
+                    missingFields.Add("วิธีชำระเงิน");
+                }
+
+                if (DropDownList4.SelectedIndex <= 0)
+                {
+                    missingFields.Add("ประเภทภาษี");
+                }
+
+                if (!imgupload)
+                {
+                    missingFields.Add("อัพโหลดสลิป (กรุณาอัพโหลดสลิปก่อนกดบันทึก)");
+                }
+
+                // ตรวจสอบว่ามีการเพิ่มประเภทเรทที่พักหรือไม่
+                DataTable dtDetailCheck = Session["dtDetail"] as DataTable;
+                if (dtDetailCheck == null || dtDetailCheck.Rows.Count == 0)
+                {
+                    missingFields.Add("ประเภทเรทที่พัก (กรุณากดปุ่ม 'เพิ่ม' เพื่อเพิ่มประเภทเรท)");
+                }
+
+                string errorMessage = "กรุณาระบุข้อมูลให้ครบถ้วน:\\n\\n";
+                foreach (string field in missingFields)
+                {
+                    errorMessage += "• " + field + "\\n";
+                }
+
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('" + errorMessage + "');", true);
             }
             
         }
