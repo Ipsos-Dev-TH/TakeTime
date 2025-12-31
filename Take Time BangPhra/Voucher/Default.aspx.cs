@@ -1114,10 +1114,15 @@ namespace Take_Time_BangPhra.Voucher
                     }
 
                     // SECURE: Voucher INSERT with parameterized query
+                    // Parse SellPrice to ensure it's a valid number
+                    string sellPriceRaw = TextBox6.Text.Replace(",", "").Replace("บาท", "").Replace(" ", "").Trim();
+                    decimal sellPriceValue = 0;
+                    decimal.TryParse(sellPriceRaw, out sellPriceValue);
+
                     var voucherInsertParams = new Dictionary<string, object>
                     {
                         { "@VoucherNumber", vnumber },
-                        { "@SellPrice", TextBox6.Text },
+                        { "@SellPrice", sellPriceValue },
                         { "@CreatedDate", createddate },
                         { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() },
                         { "@ReceiptID", CheckBox4.Checked ? "" : RecNumber },
@@ -1143,11 +1148,17 @@ namespace Take_Time_BangPhra.Voucher
                             groupIdParams).Rows[0][0].ToString();
 
                         // SECURE: Voucher_RatePlan_Group INSERT with parameterized query
+                        // Parse PriceTo to ensure it's a valid number (remove any formatting)
+                        string priceToRaw = GridView1.Rows[j].Cells[2].Text;
+                        priceToRaw = priceToRaw.Replace(",", "").Replace("บาท", "").Replace(" ", "").Trim();
+                        decimal priceToValue = 0;
+                        decimal.TryParse(priceToRaw, out priceToValue);
+
                         var voucherRatePlanParams = new Dictionary<string, object>
                         {
                             { "@VoucherNumber", vnumber },
                             { "@GroupID", groupid },
-                            { "@PriceTo", GridView1.Rows[j].Cells[2].Text }
+                            { "@PriceTo", priceToValue }
                         };
 
                         code.DatabaseInsertSafe(conn,

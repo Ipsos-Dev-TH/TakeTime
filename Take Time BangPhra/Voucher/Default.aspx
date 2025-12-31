@@ -228,6 +228,192 @@
         .styled-grid tr:hover {
             background: #f5f5f5;
         }
+
+        /* ==================== MOBILE RESPONSIVE ==================== */
+        @media screen and (max-width: 768px) {
+            .voucher-container {
+                padding: 10px;
+                max-width: 100%;
+            }
+
+            .voucher-title {
+                font-size: 20px;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+            }
+
+            .form-section {
+                padding: 15px;
+                margin-bottom: 15px;
+                border-radius: 8px;
+            }
+
+            .section-title {
+                font-size: 14px;
+                margin-bottom: 12px;
+            }
+
+            /* Stack form rows vertically on mobile */
+            .form-row {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 10px 0;
+            }
+
+            .form-row.alt {
+                margin: 0 -15px;
+                padding: 10px 15px;
+            }
+
+            .form-label {
+                width: 100%;
+                text-align: left;
+                padding-right: 0;
+                padding-bottom: 5px;
+                font-size: 13px;
+            }
+
+            .form-input {
+                width: 100%;
+            }
+
+            /* Make inputs full width on mobile */
+            .form-input input[type="text"],
+            .form-input input[type="number"],
+            .form-input input[type="date"],
+            .form-input select {
+                width: 100% !important;
+                max-width: 100%;
+                box-sizing: border-box;
+                font-size: 16px; /* Prevent zoom on iOS */
+            }
+
+            .form-input .aspNetDisabled {
+                width: 100% !important;
+            }
+
+            /* Dropdowns stacked */
+            .form-input select {
+                margin-bottom: 8px;
+            }
+
+            /* Buttons responsive */
+            .btn-secondary,
+            .btn-add {
+                width: 100%;
+                margin-top: 8px;
+                padding: 12px 15px;
+            }
+
+            .btn-primary {
+                width: 100%;
+                padding: 15px 20px;
+                font-size: 18px;
+            }
+
+            /* Price summary responsive */
+            .price-summary {
+                padding: 15px;
+                margin-top: 15px;
+            }
+
+            .price-summary .form-row {
+                padding: 8px 0;
+            }
+
+            .price-total {
+                font-size: 16px;
+            }
+
+            /* Upload section responsive */
+            .upload-section {
+                padding: 15px;
+            }
+
+            .upload-section .upload-hint {
+                font-size: 13px;
+            }
+
+            .upload-section input[type="file"] {
+                width: 100% !important;
+                margin-bottom: 10px;
+            }
+
+            .upload-section .btn-add {
+                width: 100%;
+                margin-left: 0 !important;
+                margin-top: 10px;
+            }
+
+            .upload-section img {
+                width: 100% !important;
+                max-width: 100%;
+                height: auto !important;
+                max-height: none !important;
+            }
+
+            /* GridView responsive */
+            .styled-grid {
+                font-size: 12px;
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+
+            .styled-grid th,
+            .styled-grid td {
+                padding: 8px 6px;
+            }
+
+            /* Help text */
+            .help-text {
+                font-size: 11px;
+            }
+
+            /* Checkbox group */
+            .checkbox-group label {
+                font-size: 13px;
+            }
+        }
+
+        /* Extra small devices */
+        @media screen and (max-width: 480px) {
+            .voucher-title {
+                font-size: 18px;
+            }
+
+            .form-section {
+                padding: 12px;
+            }
+
+            .section-title {
+                font-size: 13px;
+            }
+
+            .form-label {
+                font-size: 12px;
+            }
+
+            .form-input input,
+            .form-input select {
+                font-size: 16px;
+                padding: 10px;
+            }
+
+            .btn-primary {
+                font-size: 16px;
+                padding: 14px 15px;
+            }
+
+            .styled-grid {
+                font-size: 11px;
+            }
+
+            .styled-grid th,
+            .styled-grid td {
+                padding: 6px 4px;
+            }
+        }
     </style>
 
     
@@ -353,7 +539,7 @@
                         <Columns>
                             <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
                             <asp:BoundField DataField="RatePlan_Group" HeaderText="ประเภทเรทที่พัก" />
-                            <asp:BoundField DataField="PriceTo" HeaderText="ราคาที่ต้องจ่ายเพิ่ม" DataFormatString="{0:N0} บาท" />
+                            <asp:BoundField DataField="PriceTo" HeaderText="ราคาที่ต้องจ่ายเพิ่ม" />
                             <asp:CommandField ShowDeleteButton="True" ButtonType="Button" DeleteText="ลบ" />
                         </Columns>
                     </asp:GridView>
