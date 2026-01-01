@@ -697,6 +697,9 @@
                                     <li><a runat="server" href="~/Admin/HR/OTEntry">
                                         <i class="fas fa-clock"></i> บันทึกชั่วโมง OT
                                     </a></li>
+                                    <li><a runat="server" href="~/Admin/HR/OTManagement">
+                                        <i class="fas fa-list-alt"></i> จัดการ OT ทั้งหมด
+                                    </a></li>
                                 </ul>
                             </li>
                         </asp:Panel>

@@ -668,4 +668,270 @@ public class OTService
     }
 
     #endregion
+
+    #region Admin Management
+
+    /// <summary>
+    /// Get all OT entries for admin management
+    /// </summary>
+    public DataTable GetAllOTEntries(string status = null, int? month = null, int? year = null, short? employeeId = null)
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+
+                string filters = "WHERE 1=1";
+                if (!string.IsNullOrEmpty(status))
+                {
+                    filters += " AND O.Status = @Status";
+                    cmd.Parameters.AddWithValue("@Status", status);
+                }
+                if (month.HasValue)
+                {
+                    filters += " AND MONTH(O.OTDate) = @Month";
+                    cmd.Parameters.AddWithValue("@Month", month.Value);
+                }
+                if (year.HasValue)
+                {
+                    filters += " AND YEAR(O.OTDate) = @Year";
+                    cmd.Parameters.AddWithValue("@Year", year.Value);
+                }
+                if (employeeId.HasValue)
+                {
+                    filters += " AND O.Admin_ID = @EmployeeID";
+                    cmd.Parameters.AddWithValue("@EmployeeID", employeeId.Value);
+                }
+
+                cmd.CommandText = @"
+                    SELECT
+                        O.ID, O.Admin_ID, O.OTDate, O.OTHours, O.OTRate,
+                        O.WorkDescription, O.Status, O.EntryDate, O.Notes,
+                        O.ApprovedBy_AdminID, O.ApprovedDate, O.RejectedReason,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        A.Username AS EmployeeUsername,
+                        ISNULL(Salary.Position, A.Role) AS EmployeePosition,
+                        ISNULL(EnteredBy.FirstName + ' ' + EnteredBy.LastName, EnteredBy.Username) AS EnteredByName,
+                        ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                        (O.OTHours * O.OTRate) AS OTMultipliedHours
+                    FROM OT_Entry O
+                    INNER JOIN Admin A ON A.ID = O.Admin_ID
+                    INNER JOIN Admin EnteredBy ON EnteredBy.ID = O.EnteredBy_AdminID
+                    LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = O.ApprovedBy_AdminID
+                    LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
+                    " + filters + @"
+                    ORDER BY O.OTDate DESC, O.EntryDate DESC";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get single OT entry by ID
+    /// </summary>
+    public DataTable GetOTEntryById(long otEntryId)
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT
+                        O.ID, O.Admin_ID, O.OTDate, O.OTHours, O.OTRate,
+                        O.WorkDescription, O.Status, O.EntryDate, O.Notes,
+                        O.ApprovedBy_AdminID, O.ApprovedDate, O.RejectedReason,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        A.Username AS EmployeeUsername
+                    FROM OT_Entry O
+                    INNER JOIN Admin A ON A.ID = O.Admin_ID
+                    WHERE O.ID = @ID";
+                cmd.Parameters.AddWithValue("@ID", otEntryId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Update OT entry (Admin only)
+    /// </summary>
+    public (bool Success, string Message) UpdateOTEntry(
+        long otEntryId, DateTime otDate, decimal otHours, decimal otRate,
+        string workDescription, string status, string notes, short updatedByAdminId)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+
+                // Check if changing to APPROVED and currently not approved
+                string currentStatus = "";
+                using (SqlCommand checkCmd = new SqlCommand(
+                    "SELECT Status FROM OT_Entry WHERE ID = @ID", conn))
+                {
+                    checkCmd.Parameters.AddWithValue("@ID", otEntryId);
+                    object result = checkCmd.ExecuteScalar();
+                    if (result == null)
+                    {
+                        return (false, "ไม่พบรายการ OT นี้");
+                    }
+                    currentStatus = result.ToString();
+                }
+
+                // Build update command
+                string updateSql;
+                if (status == "APPROVED" && currentStatus != "APPROVED")
+                {
+                    // Setting to approved - record approver
+                    updateSql = @"
+                        UPDATE OT_Entry
+                        SET OTDate = @OTDate, OTHours = @OTHours, OTRate = @OTRate,
+                            WorkDescription = @WorkDescription, Status = @Status,
+                            Notes = @Notes, ApprovedBy_AdminID = @ApprovedBy, ApprovedDate = GETDATE()
+                        WHERE ID = @ID";
+                }
+                else
+                {
+                    updateSql = @"
+                        UPDATE OT_Entry
+                        SET OTDate = @OTDate, OTHours = @OTHours, OTRate = @OTRate,
+                            WorkDescription = @WorkDescription, Status = @Status, Notes = @Notes
+                        WHERE ID = @ID";
+                }
+
+                using (SqlCommand cmd = new SqlCommand(updateSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@ID", otEntryId);
+                    cmd.Parameters.AddWithValue("@OTDate", otDate.Date);
+                    cmd.Parameters.AddWithValue("@OTHours", otHours);
+                    cmd.Parameters.AddWithValue("@OTRate", otRate);
+                    cmd.Parameters.AddWithValue("@WorkDescription", workDescription);
+                    cmd.Parameters.AddWithValue("@Status", status);
+                    cmd.Parameters.AddWithValue("@Notes", notes ?? (object)DBNull.Value);
+
+                    if (status == "APPROVED" && currentStatus != "APPROVED")
+                    {
+                        cmd.Parameters.AddWithValue("@ApprovedBy", updatedByAdminId);
+                    }
+
+                    int affected = cmd.ExecuteNonQuery();
+                    if (affected > 0)
+                        return (true, "อัปเดต OT สำเร็จ");
+                    else
+                        return (false, "ไม่สามารถอัปเดตได้");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Delete OT entry (Admin only - can delete any entry)
+    /// </summary>
+    public (bool Success, string Message) AdminDeleteOTEntry(long otEntryId)
+    {
+        try
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand(@"
+                    DELETE FROM OT_Entry WHERE ID = @ID", conn))
+                {
+                    cmd.Parameters.AddWithValue("@ID", otEntryId);
+
+                    conn.Open();
+                    int affected = cmd.ExecuteNonQuery();
+                    if (affected > 0)
+                        return (true, "ลบรายการ OT สำเร็จ");
+                    else
+                        return (false, "ไม่พบรายการ OT นี้");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Get all distinct years from OT entries
+    /// </summary>
+    public DataTable GetAllDistinctOTYears()
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT DISTINCT YEAR(OTDate) AS Year
+                    FROM OT_Entry
+                    UNION
+                    SELECT YEAR(GETDATE()) AS Year
+                    ORDER BY Year DESC";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get all employees for dropdown filter
+    /// </summary>
+    public DataTable GetEmployeesWithOT()
+    {
+        EnsureTableExists();
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT DISTINCT A.ID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name
+                    FROM OT_Entry O
+                    INNER JOIN Admin A ON A.ID = O.Admin_ID
+                    ORDER BY Name";
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    #endregion
 }
