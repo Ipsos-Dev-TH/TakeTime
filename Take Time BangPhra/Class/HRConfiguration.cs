@@ -324,15 +324,30 @@ public static class HRConfiguration
     /// <summary>
     /// Calculate Social Security deduction from total earnings
     /// Total earnings = base salary + OT + bonus + allowance
+    /// Uses current date for ceiling lookup
     /// </summary>
     public static decimal CalculateSocialSecurity(decimal totalEarnings)
+    {
+        return CalculateSocialSecurityByYear(totalEarnings, DateTime.Now.Year + 543);
+    }
+
+    /// <summary>
+    /// Calculate Social Security deduction from total earnings for a specific Thai Buddhist year
+    /// Use this method when calculating payroll for a specific period (e.g., December 2568 payroll)
+    /// </summary>
+    /// <param name="totalEarnings">Total earnings (base + OT + bonus + allowance)</param>
+    /// <param name="thaiBuddhistYear">Thai Buddhist year (e.g., 2568, 2569)</param>
+    public static decimal CalculateSocialSecurityByYear(decimal totalEarnings, int thaiBuddhistYear)
     {
         if (totalEarnings < SocialSecurityMinBase)
             return 0;
 
-        decimal ssBase = Math.Min(SocialSecurityMaxBase, totalEarnings);
+        decimal maxBase = GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
+        decimal maxDeduction = GetSocialSecurityMaxDeductionByYear(thaiBuddhistYear);
+
+        decimal ssBase = Math.Min(maxBase, totalEarnings);
         decimal ss = Math.Round(ssBase * SocialSecurityRate, 0);
-        return Math.Min(ss, SocialSecurityMaxDeduction);
+        return Math.Min(ss, maxDeduction);
     }
 
     /// <summary>

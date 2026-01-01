@@ -362,8 +362,9 @@ public class PayrollService
                                 // Calculate totals first (bonus and allowance are 0 for initial generation)
                                 decimal totalEarnings = baseSalary + otAmount;
 
-                                // Calculate social security using total earnings (base + OT + bonus + allowance)
-                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(totalEarnings);
+                                // Calculate social security using total earnings and period year (not current date)
+                                int thaiBuddhistYear = year + 543;
+                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(totalEarnings, thaiBuddhistYear);
                                 decimal totalDeductionsForEmp = leaveDeduction + socialSecurity;
                                 decimal netSalary = totalEarnings - totalDeductionsForEmp;
 

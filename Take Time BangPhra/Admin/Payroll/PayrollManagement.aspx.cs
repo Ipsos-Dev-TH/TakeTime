@@ -363,8 +363,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // Calculate total earnings first
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
 
-                    // Calculate social security using total earnings (base + OT + bonus + allowance)
-                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(totalEarnings);
+                    // Calculate social security using total earnings and period year (not current date)
+                    int thaiBuddhistYear = periodInfo.Year + 543;
+                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(totalEarnings, thaiBuddhistYear);
 
                     // Calculate total deductions
                     decimal totalDeductions = socialSecurity + leaveDeduction + tax + otherDeductions;
@@ -485,8 +486,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
 
-                    // Cap at current SS ceiling from HRConfiguration
-                    decimal ssBase = Math.Min(HRConfiguration.SocialSecurityMaxBase, totalEarnings);
+                    // Cap at SS ceiling based on period year (not current date)
+                    int thaiBuddhistYear = year + 543;
+                    decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
+                    decimal ssBase = Math.Min(ssMaxBase, totalEarnings);
 
                     csv.AppendLine($"{seq},,-,{firstName},{lastName},{ssBase:F0},{socialSecurity:F0},");
                     seq++;

@@ -504,12 +504,47 @@
         }
 
         function calculateSS() {
+            // Get all earnings for total calculation
             var baseSalary = parseFloat(document.getElementById('<%= txtEditBaseSalary.ClientID %>').value) || 0;
+            var otAmount = parseFloat(document.getElementById('<%= txtEditOTAmount.ClientID %>').value) || 0;
+            var bonus = parseFloat(document.getElementById('<%= txtEditBonus.ClientID %>').value) || 0;
+            var allowance = parseFloat(document.getElementById('<%= txtEditAllowance.ClientID %>').value) || 0;
+            var totalEarnings = baseSalary + otAmount + bonus + allowance;
 
-            // Social Security: 5% of salary, min base 1650, max base 15000, max deduction 750
-            var ssBase = Math.max(1650, Math.min(15000, baseSalary));
+            // Get period year from dropdown and convert to Thai Buddhist year
+            var periodYear = parseInt(document.getElementById('<%= ddlYear.ClientID %>').value) || new Date().getFullYear();
+            var thaiBuddhistYear = periodYear + 543;
+
+            // Get SS ceiling based on period year (stepped phases)
+            // ระยะที่ 1: พ.ศ. 2569-2571 เพดาน 17,500 บาท สูงสุด 875 บาท
+            // ระยะที่ 2: พ.ศ. 2572-2574 เพดาน 20,000 บาท สูงสุด 1,000 บาท
+            // ระยะที่ 3: พ.ศ. 2575+ เพดาน 23,000 บาท สูงสุด 1,150 บาท
+            var maxBase, maxDeduction;
+            if (thaiBuddhistYear >= 2575) {
+                maxBase = 23000;
+                maxDeduction = 1150;
+            } else if (thaiBuddhistYear >= 2572) {
+                maxBase = 20000;
+                maxDeduction = 1000;
+            } else if (thaiBuddhistYear >= 2569) {
+                maxBase = 17500;
+                maxDeduction = 875;
+            } else {
+                maxBase = 15000;
+                maxDeduction = 750;
+            }
+
+            // Calculate SS: 5% of total earnings, min base 1650, max based on year
+            var minBase = 1650;
+            if (totalEarnings < minBase) {
+                document.getElementById('<%= txtEditSocialSecurity.ClientID %>').value = 0;
+                calculateTotals();
+                return;
+            }
+
+            var ssBase = Math.min(maxBase, totalEarnings);
             var ss = ssBase * 0.05;
-            ss = Math.min(ss, 750);
+            ss = Math.min(ss, maxDeduction);
             ss = Math.round(ss);
 
             document.getElementById('<%= txtEditSocialSecurity.ClientID %>').value = ss;
