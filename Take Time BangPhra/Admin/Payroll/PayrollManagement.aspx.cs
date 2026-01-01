@@ -828,6 +828,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         /// <summary>
         /// Get approved OT hours for an employee in a specific month
+        /// Returns multiplied hours (OTHours * OTRate) to include 1.5x or 2x rate
         /// </summary>
         private decimal GetEmployeeOTHours(short adminId, int year, int month)
         {
@@ -837,8 +838,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
                 {
                     conn.Open();
+                    // Use OTHours * OTRate to get multiplied hours (includes 1.5x or 2x rate)
                     using (var cmd = new System.Data.SqlClient.SqlCommand(@"
-                        SELECT ISNULL(SUM(OTHours), 0) AS TotalOTHours
+                        SELECT ISNULL(SUM(OTHours * OTRate), 0) AS TotalOTMultipliedHours
                         FROM OT_Entry
                         WHERE Admin_ID = @AdminID
                           AND Status = 'APPROVED'

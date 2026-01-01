@@ -324,9 +324,13 @@ public class PayrollService
                                 }
 
                                 // Get OT hours for this employee and period
+                                // Use OTHours * OTRate to get multiplied hours (1.5x or 2x)
                                 decimal otHours = 0;
+                                decimal otMultipliedHours = 0;
                                 using (SqlCommand otCmd = new SqlCommand(@"
-                                    SELECT ISNULL(SUM(OTHours), 0) AS TotalOTHours
+                                    SELECT
+                                        ISNULL(SUM(OTHours), 0) AS TotalOTHours,
+                                        ISNULL(SUM(OTHours * OTRate), 0) AS TotalOTMultipliedHours
                                     FROM OT_Entry
                                     WHERE Admin_ID = @AdminID
                                       AND Status = 'APPROVED'
@@ -336,8 +340,14 @@ public class PayrollService
                                     otCmd.Parameters.AddWithValue("@AdminID", emp.Id);
                                     otCmd.Parameters.AddWithValue("@Year", year);
                                     otCmd.Parameters.AddWithValue("@Month", month);
-                                    object result = otCmd.ExecuteScalar();
-                                    otHours = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
+                                    using (SqlDataReader otReader = otCmd.ExecuteReader())
+                                    {
+                                        if (otReader.Read())
+                                        {
+                                            otHours = otReader["TotalOTHours"] != DBNull.Value ? Convert.ToDecimal(otReader["TotalOTHours"]) : 0;
+                                            otMultipliedHours = otReader["TotalOTMultipliedHours"] != DBNull.Value ? Convert.ToDecimal(otReader["TotalOTMultipliedHours"]) : 0;
+                                        }
+                                    }
                                 }
 
                                 // Calculate work days
@@ -345,8 +355,9 @@ public class PayrollService
                                 if (workDays < 0) workDays = 0;
 
                                 // Calculate leave deduction and OT amount using centralized config
+                                // OT amount is calculated using multiplied hours (already includes 1.5x or 2x rate)
                                 decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
-                                decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otHours, daysInMonth);
+                                decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otMultipliedHours, daysInMonth);
 
                                 // Calculate social security using centralized configuration
                                 decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(baseSalary);
