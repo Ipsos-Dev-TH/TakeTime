@@ -359,11 +359,11 @@ public class PayrollService
                                 decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
                                 decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otMultipliedHours, daysInMonth);
 
-                                // Calculate social security using centralized configuration
-                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(baseSalary);
-
-                                // Calculate totals
+                                // Calculate totals first (bonus and allowance are 0 for initial generation)
                                 decimal totalEarnings = baseSalary + otAmount;
+
+                                // Calculate social security using total earnings (base + OT + bonus + allowance)
+                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(totalEarnings);
                                 decimal totalDeductionsForEmp = leaveDeduction + socialSecurity;
                                 decimal netSalary = totalEarnings - totalDeductionsForEmp;
 

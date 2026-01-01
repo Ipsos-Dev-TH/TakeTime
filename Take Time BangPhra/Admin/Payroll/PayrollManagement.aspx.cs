@@ -348,7 +348,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // Calculate leave deduction: (salary / days in month) * leave days
                     decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
 
-                    // Calculate OT amount: (salary / days in month / 8) * OT hours
+                    // Calculate OT amount: (salary / days in month / 8) * OT hours (already multiplied by rate)
                     decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otHours, daysInMonth);
 
                     decimal bonus = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
@@ -356,15 +356,17 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
                     decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
-                    // Calculate social security using centralized configuration
-                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(baseSalary);
-
                     // Calculate work days (days in month minus leave days)
                     int workDays = daysInMonth - (int)Math.Floor(leaveDays);
                     if (workDays < 0) workDays = 0;
 
-                    // Calculate totals
+                    // Calculate total earnings first
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
+
+                    // Calculate social security using total earnings (base + OT + bonus + allowance)
+                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurity(totalEarnings);
+
+                    // Calculate total deductions
                     decimal totalDeductions = socialSecurity + leaveDeduction + tax + otherDeductions;
                     decimal netSalary = totalEarnings - totalDeductions;
 
@@ -474,11 +476,17 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     string firstName = nameParts.Length > 0 ? nameParts[0] : "";
                     string lastName = nameParts.Length > 1 ? string.Join(" ", nameParts, 1, nameParts.Length - 1) : "";
 
+                    // Calculate total earnings for SS base
                     decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
+                    decimal otAmount = row["OTAmount"] != DBNull.Value ? Convert.ToDecimal(row["OTAmount"]) : 0;
+                    decimal bonusAmount = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
+                    decimal allowanceAmount = row["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(row["AllowanceAmount"]) : 0;
+                    decimal totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
+
                     decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
 
-                    // Cap salary base at 15000 for SS calculation display
-                    decimal ssBase = Math.Min(15000, baseSalary);
+                    // Cap at current SS ceiling from HRConfiguration
+                    decimal ssBase = Math.Min(HRConfiguration.SocialSecurityMaxBase, totalEarnings);
 
                     csv.AppendLine($"{seq},,-,{firstName},{lastName},{ssBase:F0},{socialSecurity:F0},");
                     seq++;

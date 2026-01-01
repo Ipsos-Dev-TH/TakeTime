@@ -322,14 +322,15 @@ public static class HRConfiguration
     #region Calculation Methods
 
     /// <summary>
-    /// Calculate Social Security deduction from salary
+    /// Calculate Social Security deduction from total earnings
+    /// Total earnings = base salary + OT + bonus + allowance
     /// </summary>
-    public static decimal CalculateSocialSecurity(decimal baseSalary)
+    public static decimal CalculateSocialSecurity(decimal totalEarnings)
     {
-        if (baseSalary < SocialSecurityMinBase)
+        if (totalEarnings < SocialSecurityMinBase)
             return 0;
 
-        decimal ssBase = Math.Min(SocialSecurityMaxBase, baseSalary);
+        decimal ssBase = Math.Min(SocialSecurityMaxBase, totalEarnings);
         decimal ss = Math.Round(ssBase * SocialSecurityRate, 0);
         return Math.Min(ss, SocialSecurityMaxDeduction);
     }
