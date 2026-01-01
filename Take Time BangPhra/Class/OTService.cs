@@ -83,6 +83,7 @@ public class OTService
 
     /// <summary>
     /// Create OT entry
+    /// Auto-approves if Owner records for anyone, or Supervisor records for subordinate
     /// </summary>
     public (bool Success, string Message, long ID) CreateOTEntry(
         short adminId, DateTime otDate, decimal otHours, string workDescription,
@@ -103,6 +104,13 @@ public class OTService
                 return (false, "กรุณาระบุรายละเอียดงานที่ทำ", 0);
             }
 
+            // Determine if auto-approve should apply
+            SupervisorService supervisorService = new SupervisorService();
+            bool isEnteredByOwner = supervisorService.IsOwner(enteredByAdminId);
+            bool isSupervisorRecordingForSubordinate = (adminId != enteredByAdminId) &&
+                supervisorService.IsSupervisorOf(enteredByAdminId, adminId);
+            bool shouldAutoApprove = isEnteredByOwner || isSupervisorRecordingForSubordinate;
+
             // Check for duplicate entry
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
@@ -120,11 +128,24 @@ public class OTService
                     }
                 }
 
-                // Insert new entry
-                using (SqlCommand cmd = new SqlCommand(@"
-                    INSERT INTO OT_Entry (Admin_ID, OTDate, OTHours, OTRate, WorkDescription, EnteredBy_AdminID, Notes)
-                    VALUES (@AdminID, @OTDate, @OTHours, @OTRate, @WorkDescription, @EnteredBy, @Notes);
-                    SELECT SCOPE_IDENTITY();", conn))
+                // Insert new entry - with auto-approve if applicable
+                string insertSql;
+                if (shouldAutoApprove)
+                {
+                    insertSql = @"
+                        INSERT INTO OT_Entry (Admin_ID, OTDate, OTHours, OTRate, WorkDescription, EnteredBy_AdminID, Notes, Status, ApprovedBy_AdminID, ApprovedDate)
+                        VALUES (@AdminID, @OTDate, @OTHours, @OTRate, @WorkDescription, @EnteredBy, @Notes, 'APPROVED', @ApprovedBy, GETDATE());
+                        SELECT SCOPE_IDENTITY();";
+                }
+                else
+                {
+                    insertSql = @"
+                        INSERT INTO OT_Entry (Admin_ID, OTDate, OTHours, OTRate, WorkDescription, EnteredBy_AdminID, Notes)
+                        VALUES (@AdminID, @OTDate, @OTHours, @OTRate, @WorkDescription, @EnteredBy, @Notes);
+                        SELECT SCOPE_IDENTITY();";
+                }
+
+                using (SqlCommand cmd = new SqlCommand(insertSql, conn))
                 {
                     cmd.Parameters.AddWithValue("@AdminID", adminId);
                     cmd.Parameters.AddWithValue("@OTDate", otDate.Date);
@@ -134,8 +155,17 @@ public class OTService
                     cmd.Parameters.AddWithValue("@EnteredBy", enteredByAdminId);
                     cmd.Parameters.AddWithValue("@Notes", notes ?? (object)DBNull.Value);
 
+                    if (shouldAutoApprove)
+                    {
+                        cmd.Parameters.AddWithValue("@ApprovedBy", enteredByAdminId);
+                    }
+
                     long newId = Convert.ToInt64(cmd.ExecuteScalar());
-                    return (true, "บันทึก OT สำเร็จ", newId);
+
+                    string message = shouldAutoApprove
+                        ? "บันทึก OT สำเร็จ (อนุมัติอัตโนมัติ)"
+                        : "บันทึก OT สำเร็จ";
+                    return (true, message, newId);
                 }
             }
         }
@@ -240,10 +270,15 @@ public class OTService
 
     /// <summary>
     /// Get OT entries for supervisor's subordinates
+    /// Owner sees all employees' OT entries
     /// </summary>
     public DataTable GetOTEntriesForSupervisor(short supervisorAdminId, string status = null, int? month = null, int? year = null)
     {
         EnsureTableExists();
+
+        // Check if user is Owner
+        SupervisorService supervisorService = new SupervisorService();
+        bool isOwner = supervisorService.IsOwner(supervisorAdminId);
 
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -268,27 +303,54 @@ public class OTService
                     cmd.Parameters.AddWithValue("@Year", year.Value);
                 }
 
-                cmd.CommandText = @"
-                    SELECT
-                        O.ID, O.Admin_ID, O.OTDate, O.OTHours, O.OTRate,
-                        O.WorkDescription, O.Status, O.EntryDate, O.Notes,
-                        O.ApprovedBy_AdminID, O.ApprovedDate, O.RejectedReason,
-                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
-                        A.Username AS EmployeeUsername,
-                        ISNULL(Salary.Position, A.Role) AS EmployeePosition,
-                        ISNULL(EnteredBy.FirstName + ' ' + EnteredBy.LastName, EnteredBy.Username) AS EnteredByName,
-                        ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
-                        (O.OTHours * O.OTRate) AS OTMultipliedHours
-                    FROM OT_Entry O
-                    INNER JOIN Admin A ON A.ID = O.Admin_ID
-                    INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
-                    INNER JOIN Admin EnteredBy ON EnteredBy.ID = O.EnteredBy_AdminID
-                    LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = O.ApprovedBy_AdminID
-                    LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
-                    WHERE ES.Supervisor_AdminID = @SupervisorID
-                      AND ES.IsActive = 1" + filters + @"
-                    ORDER BY O.OTDate DESC, O.EntryDate DESC";
-                cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+                if (isOwner)
+                {
+                    // Owner sees all employees' OT (except their own)
+                    cmd.CommandText = @"
+                        SELECT
+                            O.ID, O.Admin_ID, O.OTDate, O.OTHours, O.OTRate,
+                            O.WorkDescription, O.Status, O.EntryDate, O.Notes,
+                            O.ApprovedBy_AdminID, O.ApprovedDate, O.RejectedReason,
+                            ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                            A.Username AS EmployeeUsername,
+                            ISNULL(Salary.Position, A.Role) AS EmployeePosition,
+                            ISNULL(EnteredBy.FirstName + ' ' + EnteredBy.LastName, EnteredBy.Username) AS EnteredByName,
+                            ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                            (O.OTHours * O.OTRate) AS OTMultipliedHours
+                        FROM OT_Entry O
+                        INNER JOIN Admin A ON A.ID = O.Admin_ID
+                        INNER JOIN Admin EnteredBy ON EnteredBy.ID = O.EnteredBy_AdminID
+                        LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = O.ApprovedBy_AdminID
+                        LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
+                        WHERE A.ID != @OwnerID" + filters + @"
+                        ORDER BY O.OTDate DESC, O.EntryDate DESC";
+                    cmd.Parameters.AddWithValue("@OwnerID", supervisorAdminId);
+                }
+                else
+                {
+                    // Regular supervisor - only their subordinates
+                    cmd.CommandText = @"
+                        SELECT
+                            O.ID, O.Admin_ID, O.OTDate, O.OTHours, O.OTRate,
+                            O.WorkDescription, O.Status, O.EntryDate, O.Notes,
+                            O.ApprovedBy_AdminID, O.ApprovedDate, O.RejectedReason,
+                            ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                            A.Username AS EmployeeUsername,
+                            ISNULL(Salary.Position, A.Role) AS EmployeePosition,
+                            ISNULL(EnteredBy.FirstName + ' ' + EnteredBy.LastName, EnteredBy.Username) AS EnteredByName,
+                            ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                            (O.OTHours * O.OTRate) AS OTMultipliedHours
+                        FROM OT_Entry O
+                        INNER JOIN Admin A ON A.ID = O.Admin_ID
+                        INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                        INNER JOIN Admin EnteredBy ON EnteredBy.ID = O.EnteredBy_AdminID
+                        LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = O.ApprovedBy_AdminID
+                        LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
+                        WHERE ES.Supervisor_AdminID = @SupervisorID
+                          AND ES.IsActive = 1" + filters + @"
+                        ORDER BY O.OTDate DESC, O.EntryDate DESC";
+                    cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+                }
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
@@ -452,25 +514,45 @@ public class OTService
 
     /// <summary>
     /// Get distinct years for supervisor's subordinates OT
+    /// Owner sees all years from all OT entries
     /// </summary>
     public DataTable GetDistinctOTYearsForSupervisor(short supervisorAdminId)
     {
         EnsureTableExists();
+
+        // Check if user is Owner - return all years
+        SupervisorService supervisorService = new SupervisorService();
+        bool isOwner = supervisorService.IsOwner(supervisorAdminId);
 
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
-                cmd.CommandText = @"
-                    SELECT DISTINCT YEAR(O.OTDate) AS Year
-                    FROM OT_Entry O
-                    INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
-                    WHERE ES.Supervisor_AdminID = @SupervisorID AND ES.IsActive = 1
-                    UNION
-                    SELECT YEAR(GETDATE()) AS Year
-                    ORDER BY Year DESC";
-                cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+
+                if (isOwner)
+                {
+                    // Owner sees all years from all OT entries
+                    cmd.CommandText = @"
+                        SELECT DISTINCT YEAR(O.OTDate) AS Year
+                        FROM OT_Entry O
+                        UNION
+                        SELECT YEAR(GETDATE()) AS Year
+                        ORDER BY Year DESC";
+                }
+                else
+                {
+                    // Regular supervisor - only years from their subordinates
+                    cmd.CommandText = @"
+                        SELECT DISTINCT YEAR(O.OTDate) AS Year
+                        FROM OT_Entry O
+                        INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                        WHERE ES.Supervisor_AdminID = @SupervisorID AND ES.IsActive = 1
+                        UNION
+                        SELECT YEAR(GETDATE()) AS Year
+                        ORDER BY Year DESC";
+                    cmd.Parameters.AddWithValue("@SupervisorID", supervisorAdminId);
+                }
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
@@ -524,31 +606,56 @@ public class OTService
 
     /// <summary>
     /// Get OT dashboard stats for supervisor
+    /// Owner sees stats for all employees
     /// </summary>
     public DataTable GetOTDashboardForSupervisor(short supervisorAdminId)
     {
         EnsureTableExists();
+
+        // Check if user is Owner
+        SupervisorService supervisorService = new SupervisorService();
+        bool isOwner = supervisorService.IsOwner(supervisorAdminId);
 
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
-                cmd.CommandText = @"
-                    SELECT
-                        (SELECT COUNT(*) FROM OT_Entry O
-                         INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
-                         WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
-                         AND O.Status = 'PENDING') AS PendingOTEntries,
-                        (SELECT ISNULL(SUM(O.OTHours), 0) FROM OT_Entry O
-                         INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
-                         WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
-                         AND O.Status = 'APPROVED' AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS ApprovedHoursThisMonth,
-                        (SELECT COUNT(DISTINCT O.Admin_ID) FROM OT_Entry O
-                         INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
-                         WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
-                         AND O.Status = 'APPROVED' AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS EmployeesWithOTThisMonth";
-                cmd.Parameters.AddWithValue("@SupID", supervisorAdminId);
+
+                if (isOwner)
+                {
+                    // Owner sees all employees' stats
+                    cmd.CommandText = @"
+                        SELECT
+                            (SELECT COUNT(*) FROM OT_Entry O
+                             WHERE O.Admin_ID != @OwnerID AND O.Status = 'PENDING') AS PendingOTEntries,
+                            (SELECT ISNULL(SUM(O.OTHours), 0) FROM OT_Entry O
+                             WHERE O.Admin_ID != @OwnerID AND O.Status = 'APPROVED'
+                             AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS ApprovedHoursThisMonth,
+                            (SELECT COUNT(DISTINCT O.Admin_ID) FROM OT_Entry O
+                             WHERE O.Admin_ID != @OwnerID AND O.Status = 'APPROVED'
+                             AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS EmployeesWithOTThisMonth";
+                    cmd.Parameters.AddWithValue("@OwnerID", supervisorAdminId);
+                }
+                else
+                {
+                    // Regular supervisor
+                    cmd.CommandText = @"
+                        SELECT
+                            (SELECT COUNT(*) FROM OT_Entry O
+                             INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                             WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
+                             AND O.Status = 'PENDING') AS PendingOTEntries,
+                            (SELECT ISNULL(SUM(O.OTHours), 0) FROM OT_Entry O
+                             INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                             WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
+                             AND O.Status = 'APPROVED' AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS ApprovedHoursThisMonth,
+                            (SELECT COUNT(DISTINCT O.Admin_ID) FROM OT_Entry O
+                             INNER JOIN Employee_Supervisor ES ON ES.Employee_AdminID = O.Admin_ID
+                             WHERE ES.Supervisor_AdminID = @SupID AND ES.IsActive = 1
+                             AND O.Status = 'APPROVED' AND MONTH(O.OTDate) = MONTH(GETDATE()) AND YEAR(O.OTDate) = YEAR(GETDATE())) AS EmployeesWithOTThisMonth";
+                    cmd.Parameters.AddWithValue("@SupID", supervisorAdminId);
+                }
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
