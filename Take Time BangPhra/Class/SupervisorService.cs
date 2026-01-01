@@ -280,10 +280,17 @@ public class SupervisorService
 
     /// <summary>
     /// Get all subordinates for a supervisor
+    /// Owner sees all employees automatically
     /// </summary>
     public DataTable GetSubordinatesForSupervisor(short supervisorAdminId)
     {
         EnsureTableExists();
+
+        // If Owner, return all employees
+        if (IsOwner(supervisorAdminId))
+        {
+            return GetAllEmployeesAsSubordinates(supervisorAdminId);
+        }
 
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -318,10 +325,58 @@ public class SupervisorService
     }
 
     /// <summary>
+    /// Get all employees as subordinates (for Owner)
+    /// </summary>
+    private DataTable GetAllEmployeesAsSubordinates(short ownerAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = @"
+                    SELECT
+                        0 AS ID,
+                        A.ID AS Employee_AdminID,
+                        ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                        A.Username AS EmployeeUsername,
+                        A.Role AS EmployeeRole,
+                        A.Status AS EmployeeStatus,
+                        ISNULL(Salary.Position, A.Role) AS Position,
+                        CAST(1 AS BIT) AS IsPrimary,
+                        CAST(1 AS BIT) AS CanApproveLeave,
+                        CAST(1 AS BIT) AS CanViewSalary,
+                        GETDATE() AS AssignedDate,
+                        CAST(1 AS BIT) AS IsActive,
+                        N'Owner สิทธิ์อัตโนมัติ' AS Notes
+                    FROM Admin A
+                    LEFT JOIN Employee_Salary Salary ON Salary.Admin_ID = A.ID AND Salary.IsActive = 1
+                    WHERE A.Status = 1 AND A.ID != @OwnerID
+                    ORDER BY A.FirstName, A.LastName";
+                cmd.Parameters.AddWithValue("@OwnerID", ownerAdminId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Check if user is supervisor of another user
+    /// Owner role is automatically supervisor of everyone
     /// </summary>
     public bool IsSupervisorOf(short supervisorAdminId, short employeeAdminId)
     {
+        // Owner is supervisor of everyone automatically
+        if (IsOwner(supervisorAdminId))
+        {
+            return true;
+        }
+
         EnsureTableExists();
 
         using (SqlConnection conn = new SqlConnection(connectionString))
@@ -334,6 +389,43 @@ public class SupervisorService
                 cmd.Parameters.AddWithValue("@SupID", supervisorAdminId);
                 cmd.Parameters.AddWithValue("@EmpID", employeeAdminId);
 
+                conn.Open();
+                return (int)cmd.ExecuteScalar() > 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if admin is Owner role
+    /// </summary>
+    public bool IsOwner(short adminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT COUNT(*) FROM Admin WHERE ID = @AdminID AND Role = 'Owner' AND Status = 1", conn))
+            {
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                conn.Open();
+                return (int)cmd.ExecuteScalar() > 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if admin is Owner by username (for session-based checks)
+    /// </summary>
+    public bool IsOwnerByUsername(string username)
+    {
+        if (string.IsNullOrEmpty(username))
+            return false;
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT COUNT(*) FROM Admin WHERE Username = @Username AND Role = 'Owner' AND Status = 1", conn))
+            {
+                cmd.Parameters.AddWithValue("@Username", username);
                 conn.Open();
                 return (int)cmd.ExecuteScalar() > 0;
             }

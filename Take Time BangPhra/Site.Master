@@ -651,6 +651,9 @@
                                                     <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
                                                         <i class="fas fa-user-tie"></i> จัดการพนักงาน
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/HR/SupervisorManagement">
+                                                        <i class="fas fa-users-cog"></i> จัดการหัวหน้า-ลูกน้อง
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
                                                         <i class="fas fa-calendar-minus"></i> จัดการการลา
                                                     </a></li>
