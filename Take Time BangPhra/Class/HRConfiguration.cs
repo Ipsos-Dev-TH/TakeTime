@@ -36,27 +36,103 @@ public static class HRConfiguration
     }
 
     /// <summary>
-    /// Maximum salary base for Social Security calculation (15,000 THB)
+    /// Maximum salary base for Social Security calculation
+    /// Uses stepped ceiling based on Thai Buddhist year:
+    /// - Before 2569: 15,000 THB
+    /// - 2569-2571: 17,500 THB
+    /// - 2572-2574: 20,000 THB
+    /// - 2575+: 23,000 THB
     /// </summary>
     public static decimal SocialSecurityMaxBase
     {
         get
         {
+            // Allow override from config
             string configValue = ConfigurationManager.AppSettings["SocialSecurityMaxBase"];
-            return decimal.TryParse(configValue, out decimal result) ? result : 15000m;
+            if (decimal.TryParse(configValue, out decimal result))
+                return result;
+
+            // Calculate based on Thai Buddhist year
+            return GetSocialSecurityMaxBaseByYear(DateTime.Now.Year + 543);
         }
     }
 
     /// <summary>
-    /// Maximum Social Security deduction (750 THB)
+    /// Get Social Security max base for a specific Thai Buddhist year
+    /// Reference: ร่างกฎกระทรวง ปรับเพดานค่าจ้างแบบขั้นบันได
+    /// </summary>
+    public static decimal GetSocialSecurityMaxBaseByYear(int thaiBuddhistYear)
+    {
+        // ระยะที่ 1: ปี พ.ศ. 2569-2571 เพดาน 17,500 บาท
+        // ระยะที่ 2: ปี พ.ศ. 2572-2574 เพดาน 20,000 บาท
+        // ระยะที่ 3: ปี พ.ศ. 2575+ เพดาน 23,000 บาท
+        if (thaiBuddhistYear >= 2575)
+            return 23000m;
+        else if (thaiBuddhistYear >= 2572)
+            return 20000m;
+        else if (thaiBuddhistYear >= 2569)
+            return 17500m;
+        else
+            return 15000m; // Before 2569
+    }
+
+    /// <summary>
+    /// Maximum Social Security deduction
+    /// Uses stepped ceiling based on Thai Buddhist year:
+    /// - Before 2569: 750 THB
+    /// - 2569-2571: 875 THB
+    /// - 2572-2574: 1,000 THB
+    /// - 2575+: 1,150 THB
     /// </summary>
     public static decimal SocialSecurityMaxDeduction
     {
         get
         {
+            // Allow override from config
             string configValue = ConfigurationManager.AppSettings["SocialSecurityMaxDeduction"];
-            return decimal.TryParse(configValue, out decimal result) ? result : 750m;
+            if (decimal.TryParse(configValue, out decimal result))
+                return result;
+
+            // Calculate based on Thai Buddhist year
+            return GetSocialSecurityMaxDeductionByYear(DateTime.Now.Year + 543);
         }
+    }
+
+    /// <summary>
+    /// Get Social Security max deduction for a specific Thai Buddhist year
+    /// (MaxBase * 5% = MaxDeduction)
+    /// </summary>
+    public static decimal GetSocialSecurityMaxDeductionByYear(int thaiBuddhistYear)
+    {
+        // คำนวณจาก MaxBase * 5%
+        // ระยะที่ 1: 17,500 * 5% = 875 บาท
+        // ระยะที่ 2: 20,000 * 5% = 1,000 บาท
+        // ระยะที่ 3: 23,000 * 5% = 1,150 บาท
+        if (thaiBuddhistYear >= 2575)
+            return 1150m;
+        else if (thaiBuddhistYear >= 2572)
+            return 1000m;
+        else if (thaiBuddhistYear >= 2569)
+            return 875m;
+        else
+            return 750m; // Before 2569
+    }
+
+    /// <summary>
+    /// Get current Social Security phase info (for display)
+    /// </summary>
+    public static (int Phase, string Description, decimal MaxBase, decimal MaxDeduction) GetCurrentSocialSecurityPhase()
+    {
+        int thaiYear = DateTime.Now.Year + 543;
+
+        if (thaiYear >= 2575)
+            return (3, $"ระยะที่ 3 (พ.ศ.2575+)", 23000m, 1150m);
+        else if (thaiYear >= 2572)
+            return (2, $"ระยะที่ 2 (พ.ศ.2572-2574)", 20000m, 1000m);
+        else if (thaiYear >= 2569)
+            return (1, $"ระยะที่ 1 (พ.ศ.2569-2571)", 17500m, 875m);
+        else
+            return (0, $"ก่อน พ.ศ.2569", 15000m, 750m);
     }
 
     #endregion
