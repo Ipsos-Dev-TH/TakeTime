@@ -494,7 +494,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         continue;
                     }
 
-                    string title = ""; // คำนำหน้าชื่อ - ยังไม่มีในระบบ
+                    string title = row["Title"]?.ToString() ?? "";
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
 
@@ -938,7 +938,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     conn.Open();
                     using (var cmd = new System.Data.SqlClient.SqlCommand(@"
                         SELECT PR.*,
-                               A.IDCard, A.FirstName, A.LastName
+                               A.IDCard, A.Title, A.FirstName, A.LastName
                         FROM Payroll_Records PR
                         INNER JOIN Admin A ON A.ID = PR.Admin_ID
                         WHERE PR.PayrollPeriod_ID = @PeriodID

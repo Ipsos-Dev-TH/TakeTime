@@ -270,7 +270,7 @@ namespace Take_Time_BangPhra.Admin.HR
                     conn.Open();
 
                     using (SqlCommand cmd = new SqlCommand(@"
-                        SELECT A.ID, A.Username, A.FirstName, A.LastName, A.Role,
+                        SELECT A.ID, A.Username, A.Title, A.FirstName, A.LastName, A.Role,
                                A.Phone, A.Email, A.IDCard, A.Address, A.HireDate, A.BirthDate,
                                A.BankCode, A.BankAccountNumber, A.BankAccountName,
                                A.EmergencyContact, A.EmergencyPhone,
@@ -286,6 +286,7 @@ namespace Take_Time_BangPhra.Admin.HR
                             if (reader.Read())
                             {
                                 string username = reader["Username"]?.ToString() ?? "";
+                                string title = reader["Title"]?.ToString() ?? "";
                                 string firstName = reader["FirstName"]?.ToString() ?? "";
                                 string lastName = reader["LastName"]?.ToString() ?? "";
                                 string role = reader["Role"]?.ToString() ?? "Staff";
@@ -315,7 +316,7 @@ namespace Take_Time_BangPhra.Admin.HR
 
                                 // Register JavaScript to open modal with data
                                 string script = $@"
-                                    openEditModal('{adminId}', '{EscapeJsString(username)}', '{EscapeJsString(firstName)}',
+                                    openEditModal('{adminId}', '{EscapeJsString(username)}', '{EscapeJsString(title)}', '{EscapeJsString(firstName)}',
                                                   '{EscapeJsString(lastName)}', '{EscapeJsString(role)}', '{salary}', '{EscapeJsString(position)}',
                                                   '{EscapeJsString(idCard)}', '{birthDate}', '{EscapeJsString(phone)}', '{EscapeJsString(email)}',
                                                   '{EscapeJsString(address)}', '{hireDate}',
@@ -557,11 +558,11 @@ namespace Take_Time_BangPhra.Admin.HR
 
                 // Insert new employee (plain text password)
                 using (SqlCommand cmd = new SqlCommand(@"
-                    INSERT INTO Admin (Username, Password, FirstName, LastName, Role, Status,
+                    INSERT INTO Admin (Username, Password, Title, FirstName, LastName, Role, Status,
                                        Phone, Email, IDCard, Address, HireDate, BirthDate,
                                        BankCode, BankAccountNumber, BankAccountName,
                                        EmergencyContact, EmergencyPhone)
-                    VALUES (@Username, @Password, @FirstName, @LastName, @Role, 1,
+                    VALUES (@Username, @Password, @Title, @FirstName, @LastName, @Role, 1,
                             @Phone, @Email, @IDCard, @Address, @HireDate, @BirthDate,
                             @BankCode, @BankAccountNumber, @BankAccountName,
                             @EmergencyContact, @EmergencyPhone);
@@ -569,6 +570,7 @@ namespace Take_Time_BangPhra.Admin.HR
                 {
                     cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
                     cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                    cmd.Parameters.AddWithValue("@Title", string.IsNullOrWhiteSpace(ddlTitle.SelectedValue) ? (object)DBNull.Value : ddlTitle.SelectedValue);
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);
@@ -672,6 +674,7 @@ namespace Take_Time_BangPhra.Admin.HR
 
                 // Update Admin record
                 string updateSql = @"UPDATE Admin SET
+                                  Title = @Title,
                                   FirstName = @FirstName,
                                   LastName = @LastName,
                                   Role = @Role,
@@ -691,6 +694,7 @@ namespace Take_Time_BangPhra.Admin.HR
 
                 using (SqlCommand cmd = new SqlCommand(updateSql, conn))
                 {
+                    cmd.Parameters.AddWithValue("@Title", string.IsNullOrWhiteSpace(ddlTitle.SelectedValue) ? (object)DBNull.Value : ddlTitle.SelectedValue);
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());
                     cmd.Parameters.AddWithValue("@Role", ddlRole.SelectedValue);

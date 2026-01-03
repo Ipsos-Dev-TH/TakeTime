@@ -876,6 +876,18 @@
                 </div>
 
                 <div class="form-row">
+                    <div class="form-group" style="flex: 0 0 120px;">
+                        <label>คำนำหน้า</label>
+                        <asp:DropDownList ID="ddlTitle" runat="server" CssClass="form-control">
+                            <asp:ListItem Value="">-- เลือก --</asp:ListItem>
+                            <asp:ListItem Value="นาย">นาย</asp:ListItem>
+                            <asp:ListItem Value="นาง">นาง</asp:ListItem>
+                            <asp:ListItem Value="นางสาว">นางสาว</asp:ListItem>
+                            <asp:ListItem Value="Mr.">Mr.</asp:ListItem>
+                            <asp:ListItem Value="Mrs.">Mrs.</asp:ListItem>
+                            <asp:ListItem Value="Ms.">Ms.</asp:ListItem>
+                        </asp:DropDownList>
+                    </div>
                     <div class="form-group">
                         <label>ชื่อ <span class="required">*</span></label>
                         <asp:TextBox ID="txtFirstName" runat="server" CssClass="form-control" placeholder="ชื่อ"></asp:TextBox>
@@ -1035,6 +1047,7 @@
             // Clear form - Basic info
             document.getElementById('<%= txtUsername.ClientID %>').value = '';
             document.getElementById('<%= txtPassword.ClientID %>').value = '';
+            document.getElementById('<%= ddlTitle.ClientID %>').selectedIndex = 0;
             document.getElementById('<%= txtFirstName.ClientID %>').value = '';
             document.getElementById('<%= txtLastName.ClientID %>').value = '';
             document.getElementById('<%= txtSalary.ClientID %>').value = '';
@@ -1064,7 +1077,7 @@
             document.getElementById('employeeModal').style.display = 'flex';
         }
 
-        function openEditModal(adminId, username, firstName, lastName, role, salary, position,
+        function openEditModal(adminId, username, title, firstName, lastName, role, salary, position,
                               idCard, birthDate, phone, email, address, hireDate,
                               bankCode, bankAccountNumber, bankAccountName,
                               emergencyContact, emergencyPhone) {
@@ -1076,6 +1089,7 @@
             // Fill form - Basic info
             document.getElementById('<%= txtUsername.ClientID %>').value = username;
             document.getElementById('<%= txtPassword.ClientID %>').value = '';
+            document.getElementById('<%= ddlTitle.ClientID %>').value = title || '';
             document.getElementById('<%= txtFirstName.ClientID %>').value = firstName;
             document.getElementById('<%= txtLastName.ClientID %>').value = lastName;
             document.getElementById('<%= txtSalary.ClientID %>').value = salary || '';
