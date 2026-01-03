@@ -467,16 +467,21 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 }
 
                 // Generate CSV for Social Security submission
-                // Format: เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ
+                // Format: เลขประจำตัวประชาชน,ชื่อ,นามสกุล,ค่าจ้าง,เงินสมทบผู้ประกันตน,เงินสมทบนายจ้าง
                 StringBuilder csv = new StringBuilder();
-                csv.AppendLine("เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ");
+                csv.AppendLine("เลขประจำตัวประชาชน,ชื่อ,นามสกุล,ค่าจ้าง,เงินสมทบผู้ประกันตน,เงินสมทบนายจ้าง");
 
                 int exportedCount = 0;
                 int skippedCount = 0;
 
+                // Get SS ceiling based on period year
+                int thaiBuddhistYear = year + 543;
+                decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
+                decimal ssMaxDeduction = HRConfiguration.GetSocialSecurityMaxDeductionByYear(thaiBuddhistYear);
+
                 foreach (DataRow row in dt.Rows)
                 {
-                    string idCard = row["IDCard"]?.ToString()?.Trim() ?? "";
+                    string idCard = row["IDCard"]?.ToString()?.Trim()?.Replace(" ", "").Replace("-", "") ?? "";
                     decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
 
                     // Skip if no ID card or social security is 0
@@ -488,9 +493,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
-
-                    // คำนำหน้าชื่อ - ปล่อยว่างไว้ก่อน (ยังไม่มี column Title ในตาราง Admin)
-                    string title = "";
 
                     // Use TotalEarnings from database (computed column) - this is the actual total
                     decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
@@ -505,12 +507,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
                     }
 
-                    // Cap at SS ceiling based on period year (not current date)
-                    int thaiBuddhistYear = year + 543;
-                    decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
-                    decimal ssBase = Math.Min(ssMaxBase, totalEarnings);
+                    // Cap wage at SS ceiling based on period year
+                    decimal wageForSS = Math.Min(ssMaxBase, totalEarnings);
 
-                    csv.AppendLine($"{idCard},{title},{firstName},{lastName},{ssBase:F0},{socialSecurity:F0}");
+                    // Calculate contribution (5% of wage, capped at max deduction)
+                    decimal employeeContribution = Math.Min(Math.Round(wageForSS * 0.05m, 0), ssMaxDeduction);
+                    decimal employerContribution = employeeContribution; // Same as employee
+
+                    csv.AppendLine($"{idCard},{firstName},{lastName},{wageForSS:F0},{employeeContribution:F0},{employerContribution:F0}");
                     exportedCount++;
                 }
 
