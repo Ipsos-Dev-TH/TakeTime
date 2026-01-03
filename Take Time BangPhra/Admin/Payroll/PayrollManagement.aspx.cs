@@ -457,7 +457,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 short year = Convert.ToInt16(ddlYear.SelectedValue);
                 byte month = Convert.ToByte(ddlMonth.SelectedValue);
 
-                DataTable dt = payrollService.GetPayrollRecords(currentPayrollPeriodId);
+                // Get payroll records with employee details (IDCard, FirstName, LastName)
+                DataTable dt = GetPayrollRecordsForSSExport(currentPayrollPeriodId);
 
                 if (dt == null || dt.Rows.Count == 0)
                 {
@@ -466,16 +467,16 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 }
 
                 // Generate CSV for Social Security submission
+                // Format: เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ
                 StringBuilder csv = new StringBuilder();
-                csv.AppendLine("ลำดับ,เลขประจำตัวประชาชน,คำนำหน้า,ชื่อ,นามสกุล,เงินเดือน,เงินสมทบ,หมายเหตุ");
+                csv.AppendLine("เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ");
 
-                int seq = 1;
                 foreach (DataRow row in dt.Rows)
                 {
-                    string name = row["EmployeeName"]?.ToString() ?? "";
-                    string[] nameParts = name.Split(' ');
-                    string firstName = nameParts.Length > 0 ? nameParts[0] : "";
-                    string lastName = nameParts.Length > 1 ? string.Join(" ", nameParts, 1, nameParts.Length - 1) : "";
+                    string idCard = row["IDCard"]?.ToString() ?? "";
+                    string title = row["Title"]?.ToString() ?? "";
+                    string firstName = row["FirstName"]?.ToString() ?? "";
+                    string lastName = row["LastName"]?.ToString() ?? "";
 
                     // Calculate total earnings for SS base
                     decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
@@ -491,8 +492,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
                     decimal ssBase = Math.Min(ssMaxBase, totalEarnings);
 
-                    csv.AppendLine($"{seq},,-,{firstName},{lastName},{ssBase:F0},{socialSecurity:F0},");
-                    seq++;
+                    csv.AppendLine($"{idCard},{title},{firstName},{lastName},{ssBase:F0},{socialSecurity:F0}");
                 }
 
                 // Send file to browser
@@ -900,6 +900,39 @@ namespace Take_Time_BangPhra.Admin.Payroll
             }
             catch { }
             return (DateTime.Now.Year, DateTime.Now.Month);
+        }
+
+        /// <summary>
+        /// Get payroll records with employee details for SS export
+        /// Includes IDCard, Title, FirstName, LastName
+        /// </summary>
+        private DataTable GetPayrollRecordsForSSExport(int periodId)
+        {
+            DataTable dt = new DataTable();
+            try
+            {
+                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SqlClient.SqlCommand(@"
+                        SELECT PR.*,
+                               A.IDCard, A.Title, A.FirstName, A.LastName
+                        FROM Payroll_Records PR
+                        INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                        WHERE PR.PayrollPeriod_ID = @PeriodID
+                        ORDER BY PR.EmployeeName", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@PeriodID", periodId);
+                        using (var adapter = new System.Data.SqlClient.SqlDataAdapter(cmd))
+                        {
+                            adapter.Fill(dt);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return dt;
         }
 
         #endregion
