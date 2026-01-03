@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.IO.Compression;
@@ -30,7 +29,7 @@ namespace Take_Time_BangPhra.Admin
 
                 try
                 {
-                    CreateExcelFileStructure(tempDir, dataTable, reportTitle, sheetName);
+                    CreateExcelStructure(tempDir, dataTable, sheetName, reportTitle, true);
 
                     string tempExcelPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.xlsx");
                     ZipFile.CreateFromDirectory(tempDir, tempExcelPath);
@@ -38,14 +37,11 @@ namespace Take_Time_BangPhra.Admin
                     response.TransmitFile(tempExcelPath);
                     response.Flush();
 
-                    File.Delete(tempExcelPath);
+                    try { File.Delete(tempExcelPath); } catch { }
                 }
                 finally
                 {
-                    if (Directory.Exists(tempDir))
-                    {
-                        Directory.Delete(tempDir, true);
-                    }
+                    try { Directory.Delete(tempDir, true); } catch { }
                 }
             }
             catch (Exception ex)
@@ -54,9 +50,6 @@ namespace Take_Time_BangPhra.Admin
             }
         }
 
-        /// <summary>
-        /// Create Excel file without report title row (data starts from row 1)
-        /// </summary>
         public static void CreateExcelFileNoTitle(DataTable dataTable, string fileName, string sheetName, HttpResponse response)
         {
             try
@@ -72,7 +65,7 @@ namespace Take_Time_BangPhra.Admin
 
                 try
                 {
-                    CreateExcelFileStructureNoTitle(tempDir, dataTable, sheetName);
+                    CreateExcelStructure(tempDir, dataTable, sheetName, null, false);
 
                     string tempExcelPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.xlsx");
                     ZipFile.CreateFromDirectory(tempDir, tempExcelPath);
@@ -80,14 +73,11 @@ namespace Take_Time_BangPhra.Admin
                     response.TransmitFile(tempExcelPath);
                     response.Flush();
 
-                    File.Delete(tempExcelPath);
+                    try { File.Delete(tempExcelPath); } catch { }
                 }
                 finally
                 {
-                    if (Directory.Exists(tempDir))
-                    {
-                        Directory.Delete(tempDir, true);
-                    }
+                    try { Directory.Delete(tempDir, true); } catch { }
                 }
             }
             catch (Exception ex)
@@ -96,8 +86,9 @@ namespace Take_Time_BangPhra.Admin
             }
         }
 
-        private static void CreateExcelFileStructure(string tempDir, DataTable dataTable, string reportTitle, string sheetName = "รายงาน")
+        private static void CreateExcelStructure(string tempDir, DataTable dataTable, string sheetName, string reportTitle, bool hasTitle)
         {
+            // Create directory structure
             string relsDir = Path.Combine(tempDir, "_rels");
             string docPropsDir = Path.Combine(tempDir, "docProps");
             string xlDir = Path.Combine(tempDir, "xl");
@@ -110,136 +101,83 @@ namespace Take_Time_BangPhra.Admin
             Directory.CreateDirectory(xlRelsDir);
             Directory.CreateDirectory(xlWorksheetsDir);
 
-            CreateContentTypesXml(tempDir);
-            CreateRelsFiles(relsDir, xlRelsDir);
-            CreateDocProps(docPropsDir);
-            CreateWorkbookAndStyles(xlDir, sheetName);
-            CreateWorksheet(xlWorksheetsDir, dataTable, reportTitle);
-        }
-
-        private static void CreateExcelFileStructureNoTitle(string tempDir, DataTable dataTable, string sheetName)
-        {
-            string relsDir = Path.Combine(tempDir, "_rels");
-            string docPropsDir = Path.Combine(tempDir, "docProps");
-            string xlDir = Path.Combine(tempDir, "xl");
-            string xlRelsDir = Path.Combine(xlDir, "_rels");
-            string xlWorksheetsDir = Path.Combine(xlDir, "worksheets");
-
-            Directory.CreateDirectory(relsDir);
-            Directory.CreateDirectory(docPropsDir);
-            Directory.CreateDirectory(xlDir);
-            Directory.CreateDirectory(xlRelsDir);
-            Directory.CreateDirectory(xlWorksheetsDir);
-
-            CreateContentTypesXml(tempDir);
-            CreateRelsFiles(relsDir, xlRelsDir);
-            CreateDocProps(docPropsDir);
-            CreateWorkbookAndStyles(xlDir, sheetName);
-            CreateWorksheetNoTitle(xlWorksheetsDir, dataTable);
-        }
-
-        private static void CreateContentTypesXml(string tempDir)
-        {
-            string contentTypes = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+            // [Content_Types].xml
+            File.WriteAllText(
+                Path.Combine(tempDir, "[Content_Types].xml"),
+                @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
 <Types xmlns=""http://schemas.openxmlformats.org/package/2006/content-types"">
 <Default Extension=""rels"" ContentType=""application/vnd.openxmlformats-package.relationships+xml""/>
 <Default Extension=""xml"" ContentType=""application/xml""/>
 <Override PartName=""/xl/workbook.xml"" ContentType=""application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml""/>
 <Override PartName=""/xl/worksheets/sheet1.xml"" ContentType=""application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml""/>
 <Override PartName=""/xl/styles.xml"" ContentType=""application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml""/>
+<Override PartName=""/xl/sharedStrings.xml"" ContentType=""application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml""/>
 <Override PartName=""/docProps/core.xml"" ContentType=""application/vnd.openxmlformats-package.core-properties+xml""/>
 <Override PartName=""/docProps/app.xml"" ContentType=""application/vnd.openxmlformats-officedocument.extended-properties+xml""/>
-</Types>";
+</Types>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(tempDir, "[Content_Types].xml"), contentTypes, Encoding.UTF8);
-        }
-
-        private static void CreateRelsFiles(string relsDir, string xlRelsDir)
-        {
-            // Root .rels
-            string rootRels = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+            // _rels/.rels
+            File.WriteAllText(
+                Path.Combine(relsDir, ".rels"),
+                @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
 <Relationships xmlns=""http://schemas.openxmlformats.org/package/2006/relationships"">
 <Relationship Id=""rId1"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"" Target=""xl/workbook.xml""/>
 <Relationship Id=""rId2"" Type=""http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"" Target=""docProps/core.xml""/>
 <Relationship Id=""rId3"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties"" Target=""docProps/app.xml""/>
-</Relationships>";
+</Relationships>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(relsDir, ".rels"), rootRels, Encoding.UTF8);
-
-            // Workbook .rels
-            string workbookRels = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+            // xl/_rels/workbook.xml.rels
+            File.WriteAllText(
+                Path.Combine(xlRelsDir, "workbook.xml.rels"),
+                @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
 <Relationships xmlns=""http://schemas.openxmlformats.org/package/2006/relationships"">
 <Relationship Id=""rId1"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"" Target=""worksheets/sheet1.xml""/>
 <Relationship Id=""rId2"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"" Target=""styles.xml""/>
-</Relationships>";
+<Relationship Id=""rId3"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"" Target=""sharedStrings.xml""/>
+</Relationships>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(xlRelsDir, "workbook.xml.rels"), workbookRels, Encoding.UTF8);
-        }
-
-        private static void CreateDocProps(string docPropsDir)
-        {
-            // app.xml
-            string appXml = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
-<Properties xmlns=""http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"" xmlns:vt=""http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"">
+            // docProps/app.xml
+            File.WriteAllText(
+                Path.Combine(docPropsDir, "app.xml"),
+                @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<Properties xmlns=""http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"">
 <Application>Microsoft Excel</Application>
-<DocSecurity>0</DocSecurity>
-<ScaleCrop>false</ScaleCrop>
-<HeadingPairs>
-<vt:vector size=""2"" baseType=""variant"">
-<vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>
-<vt:variant><vt:i4>1</vt:i4></vt:variant>
-</vt:vector>
-</HeadingPairs>
-<TitlesOfParts>
-<vt:vector size=""1"" baseType=""lpstr"">
-<vt:lpstr>Sheet1</vt:lpstr>
-</vt:vector>
-</TitlesOfParts>
-<Company></Company>
-<LinksUpToDate>false</LinksUpToDate>
-<SharedDoc>false</SharedDoc>
-<HyperlinksChanged>false</HyperlinksChanged>
 <AppVersion>16.0300</AppVersion>
-</Properties>";
+</Properties>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(docPropsDir, "app.xml"), appXml, Encoding.UTF8);
-
-            // core.xml
-            string coreXml = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
-<cp:coreProperties xmlns:cp=""http://schemas.openxmlformats.org/package/2006/metadata/core-properties"" xmlns:dc=""http://purl.org/dc/elements/1.1/"" xmlns:dcterms=""http://purl.org/dc/terms/"" xmlns:dcmitype=""http://purl.org/dc/dcmitype/"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"">
-<dc:creator>TakeTime System</dc:creator>
-<cp:lastModifiedBy>TakeTime System</cp:lastModifiedBy>
+            // docProps/core.xml
+            File.WriteAllText(
+                Path.Combine(docPropsDir, "core.xml"),
+                $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<cp:coreProperties xmlns:cp=""http://schemas.openxmlformats.org/package/2006/metadata/core-properties"" xmlns:dc=""http://purl.org/dc/elements/1.1/"" xmlns:dcterms=""http://purl.org/dc/terms/"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"">
+<dc:creator>TakeTime</dc:creator>
 <dcterms:created xsi:type=""dcterms:W3CDTF"">{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss}Z</dcterms:created>
-<dcterms:modified xsi:type=""dcterms:W3CDTF"">{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss}Z</dcterms:modified>
-</cp:coreProperties>";
+</cp:coreProperties>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(docPropsDir, "core.xml"), coreXml, Encoding.UTF8);
-        }
-
-        private static void CreateWorkbookAndStyles(string xlDir, string sheetName = "รายงาน")
-        {
-            // workbook.xml
-            string workbookXml = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+            // xl/workbook.xml
+            File.WriteAllText(
+                Path.Combine(xlDir, "workbook.xml"),
+                $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
 <workbook xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" xmlns:r=""http://schemas.openxmlformats.org/officeDocument/2006/relationships"">
-<fileVersion appName=""xl"" lastEdited=""5"" lowestEdited=""5"" rupBuild=""9303""/>
-<workbookPr defaultThemeVersion=""124226""/>
-<bookViews>
-<workbookView xWindow=""0"" yWindow=""0"" windowWidth=""20490"" windowHeight=""7755""/>
-</bookViews>
 <sheets>
 <sheet name=""{EscapeXml(sheetName)}"" sheetId=""1"" r:id=""rId1""/>
 </sheets>
-<calcPr calcId=""145621""/>
-</workbook>";
+</workbook>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(xlDir, "workbook.xml"), workbookXml, Encoding.UTF8);
-
-            // styles.xml
-            string stylesXml = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+            // xl/styles.xml
+            File.WriteAllText(
+                Path.Combine(xlDir, "styles.xml"),
+                @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
 <styleSheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"">
 <fonts count=""2"">
-<font><sz val=""11""/><color theme=""1""/><name val=""Tahoma""/><family val=""2""/><charset val=""222""/></font>
-<font><b/><sz val=""11""/><color theme=""1""/><name val=""Tahoma""/><family val=""2""/><charset val=""222""/></font>
+<font><sz val=""11""/><name val=""Tahoma""/></font>
+<font><b/><sz val=""11""/><name val=""Tahoma""/></font>
 </fonts>
 <fills count=""2"">
 <fill><patternFill patternType=""none""/></fill>
@@ -251,207 +189,146 @@ namespace Take_Time_BangPhra.Admin
 <cellStyleXfs count=""1"">
 <xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""0""/>
 </cellStyleXfs>
-<cellXfs count=""3"">
+<cellXfs count=""2"">
 <xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""0"" xfId=""0""/>
 <xf numFmtId=""0"" fontId=""1"" fillId=""0"" borderId=""0"" xfId=""0"" applyFont=""1""/>
-<xf numFmtId=""2"" fontId=""0"" fillId=""0"" borderId=""0"" xfId=""0"" applyNumberFormat=""1""/>
 </cellXfs>
-<cellStyles count=""1"">
-<cellStyle name=""Normal"" xfId=""0"" builtinId=""0""/>
-</cellStyles>
-<dxfs count=""0""/>
-<tableStyles count=""0"" defaultTableStyle=""TableStyleMedium2"" defaultPivotStyle=""PivotStyleLight16""/>
-</styleSheet>";
+</styleSheet>",
+                Encoding.UTF8);
 
-            File.WriteAllText(Path.Combine(xlDir, "styles.xml"), stylesXml, Encoding.UTF8);
-        }
-
-        private static void CreateWorksheet(string xlWorksheetsDir, DataTable dataTable, string reportTitle)
-        {
+            // Build shared strings and worksheet
+            var sharedStrings = new System.Collections.Generic.List<string>();
             var sb = new StringBuilder();
+
             sb.Append(@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>");
-            sb.Append(@"<worksheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" xmlns:r=""http://schemas.openxmlformats.org/officeDocument/2006/relationships"">");
-
-            // Calculate dimension
-            int totalRows = dataTable.Rows.Count + 3; // title + empty + header + data
-            int totalCols = dataTable.Columns.Count > 0 ? dataTable.Columns.Count : 1;
-            string lastCol = GetExcelColumnName(totalCols);
-            sb.Append($@"<dimension ref=""A1:{lastCol}{totalRows}""/>");
-
-            sb.Append(@"<sheetViews><sheetView tabSelected=""1"" workbookViewId=""0""><selection activeCell=""A1"" sqref=""A1""/></sheetView></sheetViews>");
-            sb.Append(@"<sheetFormatPr defaultRowHeight=""15""/>");
+            sb.Append(@"<worksheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"">");
             sb.Append(@"<sheetData>");
 
-            int currentRow = 1;
+            int rowNum = 1;
+            int colCount = dataTable.Columns.Count > 0 ? dataTable.Columns.Count : 1;
 
-            // Title row (row 1)
-            sb.Append($@"<row r=""{currentRow}"" ht=""20"">");
-            sb.Append($@"<c r=""A{currentRow}"" s=""1"" t=""inlineStr""><is><t>{EscapeXml(reportTitle)}</t></is></c>");
-            sb.Append(@"</row>");
-            currentRow++;
+            // Title row (if hasTitle)
+            if (hasTitle && !string.IsNullOrEmpty(reportTitle))
+            {
+                sb.Append($@"<row r=""{rowNum}"">");
+                int ssIndex = AddSharedString(sharedStrings, reportTitle);
+                sb.Append($@"<c r=""A{rowNum}"" t=""s"" s=""1""><v>{ssIndex}</v></c>");
+                sb.Append(@"</row>");
+                rowNum++;
 
-            // Empty row (row 2)
-            sb.Append($@"<row r=""{currentRow}""/>");
-            currentRow++;
+                // Empty row
+                sb.Append($@"<row r=""{rowNum}""/>");
+                rowNum++;
+            }
 
             if (dataTable.Columns.Count > 0)
             {
-                // Headers (row 3)
-                sb.Append($@"<row r=""{currentRow}"" ht=""18"">");
-                for (int i = 0; i < dataTable.Columns.Count; i++)
+                // Header row
+                sb.Append($@"<row r=""{rowNum}"">");
+                for (int c = 0; c < dataTable.Columns.Count; c++)
                 {
-                    string cellRef = GetExcelColumnName(i + 1) + currentRow;
-                    string columnName = dataTable.Columns[i].ColumnName;
-                    sb.Append($@"<c r=""{cellRef}"" s=""1"" t=""inlineStr""><is><t>{EscapeXml(columnName)}</t></is></c>");
+                    string colName = GetColName(c);
+                    int ssIndex = AddSharedString(sharedStrings, dataTable.Columns[c].ColumnName);
+                    sb.Append($@"<c r=""{colName}{rowNum}"" t=""s"" s=""1""><v>{ssIndex}</v></c>");
                 }
                 sb.Append(@"</row>");
-                currentRow++;
+                rowNum++;
 
                 // Data rows
-                for (int rowIndex = 0; rowIndex < dataTable.Rows.Count; rowIndex++)
+                foreach (DataRow row in dataTable.Rows)
                 {
-                    var row = dataTable.Rows[rowIndex];
-                    sb.Append($@"<row r=""{currentRow}"">");
-
-                    for (int colIndex = 0; colIndex < dataTable.Columns.Count; colIndex++)
+                    sb.Append($@"<row r=""{rowNum}"">");
+                    for (int c = 0; c < dataTable.Columns.Count; c++)
                     {
-                        string cellRef = GetExcelColumnName(colIndex + 1) + currentRow;
-                        object cellValue = row[colIndex];
+                        string colName = GetColName(c);
+                        object val = row[c];
 
-                        if (cellValue == null || cellValue == DBNull.Value)
+                        if (val == null || val == DBNull.Value)
                         {
-                            sb.Append($@"<c r=""{cellRef}"" t=""inlineStr""><is><t></t></is></c>");
+                            // Empty cell
+                            sb.Append($@"<c r=""{colName}{rowNum}""/>");
                         }
-                        else if (cellValue is decimal || cellValue is double || cellValue is float || cellValue is int || cellValue is long)
+                        else if (IsNumeric(val))
                         {
-                            sb.Append($@"<c r=""{cellRef}"" s=""2""><v>{cellValue}</v></c>");
+                            // Numeric value
+                            sb.Append($@"<c r=""{colName}{rowNum}""><v>{Convert.ToDecimal(val)}</v></c>");
                         }
                         else
                         {
-                            string strValue = cellValue.ToString();
-                            sb.Append($@"<c r=""{cellRef}"" t=""inlineStr""><is><t>{EscapeXml(strValue)}</t></is></c>");
+                            // String value
+                            int ssIndex = AddSharedString(sharedStrings, val.ToString());
+                            sb.Append($@"<c r=""{colName}{rowNum}"" t=""s""><v>{ssIndex}</v></c>");
                         }
                     }
-
                     sb.Append(@"</row>");
-                    currentRow++;
+                    rowNum++;
                 }
-            }
-            else
-            {
-                sb.Append($@"<row r=""{currentRow}""><c r=""A{currentRow}"" t=""inlineStr""><is><t>ไม่มีข้อมูล</t></is></c></row>");
             }
 
             sb.Append(@"</sheetData>");
 
-            // Add merge cells for title row
-            if (dataTable.Columns.Count > 1)
+            // Merge cells for title
+            if (hasTitle && !string.IsNullOrEmpty(reportTitle) && dataTable.Columns.Count > 1)
             {
-                sb.Append(@"<mergeCells count=""1"">");
-                sb.Append($@"<mergeCell ref=""A1:{GetExcelColumnName(dataTable.Columns.Count)}1""/>");
-                sb.Append(@"</mergeCells>");
+                string lastCol = GetColName(dataTable.Columns.Count - 1);
+                sb.Append($@"<mergeCells count=""1""><mergeCell ref=""A1:{lastCol}1""/></mergeCells>");
             }
 
             sb.Append(@"</worksheet>");
 
+            // Write worksheet
             File.WriteAllText(Path.Combine(xlWorksheetsDir, "sheet1.xml"), sb.ToString(), Encoding.UTF8);
+
+            // Write sharedStrings.xml
+            var ssSb = new StringBuilder();
+            ssSb.Append(@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>");
+            ssSb.Append($@"<sst xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" count=""{sharedStrings.Count}"" uniqueCount=""{sharedStrings.Count}"">");
+            foreach (string s in sharedStrings)
+            {
+                ssSb.Append($@"<si><t>{EscapeXml(s)}</t></si>");
+            }
+            ssSb.Append(@"</sst>");
+            File.WriteAllText(Path.Combine(xlDir, "sharedStrings.xml"), ssSb.ToString(), Encoding.UTF8);
         }
 
-        /// <summary>
-        /// Create worksheet without title row - headers start from row 1
-        /// </summary>
-        private static void CreateWorksheetNoTitle(string xlWorksheetsDir, DataTable dataTable)
+        private static int AddSharedString(System.Collections.Generic.List<string> list, string value)
         {
-            var sb = new StringBuilder();
-            sb.Append(@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>");
-            sb.Append(@"<worksheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" xmlns:r=""http://schemas.openxmlformats.org/officeDocument/2006/relationships"">");
-
-            // Calculate dimension
-            int totalRows = dataTable.Rows.Count + 1; // header + data
-            int totalCols = dataTable.Columns.Count > 0 ? dataTable.Columns.Count : 1;
-            string lastCol = GetExcelColumnName(totalCols);
-            sb.Append($@"<dimension ref=""A1:{lastCol}{totalRows}""/>");
-
-            sb.Append(@"<sheetViews><sheetView tabSelected=""1"" workbookViewId=""0""><selection activeCell=""A1"" sqref=""A1""/></sheetView></sheetViews>");
-            sb.Append(@"<sheetFormatPr defaultRowHeight=""15""/>");
-            sb.Append(@"<sheetData>");
-
-            int currentRow = 1;
-
-            if (dataTable.Columns.Count > 0)
-            {
-                // Headers (row 1)
-                sb.Append($@"<row r=""{currentRow}"" ht=""18"">");
-                for (int i = 0; i < dataTable.Columns.Count; i++)
-                {
-                    string cellRef = GetExcelColumnName(i + 1) + currentRow;
-                    string columnName = dataTable.Columns[i].ColumnName;
-                    sb.Append($@"<c r=""{cellRef}"" s=""1"" t=""inlineStr""><is><t>{EscapeXml(columnName)}</t></is></c>");
-                }
-                sb.Append(@"</row>");
-                currentRow++;
-
-                // Data rows
-                for (int rowIndex = 0; rowIndex < dataTable.Rows.Count; rowIndex++)
-                {
-                    var row = dataTable.Rows[rowIndex];
-                    sb.Append($@"<row r=""{currentRow}"">");
-
-                    for (int colIndex = 0; colIndex < dataTable.Columns.Count; colIndex++)
-                    {
-                        string cellRef = GetExcelColumnName(colIndex + 1) + currentRow;
-                        object cellValue = row[colIndex];
-
-                        if (cellValue == null || cellValue == DBNull.Value)
-                        {
-                            sb.Append($@"<c r=""{cellRef}"" t=""inlineStr""><is><t></t></is></c>");
-                        }
-                        else if (cellValue is decimal || cellValue is double || cellValue is float || cellValue is int || cellValue is long)
-                        {
-                            sb.Append($@"<c r=""{cellRef}"" s=""2""><v>{cellValue}</v></c>");
-                        }
-                        else
-                        {
-                            string strValue = cellValue.ToString();
-                            sb.Append($@"<c r=""{cellRef}"" t=""inlineStr""><is><t>{EscapeXml(strValue)}</t></is></c>");
-                        }
-                    }
-
-                    sb.Append(@"</row>");
-                    currentRow++;
-                }
-            }
-            else
-            {
-                sb.Append($@"<row r=""{currentRow}""><c r=""A{currentRow}"" t=""inlineStr""><is><t>ไม่มีข้อมูล</t></is></c></row>");
-            }
-
-            sb.Append(@"</sheetData>");
-            sb.Append(@"</worksheet>");
-
-            File.WriteAllText(Path.Combine(xlWorksheetsDir, "sheet1.xml"), sb.ToString(), Encoding.UTF8);
+            string val = value ?? "";
+            int index = list.IndexOf(val);
+            if (index >= 0) return index;
+            list.Add(val);
+            return list.Count - 1;
         }
 
-        private static string GetExcelColumnName(int columnNumber)
+        private static string GetColName(int colIndex)
         {
-            string columnName = "";
-            while (columnNumber > 0)
+            string result = "";
+            int n = colIndex + 1;
+            while (n > 0)
             {
-                int modulo = (columnNumber - 1) % 26;
-                columnName = Convert.ToChar('A' + modulo) + columnName;
-                columnNumber = (columnNumber - modulo) / 26;
+                n--;
+                result = (char)('A' + n % 26) + result;
+                n /= 26;
             }
-            return columnName;
+            return result;
+        }
+
+        private static bool IsNumeric(object val)
+        {
+            return val is decimal || val is double || val is float ||
+                   val is int || val is long || val is short ||
+                   val is byte || val is uint || val is ulong || val is ushort;
         }
 
         private static string EscapeXml(string input)
         {
             if (string.IsNullOrEmpty(input)) return "";
-            return input.Replace("&", "&amp;")
-                       .Replace("<", "&lt;")
-                       .Replace(">", "&gt;")
-                       .Replace("\"", "&quot;")
-                       .Replace("'", "&apos;");
+            return input
+                .Replace("&", "&amp;")
+                .Replace("<", "&lt;")
+                .Replace(">", "&gt;")
+                .Replace("\"", "&quot;")
+                .Replace("'", "&apos;");
         }
     }
 }
