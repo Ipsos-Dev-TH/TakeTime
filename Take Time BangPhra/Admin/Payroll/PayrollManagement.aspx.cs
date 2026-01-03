@@ -466,10 +466,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     return;
                 }
 
-                // Get SS ceiling based on period year
-                int thaiBuddhistYear = year + 543;
-                decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
-
                 // Create export DataTable with required columns
                 // Format: เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ
                 DataTable dtExport = new DataTable();
@@ -498,10 +494,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
 
-                    // Use TotalEarnings from database
+                    // Use TotalEarnings from database (actual total earnings, not capped)
                     decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
 
-                    // If TotalEarnings is 0, calculate from individual columns
+                    // If TotalEarnings is 0 or null, calculate from individual columns
                     if (totalEarnings <= 0)
                     {
                         decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
@@ -511,11 +507,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
                     }
 
-                    // Cap wage at SS ceiling based on period year
-                    decimal wageForSS = Math.Min(ssMaxBase, totalEarnings);
-
+                    // Use actual TotalEarnings for ค่าจ้าง column (not capped at SS ceiling)
                     // Add row to export table
-                    dtExport.Rows.Add(idCard, title, firstName, lastName, wageForSS, socialSecurity);
+                    dtExport.Rows.Add(idCard, title, firstName, lastName, totalEarnings, socialSecurity);
                 }
 
                 if (dtExport.Rows.Count == 0)
@@ -925,7 +919,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         /// <summary>
         /// Get payroll records with employee details for SS export
-        /// Includes IDCard, FirstName, LastName
+        /// Includes IDCard, FirstName, LastName, Title (if exists)
         /// </summary>
         private DataTable GetPayrollRecordsForSSExport(int periodId)
         {
@@ -936,13 +930,43 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
                 {
                     conn.Open();
-                    using (var cmd = new System.Data.SqlClient.SqlCommand(@"
-                        SELECT PR.*,
-                               A.IDCard, A.Title, A.FirstName, A.LastName
-                        FROM Payroll_Records PR
-                        INNER JOIN Admin A ON A.ID = PR.Admin_ID
-                        WHERE PR.PayrollPeriod_ID = @PeriodID
-                        ORDER BY PR.EmployeeName", conn))
+
+                    // Check if Title column exists in Admin table
+                    bool hasTitleColumn = false;
+                    using (var checkCmd = new System.Data.SqlClient.SqlCommand(@"
+                        SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'Admin' AND COLUMN_NAME = 'Title'", conn))
+                    {
+                        hasTitleColumn = Convert.ToInt32(checkCmd.ExecuteScalar()) > 0;
+                    }
+
+                    string sql;
+                    if (hasTitleColumn)
+                    {
+                        sql = @"
+                            SELECT PR.ID, PR.Admin_ID, PR.EmployeeName,
+                                   PR.BaseSalary, PR.OTAmount, PR.BonusAmount, PR.AllowanceAmount,
+                                   PR.TotalEarnings, PR.SocialSecurity, PR.NetSalary,
+                                   A.IDCard, ISNULL(A.Title, '') AS Title, A.FirstName, A.LastName
+                            FROM Payroll_Records PR
+                            INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                            WHERE PR.PayrollPeriod_ID = @PeriodID
+                            ORDER BY PR.EmployeeName";
+                    }
+                    else
+                    {
+                        sql = @"
+                            SELECT PR.ID, PR.Admin_ID, PR.EmployeeName,
+                                   PR.BaseSalary, PR.OTAmount, PR.BonusAmount, PR.AllowanceAmount,
+                                   PR.TotalEarnings, PR.SocialSecurity, PR.NetSalary,
+                                   A.IDCard, '' AS Title, A.FirstName, A.LastName
+                            FROM Payroll_Records PR
+                            INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                            WHERE PR.PayrollPeriod_ID = @PeriodID
+                            ORDER BY PR.EmployeeName";
+                    }
+
+                    using (var cmd = new System.Data.SqlClient.SqlCommand(sql, conn))
                     {
                         cmd.Parameters.AddWithValue("@PeriodID", periodId);
                         using (var adapter = new System.Data.SqlClient.SqlDataAdapter(cmd))
@@ -952,7 +976,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetPayrollRecordsForSSExport Error: {ex.Message}");
+            }
             return dt;
         }
 
