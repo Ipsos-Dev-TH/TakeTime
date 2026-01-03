@@ -457,29 +457,32 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 short year = Convert.ToInt16(ddlYear.SelectedValue);
                 byte month = Convert.ToByte(ddlMonth.SelectedValue);
 
-                // Get payroll records with employee details (IDCard, FirstName, LastName)
-                DataTable dt = GetPayrollRecordsForSSExport(currentPayrollPeriodId);
+                // Get payroll records with employee details
+                DataTable dtSource = GetPayrollRecordsForSSExport(currentPayrollPeriodId);
 
-                if (dt == null || dt.Rows.Count == 0)
+                if (dtSource == null || dtSource.Rows.Count == 0)
                 {
                     ShowMessage("ไม่มีข้อมูลสำหรับ Export", "error");
                     return;
                 }
 
-                // Generate CSV for Social Security submission
-                // Format: เลขประจำตัวประชาชน,ชื่อ,นามสกุล,ค่าจ้าง,เงินสมทบผู้ประกันตน,เงินสมทบนายจ้าง
-                StringBuilder csv = new StringBuilder();
-                csv.AppendLine("เลขประจำตัวประชาชน,ชื่อ,นามสกุล,ค่าจ้าง,เงินสมทบผู้ประกันตน,เงินสมทบนายจ้าง");
-
-                int exportedCount = 0;
-                int skippedCount = 0;
-
                 // Get SS ceiling based on period year
                 int thaiBuddhistYear = year + 543;
                 decimal ssMaxBase = HRConfiguration.GetSocialSecurityMaxBaseByYear(thaiBuddhistYear);
-                decimal ssMaxDeduction = HRConfiguration.GetSocialSecurityMaxDeductionByYear(thaiBuddhistYear);
 
-                foreach (DataRow row in dt.Rows)
+                // Create export DataTable with required columns
+                // Format: เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ
+                DataTable dtExport = new DataTable();
+                dtExport.Columns.Add("เลขประจำตัวประชาชน", typeof(string));
+                dtExport.Columns.Add("คำนำหน้าชื่อ", typeof(string));
+                dtExport.Columns.Add("ชื่อผู้ประกันตน", typeof(string));
+                dtExport.Columns.Add("นามสกุลผู้ประกันตน", typeof(string));
+                dtExport.Columns.Add("ค่าจ้าง", typeof(decimal));
+                dtExport.Columns.Add("จำนวนเงินสมทบ", typeof(decimal));
+
+                int skippedCount = 0;
+
+                foreach (DataRow row in dtSource.Rows)
                 {
                     string idCard = row["IDCard"]?.ToString()?.Trim()?.Replace(" ", "").Replace("-", "") ?? "";
                     decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
@@ -491,13 +494,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         continue;
                     }
 
+                    string title = ""; // คำนำหน้าชื่อ - ยังไม่มีในระบบ
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
 
-                    // Use TotalEarnings from database (computed column) - this is the actual total
+                    // Use TotalEarnings from database
                     decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
 
-                    // If TotalEarnings is 0, calculate from individual columns as fallback
+                    // If TotalEarnings is 0, calculate from individual columns
                     if (totalEarnings <= 0)
                     {
                         decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
@@ -510,31 +514,19 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // Cap wage at SS ceiling based on period year
                     decimal wageForSS = Math.Min(ssMaxBase, totalEarnings);
 
-                    // Calculate contribution (5% of wage, capped at max deduction)
-                    decimal employeeContribution = Math.Min(Math.Round(wageForSS * 0.05m, 0), ssMaxDeduction);
-                    decimal employerContribution = employeeContribution; // Same as employee
-
-                    csv.AppendLine($"{idCard},{firstName},{lastName},{wageForSS:F0},{employeeContribution:F0},{employerContribution:F0}");
-                    exportedCount++;
+                    // Add row to export table
+                    dtExport.Rows.Add(idCard, title, firstName, lastName, wageForSS, socialSecurity);
                 }
 
-                if (exportedCount == 0)
+                if (dtExport.Rows.Count == 0)
                 {
                     ShowMessage($"ไม่มีข้อมูลสำหรับ Export (ข้าม {skippedCount} รายการที่ไม่มีเลขบัตรประชาชนหรือ ปกส. = 0)", "error");
                     return;
                 }
 
-                // Send file to browser
-                string fileName = $"SocialSecurity_{year + 543}_{month:D2}.csv";
-                byte[] preamble = Encoding.UTF8.GetPreamble();
-                byte[] content = Encoding.UTF8.GetBytes(csv.ToString());
-                byte[] bytes = preamble.Concat(content).ToArray();
-
-                Response.Clear();
-                Response.ContentType = "text/csv";
-                Response.AddHeader("Content-Disposition", $"attachment; filename=\"{fileName}\"");
-                Response.BinaryWrite(bytes);
-                Response.End();
+                // Export to Excel file with sheet name "000000"
+                string fileName = $"SocialSecurity_{year + 543}_{month:D2}";
+                ExcelCreator.CreateExcelFileNoTitle(dtExport, fileName, "000000", Response);
             }
             catch (System.Threading.ThreadAbortException)
             {

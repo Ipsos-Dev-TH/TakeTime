@@ -12,6 +12,11 @@ namespace Take_Time_BangPhra.Admin
     {
         public static void CreateExcelFile(DataTable dataTable, string fileName, string reportTitle, HttpResponse response)
         {
+            CreateExcelFile(dataTable, fileName, reportTitle, "รายงาน", response);
+        }
+
+        public static void CreateExcelFile(DataTable dataTable, string fileName, string reportTitle, string sheetName, HttpResponse response)
+        {
             try
             {
                 response.Clear();
@@ -27,7 +32,7 @@ namespace Take_Time_BangPhra.Admin
                 try
                 {
                     // สร้างโครงสร้างไฟล์ Excel
-                    CreateExcelFileStructure(tempDir, dataTable, reportTitle);
+                    CreateExcelFileStructure(tempDir, dataTable, reportTitle, sheetName);
 
                     // สร้างไฟล์ .xlsx (ซึ่งคือ zip archive)
                     string tempExcelPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.xlsx");
@@ -55,7 +60,49 @@ namespace Take_Time_BangPhra.Admin
             }
         }
 
-        private static void CreateExcelFileStructure(string tempDir, DataTable dataTable, string reportTitle)
+        /// <summary>
+        /// Create Excel file without report title row (data starts from row 1)
+        /// </summary>
+        public static void CreateExcelFileNoTitle(DataTable dataTable, string fileName, string sheetName, HttpResponse response)
+        {
+            try
+            {
+                response.Clear();
+                response.Buffer = true;
+                response.AddHeader("content-disposition", $"attachment;filename={fileName}.xlsx");
+                response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                response.Charset = "UTF-8";
+
+                string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+                Directory.CreateDirectory(tempDir);
+
+                try
+                {
+                    CreateExcelFileStructureNoTitle(tempDir, dataTable, sheetName);
+
+                    string tempExcelPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.xlsx");
+                    ZipFile.CreateFromDirectory(tempDir, tempExcelPath);
+
+                    response.TransmitFile(tempExcelPath);
+                    response.Flush();
+
+                    File.Delete(tempExcelPath);
+                }
+                finally
+                {
+                    if (Directory.Exists(tempDir))
+                    {
+                        Directory.Delete(tempDir, true);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"เกิดข้อผิดพลาดในการสร้างไฟล์ Excel: {ex.Message}", ex);
+            }
+        }
+
+        private static void CreateExcelFileStructure(string tempDir, DataTable dataTable, string reportTitle, string sheetName = "รายงาน")
         {
             // สร้าง directories ที่จำเป็น
             string relsDir = Path.Combine(tempDir, "_rels");
@@ -80,10 +127,31 @@ namespace Take_Time_BangPhra.Admin
             CreateDocProps(docPropsDir);
 
             // สร้าง workbook และ styles
-            CreateWorkbookAndStyles(xlDir);
+            CreateWorkbookAndStyles(xlDir, sheetName);
 
             // สร้าง worksheet พร้อมข้อมูล
             CreateWorksheet(xlWorksheetsDir, dataTable, reportTitle);
+        }
+
+        private static void CreateExcelFileStructureNoTitle(string tempDir, DataTable dataTable, string sheetName)
+        {
+            string relsDir = Path.Combine(tempDir, "_rels");
+            string docPropsDir = Path.Combine(tempDir, "docProps");
+            string xlDir = Path.Combine(tempDir, "xl");
+            string xlRelsDir = Path.Combine(xlDir, "_rels");
+            string xlWorksheetsDir = Path.Combine(xlDir, "worksheets");
+
+            Directory.CreateDirectory(relsDir);
+            Directory.CreateDirectory(docPropsDir);
+            Directory.CreateDirectory(xlDir);
+            Directory.CreateDirectory(xlRelsDir);
+            Directory.CreateDirectory(xlWorksheetsDir);
+
+            CreateContentTypesXml(tempDir);
+            CreateRelsFiles(relsDir, xlRelsDir);
+            CreateDocProps(docPropsDir);
+            CreateWorkbookAndStyles(xlDir, sheetName);
+            CreateWorksheetNoTitle(xlWorksheetsDir, dataTable);
         }
 
         private static void CreateContentTypesXml(string tempDir)
@@ -168,10 +236,10 @@ namespace Take_Time_BangPhra.Admin
             File.WriteAllText(Path.Combine(docPropsDir, "core.xml"), coreXml, Encoding.UTF8);
         }
 
-        private static void CreateWorkbookAndStyles(string xlDir)
+        private static void CreateWorkbookAndStyles(string xlDir, string sheetName = "รายงาน")
         {
             // workbook.xml
-            string workbookXml = @"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+            string workbookXml = $@"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
 <workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
     <fileVersion appName='xl' lastEdited='5' lowestEdited='5' rupBuild='9303'/>
     <workbookPr defaultThemeVersion='124226'/>
@@ -179,7 +247,7 @@ namespace Take_Time_BangPhra.Admin
         <workbookView xWindow='480' yWindow='60' windowWidth='18195' windowHeight='8505'/>
     </bookViews>
     <sheets>
-        <sheet name='รายงาน' sheetId='1' r:id='rId1'/>
+        <sheet name='{EscapeXml(sheetName)}' sheetId='1' r:id='rId1'/>
     </sheets>
     <calcPr calcId='145621'/>
 </workbook>";
@@ -334,6 +402,78 @@ namespace Take_Time_BangPhra.Admin
                 sb.AppendLine(@"</mergeCells>");
             }
 
+            sb.AppendLine(@"</worksheet>");
+
+            File.WriteAllText(Path.Combine(xlWorksheetsDir, "sheet1.xml"), sb.ToString(), Encoding.UTF8);
+        }
+
+        /// <summary>
+        /// Create worksheet without title row - headers start from row 1
+        /// </summary>
+        private static void CreateWorksheetNoTitle(string xlWorksheetsDir, DataTable dataTable)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>");
+            sb.AppendLine(@"<worksheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" xmlns:r=""http://schemas.openxmlformats.org/officeDocument/2006/relationships"">");
+
+            sb.AppendLine(@"<sheetViews>");
+            sb.AppendLine(@"<sheetView tabSelected=""1"" workbookViewId=""0"">");
+            sb.AppendLine(@"<selection activeCell=""A1"" sqref=""A1""/>");
+            sb.AppendLine(@"</sheetView>");
+            sb.AppendLine(@"</sheetViews>");
+
+            sb.AppendLine(@"<sheetFormatPr defaultRowHeight=""15""/>");
+            sb.AppendLine(@"<sheetData>");
+
+            int currentRow = 1;
+
+            if (dataTable.Rows.Count > 0 && dataTable.Columns.Count > 0)
+            {
+                // Headers (row 1)
+                sb.AppendLine($@"<row r=""{currentRow}"" ht=""18"">");
+                for (int i = 0; i < dataTable.Columns.Count; i++)
+                {
+                    string cellRef = GetExcelColumnName(i + 1) + currentRow;
+                    string columnName = dataTable.Columns[i].ColumnName;
+                    sb.AppendLine($@"<c r=""{cellRef}"" s=""1"" t=""inlineStr""><is><t>{EscapeXml(columnName)}</t></is></c>");
+                }
+                sb.AppendLine(@"</row>");
+                currentRow++;
+
+                // Data rows
+                for (int rowIndex = 0; rowIndex < dataTable.Rows.Count; rowIndex++)
+                {
+                    var row = dataTable.Rows[rowIndex];
+                    sb.AppendLine($@"<row r=""{currentRow}"">");
+
+                    for (int colIndex = 0; colIndex < dataTable.Columns.Count; colIndex++)
+                    {
+                        string value = row[colIndex]?.ToString() ?? "";
+                        string cellRef = GetExcelColumnName(colIndex + 1) + currentRow;
+
+                        // ตรวจสอบว่าเป็นตัวเลขหรือไม่
+                        if (decimal.TryParse(value.Replace(",", ""), out decimal numericValue) && numericValue != 0)
+                        {
+                            sb.AppendLine($@"<c r=""{cellRef}"" s=""2""><v>{numericValue}</v></c>");
+                        }
+                        else
+                        {
+                            sb.AppendLine($@"<c r=""{cellRef}"" t=""inlineStr""><is><t>{EscapeXml(value)}</t></is></c>");
+                        }
+                    }
+
+                    sb.AppendLine(@"</row>");
+                    currentRow++;
+                }
+            }
+            else
+            {
+                sb.AppendLine($@"<row r=""{currentRow}"">");
+                sb.AppendLine($@"<c r=""A{currentRow}"" t=""inlineStr""><is><t>ไม่มีข้อมูล</t></is></c>");
+                sb.AppendLine(@"</row>");
+            }
+
+            sb.AppendLine(@"</sheetData>");
             sb.AppendLine(@"</worksheet>");
 
             File.WriteAllText(Path.Combine(xlWorksheetsDir, "sheet1.xml"), sb.ToString(), Encoding.UTF8);
