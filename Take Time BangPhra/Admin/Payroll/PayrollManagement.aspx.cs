@@ -471,23 +471,39 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 StringBuilder csv = new StringBuilder();
                 csv.AppendLine("เลขประจำตัวประชาชน,คำนำหน้าชื่อ,ชื่อผู้ประกันตน,นามสกุลผู้ประกันตน,ค่าจ้าง,จำนวนเงินสมทบ");
 
+                int exportedCount = 0;
+                int skippedCount = 0;
+
                 foreach (DataRow row in dt.Rows)
                 {
-                    string idCard = row["IDCard"]?.ToString() ?? "";
+                    string idCard = row["IDCard"]?.ToString()?.Trim() ?? "";
+                    decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
+
+                    // Skip if no ID card or social security is 0
+                    if (string.IsNullOrEmpty(idCard) || socialSecurity <= 0)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
 
                     // คำนำหน้าชื่อ - ปล่อยว่างไว้ก่อน (ยังไม่มี column Title ในตาราง Admin)
                     string title = "";
 
-                    // Calculate total earnings for SS base
-                    decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
-                    decimal otAmount = row["OTAmount"] != DBNull.Value ? Convert.ToDecimal(row["OTAmount"]) : 0;
-                    decimal bonusAmount = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
-                    decimal allowanceAmount = row["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(row["AllowanceAmount"]) : 0;
-                    decimal totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
+                    // Use TotalEarnings from database (computed column) - this is the actual total
+                    decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
 
-                    decimal socialSecurity = row["SocialSecurity"] != DBNull.Value ? Convert.ToDecimal(row["SocialSecurity"]) : 0;
+                    // If TotalEarnings is 0, calculate from individual columns as fallback
+                    if (totalEarnings <= 0)
+                    {
+                        decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
+                        decimal otAmount = row["OTAmount"] != DBNull.Value ? Convert.ToDecimal(row["OTAmount"]) : 0;
+                        decimal bonusAmount = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
+                        decimal allowanceAmount = row["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(row["AllowanceAmount"]) : 0;
+                        totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
+                    }
 
                     // Cap at SS ceiling based on period year (not current date)
                     int thaiBuddhistYear = year + 543;
@@ -495,6 +511,13 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal ssBase = Math.Min(ssMaxBase, totalEarnings);
 
                     csv.AppendLine($"{idCard},{title},{firstName},{lastName},{ssBase:F0},{socialSecurity:F0}");
+                    exportedCount++;
+                }
+
+                if (exportedCount == 0)
+                {
+                    ShowMessage($"ไม่มีข้อมูลสำหรับ Export (ข้าม {skippedCount} รายการที่ไม่มีเลขบัตรประชาชนหรือ ปกส. = 0)", "error");
+                    return;
                 }
 
                 // Send file to browser
