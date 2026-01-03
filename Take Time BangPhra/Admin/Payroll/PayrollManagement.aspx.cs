@@ -474,9 +474,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 foreach (DataRow row in dt.Rows)
                 {
                     string idCard = row["IDCard"]?.ToString() ?? "";
-                    string title = row["Title"]?.ToString() ?? "";
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
+
+                    // คำนำหน้าชื่อ - ปล่อยว่างไว้ก่อน (ยังไม่มี column Title ในตาราง Admin)
+                    string title = "";
 
                     // Calculate total earnings for SS base
                     decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
@@ -904,7 +906,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         /// <summary>
         /// Get payroll records with employee details for SS export
-        /// Includes IDCard, Title, FirstName, LastName
+        /// Includes IDCard, FirstName, LastName
         /// </summary>
         private DataTable GetPayrollRecordsForSSExport(int periodId)
         {
@@ -917,7 +919,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     conn.Open();
                     using (var cmd = new System.Data.SqlClient.SqlCommand(@"
                         SELECT PR.*,
-                               A.IDCard, A.Title, A.FirstName, A.LastName
+                               A.IDCard, A.FirstName, A.LastName
                         FROM Payroll_Records PR
                         INNER JOIN Admin A ON A.ID = PR.Admin_ID
                         WHERE PR.PayrollPeriod_ID = @PeriodID
