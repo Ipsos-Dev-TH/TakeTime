@@ -254,9 +254,6 @@
                 <asp:Button ID="btnExportSS" runat="server" Text="&#128190; Export ประกันสังคม" CssClass="btn btn-export" OnClick="btnExportSS_Click" />
             </div>
 
-            <div class="ss-info">
-                <strong>&#9432; ประกันสังคม:</strong> หักพนักงาน 5% ของเงินเดือน (สูงสุด 750 บาท) | ฐานค่าจ้างขั้นต่ำ 1,650 บาท สูงสุด 15,000 บาท
-            </div>
         </asp:Panel>
 
         <!-- Payroll Records -->
