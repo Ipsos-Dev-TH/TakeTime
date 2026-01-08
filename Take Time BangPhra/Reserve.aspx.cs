@@ -2375,6 +2375,7 @@ namespace Take_Time_BangPhra
                                                 // ในส่วนของ command == "edit" ให้แทนที่ส่วนตรวจสอบการเปลี่ยนแปลงด้วย:
 
                                                 bool hasAnyChanges = false;
+                                                bool hasRoomChange = false; // ส่ง Telegram เฉพาะเมื่อมีการเปลี่ยนแปลงห้องพัก
                                                 StringBuilder changeDetails = new StringBuilder();
 
                                                 // 1. ตรวจสอบการเปลี่ยนแปลงข้อมูลลูกค้า
@@ -2477,6 +2478,7 @@ namespace Take_Time_BangPhra
                                                 if (!roomsIdentical)
                                                 {
                                                     hasAnyChanges = true;
+                                                    hasRoomChange = true; // ✅ มีการเปลี่ยนแปลงห้องพัก - ส่ง Telegram
                                                     changeDetails.AppendLine("🏨 การเปลี่ยนแปลงห้องพัก:");
 
                                                     // หาห้องที่เพิ่ม
@@ -2565,8 +2567,8 @@ namespace Take_Time_BangPhra
                                                     changeDetails.AppendLine($"💬 เปลี่ยนหมายเหตุ: {oldRemark} → {TextBox6.Text}");
                                                 }
 
-                                                // ส่งข้อความถ้ามีการเปลี่ยนแปลงใดๆ
-                                                if (hasAnyChanges)
+                                                // ส่งข้อความ Telegram เฉพาะเมื่อมีการเปลี่ยนแปลงห้องพัก
+                                                if (hasRoomChange)
                                                 {
                                                     string message = $@"✏️ ═══ แก้ไขการจอง ═══
 
