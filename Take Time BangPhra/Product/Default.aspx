@@ -323,8 +323,11 @@
 
     <!-- Scanner Modal -->
     <div id="scannerModal" class="scanner-modal">
-        <div class="scanner-container">
-            <video id="scannerVideo" autoplay playsinline class="scanner-video"></video>
+        <div id="scannerContainer" class="scanner-container">
+            <!-- QuaggaJS will create video/canvas here -->
+        </div>
+        <div id="scannerStatus" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #4CAF50; padding: 10px 20px; border-radius: 20px; font-size: 14px; z-index: 10000;">
+            📷 กำลังค้นหา Barcode...
         </div>
         <button id="closeScanner" class="scanner-close">❌ ปิดกล้อง</button>
     </div>
@@ -339,106 +342,151 @@
             }
         }
 
-        // Barcode Scanner
+        // Barcode Scanner - Fixed Version
         let quaggaInitialized = false;
-        let mediaStream = null;
+        let scannerActive = false;
 
         document.getElementById('<%= btnScanBarcode.ClientID %>').addEventListener('click', function () {
+            if (scannerActive) return;
+            scannerActive = true;
+
             const modal = document.getElementById('scannerModal');
-            const video = document.getElementById('scannerVideo');
+            const container = document.getElementById('scannerContainer');
+            const status = document.getElementById('scannerStatus');
+
             modal.style.display = 'block';
+            status.textContent = '📷 กำลังเปิดกล้อง...';
+            status.style.color = '#FFC107';
 
-            navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
+            // Clear previous content
+            container.innerHTML = '';
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: container,
+                    constraints: {
+                        facingMode: "environment",
+                        width: { min: 640, ideal: 1280, max: 1920 },
+                        height: { min: 480, ideal: 720, max: 1080 },
+                        aspectRatio: { min: 1, max: 2 }
+                    },
+                    area: {
+                        top: "20%",
+                        right: "10%",
+                        left: "10%",
+                        bottom: "20%"
+                    }
+                },
+                locator: {
+                    patchSize: "medium",
+                    halfSample: true
+                },
+                numOfWorkers: navigator.hardwareConcurrency || 4,
+                frequency: 10,
+                decoder: {
+                    readers: [
+                        "ean_reader",
+                        "ean_8_reader",
+                        "code_128_reader",
+                        "code_39_reader",
+                        "upc_reader",
+                        "upc_e_reader"
+                    ],
+                    multiple: false
+                },
+                locate: true
+            }, function (err) {
+                if (err) {
+                    console.error("Quagga init error:", err);
+                    status.textContent = '❌ ไม่สามารถเปิดกล้องได้: ' + err.message;
+                    status.style.color = '#f44336';
+                    setTimeout(stopScanner, 2000);
+                    return;
                 }
-            }).then(function (stream) {
-                video.srcObject = stream;
-                mediaStream = stream;
 
-                video.onloadedmetadata = function () {
-                    video.play().catch(err => {
-                        console.error("Video play error:", err);
-                        alert("ไม่สามารถเปิดกล้องได้: " + err.message);
-                    });
-                };
-
-                initializeQuagga();
-
-            }).catch(function (err) {
-                console.error("Camera access error:", err);
-                alert("ไม่สามารถเข้าถึงกล้องได้: " + err.message);
-                modal.style.display = 'none';
+                quaggaInitialized = true;
+                Quagga.start();
+                status.textContent = '📷 กำลังค้นหา Barcode... (ส่อง Barcode ให้อยู่ในกรอบ)';
+                status.style.color = '#4CAF50';
+                console.log("Quagga started successfully");
             });
 
-            function initializeQuagga() {
-                if (quaggaInitialized) {
-                    Quagga.stop();
-                }
+            // Draw detection area
+            Quagga.onProcessed(function (result) {
+                var drawingCtx = Quagga.canvas.ctx.overlay;
+                var drawingCanvas = Quagga.canvas.dom.overlay;
 
-                Quagga.init({
-                    inputStream: {
-                        name: "Live",
-                        type: "LiveStream",
-                        target: video,
-                        constraints: {
-                            facingMode: "environment",
-                            width: { min: 640 },
-                            height: { min: 480 }
-                        },
-                    },
-                    decoder: {
-                        readers: ["code_128_reader", "ean_reader", "upc_reader"],
-                    },
-                    locate: true,
-                    numOfWorkers: 2,
-                    frequency: 10
-                }, function (err) {
-                    if (err) {
-                        console.error("Quagga init error:", err);
-                        stopScanner();
-                        return;
+                if (result) {
+                    if (result.boxes) {
+                        drawingCtx.clearRect(0, 0, parseInt(drawingCanvas.getAttribute("width")), parseInt(drawingCanvas.getAttribute("height")));
+                        result.boxes.filter(function (box) {
+                            return box !== result.box;
+                        }).forEach(function (box) {
+                            Quagga.ImageDebug.drawPath(box, { x: 0, y: 1 }, drawingCtx, { color: "yellow", lineWidth: 2 });
+                        });
                     }
 
-                    quaggaInitialized = true;
-                    Quagga.start();
-                });
+                    if (result.box) {
+                        Quagga.ImageDebug.drawPath(result.box, { x: 0, y: 1 }, drawingCtx, { color: "#00F", lineWidth: 2 });
+                    }
 
-                Quagga.onDetected(function (result) {
-                    if (result.codeResult) {
-                        const code = result.codeResult.code;
-                        document.getElementById('<%= TextBox1.ClientID %>').value = code;
+                    if (result.codeResult && result.codeResult.code) {
+                        Quagga.ImageDebug.drawPath(result.line, { x: 'x', y: 'y' }, drawingCtx, { color: 'lime', lineWidth: 3 });
+                    }
+                }
+            });
 
-                        // Play success sound
-                        const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3');
-                        audio.play().catch(e => console.log("Audio play error:", e));
+            // On barcode detected
+            Quagga.onDetected(function (result) {
+                if (result && result.codeResult && result.codeResult.code) {
+                    const code = result.codeResult.code;
+                    const format = result.codeResult.format;
 
+                    console.log("Barcode detected:", code, "Format:", format);
+
+                    status.textContent = '✅ พบ Barcode: ' + code;
+                    status.style.color = '#4CAF50';
+
+                    // Fill the textbox
+                    document.getElementById('<%= TextBox1.ClientID %>').value = code;
+
+                    // Play success sound
+                    try {
+                        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1sbJaQo5N6YWJ0lJOUlH50ZnKJhZqWlYN0Znd3e4KDmJmXjHlxe3p6f4GGiouJhYB8e35+gIOGiYuKiIaCgYGCgYOFhoaFhYSDgoKCgoKDg4ODg4OCgoKCgoKCgoKCgoKCgoKCgoKCgoKC');
+                        audio.play().catch(e => {});
+                    } catch(e) {}
+
+                    // Stop scanner and submit
+                    setTimeout(function() {
                         stopScanner();
                         __doPostBack('<%= TextBox1.UniqueID %>', '');
-                    }
-                });
-            }
-
-            document.getElementById('closeScanner').addEventListener('click', stopScanner);
-
-            function stopScanner() {
-                if (quaggaInitialized) {
-                    Quagga.stop();
-                    quaggaInitialized = false;
+                    }, 500);
                 }
-                if (mediaStream) {
-                    mediaStream.getTracks().forEach(track => track.stop());
-                    mediaStream = null;
-                }
-                const video = document.getElementById('scannerVideo');
-                if (video) {
-                    video.srcObject = null;
-                }
-                modal.style.display = 'none';
-            }
+            });
         });
+
+        document.getElementById('closeScanner').addEventListener('click', stopScanner);
+
+        function stopScanner() {
+            if (quaggaInitialized) {
+                try {
+                    Quagga.stop();
+                } catch(e) {
+                    console.log("Quagga stop error:", e);
+                }
+                quaggaInitialized = false;
+            }
+
+            const modal = document.getElementById('scannerModal');
+            const container = document.getElementById('scannerContainer');
+
+            if (modal) modal.style.display = 'none';
+            if (container) container.innerHTML = '';
+
+            scannerActive = false;
+        }
 
         // Mobile table scroll helper
         document.addEventListener('DOMContentLoaded', function() {
