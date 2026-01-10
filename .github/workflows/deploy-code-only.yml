@@ -128,7 +128,7 @@ jobs:
     name: Deploy to IIS
     needs: build
     runs-on: self-hosted
-    environment: production
+    # environment: production  # Temporarily disabled for testing from feature branches
 
     steps:
       - name: Download Build Artifact
