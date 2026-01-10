@@ -439,6 +439,29 @@
                 modal.style.display = 'none';
             }
         });
+
+        // Mobile table scroll helper
+        document.addEventListener('DOMContentLoaded', function() {
+            var tableResponsive = document.querySelectorAll('.table-responsive');
+            tableResponsive.forEach(function(el) {
+                el.addEventListener('scroll', function() {
+                    if (this.scrollLeft > 10) {
+                        this.classList.add('scrolled');
+                    } else {
+                        this.classList.remove('scrolled');
+                    }
+                });
+
+                // Touch event handling for better mobile scroll
+                el.addEventListener('touchstart', function(e) {
+                    this.classList.add('touching');
+                }, { passive: true });
+
+                el.addEventListener('touchend', function(e) {
+                    this.classList.remove('touching');
+                }, { passive: true });
+            });
+        });
     </script>
 
     <asp:Literal ID="Literal1" runat="server"></asp:Literal>

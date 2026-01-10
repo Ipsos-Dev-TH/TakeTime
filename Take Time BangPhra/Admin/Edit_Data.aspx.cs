@@ -102,8 +102,12 @@ namespace Take_Time_BangPhra.Admin
                         GridView2.DataBind();
 
                         // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                        string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                            "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                        string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                            "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                            "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                            "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                            "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                            "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
                         if (!allowedTables.Contains(data))
                         {
                             Response.Redirect("/Default");
@@ -119,8 +123,12 @@ namespace Take_Time_BangPhra.Admin
                         GridView2.Visible = false;
 
                         // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                        string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                            "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                        string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                            "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                            "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                            "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                            "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                            "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
                         if (!allowedTables.Contains(data))
                         {
                             Response.Redirect("/Default");
@@ -196,8 +204,12 @@ namespace Take_Time_BangPhra.Admin
             else if (1 == 1)
             {
                 // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                    "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+                string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                    "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                    "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                    "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                    "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                    "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
                 if (!allowedTables.Contains(data))
                 {
                     Response.Redirect("/Default");
@@ -260,8 +272,12 @@ namespace Take_Time_BangPhra.Admin
         protected void GridView1_RowUpdating(object sender, GridViewUpdateEventArgs e)
         {
             // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
             if (!allowedTables.Contains(data))
             {
                 Response.Redirect("/Default");
@@ -317,8 +333,12 @@ namespace Take_Time_BangPhra.Admin
         protected void GridView1_RowDeleting(object sender, GridViewDeleteEventArgs e)
         {
             // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
             if (!allowedTables.Contains(data))
             {
                 Response.Redirect("/Default");
@@ -346,8 +366,12 @@ namespace Take_Time_BangPhra.Admin
         protected void Button1_Click(object sender, EventArgs e)
         {
             // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation_RatePlan", "Supplier", "Supplier_Type", "Supplier_Contact",
-                "Accommodation_Type", "Accommodation", "Account_ProductType", "Account_Vat_Type" };
+            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
+                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
+                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
+                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
+                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
             if (!allowedTables.Contains(data))
             {
                 Response.Redirect("/Default");

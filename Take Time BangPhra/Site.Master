@@ -585,6 +585,9 @@
                                                 <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
                                                     <i class="fas fa-trophy"></i> Loyalty Dashboard
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
+                                                    <i class="fas fa-star"></i> Review Management
+                                                </a></li>
                                             </ul>
                                         </div>
 
@@ -613,9 +616,6 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
-                                                        <i class="fas fa-star"></i> Review Management
                                                     </a></li>
                                                     <li><a runat="server" href="~/Account/TierBenefitsManagement">
                                                         <i class="fas fa-crown"></i> Tier Benefits
