@@ -447,42 +447,76 @@ textarea.form-control {
 
 /* Mobile scroll indicator and fixes */
 @media (max-width: 768px) {
+    /* Fix parent containers that might block scroll */
+    .product-card-body,
+    .product-form {
+        overflow: visible !important;
+    }
+
     .table-responsive {
         position: relative;
-        margin: 0 -15px;
-        padding: 0 15px;
+        margin: 0 -20px;
+        padding: 0;
+        width: calc(100% + 40px);
         /* Force horizontal scroll on mobile */
         overflow-x: scroll !important;
         overflow-y: visible !important;
         /* iOS specific fix */
         -webkit-overflow-scrolling: touch !important;
         touch-action: pan-x pan-y !important;
+        /* Prevent any blocking */
+        z-index: 1;
+    }
+
+    .table-responsive::before {
+        content: '👆 เลื่อนซ้าย-ขวา';
+        display: block;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #fff;
+        background: var(--product-primary);
+        position: sticky;
+        left: 0;
+        right: 0;
+        z-index: 10;
     }
 
     .table-responsive::after {
-        content: '← เลื่อนซ้าย-ขวาเพื่อดูข้อมูล →';
-        display: block;
-        text-align: center;
-        padding: 10px;
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--product-primary);
-        background: linear-gradient(to right, #fff3e0, #ffe0b2, #fff3e0);
-        border-radius: 0 0 var(--product-radius) var(--product-radius);
-        position: sticky;
-        left: 0;
-    }
-
-    .table-responsive.scrolled::after {
         display: none;
     }
 
     /* Ensure table inside is scrollable */
     .table-responsive > table,
-    .table-responsive > .product-table {
-        min-width: 700px;
+    .table-responsive > .product-table,
+    .table-responsive .product-table {
+        min-width: 650px !important;
         margin: 0;
         table-layout: auto;
+    }
+
+    /* Make action buttons more compact on mobile */
+    .product-table .actions {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+        flex-wrap: nowrap;
+        min-width: 120px;
+    }
+
+    .product-table .actions .btn {
+        min-width: 36px !important;
+        min-height: 36px !important;
+        padding: 6px !important;
+        font-size: 14px !important;
+    }
+
+    /* Reduce column padding on mobile */
+    .product-table td,
+    .product-table th {
+        padding: 10px 8px !important;
+        white-space: nowrap;
     }
 }
 
