@@ -593,8 +593,9 @@ public class LeaveService
 
                     try
                     {
-                        // Generate request number
-                        string requestNumber = "LR-" + DateTime.Now.ToString("yyyyMMdd") + "-" + adminId + "-" + DateTime.Now.ToString("HHmmss");
+                        // Generate request number (max 20 chars to fit NVARCHAR(20))
+                        // Format: LR-YYMMDD-ID-SS (e.g., LR-260113-12-53)
+                        string requestNumber = "LR-" + DateTime.Now.ToString("yyMMdd") + "-" + adminId + "-" + DateTime.Now.ToString("ss");
 
                         // Get leave type details
                         cmd.CommandText = @"
@@ -669,7 +670,17 @@ public class LeaveService
                         cmd.Parameters.AddWithValue("@StartDate", startDate);
                         cmd.Parameters.AddWithValue("@EndDate", endDate);
                         cmd.Parameters.AddWithValue("@TotalDays", totalDays);
-                        cmd.Parameters.AddWithValue("@Reason", reason ?? (object)DBNull.Value);
+
+                        // Handle Reason with proper NVARCHAR type and truncation (schema allows 1000 chars)
+                        string reasonTruncated = reason;
+                        if (!string.IsNullOrEmpty(reason) && reason.Length > 1000)
+                        {
+                            reasonTruncated = reason.Substring(0, 1000);
+                        }
+                        var reasonParam = new SqlParameter("@Reason", SqlDbType.NVarChar, 1000);
+                        reasonParam.Value = string.IsNullOrEmpty(reasonTruncated) ? (object)DBNull.Value : reasonTruncated;
+                        cmd.Parameters.Add(reasonParam);
+
                         cmd.Parameters.AddWithValue("@DeductSalary", deductSalary);
                         cmd.Parameters.AddWithValue("@DeductionAmount", deductionAmount);
                         cmd.Parameters.AddWithValue("@MedicalCertPath", medicalCertPath ?? (object)DBNull.Value);
