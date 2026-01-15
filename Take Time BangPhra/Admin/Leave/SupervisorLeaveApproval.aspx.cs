@@ -319,7 +319,7 @@ namespace Take_Time_BangPhra.Admin.Leave
                 case "REJECTED":
                     return "<span class='badge badge-rejected'>ปฏิเสธ</span>";
                 case "CANCELLED":
-                    return "<span class='badge'>ยกเลิก</span>";
+                    return "<span class='badge badge-cancelled'>ยกเลิก</span>";
                 default:
                     return "<span class='badge'>" + status + "</span>";
             }
