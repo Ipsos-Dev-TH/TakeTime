@@ -382,6 +382,7 @@
     <Content Include="Admin\HR\OTEntry.aspx" />
     <Content Include="Admin\HR\SupervisorManagement.aspx" />
     <Content Include="Admin\Leave\LeaveRequest.aspx" />
+    <Content Include="Admin\Leave\LeaveHistory.aspx" />
     <Content Include="Admin\Leave\SupervisorLeaveApproval.aspx" />
     <Content Include="Admin\Assets\AssetManagement.aspx" />
     <Content Include="Account\TierBenefitsManagement.aspx" />
@@ -854,6 +855,13 @@
     </Compile>
     <Compile Include="Admin\Leave\SupervisorLeaveApproval.aspx.designer.cs">
       <DependentUpon>SupervisorLeaveApproval.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveHistory.aspx.cs">
+      <DependentUpon>LeaveHistory.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Leave\LeaveHistory.aspx.designer.cs">
+      <DependentUpon>LeaveHistory.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\OTService.cs" />
     <Compile Include="Class\SupervisorService.cs" />
