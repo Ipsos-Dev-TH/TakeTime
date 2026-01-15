@@ -1682,7 +1682,7 @@ public class LeaveService
                 cmd.CommandText = @"
                     SELECT
                         LR.ID, LR.RequestNumber,
-                        LT.LeaveTypeName, LT.LeaveTypeCode,
+                        LR.LeaveType_ID AS LeaveTypeID, LT.LeaveTypeName, LT.LeaveTypeCode,
                         LR.StartDate, LR.EndDate, LR.TotalDays,
                         LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
                         LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
@@ -1780,6 +1780,265 @@ public class LeaveService
                     ORDER BY LR.StartDate DESC";
 
                 cmd.Parameters.AddWithValue("@ApproverID", approverAdminId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    #endregion
+
+    #region Leave Request Validation and Cancellation
+
+    /// <summary>
+    /// Get remaining leave days for a specific leave type
+    /// </summary>
+    public decimal GetRemainingLeaveForType(short adminId, byte leaveTypeId, short? year = null)
+    {
+        if (!year.HasValue)
+            year = (short)DateTime.Now.Year;
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT ISNULL(RemainingDays, 0) AS RemainingDays
+                FROM Employee_Leave_Quota
+                WHERE Admin_ID = @AdminID
+                  AND LeaveType_ID = @LeaveTypeID
+                  AND Year = @Year", conn))
+            {
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                cmd.Parameters.AddWithValue("@Year", year.Value);
+
+                conn.Open();
+                object result = cmd.ExecuteScalar();
+
+                if (result != null && result != DBNull.Value)
+                {
+                    return Convert.ToDecimal(result);
+                }
+
+                // If no quota record exists, get default from Leave_Types
+                using (SqlCommand ltCmd = new SqlCommand(
+                    "SELECT ISNULL(AnnualQuota, 0) FROM Leave_Types WHERE ID = @LeaveTypeID", conn))
+                {
+                    ltCmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
+                    object ltResult = ltCmd.ExecuteScalar();
+                    return ltResult != null && ltResult != DBNull.Value ? Convert.ToDecimal(ltResult) : 0;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validate leave request before submission
+    /// Checks if employee has sufficient remaining days
+    /// </summary>
+    public (bool IsValid, string Message, decimal RemainingDays) ValidateLeaveRequest(
+        short adminId, byte leaveTypeId, decimal requestedDays, short? year = null)
+    {
+        if (!year.HasValue)
+            year = (short)DateTime.Now.Year;
+
+        decimal remainingDays = GetRemainingLeaveForType(adminId, leaveTypeId, year);
+
+        if (remainingDays < requestedDays)
+        {
+            return (false,
+                $"วันลาคงเหลือไม่เพียงพอ (คงเหลือ {remainingDays:N1} วัน, ขอลา {requestedDays:N1} วัน)",
+                remainingDays);
+        }
+
+        return (true, "มีวันลาเพียงพอ", remainingDays);
+    }
+
+    /// <summary>
+    /// Cancel a pending leave request
+    /// Only the requester or Admin/Owner can cancel
+    /// </summary>
+    public (bool Success, string Message) CancelLeaveRequest(long requestId, short cancelledByAdminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            try
+            {
+                conn.Open();
+
+                // Get request details
+                SqlCommand cmd = new SqlCommand(@"
+                    SELECT LR.Admin_ID, LR.Status, LR.CreatedBy_AdminID
+                    FROM Leave_Requests LR
+                    WHERE LR.ID = @RequestID", conn);
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                short requesterId = 0;
+                string currentStatus = "";
+                short createdBy = 0;
+
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        requesterId = Convert.ToInt16(reader["Admin_ID"]);
+                        currentStatus = reader["Status"]?.ToString() ?? "";
+                        createdBy = reader["CreatedBy_AdminID"] != DBNull.Value
+                            ? Convert.ToInt16(reader["CreatedBy_AdminID"]) : requesterId;
+                    }
+                    else
+                    {
+                        return (false, "ไม่พบคำขอลานี้");
+                    }
+                }
+
+                // Check if already processed
+                if (currentStatus != "PENDING")
+                {
+                    return (false, "ไม่สามารถยกเลิกได้ คำขอลานี้ได้รับการดำเนินการแล้ว");
+                }
+
+                // Check if canceller has permission
+                // Can cancel if: is requester, is creator (supervisor), or is Admin/Owner
+                cmd.Parameters.Clear();
+                cmd.CommandText = "SELECT Role FROM Admin WHERE ID = @CancellerID";
+                cmd.Parameters.AddWithValue("@CancellerID", cancelledByAdminId);
+                string cancellerRole = cmd.ExecuteScalar()?.ToString() ?? "";
+
+                bool canCancel = (cancelledByAdminId == requesterId)
+                    || (cancelledByAdminId == createdBy)
+                    || (cancellerRole == "Admin" || cancellerRole == "Owner");
+
+                if (!canCancel)
+                {
+                    return (false, "คุณไม่มีสิทธิ์ยกเลิกคำขอลานี้");
+                }
+
+                // Update status to CANCELLED
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+                    UPDATE Leave_Requests
+                    SET Status = 'CANCELLED',
+                        RejectedReason = 'ยกเลิกโดย ' + (SELECT ISNULL(FirstName + ' ' + LastName, Username) FROM Admin WHERE ID = @CancellerID),
+                        ApprovedBy_AdminID = @CancellerID,
+                        ApprovedDate = GETDATE()
+                    WHERE ID = @RequestID AND Status = 'PENDING'";
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+                cmd.Parameters.AddWithValue("@CancellerID", cancelledByAdminId);
+
+                int affected = cmd.ExecuteNonQuery();
+                if (affected > 0)
+                {
+                    return (true, "ยกเลิกคำขอลาสำเร็จ");
+                }
+                else
+                {
+                    return (false, "ไม่สามารถยกเลิกคำขอลาได้");
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, "เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get single leave request details
+    /// </summary>
+    public DataTable GetLeaveRequestById(long requestId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT
+                    LR.ID, LR.RequestNumber, LR.Admin_ID,
+                    ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS EmployeeName,
+                    A.Username AS NickName,
+                    LT.ID AS LeaveTypeID, LT.LeaveTypeName, LT.LeaveTypeCode,
+                    LR.StartDate, LR.EndDate, LR.TotalDays,
+                    LR.Reason, LR.Status, LR.DeductSalary, LR.DeductionAmount,
+                    LR.MedicalCertPath, LR.CreatedDate AS SubmittedDate,
+                    LR.ApprovedBy_AdminID, LR.ApprovedDate,
+                    LR.RejectedReason,
+                    ISNULL(ApprovedBy.FirstName + ' ' + ApprovedBy.LastName, ApprovedBy.Username) AS ApprovedByName,
+                    LR.CreatedBy_AdminID,
+                    ISNULL(CreatedBy.FirstName + ' ' + CreatedBy.LastName, CreatedBy.Username) AS CreatedByName,
+                    ISNULL(LR.IsReplaced, 0) AS IsReplaced,
+                    LR.ReplacementDate, LR.ReplacementApprovedBy, LR.ReplacementApprovedDate
+                FROM Leave_Requests LR
+                INNER JOIN Admin A ON A.ID = LR.Admin_ID
+                INNER JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
+                LEFT JOIN Admin ApprovedBy ON ApprovedBy.ID = LR.ApprovedBy_AdminID
+                LEFT JOIN Admin CreatedBy ON CreatedBy.ID = LR.CreatedBy_AdminID
+                WHERE LR.ID = @RequestID", conn))
+            {
+                cmd.Parameters.AddWithValue("@RequestID", requestId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get available years for leave history filter
+    /// </summary>
+    public DataTable GetLeaveYearsForEmployee(short adminId)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT DISTINCT YEAR(StartDate) AS Year
+                FROM Leave_Requests
+                WHERE Admin_ID = @AdminID
+                UNION
+                SELECT YEAR(GETDATE()) AS Year
+                ORDER BY Year DESC", conn))
+            {
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get leave summary totals for an employee in a year
+    /// Returns totals across all leave types
+    /// </summary>
+    public DataTable GetEmployeeLeaveTotals(short adminId, short? year = null)
+    {
+        if (!year.HasValue)
+            year = (short)DateTime.Now.Year;
+
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                SELECT
+                    SUM(ELQ.TotalDays) AS TotalQuota,
+                    SUM(ELQ.UsedDays) AS TotalUsed,
+                    SUM(ELQ.RemainingDays) AS TotalRemaining,
+                    SUM(ELQ.CarryForwardDays) AS TotalCarryForward,
+                    COUNT(*) AS LeaveTypeCount
+                FROM Employee_Leave_Quota ELQ
+                WHERE ELQ.Admin_ID = @AdminID AND ELQ.Year = @Year", conn))
+            {
+                cmd.Parameters.AddWithValue("@AdminID", adminId);
+                cmd.Parameters.AddWithValue("@Year", year.Value);
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {

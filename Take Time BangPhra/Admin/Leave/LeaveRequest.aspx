@@ -202,6 +202,7 @@
         .badge-pending { background: #fff3cd; color: #856404; }
         .badge-approved { background: #d4edda; color: #155724; }
         .badge-rejected { background: #f8d7da; color: #721c24; }
+        .badge-cancelled { background: #e2e3e5; color: #6c757d; }
 
         .leave-type-badge {
             display: inline-block;
@@ -266,15 +267,29 @@
                 </div>
                 <small><asp:Label ID="lblPosition" runat="server" Text=""></asp:Label></small>
             </div>
+            <div class="info-card" style="border-left: 4px solid #6f42c1;">
+                <h4>&#128197; สิทธิ์วันลาทั้งปี</h4>
+                <div class="value" style="color: #6f42c1;">
+                    <asp:Label ID="lblTotalQuota" runat="server" Text="0"></asp:Label>
+                    <span style="font-size: 14px; font-weight: normal;">วัน</span>
+                </div>
+            </div>
+            <div class="info-card" style="border-left: 4px solid #fd7e14;">
+                <h4>&#128200; ใช้ไปแล้ว</h4>
+                <div class="value" style="color: #fd7e14;">
+                    <asp:Label ID="lblTotalUsed" runat="server" Text="0"></asp:Label>
+                    <span style="font-size: 14px; font-weight: normal;">วัน</span>
+                </div>
+            </div>
             <div class="info-card success">
-                <h4>&#128197; วันลาคงเหลือรวม</h4>
-                <div class="value">
+                <h4>&#127919; คงเหลือ</h4>
+                <div class="value" style="color: #11998e;">
                     <asp:Label ID="lblTotalRemainingDays" runat="server" Text="0"></asp:Label>
                     <span style="font-size: 14px; font-weight: normal;">วัน</span>
                 </div>
             </div>
             <div class="info-card warning">
-                <h4>&#128336; คำขอรออนุมัติ</h4>
+                <h4>&#128336; รออนุมัติ</h4>
                 <div class="value">
                     <asp:Label ID="lblPendingRequests" runat="server" Text="0"></asp:Label>
                     <span style="font-size: 14px; font-weight: normal;">รายการ</span>
@@ -348,10 +363,15 @@
 
         <!-- My Leave Requests -->
         <div class="form-section">
-            <h3>&#128203; ประวัติการลาของฉัน</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0;">&#128203; ประวัติการลาของฉัน (ปีนี้)</h3>
+                <a href="LeaveHistory.aspx" class="btn btn-secondary" style="padding: 8px 15px; text-decoration: none;">
+                    &#128197; ดูประวัติทั้งหมด
+                </a>
+            </div>
             <div class="data-table">
                 <asp:GridView ID="gvMyLeaveRequests" runat="server" AutoGenerateColumns="False"
-                    CssClass="table" GridLines="None">
+                    CssClass="table" GridLines="None" OnRowCommand="gvMyLeaveRequests_RowCommand">
                     <Columns>
                         <asp:BoundField DataField="RequestNumber" HeaderText="เลขที่" />
                         <asp:TemplateField HeaderText="ประเภท">
@@ -381,6 +401,18 @@
                                 <%# Eval("ApprovedByName") != DBNull.Value ? Eval("ApprovedByName") : "-" %>
                             </ItemTemplate>
                         </asp:TemplateField>
+                        <asp:TemplateField HeaderText="จัดการ">
+                            <ItemTemplate>
+                                <asp:LinkButton ID="btnCancel" runat="server"
+                                    CommandName="CancelRequest"
+                                    CommandArgument='<%# Eval("ID") %>'
+                                    Visible='<%# CanCancelRequest(Convert.ToString(Eval("Status"))) %>'
+                                    CssClass="btn-cancel"
+                                    OnClientClick="return confirm('ต้องการยกเลิกคำขอลานี้หรือไม่?');">
+                                    &#10060; ยกเลิก
+                                </asp:LinkButton>
+                            </ItemTemplate>
+                        </asp:TemplateField>
                     </Columns>
                     <EmptyDataTemplate>
                         <div style="text-align: center; padding: 40px; color: #999;">
@@ -391,4 +423,20 @@
             </div>
         </div>
     </div>
+
+    <style>
+        .btn-cancel {
+            color: #dc3545;
+            text-decoration: none;
+            padding: 4px 8px;
+            border: 1px solid #dc3545;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .btn-cancel:hover {
+            background: #dc3545;
+            color: white;
+        }
+    </style>
 </asp:Content>

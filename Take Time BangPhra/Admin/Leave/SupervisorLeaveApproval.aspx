@@ -176,6 +176,11 @@
             color: #721c24;
         }
 
+        .badge-cancelled {
+            background: #e2e3e5;
+            color: #6c757d;
+        }
+
         .badge-primary {
             background: #cce5ff;
             color: #004085;

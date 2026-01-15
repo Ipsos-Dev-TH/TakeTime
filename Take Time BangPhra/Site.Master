@@ -690,6 +690,9 @@
                                     <li><a runat="server" href="~/Admin/Leave/LeaveRequest">
                                         <i class="fas fa-calendar-minus"></i> ขอลางาน
                                     </a></li>
+                                    <li><a runat="server" href="~/Admin/Leave/LeaveHistory">
+                                        <i class="fas fa-history"></i> ประวัติการลา
+                                    </a></li>
                                     <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
                                         <i class="fas fa-user-check"></i> อนุมัติการลา (ลูกน้อง)
                                     </a></li>

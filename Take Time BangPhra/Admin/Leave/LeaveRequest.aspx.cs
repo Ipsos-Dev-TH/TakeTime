@@ -22,6 +22,13 @@ namespace Take_Time_BangPhra.Admin.Leave
                 if (!CheckLogin())
                     return;
 
+                // Check for success message from PRG pattern
+                if (Session["LeaveRequestSuccess"] != null)
+                {
+                    ShowMessage(Session["LeaveRequestSuccess"].ToString(), "success");
+                    Session.Remove("LeaveRequestSuccess");
+                }
+
                 InitializePage();
             }
             else
@@ -103,6 +110,7 @@ namespace Take_Time_BangPhra.Admin.Leave
             LoadLeaveTypes();
             LoadEmployeeInfo();
             LoadLeaveQuota();
+            LoadLeaveTotals();
             LoadMyLeaveRequests();
 
             // Set current year
@@ -111,6 +119,33 @@ namespace Take_Time_BangPhra.Admin.Leave
             // Set default dates
             txtStartDate.Text = DateTime.Now.ToString("yyyy-MM-dd");
             txtEndDate.Text = DateTime.Now.ToString("yyyy-MM-dd");
+        }
+
+        private void LoadLeaveTotals()
+        {
+            try
+            {
+                DataTable dt = leaveService.GetEmployeeLeaveTotals(targetAdminId);
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    DataRow row = dt.Rows[0];
+                    lblTotalQuota.Text = row["TotalQuota"] != DBNull.Value ? Convert.ToDecimal(row["TotalQuota"]).ToString("N1") : "0";
+                    lblTotalUsed.Text = row["TotalUsed"] != DBNull.Value ? Convert.ToDecimal(row["TotalUsed"]).ToString("N1") : "0";
+                    lblTotalRemainingDays.Text = row["TotalRemaining"] != DBNull.Value ? Convert.ToDecimal(row["TotalRemaining"]).ToString("N1") : "0";
+                }
+                else
+                {
+                    lblTotalQuota.Text = "0";
+                    lblTotalUsed.Text = "0";
+                    lblTotalRemainingDays.Text = "0";
+                }
+            }
+            catch
+            {
+                lblTotalQuota.Text = "0";
+                lblTotalUsed.Text = "0";
+                lblTotalRemainingDays.Text = "0";
+            }
         }
 
         private void LoadLeaveTypes()
@@ -227,6 +262,7 @@ namespace Take_Time_BangPhra.Admin.Leave
             GetTargetAdminId();
             LoadEmployeeInfo();
             LoadLeaveQuota();
+            LoadLeaveTotals();
             LoadMyLeaveRequests();
         }
 
@@ -280,6 +316,14 @@ namespace Take_Time_BangPhra.Admin.Leave
                 byte leaveTypeId = Convert.ToByte(ddlLeaveType.SelectedValue);
                 string reason = txtReason.Text.Trim();
 
+                // Validate remaining leave days before submission
+                var validation = leaveService.ValidateLeaveRequest(targetAdminId, leaveTypeId, totalDays, (short)startDate.Year);
+                if (!validation.IsValid)
+                {
+                    ShowMessage(validation.Message, "error");
+                    return;
+                }
+
                 // Handle file upload
                 string medicalCertPath = null;
                 if (fuMedicalCert.HasFile)
@@ -326,10 +370,10 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                 if (result.Success)
                 {
-                    ShowMessage("ส่งคำขอลาสำเร็จ เลขที่คำขอ: " + result.Message, "success");
-                    ClearForm();
-                    LoadLeaveQuota();
-                    LoadMyLeaveRequests();
+                    // PRG Pattern: Store success message in session and redirect
+                    Session["LeaveRequestSuccess"] = "ส่งคำขอลาสำเร็จ เลขที่คำขอ: " + result.ID;
+                    Response.Redirect(Request.Url.PathAndQuery, false);
+                    Context.ApplicationInstance.CompleteRequest();
                 }
                 else
                 {
@@ -339,6 +383,34 @@ namespace Take_Time_BangPhra.Admin.Leave
             catch (Exception ex)
             {
                 ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
+        }
+
+        protected void gvMyLeaveRequests_RowCommand(object sender, System.Web.UI.WebControls.GridViewCommandEventArgs e)
+        {
+            if (e.CommandName == "CancelRequest")
+            {
+                try
+                {
+                    long requestId = Convert.ToInt64(e.CommandArgument);
+                    GetCurrentAdminId();
+
+                    var result = leaveService.CancelLeaveRequest(requestId, currentAdminId);
+
+                    if (result.Success)
+                    {
+                        ShowMessage(result.Message, "success");
+                        LoadMyLeaveRequests();
+                    }
+                    else
+                    {
+                        ShowMessage(result.Message, "error");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+                }
             }
         }
 
@@ -370,9 +442,16 @@ namespace Take_Time_BangPhra.Admin.Leave
                     return "<span class='badge badge-approved'>อนุมัติแล้ว</span>";
                 case "REJECTED":
                     return "<span class='badge badge-rejected'>ปฏิเสธ</span>";
+                case "CANCELLED":
+                    return "<span class='badge badge-cancelled'>ยกเลิก</span>";
                 default:
                     return "<span class='badge'>" + status + "</span>";
             }
+        }
+
+        protected bool CanCancelRequest(string status)
+        {
+            return status == "PENDING";
         }
 
         private void ShowMessage(string message, string type)
