@@ -42,6 +42,16 @@ namespace Take_Time_BangPhra.Admin.Leave
         protected global::System.Web.UI.WebControls.Label lblPosition;
 
         /// <summary>
+        /// lblTotalQuota control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTotalQuota;
+
+        /// <summary>
+        /// lblTotalUsed control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTotalUsed;
+
+        /// <summary>
         /// lblTotalRemainingDays control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblTotalRemainingDays;
