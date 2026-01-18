@@ -400,6 +400,8 @@ namespace Take_Time_BangPhra.Admin.Leave
                     if (result.Success)
                     {
                         ShowMessage(result.Message, "success");
+                        LoadLeaveQuota();
+                        LoadLeaveTotals();
                         LoadMyLeaveRequests();
                     }
                     else
