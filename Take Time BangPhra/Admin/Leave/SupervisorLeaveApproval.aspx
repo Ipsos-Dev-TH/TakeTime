@@ -128,12 +128,14 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 900px;
         }
 
         .data-table th {
@@ -142,6 +144,7 @@
             padding: 12px;
             text-align: left;
             font-weight: 500;
+            white-space: nowrap;
         }
 
         .data-table td {
@@ -151,6 +154,26 @@
 
         .data-table tr:hover {
             background-color: #f8f9fa;
+        }
+
+        @media (max-width: 768px) {
+            .data-table {
+                margin: 10px -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
+            }
+            .stats-cards {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            .filter-section {
+                flex-direction: column;
+            }
+            .filter-section .form-group {
+                width: 100%;
+                margin-bottom: 10px;
+            }
         }
 
         .badge {

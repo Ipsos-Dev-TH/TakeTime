@@ -189,12 +189,14 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 900px;
         }
 
         .data-table th {
@@ -429,6 +431,59 @@
             border: 1px solid #4facfe;
             border-radius: 4px;
             text-align: center;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .leave-management {
+                padding: 10px;
+            }
+            .tab-navigation {
+                flex-wrap: wrap;
+            }
+            .tab-btn {
+                padding: 10px 15px;
+                font-size: 12px;
+                flex: 1;
+                text-align: center;
+            }
+            .stats-container {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .filter-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .filter-controls .form-control {
+                width: 100%;
+            }
+            .data-table {
+                margin: 10px -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
+            }
+            .quota-filter {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .quota-filter label {
+                margin-top: 10px;
+            }
+            .quota-filter .form-control {
+                width: 100%;
+            }
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .toolbar-left, .toolbar-right {
+                width: 100%;
+            }
+            .toolbar-right {
+                margin-top: 10px;
+            }
         }
     </style>
 

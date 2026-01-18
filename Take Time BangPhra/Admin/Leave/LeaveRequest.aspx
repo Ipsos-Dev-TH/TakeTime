@@ -169,13 +169,15 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
             margin-top: 20px;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 600px;
         }
 
         .data-table th {
@@ -184,11 +186,31 @@
             padding: 12px;
             text-align: left;
             font-weight: 500;
+            white-space: nowrap;
         }
 
         .data-table td {
             padding: 12px;
             border-bottom: 1px solid #f0f0f0;
+        }
+
+        @media (max-width: 768px) {
+            .data-table {
+                margin: 10px -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
+            }
+            .data-table table {
+                min-width: 700px;
+            }
+            .info-cards {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            .form-row {
+                flex-direction: column;
+            }
         }
 
         .badge {
