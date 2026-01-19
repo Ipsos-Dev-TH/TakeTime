@@ -2118,7 +2118,28 @@ namespace Take_Time_BangPhra.Account.Report
             }
             else
             {
-                
+
+            }
+        }
+
+        /// <summary>
+        /// Handle checkbox change for editing amount fields (TextBox3, TextBox4, TextBox6)
+        /// </summary>
+        protected void ChkEditAmount_CheckedChanged(object sender, EventArgs e)
+        {
+            if (ChkEditAmount.Checked)
+            {
+                // Enable editing for amount fields
+                TextBox3.Enabled = true;
+                TextBox4.Enabled = true;
+                TextBox6.Enabled = true;
+            }
+            else
+            {
+                // Disable editing for amount fields
+                TextBox3.Enabled = false;
+                TextBox4.Enabled = false;
+                TextBox6.Enabled = false;
             }
         }
     }

@@ -190,12 +190,90 @@
          </style>
             <style>
             th, td {
-  padding: 5px;
-}
-                .auto-style1 {
-                    width: 20%;
-                }
-                </style>
+              padding: 5px;
+            }
+            .auto-style1 {
+                width: 20%;
+            }
+
+            /* Modern Form Styling */
+            .form-title {
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+              padding: 15px 25px;
+              border-radius: 10px;
+              margin-bottom: 20px;
+              text-align: center;
+              font-size: 18px;
+              font-weight: 600;
+              box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            }
+
+            /* Input styling */
+            input[type="text"], input[type="number"], input[type="date"], select, textarea {
+              padding: 8px 12px;
+              border: 1px solid #ddd;
+              border-radius: 6px;
+              transition: all 0.3s;
+              font-size: 14px;
+            }
+
+            input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+              border-color: #667eea;
+              box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+              outline: none;
+            }
+
+            input:disabled, input[readonly] {
+              background-color: #f5f5f5;
+              cursor: not-allowed;
+            }
+
+            /* Checkbox styling */
+            input[type="checkbox"] {
+              width: 18px;
+              height: 18px;
+              margin-right: 8px;
+              cursor: pointer;
+              vertical-align: middle;
+            }
+
+            /* Edit checkbox highlight */
+            .edit-checkbox-row {
+              background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%) !important;
+              border-left: 4px solid #f39c12;
+            }
+
+            .edit-checkbox-row td {
+              padding: 12px !important;
+            }
+
+            /* Table row styling */
+            tr:hover {
+              background-color: rgba(102, 126, 234, 0.05) !important;
+            }
+
+            /* Mobile responsive */
+            @media (max-width: 768px) {
+              table {
+                font-size: 13px;
+              }
+              input[type="text"], input[type="number"], select {
+                width: 100% !important;
+                max-width: 100%;
+              }
+              td {
+                display: block;
+                width: 100%;
+                text-align: left !important;
+                padding: 8px 5px !important;
+              }
+              td.modal-sm {
+                background: #f5f5f5;
+                font-weight: 600;
+              }
+            }
+            </style>
       <script type="text/javascript">
       function checkEnter(event) {
           if (event.key === 'Enter') {
@@ -205,12 +283,9 @@
       }
       </script>
     
-    <p>
-        &nbsp;</p>
-    <p class="text-center">
-        <strong>สร้างใบสำคัญจ่าย</strong><div class="text-center">
-            <br />
-        </div>
+    <div class="form-title">
+        <i class="fas fa-file-invoice-dollar"></i> สร้าง/แก้ไข ใบสำคัญจ่าย
+    </div>
         <table style="width:100%;">
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">เลขที่ใบสำคัญจ่าย:</td>
@@ -338,6 +413,12 @@
             
             </tr>
 
+            <tr>
+                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
+                <td>
+                    <asp:CheckBox ID="CheckBox1" runat="server" Text="แก้ไขยอดเงินด้วยตนเอง" AutoPostBack="True" OnCheckedChanged="CheckBox1_CheckedChanged" />
+                 </td>
+            </tr>
             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">จำนวนรวมก่อนภาษีมุลค่าเพิ่ม: </td>
                 <td>
@@ -350,7 +431,6 @@
                 <td>
                     &nbsp;<asp:TextBox ID="TextBox4" runat="server" Width="30%" Enabled="False"></asp:TextBox>
                     &nbsp;บาท
-                    <asp:CheckBox ID="CheckBox1" runat="server" Text="Edit" OnCheckedChanged="CheckBox1_CheckedChanged" />
                  </td>
             </tr>
 

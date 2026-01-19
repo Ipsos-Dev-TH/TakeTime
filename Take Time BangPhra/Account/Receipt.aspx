@@ -5,28 +5,148 @@
   <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView.css">
      <style>
-
-
  .header-center{
         text-align:center;
     }
   .header-right{
         text-align:right;
     }
+  th, td {
+    padding: 5px;
+  }
+
+  /* Modern Form Styling */
+  .form-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 600;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  }
+
+  /* Input styling */
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    transition: all 0.3s;
+    font-size: 14px;
+  }
+
+  input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    outline: none;
+  }
+
+  input:disabled, input[readonly] {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+  }
+
+  /* Checkbox styling */
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    cursor: pointer;
+  }
+
+  /* Edit checkbox highlight */
+  .edit-checkbox-row {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%) !important;
+    border-left: 4px solid #f39c12;
+  }
+
+  .edit-checkbox-row td {
+    padding: 12px !important;
+  }
+
+  /* Button styling */
+  input[type="submit"], button, .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+
+  .btn-success {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+    color: white;
+  }
+
+  .btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
+  }
+
+  /* Table row styling */
+  tr:hover {
+    background-color: rgba(102, 126, 234, 0.05) !important;
+  }
+
+  /* Amount section styling */
+  .amount-section {
+    background: linear-gradient(135deg, #f8f9ff 0%, #eef2ff 100%);
+    border: 2px solid #667eea;
+    border-radius: 10px;
+    margin: 15px 0;
+    padding: 15px;
+  }
+
+  .amount-label {
+    font-weight: 600;
+    color: #333;
+  }
+
+  .amount-value {
+    font-size: 16px;
+    font-weight: bold;
+    color: #667eea;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    table {
+      font-size: 13px;
+    }
+    input[type="text"], input[type="number"], select {
+      width: 100% !important;
+      max-width: 100%;
+    }
+    td {
+      display: block;
+      width: 100%;
+      text-align: left !important;
+      padding: 8px 5px !important;
+    }
+    td.modal-sm {
+      background: #f5f5f5;
+      font-weight: 600;
+    }
+  }
          </style>
-            <style>
-            th, td {
-  padding: 5px;
-}
-                </style>
 
     
-    <p>
-        &nbsp;</p>
-    <p class="text-center">
-        <strong></strong><span class="ui-priority-primary">สร้างใบกำกับภาษี</span><div class="text-center">
-            <br />
-        </div>
+    <div class="form-title">
+        <i class="fas fa-file-invoice"></i> สร้าง/แก้ไข ใบกำกับภาษี
+    </div>
         <table style="width:100%;">
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">เลขที่:</td>
@@ -245,6 +365,12 @@
             
             </tr>
 
+            <tr>
+                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
+                <td>
+                    <asp:CheckBox ID="ChkEditAmount" runat="server" Text="แก้ไขยอดเงินด้วยตนเอง" AutoPostBack="True" OnCheckedChanged="ChkEditAmount_CheckedChanged" />
+                </td>
+            </tr>
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">จำนวนรวมก่อนภาษีมุลค่าเพิ่ม: </td>
                 <td>
