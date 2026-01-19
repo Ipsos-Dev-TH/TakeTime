@@ -380,6 +380,7 @@
     <Content Include="Admin\Payroll\PayrollManagement.aspx" />
     <Content Include="Admin\Payroll\PayrollDetail.aspx" />
     <Content Include="Admin\HR\OTEntry.aspx" />
+    <Content Include="Admin\HR\OTManagement.aspx" />
     <Content Include="Admin\HR\SupervisorManagement.aspx" />
     <Content Include="Admin\Leave\LeaveRequest.aspx" />
     <Content Include="Admin\Leave\LeaveHistory.aspx" />
@@ -834,6 +835,13 @@
     </Compile>
     <Compile Include="Admin\HR\OTEntry.aspx.designer.cs">
       <DependentUpon>OTEntry.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\HR\OTManagement.aspx.cs">
+      <DependentUpon>OTManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\HR\OTManagement.aspx.designer.cs">
+      <DependentUpon>OTManagement.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\HR\SupervisorManagement.aspx.cs">
       <DependentUpon>SupervisorManagement.aspx</DependentUpon>
