@@ -169,13 +169,15 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
             margin-top: 20px;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 600px;
         }
 
         .data-table th {
@@ -184,11 +186,31 @@
             padding: 12px;
             text-align: left;
             font-weight: 500;
+            white-space: nowrap;
         }
 
         .data-table td {
             padding: 12px;
             border-bottom: 1px solid #f0f0f0;
+        }
+
+        @media (max-width: 768px) {
+            .data-table {
+                margin: 10px -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
+            }
+            .data-table table {
+                min-width: 700px;
+            }
+            .info-cards {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            .form-row {
+                flex-direction: column;
+            }
         }
 
         .badge {
@@ -331,20 +353,28 @@
                         <asp:ListItem Value="">-- เลือกประเภทการลา --</asp:ListItem>
                     </asp:DropDownList>
                 </div>
-                <div class="form-group">
-                    <label>จำนวนวันที่ลา <span class="required">*</span></label>
-                    <asp:TextBox ID="txtTotalDays" runat="server" CssClass="form-control" TextMode="Number" step="0.5" min="0.5" Text="1"></asp:TextBox>
-                </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
                     <label>วันที่เริ่มต้น <span class="required">*</span></label>
-                    <asp:TextBox ID="txtStartDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                    <asp:TextBox ID="txtStartDate" runat="server" CssClass="form-control" TextMode="Date" onchange="calculateLeaveDays()"></asp:TextBox>
                 </div>
                 <div class="form-group">
                     <label>วันที่สิ้นสุด <span class="required">*</span></label>
-                    <asp:TextBox ID="txtEndDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                    <asp:TextBox ID="txtEndDate" runat="server" CssClass="form-control" TextMode="Date" onchange="calculateLeaveDays()"></asp:TextBox>
                 </div>
+                <div class="form-group">
+                    <label>จำนวนวันที่ลา <span class="required">*</span></label>
+                    <asp:TextBox ID="txtTotalDays" runat="server" CssClass="form-control" TextMode="Number" step="0.5" min="0.5" Text="1"></asp:TextBox>
+                    <small id="daysCalculationInfo" style="color: #666; display: none;"></small>
+                </div>
+            </div>
+            <!-- Warning for multiple days -->
+            <div id="daysWarning" class="alert alert-warning" style="display: none; margin-bottom: 15px;">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>กรุณาตรวจสอบ:</strong> คำนวณได้ <span id="calculatedDays">0</span> วัน
+                (รวมวันหยุดสุดสัปดาห์ <span id="weekendDays">0</span> วัน)
+                <br><small>หากลาคร่อมวันหยุด กรุณาปรับจำนวนวันที่ลาให้ถูกต้องด้วยตนเอง</small>
             </div>
             <div class="form-group">
                 <label>เหตุผลการลา <span class="required">*</span></label>
@@ -360,6 +390,74 @@
                 <asp:Button ID="btnClear" runat="server" Text="&#128260; ล้างฟอร์ม" CssClass="btn btn-secondary" OnClick="btnClear_Click" CausesValidation="false" />
             </div>
         </div>
+
+        <script type="text/javascript">
+            function calculateLeaveDays() {
+                var startDateInput = document.getElementById('<%= txtStartDate.ClientID %>');
+                var endDateInput = document.getElementById('<%= txtEndDate.ClientID %>');
+                var totalDaysInput = document.getElementById('<%= txtTotalDays.ClientID %>');
+                var warningDiv = document.getElementById('daysWarning');
+                var calculatedDaysSpan = document.getElementById('calculatedDays');
+                var weekendDaysSpan = document.getElementById('weekendDays');
+                var infoSmall = document.getElementById('daysCalculationInfo');
+
+                if (!startDateInput.value || !endDateInput.value) {
+                    warningDiv.style.display = 'none';
+                    infoSmall.style.display = 'none';
+                    return;
+                }
+
+                var startDate = new Date(startDateInput.value);
+                var endDate = new Date(endDateInput.value);
+
+                if (endDate < startDate) {
+                    warningDiv.style.display = 'none';
+                    infoSmall.style.display = 'none';
+                    return;
+                }
+
+                // Calculate total days (inclusive)
+                var totalDays = 0;
+                var weekendCount = 0;
+                var currentDate = new Date(startDate);
+
+                while (currentDate <= endDate) {
+                    totalDays++;
+                    var dayOfWeek = currentDate.getDay();
+                    if (dayOfWeek === 0 || dayOfWeek === 6) {
+                        weekendCount++;
+                    }
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+
+                // Set the calculated days
+                totalDaysInput.value = totalDays;
+                calculatedDaysSpan.textContent = totalDays;
+                weekendDaysSpan.textContent = weekendCount;
+
+                // Show warning if more than 1 day
+                if (totalDays > 1) {
+                    warningDiv.style.display = 'block';
+                    if (weekendCount > 0) {
+                        infoSmall.innerHTML = 'คำนวณได้ ' + totalDays + ' วัน (มีวันหยุด ' + weekendCount + ' วัน)';
+                        infoSmall.style.display = 'block';
+                        infoSmall.style.color = '#fd7e14';
+                    } else {
+                        infoSmall.innerHTML = 'คำนวณได้ ' + totalDays + ' วัน';
+                        infoSmall.style.display = 'block';
+                        infoSmall.style.color = '#666';
+                    }
+                } else {
+                    warningDiv.style.display = 'none';
+                    infoSmall.style.display = 'none';
+                }
+            }
+
+            // Run on page load if dates are already set
+            document.addEventListener('DOMContentLoaded', function() {
+                calculateLeaveDays();
+            });
+        </script>
 
         <!-- My Leave Requests -->
         <div class="form-section">

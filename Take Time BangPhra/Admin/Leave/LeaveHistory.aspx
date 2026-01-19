@@ -155,11 +155,13 @@
 
         .data-table {
             overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 800px;
         }
 
         .data-table th {
@@ -237,6 +239,17 @@
             }
             .summary-cards {
                 grid-template-columns: repeat(2, 1fr);
+            }
+            .data-table, .data-section {
+                margin-left: -15px;
+                margin-right: -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
+            }
+            .quota-table {
+                min-width: 500px;
             }
         }
     </style>
