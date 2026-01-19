@@ -42,6 +42,8 @@ namespace Take_Time_BangPhra.Admin
             {
                 string command = Request.QueryString["command"];
                 string id = Request.QueryString["id"];
+                string affiliateCode = Request.QueryString["affiliate"];
+
                 if (command == "edit")
                 {
                     // SECURE: Payment lookup with parameterized query
@@ -96,7 +98,7 @@ namespace Take_Time_BangPhra.Admin
                     Session["dtDetail"] = dtDetail;
                     TextBox8.Text = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 }
-                
+
                 DataTable dtUpload = new DataTable();
                 try
                 {
@@ -107,6 +109,22 @@ namespace Take_Time_BangPhra.Admin
 
                 }
                 Session["dtUpload"] = dtUpload;
+
+                // Pre-select affiliate if passed from AffiliateManagement
+                if (!string.IsNullOrEmpty(affiliateCode))
+                {
+                    // Find and select the affiliate in dropdown
+                    foreach (ListItem item in DropDownList5.Items)
+                    {
+                        if (item.Text == affiliateCode)
+                        {
+                            item.Selected = true;
+                            // Trigger the selection to load pending commissions
+                            DropDownList5_SelectedIndexChanged(null, null);
+                            break;
+                        }
+                    }
+                }
             }
 
             DataTable dt = (DataTable)Session["dtDetail"];
