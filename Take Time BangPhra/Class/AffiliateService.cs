@@ -214,11 +214,12 @@ public class AffiliateService
                         A.AccomName AS RoomName,
                         R.ID AS ReservationID,
                         R.Status AS ReservationStatus,
-                        R.Customer_Name AS CustomerName,
+                        ISNULL(C.FullName, C.Name) AS CustomerName,
                         V.Name AS AffiliateName
                     FROM Affiliate_Reservation AR
                     INNER JOIN Accommodation A ON A.ID = AR.Accommodation_ID
                     INNER JOIN Reservation R ON R.ID = AR.Reservation_ID
+                    LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     INNER JOIN Affiliate_Member AM ON AM.Coupon_Code = AR.Affiliate_Member_Coupon_Code
                     LEFT JOIN Vendor V ON V.ID = AM.Vendor_ID
                     WHERE AR.Status = 'NEW'
@@ -260,11 +261,12 @@ public class AffiliateService
                         A.AccomName AS RoomName,
                         R.ID AS ReservationID,
                         R.Status AS ReservationStatus,
-                        R.Customer_Name AS CustomerName,
+                        ISNULL(C.FullName, C.Name) AS CustomerName,
                         V.Name AS AffiliateName
                     FROM Affiliate_Reservation AR
                     INNER JOIN Accommodation A ON A.ID = AR.Accommodation_ID
                     INNER JOIN Reservation R ON R.ID = AR.Reservation_ID
+                    LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     INNER JOIN Affiliate_Member AM ON AM.Coupon_Code = AR.Affiliate_Member_Coupon_Code
                     LEFT JOIN Vendor V ON V.ID = AM.Vendor_ID
                     WHERE (@CouponCode = '' OR AR.Affiliate_Member_Coupon_Code = @CouponCode)
