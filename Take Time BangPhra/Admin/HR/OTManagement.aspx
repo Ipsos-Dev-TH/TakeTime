@@ -112,12 +112,14 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 900px;
         }
 
         .data-table th {
@@ -260,14 +262,24 @@
         }
 
         @media (max-width: 768px) {
+            .ot-management {
+                padding: 10px;
+            }
             .filter-row {
                 flex-direction: column;
             }
             .filter-group {
                 width: 100%;
             }
+            .stats-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
             .data-table {
-                overflow-x: auto;
+                margin: 10px -15px;
+                border-radius: 0;
+                overflow-x: scroll !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-x pan-y !important;
             }
         }
     </style>
