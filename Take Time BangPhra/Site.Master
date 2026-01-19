@@ -673,8 +673,8 @@
                                                     <li><a runat="server" href="~/Admin/Vendor">
                                                         <i class="fas fa-store"></i> Vendor
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/PaymentAffiliate">
-                                                        <i class="fas fa-handshake"></i> Affiliate
+                                                    <li><a runat="server" href="~/Admin/AffiliateManagement">
+                                                        <i class="fas fa-handshake"></i> จัดการ Affiliate
                                                     </a></li>
                                                 </ul>
                                             </div>

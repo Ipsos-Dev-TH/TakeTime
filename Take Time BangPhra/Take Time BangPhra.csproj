@@ -410,6 +410,7 @@
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
+    <Content Include="Admin\AffiliateManagement.aspx" />
     <Content Include="Affiliate\Register.aspx" />
     <Content Include="Contact.aspx" />
     <Content Include="Content\bootstrap-theme.css" />
@@ -717,6 +718,13 @@
     <Compile Include="Admin\PaymentAffiliate.aspx.designer.cs">
       <DependentUpon>PaymentAffiliate.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\AffiliateManagement.aspx.cs">
+      <DependentUpon>AffiliateManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\AffiliateManagement.aspx.designer.cs">
+      <DependentUpon>AffiliateManagement.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Affiliate\Register.aspx.cs">
       <DependentUpon>Register.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -753,6 +761,7 @@
     <Compile Include="Class\PayrollService.cs" />
     <Compile Include="Class\PaymentVoucherPdfService.cs" />
     <Compile Include="Class\LeaveService.cs" />
+    <Compile Include="Class\AffiliateService.cs" />
     <Compile Include="Class\AssetService.cs" />
     <Compile Include="Class\SecurityHelper.cs" />
     <Compile Include="Class\HRConfiguration.cs" />
