@@ -1,111 +1,254 @@
-﻿<%@ Page Title="" Language="C#" MasterPageFile="~/Site2.Master" AutoEventWireup="true" CodeBehind="Login.aspx.cs" Inherits="Take_Time_BangPhra.Affiliate.Login" %>
+<%@ Page Title="Affiliate Login" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Login.aspx.cs" Inherits="Take_Time_BangPhra.Affiliate.Login" %>
 <asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
-    <!--===============================================================================================-->	
-	<link rel="icon" type="image/png" href="../IMG/icons/favicon.ico"/>
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/bootstrap/css/bootstrap.min.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../fonts/font-awesome-4.7.0/css/font-awesome.min.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../fonts/Linearicons-Free-v1.0.0/icon-font.min.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/animate/animate.css">
-<!--===============================================================================================-->	
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/css-hamburgers/hamburgers.min.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/animsition/css/animsition.min.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/select2/select2.min.css">
-<!--===============================================================================================-->	
-	<link rel="stylesheet" type="text/css" href="../Content/vendor/daterangepicker/daterangepicker.css">
-<!--===============================================================================================-->
-	<link rel="stylesheet" type="text/css" href="../Content/util.css">
-	<link rel="stylesheet" type="text/css" href="../Content/main.css">
-<!--===============================================================================================-->
-     <style>
+    <style>
+        .affiliate-login-page {
+            min-height: 80vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
 
-                 .mycheckbox input[type="checkbox"] 
-{ 
-    margin-right: 5px; 
-}
+        .login-container {
+            width: 100%;
+            max-width: 450px;
+        }
 
-         .radioBL input[type="radio"]
-    {
-        margin-right:10px;
-    }
-        .rounded-textbox {
-    border-radius: 10px; /* Adjust the value for more/less rounding */
-    padding: 5px;
-    border: 1px solid #ccc; /* Optional: Border styling */
-    outline: none; /* Optional: Remove focus outline */
-}
- .header-center{
-        text-align:center;
-    }
-  .header-right{
-        text-align:right;
-    }
-         </style>
-	<center>
-    <div class="limiter">
-		<div class="container-login100">
-			<div class="wrap-login100">
-				<div class="login100-form-title" style="background-image: url(../Images/Affiliate.png);">
-					<span class="login100-form-title-1">
-						Affiliate
-					</span>
-				</div>
+        .login-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
 
-				<div class="login100-form validate-form">
-					<div class="wrap-input100 validate-input m-b-26" data-validate="Username is required">
-						<span class="label-input100">Username</span>
-						<asp:TextBox ID="TextBox1" runat="server" placeholder="รหัสบัตรประชาชน" CssClass="input100" name="username"></asp:TextBox> 
-						<span class="focus-input100"></span>
-					</div>
+        .login-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
 
-					<div class="wrap-input100 validate-input m-b-18" data-validate = "Password is required">
-						<span class="label-input100">Password</span>
-						<asp:TextBox ID="TextBox2" runat="server" TextMode="Password" placeholder="รหัสผ่าน" CssClass="input100"></asp:TextBox>
-						<span class="focus-input100"></span>
-					</div>
+        .login-header .icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 40px;
+        }
 
-					<div class="flex-sb-m w-full p-b-30">
-						<div class="contact100-form-checkbox">
-							</div>
+        .login-header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
 
-						<div>
-							<a href="https://ipsos.service-now.com/ess" class="txt1">
-								</a></div>
-					</div>
+        .login-header p {
+            margin: 10px 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
 
-					<div class="container-login100-form-btn">
-						<asp:Button ID="Button1" runat="server" Text="Login" OnClick="Button1_Click" class="login100-form-btn" /> &nbsp;&nbsp; <a href="Register.aspx" style="font-size: large"><strong>สมัครสมาชิก</strong></a>
-					</div>
-					
-				</div>
-				
-			</div>
-		</div>
-	
-	</div>
-	
-<!--===============================================================================================-->
-	<script src="Content/vendor/jquery/jquery-3.2.1.min.js"></script>
-<!--===============================================================================================-->
-	<script src="Content/vendor/animsition/js/animsition.min.js"></script>
-<!--===============================================================================================-->
-	<script src="Content/vendor/bootstrap/js/popper.js"></script>
-	<script src="Content/vendor/bootstrap/js/bootstrap.min.js"></script>
-<!--===============================================================================================-->
-	<script src="Content/vendor/select2/select2.min.js"></script>
-<!--===============================================================================================-->
-	<script src="Content/vendor/daterangepicker/moment.min.js"></script>
-	<script src="Content/vendor/daterangepicker/daterangepicker.js"></script>
-<!--===============================================================================================-->
-	<script src="Content/vendor/countdowntime/countdowntime.js"></script>
-<!--===============================================================================================-->
-	<script src="Scripts/main.js"></script>
-            </center>
+        .login-body {
+            padding: 40px 30px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .form-group label i {
+            margin-right: 8px;
+            color: #667eea;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        .form-control:focus {
+            border-color: #667eea;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-control::placeholder {
+            color: #aaa;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        .login-footer {
+            text-align: center;
+            padding: 25px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #eee;
+        }
+
+        .login-footer p {
+            margin: 0;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .login-footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .login-footer a:hover {
+            text-decoration: underline;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .feature-item {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+        }
+
+        .feature-item i {
+            font-size: 24px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .feature-item span {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .alert-message {
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        @media (max-width: 480px) {
+            .affiliate-login-page {
+                padding: 20px 15px;
+            }
+            .login-header {
+                padding: 30px 20px;
+            }
+            .login-body {
+                padding: 30px 20px;
+            }
+            .features {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+
+    <div class="affiliate-login-page">
+        <div class="login-container">
+            <div class="login-card">
+                <div class="login-header">
+                    <div class="icon">
+                        <i class="fas fa-handshake"></i>
+                    </div>
+                    <h1>Affiliate Portal</h1>
+                    <p>Take Time BangPhra Partner Program</p>
+                </div>
+
+                <div class="login-body">
+                    <asp:Panel ID="pnlMessage" runat="server" Visible="false">
+                        <div class="alert-message alert-success">
+                            <i class="fas fa-check-circle"></i>
+                            <asp:Label ID="lblMessage" runat="server"></asp:Label>
+                        </div>
+                    </asp:Panel>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-user"></i>Username</label>
+                        <asp:TextBox ID="TextBox1" runat="server" CssClass="form-control"
+                            placeholder="รหัสบัตรประชาชน หรือ รหัส Coupon"></asp:TextBox>
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-lock"></i>Password</label>
+                        <asp:TextBox ID="TextBox2" runat="server" TextMode="Password"
+                            CssClass="form-control" placeholder="รหัสผ่าน"></asp:TextBox>
+                    </div>
+
+                    <asp:Button ID="Button1" runat="server" Text="เข้าสู่ระบบ"
+                        CssClass="btn-login" OnClick="Button1_Click" />
+                </div>
+
+                <div class="login-footer">
+                    <p>ยังไม่มีบัญชี? <a href="Register.aspx">สมัครสมาชิก Affiliate</a></p>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="feature-item">
+                    <i class="fas fa-percent"></i>
+                    <span>รับค่าคอมมิชชั่น</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-chart-line"></i>
+                    <span>ติดตามรายได้</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-money-bill-wave"></i>
+                    <span>ถอนเงินง่าย</span>
+                </div>
+            </div>
+        </div>
+    </div>
 </asp:Content>
-
-

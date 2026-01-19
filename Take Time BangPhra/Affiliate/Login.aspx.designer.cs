@@ -13,6 +13,15 @@ namespace Take_Time_BangPhra.Affiliate
 
     public partial class Login
     {
+        /// <summary>
+        /// pnlMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlMessage;
+
+        /// <summary>
+        /// lblMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblMessage;
 
         /// <summary>
         /// TextBox1 control.
