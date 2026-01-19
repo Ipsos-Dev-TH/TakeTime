@@ -663,6 +663,9 @@
                                                     <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
                                                         <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/HR/OTManagement">
+                                                        <i class="fas fa-list-alt"></i> จัดการ OT ทั้งหมด
+                                                    </a></li>
                                                     <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Admin/Assets/AssetManagement">
                                                         <i class="fas fa-boxes"></i> สินทรัพย์
@@ -699,9 +702,6 @@
                                     <li role="separator" class="divider"></li>
                                     <li><a runat="server" href="~/Admin/HR/OTEntry">
                                         <i class="fas fa-clock"></i> บันทึกชั่วโมง OT
-                                    </a></li>
-                                    <li><a runat="server" href="~/Admin/HR/OTManagement">
-                                        <i class="fas fa-list-alt"></i> จัดการ OT ทั้งหมด
                                     </a></li>
                                 </ul>
                             </li>
