@@ -71,7 +71,6 @@ namespace Take_Time_BangPhra.Admin
             currentUserType = GetSelectedUserType();
 
             LoadDashboardStats(startDate, endDate);
-            LoadStaffVsCustomerSummary(startDate, endDate);
             LoadOverviewData(startDate, endDate);
             LoadBrowserData(startDate, endDate);
             LoadTimeData(startDate, endDate);
@@ -79,38 +78,6 @@ namespace Take_Time_BangPhra.Admin
             LoadActivityData(startDate, endDate);
             LoadErrorData(startDate, endDate);
             LoadAccessLogData(startDate, endDate);
-        }
-
-        private void LoadStaffVsCustomerSummary(DateTime startDate, DateTime endDate)
-        {
-            try
-            {
-                DataTable summary = analyticsService.GetStaffVsCustomerSummary(startDate, endDate);
-                foreach (DataRow row in summary.Rows)
-                {
-                    string category = row["UserCategory"]?.ToString() ?? "";
-                    string visitCount = FormatNumber(row["VisitCount"]);
-                    string uniqueVisitors = FormatNumber(row["UniqueVisitors"]);
-                    string percentage = row["Percentage"] != DBNull.Value ? Convert.ToDecimal(row["Percentage"]).ToString("0.0") + "%" : "0%";
-
-                    if (category == "Staff")
-                    {
-                        lblStaffVisits.Text = visitCount;
-                        lblStaffUnique.Text = uniqueVisitors;
-                        lblStaffPercent.Text = percentage;
-                    }
-                    else if (category == "Customer")
-                    {
-                        lblCustomerVisits.Text = visitCount;
-                        lblCustomerUnique.Text = uniqueVisitors;
-                        lblCustomerPercent.Text = percentage;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error loading staff vs customer summary: {ex.Message}");
-            }
         }
 
         private void LoadDashboardStats(DateTime startDate, DateTime endDate)

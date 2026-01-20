@@ -493,27 +493,6 @@
             </div>
         </div>
 
-        <!-- Staff vs Customer Summary -->
-        <div class="data-card" style="margin-bottom: 25px;">
-            <div class="data-card-header">
-                <span><i class="fas fa-users-cog"></i> สรุปทีมงาน vs ลูกค้า</span>
-            </div>
-            <div class="data-card-body">
-                <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 200px; text-align: center; padding: 20px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); border-radius: 10px; color: white;">
-                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 10px;">ทีมงาน (Staff)</div>
-                        <div style="font-size: 32px; font-weight: 700;"><asp:Label ID="lblStaffVisits" runat="server" Text="0"></asp:Label></div>
-                        <div style="font-size: 13px; opacity: 0.8; margin-top: 5px;"><asp:Label ID="lblStaffPercent" runat="server" Text="0%"></asp:Label> | <asp:Label ID="lblStaffUnique" runat="server" Text="0"></asp:Label> IPs</div>
-                    </div>
-                    <div style="flex: 1; min-width: 200px; text-align: center; padding: 20px; background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); border-radius: 10px; color: white;">
-                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 10px;">ลูกค้า (Customer)</div>
-                        <div style="font-size: 32px; font-weight: 700;"><asp:Label ID="lblCustomerVisits" runat="server" Text="0"></asp:Label></div>
-                        <div style="font-size: 13px; opacity: 0.8; margin-top: 5px;"><asp:Label ID="lblCustomerPercent" runat="server" Text="0%"></asp:Label> | <asp:Label ID="lblCustomerUnique" runat="server" Text="0"></asp:Label> IPs</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Tab Navigation -->
         <div class="tab-navigation">
             <asp:Button ID="btnTabOverview" runat="server" Text="ภาพรวม" CssClass="tab-btn active" OnClick="btnTabOverview_Click" />
