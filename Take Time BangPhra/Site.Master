@@ -508,7 +508,7 @@
                         </a></li>
 
                         <!-- Admin Mega Menu -->
-                        <asp:Panel ID="pnlAdminNav" runat="server" Visible="false">
+                        <asp:PlaceHolder ID="pnlAdminNav" runat="server" Visible="false">
                             <li class="dropdown admin-menu mega-menu">
                                 <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true">
                                     <i class="fas fa-user-cog"></i> ผู้ดูแลระบบ <span class="caret"></span>
@@ -685,9 +685,9 @@
                                     </div>
                                 </div>
                             </li>
-                        </asp:Panel>
+                        </asp:PlaceHolder>
                         <!-- Employee Menu (visible to all logged-in users) -->
-                        <asp:Panel ID="pnlEmployeeNav" runat="server" Visible="false">
+                        <asp:PlaceHolder ID="pnlEmployeeNav" runat="server" Visible="false">
                             <li class="dropdown">
                                 <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" style="background: rgba(102, 126, 234, 0.2); border-radius: 5px;">
                                     <i class="fas fa-user-circle"></i> พนักงาน <span class="caret"></span>
@@ -708,7 +708,7 @@
                                     </a></li>
                                 </ul>
                             </li>
-                        </asp:Panel>
+                        </asp:PlaceHolder>
                     </ul>
 
                     <!-- Authentication Buttons -->

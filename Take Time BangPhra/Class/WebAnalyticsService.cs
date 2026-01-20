@@ -30,71 +30,67 @@ namespace Take_Time_BangPhra.Class
         }
 
         /// <summary>
-        /// Build SQL WHERE clause for user type filter
-        /// Staff = IP ที่เคย login เข้าระบบ (มีใน Logs table) หรือ Internal IP
+        /// Get CTE for Staff IPs - runs once per query for high performance
+        /// </summary>
+        private string GetStaffIPsCTE()
+        {
+            return @"StaffIPs AS (
+                SELECT DISTINCT LogFromIP
+                FROM Logs
+                WHERE LogFromIP IS NOT NULL
+                AND LogFromIP != ''
+                AND LogBy IS NOT NULL
+                AND LogBy != ''
+            )";
+        }
+
+        /// <summary>
+        /// Check if IP is internal (local network or localhost)
+        /// </summary>
+        private string GetInternalIPCheck(string ipColumn = "DeviceIP")
+        {
+            return $@"({ipColumn} LIKE '10.%'
+                OR {ipColumn} LIKE '192.168.%'
+                OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
+                OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
+                OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
+                OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
+                OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
+                OR {ipColumn} LIKE '172.31.%'
+                OR {ipColumn} LIKE '127.%'
+                OR {ipColumn} = '::1'
+                OR {ipColumn} = 'localhost')";
+        }
+
+        /// <summary>
+        /// Build SQL WHERE clause for user type filter (use with CTE and LEFT JOIN)
+        /// Staff = IP ที่เคย login เข้าระบบ (มีใน StaffIPs CTE) หรือ Internal IP
         /// Customer = IP ภายนอกที่ไม่เคย login
         /// </summary>
-        private string GetUserTypeFilter(UserType userType, string ipColumn = "DeviceIP")
+        private string GetUserTypeJoinFilter(UserType userType, string ipColumn = "DeviceIP", string staffIPsAlias = "sip")
         {
+            string internalIPCheck = GetInternalIPCheck(ipColumn);
             switch (userType)
             {
                 case UserType.Staff:
-                    // IPs that have logged in (exist in Logs table) OR Internal IPs
-                    // Use EXISTS for better performance instead of IN with subquery
-                    return $@" AND (
-                        EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
-                        OR {ipColumn} LIKE '10.%'
-                        OR {ipColumn} LIKE '192.168.%'
-                        OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
-                        OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
-                        OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
-                        OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
-                        OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
-                        OR {ipColumn} LIKE '172.31.%'
-                        OR {ipColumn} LIKE '127.%'
-                        OR {ipColumn} = '::1'
-                        OR {ipColumn} = 'localhost'
-                    )";
+                    // IPs that have logged in (found in StaffIPs CTE) OR Internal IPs
+                    return $@" AND ({staffIPsAlias}.LogFromIP IS NOT NULL OR {internalIPCheck})";
                 case UserType.Customer:
-                    // External IPs that never logged in
-                    // Use NOT EXISTS for better performance instead of NOT IN with subquery
-                    return $@" AND NOT (
-                        EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
-                        OR {ipColumn} LIKE '10.%'
-                        OR {ipColumn} LIKE '192.168.%'
-                        OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
-                        OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
-                        OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
-                        OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
-                        OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
-                        OR {ipColumn} LIKE '172.31.%'
-                        OR {ipColumn} LIKE '127.%'
-                        OR {ipColumn} = '::1'
-                        OR {ipColumn} = 'localhost'
-                    )";
+                    // External IPs that never logged in (not in StaffIPs AND not internal)
+                    return $@" AND ({staffIPsAlias}.LogFromIP IS NULL AND NOT {internalIPCheck})";
                 default:
                     return "";
             }
         }
 
         /// <summary>
-        /// Get SQL CASE expression for user category (Staff/Customer)
-        /// Use EXISTS for better performance instead of IN with subquery
+        /// Get SQL CASE expression for user category (Staff/Customer) - use with LEFT JOIN StaffIPs
         /// </summary>
-        private string GetUserCategorySql(string ipColumn = "DeviceIP")
+        private string GetUserCategoryJoinSql(string ipColumn = "DeviceIP", string staffIPsAlias = "sip")
         {
+            string internalIPCheck = GetInternalIPCheck(ipColumn);
             return $@"CASE
-                WHEN EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
-                     OR {ipColumn} LIKE '10.%'
-                     OR {ipColumn} LIKE '192.168.%'
-                     OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
-                     OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
-                     OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
-                     OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
-                     OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
-                     OR {ipColumn} LIKE '172.31.%'
-                     OR {ipColumn} LIKE '127.%'
-                     OR {ipColumn} = '::1'
+                WHEN {staffIPsAlias}.LogFromIP IS NOT NULL OR {internalIPCheck}
                 THEN 'Staff'
                 ELSE 'Customer'
             END";
@@ -106,26 +102,48 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get overview statistics for the dashboard with user type filter
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetDashboardStats(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS TotalVisits,
-                            (SELECT COUNT(DISTINCT DeviceIP) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueVisitors,
-                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= CAST(GETDATE() AS DATE) {userTypeFilter}) AS TodayVisits,
-                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -7, GETDATE()) {userTypeFilter}) AS WeeklyVisits,
-                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -30, GETDATE()) {userTypeFilter}) AS MonthlyVisits,
-                            (SELECT COUNT(*) FROM System_Logs WHERE LogLevel >= 4 AND CreatedDate BETWEEN @StartDate AND @EndDate) AS ErrorCount,
-                            (SELECT COUNT(DISTINCT Browser) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueBrowsers,
-                            (SELECT TOP 1 Browser FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter} GROUP BY Browser ORDER BY COUNT(*) DESC) AS TopBrowser";
+
+                    if (userType == UserType.All)
+                    {
+                        // No filter needed - simple query without CTE
+                        cmd.CommandText = @"
+                            SELECT
+                                (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate) AS TotalVisits,
+                                (SELECT COUNT(DISTINCT DeviceIP) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate) AS UniqueVisitors,
+                                (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= CAST(GETDATE() AS DATE)) AS TodayVisits,
+                                (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -7, GETDATE())) AS WeeklyVisits,
+                                (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -30, GETDATE())) AS MonthlyVisits,
+                                (SELECT COUNT(*) FROM System_Logs WHERE LogLevel >= 4 AND CreatedDate BETWEEN @StartDate AND @EndDate) AS ErrorCount,
+                                (SELECT COUNT(DISTINCT Browser) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate) AS UniqueBrowsers,
+                                (SELECT TOP 1 Browser FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate GROUP BY Browser ORDER BY COUNT(*) DESC) AS TopBrowser";
+                    }
+                    else
+                    {
+                        // Use CTE with LEFT JOIN for Staff/Customer filter
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                (SELECT COUNT(*) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS TotalVisits,
+                                (SELECT COUNT(DISTINCT la.DeviceIP) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueVisitors,
+                                (SELECT COUNT(*) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime >= CAST(GETDATE() AS DATE) {userTypeFilter}) AS TodayVisits,
+                                (SELECT COUNT(*) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime >= DATEADD(DAY, -7, GETDATE()) {userTypeFilter}) AS WeeklyVisits,
+                                (SELECT COUNT(*) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime >= DATEADD(DAY, -30, GETDATE()) {userTypeFilter}) AS MonthlyVisits,
+                                (SELECT COUNT(*) FROM System_Logs WHERE LogLevel >= 4 AND CreatedDate BETWEEN @StartDate AND @EndDate) AS ErrorCount,
+                                (SELECT COUNT(DISTINCT la.Browser) FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueBrowsers,
+                                (SELECT TOP 1 la.Browser FROM Logs_Access la LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter} GROUP BY la.Browser ORDER BY COUNT(*) DESC) AS TopBrowser";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -147,32 +165,36 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get access logs with pagination and filters
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetAccessLogs(DateTime startDate, DateTime endDate, string browser = "", string deviceIP = "", int pageSize = 100, int pageNumber = 1, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
+            string userCategorySql = GetUserCategoryJoinSql("la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    string userCategorySql = GetUserCategorySql();
                     cmd.CommandText = $@"
+                        ;WITH {staffIPsCTE}
                         SELECT
-                            ID,
-                            AccessDateTime,
-                            DeviceName,
-                            DeviceIP,
-                            Browser,
+                            la.ID,
+                            la.AccessDateTime,
+                            la.DeviceName,
+                            la.DeviceIP,
+                            la.Browser,
                             {userCategorySql} AS UserCategory,
-                            ROW_NUMBER() OVER (ORDER BY AccessDateTime DESC) AS RowNum
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        AND (@Browser = '' OR Browser LIKE '%' + @Browser + '%')
-                        AND (@DeviceIP = '' OR DeviceIP LIKE '%' + @DeviceIP + '%')
+                            ROW_NUMBER() OVER (ORDER BY la.AccessDateTime DESC) AS RowNum
+                        FROM Logs_Access la
+                        LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND (@Browser = '' OR la.Browser LIKE '%' + @Browser + '%')
+                        AND (@DeviceIP = '' OR la.DeviceIP LIKE '%' + @DeviceIP + '%')
                         {userTypeFilter}
-                        ORDER BY AccessDateTime DESC
+                        ORDER BY la.AccessDateTime DESC
                         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
@@ -195,10 +217,12 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get total access log count for pagination
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public int GetAccessLogCount(DateTime startDate, DateTime endDate, string browser = "", string deviceIP = "", UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
@@ -206,11 +230,13 @@ namespace Take_Time_BangPhra.Class
                 {
                     cmd.Connection = conn;
                     cmd.CommandText = $@"
+                        ;WITH {staffIPsCTE}
                         SELECT COUNT(*)
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        AND (@Browser = '' OR Browser LIKE '%' + @Browser + '%')
-                        AND (@DeviceIP = '' OR DeviceIP LIKE '%' + @DeviceIP + '%')
+                        FROM Logs_Access la
+                        LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND (@Browser = '' OR la.Browser LIKE '%' + @Browser + '%')
+                        AND (@DeviceIP = '' OR la.DeviceIP LIKE '%' + @DeviceIP + '%')
                         {userTypeFilter}";
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
@@ -230,27 +256,48 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get browser usage statistics
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetBrowserStats(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            Browser,
-                            COUNT(*) AS VisitCount,
-                            CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}), 0) AS DECIMAL(5,2)) AS Percentage
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        AND Browser IS NOT NULL AND Browser != ''
-                        {userTypeFilter}
-                        GROUP BY Browser
-                        ORDER BY VisitCount DESC";
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            SELECT
+                                Browser,
+                                COUNT(*) AS VisitCount,
+                                CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate), 0) AS DECIMAL(5,2)) AS Percentage
+                            FROM Logs_Access
+                            WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                            AND Browser IS NOT NULL AND Browser != ''
+                            GROUP BY Browser
+                            ORDER BY VisitCount DESC";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                la.Browser,
+                                COUNT(*) AS VisitCount,
+                                CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access la2 LEFT JOIN StaffIPs sip2 ON la2.DeviceIP = sip2.LogFromIP WHERE la2.AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter.Replace("la.", "la2.").Replace("sip.", "sip2.")}), 0) AS DECIMAL(5,2)) AS Percentage
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            AND la.Browser IS NOT NULL AND la.Browser != ''
+                            {userTypeFilter}
+                            GROUP BY la.Browser
+                            ORDER BY VisitCount DESC";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -272,25 +319,44 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get visits by hour of day
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetVisitsByHour(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            DATEPART(HOUR, AccessDateTime) AS Hour,
-                            COUNT(*) AS VisitCount
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        {userTypeFilter}
-                        GROUP BY DATEPART(HOUR, AccessDateTime)
-                        ORDER BY Hour";
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            SELECT
+                                DATEPART(HOUR, AccessDateTime) AS Hour,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access
+                            WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                            GROUP BY DATEPART(HOUR, AccessDateTime)
+                            ORDER BY Hour";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                DATEPART(HOUR, la.AccessDateTime) AS Hour,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            {userTypeFilter}
+                            GROUP BY DATEPART(HOUR, la.AccessDateTime)
+                            ORDER BY Hour";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -308,26 +374,46 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get visits by day of week
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetVisitsByDayOfWeek(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            DATEPART(WEEKDAY, AccessDateTime) AS DayOfWeek,
-                            DATENAME(WEEKDAY, AccessDateTime) AS DayName,
-                            COUNT(*) AS VisitCount
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        {userTypeFilter}
-                        GROUP BY DATEPART(WEEKDAY, AccessDateTime), DATENAME(WEEKDAY, AccessDateTime)
-                        ORDER BY DayOfWeek";
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            SELECT
+                                DATEPART(WEEKDAY, AccessDateTime) AS DayOfWeek,
+                                DATENAME(WEEKDAY, AccessDateTime) AS DayName,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access
+                            WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                            GROUP BY DATEPART(WEEKDAY, AccessDateTime), DATENAME(WEEKDAY, AccessDateTime)
+                            ORDER BY DayOfWeek";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                DATEPART(WEEKDAY, la.AccessDateTime) AS DayOfWeek,
+                                DATENAME(WEEKDAY, la.AccessDateTime) AS DayName,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            {userTypeFilter}
+                            GROUP BY DATEPART(WEEKDAY, la.AccessDateTime), DATENAME(WEEKDAY, la.AccessDateTime)
+                            ORDER BY DayOfWeek";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -345,26 +431,46 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get daily visits trend
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetDailyVisitsTrend(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            CAST(AccessDateTime AS DATE) AS VisitDate,
-                            COUNT(*) AS VisitCount,
-                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        {userTypeFilter}
-                        GROUP BY CAST(AccessDateTime AS DATE)
-                        ORDER BY VisitDate";
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            SELECT
+                                CAST(AccessDateTime AS DATE) AS VisitDate,
+                                COUNT(*) AS VisitCount,
+                                COUNT(DISTINCT DeviceIP) AS UniqueVisitors
+                            FROM Logs_Access
+                            WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                            GROUP BY CAST(AccessDateTime AS DATE)
+                            ORDER BY VisitDate";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                CAST(la.AccessDateTime AS DATE) AS VisitDate,
+                                COUNT(*) AS VisitCount,
+                                COUNT(DISTINCT la.DeviceIP) AS UniqueVisitors
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            {userTypeFilter}
+                            GROUP BY CAST(la.AccessDateTime AS DATE)
+                            ORDER BY VisitDate";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -382,27 +488,48 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get monthly visits summary
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetMonthlyVisitsSummary(int year, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        SELECT
-                            MONTH(AccessDateTime) AS Month,
-                            DATENAME(MONTH, AccessDateTime) AS MonthName,
-                            COUNT(*) AS VisitCount,
-                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors
-                        FROM Logs_Access
-                        WHERE YEAR(AccessDateTime) = @Year
-                        {userTypeFilter}
-                        GROUP BY MONTH(AccessDateTime), DATENAME(MONTH, AccessDateTime)
-                        ORDER BY Month";
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            SELECT
+                                MONTH(AccessDateTime) AS Month,
+                                DATENAME(MONTH, AccessDateTime) AS MonthName,
+                                COUNT(*) AS VisitCount,
+                                COUNT(DISTINCT DeviceIP) AS UniqueVisitors
+                            FROM Logs_Access
+                            WHERE YEAR(AccessDateTime) = @Year
+                            GROUP BY MONTH(AccessDateTime), DATENAME(MONTH, AccessDateTime)
+                            ORDER BY Month";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE}
+                            SELECT
+                                MONTH(la.AccessDateTime) AS Month,
+                                DATENAME(MONTH, la.AccessDateTime) AS MonthName,
+                                COUNT(*) AS VisitCount,
+                                COUNT(DISTINCT la.DeviceIP) AS UniqueVisitors
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            WHERE YEAR(la.AccessDateTime) = @Year
+                            {userTypeFilter}
+                            GROUP BY MONTH(la.AccessDateTime), DATENAME(MONTH, la.AccessDateTime)
+                            ORDER BY Month";
+                    }
 
                     cmd.Parameters.AddWithValue("@Year", year);
 
@@ -423,31 +550,35 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get top visitors by IP
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetTopVisitorsByIP(DateTime startDate, DateTime endDate, int topN = 20, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
+            string userCategorySql = GetUserCategoryJoinSql("la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    string userCategorySql = GetUserCategorySql();
                     cmd.CommandText = $@"
+                        ;WITH {staffIPsCTE}
                         SELECT TOP (@TopN)
-                            DeviceIP,
-                            DeviceName,
+                            la.DeviceIP,
+                            la.DeviceName,
                             COUNT(*) AS VisitCount,
-                            MIN(AccessDateTime) AS FirstVisit,
-                            MAX(AccessDateTime) AS LastVisit,
-                            COUNT(DISTINCT CAST(AccessDateTime AS DATE)) AS VisitDays,
+                            MIN(la.AccessDateTime) AS FirstVisit,
+                            MAX(la.AccessDateTime) AS LastVisit,
+                            COUNT(DISTINCT CAST(la.AccessDateTime AS DATE)) AS VisitDays,
                             {userCategorySql} AS UserCategory
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        AND DeviceIP IS NOT NULL AND DeviceIP != ''
+                        FROM Logs_Access la
+                        LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND la.DeviceIP IS NOT NULL AND la.DeviceIP != ''
                         {userTypeFilter}
-                        GROUP BY DeviceIP, DeviceName
+                        GROUP BY la.DeviceIP, la.DeviceName, sip.LogFromIP
                         ORDER BY VisitCount DESC";
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
@@ -467,38 +598,68 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get new vs returning visitors
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetNewVsReturningVisitors(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
         {
-            string userTypeFilter = GetUserTypeFilter(userType);
-            string userTypeFilterVfv = GetUserTypeFilter(userType, "la.DeviceIP");
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userTypeFilter = GetUserTypeJoinFilter(userType, "la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = $@"
-                        WITH VisitorFirstVisit AS (
-                            SELECT DeviceIP, MIN(AccessDateTime) AS FirstVisit
-                            FROM Logs_Access
-                            WHERE 1=1 {userTypeFilter}
-                            GROUP BY DeviceIP
-                        )
-                        SELECT
-                            CASE
+
+                    if (userType == UserType.All)
+                    {
+                        cmd.CommandText = @"
+                            WITH VisitorFirstVisit AS (
+                                SELECT DeviceIP, MIN(AccessDateTime) AS FirstVisit
+                                FROM Logs_Access
+                                GROUP BY DeviceIP
+                            )
+                            SELECT
+                                CASE
+                                    WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
+                                    ELSE 'Returning Visitor'
+                                END AS VisitorType,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access la
+                            INNER JOIN VisitorFirstVisit vfv ON la.DeviceIP = vfv.DeviceIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            GROUP BY CASE
                                 WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
                                 ELSE 'Returning Visitor'
-                            END AS VisitorType,
-                            COUNT(*) AS VisitCount
-                        FROM Logs_Access la
-                        INNER JOIN VisitorFirstVisit vfv ON la.DeviceIP = vfv.DeviceIP
-                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
-                        {userTypeFilterVfv}
-                        GROUP BY CASE
-                            WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
-                            ELSE 'Returning Visitor'
-                        END";
+                            END";
+                    }
+                    else
+                    {
+                        cmd.CommandText = $@"
+                            ;WITH {staffIPsCTE},
+                            VisitorFirstVisit AS (
+                                SELECT la2.DeviceIP, MIN(la2.AccessDateTime) AS FirstVisit
+                                FROM Logs_Access la2
+                                LEFT JOIN StaffIPs sip2 ON la2.DeviceIP = sip2.LogFromIP
+                                WHERE 1=1 {userTypeFilter.Replace("la.", "la2.").Replace("sip.", "sip2.")}
+                                GROUP BY la2.DeviceIP
+                            )
+                            SELECT
+                                CASE
+                                    WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
+                                    ELSE 'Returning Visitor'
+                                END AS VisitorType,
+                                COUNT(*) AS VisitCount
+                            FROM Logs_Access la
+                            LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                            INNER JOIN VisitorFirstVisit vfv ON la.DeviceIP = vfv.DeviceIP
+                            WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                            {userTypeFilter}
+                            GROUP BY CASE
+                                WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
+                                ELSE 'Returning Visitor'
+                            END";
+                    }
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
                     cmd.Parameters.AddWithValue("@EndDate", endDate);
@@ -518,10 +679,12 @@ namespace Take_Time_BangPhra.Class
         /// Get staff vs customer usage summary
         /// Staff = IP ที่เคย login หรือ Internal IP
         /// Customer = IP ภายนอกที่ไม่เคย login
+        /// Uses CTE for high performance Staff IP lookup
         /// </summary>
         public DataTable GetStaffVsCustomerSummary(DateTime startDate, DateTime endDate)
         {
-            string userCategorySql = GetUserCategorySql();
+            string staffIPsCTE = GetStaffIPsCTE();
+            string userCategorySql = GetUserCategoryJoinSql("la.DeviceIP", "sip");
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
@@ -529,13 +692,15 @@ namespace Take_Time_BangPhra.Class
                 {
                     cmd.Connection = conn;
                     cmd.CommandText = $@"
+                        ;WITH {staffIPsCTE}
                         SELECT
                             {userCategorySql} AS UserCategory,
                             COUNT(*) AS VisitCount,
-                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors,
+                            COUNT(DISTINCT la.DeviceIP) AS UniqueVisitors,
                             CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate), 0) AS DECIMAL(5,2)) AS Percentage
-                        FROM Logs_Access
-                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        FROM Logs_Access la
+                        LEFT JOIN StaffIPs sip ON la.DeviceIP = sip.LogFromIP
+                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
                         GROUP BY {userCategorySql}
                         ORDER BY VisitCount DESC";
 
