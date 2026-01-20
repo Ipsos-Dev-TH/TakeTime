@@ -62,7 +62,9 @@
             border-radius: 6px;
             font-size: 14px;
             min-width: 150px;
-            white-space: nowrap;
+            height: auto;
+            line-height: 1.6;
+            box-sizing: border-box;
         }
 
         .form-control:focus {
@@ -72,18 +74,28 @@
 
         /* Dropdown specific styles */
         select.form-control {
-            min-width: 180px;
-            padding-right: 30px;
+            min-width: 200px;
+            width: auto;
+            min-height: 44px;
+            height: auto !important;
+            padding: 10px 40px 10px 15px;
+            line-height: 1.6 !important;
+            font-size: 14px;
+            overflow: visible;
+            text-overflow: clip;
             appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
-            background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 8px center;
-            background-size: 20px;
+            background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 10px center;
+            background-size: 18px;
             cursor: pointer;
+            box-sizing: border-box;
         }
 
         select.form-control option {
-            padding: 10px;
+            padding: 12px 15px;
+            line-height: 1.6;
+            font-size: 14px;
         }
 
         /* Stats Cards */

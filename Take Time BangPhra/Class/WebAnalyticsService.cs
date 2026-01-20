@@ -40,8 +40,9 @@ namespace Take_Time_BangPhra.Class
             {
                 case UserType.Staff:
                     // IPs that have logged in (exist in Logs table) OR Internal IPs
+                    // Use EXISTS for better performance instead of IN with subquery
                     return $@" AND (
-                        {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                        EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
                         OR {ipColumn} LIKE '10.%'
                         OR {ipColumn} LIKE '192.168.%'
                         OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
@@ -56,8 +57,9 @@ namespace Take_Time_BangPhra.Class
                     )";
                 case UserType.Customer:
                     // External IPs that never logged in
+                    // Use NOT EXISTS for better performance instead of NOT IN with subquery
                     return $@" AND NOT (
-                        {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                        EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
                         OR {ipColumn} LIKE '10.%'
                         OR {ipColumn} LIKE '192.168.%'
                         OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
@@ -77,11 +79,12 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get SQL CASE expression for user category (Staff/Customer)
+        /// Use EXISTS for better performance instead of IN with subquery
         /// </summary>
         private string GetUserCategorySql(string ipColumn = "DeviceIP")
         {
             return $@"CASE
-                WHEN {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                WHEN EXISTS (SELECT 1 FROM Logs WHERE LogFromIP = {ipColumn} AND LogBy IS NOT NULL AND LogBy != '')
                      OR {ipColumn} LIKE '10.%'
                      OR {ipColumn} LIKE '192.168.%'
                      OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
