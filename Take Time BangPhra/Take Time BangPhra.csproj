@@ -411,6 +411,7 @@
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
     <Content Include="Admin\AffiliateManagement.aspx" />
+    <Content Include="Admin\WebAnalytics.aspx" />
     <Content Include="Affiliate\Register.aspx" />
     <Content Include="Contact.aspx" />
     <Content Include="Content\bootstrap-theme.css" />
@@ -725,6 +726,13 @@
     <Compile Include="Admin\AffiliateManagement.aspx.designer.cs">
       <DependentUpon>AffiliateManagement.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\WebAnalytics.aspx.cs">
+      <DependentUpon>WebAnalytics.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\WebAnalytics.aspx.designer.cs">
+      <DependentUpon>WebAnalytics.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Affiliate\Register.aspx.cs">
       <DependentUpon>Register.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -882,6 +890,7 @@
     </Compile>
     <Compile Include="Class\OTService.cs" />
     <Compile Include="Class\SupervisorService.cs" />
+    <Compile Include="Class\WebAnalyticsService.cs" />
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
