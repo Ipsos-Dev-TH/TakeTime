@@ -21,7 +21,7 @@ namespace Take_Time_BangPhra
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Panel pnlAdminNav;
+        protected global::System.Web.UI.WebControls.PlaceHolder pnlAdminNav;
 
         /// <summary>
         /// Label1 control.
@@ -129,7 +129,7 @@ namespace Take_Time_BangPhra
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Panel pnlEmployeeNav;
+        protected global::System.Web.UI.WebControls.PlaceHolder pnlEmployeeNav;
 
         /// <summary>
         /// Label4 control.
