@@ -676,6 +676,9 @@
                                                     <li><a runat="server" href="~/Admin/AffiliateManagement">
                                                         <i class="fas fa-handshake"></i> จัดการ Affiliate
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/WebAnalytics">
+                                                        <i class="fas fa-chart-line"></i> Web Analytics
+                                                    </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>

@@ -1,0 +1,889 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.Configuration;
+
+namespace Take_Time_BangPhra.Class
+{
+    /// <summary>
+    /// Service for Web Analytics - analyzing access logs and usage patterns
+    /// </summary>
+    public class WebAnalyticsService
+    {
+        private readonly string connectionString;
+
+        public WebAnalyticsService()
+        {
+            connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        }
+
+        #region User Type Filter
+
+        /// <summary>
+        /// User type filter: All, Staff (Internal IP), Customer (External IP)
+        /// </summary>
+        public enum UserType
+        {
+            All = 0,
+            Staff = 1,      // Internal IPs: 10.x.x.x, 192.168.x.x, 172.16-31.x.x, 127.x.x.x
+            Customer = 2    // External IPs
+        }
+
+        /// <summary>
+        /// Build SQL WHERE clause for user type filter
+        /// </summary>
+        private string GetUserTypeFilter(UserType userType, string ipColumn = "DeviceIP")
+        {
+            switch (userType)
+            {
+                case UserType.Staff:
+                    // Internal IPs (staff)
+                    return $@" AND (
+                        {ipColumn} LIKE '10.%' OR
+                        {ipColumn} LIKE '192.168.%' OR
+                        {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%' OR
+                        {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%' OR
+                        {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%' OR
+                        {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%' OR
+                        {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%' OR
+                        {ipColumn} LIKE '172.31.%' OR
+                        {ipColumn} LIKE '127.%' OR
+                        {ipColumn} = '::1' OR
+                        {ipColumn} = 'localhost'
+                    )";
+                case UserType.Customer:
+                    // External IPs (customers)
+                    return $@" AND NOT (
+                        {ipColumn} LIKE '10.%' OR
+                        {ipColumn} LIKE '192.168.%' OR
+                        {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%' OR
+                        {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%' OR
+                        {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%' OR
+                        {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%' OR
+                        {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%' OR
+                        {ipColumn} LIKE '172.31.%' OR
+                        {ipColumn} LIKE '127.%' OR
+                        {ipColumn} = '::1' OR
+                        {ipColumn} = 'localhost'
+                    )";
+                default:
+                    return "";
+            }
+        }
+
+        #endregion
+
+        #region Dashboard Statistics
+
+        /// <summary>
+        /// Get overview statistics for the dashboard with user type filter
+        /// </summary>
+        public DataTable GetDashboardStats(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS TotalVisits,
+                            (SELECT COUNT(DISTINCT DeviceIP) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueVisitors,
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= CAST(GETDATE() AS DATE) {userTypeFilter}) AS TodayVisits,
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -7, GETDATE()) {userTypeFilter}) AS WeeklyVisits,
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime >= DATEADD(DAY, -30, GETDATE()) {userTypeFilter}) AS MonthlyVisits,
+                            (SELECT COUNT(*) FROM System_Logs WHERE LogLevel >= 4 AND CreatedDate BETWEEN @StartDate AND @EndDate) AS ErrorCount,
+                            (SELECT COUNT(DISTINCT Browser) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}) AS UniqueBrowsers,
+                            (SELECT TOP 1 Browser FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter} GROUP BY Browser ORDER BY COUNT(*) DESC) AS TopBrowser";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Access Logs
+
+        /// <summary>
+        /// Get access logs with pagination and filters
+        /// </summary>
+        public DataTable GetAccessLogs(DateTime startDate, DateTime endDate, string browser = "", string deviceIP = "", int pageSize = 100, int pageNumber = 1, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            ID,
+                            AccessDateTime,
+                            DeviceName,
+                            DeviceIP,
+                            Browser,
+                            CASE
+                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
+                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
+                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
+                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
+                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
+                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
+                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
+                                THEN 'Staff'
+                                ELSE 'Customer'
+                            END AS UserCategory,
+                            ROW_NUMBER() OVER (ORDER BY AccessDateTime DESC) AS RowNum
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND (@Browser = '' OR Browser LIKE '%' + @Browser + '%')
+                        AND (@DeviceIP = '' OR DeviceIP LIKE '%' + @DeviceIP + '%')
+                        {userTypeFilter}
+                        ORDER BY AccessDateTime DESC
+                        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+                    cmd.Parameters.AddWithValue("@Browser", browser ?? "");
+                    cmd.Parameters.AddWithValue("@DeviceIP", deviceIP ?? "");
+                    cmd.Parameters.AddWithValue("@Offset", (pageNumber - 1) * pageSize);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get total access log count for pagination
+        /// </summary>
+        public int GetAccessLogCount(DateTime startDate, DateTime endDate, string browser = "", string deviceIP = "", UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT COUNT(*)
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND (@Browser = '' OR Browser LIKE '%' + @Browser + '%')
+                        AND (@DeviceIP = '' OR DeviceIP LIKE '%' + @DeviceIP + '%')
+                        {userTypeFilter}";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+                    cmd.Parameters.AddWithValue("@Browser", browser ?? "");
+                    cmd.Parameters.AddWithValue("@DeviceIP", deviceIP ?? "");
+
+                    conn.Open();
+                    return (int)cmd.ExecuteScalar();
+                }
+            }
+        }
+
+        #endregion
+
+        #region Browser Analytics
+
+        /// <summary>
+        /// Get browser usage statistics
+        /// </summary>
+        public DataTable GetBrowserStats(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            Browser,
+                            COUNT(*) AS VisitCount,
+                            CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate {userTypeFilter}), 0) AS DECIMAL(5,2)) AS Percentage
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND Browser IS NOT NULL AND Browser != ''
+                        {userTypeFilter}
+                        GROUP BY Browser
+                        ORDER BY VisitCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Time-based Analytics
+
+        /// <summary>
+        /// Get visits by hour of day
+        /// </summary>
+        public DataTable GetVisitsByHour(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            DATEPART(HOUR, AccessDateTime) AS Hour,
+                            COUNT(*) AS VisitCount
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        {userTypeFilter}
+                        GROUP BY DATEPART(HOUR, AccessDateTime)
+                        ORDER BY Hour";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get visits by day of week
+        /// </summary>
+        public DataTable GetVisitsByDayOfWeek(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            DATEPART(WEEKDAY, AccessDateTime) AS DayOfWeek,
+                            DATENAME(WEEKDAY, AccessDateTime) AS DayName,
+                            COUNT(*) AS VisitCount
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        {userTypeFilter}
+                        GROUP BY DATEPART(WEEKDAY, AccessDateTime), DATENAME(WEEKDAY, AccessDateTime)
+                        ORDER BY DayOfWeek";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get daily visits trend
+        /// </summary>
+        public DataTable GetDailyVisitsTrend(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            CAST(AccessDateTime AS DATE) AS VisitDate,
+                            COUNT(*) AS VisitCount,
+                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        {userTypeFilter}
+                        GROUP BY CAST(AccessDateTime AS DATE)
+                        ORDER BY VisitDate";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get monthly visits summary
+        /// </summary>
+        public DataTable GetMonthlyVisitsSummary(int year, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT
+                            MONTH(AccessDateTime) AS Month,
+                            DATENAME(MONTH, AccessDateTime) AS MonthName,
+                            COUNT(*) AS VisitCount,
+                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors
+                        FROM Logs_Access
+                        WHERE YEAR(AccessDateTime) = @Year
+                        {userTypeFilter}
+                        GROUP BY MONTH(AccessDateTime), DATENAME(MONTH, AccessDateTime)
+                        ORDER BY Month";
+
+                    cmd.Parameters.AddWithValue("@Year", year);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region IP Analytics
+
+        /// <summary>
+        /// Get top visitors by IP
+        /// </summary>
+        public DataTable GetTopVisitorsByIP(DateTime startDate, DateTime endDate, int topN = 20, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        SELECT TOP (@TopN)
+                            DeviceIP,
+                            DeviceName,
+                            COUNT(*) AS VisitCount,
+                            MIN(AccessDateTime) AS FirstVisit,
+                            MAX(AccessDateTime) AS LastVisit,
+                            COUNT(DISTINCT CAST(AccessDateTime AS DATE)) AS VisitDays,
+                            CASE
+                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
+                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
+                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
+                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
+                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
+                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
+                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
+                                THEN 'Staff'
+                                ELSE 'Customer'
+                            END AS UserCategory
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        AND DeviceIP IS NOT NULL AND DeviceIP != ''
+                        {userTypeFilter}
+                        GROUP BY DeviceIP, DeviceName
+                        ORDER BY VisitCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+                    cmd.Parameters.AddWithValue("@TopN", topN);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get new vs returning visitors
+        /// </summary>
+        public DataTable GetNewVsReturningVisitors(DateTime startDate, DateTime endDate, UserType userType = UserType.All)
+        {
+            string userTypeFilter = GetUserTypeFilter(userType);
+            string userTypeFilterVfv = GetUserTypeFilter(userType, "la.DeviceIP");
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = $@"
+                        WITH VisitorFirstVisit AS (
+                            SELECT DeviceIP, MIN(AccessDateTime) AS FirstVisit
+                            FROM Logs_Access
+                            WHERE 1=1 {userTypeFilter}
+                            GROUP BY DeviceIP
+                        )
+                        SELECT
+                            CASE
+                                WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
+                                ELSE 'Returning Visitor'
+                            END AS VisitorType,
+                            COUNT(*) AS VisitCount
+                        FROM Logs_Access la
+                        INNER JOIN VisitorFirstVisit vfv ON la.DeviceIP = vfv.DeviceIP
+                        WHERE la.AccessDateTime BETWEEN @StartDate AND @EndDate
+                        {userTypeFilterVfv}
+                        GROUP BY CASE
+                            WHEN vfv.FirstVisit >= @StartDate THEN 'New Visitor'
+                            ELSE 'Returning Visitor'
+                        END";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get staff vs customer usage summary
+        /// </summary>
+        public DataTable GetStaffVsCustomerSummary(DateTime startDate, DateTime endDate)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            CASE
+                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
+                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
+                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
+                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
+                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
+                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
+                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
+                                THEN 'Staff'
+                                ELSE 'Customer'
+                            END AS UserCategory,
+                            COUNT(*) AS VisitCount,
+                            COUNT(DISTINCT DeviceIP) AS UniqueVisitors,
+                            CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate), 0) AS DECIMAL(5,2)) AS Percentage
+                        FROM Logs_Access
+                        WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
+                        GROUP BY CASE
+                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
+                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
+                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
+                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
+                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
+                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
+                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
+                                THEN 'Staff'
+                                ELSE 'Customer'
+                            END
+                        ORDER BY VisitCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region System Logs Analytics
+
+        /// <summary>
+        /// Get system log summary by category
+        /// </summary>
+        public DataTable GetSystemLogsByCategory(DateTime startDate, DateTime endDate)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            Category,
+                            CASE Category
+                                WHEN 0 THEN 'General'
+                                WHEN 1 THEN 'Accounting'
+                                WHEN 2 THEN 'Payment'
+                                WHEN 3 THEN 'Receipt'
+                                WHEN 4 THEN 'Revenue'
+                                WHEN 5 THEN 'Reconciliation'
+                                WHEN 6 THEN 'DataIntegrity'
+                                WHEN 7 THEN 'Performance'
+                                ELSE 'Unknown'
+                            END AS CategoryName,
+                            COUNT(*) AS LogCount,
+                            SUM(CASE WHEN LogLevel >= 4 THEN 1 ELSE 0 END) AS ErrorCount
+                        FROM System_Logs
+                        WHERE CreatedDate BETWEEN @StartDate AND @EndDate
+                        GROUP BY Category
+                        ORDER BY LogCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get system log summary by level
+        /// </summary>
+        public DataTable GetSystemLogsByLevel(DateTime startDate, DateTime endDate)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            LogLevel,
+                            CASE LogLevel
+                                WHEN 1 THEN 'Debug'
+                                WHEN 2 THEN 'Info'
+                                WHEN 3 THEN 'Warning'
+                                WHEN 4 THEN 'Error'
+                                WHEN 5 THEN 'Critical'
+                                ELSE 'Unknown'
+                            END AS LevelName,
+                            COUNT(*) AS LogCount
+                        FROM System_Logs
+                        WHERE CreatedDate BETWEEN @StartDate AND @EndDate
+                        GROUP BY LogLevel
+                        ORDER BY LogLevel";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get recent errors
+        /// </summary>
+        public DataTable GetRecentErrors(int topN = 50)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT TOP (@TopN)
+                            ID,
+                            CreatedDate,
+                            CASE LogLevel
+                                WHEN 4 THEN 'Error'
+                                WHEN 5 THEN 'Critical'
+                                ELSE 'Unknown'
+                            END AS LevelName,
+                            CASE Category
+                                WHEN 0 THEN 'General'
+                                WHEN 1 THEN 'Accounting'
+                                WHEN 2 THEN 'Payment'
+                                WHEN 3 THEN 'Receipt'
+                                WHEN 4 THEN 'Revenue'
+                                WHEN 5 THEN 'Reconciliation'
+                                WHEN 6 THEN 'DataIntegrity'
+                                WHEN 7 THEN 'Performance'
+                                ELSE 'Unknown'
+                            END AS CategoryName,
+                            Message,
+                            Details
+                        FROM System_Logs
+                        WHERE LogLevel >= 4
+                        ORDER BY CreatedDate DESC";
+
+                    cmd.Parameters.AddWithValue("@TopN", topN);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region User Activity Logs
+
+        /// <summary>
+        /// Get user activity logs from the Logs table
+        /// </summary>
+        public DataTable GetUserActivityLogs(DateTime startDate, DateTime endDate, string action = "", string logBy = "")
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT TOP 500
+                            LogDateTime,
+                            LogAction,
+                            LogDetail,
+                            LogBy,
+                            LogFromComputerName,
+                            LogFromIP
+                        FROM Logs
+                        WHERE LogDateTime BETWEEN @StartDate AND @EndDate
+                        AND (@Action = '' OR LogAction LIKE '%' + @Action + '%')
+                        AND (@LogBy = '' OR LogBy LIKE '%' + @LogBy + '%')
+                        ORDER BY LogDateTime DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+                    cmd.Parameters.AddWithValue("@Action", action ?? "");
+                    cmd.Parameters.AddWithValue("@LogBy", logBy ?? "");
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get action summary
+        /// </summary>
+        public DataTable GetActionSummary(DateTime startDate, DateTime endDate)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            LogAction,
+                            COUNT(*) AS ActionCount,
+                            COUNT(DISTINCT LogBy) AS UniqueUsers
+                        FROM Logs
+                        WHERE LogDateTime BETWEEN @StartDate AND @EndDate
+                        AND LogAction IS NOT NULL AND LogAction != ''
+                        GROUP BY LogAction
+                        ORDER BY ActionCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get active users summary
+        /// </summary>
+        public DataTable GetActiveUsersSummary(DateTime startDate, DateTime endDate)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            LogBy AS Username,
+                            COUNT(*) AS ActionCount,
+                            MIN(LogDateTime) AS FirstActivity,
+                            MAX(LogDateTime) AS LastActivity,
+                            COUNT(DISTINCT LogAction) AS UniqueActions
+                        FROM Logs
+                        WHERE LogDateTime BETWEEN @StartDate AND @EndDate
+                        AND LogBy IS NOT NULL AND LogBy != ''
+                        GROUP BY LogBy
+                        ORDER BY ActionCount DESC";
+
+                    cmd.Parameters.AddWithValue("@StartDate", startDate);
+                    cmd.Parameters.AddWithValue("@EndDate", endDate);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Comparison Analytics
+
+        /// <summary>
+        /// Compare two periods
+        /// </summary>
+        public DataTable ComparePeriods(DateTime period1Start, DateTime period1End, DateTime period2Start, DateTime period2End)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                using (SqlCommand cmd = new SqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = @"
+                        SELECT
+                            'Period 1' AS Period,
+                            @P1Start AS StartDate,
+                            @P1End AS EndDate,
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @P1Start AND @P1End) AS TotalVisits,
+                            (SELECT COUNT(DISTINCT DeviceIP) FROM Logs_Access WHERE AccessDateTime BETWEEN @P1Start AND @P1End) AS UniqueVisitors
+                        UNION ALL
+                        SELECT
+                            'Period 2' AS Period,
+                            @P2Start AS StartDate,
+                            @P2End AS EndDate,
+                            (SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @P2Start AND @P2End) AS TotalVisits,
+                            (SELECT COUNT(DISTINCT DeviceIP) FROM Logs_Access WHERE AccessDateTime BETWEEN @P2Start AND @P2End) AS UniqueVisitors";
+
+                    cmd.Parameters.AddWithValue("@P1Start", period1Start);
+                    cmd.Parameters.AddWithValue("@P1End", period1End);
+                    cmd.Parameters.AddWithValue("@P2Start", period2Start);
+                    cmd.Parameters.AddWithValue("@P2End", period2End);
+
+                    conn.Open();
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Export
+
+        /// <summary>
+        /// Get all data for export
+        /// </summary>
+        public DataTable GetExportData(DateTime startDate, DateTime endDate, string exportType)
+        {
+            switch (exportType.ToLower())
+            {
+                case "access":
+                    return GetAccessLogs(startDate, endDate, "", "", 10000, 1);
+                case "browser":
+                    return GetBrowserStats(startDate, endDate);
+                case "daily":
+                    return GetDailyVisitsTrend(startDate, endDate);
+                case "hourly":
+                    return GetVisitsByHour(startDate, endDate);
+                case "visitors":
+                    return GetTopVisitorsByIP(startDate, endDate, 100);
+                default:
+                    return new DataTable();
+            }
+        }
+
+        #endregion
+    }
+}
