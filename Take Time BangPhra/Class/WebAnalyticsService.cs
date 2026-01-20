@@ -20,55 +20,81 @@ namespace Take_Time_BangPhra.Class
         #region User Type Filter
 
         /// <summary>
-        /// User type filter: All, Staff (Internal IP), Customer (External IP)
+        /// User type filter: All, Staff (logged in IPs or Internal IP), Customer (External IP never logged in)
         /// </summary>
         public enum UserType
         {
             All = 0,
-            Staff = 1,      // Internal IPs: 10.x.x.x, 192.168.x.x, 172.16-31.x.x, 127.x.x.x
-            Customer = 2    // External IPs
+            Staff = 1,      // IPs that have logged in OR Internal IPs
+            Customer = 2    // External IPs that never logged in
         }
 
         /// <summary>
         /// Build SQL WHERE clause for user type filter
+        /// Staff = IP ที่เคย login เข้าระบบ (มีใน Logs table) หรือ Internal IP
+        /// Customer = IP ภายนอกที่ไม่เคย login
         /// </summary>
         private string GetUserTypeFilter(UserType userType, string ipColumn = "DeviceIP")
         {
             switch (userType)
             {
                 case UserType.Staff:
-                    // Internal IPs (staff)
+                    // IPs that have logged in (exist in Logs table) OR Internal IPs
                     return $@" AND (
-                        {ipColumn} LIKE '10.%' OR
-                        {ipColumn} LIKE '192.168.%' OR
-                        {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%' OR
-                        {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%' OR
-                        {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%' OR
-                        {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%' OR
-                        {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%' OR
-                        {ipColumn} LIKE '172.31.%' OR
-                        {ipColumn} LIKE '127.%' OR
-                        {ipColumn} = '::1' OR
-                        {ipColumn} = 'localhost'
+                        {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                        OR {ipColumn} LIKE '10.%'
+                        OR {ipColumn} LIKE '192.168.%'
+                        OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
+                        OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
+                        OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
+                        OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
+                        OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
+                        OR {ipColumn} LIKE '172.31.%'
+                        OR {ipColumn} LIKE '127.%'
+                        OR {ipColumn} = '::1'
+                        OR {ipColumn} = 'localhost'
                     )";
                 case UserType.Customer:
-                    // External IPs (customers)
+                    // External IPs that never logged in
                     return $@" AND NOT (
-                        {ipColumn} LIKE '10.%' OR
-                        {ipColumn} LIKE '192.168.%' OR
-                        {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%' OR
-                        {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%' OR
-                        {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%' OR
-                        {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%' OR
-                        {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%' OR
-                        {ipColumn} LIKE '172.31.%' OR
-                        {ipColumn} LIKE '127.%' OR
-                        {ipColumn} = '::1' OR
-                        {ipColumn} = 'localhost'
+                        {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                        OR {ipColumn} LIKE '10.%'
+                        OR {ipColumn} LIKE '192.168.%'
+                        OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
+                        OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
+                        OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
+                        OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
+                        OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
+                        OR {ipColumn} LIKE '172.31.%'
+                        OR {ipColumn} LIKE '127.%'
+                        OR {ipColumn} = '::1'
+                        OR {ipColumn} = 'localhost'
                     )";
                 default:
                     return "";
             }
+        }
+
+        /// <summary>
+        /// Get SQL CASE expression for user category (Staff/Customer)
+        /// </summary>
+        private string GetUserCategorySql(string ipColumn = "DeviceIP")
+        {
+            return $@"CASE
+                WHEN {ipColumn} IN (SELECT DISTINCT LogFromIP FROM Logs WHERE LogFromIP IS NOT NULL AND LogFromIP != '' AND LogBy IS NOT NULL AND LogBy != '')
+                     OR {ipColumn} LIKE '10.%'
+                     OR {ipColumn} LIKE '192.168.%'
+                     OR {ipColumn} LIKE '172.16.%' OR {ipColumn} LIKE '172.17.%' OR {ipColumn} LIKE '172.18.%'
+                     OR {ipColumn} LIKE '172.19.%' OR {ipColumn} LIKE '172.20.%' OR {ipColumn} LIKE '172.21.%'
+                     OR {ipColumn} LIKE '172.22.%' OR {ipColumn} LIKE '172.23.%' OR {ipColumn} LIKE '172.24.%'
+                     OR {ipColumn} LIKE '172.25.%' OR {ipColumn} LIKE '172.26.%' OR {ipColumn} LIKE '172.27.%'
+                     OR {ipColumn} LIKE '172.28.%' OR {ipColumn} LIKE '172.29.%' OR {ipColumn} LIKE '172.30.%'
+                     OR {ipColumn} LIKE '172.31.%'
+                     OR {ipColumn} LIKE '127.%'
+                     OR {ipColumn} = '::1'
+                THEN 'Staff'
+                ELSE 'Customer'
+            END";
         }
 
         #endregion
@@ -128,6 +154,7 @@ namespace Take_Time_BangPhra.Class
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
+                    string userCategorySql = GetUserCategorySql();
                     cmd.CommandText = $@"
                         SELECT
                             ID,
@@ -135,17 +162,7 @@ namespace Take_Time_BangPhra.Class
                             DeviceName,
                             DeviceIP,
                             Browser,
-                            CASE
-                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
-                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
-                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
-                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
-                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
-                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
-                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
-                                THEN 'Staff'
-                                ELSE 'Customer'
-                            END AS UserCategory,
+                            {userCategorySql} AS UserCategory,
                             ROW_NUMBER() OVER (ORDER BY AccessDateTime DESC) AS RowNum
                         FROM Logs_Access
                         WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
@@ -413,6 +430,7 @@ namespace Take_Time_BangPhra.Class
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
+                    string userCategorySql = GetUserCategorySql();
                     cmd.CommandText = $@"
                         SELECT TOP (@TopN)
                             DeviceIP,
@@ -421,17 +439,7 @@ namespace Take_Time_BangPhra.Class
                             MIN(AccessDateTime) AS FirstVisit,
                             MAX(AccessDateTime) AS LastVisit,
                             COUNT(DISTINCT CAST(AccessDateTime AS DATE)) AS VisitDays,
-                            CASE
-                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
-                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
-                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
-                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
-                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
-                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
-                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
-                                THEN 'Staff'
-                                ELSE 'Customer'
-                            END AS UserCategory
+                            {userCategorySql} AS UserCategory
                         FROM Logs_Access
                         WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
                         AND DeviceIP IS NOT NULL AND DeviceIP != ''
@@ -505,43 +513,27 @@ namespace Take_Time_BangPhra.Class
 
         /// <summary>
         /// Get staff vs customer usage summary
+        /// Staff = IP ที่เคย login หรือ Internal IP
+        /// Customer = IP ภายนอกที่ไม่เคย login
         /// </summary>
         public DataTable GetStaffVsCustomerSummary(DateTime startDate, DateTime endDate)
         {
+            string userCategorySql = GetUserCategorySql();
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = @"
+                    cmd.CommandText = $@"
                         SELECT
-                            CASE
-                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
-                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
-                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
-                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
-                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
-                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
-                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
-                                THEN 'Staff'
-                                ELSE 'Customer'
-                            END AS UserCategory,
+                            {userCategorySql} AS UserCategory,
                             COUNT(*) AS VisitCount,
                             COUNT(DISTINCT DeviceIP) AS UniqueVisitors,
                             CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM Logs_Access WHERE AccessDateTime BETWEEN @StartDate AND @EndDate), 0) AS DECIMAL(5,2)) AS Percentage
                         FROM Logs_Access
                         WHERE AccessDateTime BETWEEN @StartDate AND @EndDate
-                        GROUP BY CASE
-                                WHEN DeviceIP LIKE '10.%' OR DeviceIP LIKE '192.168.%' OR
-                                     DeviceIP LIKE '172.16.%' OR DeviceIP LIKE '172.17.%' OR DeviceIP LIKE '172.18.%' OR
-                                     DeviceIP LIKE '172.19.%' OR DeviceIP LIKE '172.20.%' OR DeviceIP LIKE '172.21.%' OR
-                                     DeviceIP LIKE '172.22.%' OR DeviceIP LIKE '172.23.%' OR DeviceIP LIKE '172.24.%' OR
-                                     DeviceIP LIKE '172.25.%' OR DeviceIP LIKE '172.26.%' OR DeviceIP LIKE '172.27.%' OR
-                                     DeviceIP LIKE '172.28.%' OR DeviceIP LIKE '172.29.%' OR DeviceIP LIKE '172.30.%' OR
-                                     DeviceIP LIKE '172.31.%' OR DeviceIP LIKE '127.%' OR DeviceIP = '::1'
-                                THEN 'Staff'
-                                ELSE 'Customer'
-                            END
+                        GROUP BY {userCategorySql}
                         ORDER BY VisitCount DESC";
 
                     cmd.Parameters.AddWithValue("@StartDate", startDate);
