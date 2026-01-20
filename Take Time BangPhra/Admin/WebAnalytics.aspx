@@ -62,11 +62,28 @@
             border-radius: 6px;
             font-size: 14px;
             min-width: 150px;
+            white-space: nowrap;
         }
 
         .form-control:focus {
             border-color: #667eea;
             outline: none;
+        }
+
+        /* Dropdown specific styles */
+        select.form-control {
+            min-width: 180px;
+            padding-right: 30px;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 8px center;
+            background-size: 20px;
+            cursor: pointer;
+        }
+
+        select.form-control option {
+            padding: 10px;
         }
 
         /* Stats Cards */
