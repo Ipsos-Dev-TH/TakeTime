@@ -6,6 +6,7 @@
 -- 1. Column names: CheckInDate/CheckOutDate → CheckinDate/CheckoutDate
 -- 2. Status values: Use NOT IN to exclude cancelled/completed statuses
 --    instead of IN with incomplete list of active statuses
+-- 3. Date comparison: Use CAST AS DATE to allow access on checkout day
 -- ============================================
 
 USE [TakeTime]
@@ -49,14 +50,15 @@ BEGIN
     -- Check if customer has active reservation for this accommodation
     -- FIX: Use correct column names (CheckinDate/CheckoutDate instead of CheckInDate/CheckOutDate)
     -- FIX: Use NOT IN to exclude cancelled/completed statuses for better coverage
+    -- FIX: Use CAST AS DATE to compare date only (allow access on checkout day until status changes)
     IF EXISTS (
         SELECT 1
         FROM Reservation R
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckinDate <= GETDATE()
-          AND R.CheckoutDate >= GETDATE()
+          AND CAST(R.CheckinDate AS DATE) <= CAST(GETDATE() AS DATE)
+          AND CAST(R.CheckoutDate AS DATE) >= CAST(GETDATE() AS DATE)
           AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
     )
     BEGIN
@@ -76,8 +78,8 @@ BEGIN
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckinDate <= GETDATE()
-          AND R.CheckoutDate >= GETDATE()
+          AND CAST(R.CheckinDate AS DATE) <= CAST(GETDATE() AS DATE)
+          AND CAST(R.CheckoutDate AS DATE) >= CAST(GETDATE() AS DATE)
           AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
         ORDER BY R.CheckinDate DESC;
     END
@@ -94,4 +96,5 @@ PRINT '📋 Changes made:';
 PRINT '   1. Fixed column names: CheckInDate → CheckinDate, CheckOutDate → CheckoutDate';
 PRINT '   2. Changed status filter from IN (ยืนยันแล้ว, เช็คอินแล้ว) to NOT IN (cancelled/completed statuses)';
 PRINT '   3. Now supports all active reservation statuses: มัดจำแล้ว, เช็คอินแล้ว, เข้าพักแล้ว, จองแล้ว, etc.';
+PRINT '   4. Date comparison uses CAST AS DATE - guests can access on checkout day until status changes';
 GO
