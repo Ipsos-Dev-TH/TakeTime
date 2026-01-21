@@ -646,23 +646,59 @@ public class LeaveService
                             deductionAmount = Math.Round(dailyRate * totalDays, 2);
                         }
 
+                        // Determine if auto-approve should apply
+                        // Auto-approve when Owner or Supervisor submits for subordinate
+                        SupervisorService supervisorService = new SupervisorService();
+                        short submitterAdminId = submittedByAdminId ?? adminId;
+                        bool isSubmittedByOwner = supervisorService.IsOwner(submitterAdminId);
+                        bool isSupervisorSubmittingForSubordinate = (adminId != submitterAdminId) &&
+                            supervisorService.IsSupervisorOf(submitterAdminId, adminId);
+                        bool shouldAutoApprove = isSubmittedByOwner || isSupervisorSubmittingForSubordinate;
+
+                        string status = shouldAutoApprove ? "APPROVED" : "PENDING";
+
                         // Insert leave request
                         cmd.Parameters.Clear();
                         cmd.CommandType = CommandType.Text;
-                        cmd.CommandText = @"
-                            INSERT INTO Leave_Requests (
-                                RequestNumber, Admin_ID, LeaveType_ID,
-                                StartDate, EndDate, TotalDays, Reason,
-                                DeductSalary, DeductionAmount, MedicalCertPath,
-                                Status, CreatedBy_AdminID, CreatedDate
-                            )
-                            VALUES (
-                                @RequestNumber, @AdminID, @LeaveTypeID,
-                                @StartDate, @EndDate, @TotalDays, @Reason,
-                                @DeductSalary, @DeductionAmount, @MedicalCertPath,
-                                'PENDING', @SubmittedBy, GETDATE()
-                            );
-                            SELECT SCOPE_IDENTITY();";
+
+                        string insertSql;
+                        if (shouldAutoApprove)
+                        {
+                            insertSql = @"
+                                INSERT INTO Leave_Requests (
+                                    RequestNumber, Admin_ID, LeaveType_ID,
+                                    StartDate, EndDate, TotalDays, Reason,
+                                    DeductSalary, DeductionAmount, MedicalCertPath,
+                                    Status, CreatedBy_AdminID, CreatedDate,
+                                    ApprovedBy_AdminID, ApprovedDate
+                                )
+                                VALUES (
+                                    @RequestNumber, @AdminID, @LeaveTypeID,
+                                    @StartDate, @EndDate, @TotalDays, @Reason,
+                                    @DeductSalary, @DeductionAmount, @MedicalCertPath,
+                                    'APPROVED', @SubmittedBy, GETDATE(),
+                                    @ApprovedBy, GETDATE()
+                                );
+                                SELECT SCOPE_IDENTITY();";
+                        }
+                        else
+                        {
+                            insertSql = @"
+                                INSERT INTO Leave_Requests (
+                                    RequestNumber, Admin_ID, LeaveType_ID,
+                                    StartDate, EndDate, TotalDays, Reason,
+                                    DeductSalary, DeductionAmount, MedicalCertPath,
+                                    Status, CreatedBy_AdminID, CreatedDate
+                                )
+                                VALUES (
+                                    @RequestNumber, @AdminID, @LeaveTypeID,
+                                    @StartDate, @EndDate, @TotalDays, @Reason,
+                                    @DeductSalary, @DeductionAmount, @MedicalCertPath,
+                                    'PENDING', @SubmittedBy, GETDATE()
+                                );
+                                SELECT SCOPE_IDENTITY();";
+                        }
+                        cmd.CommandText = insertSql;
 
                         cmd.Parameters.AddWithValue("@RequestNumber", requestNumber);
                         cmd.Parameters.AddWithValue("@AdminID", adminId);
@@ -684,12 +720,21 @@ public class LeaveService
                         cmd.Parameters.AddWithValue("@DeductSalary", deductSalary);
                         cmd.Parameters.AddWithValue("@DeductionAmount", deductionAmount);
                         cmd.Parameters.AddWithValue("@MedicalCertPath", medicalCertPath ?? (object)DBNull.Value);
-                        cmd.Parameters.AddWithValue("@SubmittedBy", submittedByAdminId ?? adminId);
+                        cmd.Parameters.AddWithValue("@SubmittedBy", submitterAdminId);
+
+                        if (shouldAutoApprove)
+                        {
+                            cmd.Parameters.AddWithValue("@ApprovedBy", submitterAdminId);
+                        }
 
                         long requestId = Convert.ToInt64(cmd.ExecuteScalar());
 
                         transaction.Commit();
-                        return new LeaveOperationResultLong(true, "Leave request created successfully", requestId);
+
+                        string message = shouldAutoApprove
+                            ? "Leave request created and auto-approved"
+                            : "Leave request created successfully";
+                        return new LeaveOperationResultLong(true, message, requestId);
                     }
                     catch (Exception ex)
                     {
