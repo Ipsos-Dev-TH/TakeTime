@@ -380,14 +380,15 @@ BEGIN
     WHERE QR_Token = @QR_Token;
 
     -- Check if customer has active reservation for this accommodation
+    -- Use CAST AS DATE to compare date only (allow access on checkout day until status changes)
     IF EXISTS (
         SELECT 1
         FROM Reservation R
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckinDate <= GETDATE()
-          AND R.CheckoutDate >= GETDATE()
+          AND CAST(R.CheckinDate AS DATE) <= CAST(GETDATE() AS DATE)
+          AND CAST(R.CheckoutDate AS DATE) >= CAST(GETDATE() AS DATE)
           AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
     )
     BEGIN
@@ -407,8 +408,8 @@ BEGIN
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckinDate <= GETDATE()
-          AND R.CheckoutDate >= GETDATE()
+          AND CAST(R.CheckinDate AS DATE) <= CAST(GETDATE() AS DATE)
+          AND CAST(R.CheckoutDate AS DATE) >= CAST(GETDATE() AS DATE)
           AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
         ORDER BY R.CheckinDate DESC;
     END
