@@ -363,12 +363,18 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // Calculate total earnings first
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
 
-                    // Calculate social security using total earnings and period year (not current date)
+                    // Calculate pre-SS deductions (leave, tax, other)
+                    decimal preSSDeductions = leaveDeduction + tax + otherDeductions;
+
+                    // Calculate social security using income AFTER other deductions
+                    // (รายได้หลังหักค่าใช้จ่ายอื่นๆ)
                     int thaiBuddhistYear = periodInfo.Year + 543;
-                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(totalEarnings, thaiBuddhistYear);
+                    decimal ssBase = totalEarnings - preSSDeductions;
+                    if (ssBase < 0) ssBase = 0;
+                    decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(ssBase, thaiBuddhistYear);
 
                     // Calculate total deductions
-                    decimal totalDeductions = socialSecurity + leaveDeduction + tax + otherDeductions;
+                    decimal totalDeductions = preSSDeductions + socialSecurity;
                     decimal netSalary = totalEarnings - totalDeductions;
 
                     var updateFields = new Dictionary<string, object>
@@ -813,6 +819,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         /// <summary>
         /// Get approved leave days for an employee in a specific month
+        /// Only counts leaves where DeductSalary = 1 (excludes paid leave like sick leave, vacation with quota)
         /// Excludes leaves that have been replaced by work
         /// </summary>
         private decimal GetEmployeeLeaveDays(short adminId, int year, int month)
@@ -823,7 +830,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
                 {
                     conn.Open();
-                    // Get leaves that are approved and NOT fully replaced
+                    // Get leaves that are approved, NOT fully replaced, AND deduct salary
                     using (var cmd = new System.Data.SqlClient.SqlCommand(@"
                         SELECT ISNULL(SUM(
                             CASE
@@ -834,6 +841,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         FROM Leave_Requests
                         WHERE Admin_ID = @AdminID
                           AND Status = 'APPROVED'
+                          AND ISNULL(DeductSalary, 0) = 1
                           AND YEAR(StartDate) = @Year
                           AND MONTH(StartDate) = @Month", conn))
                     {

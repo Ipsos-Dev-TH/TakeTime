@@ -304,7 +304,9 @@ public class PayrollService
                             {
                                 decimal baseSalary = emp.Salary;
 
-                                // Get leave days for this employee and period (exclude replaced leaves)
+                                // Get leave days for this employee and period
+                                // Only count leaves where DeductSalary = 1 (exclude paid leave)
+                                // Also exclude replaced leaves
                                 decimal leaveDays = 0;
                                 using (SqlCommand leaveCmd = new SqlCommand(@"
                                     SELECT ISNULL(SUM(
@@ -313,6 +315,7 @@ public class PayrollService
                                     FROM Leave_Requests
                                     WHERE Admin_ID = @AdminID
                                       AND Status = 'APPROVED'
+                                      AND ISNULL(DeductSalary, 0) = 1
                                       AND YEAR(StartDate) = @Year
                                       AND MONTH(StartDate) = @Month", conn, transaction))
                                 {
@@ -362,9 +365,12 @@ public class PayrollService
                                 // Calculate totals first (bonus and allowance are 0 for initial generation)
                                 decimal totalEarnings = baseSalary + otAmount;
 
-                                // Calculate social security using total earnings and period year (not current date)
+                                // Calculate social security using income AFTER other deductions
+                                // (รายได้หลังหักค่าใช้จ่ายอื่นๆ)
                                 int thaiBuddhistYear = year + 543;
-                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(totalEarnings, thaiBuddhistYear);
+                                decimal ssBase = totalEarnings - leaveDeduction;
+                                if (ssBase < 0) ssBase = 0;
+                                decimal socialSecurity = HRConfiguration.CalculateSocialSecurityByYear(ssBase, thaiBuddhistYear);
                                 decimal totalDeductionsForEmp = leaveDeduction + socialSecurity;
                                 decimal netSalary = totalEarnings - totalDeductionsForEmp;
 
