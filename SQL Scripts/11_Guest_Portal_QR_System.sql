@@ -386,9 +386,9 @@ BEGIN
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckInDate <= GETDATE()
-          AND R.CheckOutDate >= GETDATE()
-          AND R.Status IN (N'ยืนยันแล้ว', N'เช็คอินแล้ว')
+          AND R.CheckinDate <= GETDATE()
+          AND R.CheckoutDate >= GETDATE()
+          AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
     )
     BEGIN
         -- Valid access - return reservation details
@@ -398,8 +398,8 @@ BEGIN
             R.Customer_MobilePhone,
             @Accommodation_ID AS Accommodation_ID,
             @Accommodation_Name AS Accommodation_Name,
-            R.CheckInDate,
-            R.CheckOutDate,
+            R.CheckinDate AS CheckInDate,
+            R.CheckoutDate AS CheckOutDate,
             C.Name AS Customer_Name,
             C.Email AS Customer_Email
         FROM Reservation R
@@ -407,10 +407,10 @@ BEGIN
         INNER JOIN Reservation_Accommodation RA ON RA.Reservation_ID = R.ID
         WHERE R.Customer_MobilePhone = @Customer_MobilePhone
           AND RA.Accommodation_ID = @Accommodation_ID
-          AND R.CheckInDate <= GETDATE()
-          AND R.CheckOutDate >= GETDATE()
-          AND R.Status IN (N'ยืนยันแล้ว', N'เช็คอินแล้ว')
-        ORDER BY R.CheckInDate DESC;
+          AND R.CheckinDate <= GETDATE()
+          AND R.CheckoutDate >= GETDATE()
+          AND R.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')
+        ORDER BY R.CheckinDate DESC;
     END
     ELSE
     BEGIN
