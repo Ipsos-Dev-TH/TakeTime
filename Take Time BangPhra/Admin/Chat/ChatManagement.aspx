@@ -605,17 +605,21 @@
         </div>
     </div>
 
-    <!-- Alert Overlay -->
+    <!-- Alert Overlay - Popup for new messages -->
     <div class="alert-overlay" id="alertOverlay">
-        <div class="alert-box">
+        <div class="alert-box" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
             <i class="fas fa-bell"></i>
-            <h3>ข้อความใหม่!</h3>
-            <p>มีแขกส่งข้อความมาใหม่</p>
-            <div class="room-info" id="alertRoomInfo">
-                <strong id="alertRoomName">-</strong><br>
-                <small id="alertGuestName">-</small>
+            <h3>🔔 ข้อความใหม่จากแขก!</h3>
+            <p>กรุณากด "รับเรื่อง" เพื่อดำเนินการตอบกลับ</p>
+
+            <!-- List of pending chats -->
+            <div id="pendingChatsList" style="text-align: left; margin: 15px 0;"></div>
+
+            <div style="margin-top: 15px;">
+                <button type="button" class="btn-action secondary" onclick="dismissAlert()" style="padding: 10px 20px;">
+                    <i class="fas fa-times"></i> ปิด
+                </button>
             </div>
-            <button class="btn-respond" onclick="respondToAlert()">ตอบกลับ</button>
         </div>
     </div>
 
@@ -631,6 +635,8 @@
         var soundEnabled = true;
         var alertInterval = null;
         var checkInterval = null;
+        var lastUnreadCount = 0;
+        var isAlertShowing = false;
 
         // Select chat
         function selectChat(reservationId) {
@@ -670,10 +676,34 @@
             }
         }
 
-        // Show alert overlay
-        function showAlert(roomName, guestName) {
-            document.getElementById('alertRoomName').innerText = roomName;
-            document.getElementById('alertGuestName').innerText = guestName;
+        // Show alert overlay with pending chats list
+        function showAlertWithChats(chats) {
+            if (isAlertShowing) return;
+            isAlertShowing = true;
+
+            var listHtml = '';
+            chats.forEach(function(chat) {
+                listHtml += `
+                    <div style="background: #f8f9fa; border-radius: 10px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #f44336;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <strong style="color: #667eea;">🚪 ${chat.roomName}</strong><br>
+                                <span style="color: #333;">👤 ${chat.guestName}</span><br>
+                                <small style="color: #666;">💬 ${chat.message}</small><br>
+                                <small style="color: #999;">⏰ ${chat.time}</small>
+                            </div>
+                            <button type="button" onclick="claimChat(${chat.reservationId})"
+                                style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none;
+                                       padding: 10px 20px; border-radius: 20px; cursor: pointer; font-weight: 600;
+                                       white-space: nowrap; margin-left: 10px;">
+                                <i class="fas fa-hand-paper"></i> รับเรื่อง
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('pendingChatsList').innerHTML = listHtml;
             document.getElementById('alertOverlay').classList.add('show');
 
             // Play sound repeatedly
@@ -681,40 +711,114 @@
             alertInterval = setInterval(playSound, 3000);
         }
 
-        // Respond to alert
-        function respondToAlert() {
+        // Dismiss alert without claiming
+        function dismissAlert() {
             document.getElementById('alertOverlay').classList.remove('show');
+            isAlertShowing = false;
             if (alertInterval) {
                 clearInterval(alertInterval);
                 alertInterval = null;
             }
         }
 
+        // Claim a chat conversation
+        function claimChat(reservationId) {
+            // Stop sound
+            if (alertInterval) {
+                clearInterval(alertInterval);
+                alertInterval = null;
+            }
+
+            // Show loading
+            var btn = event.target;
+            var originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังรับเรื่อง...';
+            btn.disabled = true;
+
+            fetch('ChatManagement.aspx/ClaimChat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reservationId: reservationId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.d && data.d.success) {
+                    // Close popup
+                    dismissAlert();
+                    // Select the chat to show messages
+                    selectChat(reservationId);
+                } else {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    alert('ไม่สามารถรับเรื่องได้ กรุณาลองใหม่');
+                }
+            })
+            .catch(err => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                console.log('Claim error:', err);
+            });
+        }
+
         // Check for new messages
         function checkNewMessages() {
-            fetch('ChatManagement.aspx/CheckUnreadMessages', {
+            fetch('ChatManagement.aspx/GetAllUnreadChats', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})
             })
             .then(response => response.json())
             .then(data => {
-                if (data.d && data.d.hasUnread && data.d.count > 0) {
+                if (data.d && data.d.success && data.d.chats && data.d.chats.length > 0) {
+                    var unreadCount = data.d.chats.length;
+
                     // Update badge
                     var badge = document.querySelector('.unread-badge');
                     if (badge) {
                         badge.style.display = 'block';
-                        badge.querySelector('span, label')?.innerText = data.d.count + ' ข้อความใหม่';
+                        var lblCount = badge.querySelector('span');
+                        if (lblCount) lblCount.innerText = unreadCount;
                     }
 
-                    // Show alert if not already responding
-                    if (!document.getElementById('alertOverlay').classList.contains('show')) {
-                        if (data.d.latestRoom && data.d.latestGuest) {
-                            showAlert(data.d.latestRoom, data.d.latestGuest);
-                        }
+                    // Show alert popup if there are new messages and popup not already showing
+                    if (unreadCount > lastUnreadCount || (!isAlertShowing && unreadCount > 0)) {
+                        showAlertWithChats(data.d.chats);
+                    } else if (isAlertShowing && unreadCount > 0) {
+                        // Update the list if popup is already showing
+                        var listHtml = '';
+                        data.d.chats.forEach(function(chat) {
+                            listHtml += `
+                                <div style="background: #f8f9fa; border-radius: 10px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #f44336;">
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                        <div style="flex: 1;">
+                                            <strong style="color: #667eea;">🚪 ${chat.roomName}</strong><br>
+                                            <span style="color: #333;">👤 ${chat.guestName}</span><br>
+                                            <small style="color: #666;">💬 ${chat.message}</small><br>
+                                            <small style="color: #999;">⏰ ${chat.time}</small>
+                                        </div>
+                                        <button type="button" onclick="claimChat(${chat.reservationId})"
+                                            style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none;
+                                                   padding: 10px 20px; border-radius: 20px; cursor: pointer; font-weight: 600;
+                                                   white-space: nowrap; margin-left: 10px;">
+                                            <i class="fas fa-hand-paper"></i> รับเรื่อง
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('pendingChatsList').innerHTML = listHtml;
                     }
+
+                    lastUnreadCount = unreadCount;
+                } else {
+                    // No unread messages - hide badge and popup
+                    var badge = document.querySelector('.unread-badge');
+                    if (badge) badge.style.display = 'none';
+
+                    if (isAlertShowing) {
+                        dismissAlert();
+                    }
+                    lastUnreadCount = 0;
                 }
             })
             .catch(err => console.log('Check error:', err));
@@ -747,8 +851,8 @@
 
             scrollToBottom();
 
-            // Start checking for new messages every 5 seconds
-            checkInterval = setInterval(checkNewMessages, 5000);
+            // Start checking for new messages every 3 seconds (faster for real-time feel)
+            checkInterval = setInterval(checkNewMessages, 3000);
 
             // Initial check
             checkNewMessages();
