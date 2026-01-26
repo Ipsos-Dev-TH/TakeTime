@@ -126,6 +126,34 @@ namespace Take_Time_BangPhra
                         // Ignore if table doesn't exist
                     }
 
+                    // Get Room Service charges (CHARGE_TO_ROOM orders)
+                    decimal roomServiceCharges = 0;
+                    try
+                    {
+                        var rsParams = new System.Collections.Generic.Dictionary<string, object>
+                        {
+                            { "@reservationId", reservationId }
+                        };
+                        string rsQuery = @"
+                            SELECT ISNULL(SUM(Total_Amount), 0) as TotalCharges
+                            FROM Guest_Room_Service_Orders
+                            WHERE Reservation_ID = @reservationId
+                            AND Payment_Method = 'CHARGE_TO_ROOM'
+                            AND Order_Status <> 'CANCELLED'";
+                        DataTable dtRS = codeInstance.DatabaseQuerySafe(connectionString, rsQuery, rsParams);
+                        if (dtRS.Rows.Count > 0 && dtRS.Rows[0]["TotalCharges"] != DBNull.Value)
+                        {
+                            roomServiceCharges = Convert.ToDecimal(dtRS.Rows[0]["TotalCharges"]);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore if table doesn't exist
+                    }
+
+                    // Add room service to product charges
+                    productCharges += roomServiceCharges;
+
                     // Calculate total price with ALL product charges
                     decimal totalPriceWithCharges = baseTotalPrice + productCharges;
 
@@ -174,16 +202,49 @@ namespace Take_Time_BangPhra
                         // Ignore if table doesn't exist
                     }
 
+                    // Check for pending Room Service orders (not yet delivered)
+                    decimal pendingRoomService = 0;
+                    int pendingRSCount = 0;
+                    try
+                    {
+                        var pendingRSParams = new System.Collections.Generic.Dictionary<string, object>
+                        {
+                            { "@reservationId", reservationId }
+                        };
+                        string pendingRSQuery = @"
+                            SELECT COUNT(*) as OrderCount, ISNULL(SUM(Total_Amount), 0) as PendingAmount
+                            FROM Guest_Room_Service_Orders
+                            WHERE Reservation_ID = @reservationId
+                            AND Payment_Method = 'CHARGE_TO_ROOM'
+                            AND Order_Status NOT IN ('DELIVERED', 'CANCELLED')";
+                        DataTable dtPendingRS = codeInstance.DatabaseQuerySafe(connectionString, pendingRSQuery, pendingRSParams);
+                        if (dtPendingRS.Rows.Count > 0)
+                        {
+                            pendingRSCount = Convert.ToInt32(dtPendingRS.Rows[0]["OrderCount"]);
+                            pendingRoomService = dtPendingRS.Rows[0]["PendingAmount"] != DBNull.Value
+                                ? Convert.ToDecimal(dtPendingRS.Rows[0]["PendingAmount"]) : 0;
+                        }
+                    }
+                    catch { }
+
                     lblTotalPrice.Text = totalPriceWithCharges.ToString("N2");
                     lblPaidAmount.Text = totalPaid.ToString("N2");
                     lblTotalPaid.Text = totalPaid.ToString("N2");
                     lblRemainingBalance.Text = remainingBalance.ToString("N2");
 
                     // Show pending charges warning if any
+                    string warningMessages = "";
                     if (pendingCharges > 0)
                     {
-                        ShowWarning($"⚠️ มีสินค้าชาร์จเข้าห้องที่ยังไม่ได้ชำระ: {pendingCharges:N2} บาท<br/>" +
-                                   $"กรุณาชำระยอดคงเหลือก่อนเช็คเอาท์");
+                        warningMessages += $"⚠️ มีสินค้าชาร์จเข้าห้องที่ยังไม่ได้ชำระ: {pendingCharges:N2} บาท<br/>";
+                    }
+                    if (pendingRSCount > 0)
+                    {
+                        warningMessages += $"🍽️ มี Room Service {pendingRSCount} รายการที่ยังไม่ได้จัดส่ง (฿{pendingRoomService:N0})<br/>";
+                    }
+                    if (!string.IsNullOrEmpty(warningMessages))
+                    {
+                        ShowWarning(warningMessages + "กรุณาตรวจสอบก่อนเช็คเอาท์");
                     }
 
                     // Check payment status

@@ -534,6 +534,9 @@
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
+                                                    <i class="fas fa-concierge-bell"></i> Room Service
+                                                </a></li>
                                             </ul>
                                         </div>
 
@@ -969,11 +972,18 @@
                 </div>
             </div>
 
-            <!-- Floating Badge -->
+            <!-- Floating Badge - Chat -->
             <a href="Admin/Chat/ChatManagement.aspx" class="chat-notification-badge" id="chatNotificationBadge">
                 <i class="fas fa-comments"></i>
                 <span>แชทใหม่</span>
                 <span class="count" id="chatUnreadCount">0</span>
+            </a>
+
+            <!-- Floating Badge - Room Service -->
+            <a href="Admin/RoomService/OrderManagement.aspx" class="chat-notification-badge room-service-badge" id="roomServiceBadge" style="bottom: 140px; background: linear-gradient(135deg, #ff9800, #f57c00);">
+                <i class="fas fa-concierge-bell"></i>
+                <span>ออเดอร์ใหม่</span>
+                <span class="count" id="rsUnreadCount">0</span>
             </a>
 
             <!-- Audio for notification -->
@@ -1092,11 +1102,59 @@
                     .catch(err => console.log('Keep-alive error:', err));
                 }
 
+                // Room Service Order Notification
+                var lastKnownRSCount = 0;
+
+                function checkRoomServiceOrders() {
+                    // Skip if on OrderManagement page
+                    if (window.location.href.indexOf('OrderManagement') > -1) {
+                        return;
+                    }
+
+                    fetch('<%= ResolveUrl("~/Admin/RoomService/OrderManagement.aspx/GetPendingOrders") %>', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.d && data.d.success && data.d.orders && data.d.orders.length > 0) {
+                            var count = data.d.orders.length;
+
+                            // Update badge
+                            var badge = document.getElementById('roomServiceBadge');
+                            var countEl = document.getElementById('rsUnreadCount');
+                            if (badge && countEl) {
+                                badge.classList.add('show');
+                                countEl.innerText = count;
+                            }
+
+                            // Play sound if new orders
+                            if (count > lastKnownRSCount) {
+                                playGlobalChatSound();
+                            }
+
+                            lastKnownRSCount = count;
+                        } else {
+                            var badge = document.getElementById('roomServiceBadge');
+                            if (badge) {
+                                badge.classList.remove('show');
+                            }
+                            lastKnownRSCount = 0;
+                        }
+                    })
+                    .catch(err => console.log('RS check error:', err));
+                }
+
                 // Initialize on page load
                 document.addEventListener('DOMContentLoaded', function() {
                     // Check for new messages every 5 seconds
                     checkGlobalChatMessages();
                     chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
+
+                    // Check for Room Service orders every 5 seconds
+                    checkRoomServiceOrders();
+                    setInterval(checkRoomServiceOrders, 5000);
 
                     // Keep session alive every 5 minutes
                     sessionKeepAliveInterval = setInterval(keepSessionAlive, 5 * 60 * 1000);

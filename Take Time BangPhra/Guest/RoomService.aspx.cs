@@ -97,7 +97,11 @@ namespace Take_Time_BangPhra.Guest
         {
             try
             {
-                DataTable dtOrders = _guestPortalService.GetRoomServiceOrders(_reservationId);
+                DataTable dtOrders = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT * FROM Guest_Room_Service_Orders
+                      WHERE Reservation_ID = @ReservationId
+                      ORDER BY Order_Date DESC",
+                    new Dictionary<string, object> { { "@ReservationId", _reservationId } });
 
                 if (dtOrders.Rows.Count > 0)
                 {
@@ -113,6 +117,96 @@ namespace Take_Time_BangPhra.Guest
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error loading orders: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Get status display text
+        /// </summary>
+        protected string GetStatusText(string status)
+        {
+            switch (status)
+            {
+                case "PENDING": return "รอรับออเดอร์";
+                case "CONFIRMED": return "รับออเดอร์แล้ว";
+                case "PREPARING": return "กำลังจัดเตรียม";
+                case "DELIVERED": return "จัดส่งแล้ว";
+                case "CANCELLED": return "ยกเลิก";
+                default: return status;
+            }
+        }
+
+        /// <summary>
+        /// Get payment display text
+        /// </summary>
+        protected string GetPaymentText(string method)
+        {
+            switch (method)
+            {
+                case "CHARGE_TO_ROOM": return "ชาร์จเข้าห้อง";
+                case "TRANSFER": return "โอนเงิน";
+                case "CASH": return "เงินสด";
+                default: return method;
+            }
+        }
+
+        /// <summary>
+        /// Get payment status text
+        /// </summary>
+        protected string GetPaymentStatusText(string status)
+        {
+            switch (status)
+            {
+                case "PENDING": return "รอชำระ";
+                case "PAID": return "ชำระแล้ว";
+                case "CHARGED": return "ชาร์จแล้ว";
+                default: return status;
+            }
+        }
+
+        /// <summary>
+        /// Get timeline step class based on order status
+        /// </summary>
+        protected string GetTimelineClass(string orderStatus, string stepStatus)
+        {
+            if (orderStatus == "CANCELLED") return "cancelled";
+
+            string[] statuses = { "PENDING", "CONFIRMED", "PREPARING", "DELIVERED" };
+            int orderIndex = Array.IndexOf(statuses, orderStatus);
+            int stepIndex = Array.IndexOf(statuses, stepStatus);
+
+            if (stepIndex < orderIndex) return "completed";
+            if (stepIndex == orderIndex) return "active";
+            return "";
+        }
+
+        /// <summary>
+        /// Get order items HTML
+        /// </summary>
+        protected string GetOrderItemsHtml(object orderId)
+        {
+            try
+            {
+                DataTable dtItems = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT * FROM Guest_Room_Service_Items WHERE Order_ID = @OrderId",
+                    new Dictionary<string, object> { { "@OrderId", Convert.ToInt64(orderId) } });
+
+                if (dtItems.Rows.Count == 0) return "";
+
+                string html = "";
+                foreach (DataRow item in dtItems.Rows)
+                {
+                    html += $@"<div class='order-item-row'>
+                        <span class='order-item-name'>{item["Product_Name"]}</span>
+                        <span class='order-item-qty'>x{item["Quantity"]}</span>
+                        <span class='order-item-subtotal'>฿{Convert.ToDecimal(item["Subtotal"]):N0}</span>
+                    </div>";
+                }
+                return html;
+            }
+            catch
+            {
+                return "";
             }
         }
 

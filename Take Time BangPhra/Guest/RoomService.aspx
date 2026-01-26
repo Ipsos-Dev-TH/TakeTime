@@ -325,6 +325,122 @@
         .status-DELIVERED { background: #d4edda; color: #155724; }
         .status-CANCELLED { background: #f8d7da; color: #721c24; }
 
+        /* Order Status Timeline */
+        .order-timeline {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+            position: relative;
+            padding: 0 10px;
+        }
+
+        .order-timeline::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 30px;
+            right: 30px;
+            height: 3px;
+            background: #e0e0e0;
+            z-index: 1;
+        }
+
+        .timeline-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+            flex: 1;
+        }
+
+        .timeline-icon {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 14px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .timeline-step.completed .timeline-icon {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .timeline-step.active .timeline-icon {
+            background: #2196F3;
+            color: white;
+            animation: pulse-blue 1.5s infinite;
+        }
+
+        .timeline-step.cancelled .timeline-icon {
+            background: #f44336;
+            color: white;
+        }
+
+        @keyframes pulse-blue {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(33, 150, 243, 0); }
+        }
+
+        .timeline-label {
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+            max-width: 70px;
+        }
+
+        .timeline-step.completed .timeline-label,
+        .timeline-step.active .timeline-label {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .timeline-time {
+            font-size: 10px;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        /* Order Items List */
+        .order-items-list {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 10px 0;
+        }
+
+        .order-item-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .order-item-row:last-child {
+            border-bottom: none;
+        }
+
+        .order-item-name {
+            flex: 1;
+        }
+
+        .order-item-qty {
+            color: #666;
+            margin: 0 10px;
+        }
+
+        .order-item-subtotal {
+            font-weight: 600;
+            color: #4CAF50;
+        }
+
         .empty-cart {
             text-align: center;
             padding: 40px;
@@ -449,37 +565,71 @@
     <!-- Tab: Order History -->
     <div id="history" class="tab-content">
         <div class="orders-list">
-            <h3 style="margin-bottom: 20px;">Your Orders</h3>
+            <h3 style="margin-bottom: 20px;"><i class="fas fa-history"></i> ประวัติการสั่งซื้อ</h3>
             <asp:Repeater ID="rptOrders" runat="server">
                 <ItemTemplate>
-                    <div class="order-card">
+                    <div class="order-card" data-order-id='<%# Eval("ID") %>'>
                         <div class="order-header">
                             <div>
-                                <div class="order-number">Order #<%# Eval("Order_Number") %></div>
+                                <div class="order-number">#<%# Eval("Order_Number") %></div>
                                 <div style="color: #666; font-size: 13px;">
-                                    <%# Eval("Order_Date", "{0:dd MMM yyyy HH:mm}") %>
+                                    <i class="fas fa-clock"></i> <%# Eval("Order_Date", "{0:dd MMM yyyy HH:mm}") %>
                                 </div>
                             </div>
                             <span class="order-status status-<%# Eval("Order_Status") %>">
-                                <%# Eval("Order_Status") %>
+                                <%# GetStatusText(Eval("Order_Status").ToString()) %>
                             </span>
                         </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Total:</strong> ฿<%# Eval("Total_Amount", "{0:N0}") %>
+
+                        <!-- Status Timeline -->
+                        <div class="order-timeline">
+                            <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "PENDING") %>'>
+                                <div class="timeline-icon"><i class="fas fa-clipboard-list"></i></div>
+                                <span class="timeline-label">สั่งซื้อแล้ว</span>
+                                <span class="timeline-time"><%# Eval("Order_Date", "{0:HH:mm}") %></span>
+                            </div>
+                            <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "CONFIRMED") %>'>
+                                <div class="timeline-icon"><i class="fas fa-check"></i></div>
+                                <span class="timeline-label">รับออเดอร์</span>
+                                <span class="timeline-time"><%# Eval("Confirmed_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Confirmed_Date")).ToString("HH:mm") : "-" %></span>
+                            </div>
+                            <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "PREPARING") %>'>
+                                <div class="timeline-icon"><i class="fas fa-utensils"></i></div>
+                                <span class="timeline-label">กำลังจัดเตรียม</span>
+                            </div>
+                            <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "DELIVERED") %>'>
+                                <div class="timeline-icon"><i class="fas fa-check-circle"></i></div>
+                                <span class="timeline-label">จัดส่งแล้ว</span>
+                                <span class="timeline-time"><%# Eval("Delivered_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Delivered_Date")).ToString("HH:mm") : "-" %></span>
+                            </div>
                         </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Payment:</strong> <%# Eval("Payment_Method") %>
-                            (<%# Eval("Payment_Status") %>)
+
+                        <!-- Order Items -->
+                        <div class="order-items-list">
+                            <%# GetOrderItemsHtml(Eval("ID")) %>
                         </div>
-                        <div style="font-size: 13px; color: #666;">
-                            <i class="fas fa-comment"></i> <%# Eval("Delivery_Instructions") %>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <div>
+                                <strong>การชำระเงิน:</strong>
+                                <%# GetPaymentText(Eval("Payment_Method").ToString()) %>
+                                <span class="order-status status-<%# Eval("Payment_Status") %>" style="font-size: 11px;">
+                                    <%# GetPaymentStatusText(Eval("Payment_Status").ToString()) %>
+                                </span>
+                            </div>
+                            <div style="font-size: 18px; font-weight: 700; color: #4CAF50;">
+                                ฿<%# Eval("Total_Amount", "{0:N0}") %>
+                            </div>
                         </div>
+
+                        <%# !string.IsNullOrEmpty(Eval("Delivery_Instructions").ToString()) ?
+                            "<div style='font-size: 13px; color: #666; margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 5px;'><i class='fas fa-comment'></i> " + Eval("Delivery_Instructions") + "</div>" : "" %>
                     </div>
                 </ItemTemplate>
             </asp:Repeater>
 
             <asp:Label ID="lblNoOrders" runat="server" Visible="false"
-                Text="<div class='empty-cart'><i class='fas fa-inbox'></i><p>No orders yet</p></div>"></asp:Label>
+                Text="<div class='empty-cart'><i class='fas fa-inbox'></i><p>ยังไม่มีรายการสั่งซื้อ</p></div>"></asp:Label>
         </div>
     </div>
 
