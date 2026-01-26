@@ -422,7 +422,7 @@
                     <div class="filter-tabs">
                         <button type="button" class="filter-tab active" onclick="filterOrders('all')">ทั้งหมด</button>
                         <button type="button" class="filter-tab" onclick="filterOrders('pending')">รอรับ</button>
-                        <button type="button" class="filter-tab" onclick="filterOrders('preparing')">กำลังจัด</button>
+                        <button type="button" class="filter-tab" onclick="filterOrders('confirmed')">รับแล้ว</button>
                     </div>
                 </div>
                 <div class="order-list" id="orderList">
@@ -539,7 +539,6 @@
                     <!-- Action Buttons -->
                     <div class="action-area">
                         <asp:Button ID="btnClaim" runat="server" Text=" รับออเดอร์" CssClass="btn-action btn-claim" OnClick="btnClaim_Click" />
-                        <asp:Button ID="btnPreparing" runat="server" Text=" กำลังจัดเตรียม" CssClass="btn-action btn-preparing" OnClick="btnPreparing_Click" />
                         <asp:Button ID="btnDelivered" runat="server" Text=" จัดส่งแล้ว" CssClass="btn-action btn-delivered" OnClick="btnDelivered_Click" />
                         <asp:Button ID="btnCancel" runat="server" Text=" ยกเลิก" CssClass="btn-action btn-cancel" OnClick="btnCancel_Click"
                             OnClientClick="return confirm('ยืนยันยกเลิกออเดอร์นี้?');" />
@@ -620,7 +619,7 @@
                     item.style.display = 'block';
                 } else if (status === 'pending' && itemStatus === 'PENDING') {
                     item.style.display = 'block';
-                } else if (status === 'preparing' && (itemStatus === 'CONFIRMED' || itemStatus === 'PREPARING')) {
+                } else if (status === 'confirmed' && itemStatus === 'CONFIRMED') {
                     item.style.display = 'block';
                 } else {
                     item.style.display = 'none';
@@ -726,9 +725,6 @@
             // Add icons to buttons
             var btnClaim = document.getElementById('<%= btnClaim.ClientID %>');
             if (btnClaim) btnClaim.innerHTML = '<i class="fas fa-hand-paper"></i> รับออเดอร์';
-
-            var btnPreparing = document.getElementById('<%= btnPreparing.ClientID %>');
-            if (btnPreparing) btnPreparing.innerHTML = '<i class="fas fa-utensils"></i> กำลังจัดเตรียม';
 
             var btnDelivered = document.getElementById('<%= btnDelivered.ClientID %>');
             if (btnDelivered) btnDelivered.innerHTML = '<i class="fas fa-check-circle"></i> จัดส่งแล้ว';

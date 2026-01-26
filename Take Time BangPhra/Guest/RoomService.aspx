@@ -589,13 +589,9 @@
                                 <span class="timeline-time"><%# Eval("Order_Date", "{0:HH:mm}") %></span>
                             </div>
                             <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "CONFIRMED") %>'>
-                                <div class="timeline-icon"><i class="fas fa-check"></i></div>
-                                <span class="timeline-label">รับออเดอร์</span>
-                                <span class="timeline-time"><%# Eval("Confirmed_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Confirmed_Date")).ToString("HH:mm") : "-" %></span>
-                            </div>
-                            <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "PREPARING") %>'>
                                 <div class="timeline-icon"><i class="fas fa-utensils"></i></div>
                                 <span class="timeline-label">กำลังจัดเตรียม</span>
+                                <span class="timeline-time"><%# Eval("Confirmed_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Confirmed_Date")).ToString("HH:mm") : "-" %></span>
                             </div>
                             <div class='timeline-step <%# GetTimelineClass(Eval("Order_Status").ToString(), "DELIVERED") %>'>
                                 <div class="timeline-icon"><i class="fas fa-check-circle"></i></div>

@@ -24,7 +24,6 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected global::System.Web.UI.WebControls.Repeater rptOrderItems;
         protected global::System.Web.UI.WebControls.Label lblTotalAmount;
         protected global::System.Web.UI.WebControls.Button btnClaim;
-        protected global::System.Web.UI.WebControls.Button btnPreparing;
         protected global::System.Web.UI.WebControls.Button btnDelivered;
         protected global::System.Web.UI.WebControls.Button btnCancel;
         protected global::System.Web.UI.WebControls.Panel pnlSelectOrder;

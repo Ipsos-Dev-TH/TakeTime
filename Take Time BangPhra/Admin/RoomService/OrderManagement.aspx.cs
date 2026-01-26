@@ -114,8 +114,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
             switch (status)
             {
                 case "PENDING": return "รอรับออเดอร์";
-                case "CONFIRMED": return "รับออเดอร์แล้ว";
-                case "PREPARING": return "กำลังจัดเตรียม";
+                case "CONFIRMED": return "กำลังจัดเตรียม";
                 case "DELIVERED": return "จัดส่งแล้ว";
                 case "CANCELLED": return "ยกเลิก";
                 default: return status;
@@ -174,8 +173,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     // Update button visibility based on status
                     string status = order["Order_Status"].ToString();
                     btnClaim.Visible = status == "PENDING";
-                    btnPreparing.Visible = status == "CONFIRMED";
-                    btnDelivered.Visible = status == "PREPARING";
+                    btnDelivered.Visible = status == "CONFIRMED";
                     btnCancel.Visible = status != "DELIVERED" && status != "CANCELLED";
                 }
 
@@ -230,14 +228,6 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected void btnClaim_Click(object sender, EventArgs e)
         {
             UpdateOrderStatus("CONFIRMED");
-        }
-
-        /// <summary>
-        /// Mark as preparing
-        /// </summary>
-        protected void btnPreparing_Click(object sender, EventArgs e)
-        {
-            UpdateOrderStatus("PREPARING");
         }
 
         /// <summary>

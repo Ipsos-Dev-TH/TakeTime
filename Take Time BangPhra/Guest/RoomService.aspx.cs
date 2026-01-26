@@ -128,8 +128,7 @@ namespace Take_Time_BangPhra.Guest
             switch (status)
             {
                 case "PENDING": return "รอรับออเดอร์";
-                case "CONFIRMED": return "รับออเดอร์แล้ว";
-                case "PREPARING": return "กำลังจัดเตรียม";
+                case "CONFIRMED": return "กำลังจัดเตรียม";
                 case "DELIVERED": return "จัดส่งแล้ว";
                 case "CANCELLED": return "ยกเลิก";
                 default: return status;
@@ -171,7 +170,7 @@ namespace Take_Time_BangPhra.Guest
         {
             if (orderStatus == "CANCELLED") return "cancelled";
 
-            string[] statuses = { "PENDING", "CONFIRMED", "PREPARING", "DELIVERED" };
+            string[] statuses = { "PENDING", "CONFIRMED", "DELIVERED" };
             int orderIndex = Array.IndexOf(statuses, orderStatus);
             int stepIndex = Array.IndexOf(statuses, stepStatus);
 
