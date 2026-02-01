@@ -427,7 +427,7 @@ namespace Take_Time_BangPhra.Voucher
             // ✨ Declare date variables used throughout the method
             DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
             string Year = receiptDate.Year.ToString();
-            string Month = receiptDate.Month.ToString("00");
+            string Month = receiptDate.Month.ToString();
             string Day = receiptDate.Day.ToString("00");
 
             bool imgupload = false;
@@ -1356,25 +1356,33 @@ namespace Take_Time_BangPhra.Voucher
                     receiptUpdateParams);
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
+                string recMonth = createdDate.Month.ToString();
+                // Fallback: check padded month directory for files created with zero-padded month
+                if (!Directory.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + recMonth))
+                {
+                    string pm = recMonth.PadLeft(2, '0');
+                    if (Directory.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + pm))
+                        recMonth = pm;
+                }
 
                 string inputPdfStreampath = "";
                 string outputPdfStreampath = "";
-                if(File.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() + "_"+uid+".pdf"))
+                if(File.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() + "_"+uid+".pdf"))
                 {
-                    inputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() + "_" + uid + ".pdf";
+                    inputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() + "_" + uid + ".pdf";
                 }
                 else
                 {
-                    inputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() + ".pdf";
+                    inputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() + ".pdf";
                 }
 
-                if (File.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() +"_"+uid+ "_Cancel.pdf"))
+                if (File.Exists(path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() +"_"+uid+ "_Cancel.pdf"))
                 {
-                    outputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() + "_" + uid + "_Cancel.pdf";
+                    outputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() + "_" + uid + "_Cancel.pdf";
                 }
                 else
                 {
-                    outputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + createdDate.Month + "\\" + dtRec.Rows[i]["ID"].ToString() + "_Cancel.pdf";
+                    outputPdfStreampath = path + "\\" + createdDate.Year.ToString() + "\\" + recMonth + "\\" + dtRec.Rows[i]["ID"].ToString() + "_Cancel.pdf";
                 }
                 using (Stream inputPdfStream = new FileStream(inputPdfStreampath, FileMode.Open, FileAccess.Read, FileShare.Read))
                     using (Stream inputImageStream = new FileStream(Imagespath + "\\Cancel.png", FileMode.Open, FileAccess.Read, FileShare.Read))

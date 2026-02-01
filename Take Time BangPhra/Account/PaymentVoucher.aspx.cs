@@ -155,6 +155,13 @@ namespace Take_Time_BangPhra.Account.Report
 
                     string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
                     string paymentPath = path + "\\" + docdate.Year + "\\" + docdate.Month;
+                    // Fallback: check padded month directory for files created with zero-padded month
+                    if (!Directory.Exists(paymentPath))
+                    {
+                        string altPath = path + "\\" + docdate.Year + "\\" + docdate.Month.ToString().PadLeft(2, '0');
+                        if (Directory.Exists(altPath))
+                            paymentPath = altPath;
+                    }
                     if (Directory.Exists(paymentPath))
                     {
                         string[] dirs = Directory.GetFiles(paymentPath, id + "_" + uid + "*");
@@ -794,6 +801,18 @@ namespace Take_Time_BangPhra.Account.Report
                     return "#";
 
                 string folderPath = System.IO.Path.Combine(basePath, year, month);
+
+                // Fallback: check padded month directory for files created with zero-padded month
+                if (!Directory.Exists(folderPath))
+                {
+                    string paddedMonth = month.PadLeft(2, '0');
+                    string altFolderPath = System.IO.Path.Combine(basePath, year, paddedMonth);
+                    if (Directory.Exists(altFolderPath))
+                    {
+                        folderPath = altFolderPath;
+                        month = paddedMonth;
+                    }
+                }
 
                 // ตรวจสอบว่าโฟลเดอร์มีอยู่จริง
                 if (!Directory.Exists(folderPath))
