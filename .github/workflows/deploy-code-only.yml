@@ -128,7 +128,6 @@ jobs:
     name: Deploy to IIS
     needs: build
     runs-on: self-hosted
-    environment: production
 
     steps:
       - name: Download Build Artifact

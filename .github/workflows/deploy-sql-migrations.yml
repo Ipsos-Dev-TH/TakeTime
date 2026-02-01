@@ -43,7 +43,6 @@ jobs:
     needs: validate
     if: needs.validate.outputs.is_valid == 'true'
     runs-on: self-hosted
-    environment: production
 
     steps:
       - name: Checkout code
