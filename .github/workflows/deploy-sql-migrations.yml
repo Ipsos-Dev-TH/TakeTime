@@ -38,22 +38,87 @@ jobs:
           fi
           echo "is_valid=true" >> $GITHUB_OUTPUT
 
-  deploy-migrations:
-    name: Deploy SQL Migrations
+  prepare-migrations:
+    name: Prepare Migration Files
     needs: validate
     if: needs.validate.outputs.is_valid == 'true'
-    runs-on: self-hosted
-    environment: production
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Package migration files
+        run: |
+          echo "=== Packaging Migration Files ==="
+          MIGRATIONS_DIR="${{ github.workspace }}/${{ env.MIGRATIONS_PATH }}"
+
+          if [ ! -d "$MIGRATIONS_DIR" ]; then
+            echo "::error::Migrations folder not found: $MIGRATIONS_DIR"
+            exit 1
+          fi
+
+          # Create staging directory
+          mkdir -p staging/migrations
+
+          INPUT_FILES="${{ inputs.migration_files }}"
+
+          if [ "$INPUT_FILES" = "all" ]; then
+            # Copy all SQL files
+            cp "$MIGRATIONS_DIR"/*.sql staging/migrations/ 2>/dev/null || true
+          else
+            # Copy specific files
+            IFS=',' read -ra FILES <<< "$INPUT_FILES"
+            for FILE in "${FILES[@]}"; do
+              FILE=$(echo "$FILE" | xargs)  # trim whitespace
+              # Add .sql extension if not present
+              if [[ ! "$FILE" == *.sql ]]; then
+                FILE="${FILE}.sql"
+              fi
+              if [ -f "$MIGRATIONS_DIR/$FILE" ]; then
+                cp "$MIGRATIONS_DIR/$FILE" staging/migrations/
+                echo "  Included: $FILE"
+              else
+                echo "::warning::File not found: $FILE"
+              fi
+            done
+          fi
+
+          # Check if any files were copied
+          FILE_COUNT=$(find staging/migrations -name "*.sql" | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "::error::No migration files to package"
+            exit 1
+          fi
+
+          echo "=== Migration files packaged: $FILE_COUNT files ==="
+          ls -la staging/migrations/
+
+      - name: Upload migration files
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-files
+          path: staging/migrations/
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy-migrations:
+    name: Deploy SQL Migrations
+    needs: prepare-migrations
+    runs-on: self-hosted
+
+    steps:
+      - name: Download migration files
+        uses: actions/download-artifact@v4
+        with:
+          name: migration-files
+          path: ${{ github.workspace }}/migrations
 
       - name: List available migrations
         id: list_migrations
         run: |
           Write-Host "=== Available Migration Files ==="
-          $migrationsPath = "${{ github.workspace }}\${{ env.MIGRATIONS_PATH }}"
+          $migrationsPath = "${{ github.workspace }}\migrations"
 
           if (Test-Path $migrationsPath) {
             Get-ChildItem -Path $migrationsPath -Filter "*.sql" |
@@ -70,34 +135,13 @@ jobs:
       - name: Determine migrations to run
         id: determine_migrations
         run: |
-          $migrationsPath = "${{ github.workspace }}\${{ env.MIGRATIONS_PATH }}"
-          $inputFiles = "${{ inputs.migration_files }}"
+          $migrationsPath = "${{ github.workspace }}\migrations"
           $filesToRun = @()
 
-          if ($inputFiles -eq "all") {
-            # Run all SQL files in order
-            $filesToRun = Get-ChildItem -Path $migrationsPath -Filter "*.sql" |
-              Sort-Object Name |
-              Select-Object -ExpandProperty FullName
-          } else {
-            # Run specific files
-            $fileNames = $inputFiles -split ','
-            foreach ($fileName in $fileNames) {
-              $fileName = $fileName.Trim()
-              $filePath = Join-Path $migrationsPath $fileName
-
-              # Add .sql extension if not present
-              if (-not $fileName.EndsWith('.sql')) {
-                $filePath = "$filePath.sql"
-              }
-
-              if (Test-Path $filePath) {
-                $filesToRun += $filePath
-              } else {
-                Write-Host "::warning::File not found: $fileName"
-              }
-            }
-          }
+          # All files from the artifact are the ones we need to run
+          $filesToRun = Get-ChildItem -Path $migrationsPath -Filter "*.sql" |
+            Sort-Object Name |
+            Select-Object -ExpandProperty FullName
 
           if ($filesToRun.Count -eq 0) {
             Write-Host "::error::No migration files to run"
@@ -118,8 +162,6 @@ jobs:
           $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
           $backupName = "TakeTime_PreMigration_$timestamp"
 
-          # This assumes SQL Server backup location is configured
-          # Adjust path as needed for your environment
           try {
             $backupQuery = "BACKUP DATABASE [TakeTime] TO DISK = N'${{ vars.SQL_BACKUP_PATH }}\$backupName.bak' WITH NOFORMAT, NOINIT, NAME = N'$backupName', SKIP, NOREWIND, NOUNLOAD, STATS = 10"
 

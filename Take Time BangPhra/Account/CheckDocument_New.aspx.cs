@@ -948,6 +948,13 @@ namespace Take_Time_BangPhra.Account
                 if (docType == "REC")
                 {
                     string path = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    // Fallback: check padded month directory for files created with zero-padded month
+                    if (!Directory.Exists(path))
+                    {
+                        string altPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
+                            path = altPath;
+                    }
 
                     System.Diagnostics.Debug.WriteLine($"   Receipt path: {path}");
 
@@ -1055,6 +1062,13 @@ namespace Take_Time_BangPhra.Account
                 else if (docType == "PAY")
                 {
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    // Fallback: check padded month directory for files created with zero-padded month
+                    if (!Directory.Exists(path))
+                    {
+                        string altPath = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
+                            path = altPath;
+                    }
 
                     System.Diagnostics.Debug.WriteLine($"   Payment path: {path}");
 
@@ -1185,6 +1199,24 @@ namespace Take_Time_BangPhra.Account
                         filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}.pdf");
                     }
 
+                    // Also check padded month format (for files created with zero-padded month)
+                    if (docMonth.PadLeft(2, '0') != docMonth)
+                    {
+                        string pm = docMonth.PadLeft(2, '0');
+                        if (docStatus == "Cancel")
+                        {
+                            if (!string.IsNullOrEmpty(uid))
+                                filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_{uid}_Cancel.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_Cancel.pdf");
+                        }
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(uid))
+                                filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_{uid}.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}.pdf");
+                        }
+                    }
+
                     // Check each file and redirect to the first one that exists
                     foreach (var filePath in filesToCheck)
                     {
@@ -1238,6 +1270,24 @@ namespace Take_Time_BangPhra.Account
                             filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}_{uid}.pdf");
                         }
                         filesToCheck.Add($"{path}\\{docYear}\\{docMonth}\\{docNum}.pdf");
+                    }
+
+                    // Also check padded month format (for files created with zero-padded month)
+                    if (docMonth.PadLeft(2, '0') != docMonth)
+                    {
+                        string pm = docMonth.PadLeft(2, '0');
+                        if (docStatus == "Cancel")
+                        {
+                            if (!string.IsNullOrEmpty(uid))
+                                filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_{uid}_Cancel.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_Cancel.pdf");
+                        }
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(uid))
+                                filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}_{uid}.pdf");
+                            filesToCheck.Add($"{path}\\{docYear}\\{pm}\\{docNum}.pdf");
+                        }
                     }
 
                     // Check each file and redirect to the first one that exists

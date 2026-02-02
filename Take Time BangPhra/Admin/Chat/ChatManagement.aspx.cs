@@ -40,7 +40,7 @@ namespace Take_Time_BangPhra.Admin.Chat
                     @"SELECT
                         gc.Reservation_ID AS ReservationId,
                         c.Name AS GuestName,
-                        a.Name AS RoomName,
+                        ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
                         gc.Guest_Phone AS Phone,
                         (SELECT TOP 1 Message FROM Guest_Chat gc2
                          WHERE gc2.Reservation_ID = gc.Reservation_ID
@@ -54,10 +54,9 @@ namespace Take_Time_BangPhra.Admin.Chat
                            AND (gc2.Is_Read = 0 OR gc2.Is_Read IS NULL)) AS UnreadCount
                       FROM Guest_Chat gc
                       INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                      INNER JOIN Customer c ON r.Customer_ID = c.ID
-                      INNER JOIN Accommodation a ON r.Accommodation_ID = a.ID
-                      WHERE r.Status NOT IN ('CANCELLED', 'NO-SHOW')
-                      GROUP BY gc.Reservation_ID, c.Name, a.Name, gc.Guest_Phone
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                      WHERE r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                      GROUP BY gc.Reservation_ID, c.Name, r.ID, gc.Guest_Phone
                       ORDER BY
                         (SELECT COUNT(*) FROM Guest_Chat gc2
                          WHERE gc2.Reservation_ID = gc.Reservation_ID
@@ -140,14 +139,13 @@ namespace Take_Time_BangPhra.Admin.Chat
                 DataTable dtGuest = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
                         c.Name AS GuestName,
-                        a.Name AS RoomName,
+                        ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
                         gc.Guest_Phone AS Phone
                       FROM Guest_Chat gc
                       INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                      INNER JOIN Customer c ON r.Customer_ID = c.ID
-                      INNER JOIN Accommodation a ON r.Accommodation_ID = a.ID
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
                       WHERE gc.Reservation_ID = @ReservationId
-                      GROUP BY c.Name, a.Name, gc.Guest_Phone",
+                      GROUP BY c.Name, r.ID, gc.Guest_Phone",
                     new System.Collections.Generic.Dictionary<string, object>
                     {
                         { "@ReservationId", reservationId }
@@ -307,17 +305,19 @@ namespace Take_Time_BangPhra.Admin.Chat
                 string latestGuest = "";
                 string latestMessage = "";
 
+                long latestReservationId = 0;
+
                 if (unreadCount > 0)
                 {
                     DataTable dtLatest = code.DatabaseQuerySafe(connectionString,
                         @"SELECT TOP 1
-                            a.Name AS RoomName,
+                            ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
                             c.Name AS GuestName,
-                            gc.Message AS LatestMessage
+                            gc.Message AS LatestMessage,
+                            gc.Reservation_ID AS ReservationId
                           FROM Guest_Chat gc
                           INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                          INNER JOIN Customer c ON r.Customer_ID = c.ID
-                          INNER JOIN Accommodation a ON r.Accommodation_ID = a.ID
+                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
                           WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
                           ORDER BY gc.Created_Date DESC",
                         null);
@@ -327,6 +327,7 @@ namespace Take_Time_BangPhra.Admin.Chat
                         latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
                         latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
                         latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
+                        latestReservationId = Convert.ToInt64(dtLatest.Rows[0]["ReservationId"]);
                         // Truncate message if too long
                         if (latestMessage.Length > 100)
                         {
@@ -341,12 +342,13 @@ namespace Take_Time_BangPhra.Admin.Chat
                     count = unreadCount,
                     latestRoom = latestRoom,
                     latestGuest = latestGuest,
-                    latestMessage = latestMessage
+                    latestMessage = latestMessage,
+                    latestReservationId = latestReservationId
                 };
             }
             catch
             {
-                return new { hasUnread = false, count = 0, latestRoom = "", latestGuest = "", latestMessage = "" };
+                return new { hasUnread = false, count = 0, latestRoom = "", latestGuest = "", latestMessage = "", latestReservationId = 0 };
             }
         }
 
@@ -370,6 +372,92 @@ namespace Take_Time_BangPhra.Admin.Chat
             catch
             {
                 return new { success = false };
+            }
+        }
+
+        /// <summary>
+        /// Web method to claim a chat conversation
+        /// </summary>
+        [WebMethod(EnableSession = true)]
+        public static object ClaimChat(long reservationId)
+        {
+            try
+            {
+                var context = System.Web.HttpContext.Current;
+                string staffName = context?.Session["username"]?.ToString() ?? "Unknown Staff";
+
+                string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var code = new code();
+
+                // Mark all unread messages as read (claimed)
+                code.DatabaseInsertSafe(connectionString,
+                    @"UPDATE Guest_Chat
+                      SET Is_Read = 1, Read_Date = @ReadDate, Staff_Name = @StaffName
+                      WHERE Reservation_ID = @ReservationId
+                        AND IsFromGuest = 1
+                        AND (Is_Read = 0 OR Is_Read IS NULL)",
+                    new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "@ReservationId", reservationId },
+                        { "@ReadDate", DateTime.Now },
+                        { "@StaffName", staffName }
+                    });
+
+                return new { success = true, claimedBy = staffName };
+            }
+            catch (Exception ex)
+            {
+                return new { success = false, error = ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Web method to get all unread chats for notification display
+        /// </summary>
+        [WebMethod]
+        public static object GetAllUnreadChats()
+        {
+            try
+            {
+                string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var code = new code();
+
+                DataTable dtUnread = code.DatabaseQuerySafe(connectionString,
+                    @"SELECT
+                        gc.Reservation_ID AS ReservationId,
+                        ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
+                        c.Name AS GuestName,
+                        gc.Message AS LatestMessage,
+                        gc.Created_Date AS MessageTime
+                      FROM Guest_Chat gc
+                      INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                      WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
+                      AND gc.ID = (SELECT MAX(gc2.ID) FROM Guest_Chat gc2 WHERE gc2.Reservation_ID = gc.Reservation_ID AND gc2.IsFromGuest = 1)
+                      ORDER BY gc.Created_Date DESC",
+                    null);
+
+                var chats = new System.Collections.Generic.List<object>();
+                foreach (System.Data.DataRow row in dtUnread.Rows)
+                {
+                    string msg = row["LatestMessage"].ToString();
+                    if (msg.Length > 80) msg = msg.Substring(0, 80) + "...";
+
+                    chats.Add(new
+                    {
+                        reservationId = Convert.ToInt64(row["ReservationId"]),
+                        roomName = row["RoomName"].ToString(),
+                        guestName = row["GuestName"].ToString(),
+                        message = msg,
+                        time = Convert.ToDateTime(row["MessageTime"]).ToString("HH:mm")
+                    });
+                }
+
+                return new { success = true, chats = chats };
+            }
+            catch
+            {
+                return new { success = false, chats = new object[0] };
             }
         }
     }

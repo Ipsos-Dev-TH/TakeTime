@@ -114,7 +114,6 @@ jobs:
     name: Deploy to IIS
     needs: build
     runs-on: self-hosted  # ใช้ self-hosted runner บนเครื่อง production
-    environment: production
 
     steps:
       - name: Download artifact

@@ -18,13 +18,13 @@ env:
   BUILD_CONFIGURATION: 'Release'
 
 jobs:
-  build-and-deploy:
-    name: Build and Deploy
-    runs-on: self-hosted
+  build:
+    name: Build Application
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v1.3
@@ -38,29 +38,16 @@ jobs:
       - name: Build Project
         run: |
           msbuild "${{ env.PROJECT_FILE }}" /p:Configuration=${{ env.BUILD_CONFIGURATION }} /verbosity:minimal
-        shell: powershell
 
-      - name: Backup current site
-        run: |
-          $sitePath = "${{ vars.IIS_SITE_PATH }}"
-          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-
-          if (Test-Path $sitePath) {
-            New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
-            Copy-Item -Path "$sitePath\*" -Destination $backupPath -Recurse -Force
-            Write-Host "Backup created: $backupPath"
-          }
-        shell: powershell
-
-      - name: Deploy to IIS
+      - name: Prepare Publish Folder
         run: |
           $projectPath = "${{ github.workspace }}\Take Time BangPhra"
-          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $publishPath = "${{ github.workspace }}\publish"
 
-          Write-Host "Deploying from: $projectPath"
-          Write-Host "Deploying to: $sitePath"
+          Write-Host "Creating publish folder..."
+          New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
 
-          # Get all files to deploy (exclude source code, project files, obj folder)
+          # Copy all files except source code and build artifacts
           Get-ChildItem -Path $projectPath -Recurse |
             Where-Object {
               $item = $_
@@ -75,13 +62,12 @@ jobs:
               if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
               if ($item.Extension -eq ".csproj") { $exclude = $true }
               if ($item.Name -eq "packages.config") { $exclude = $true }
-              if ($item.Name -eq "Web.config") { $exclude = $true }
 
               -not $exclude
             } |
             ForEach-Object {
               $relativePath = $_.FullName.Substring($projectPath.Length)
-              $destPath = Join-Path $sitePath $relativePath
+              $destPath = Join-Path $publishPath $relativePath
 
               if ($_.PSIsContainer) {
                 if (!(Test-Path $destPath)) {
@@ -96,25 +82,165 @@ jobs:
               }
             }
 
-          Write-Host "Deployment complete (Web.config preserved)"
+          $fileCount = (Get-ChildItem -Path $publishPath -Recurse -File).Count
+          Write-Host "Publish folder ready: $fileCount files"
+
+          # Verify bin folder exists
+          $binPath = Join-Path $publishPath "bin"
+          if (Test-Path $binPath) {
+            $dllCount = (Get-ChildItem -Path $binPath -Filter "*.dll").Count
+            Write-Host "DLLs in bin folder: $dllCount"
+          } else {
+            Write-Host "WARNING: bin folder not found!"
+          }
+        shell: powershell
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/publish/
+          retention-days: 5
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to IIS
+    needs: build
+    runs-on: self-hosted
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/deploy
+
+      - name: Verify environment
+        run: |
+          Write-Host "=== Environment Check ==="
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "OS: $env:RUNNER_OS"
+          Write-Host ""
+
+          # Check required variables
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+
+          if ([string]::IsNullOrEmpty($sitePath)) {
+            Write-Host "::error::vars.IIS_SITE_PATH is not configured! Go to repo Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          }
+          if ([string]::IsNullOrEmpty($backupPath)) {
+            Write-Host "::error::vars.BACKUP_PATH is not configured! Go to repo Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          }
+
+          Write-Host "IIS_SITE_PATH: $sitePath"
+          Write-Host "BACKUP_PATH: $backupPath"
+          Write-Host "SITE_URL: ${{ vars.SITE_URL }}"
+          Write-Host "=== Environment Check Complete ==="
+        shell: powershell
+
+      - name: Backup current site
+        run: |
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupRoot = "${{ vars.BACKUP_PATH }}"
+          $backupPath = "$backupRoot\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+
+          if ([string]::IsNullOrEmpty($sitePath) -or [string]::IsNullOrEmpty($backupRoot)) {
+            Write-Host "::warning::Backup skipped - IIS_SITE_PATH or BACKUP_PATH not configured"
+            exit 0
+          }
+
+          if (Test-Path $sitePath) {
+            New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+            Copy-Item -Path "$sitePath\*" -Destination $backupPath -Recurse -Force
+            Write-Host "Backup created: $backupPath"
+          } else {
+            Write-Host "::warning::Site path not found, skipping backup: $sitePath"
+          }
+        shell: powershell
+
+      - name: Deploy to IIS
+        run: |
+          $sourcePath = "${{ github.workspace }}\deploy"
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+
+          if ([string]::IsNullOrEmpty($sitePath)) {
+            Write-Host "::error::vars.IIS_SITE_PATH is not configured!"
+            exit 1
+          }
+
+          Write-Host "Deploying from: $sourcePath"
+          Write-Host "Deploying to: $sitePath"
+
+          if (!(Test-Path $sourcePath)) {
+            Write-Host "::error::Source path not found: $sourcePath"
+            exit 1
+          }
+
+          # Ensure site path exists
+          if (!(Test-Path $sitePath)) {
+            New-Item -ItemType Directory -Path $sitePath -Force | Out-Null
+            Write-Host "Created site directory: $sitePath"
+          }
+
+          # Copy all files EXCEPT Web.config (preserve production config)
+          $fileCount = 0
+          Get-ChildItem -Path $sourcePath -Recurse |
+            Where-Object { $_.Name -ne "Web.config" } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($sourcePath.Length)
+              $destPath = Join-Path $sitePath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+                $fileCount++
+              }
+            }
+
+          Write-Host "Deployment complete: $fileCount files copied (Web.config preserved)"
         shell: powershell
 
       - name: Health Check
         run: |
           $siteUrl = "${{ vars.SITE_URL }}"
-          if ($siteUrl) {
+          if ([string]::IsNullOrEmpty($siteUrl)) {
+            Write-Host "SITE_URL not configured, skipping health check"
+            exit 0
+          }
+
+          $maxRetries = 5
+          $retryCount = 0
+
+          while ($retryCount -lt $maxRetries) {
             try {
               $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
-              Write-Host "Health check passed! Status: $($response.StatusCode)"
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed! Status: $($response.StatusCode)"
+                exit 0
+              }
             } catch {
-              Write-Host "Health check warning: $($_.Exception.Message)"
+              $retryCount++
+              Write-Host "Attempt $retryCount failed. Retrying in 10 seconds..."
+              Start-Sleep -Seconds 10
             }
-          } else {
-            Write-Host "SITE_URL not configured, skipping health check"
           }
+
+          Write-Host "Health check failed after $maxRetries attempts"
+          exit 1
         shell: powershell
 
       - name: Deployment Summary
+        if: always()
         run: |
           Write-Host "================================"
           Write-Host "Deployment Complete!"
@@ -122,4 +248,21 @@ jobs:
           Write-Host "URL: ${{ vars.SITE_URL }}"
           Write-Host "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Host "================================"
+        shell: powershell
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          Write-Host "Deployment failed! Initiating rollback..."
+
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+          $latestBackup = Get-ChildItem -Path $backupPath -Directory |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if ($latestBackup) {
+            $sitePath = "${{ vars.IIS_SITE_PATH }}"
+            Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
+            Write-Host "Rolled back to: $($latestBackup.Name)"
+          }
         shell: powershell

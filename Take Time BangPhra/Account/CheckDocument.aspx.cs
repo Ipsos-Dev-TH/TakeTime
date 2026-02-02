@@ -308,6 +308,17 @@ namespace Take_Time_BangPhra.Account
                     docYear = "20" + docNum.Remove(0, 3).Remove(2, 10);
                     docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, 8)).ToString();
                 }
+                // Fallback: check padded month directory for files created with zero-padded month
+                {
+                    string ck = (docType == "REC") ? "ReceiptFolderPath" : "PaymentFolderPath";
+                    string bp = System.Configuration.ConfigurationSettings.AppSettings[ck]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(bp) && !Directory.Exists(bp + "\\" + docYear + "\\" + docMonth))
+                    {
+                        string pm = docMonth.PadLeft(2, '0');
+                        if (pm != docMonth && Directory.Exists(bp + "\\" + docYear + "\\" + pm))
+                            docMonth = pm;
+                    }
+                }
                 if (docType == "REC")
                 {
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
@@ -453,6 +464,17 @@ namespace Take_Time_BangPhra.Account
                 docType = docNum.Remove(3, 12);
                 docYear = "20" + docNum.Remove(0, 3).Remove(2, 10);
                 docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, 8)).ToString();
+            }
+            // Fallback: check padded month directory for files created with zero-padded month
+            {
+                string ck = (docType == "REC") ? "ReceiptFolderPath" : "PaymentFolderPath";
+                string bp = System.Configuration.ConfigurationSettings.AppSettings[ck]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(bp) && !Directory.Exists(bp + "\\" + docYear + "\\" + docMonth))
+                {
+                    string pm = docMonth.PadLeft(2, '0');
+                    if (pm != docMonth && Directory.Exists(bp + "\\" + docYear + "\\" + pm))
+                        docMonth = pm;
+                }
             }
             if (docType == "REC")
             {

@@ -20,7 +20,7 @@ env:
 jobs:
   build:
     name: Build Application
-    runs-on: self-hosted
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -57,29 +57,18 @@ jobs:
           Write-Host "Creating publish folder..."
           New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
 
-          # Files/folders to exclude
-          $excludePatterns = @(
-            "*.csproj",
-            "*.csproj.user",
-            "*.cs",
-            "packages.config",
-            "obj",
-            "Properties",
-            ".vs"
-          )
-
-          # Copy all files except excluded ones
+          # Copy all files except source code and build artifacts
           Get-ChildItem -Path $projectPath -Recurse |
             Where-Object {
               $item = $_
               $exclude = $false
 
-              # Check if in obj folder
+              # Exclude folders
               if ($item.FullName -match "\\obj\\") { $exclude = $true }
               if ($item.FullName -match "\\Properties\\") { $exclude = $true }
               if ($item.FullName -match "\\.vs\\") { $exclude = $true }
 
-              # Check file extensions
+              # Exclude files
               if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
               if ($item.Extension -eq ".csproj") { $exclude = $true }
               if ($item.Name -eq "packages.config") { $exclude = $true }
@@ -128,7 +117,6 @@ jobs:
     name: Deploy to IIS
     needs: build
     runs-on: self-hosted
-    environment: production
 
     steps:
       - name: Download Build Artifact

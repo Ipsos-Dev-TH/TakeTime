@@ -621,6 +621,7 @@ namespace Take_Time_BangPhra
 
             // 🏨 เพิ่มสินค้าชาร์จเข้าห้อง (Product Charges - ทั้งหมด ไม่ใช่เฉพาะที่ค้างชำระ)
             double ProductCharges = 0;
+            double RoomServiceCharges = 0;
             try
             {
                 if ((command == "edit" || command == "checkin") && !string.IsNullOrEmpty(id))
@@ -644,6 +645,31 @@ namespace Take_Time_BangPhra
                     {
                         ProductCharges = Convert.ToDouble(dtProductCharges.Rows[0]["TotalCharges"]);
                     }
+
+                    // 🍽️ เพิ่ม Room Service Orders ที่ชาร์จเข้าห้อง
+                    try
+                    {
+                        var rsParams = new Dictionary<string, object>
+                        {
+                            { "@reservationId", reservationId }
+                        };
+                        DataTable dtRS = code2.DatabaseQuerySafe(conn,
+                            @"SELECT ISNULL(SUM(Total_Amount), 0) as TotalCharges
+                              FROM Guest_Room_Service_Orders
+                              WHERE Reservation_ID = @reservationId
+                              AND Payment_Method = 'CHARGE_TO_ROOM'
+                              AND Order_Status <> 'CANCELLED'",
+                            rsParams);
+
+                        if (dtRS.Rows.Count > 0 && dtRS.Rows[0]["TotalCharges"] != DBNull.Value)
+                        {
+                            RoomServiceCharges = Convert.ToDouble(dtRS.Rows[0]["TotalCharges"]);
+                        }
+                    }
+                    catch { }
+
+                    // รวม Room Service เข้ากับ Product Charges
+                    ProductCharges += RoomServiceCharges;
                 }
             }
             catch (Exception ex)

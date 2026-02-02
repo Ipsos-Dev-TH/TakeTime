@@ -188,10 +188,9 @@ namespace Take_Time_BangPhra.Guest
             {
                 // Get room info
                 DataTable dtRoom = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT a.Name AS RoomName, c.Name AS GuestName
+                    @"SELECT ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName, c.Name AS GuestName
                       FROM Reservation r
-                      JOIN Accommodation a ON r.Accommodation_ID = a.ID
-                      JOIN Customer c ON r.Customer_ID = c.ID
+                      JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
                       WHERE r.ID = @ReservationId",
                     new System.Collections.Generic.Dictionary<string, object>
                     {
