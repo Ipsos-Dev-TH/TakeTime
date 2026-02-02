@@ -377,7 +377,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                     Panel1.Visible = true;
                     string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                    string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString();
+                    string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString("00");
                     string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
                     if (File.Exists(path + "\\" + Year + "\\" + Month + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + ".pdf"))
@@ -521,7 +521,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                 // Extract Year/Month for directory structure
                 string Year = receiptDate.Year.ToString();
-                string Month = receiptDate.Month.ToString();
+                string Month = receiptDate.Month.ToString("00");
 
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
                 string docNum = "";

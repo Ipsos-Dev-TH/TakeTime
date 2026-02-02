@@ -76,7 +76,7 @@ namespace Take_Time_BangPhra.Services
 
             DateTime createdDate = Convert.ToDateTime(dtRec.Rows[0]["Created_Date"]);
             string year = createdDate.Year.ToString();
-            string month = createdDate.Month.ToString();
+            string month = createdDate.Month.ToString("00");
 
             // Determine input and output file paths
             string inputPdfPath = GetPdfFilePath(receiptId, uid, year, month, false);
@@ -600,7 +600,7 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 string year = docDate.Year.ToString();
-                string month = docDate.Month.ToString();
+                string month = docDate.Month.ToString("00");
                 string directoryPath = Path.Combine(_receiptFolderPath, year, month);
 
                 if (!Directory.Exists(directoryPath))
