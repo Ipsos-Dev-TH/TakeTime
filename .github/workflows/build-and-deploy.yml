@@ -18,20 +18,108 @@ env:
   BUILD_CONFIGURATION: 'Release'
 
 jobs:
-  build-and-deploy:
-    name: Build and Deploy
-    runs-on: self-hosted
+  build:
+    name: Build Application
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: Build Project
+        run: |
+          msbuild "${{ env.PROJECT_FILE }}" /p:Configuration=${{ env.BUILD_CONFIGURATION }} /verbosity:minimal
+
+      - name: Prepare Publish Folder
+        run: |
+          $projectPath = "${{ github.workspace }}\Take Time BangPhra"
+          $publishPath = "${{ github.workspace }}\publish"
+
+          Write-Host "Creating publish folder..."
+          New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
+
+          # Copy all files except source code and build artifacts
+          Get-ChildItem -Path $projectPath -Recurse |
+            Where-Object {
+              $item = $_
+              $exclude = $false
+
+              # Exclude folders
+              if ($item.FullName -match "\\obj\\") { $exclude = $true }
+              if ($item.FullName -match "\\Properties\\") { $exclude = $true }
+              if ($item.FullName -match "\\.vs\\") { $exclude = $true }
+
+              # Exclude files
+              if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
+              if ($item.Extension -eq ".csproj") { $exclude = $true }
+              if ($item.Name -eq "packages.config") { $exclude = $true }
+
+              -not $exclude
+            } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring($projectPath.Length)
+              $destPath = Join-Path $publishPath $relativePath
+
+              if ($_.PSIsContainer) {
+                if (!(Test-Path $destPath)) {
+                  New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                }
+              } else {
+                $destDir = Split-Path -Parent $destPath
+                if (!(Test-Path $destDir)) {
+                  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                }
+                Copy-Item -Path $_.FullName -Destination $destPath -Force
+              }
+            }
+
+          $fileCount = (Get-ChildItem -Path $publishPath -Recurse -File).Count
+          Write-Host "Publish folder ready: $fileCount files"
+
+          # Verify bin folder exists
+          $binPath = Join-Path $publishPath "bin"
+          if (Test-Path $binPath) {
+            $dllCount = (Get-ChildItem -Path $binPath -Filter "*.dll").Count
+            Write-Host "DLLs in bin folder: $dllCount"
+          } else {
+            Write-Host "WARNING: bin folder not found!"
+          }
+        shell: powershell
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/publish/
+          retention-days: 5
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to IIS
+    needs: build
+    runs-on: self-hosted
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-package
+          path: ${{ github.workspace }}/deploy
 
       - name: Verify environment
         run: |
           Write-Host "=== Environment Check ==="
           Write-Host "Runner: $env:RUNNER_NAME"
           Write-Host "OS: $env:RUNNER_OS"
-          Write-Host "Workspace: ${{ github.workspace }}"
           Write-Host ""
 
           # Check required variables
@@ -50,68 +138,7 @@ jobs:
           Write-Host "IIS_SITE_PATH: $sitePath"
           Write-Host "BACKUP_PATH: $backupPath"
           Write-Host "SITE_URL: ${{ vars.SITE_URL }}"
-
-          # Check if site path exists
-          if (Test-Path $sitePath) {
-            Write-Host "Site path exists: OK"
-          } else {
-            Write-Host "::warning::Site path does not exist yet: $sitePath"
-          }
-
           Write-Host "=== Environment Check Complete ==="
-        shell: powershell
-
-      - name: Find MSBuild
-        run: |
-          # Try vswhere first (most reliable on self-hosted)
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) {
-            $msbuildPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
-            if ($msbuildPath) {
-              Write-Host "Found MSBuild via vswhere: $msbuildPath"
-              $msbuildDir = Split-Path $msbuildPath -Parent
-              echo "$msbuildDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              exit 0
-            }
-          }
-
-          # Fallback: check if msbuild is already in PATH
-          $existing = Get-Command msbuild -ErrorAction SilentlyContinue
-          if ($existing) {
-            Write-Host "MSBuild already in PATH: $($existing.Source)"
-            exit 0
-          }
-
-          Write-Host "::error::MSBuild not found! Please install Visual Studio or Build Tools on this runner."
-          exit 1
-        shell: powershell
-
-      - name: Find NuGet
-        run: |
-          # Check if nuget is already available
-          $existing = Get-Command nuget -ErrorAction SilentlyContinue
-          if ($existing) {
-            Write-Host "NuGet found: $($existing.Source)"
-            exit 0
-          }
-
-          # Download nuget.exe if not found
-          $nugetPath = "${{ github.workspace }}\nuget.exe"
-          Write-Host "NuGet not found in PATH, downloading..."
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile $nugetPath -UseBasicParsing
-          Write-Host "Downloaded NuGet to: $nugetPath"
-          echo "${{ github.workspace }}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        shell: powershell
-
-      - name: Restore NuGet packages
-        run: |
-          nuget restore "${{ env.SOLUTION_FILE }}"
-        shell: powershell
-
-      - name: Build Project
-        run: |
-          msbuild "${{ env.PROJECT_FILE }}" /p:Configuration=${{ env.BUILD_CONFIGURATION }} /verbosity:minimal
         shell: powershell
 
       - name: Backup current site
@@ -136,7 +163,7 @@ jobs:
 
       - name: Deploy to IIS
         run: |
-          $projectPath = "${{ github.workspace }}\Take Time BangPhra"
+          $sourcePath = "${{ github.workspace }}\deploy"
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
 
           if ([string]::IsNullOrEmpty($sitePath)) {
@@ -144,11 +171,11 @@ jobs:
             exit 1
           }
 
-          Write-Host "Deploying from: $projectPath"
+          Write-Host "Deploying from: $sourcePath"
           Write-Host "Deploying to: $sitePath"
 
-          if (!(Test-Path $projectPath)) {
-            Write-Host "::error::Project path not found: $projectPath"
+          if (!(Test-Path $sourcePath)) {
+            Write-Host "::error::Source path not found: $sourcePath"
             exit 1
           }
 
@@ -158,28 +185,12 @@ jobs:
             Write-Host "Created site directory: $sitePath"
           }
 
-          # Get all files to deploy (exclude source code, project files, obj folder)
+          # Copy all files EXCEPT Web.config (preserve production config)
           $fileCount = 0
-          Get-ChildItem -Path $projectPath -Recurse |
-            Where-Object {
-              $item = $_
-              $exclude = $false
-
-              # Exclude folders
-              if ($item.FullName -match "\\obj\\") { $exclude = $true }
-              if ($item.FullName -match "\\Properties\\") { $exclude = $true }
-              if ($item.FullName -match "\\.vs\\") { $exclude = $true }
-
-              # Exclude files
-              if ($item.Extension -eq ".cs" -and $item.FullName -notmatch "\\bin\\") { $exclude = $true }
-              if ($item.Extension -eq ".csproj") { $exclude = $true }
-              if ($item.Name -eq "packages.config") { $exclude = $true }
-              if ($item.Name -eq "Web.config") { $exclude = $true }
-
-              -not $exclude
-            } |
+          Get-ChildItem -Path $sourcePath -Recurse |
+            Where-Object { $_.Name -ne "Web.config" } |
             ForEach-Object {
-              $relativePath = $_.FullName.Substring($projectPath.Length)
+              $relativePath = $_.FullName.Substring($sourcePath.Length)
               $destPath = Join-Path $sitePath $relativePath
 
               if ($_.PSIsContainer) {
@@ -207,12 +218,25 @@ jobs:
             exit 0
           }
 
-          try {
-            $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
-            Write-Host "Health check passed! Status: $($response.StatusCode)"
-          } catch {
-            Write-Host "::warning::Health check failed: $($_.Exception.Message)"
+          $maxRetries = 5
+          $retryCount = 0
+
+          while ($retryCount -lt $maxRetries) {
+            try {
+              $response = Invoke-WebRequest -Uri $siteUrl -UseBasicParsing -TimeoutSec 30
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed! Status: $($response.StatusCode)"
+                exit 0
+              }
+            } catch {
+              $retryCount++
+              Write-Host "Attempt $retryCount failed. Retrying in 10 seconds..."
+              Start-Sleep -Seconds 10
+            }
           }
+
+          Write-Host "Health check failed after $maxRetries attempts"
+          exit 1
         shell: powershell
 
       - name: Deployment Summary
@@ -224,4 +248,21 @@ jobs:
           Write-Host "URL: ${{ vars.SITE_URL }}"
           Write-Host "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Host "================================"
+        shell: powershell
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          Write-Host "Deployment failed! Initiating rollback..."
+
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+          $latestBackup = Get-ChildItem -Path $backupPath -Directory |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if ($latestBackup) {
+            $sitePath = "${{ vars.IIS_SITE_PATH }}"
+            Copy-Item -Path "$($latestBackup.FullName)\*" -Destination $sitePath -Recurse -Force
+            Write-Host "Rolled back to: $($latestBackup.Name)"
+          }
         shell: powershell
