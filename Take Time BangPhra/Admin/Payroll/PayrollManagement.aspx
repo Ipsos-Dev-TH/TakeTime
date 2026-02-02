@@ -370,7 +370,7 @@
                         <div class="form-group">
                             <label>ประกันสังคม (บาท)</label>
                             <asp:TextBox ID="txtEditSocialSecurity" runat="server" CssClass="form-control" TextMode="Number" onchange="calculateTotals()"></asp:TextBox>
-                            <small style="color: #666;">5% ของเงินเดือน สูงสุด 750 บาท</small>
+                            <small style="color: #666;">5% ของรายได้สุทธิ (หลังหักค่าใช้จ่าย) สูงสุดตามปี พ.ศ.</small>
                         </div>
                         <div class="form-group">
                             <label>หักขาด/ลา (บาท)</label>
@@ -508,6 +508,15 @@
             var allowance = parseFloat(document.getElementById('<%= txtEditAllowance.ClientID %>').value) || 0;
             var totalEarnings = baseSalary + otAmount + bonus + allowance;
 
+            // Get deductions (exclude SS itself)
+            var leaveDeduction = parseFloat(document.getElementById('<%= txtEditLeaveDeduction.ClientID %>').value) || 0;
+            var tax = parseFloat(document.getElementById('<%= txtEditTax.ClientID %>').value) || 0;
+            var otherDeductions = parseFloat(document.getElementById('<%= txtEditOtherDeductions.ClientID %>').value) || 0;
+
+            // Calculate net income before SS (รายได้สุทธิก่อนหักประกันสังคม)
+            var netBeforeSS = totalEarnings - leaveDeduction - tax - otherDeductions;
+            if (netBeforeSS < 0) netBeforeSS = 0;
+
             // Get period year from dropdown and convert to Thai Buddhist year
             var periodYear = parseInt(document.getElementById('<%= ddlYear.ClientID %>').value) || new Date().getFullYear();
             var thaiBuddhistYear = periodYear + 543;
@@ -531,15 +540,16 @@
                 maxDeduction = 750;
             }
 
-            // Calculate SS: 5% of total earnings, min base 1650, max based on year
+            // Calculate SS from net income (after all deductions)
+            // คำนวณจากรายได้สุทธิหลังหักทุกรายการ
             var minBase = 1650;
-            if (totalEarnings < minBase) {
+            if (netBeforeSS < minBase) {
                 document.getElementById('<%= txtEditSocialSecurity.ClientID %>').value = 0;
                 calculateTotals();
                 return;
             }
 
-            var ssBase = Math.min(maxBase, totalEarnings);
+            var ssBase = Math.min(maxBase, netBeforeSS);
             var ss = ssBase * 0.05;
             ss = Math.min(ss, maxDeduction);
             ss = Math.round(ss);
