@@ -122,13 +122,44 @@ jobs:
           name: webapp-package
           path: ${{ github.workspace }}/deploy
 
+      - name: Verify environment
+        run: |
+          Write-Host "=== Environment Check ==="
+          $sitePath = "${{ vars.IIS_SITE_PATH }}"
+          $backupPath = "${{ vars.BACKUP_PATH }}"
+
+          if ([string]::IsNullOrEmpty($sitePath)) {
+            Write-Host "::error::vars.IIS_SITE_PATH is not configured! Go to repo Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          }
+          if ([string]::IsNullOrEmpty($backupPath)) {
+            Write-Host "::error::vars.BACKUP_PATH is not configured! Go to repo Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          }
+
+          Write-Host "IIS_SITE_PATH: $sitePath"
+          Write-Host "BACKUP_PATH: $backupPath"
+          Write-Host "SITE_URL: ${{ vars.SITE_URL }}"
+          Write-Host "=== Environment Check Complete ==="
+        shell: powershell
+
       - name: Backup current deployment
         run: |
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
-          $backupPath = "${{ vars.BACKUP_PATH }}\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          $backupRoot = "${{ vars.BACKUP_PATH }}"
+          $backupPath = "$backupRoot\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+
+          if ([string]::IsNullOrEmpty($sitePath) -or [string]::IsNullOrEmpty($backupRoot)) {
+            Write-Host "::warning::Backup skipped - IIS_SITE_PATH or BACKUP_PATH not configured"
+            exit 0
+          }
+
           if (Test-Path $sitePath) {
-            Copy-Item -Path $sitePath -Destination $backupPath -Recurse -Force
+            New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+            Copy-Item -Path "$sitePath\*" -Destination $backupPath -Recurse -Force
             Write-Host "Backup created at: $backupPath"
+          } else {
+            Write-Host "::warning::Site path not found, skipping backup: $sitePath"
           }
         shell: powershell
 
@@ -137,7 +168,26 @@ jobs:
           $sourcePath = "${{ github.workspace }}\deploy"
           $sitePath = "${{ vars.IIS_SITE_PATH }}"
 
-          # Copy all files EXCEPT Web.config
+          if ([string]::IsNullOrEmpty($sitePath)) {
+            Write-Host "::error::vars.IIS_SITE_PATH is not configured!"
+            exit 1
+          }
+
+          Write-Host "Deploying from: $sourcePath"
+          Write-Host "Deploying to: $sitePath"
+
+          if (!(Test-Path $sourcePath)) {
+            Write-Host "::error::Source path not found: $sourcePath"
+            exit 1
+          }
+
+          if (!(Test-Path $sitePath)) {
+            New-Item -ItemType Directory -Path $sitePath -Force | Out-Null
+            Write-Host "Created site directory: $sitePath"
+          }
+
+          # Copy all files EXCEPT Web.config (preserve production config)
+          $fileCount = 0
           Get-ChildItem -Path $sourcePath -Recurse |
             Where-Object { $_.Name -ne "Web.config" } |
             ForEach-Object {
@@ -154,15 +204,21 @@ jobs:
                   New-Item -ItemType Directory -Path $destDir -Force | Out-Null
                 }
                 Copy-Item -Path $_.FullName -Destination $destPath -Force
+                $fileCount++
               }
             }
 
-          Write-Host "Deployed to: $sitePath (Web.config preserved)"
+          Write-Host "Deployment complete: $fileCount files copied (Web.config preserved)"
         shell: powershell
 
       - name: Health Check
         run: |
           $siteUrl = "${{ vars.SITE_URL }}"
+          if ([string]::IsNullOrEmpty($siteUrl)) {
+            Write-Host "SITE_URL not configured, skipping health check"
+            exit 0
+          }
+
           $maxRetries = 5
           $retryCount = 0
 
@@ -197,8 +253,12 @@ jobs:
         run: |
           Write-Host "Deployment failed! Initiating rollback..."
 
-          # Find latest backup
           $backupPath = "${{ vars.BACKUP_PATH }}"
+          if ([string]::IsNullOrEmpty($backupPath)) {
+            Write-Host "::warning::BACKUP_PATH not configured, cannot rollback"
+            exit 1
+          }
+
           $latestBackup = Get-ChildItem -Path $backupPath -Directory |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
