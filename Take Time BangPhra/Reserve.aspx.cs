@@ -3314,6 +3314,8 @@ namespace Take_Time_BangPhra
                                                 double pricePerNight = Convert.ToDouble(row.Cells[4].Text);
                                                 int nights = Convert.ToInt32(DropDownList1.SelectedValue);
 
+                                                double accomTotalForCoupon = 0;
+
                                                 if (dtAccommodation.Rows[row.RowIndex]["LimitWithPeople"].ToString() == "True")
                                                 {
                                                     // ห้องคิดตามจำนวนคน
@@ -3322,6 +3324,7 @@ namespace Take_Time_BangPhra
                                                     double totalAmount = TwoDecimalPoints(pricePerPiece * nights); // ราคารวมทุกคืน
 
                                                     PriceAccom += (int)totalAmount;
+                                                    accomTotalForCoupon = totalAmount;
 
                                                     if (Convert.ToDouble(TextBox5.Text) == Convert.ToDouble(TextBox4.Text))
                                                     {
@@ -3351,6 +3354,7 @@ namespace Take_Time_BangPhra
                                                     double totalAmount = TwoDecimalPoints(pricePerNight * nights);
 
                                                     PriceAccom += (int)totalAmount;
+                                                    accomTotalForCoupon = totalAmount;
 
                                                     if (Convert.ToDouble(TextBox5.Text) == Convert.ToDouble(TextBox4.Text))
                                                     {
@@ -3385,9 +3389,19 @@ namespace Take_Time_BangPhra
                                                     Convert.ToDecimal(pricePerNight),
                                                     checkusecoupon.ToString()
                                                 );
+
+                                                // บันทึกการใช้คูปอง/Voucher (ทำเครื่องหมายว่าใช้แล้ว)
+                                                CouponRecord(TextBox19.Text, Reservation_ID.ToString(),
+                                                    dtAccommodation.Rows[row.RowIndex]["ID"].ToString(),
+                                                    code2.ParseDate(TextBox12.Text).Value, (int)accomTotalForCoupon);
                                             }
                                             i++;
                                         }
+                                        // เคลียร์ session ที่เกี่ยวกับ voucher/coupon หลังจากบันทึกเสร็จแล้ว
+                                        Session["UseCoupon"] = "false";
+                                        Session["UseVoucher"] = false;
+                                        Session["UseVoucherAccomID"] = null;
+
                                         i = 0;
                                         msg += "\r\nรายการของเช่า\r\n";
                                         foreach (GridViewRow row in GridView2.Rows)
@@ -5989,12 +6003,9 @@ namespace Take_Time_BangPhra
                                     try
                                     {
                                         oldvalue = Session["UseVoucherAccomID"].ToString();
-                                        Session["UseVoucherAccomID"] += oldvalue +dtVoucher.Rows[0]["Accom_ID"].ToString()+";";
                                     }
-                                    catch
-                                    {
-                                        Session["UseVoucherAccomID"] += dtVoucher.Rows[0]["Accom_ID"].ToString()+";";
-                                    }
+                                    catch { }
+                                    Session["UseVoucherAccomID"] = oldvalue + dtVoucher.Rows[0]["Accom_ID"].ToString() + ";";
                                 }
                                 else
                                 {
@@ -7147,6 +7158,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             {
                 Button8.Text = "Submit";
                 Session["UseCoupon"] = "false";
+                Session["UseVoucher"] = false;
+                Session["UseVoucherAccomID"] = null;
                 string clearedCode = TextBox19.Text;
                 TextBox19.Text = string.Empty;
                 TextBox19.Enabled = true;
