@@ -427,7 +427,7 @@ namespace Take_Time_BangPhra.Voucher
             // ✨ Declare date variables used throughout the method
             DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
             string Year = receiptDate.Year.ToString();
-            string Month = receiptDate.Month.ToString();
+            string Month = receiptDate.Month.ToString("00");
             string Day = receiptDate.Day.ToString("00");
 
             bool imgupload = false;

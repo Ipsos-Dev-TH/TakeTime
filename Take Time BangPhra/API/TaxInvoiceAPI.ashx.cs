@@ -472,7 +472,7 @@ namespace Take_Time_BangPhra.API
 
                 string basePath = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"];
                 string year = createdDate.Year.ToString();
-                string month = createdDate.Month.ToString();
+                string month = createdDate.Month.ToString("00");
 
                 string fileName;
                 if (fileType.ToLower() == "etax")

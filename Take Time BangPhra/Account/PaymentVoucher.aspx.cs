@@ -384,7 +384,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                 // Extract Year/Month for directory structure
                 string Year = docDate.Year.ToString();
-                string Month = docDate.Month.ToString();
+                string Month = docDate.Month.ToString("00");
 
                 // SECURE: Insert payment record with parameterized query
                 var paymentInsertParams = new Dictionary<string, object>
@@ -677,13 +677,13 @@ namespace Take_Time_BangPhra.Account.Report
                     try
                     {
                         System.IO.Directory.CreateDirectory(path + "\\" + createDate.Year.ToString());
-                        System.IO.Directory.CreateDirectory(path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString());
+                        System.IO.Directory.CreateDirectory(path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString("00"));
                     }
                     catch (Exception ex)
                     {
 
                     }
-                    path = path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString();
+                    path = path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString("00");
                     string FileName = System.IO.Path.GetFileName(FileUpload1.PostedFile.FileName);
                     string FileExtension = FileName.Substring(FileName.LastIndexOf('.') + 1).ToLower();
                     string FileSaveWithPath = "";
@@ -792,7 +792,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                 DateTime createDate = Convert.ToDateTime(TextBox8.Text);
                 string year = createDate.Year.ToString();
-                string month = createDate.Month.ToString();
+                string month = createDate.Month.ToString("00");
                 string searchPattern = fileName.ToString(); // filename ที่ถูก strip แล้ว (เช่น "ใบเสร็จ.pdf")
 
                 // Get payment folder path

@@ -216,7 +216,7 @@ namespace Take_Time_BangPhra.Admin
 
                 // Extract Year/Month for directory structure
                 string Year = docDate.Year.ToString();
-                string Month = docDate.Month.ToString();
+                string Month = docDate.Month.ToString("00");
 
                 if (command == "edit")
                 {
