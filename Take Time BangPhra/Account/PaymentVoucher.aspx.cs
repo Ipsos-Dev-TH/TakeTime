@@ -688,7 +688,7 @@ namespace Take_Time_BangPhra.Account.Report
                     string FileExtension = FileName.Substring(FileName.LastIndexOf('.') + 1).ToLower();
                     string FileSaveWithPath = "";
                     string filename = TextBox7.Text + "."+FileExtension;
-                    FileSaveWithPath = Server.MapPath("\\Documents\\Payment\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString() +"\\"+ filename);
+                    FileSaveWithPath = Server.MapPath("\\Documents\\Payment\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString("00") +"\\"+ filename);
                     FileUpload1.SaveAs(FileSaveWithPath);
                     dtUpload.Rows.Add(filename);
                     Session["dtUpload"] = dtUpload;
@@ -715,7 +715,7 @@ namespace Take_Time_BangPhra.Account.Report
         {
             DateTime createDate = Convert.ToDateTime(TextBox8.Text);
             string path = AppDomain.CurrentDomain.BaseDirectory + "\\Documents\\Payment";
-            path = path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString();
+            path = path + "\\" + createDate.Year.ToString() + "\\" + createDate.Month.ToString("00");
             DataTable dtUpload = (DataTable)Session["dtUpload"];
             File.Delete(path+"\\"+dtUpload.Rows[e.RowIndex][0].ToString());
             dtUpload.Rows[e.RowIndex].Delete();
