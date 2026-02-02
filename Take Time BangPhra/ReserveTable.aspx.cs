@@ -722,7 +722,7 @@ namespace Take_Time_BangPhra
         private string GetFilePath(string basePath, DateTime date, string receiptId, string uid, string suffix)
         {
             string yearPath = Path.Combine(basePath, date.Year.ToString());
-            string monthPath = Path.Combine(yearPath, date.Month.ToString());
+            string monthPath = Path.Combine(yearPath, date.Month.ToString("00"));
 
             // Create directory if it doesn't exist
             if (!Directory.Exists(monthPath))

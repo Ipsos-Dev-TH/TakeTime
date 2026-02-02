@@ -4393,13 +4393,13 @@ namespace Take_Time_BangPhra
                     string uid = dtReceipt.Rows[0]["UID"].ToString();
                     string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
                     string pdfpath = "";
-                    if (File.Exists(path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf"))
+                    if (File.Exists(path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf"))
                     {
-                        pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf";
+                        pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf";
                     }
-                    else 
+                    else
                     {
-                        pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
+                        pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
                     }
 
                        
@@ -4670,7 +4670,7 @@ namespace Take_Time_BangPhra
             try
             {
                 System.IO.Directory.CreateDirectory(path+"\\"+docDate.Year.ToString());
-                System.IO.Directory.CreateDirectory(path + "\\" + docDate.Year.ToString() + "\\" + DateTime.Now.Month.ToString());
+                System.IO.Directory.CreateDirectory(path + "\\" + docDate.Year.ToString() + "\\" + DateTime.Now.Month.ToString("00"));
             }
             catch(Exception ex)
             {
@@ -4868,7 +4868,7 @@ namespace Take_Time_BangPhra
             //GridView1.DataSource = dt;
             //GridView1.DataBind();
             uid = dtReceipt.Rows[0]["UID"].ToString();
-            string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + DocNumber +"_"+uid+ ".pdf";
+            string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ ".pdf";
 
             try
             {
@@ -4926,7 +4926,7 @@ namespace Take_Time_BangPhra
                 try
                 {
                     uid = dtReceipt.Rows[0]["UID"].ToString();
-                    string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + DocNumber +"_"+uid+ ".xml";
+                    string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ ".xml";
                     string xmlString = System.IO.File.ReadAllText(ConfigurationSettings.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
                     xmlString = xmlString.Replace("*invoice_id", DocNumber);
                     xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
@@ -5030,8 +5030,8 @@ namespace Take_Time_BangPhra
 
 
                         PDFA3Invoice pdf = new PDFA3Invoice();
-                        string pdfFilePath = path + "\\" + docDate.Year.ToString()+ "\\" + docDate.Month.ToString() + "\\" + DocNumber +"_"+uid+ ".pdf";
-                        string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + DocNumber + "_"+uid+".xml";
+                        string pdfFilePath = path + "\\" + docDate.Year.ToString()+ "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ ".pdf";
+                        string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber + "_"+uid+".xml";
 
                         string xmlFileName = "ETDA-invoice.xml";
 
@@ -5040,7 +5040,7 @@ namespace Take_Time_BangPhra
                         string documentID = DocNumber;
                         string documentOID = "";
 
-                        string outputPath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + DocNumber +"_"+uid+ "_etax.pdf";
+                        string outputPath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ "_etax.pdf";
 
                         pdf.CreatePDFA3Invoice(pdfFilePath, xmlFilePath, xmlFileName, xmlVersion, documentID, documentOID, outputPath, "Tax Invoice");
 

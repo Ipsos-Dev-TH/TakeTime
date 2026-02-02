@@ -867,7 +867,7 @@ namespace Take_Time_BangPhra.Product
 
                 // Extract Year/Month for directory structure
                 string Year = receiptDate.Year.ToString();
-                string Month = receiptDate.Month.ToString();
+                string Month = receiptDate.Month.ToString("00");
 
                 // 🎁 Apply product category discounts for loyalty members
                 double originalTotal = Convert.ToDouble(TextBox2.Text);
