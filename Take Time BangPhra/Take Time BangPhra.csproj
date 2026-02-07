@@ -479,6 +479,7 @@
     <Content Include="Payment\MakePayment.aspx" />
     <Content Include="Payment\PaymentHistory.aspx" />
     <Content Include="PostponeList.aspx" />
+    <Content Include="ReservationList.aspx" />
     <!--<Content Include="Reservation.aspx" />-->
     <Content Include="Reservation_Confirmed.aspx" />
     <Content Include="ReserveTable.aspx" />
@@ -1118,6 +1119,13 @@
     </Compile>
     <Compile Include="PostponeList.aspx.designer.cs">
       <DependentUpon>PostponeList.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="ReservationList.aspx.cs">
+      <DependentUpon>ReservationList.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="ReservationList.aspx.designer.cs">
+      <DependentUpon>ReservationList.aspx</DependentUpon>
     </Compile>
     <Compile Include="Product\SellReport.aspx.cs">
       <DependentUpon>SellReport.aspx</DependentUpon>

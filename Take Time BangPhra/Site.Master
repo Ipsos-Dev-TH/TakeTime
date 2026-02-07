@@ -528,6 +528,9 @@
                                                 <li><a runat="server" href="~/PostponeList">
                                                     <i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
                                                 </a></li>
+                                                <li><a runat="server" href="~/ReservationList">
+                                                    <i class="fas fa-list-alt"></i> รายการจองทั้งหมด
+                                                </a></li>
                                                 <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
                                                     <i class="fas fa-broom"></i> Housekeeping
                                                 </a></li>
