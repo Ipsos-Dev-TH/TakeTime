@@ -55,6 +55,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                 }
                 Session["dtUpload"] = dtUpload;
+                Session["dtExistingFiles"] = new List<string>(); // Initialize empty list for new vouchers
 
                 DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource2.ConnectionString, SqlDataSource2.SelectCommand);
                 for (int i = 0; i < dtPaidHow.Rows.Count; i++)
@@ -162,14 +163,24 @@ namespace Take_Time_BangPhra.Account.Report
                         if (Directory.Exists(altPath))
                             paymentPath = altPath;
                     }
+
+                    // Track existing files with full names (with prefix) for edit mode
+                    List<string> existingFilesFullName = new List<string>();
+
                     if (Directory.Exists(paymentPath))
                     {
                         string[] dirs = Directory.GetFiles(paymentPath, id + "_" + uid + "*");
                         foreach (string file in dirs)
                         {
-                            if(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id, "").Replace("_" + uid, "").Length > 0)
+                            string fileName = System.IO.Path.GetFileName(file);
+                            // Skip the main PDF file (id_uid.pdf)
+                            if(fileName.Split('.')[0].Replace(id, "").Replace("_" + uid, "").Length > 0)
                             {
-                                dtUpload.Rows.Add(System.IO.Path.GetFileName(file).Split('.')[0].Replace(id+"_", "").Replace( uid+"_", "")+"."+ System.IO.Path.GetFileName(file).Split('.')[1]);
+                                // Store display name (without prefix) for UI
+                                string displayName = fileName.Split('.')[0].Replace(id+"_", "").Replace( uid+"_", "")+"."+ fileName.Split('.')[1];
+                                dtUpload.Rows.Add(displayName);
+                                // Store full file name for tracking existing files
+                                existingFilesFullName.Add(fileName);
                             }
 
                         }
@@ -177,7 +188,8 @@ namespace Take_Time_BangPhra.Account.Report
                     GridView2.DataSource = dtUpload;
                     GridView2.DataBind();
 
-
+                    // Store existing files list to avoid re-renaming them
+                    Session["dtExistingFiles"] = existingFilesFullName;
                     Session["dtUpload"] = dtUpload;
 
                     Session["dtDetail"] = dtPaymentDetail;
@@ -335,6 +347,10 @@ namespace Take_Time_BangPhra.Account.Report
                     getIdParams).Rows[0][0].ToString();
             }
             catch { }
+
+            // Store original UID for edit mode - to preserve file attachment names
+            string originalUid = uid;
+
             if (command == "edit")
             {
                 // SECURE: Delete payment record with parameterized query
@@ -387,6 +403,7 @@ namespace Take_Time_BangPhra.Account.Report
                 string Month = docDate.Month.ToString("00");
 
                 // SECURE: Insert payment record with parameterized query
+                // In edit mode, preserve the original UID to keep file attachments working
                 var paymentInsertParams = new Dictionary<string, object>
                 {
                     { "@ID", docNum },
@@ -400,10 +417,23 @@ namespace Take_Time_BangPhra.Account.Report
                     { "@PaidType", DropDownList3.SelectedItem.Text },
                     { "@CreatedByID", Session["UserID"].ToString() }
                 };
-                code.DatabaseInsertSafe(conn,
-                    "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
-                    "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
-                    paymentInsertParams);
+
+                // If editing, preserve the original UID; otherwise let database generate new one
+                if (command == "edit" && !string.IsNullOrEmpty(originalUid))
+                {
+                    paymentInsertParams.Add("@UID", originalUid);
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[UID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
+                        "VALUES (@ID,@UID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
+                        paymentInsertParams);
+                }
+                else
+                {
+                    code.DatabaseInsertSafe(conn,
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
+                        "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
+                        paymentInsertParams);
+                }
 
                 // SECURE: Insert payment details with parameterized queries
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
@@ -640,12 +670,41 @@ namespace Take_Time_BangPhra.Account.Report
                 {
                     string filepath = path + "\\" + Year + "\\" + Month + "\\";
 
+                    // Get list of existing files (files that were already on disk before editing)
+                    List<string> existingFiles = Session["dtExistingFiles"] as List<string> ?? new List<string>();
+
                     for (int i = 0; i < dtUpload.Rows.Count; i++)
                     {
-                        File.Move(filepath + dtUpload.Rows[i][0].ToString(), filepath + docNum + "_" + uid + "_" + dtUpload.Rows[i][0].ToString());
+                        string displayName = dtUpload.Rows[i][0].ToString();
+                        string targetFileName = docNum + "_" + uid + "_" + displayName;
+
+                        // Check if this is an existing file (already has prefix on disk)
+                        string existingFileFullName = existingFiles.Find(f => f.EndsWith("_" + displayName));
+
+                        if (!string.IsNullOrEmpty(existingFileFullName))
+                        {
+                            // This is an existing file - check if it needs to be renamed (if ID changed)
+                            if (existingFileFullName != targetFileName && File.Exists(filepath + existingFileFullName))
+                            {
+                                // ID changed, need to rename from old prefix to new prefix
+                                File.Move(filepath + existingFileFullName, filepath + targetFileName);
+                            }
+                            // else: file already has correct name, no action needed
+                        }
+                        else
+                        {
+                            // This is a new file - rename from simple name to prefixed name
+                            if (File.Exists(filepath + displayName))
+                            {
+                                File.Move(filepath + displayName, filepath + targetFileName);
+                            }
+                        }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("File rename error: " + ex.Message);
+                }
 
                 // Create asset if checkbox is checked
                 if (chkRecordAsset.Checked)
