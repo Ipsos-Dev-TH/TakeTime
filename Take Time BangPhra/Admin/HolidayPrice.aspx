@@ -71,8 +71,9 @@ box-shadow: 0 0 7px 3px #e5e5e5;}
             <asp:Calendar ID="Calendar1" runat="server" Width="80%" OnDayRender="Calendar1_DayRender" OnSelectionChanged="Calendar1_SelectionChanged"></asp:Calendar>
             <br />
 
-          
-                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" CssClass="mydatagrid" PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows"  >
+
+                    <div class="mobile-table-wrapper">
+                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" CssClass="mydatagrid gridview-table" PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows"  >
                         <Columns>
                             <asp:TemplateField HeaderText="เลือก" HeaderStyle-Width="5%">
                              <ItemTemplate>
@@ -107,6 +108,7 @@ box-shadow: 0 0 7px 3px #e5e5e5;}
 
 <RowStyle CssClass="rows"></RowStyle>
                                 </asp:GridView>
+                    </div>
             <br />
             <asp:Button ID="Button1" runat="server" Text="Submit" Width="166px" Height="48px" OnClick="Button1_Click" />
         </center>
@@ -118,7 +120,8 @@ box-shadow: 0 0 7px 3px #e5e5e5;}
     </p>
     <asp:Panel ID="Panel1" runat="server" Visible="False"><center>
 
-                                          <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView2_RowDeleting" CssClass="mydatagrid" PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows">
+                                          <div class="mobile-table-wrapper">
+                                          <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView2_RowDeleting" CssClass="mydatagrid gridview-table" PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows">
                                               <Columns>
                                                   <asp:BoundField DataField="Accommodation_ID" HeaderText="Accommodation_ID" />
                                                   <asp:BoundField DataField="DateNewPrice" HeaderText="Date" DataFormatString="{0:dd/MMM/yyyy}" />
@@ -130,6 +133,7 @@ box-shadow: 0 0 7px 3px #e5e5e5;}
                                               <PagerStyle CssClass="pager" />
                                               <RowStyle CssClass="rows" />
                                           </asp:GridView>
+                                          </div>
 
                                           </center>
     </asp:Panel>

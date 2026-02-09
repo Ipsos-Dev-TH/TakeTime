@@ -349,7 +349,7 @@
         <asp:HiddenField ID="hdnEditId" runat="server" />
 
         <!-- Data Table -->
-        <div class="data-table">
+        <div class="mobile-table-wrapper data-table">
             <asp:GridView ID="gvOTEntries" runat="server" AutoGenerateColumns="False"
                 CssClass="table" GridLines="None" OnRowCommand="gvOTEntries_RowCommand">
                 <Columns>

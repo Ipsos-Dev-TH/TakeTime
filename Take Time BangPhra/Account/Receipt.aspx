@@ -349,7 +349,8 @@
             <tr style="background-color:whitesmoke;">
                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                  <td style="text-align: right">
-                     <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting">
+                     <div class="mobile-table-wrapper">
+                     <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting" CssClass="gridview-table">
                          <Columns>
                              <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
                              <asp:BoundField DataField="ProductType_ID" HeaderText="ประเภท" />
@@ -361,8 +362,9 @@
                              <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
                          </Columns>
                      </asp:GridView>
+                     </div>
                      </td>
-            
+
             </tr>
 
             <tr>
