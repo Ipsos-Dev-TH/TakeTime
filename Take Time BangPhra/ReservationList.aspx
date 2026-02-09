@@ -770,7 +770,7 @@
 
                         <asp:TemplateField HeaderText="หมายเหตุ">
                             <ItemTemplate>
-                                <asp:Panel ID="pnlRemark" runat="server" CssClass="remark-tooltip" Visible='<%# !string.IsNullOrEmpty(Eval("Remark")?.ToString()) %>'>
+                                <asp:Panel ID="pnlRemark" runat="server" CssClass="remark-tooltip" Visible='<%# !string.IsNullOrEmpty(Convert.ToString(Eval("Remark"))) %>'>
                                     <i class="fas fa-comment-alt" style="color: #888;"></i>
                                     <span class="tooltip-text"><%# Eval("Remark") %></span>
                                 </asp:Panel>
