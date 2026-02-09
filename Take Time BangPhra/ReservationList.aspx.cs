@@ -235,9 +235,10 @@ namespace Take_Time_BangPhra
                     {
                         if (reader.Read())
                         {
-                            totalRecords = reader.GetInt32(0);
-                            totalAmount = reader.GetDecimal(1);
-                            totalDeposit = reader.GetDecimal(2);
+                            // Use Convert to handle different SQL numeric types safely
+                            totalRecords = Convert.ToInt32(reader[0]);
+                            totalAmount = reader[1] != DBNull.Value ? Convert.ToDecimal(reader[1]) : 0;
+                            totalDeposit = reader[2] != DBNull.Value ? Convert.ToDecimal(reader[2]) : 0;
                         }
                     }
                 }
