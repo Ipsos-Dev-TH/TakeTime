@@ -220,10 +220,10 @@ namespace Take_Time_BangPhra
                 // Get ORDER BY clause
                 string orderBy = GetOrderByClause();
 
-                // Count total records and calculate totals
+                // Count total records and calculate totals (use LEFT JOIN to include reservations without matching customer)
                 string countQuery = $@"SELECT COUNT(*), ISNULL(SUM(R.TotalPrice), 0), ISNULL(SUM(ISNULL(R.Deposit, 0)), 0)
                                       FROM Reservation R
-                                      INNER JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                                       {whereClause}";
 
                 using (SqlCommand cmdCount = new SqlCommand(countQuery, conn))
@@ -244,11 +244,13 @@ namespace Take_Time_BangPhra
                 int offset = (page - 1) * PageSize;
 
                 string dataQuery = $@"
-                    SELECT R.ID, R.Created_Date, R.Customer_MobilePhone, C.Name, C.NickName,
+                    SELECT R.ID, R.Created_Date, R.Customer_MobilePhone,
+                           ISNULL(C.Name, R.Customer_MobilePhone) as Name,
+                           ISNULL(C.NickName, '') as NickName,
                            R.CheckinDate, R.CheckoutDate, R.StayDays, R.TotalPrice,
                            ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark
                     FROM Reservation R
-                    INNER JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                    LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     {whereClause}
                     ORDER BY {orderBy}
                     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
@@ -517,9 +519,10 @@ namespace Take_Time_BangPhra
                 string search = txtSearch.Text.Trim();
                 if (!string.IsNullOrEmpty(search))
                 {
-                    whereClause.Append(@" AND (C.Name LIKE @Search
-                                          OR C.NickName LIKE @Search
-                                          OR R.Customer_MobilePhone LIKE @Search)");
+                    whereClause.Append(@" AND (ISNULL(C.Name, '') LIKE @Search
+                                          OR ISNULL(C.NickName, '') LIKE @Search
+                                          OR R.Customer_MobilePhone LIKE @Search
+                                          OR CAST(R.ID AS NVARCHAR) LIKE @Search)");
                     parameters.Add(new SqlParameter("@Search", "%" + search + "%"));
                 }
 
@@ -550,11 +553,12 @@ namespace Take_Time_BangPhra
                 }
 
                 string query = $@"
-                    SELECT R.ID, R.Created_Date, R.Customer_MobilePhone, C.Name,
+                    SELECT R.ID, R.Created_Date, R.Customer_MobilePhone,
+                           ISNULL(C.Name, R.Customer_MobilePhone) as Name,
                            R.CheckinDate, R.CheckoutDate, R.StayDays, R.TotalPrice,
                            ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark
                     FROM Reservation R
-                    INNER JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                    LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     {whereClause}
                     ORDER BY R.Created_Date DESC";
 
