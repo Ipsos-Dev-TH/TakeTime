@@ -213,8 +213,9 @@ namespace Take_Time_BangPhra.Voucher
                     {
                         if (reader.Read())
                         {
-                            totalRecords = reader.GetInt32(0);
-                            totalSales = reader.GetDecimal(1);
+                            // Use Convert to handle different SQL numeric types safely
+                            totalRecords = Convert.ToInt32(reader[0]);
+                            totalSales = reader[1] != DBNull.Value ? Convert.ToDecimal(reader[1]) : 0;
                         }
                     }
                 }
