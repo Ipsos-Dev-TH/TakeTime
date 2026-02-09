@@ -241,7 +241,15 @@ namespace Take_Time_BangPhra.Account.Report
                     DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct([Name]) as Material_Name FROM [Taketime].[dbo].[Vendor] Where [Status] = 'True'");
                     for (int i = 0; i < dt.Rows.Count; i++)
                     {
-                        yourHTMLstring += "\"" + dt.Rows[i][0].ToString().Replace(",", "") + "\"";
+                        // Properly escape special characters for JavaScript string
+                        string vendorName = dt.Rows[i][0].ToString()
+                            .Replace("\\", "\\\\")  // Escape backslashes first
+                            .Replace("\"", "\\\"")  // Escape double quotes
+                            .Replace("'", "\\'")    // Escape single quotes
+                            .Replace("\r", "")      // Remove carriage return
+                            .Replace("\n", "")      // Remove newline
+                            .Replace(",", "");      // Remove commas
+                        yourHTMLstring += "\"" + vendorName + "\"";
                         if (i < dt.Rows.Count - 1)
                         {
                             yourHTMLstring += ",";
