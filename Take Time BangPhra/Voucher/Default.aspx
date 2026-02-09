@@ -4,6 +4,7 @@
      <link rel="stylesheet" href="/Content/jquery-ui.css">
   <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
      <style>
         .header-center { text-align: center; }
         .header-right { text-align: right; }
@@ -416,9 +417,15 @@
         }
     </style>
 
-    
+
     <div class="voucher-container">
-        <div class="voucher-title">ขาย Voucher</div>
+        <!-- Header with navigation -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <div class="voucher-title" style="margin-bottom: 0;">ขาย Voucher</div>
+            <a href="VoucherList.aspx" style="background: linear-gradient(135deg, #2196F3, #1976D2); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s;">
+                <i class="fas fa-list-alt"></i> รายการ Voucher ทั้งหมด
+            </a>
+        </div>
 
         <!-- ส่วนที่ 1: ข้อมูลลูกค้า -->
         <div class="form-section">
