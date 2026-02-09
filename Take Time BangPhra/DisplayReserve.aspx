@@ -244,8 +244,8 @@
             </div>
         </div>
 
-        <div class="table-responsive">
-            <asp:GridView ID="GridView1" runat="server" Width="100%" CssClass="reservation-grid" 
+        <div class="mobile-table-wrapper table-responsive">
+            <asp:GridView ID="GridView1" runat="server" Width="100%" CssClass="reservation-grid gridview-table" 
                 PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows" 
                 AlternatingRowStyle-Wrap="true" EditRowStyle-Wrap="true" RowStyle-Wrap="true"
                 AutoGenerateColumns="false" OnRowDataBound="GridView1_RowDataBound">

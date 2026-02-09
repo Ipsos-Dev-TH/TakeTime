@@ -535,7 +535,8 @@
             <div class="form-row">
                 <div class="form-label"></div>
                 <div class="form-input">
-                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting" CssClass="styled-grid">
+                    <div class="mobile-table-wrapper">
+                    <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting" CssClass="styled-grid gridview-table">
                         <Columns>
                             <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
                             <asp:BoundField DataField="RatePlan_Group" HeaderText="ประเภทเรทที่พัก" />
@@ -543,6 +544,7 @@
                             <asp:CommandField ShowDeleteButton="True" ButtonType="Button" DeleteText="ลบ" />
                         </Columns>
                     </asp:GridView>
+                    </div>
                 </div>
             </div>
         </div>

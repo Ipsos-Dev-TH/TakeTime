@@ -96,11 +96,11 @@
                     </div>
 
                     <!-- Cart Items -->
-                    <div style="margin-top: 25px; overflow: visible;">
+                    <div style="margin-top: 25px;">
                         <h4 style="margin-bottom: 15px; color: #e65100; display: flex; align-items: center; gap: 8px;">
                             🛒 รายการสินค้า
                         </h4>
-                        <div class="table-responsive" style="overflow-x: scroll !important; -webkit-overflow-scrolling: touch;">
+                        <div class="mobile-table-wrapper table-responsive">
                             <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False"
                                 CssClass="product-table" GridLines="None"
                                 OnRowCommand="GridView1_RowCommand"
