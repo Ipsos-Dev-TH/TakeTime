@@ -512,15 +512,18 @@ namespace Take_Time_BangPhra.Voucher
                     litRatePlan.Text = GetRatePlanForVoucher(voucherNumber);
                 }
 
-                // Load used reservation
+                // Load used reservation with check-in date
                 Literal litUsedReservation = (Literal)e.Row.FindControl("litUsedReservation");
                 if (litUsedReservation != null)
                 {
                     string voucherNumber = drv["Voucher_Number"]?.ToString();
-                    string usedRes = GetUsedReservation(voucherNumber);
-                    if (!string.IsNullOrEmpty(usedRes))
+                    var reservationInfo = GetUsedReservationWithCheckin(voucherNumber);
+                    if (reservationInfo != null)
                     {
-                        litUsedReservation.Text = $"<a href='../Reserve.aspx?id={usedRes}' target='_blank'>#{usedRes}</a>";
+                        string checkinText = reservationInfo.Item2.HasValue
+                            ? $"<br/><small style='color:#666;'>เข้าพัก: {reservationInfo.Item2.Value:dd/MM/yyyy}</small>"
+                            : "";
+                        litUsedReservation.Text = $"<a href='../Reserve.aspx?id={reservationInfo.Item1}' target='_blank'>#{reservationInfo.Item1}</a>{checkinText}";
                     }
                     else
                     {
@@ -565,7 +568,7 @@ namespace Take_Time_BangPhra.Voucher
             }
         }
 
-        private string GetUsedReservation(string voucherNumber)
+        private Tuple<string, DateTime?> GetUsedReservationWithCheckin(string voucherNumber)
         {
             if (string.IsNullOrEmpty(voucherNumber)) return null;
 
@@ -574,20 +577,31 @@ namespace Take_Time_BangPhra.Voucher
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    string query = @"SELECT TOP 1 ID FROM Reservation WHERE Voucher_Number = @VoucherNumber";
+                    // Query for reservation with check-in date
+                    string query = @"SELECT TOP 1 ID, CheckinDate FROM Reservation WHERE Voucher_Number = @VoucherNumber";
 
                     using (SqlCommand cmd = new SqlCommand(query, conn))
                     {
                         cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-                        object result = cmd.ExecuteScalar();
-                        return result?.ToString();
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                string resId = reader["ID"]?.ToString();
+                                DateTime? checkinDate = reader["CheckinDate"] != DBNull.Value
+                                    ? (DateTime?)Convert.ToDateTime(reader["CheckinDate"])
+                                    : null;
+                                return Tuple.Create(resId, checkinDate);
+                            }
+                        }
                     }
                 }
             }
             catch
             {
-                return null;
+                // Ignore errors
             }
+            return null;
         }
 
         #endregion
