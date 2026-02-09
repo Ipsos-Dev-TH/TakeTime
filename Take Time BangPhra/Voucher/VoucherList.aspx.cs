@@ -26,9 +26,10 @@ namespace Take_Time_BangPhra.Voucher
                     return;
                 }
 
-                // Set default date range (last 90 days)
-                txtDateFrom.Text = DateTime.Now.AddDays(-90).ToString("yyyy-MM-dd");
-                txtDateTo.Text = DateTime.Now.ToString("yyyy-MM-dd");
+                // Don't set default date filter - show all vouchers to match stats
+                // User can filter by date if needed
+                txtDateFrom.Text = "";
+                txtDateTo.Text = "";
 
                 // Initialize
                 ViewState["CurrentPage"] = 1;
@@ -185,15 +186,15 @@ namespace Take_Time_BangPhra.Voucher
                     }
                 }
 
-                // Date range filter (parse as DateTime for proper SQL comparison)
+                // Date range filter (use ParseExact for reliable parsing)
                 DateTime dateFrom, dateTo;
-                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParseExact(txtDateFrom.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateFrom))
                 {
                     whereClause.Append(" AND V.Created_Date >= @DateFrom");
                     parameters.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
 
-                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParseExact(txtDateTo.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateTo))
                 {
                     whereClause.Append(" AND V.Created_Date <= @DateTo");
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
@@ -238,11 +239,11 @@ namespace Take_Time_BangPhra.Voucher
                 {
                     dataParams.Add(new SqlParameter("@Search", "%" + search + "%"));
                 }
-                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParseExact(txtDateFrom.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateFrom))
                 {
                     dataParams.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
-                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParseExact(txtDateTo.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateTo))
                 {
                     dataParams.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
@@ -278,8 +279,8 @@ namespace Take_Time_BangPhra.Voucher
         {
             txtSearch.Text = "";
             ddlStatus.SelectedIndex = 0;
-            txtDateFrom.Text = DateTime.Now.AddDays(-90).ToString("yyyy-MM-dd");
-            txtDateTo.Text = DateTime.Now.ToString("yyyy-MM-dd");
+            txtDateFrom.Text = "";
+            txtDateTo.Text = "";
 
             ViewState["CurrentPage"] = 1;
             ViewState["FilterStatus"] = "";
@@ -428,13 +429,13 @@ namespace Take_Time_BangPhra.Voucher
                 }
 
                 DateTime dateFrom, dateTo;
-                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParseExact(txtDateFrom.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateFrom))
                 {
                     whereClause.Append(" AND V.Created_Date >= @DateFrom");
                     parameters.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
 
-                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParseExact(txtDateTo.Text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dateTo))
                 {
                     whereClause.Append(" AND V.Created_Date <= @DateTo");
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
