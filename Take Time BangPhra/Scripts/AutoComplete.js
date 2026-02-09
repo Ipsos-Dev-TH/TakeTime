@@ -17,15 +17,8 @@
             if (arr[i].toUpperCase().includes(val.toUpperCase())) {
                 b = document.createElement("DIV");
 
-                // Find the position of the match
-                var matchPos = arr[i].toUpperCase().indexOf(val.toUpperCase());
-                var matchEnd = matchPos + val.length;
-
-                // Highlight the matched portion
-                b.innerHTML = arr[i].substr(0, matchPos);
-                b.innerHTML += "<strong>" + arr[i].substr(matchPos, val.length) + "</strong>";
-                b.innerHTML += arr[i].substr(matchEnd);
-
+                // Show full text without highlighting/splitting (user requested no separation)
+                b.innerHTML = arr[i];
                 b.innerHTML += "<input type='hidden' value='" + arr[i] + "'>";
 
                 b.addEventListener("mousedown", function (e) {

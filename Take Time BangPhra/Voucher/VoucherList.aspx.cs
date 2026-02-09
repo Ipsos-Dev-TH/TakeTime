@@ -185,17 +185,18 @@ namespace Take_Time_BangPhra.Voucher
                     }
                 }
 
-                // Date range filter
-                if (!string.IsNullOrEmpty(txtDateFrom.Text))
+                // Date range filter (parse as DateTime for proper SQL comparison)
+                DateTime dateFrom, dateTo;
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
                 {
                     whereClause.Append(" AND V.Created_Date >= @DateFrom");
-                    parameters.Add(new SqlParameter("@DateFrom", txtDateFrom.Text + " 00:00:00"));
+                    parameters.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
 
-                if (!string.IsNullOrEmpty(txtDateTo.Text))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
                 {
                     whereClause.Append(" AND V.Created_Date <= @DateTo");
-                    parameters.Add(new SqlParameter("@DateTo", txtDateTo.Text + " 23:59:59"));
+                    parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
                 // Count total records and calculate totals
@@ -237,13 +238,13 @@ namespace Take_Time_BangPhra.Voucher
                 {
                     dataParams.Add(new SqlParameter("@Search", "%" + search + "%"));
                 }
-                if (!string.IsNullOrEmpty(txtDateFrom.Text))
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
                 {
-                    dataParams.Add(new SqlParameter("@DateFrom", txtDateFrom.Text + " 00:00:00"));
+                    dataParams.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
-                if (!string.IsNullOrEmpty(txtDateTo.Text))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
                 {
-                    dataParams.Add(new SqlParameter("@DateTo", txtDateTo.Text + " 23:59:59"));
+                    dataParams.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
                 dataParams.Add(new SqlParameter("@Offset", offset));
                 dataParams.Add(new SqlParameter("@PageSize", PageSize));
@@ -426,16 +427,17 @@ namespace Take_Time_BangPhra.Voucher
                     }
                 }
 
-                if (!string.IsNullOrEmpty(txtDateFrom.Text))
+                DateTime dateFrom, dateTo;
+                if (!string.IsNullOrEmpty(txtDateFrom.Text) && DateTime.TryParse(txtDateFrom.Text, out dateFrom))
                 {
                     whereClause.Append(" AND V.Created_Date >= @DateFrom");
-                    parameters.Add(new SqlParameter("@DateFrom", txtDateFrom.Text + " 00:00:00"));
+                    parameters.Add(new SqlParameter("@DateFrom", SqlDbType.DateTime) { Value = dateFrom });
                 }
 
-                if (!string.IsNullOrEmpty(txtDateTo.Text))
+                if (!string.IsNullOrEmpty(txtDateTo.Text) && DateTime.TryParse(txtDateTo.Text, out dateTo))
                 {
                     whereClause.Append(" AND V.Created_Date <= @DateTo");
-                    parameters.Add(new SqlParameter("@DateTo", txtDateTo.Text + " 23:59:59"));
+                    parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
                 string query = $@"
