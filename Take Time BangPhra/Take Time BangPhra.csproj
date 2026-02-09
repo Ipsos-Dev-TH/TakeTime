@@ -554,6 +554,7 @@
     </Content>
     <Content Include="ViewSwitcher.ascx" />
     <Content Include="Voucher\Default.aspx" />
+    <Content Include="Voucher\VoucherList.aspx" />
     <Content Include="Voucher\Voucher_Confirmed.aspx" />
     <Content Include="Web.config" />
     <Content Include="Bundle.config" />
@@ -1234,6 +1235,13 @@
     </Compile>
     <Compile Include="Voucher\Default.aspx.designer.cs">
       <DependentUpon>Default.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Voucher\VoucherList.aspx.cs">
+      <DependentUpon>VoucherList.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Voucher\VoucherList.aspx.designer.cs">
+      <DependentUpon>VoucherList.aspx</DependentUpon>
     </Compile>
     <Compile Include="Voucher\Voucher_Confirmed.aspx.cs">
       <DependentUpon>Voucher_Confirmed.aspx</DependentUpon>

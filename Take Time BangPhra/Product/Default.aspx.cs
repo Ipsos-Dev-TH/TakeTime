@@ -89,7 +89,15 @@ namespace Take_Time_BangPhra.Product
                     DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct(Product_Name) as Material_Name FROM [Taketime].[dbo].[Product] Where [Status] = 'True'");
                     for (int i = 0; i < dt.Rows.Count; i++)
                     {
-                        yourHTMLstring += "\"" + dt.Rows[i][0].ToString().Replace(",", "") + "\"";
+                        // Properly escape special characters for JavaScript string
+                        string productName = dt.Rows[i][0].ToString()
+                            .Replace("\\", "\\\\")  // Escape backslashes first
+                            .Replace("\"", "\\\"")  // Escape double quotes
+                            .Replace("'", "\\'")    // Escape single quotes
+                            .Replace("\r", "")      // Remove carriage return
+                            .Replace("\n", "")      // Remove newline
+                            .Replace(",", "");      // Remove commas
+                        yourHTMLstring += "\"" + productName + "\"";
                         if (i < dt.Rows.Count - 1)
                         {
                             yourHTMLstring += ",";
