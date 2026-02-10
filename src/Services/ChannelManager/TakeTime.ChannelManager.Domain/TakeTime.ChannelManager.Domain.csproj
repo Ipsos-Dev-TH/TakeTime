@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.ChannelManager.Domain</RootNamespace>
+    <AssemblyName>TakeTime.ChannelManager.Domain</AssemblyName>
+    <Description>Domain layer for the TakeTime Channel Manager microservice.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Core\TakeTime.Core\TakeTime.Core.csproj" />
+  </ItemGroup>
+
+</Project>

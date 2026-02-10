@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.Accounting.Infrastructure</RootNamespace>
+    <AssemblyName>TakeTime.Accounting.Infrastructure</AssemblyName>
+    <Description>Infrastructure layer for the TakeTime Accounting microservice.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TakeTime.Accounting.Application\TakeTime.Accounting.Application.csproj" />
+    <ProjectReference Include="..\TakeTime.Accounting.Domain\TakeTime.Accounting.Domain.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Core\TakeTime.Core\TakeTime.Core.csproj" />
+    <ProjectReference Include="..\..\..\..\src\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+</Project>

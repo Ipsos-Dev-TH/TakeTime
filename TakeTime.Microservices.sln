@@ -1,0 +1,257 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+
+# ==========================================
+# Core Libraries
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Core", "src\Core\TakeTime.Core\TakeTime.Core.csproj", "{A1B2C3D4-0001-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.MultiTenancy", "src\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj", "{A1B2C3D4-0002-0002-0002-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Identity", "src\Identity\TakeTime.Identity\TakeTime.Identity.csproj", "{A1B2C3D4-0003-0003-0003-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Infrastructure", "src\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj", "{A1B2C3D4-0004-0004-0004-000000000004}"
+EndProject
+
+# ==========================================
+# Reservation Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Reservation.Domain", "src\Services\Reservation\TakeTime.Reservation.Domain\TakeTime.Reservation.Domain.csproj", "{B1B2C3D4-0001-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Reservation.Application", "src\Services\Reservation\TakeTime.Reservation.Application\TakeTime.Reservation.Application.csproj", "{B1B2C3D4-0001-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Reservation.Infrastructure", "src\Services\Reservation\TakeTime.Reservation.Infrastructure\TakeTime.Reservation.Infrastructure.csproj", "{B1B2C3D4-0001-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Reservation.API", "src\Services\Reservation\TakeTime.Reservation.API\TakeTime.Reservation.API.csproj", "{B1B2C3D4-0001-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Payment Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Payment.Domain", "src\Services\Payment\TakeTime.Payment.Domain\TakeTime.Payment.Domain.csproj", "{B1B2C3D4-0002-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Payment.Application", "src\Services\Payment\TakeTime.Payment.Application\TakeTime.Payment.Application.csproj", "{B1B2C3D4-0002-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Payment.Infrastructure", "src\Services\Payment\TakeTime.Payment.Infrastructure\TakeTime.Payment.Infrastructure.csproj", "{B1B2C3D4-0002-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Payment.API", "src\Services\Payment\TakeTime.Payment.API\TakeTime.Payment.API.csproj", "{B1B2C3D4-0002-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Inventory Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Inventory.Domain", "src\Services\Inventory\TakeTime.Inventory.Domain\TakeTime.Inventory.Domain.csproj", "{B1B2C3D4-0003-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Inventory.Application", "src\Services\Inventory\TakeTime.Inventory.Application\TakeTime.Inventory.Application.csproj", "{B1B2C3D4-0003-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Inventory.Infrastructure", "src\Services\Inventory\TakeTime.Inventory.Infrastructure\TakeTime.Inventory.Infrastructure.csproj", "{B1B2C3D4-0003-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Inventory.API", "src\Services\Inventory\TakeTime.Inventory.API\TakeTime.Inventory.API.csproj", "{B1B2C3D4-0003-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Human Resources Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.HumanResources.Domain", "src\Services\HumanResources\TakeTime.HumanResources.Domain\TakeTime.HumanResources.Domain.csproj", "{B1B2C3D4-0004-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.HumanResources.Application", "src\Services\HumanResources\TakeTime.HumanResources.Application\TakeTime.HumanResources.Application.csproj", "{B1B2C3D4-0004-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.HumanResources.Infrastructure", "src\Services\HumanResources\TakeTime.HumanResources.Infrastructure\TakeTime.HumanResources.Infrastructure.csproj", "{B1B2C3D4-0004-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.HumanResources.API", "src\Services\HumanResources\TakeTime.HumanResources.API\TakeTime.HumanResources.API.csproj", "{B1B2C3D4-0004-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# CRM Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.CRM.Domain", "src\Services\CRM\TakeTime.CRM.Domain\TakeTime.CRM.Domain.csproj", "{B1B2C3D4-0005-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.CRM.Application", "src\Services\CRM\TakeTime.CRM.Application\TakeTime.CRM.Application.csproj", "{B1B2C3D4-0005-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.CRM.Infrastructure", "src\Services\CRM\TakeTime.CRM.Infrastructure\TakeTime.CRM.Infrastructure.csproj", "{B1B2C3D4-0005-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.CRM.API", "src\Services\CRM\TakeTime.CRM.API\TakeTime.CRM.API.csproj", "{B1B2C3D4-0005-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Channel Manager Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.ChannelManager.Domain", "src\Services\ChannelManager\TakeTime.ChannelManager.Domain\TakeTime.ChannelManager.Domain.csproj", "{B1B2C3D4-0006-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.ChannelManager.Application", "src\Services\ChannelManager\TakeTime.ChannelManager.Application\TakeTime.ChannelManager.Application.csproj", "{B1B2C3D4-0006-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.ChannelManager.Infrastructure", "src\Services\ChannelManager\TakeTime.ChannelManager.Infrastructure\TakeTime.ChannelManager.Infrastructure.csproj", "{B1B2C3D4-0006-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.ChannelManager.API", "src\Services\ChannelManager\TakeTime.ChannelManager.API\TakeTime.ChannelManager.API.csproj", "{B1B2C3D4-0006-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Guest Experience Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.GuestExperience.Domain", "src\Services\GuestExperience\TakeTime.GuestExperience.Domain\TakeTime.GuestExperience.Domain.csproj", "{B1B2C3D4-0007-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.GuestExperience.Application", "src\Services\GuestExperience\TakeTime.GuestExperience.Application\TakeTime.GuestExperience.Application.csproj", "{B1B2C3D4-0007-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.GuestExperience.Infrastructure", "src\Services\GuestExperience\TakeTime.GuestExperience.Infrastructure\TakeTime.GuestExperience.Infrastructure.csproj", "{B1B2C3D4-0007-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.GuestExperience.API", "src\Services\GuestExperience\TakeTime.GuestExperience.API\TakeTime.GuestExperience.API.csproj", "{B1B2C3D4-0007-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Accounting Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Accounting.Domain", "src\Services\Accounting\TakeTime.Accounting.Domain\TakeTime.Accounting.Domain.csproj", "{B1B2C3D4-0008-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Accounting.Application", "src\Services\Accounting\TakeTime.Accounting.Application\TakeTime.Accounting.Application.csproj", "{B1B2C3D4-0008-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Accounting.Infrastructure", "src\Services\Accounting\TakeTime.Accounting.Infrastructure\TakeTime.Accounting.Infrastructure.csproj", "{B1B2C3D4-0008-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Accounting.API", "src\Services\Accounting\TakeTime.Accounting.API\TakeTime.Accounting.API.csproj", "{B1B2C3D4-0008-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Notification Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Notification.Domain", "src\Services\Notification\TakeTime.Notification.Domain\TakeTime.Notification.Domain.csproj", "{B1B2C3D4-0009-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Notification.Application", "src\Services\Notification\TakeTime.Notification.Application\TakeTime.Notification.Application.csproj", "{B1B2C3D4-0009-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Notification.Infrastructure", "src\Services\Notification\TakeTime.Notification.Infrastructure\TakeTime.Notification.Infrastructure.csproj", "{B1B2C3D4-0009-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Notification.API", "src\Services\Notification\TakeTime.Notification.API\TakeTime.Notification.API.csproj", "{B1B2C3D4-0009-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Affiliate Service
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Affiliate.Domain", "src\Services\Affiliate\TakeTime.Affiliate.Domain\TakeTime.Affiliate.Domain.csproj", "{B1B2C3D4-0010-0001-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Affiliate.Application", "src\Services\Affiliate\TakeTime.Affiliate.Application\TakeTime.Affiliate.Application.csproj", "{B1B2C3D4-0010-0002-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Affiliate.Infrastructure", "src\Services\Affiliate\TakeTime.Affiliate.Infrastructure\TakeTime.Affiliate.Infrastructure.csproj", "{B1B2C3D4-0010-0003-0001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Affiliate.API", "src\Services\Affiliate\TakeTime.Affiliate.API\TakeTime.Affiliate.API.csproj", "{B1B2C3D4-0010-0004-0001-000000000001}"
+EndProject
+
+# ==========================================
+# API Gateway
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.ApiGateway", "src\Gateway\TakeTime.ApiGateway\TakeTime.ApiGateway.csproj", "{C1B2C3D4-0001-0001-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Migrator
+# ==========================================
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TakeTime.Migrator", "src\Migrator\TakeTime.Migrator\TakeTime.Migrator.csproj", "{D1B2C3D4-0001-0001-0001-000000000001}"
+EndProject
+
+# ==========================================
+# Solution Folders
+# ==========================================
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{E0000001-0001-0001-0001-000000000001}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Services", "Services", "{E0000002-0002-0002-0002-000000000002}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Gateway", "Gateway", "{E0000003-0003-0003-0003-000000000003}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Reservation", "Reservation", "{F0000001-0001-0001-0001-000000000001}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Payment", "Payment", "{F0000002-0002-0002-0002-000000000002}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Inventory", "Inventory", "{F0000003-0003-0003-0003-000000000003}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "HumanResources", "HumanResources", "{F0000004-0004-0004-0004-000000000004}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "CRM", "CRM", "{F0000005-0005-0005-0005-000000000005}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ChannelManager", "ChannelManager", "{F0000006-0006-0006-0006-000000000006}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GuestExperience", "GuestExperience", "{F0000007-0007-0007-0007-000000000007}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Accounting", "Accounting", "{F0000008-0008-0008-0008-000000000008}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Notification", "Notification", "{F0000009-0009-0009-0009-000000000009}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Affiliate", "Affiliate", "{F0000010-0010-0010-0010-000000000010}"
+EndProject
+
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A1B2C3D4-0001-0001-0001-000000000001} = {E0000001-0001-0001-0001-000000000001}
+		{A1B2C3D4-0002-0002-0002-000000000002} = {E0000001-0001-0001-0001-000000000001}
+		{A1B2C3D4-0003-0003-0003-000000000003} = {E0000001-0001-0001-0001-000000000001}
+		{A1B2C3D4-0004-0004-0004-000000000004} = {E0000001-0001-0001-0001-000000000001}
+		{F0000001-0001-0001-0001-000000000001} = {E0000002-0002-0002-0002-000000000002}
+		{F0000002-0002-0002-0002-000000000002} = {E0000002-0002-0002-0002-000000000002}
+		{F0000003-0003-0003-0003-000000000003} = {E0000002-0002-0002-0002-000000000002}
+		{F0000004-0004-0004-0004-000000000004} = {E0000002-0002-0002-0002-000000000002}
+		{F0000005-0005-0005-0005-000000000005} = {E0000002-0002-0002-0002-000000000002}
+		{F0000006-0006-0006-0006-000000000006} = {E0000002-0002-0002-0002-000000000002}
+		{F0000007-0007-0007-0007-000000000007} = {E0000002-0002-0002-0002-000000000002}
+		{F0000008-0008-0008-0008-000000000008} = {E0000002-0002-0002-0002-000000000002}
+		{F0000009-0009-0009-0009-000000000009} = {E0000002-0002-0002-0002-000000000002}
+		{F0000010-0010-0010-0010-000000000010} = {E0000002-0002-0002-0002-000000000002}
+		{B1B2C3D4-0001-0001-0001-000000000001} = {F0000001-0001-0001-0001-000000000001}
+		{B1B2C3D4-0001-0002-0001-000000000001} = {F0000001-0001-0001-0001-000000000001}
+		{B1B2C3D4-0001-0003-0001-000000000001} = {F0000001-0001-0001-0001-000000000001}
+		{B1B2C3D4-0001-0004-0001-000000000001} = {F0000001-0001-0001-0001-000000000001}
+		{B1B2C3D4-0002-0001-0001-000000000001} = {F0000002-0002-0002-0002-000000000002}
+		{B1B2C3D4-0002-0002-0001-000000000001} = {F0000002-0002-0002-0002-000000000002}
+		{B1B2C3D4-0002-0003-0001-000000000001} = {F0000002-0002-0002-0002-000000000002}
+		{B1B2C3D4-0002-0004-0001-000000000001} = {F0000002-0002-0002-0002-000000000002}
+		{B1B2C3D4-0003-0001-0001-000000000001} = {F0000003-0003-0003-0003-000000000003}
+		{B1B2C3D4-0003-0002-0001-000000000001} = {F0000003-0003-0003-0003-000000000003}
+		{B1B2C3D4-0003-0003-0001-000000000001} = {F0000003-0003-0003-0003-000000000003}
+		{B1B2C3D4-0003-0004-0001-000000000001} = {F0000003-0003-0003-0003-000000000003}
+		{B1B2C3D4-0004-0001-0001-000000000001} = {F0000004-0004-0004-0004-000000000004}
+		{B1B2C3D4-0004-0002-0001-000000000001} = {F0000004-0004-0004-0004-000000000004}
+		{B1B2C3D4-0004-0003-0001-000000000001} = {F0000004-0004-0004-0004-000000000004}
+		{B1B2C3D4-0004-0004-0001-000000000001} = {F0000004-0004-0004-0004-000000000004}
+		{B1B2C3D4-0005-0001-0001-000000000001} = {F0000005-0005-0005-0005-000000000005}
+		{B1B2C3D4-0005-0002-0001-000000000001} = {F0000005-0005-0005-0005-000000000005}
+		{B1B2C3D4-0005-0003-0001-000000000001} = {F0000005-0005-0005-0005-000000000005}
+		{B1B2C3D4-0005-0004-0001-000000000001} = {F0000005-0005-0005-0005-000000000005}
+		{B1B2C3D4-0006-0001-0001-000000000001} = {F0000006-0006-0006-0006-000000000006}
+		{B1B2C3D4-0006-0002-0001-000000000001} = {F0000006-0006-0006-0006-000000000006}
+		{B1B2C3D4-0006-0003-0001-000000000001} = {F0000006-0006-0006-0006-000000000006}
+		{B1B2C3D4-0006-0004-0001-000000000001} = {F0000006-0006-0006-0006-000000000006}
+		{B1B2C3D4-0007-0001-0001-000000000001} = {F0000007-0007-0007-0007-000000000007}
+		{B1B2C3D4-0007-0002-0001-000000000001} = {F0000007-0007-0007-0007-000000000007}
+		{B1B2C3D4-0007-0003-0001-000000000001} = {F0000007-0007-0007-0007-000000000007}
+		{B1B2C3D4-0007-0004-0001-000000000001} = {F0000007-0007-0007-0007-000000000007}
+		{B1B2C3D4-0008-0001-0001-000000000001} = {F0000008-0008-0008-0008-000000000008}
+		{B1B2C3D4-0008-0002-0001-000000000001} = {F0000008-0008-0008-0008-000000000008}
+		{B1B2C3D4-0008-0003-0001-000000000001} = {F0000008-0008-0008-0008-000000000008}
+		{B1B2C3D4-0008-0004-0001-000000000001} = {F0000008-0008-0008-0008-000000000008}
+		{B1B2C3D4-0009-0001-0001-000000000001} = {F0000009-0009-0009-0009-000000000009}
+		{B1B2C3D4-0009-0002-0001-000000000001} = {F0000009-0009-0009-0009-000000000009}
+		{B1B2C3D4-0009-0003-0001-000000000001} = {F0000009-0009-0009-0009-000000000009}
+		{B1B2C3D4-0009-0004-0001-000000000001} = {F0000009-0009-0009-0009-000000000009}
+		{B1B2C3D4-0010-0001-0001-000000000001} = {F0000010-0010-0010-0010-000000000010}
+		{B1B2C3D4-0010-0002-0001-000000000001} = {F0000010-0010-0010-0010-000000000010}
+		{B1B2C3D4-0010-0003-0001-000000000001} = {F0000010-0010-0010-0010-000000000010}
+		{B1B2C3D4-0010-0004-0001-000000000001} = {F0000010-0010-0010-0010-000000000010}
+		{C1B2C3D4-0001-0001-0001-000000000001} = {E0000003-0003-0003-0003-000000000003}
+	EndGlobalSection
+EndGlobal

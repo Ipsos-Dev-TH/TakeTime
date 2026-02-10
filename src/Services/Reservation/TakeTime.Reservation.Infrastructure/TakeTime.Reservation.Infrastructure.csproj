@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.Reservation.Infrastructure</RootNamespace>
+    <AssemblyName>TakeTime.Reservation.Infrastructure</AssemblyName>
+    <Description>Infrastructure layer for the TakeTime Reservation microservice.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TakeTime.Reservation.Domain\TakeTime.Reservation.Domain.csproj" />
+    <ProjectReference Include="..\TakeTime.Reservation.Application\TakeTime.Reservation.Application.csproj" />
+    <ProjectReference Include="..\..\..\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+  </ItemGroup>
+
+</Project>

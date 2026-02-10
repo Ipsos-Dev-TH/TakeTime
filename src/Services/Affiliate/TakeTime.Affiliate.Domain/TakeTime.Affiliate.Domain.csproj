@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.Affiliate.Domain</RootNamespace>
+    <AssemblyName>TakeTime.Affiliate.Domain</AssemblyName>
+    <Description>Domain layer for the TakeTime Affiliate microservice.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Core\TakeTime.Core\TakeTime.Core.csproj" />
+  </ItemGroup>
+
+</Project>
