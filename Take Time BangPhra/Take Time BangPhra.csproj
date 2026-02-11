@@ -351,6 +351,8 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="API\FileHandler.ashx" />
+    <Content Include="API\TaxInvoiceAPI.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
@@ -561,6 +563,12 @@
     <Content Include="Database\Migrations\001_HotelManagementSystemTables.sql" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="API\FileHandler.ashx.cs">
+      <DependentUpon>FileHandler.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\TaxInvoiceAPI.ashx.cs">
+      <DependentUpon>TaxInvoiceAPI.ashx</DependentUpon>
+    </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
