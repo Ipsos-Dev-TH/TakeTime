@@ -1,0 +1,27 @@
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "TakeTime CRM API", Version = "v1" });
+});
+
+builder.Services.AddMediatR(cfg =>
+    cfg.RegisterServicesFromAssembly(typeof(TakeTime.CRM.Application.Commands.UpsertCustomerCommand).Assembly));
+
+builder.Services.AddHealthChecks();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseAuthorization();
+app.MapControllers();
+app.MapHealthChecks("/health");
+
+app.Run();

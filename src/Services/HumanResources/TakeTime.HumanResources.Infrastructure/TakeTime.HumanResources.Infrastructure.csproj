@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.HumanResources.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TakeTime.HumanResources.Domain\TakeTime.HumanResources.Domain.csproj" />
+    <ProjectReference Include="..\TakeTime.HumanResources.Application\TakeTime.HumanResources.Application.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

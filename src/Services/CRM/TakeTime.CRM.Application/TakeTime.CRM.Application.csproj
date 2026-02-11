@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TakeTime.CRM.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MediatR" Version="12.2.0" />
+    <PackageReference Include="FluentValidation" Version="11.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TakeTime.CRM.Domain\TakeTime.CRM.Domain.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Core\TakeTime.Core\TakeTime.Core.csproj" />
+    <ProjectReference Include="..\..\..\..\src\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
+  </ItemGroup>
+
+</Project>
