@@ -82,8 +82,23 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Serve Admin Portal static files (wwwroot)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+// Redirect root to admin login
+app.MapGet("/", () => Results.Redirect("/login.html"));
+
 app.MapControllers();
 app.MapHealthChecks("/health");
+
+// Swagger UI
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
 app.MapReverseProxy();
 
 app.Run();
