@@ -1,7 +1,19 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using TakeTime.MultiTenancy;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Controllers for admin endpoints (feature management, etc.)
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "TakeTime API Gateway", Version = "v1" });
+});
+
+// Multi-tenancy services (for feature management API)
+builder.Services.AddMultiTenancy(builder.Configuration);
 
 // YARP Reverse Proxy
 builder.Services.AddReverseProxy()
@@ -70,6 +82,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.MapControllers();
 app.MapHealthChecks("/health");
 app.MapReverseProxy();
 

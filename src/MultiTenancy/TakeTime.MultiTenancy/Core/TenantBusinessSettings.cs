@@ -1,3 +1,5 @@
+using TakeTime.MultiTenancy.Features;
+
 namespace TakeTime.MultiTenancy.Core;
 
 /// <summary>
@@ -289,6 +291,15 @@ public class TenantBusinessSettings
     /// <summary>Enable API access for third-party integrations.</summary>
     public bool EnableAPIAccess { get; set; }
 
+    // ─── Feature & Menu Configuration ────────────────────────────────
+
+    /// <summary>
+    /// Granular feature and menu configuration for this tenant.
+    /// Controls which modules, sub-features, and individual menu items
+    /// are available. When null, the basic feature flags above are used.
+    /// </summary>
+    public TenantFeatureConfiguration? FeatureConfiguration { get; set; }
+
     /// <summary>
     /// Creates a deep copy of these settings. Useful when provisioning a new
     /// tenant from a template or when making speculative changes.
@@ -337,7 +348,8 @@ public class TenantBusinessSettings
             WorkingDaysPerWeek = 6,
             WorkingHoursPerDay = 8m,
             OTRateMultiplier = 1.5m,
-            PayrollCutoffDay = 25
+            PayrollCutoffDay = 25,
+            FeatureConfiguration = TenantFeatureConfiguration.CreateThaiDefault()
         };
     }
 }

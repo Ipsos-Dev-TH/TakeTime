@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TakeTime.MultiTenancy.Configuration;
 using TakeTime.MultiTenancy.Core;
+using TakeTime.MultiTenancy.Features;
 using TakeTime.MultiTenancy.Middleware;
 using TakeTime.MultiTenancy.Resolution;
 using TakeTime.MultiTenancy.Services;
@@ -101,6 +102,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<TenantManagementService>();
         services.AddScoped<TenantSettingsService>();
 
+        // Register feature management
+        services.AddScoped<IFeatureManager, TenantFeatureManager>();
+
         return services;
     }
 
@@ -134,6 +138,7 @@ public static class ServiceCollectionExtensions
     {
         app.UseMiddleware<TenantResolutionMiddleware>();
         app.UseMiddleware<TenantSecurityMiddleware>();
+        app.UseMiddleware<FeatureGateMiddleware>();
         return app;
     }
 

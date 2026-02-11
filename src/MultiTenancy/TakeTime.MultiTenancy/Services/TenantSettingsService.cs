@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using TakeTime.MultiTenancy.Core;
+using TakeTime.MultiTenancy.Features;
 
 namespace TakeTime.MultiTenancy.Services;
 
@@ -494,6 +495,232 @@ public class TenantSettingsService
             tenant.Code, settings.ReceiptPrefix);
 
         return TenantOperationResult.Ok(tenant);
+    }
+
+    // ─── Module & Feature Configuration ─────────────────────────────
+
+    /// <summary>
+    /// Gets the full feature configuration for a tenant.
+    /// </summary>
+    public async Task<TenantFeatureConfiguration?> GetFeatureConfigurationAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        return tenant?.BusinessSettings.FeatureConfiguration;
+    }
+
+    /// <summary>
+    /// Replaces the full feature configuration for a tenant.
+    /// </summary>
+    public async Task<TenantOperationResult> UpdateFeatureConfigurationAsync(
+        string tenantId,
+        TenantFeatureConfiguration featureConfiguration,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(featureConfiguration);
+
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        tenant.BusinessSettings.FeatureConfiguration = featureConfiguration;
+        tenant.MarkUpdated(updatedBy);
+
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Updated full feature configuration for tenant {TenantCode} by {UpdatedBy}",
+            tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Enables or disables a specific module for a tenant.
+    /// </summary>
+    public async Task<TenantOperationResult> SetModuleEnabledAsync(
+        string tenantId,
+        FeatureModule module,
+        bool enabled,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        var config = EnsureFeatureConfiguration(tenant);
+
+        if (enabled)
+            config.EnableModule(module);
+        else
+            config.DisableModule(module);
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Module {Module} {Action} for tenant {TenantCode} by {UpdatedBy}",
+            module, enabled ? "enabled" : "disabled", tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Enables or disables multiple modules at once for a tenant.
+    /// </summary>
+    public async Task<TenantOperationResult> SetModulesEnabledAsync(
+        string tenantId,
+        Dictionary<FeatureModule, bool> moduleStates,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        var config = EnsureFeatureConfiguration(tenant);
+
+        foreach (var (module, enabled) in moduleStates)
+        {
+            if (enabled)
+                config.EnableModule(module);
+            else
+                config.DisableModule(module);
+        }
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Updated {Count} module states for tenant {TenantCode} by {UpdatedBy}",
+            moduleStates.Count, tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Toggles a sub-feature within a module for a tenant.
+    /// </summary>
+    public async Task<TenantOperationResult> SetSubFeatureEnabledAsync(
+        string tenantId,
+        FeatureModule module,
+        string subFeature,
+        bool enabled,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        var config = EnsureFeatureConfiguration(tenant);
+        config.SetSubFeature(module, subFeature, enabled);
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Sub-feature {Module}.{SubFeature} {Action} for tenant {TenantCode} by {UpdatedBy}",
+            module, subFeature, enabled ? "enabled" : "disabled", tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Toggles visibility of a menu item for a tenant.
+    /// </summary>
+    public async Task<TenantOperationResult> SetMenuVisibilityAsync(
+        string tenantId,
+        FeatureModule module,
+        string menuKey,
+        bool visible,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        var config = EnsureFeatureConfiguration(tenant);
+        config.SetMenuVisibility(module, menuKey, visible);
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Menu '{MenuKey}' in {Module} set to {Visibility} for tenant {TenantCode} by {UpdatedBy}",
+            menuKey, module, visible ? "visible" : "hidden", tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Toggles visibility of multiple menu items at once.
+    /// </summary>
+    public async Task<TenantOperationResult> SetMenuVisibilityBatchAsync(
+        string tenantId,
+        List<(FeatureModule Module, string MenuKey, bool Visible)> menuChanges,
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        var config = EnsureFeatureConfiguration(tenant);
+
+        foreach (var (module, menuKey, visible) in menuChanges)
+        {
+            config.SetMenuVisibility(module, menuKey, visible);
+        }
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Updated {Count} menu visibility settings for tenant {TenantCode} by {UpdatedBy}",
+            menuChanges.Count, tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Initializes feature configuration from a template (Starter, ThaiDefault, FullAccess).
+    /// </summary>
+    public async Task<TenantOperationResult> InitializeFeatureConfigurationAsync(
+        string tenantId,
+        string template = "ThaiDefault",
+        string? updatedBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await ResolveTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        tenant.BusinessSettings.FeatureConfiguration = template.ToLowerInvariant() switch
+        {
+            "starter" => TenantFeatureConfiguration.CreateStarter(),
+            "full" or "fullaccess" or "enterprise" => TenantFeatureConfiguration.CreateFullAccess(),
+            _ => TenantFeatureConfiguration.CreateThaiDefault()
+        };
+
+        tenant.MarkUpdated(updatedBy);
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Initialized feature configuration from template '{Template}' for tenant {TenantCode} by {UpdatedBy}",
+            template, tenant.Code, updatedBy);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    private static TenantFeatureConfiguration EnsureFeatureConfiguration(Tenant tenant)
+    {
+        tenant.BusinessSettings.FeatureConfiguration ??= TenantFeatureConfiguration.CreateThaiDefault();
+        return tenant.BusinessSettings.FeatureConfiguration;
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
