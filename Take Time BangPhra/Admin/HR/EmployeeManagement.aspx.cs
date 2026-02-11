@@ -1323,7 +1323,7 @@ namespace Take_Time_BangPhra.Admin.HR
                     if (File.Exists(physicalPath))
                     {
                         // Open via FileHandler to bypass IIS static file auth
-                        string handlerUrl = ResolveUrl($"~/API/FileHandler.ashx?path={HttpUtility.UrlEncode(filePath)}");
+                        string handlerUrl = ResolveUrl($"~/API/FileHandler.ashx?path={Server.UrlEncode(filePath)}");
                         string script = $"window.open('{handlerUrl}', '_blank');";
                         ScriptManager.RegisterStartupScript(this, GetType(), "ViewDoc", script, true);
                     }
