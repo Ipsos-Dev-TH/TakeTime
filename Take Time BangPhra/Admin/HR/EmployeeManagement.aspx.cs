@@ -1043,8 +1043,8 @@ namespace Take_Time_BangPhra.Admin.HR
                     }
                     catch
                     {
-                        // If reading fails, try virtual path as fallback
-                        imgSignature.ImageUrl = $"~/Documents/Staff/Signature/{employeeName}{ext}?t={DateTime.Now.Ticks}";
+                        // If reading fails, serve via FileHandler to bypass IIS static file auth
+                        imgSignature.ImageUrl = $"~/API/FileHandler.ashx?path=~/Documents/Staff/Signature/{employeeName}{ext}";
                         imgSignature.Visible = true;
                         btnDeleteSignature.Visible = true;
                         return;
@@ -1322,8 +1322,9 @@ namespace Take_Time_BangPhra.Admin.HR
 
                     if (File.Exists(physicalPath))
                     {
-                        // Open in new window
-                        string script = $"window.open('{ResolveUrl(filePath)}', '_blank');";
+                        // Open via FileHandler to bypass IIS static file auth
+                        string handlerUrl = ResolveUrl($"~/API/FileHandler.ashx?path={HttpUtility.UrlEncode(filePath)}");
+                        string script = $"window.open('{handlerUrl}', '_blank');";
                         ScriptManager.RegisterStartupScript(this, GetType(), "ViewDoc", script, true);
                     }
                     else
