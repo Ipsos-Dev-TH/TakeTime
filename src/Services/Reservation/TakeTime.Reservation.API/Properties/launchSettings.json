@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "TakeTime.Reservation.API": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:65250;http://localhost:65259"
+    }
+  }
+}

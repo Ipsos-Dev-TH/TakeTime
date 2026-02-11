@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "TakeTime.Inventory.API": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:65252;http://localhost:65258"
+    }
+  }
+}
