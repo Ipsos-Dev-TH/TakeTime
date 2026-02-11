@@ -173,4 +173,51 @@ public sealed class ReportsController : ControllerBase
             Currency = currency
         });
     }
+
+    // ─── Additional Report Endpoints ─────────────────────────────────
+
+    /// <summary>Gets monthly revenue summary for a specific year.</summary>
+    [HttpGet("monthly-summary")]
+    public IActionResult GetMonthlySummary([FromQuery] int? year)
+    {
+        // TODO: Implement GetMonthlySummaryQuery
+        return StatusCode(501, new { message = "Monthly summary not yet implemented." });
+    }
+
+    /// <summary>Gets revenue by room type for a date range.</summary>
+    [HttpGet("revenue-by-room-type")]
+    public IActionResult GetRevenueByRoomType(
+        [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+    {
+        // TODO: Implement GetRevenueByRoomTypeQuery
+        return StatusCode(501, new { message = "Revenue by room type not yet implemented." });
+    }
+
+    /// <summary>Gets tax report for filing purposes.</summary>
+    [HttpGet("tax-report")]
+    public IActionResult GetTaxReport([FromQuery] int month, [FromQuery] int year)
+    {
+        // TODO: Implement GetTaxReportQuery
+        return StatusCode(501, new { message = "Tax report not yet implemented." });
+    }
+
+    /// <summary>Exports a report in the specified format.</summary>
+    [HttpGet("export")]
+    public IActionResult Export(
+        [FromQuery] string reportType, [FromQuery] string format = "pdf",
+        [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
+    {
+        // TODO: Implement ReportExportCommand
+        return StatusCode(501, new { message = "Report export not yet implemented." });
+    }
+
+    /// <summary>Gets financial transactions for a date range.</summary>
+    [HttpGet("transactions")]
+    public IActionResult GetTransactions(
+        [FromQuery] DateTime startDate, [FromQuery] DateTime endDate,
+        [FromQuery] string? category, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    {
+        // TODO: Implement GetTransactionsQuery
+        return StatusCode(501, new { message = "Transactions query not yet implemented." });
+    }
 }

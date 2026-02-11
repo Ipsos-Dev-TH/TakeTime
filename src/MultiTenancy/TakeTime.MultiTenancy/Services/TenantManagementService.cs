@@ -10,14 +10,14 @@ public class TenantOperationResult
 {
     public bool Success { get; init; }
     public Tenant? Tenant { get; init; }
-    public string? Error { get; init; }
+    public string? ErrorMessage { get; init; }
     public List<string> Warnings { get; init; } = [];
 
     public static TenantOperationResult Ok(Tenant tenant) =>
         new() { Success = true, Tenant = tenant };
 
     public static TenantOperationResult Fail(string error) =>
-        new() { Success = false, Error = error };
+        new() { Success = false, ErrorMessage = error };
 }
 
 /// <summary>
@@ -282,6 +282,83 @@ public class TenantManagementService
         _logger.LogInformation(
             "Updated subscription for tenant {TenantCode}: {OldTier} -> {NewTier}",
             tenant.Code, oldTier, newTier);
+
+        return TenantOperationResult.Ok(tenant);
+    }
+
+    /// <summary>
+    /// Convenience overload for creating a tenant with minimal parameters.
+    /// </summary>
+    public Task<TenantOperationResult> CreateTenantAsync(
+        string code, string name, string? connectionString,
+        string? createdBy, CancellationToken cancellationToken = default)
+    {
+        return CreateTenantAsync(code, name, null, null, connectionString,
+            SubscriptionTier.Free, createdBy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates tenant basic info by individual fields.
+    /// </summary>
+    public async Task<TenantOperationResult> UpdateTenantAsync(
+        string tenantId, string? name, string? contactEmail,
+        string? contactPhone, string? websiteUrl,
+        string? updatedBy, CancellationToken cancellationToken = default)
+    {
+        return await UpdateTenantAsync(tenantId, tenant =>
+        {
+            if (name is not null) tenant.Name = name;
+            if (contactEmail is not null) tenant.ContactEmail = contactEmail;
+            if (contactPhone is not null) tenant.ContactPhone = contactPhone;
+            if (websiteUrl is not null) tenant.WebsiteUrl = websiteUrl;
+        }, updatedBy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates tenant branding (logo, colors, custom domain).
+    /// </summary>
+    public async Task<TenantOperationResult> UpdateBrandingAsync(
+        string tenantId, string? logoUrl, string? faviconUrl,
+        string? primaryColor, string? secondaryColor,
+        string? customDomain, string? updatedBy,
+        CancellationToken cancellationToken = default)
+    {
+        return await UpdateTenantAsync(tenantId, tenant =>
+        {
+            if (logoUrl is not null) tenant.LogoUrl = logoUrl;
+            if (faviconUrl is not null) tenant.FaviconUrl = faviconUrl;
+            if (primaryColor is not null) tenant.PrimaryColor = primaryColor;
+            if (secondaryColor is not null) tenant.SecondaryColor = secondaryColor;
+            if (customDomain is not null) tenant.CustomDomain = customDomain;
+        }, updatedBy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates subscription with full control over all subscription parameters.
+    /// </summary>
+    public async Task<TenantOperationResult> UpdateSubscriptionAsync(
+        string tenantId, SubscriptionTier newTier,
+        DateTime? startDate, DateTime? endDate,
+        int maxRooms, int maxUsers,
+        string? updatedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var tenant = await _tenantStore.GetTenantAsync(tenantId, cancellationToken);
+        if (tenant is null)
+            return TenantOperationResult.Fail($"Tenant '{tenantId}' not found.");
+
+        tenant.SubscriptionTier = newTier;
+        tenant.SubscriptionStartDate = startDate ?? DateTime.UtcNow;
+        tenant.SubscriptionEndDate = endDate;
+        tenant.MaxRooms = maxRooms;
+        tenant.MaxUsers = maxUsers;
+        tenant.MarkUpdated(updatedBy);
+
+        await _tenantStore.SaveTenantAsync(tenant, cancellationToken);
+
+        _logger.LogInformation(
+            "Updated subscription for tenant {TenantCode}: Tier={Tier}, Rooms={Rooms}, Users={Users}",
+            tenant.Code, newTier, maxRooms, maxUsers);
 
         return TenantOperationResult.Ok(tenant);
     }

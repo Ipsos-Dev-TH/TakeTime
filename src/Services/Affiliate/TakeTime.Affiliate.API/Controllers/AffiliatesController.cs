@@ -131,6 +131,62 @@ public sealed class AffiliatesController : ControllerBase
         // would come from a separate query in a full implementation
         return Ok(new List<AffiliateCommissionDto>());
     }
+
+    /// <summary>Gets all affiliates.</summary>
+    [HttpGet]
+    public IActionResult GetAll([FromQuery] bool? activeOnly, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        // TODO: Implement GetAllAffiliatesQuery
+        return StatusCode(501, new { message = "List affiliates not yet implemented." });
+    }
+
+    /// <summary>Updates an affiliate's profile.</summary>
+    [HttpPut("{id:guid}")]
+    public IActionResult Update(Guid id, [FromBody] object request)
+    {
+        // TODO: Implement UpdateAffiliateCommand
+        return StatusCode(501, new { message = "Update affiliate not yet implemented." });
+    }
+
+    /// <summary>Activates an affiliate partner.</summary>
+    [HttpPost("{id:guid}/activate")]
+    public IActionResult Activate(Guid id)
+    {
+        // TODO: Implement ActivateAffiliateCommand
+        return StatusCode(501, new { message = "Activate affiliate not yet implemented." });
+    }
+
+    /// <summary>Deactivates an affiliate partner.</summary>
+    [HttpPost("{id:guid}/deactivate")]
+    public IActionResult Deactivate(Guid id)
+    {
+        // TODO: Implement DeactivateAffiliateCommand
+        return StatusCode(501, new { message = "Deactivate affiliate not yet implemented." });
+    }
+
+    /// <summary>Gets payout history for an affiliate.</summary>
+    [HttpGet("{id:guid}/payouts")]
+    public IActionResult GetPayouts(Guid id)
+    {
+        // TODO: Implement GetAffiliatePayoutsQuery
+        return StatusCode(501, new { message = "Payout history not yet implemented." });
+    }
+
+    /// <summary>Creates a payout for an affiliate.</summary>
+    [HttpPost("{id:guid}/payouts")]
+    public IActionResult CreatePayout(Guid id, [FromBody] object request)
+    {
+        // TODO: Implement CreateAffiliatePayoutCommand
+        return StatusCode(501, new { message = "Create payout not yet implemented." });
+    }
+
+    /// <summary>Gets affiliate performance report.</summary>
+    [HttpGet("performance")]
+    public IActionResult GetPerformance([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    {
+        // TODO: Implement GetAffiliatePerformanceQuery
+        return StatusCode(501, new { message = "Performance report not yet implemented." });
+    }
 }
 
 /// <summary>

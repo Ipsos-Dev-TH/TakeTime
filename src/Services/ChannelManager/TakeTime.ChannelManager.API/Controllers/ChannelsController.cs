@@ -225,4 +225,53 @@ public sealed class ChannelsController : ControllerBase
 
         return Ok(dtos);
     }
+
+    /// <summary>Updates a channel connection.</summary>
+    [HttpPut("connections/{connectionId:guid}")]
+    public IActionResult UpdateConnection(Guid connectionId, [FromBody] object request)
+    {
+        // TODO: Implement UpdateChannelConnectionCommand
+        return StatusCode(501, new { message = "Update connection not yet implemented." });
+    }
+
+    /// <summary>Deletes/disconnects a channel connection.</summary>
+    [HttpDelete("connections/{connectionId:guid}")]
+    public IActionResult DeleteConnection(Guid connectionId)
+    {
+        // TODO: Implement DeleteChannelConnectionCommand
+        return StatusCode(501, new { message = "Delete connection not yet implemented." });
+    }
+
+    /// <summary>Gets room mappings for a channel connection.</summary>
+    [HttpGet("connections/{connectionId:guid}/room-mappings")]
+    public IActionResult GetRoomMappings(Guid connectionId)
+    {
+        // TODO: Implement GetRoomMappingsQuery
+        return StatusCode(501, new { message = "Get room mappings not yet implemented." });
+    }
+
+    /// <summary>Creates/updates room mapping for a channel.</summary>
+    [HttpPut("connections/{connectionId:guid}/room-mappings")]
+    public IActionResult UpdateRoomMappings(Guid connectionId, [FromBody] object request)
+    {
+        // TODO: Implement UpdateRoomMappingsCommand
+        return StatusCode(501, new { message = "Update room mappings not yet implemented." });
+    }
+
+    /// <summary>Gets sync history for a channel connection.</summary>
+    [HttpGet("connections/{connectionId:guid}/sync-history")]
+    public IActionResult GetSyncHistory(
+        Guid connectionId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        // TODO: Implement GetSyncHistoryQuery
+        return StatusCode(501, new { message = "Sync history not yet implemented." });
+    }
+
+    /// <summary>Pushes rate update to a channel.</summary>
+    [HttpPost("connections/{connectionId:guid}/push-rates")]
+    public IActionResult PushRates(Guid connectionId, [FromBody] object request)
+    {
+        // TODO: Implement PushRatesCommand
+        return StatusCode(501, new { message = "Push rates not yet implemented." });
+    }
 }
