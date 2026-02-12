@@ -83,3 +83,43 @@ public class CustomerAnalyticsDto
     public List<CustomerSummaryDto> TopCustomers { get; set; } = [];
     public double AverageRating { get; set; }
 }
+
+/// <summary>
+/// Customer reservation history with summary statistics.
+/// </summary>
+public class CustomerReservationHistoryDto
+{
+    public Guid CustomerId { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+    public int TotalReservations { get; set; }
+    public decimal TotalSpent { get; set; }
+    public string Currency { get; set; } = "THB";
+    public List<CustomerReservationDto> Reservations { get; set; } = [];
+}
+
+/// <summary>
+/// Individual reservation entry in customer history.
+/// </summary>
+public class CustomerReservationDto
+{
+    public Guid Id { get; set; }
+    public string ReservationNumber { get; set; } = string.Empty;
+    public DateTime CheckInDate { get; set; }
+    public DateTime CheckOutDate { get; set; }
+    public string RoomType { get; set; } = string.Empty;
+    public string? RoomNumber { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Customer export result containing file data.
+/// </summary>
+public class CustomerExportDto
+{
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public byte[] Data { get; set; } = [];
+    public int TotalRecords { get; set; }
+}

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TakeTime.GuestExperience.Application.Commands;
 using TakeTime.GuestExperience.Application.DTOs;
+using TakeTime.GuestExperience.Application.Queries;
 using TakeTime.MultiTenancy.Features;
 
 namespace TakeTime.GuestExperience.API.Controllers;
@@ -60,7 +61,6 @@ public class HousekeepingController : ControllerBase
     /// <returns>A list of housekeeping tasks.</returns>
     [HttpGet]
     [ProducesResponseType(typeof(List<HousekeepingTaskDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? status,
         [FromQuery] DateTime? date,
@@ -69,16 +69,20 @@ public class HousekeepingController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        // TODO: Implement GetHousekeepingTasksQuery when available
-        // Should support filtering by status, date, priority, and assigned staff
-        // Should return paginated results ordered by priority and scheduled time
         _logger.LogDebug("Listing housekeeping tasks. Status: {Status}, Date: {Date}, Priority: {Priority}",
             status, date, priority);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var query = new GetHousekeepingTasksQuery
         {
-            message = "List housekeeping tasks is not yet implemented. Awaiting GetHousekeepingTasksQuery."
-        });
+            Status = status,
+            Date = date,
+            Priority = priority,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -90,17 +94,13 @@ public class HousekeepingController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(HousekeepingTaskDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement GetHousekeepingTaskByIdQuery when available
-        // Should return full task details including assignment, timing, and inspection info
         _logger.LogDebug("Getting housekeeping task {TaskId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Get housekeeping task by ID is not yet implemented. Awaiting GetHousekeepingTaskByIdQuery."
-        });
+        var query = new GetHousekeepingTaskByIdQuery { Id = id };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -113,22 +113,23 @@ public class HousekeepingController : ControllerBase
     [HttpPut("{id:guid}/assign")]
     [ProducesResponseType(typeof(HousekeepingTaskDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Assign(
         Guid id,
         [FromBody] AssignHousekeepingTaskRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement AssignHousekeepingTaskCommand when available
-        // Should validate staff exists, update task status to Assigned,
-        // and optionally send notification to assigned staff
         _logger.LogInformation("Assigning housekeeping task {TaskId} to staff {StaffId}",
             id, request.AssignedTo);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new AssignHousekeepingTaskCommand
         {
-            message = "Assign housekeeping task is not yet implemented. Awaiting AssignHousekeepingTaskCommand."
-        });
+            TaskId = id,
+            AssignedTo = request.AssignedTo,
+            AssignedToName = request.AssignedToName
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -140,18 +141,13 @@ public class HousekeepingController : ControllerBase
     [HttpPut("{id:guid}/start")]
     [ProducesResponseType(typeof(HousekeepingTaskDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Start(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement StartHousekeepingTaskCommand when available
-        // Should set status to InProgress, record StartedAt timestamp,
-        // and validate task is in Assigned status
         _logger.LogInformation("Starting housekeeping task {TaskId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Start housekeeping task is not yet implemented. Awaiting StartHousekeepingTaskCommand."
-        });
+        var command = new StartHousekeepingTaskCommand { TaskId = id };
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -164,21 +160,22 @@ public class HousekeepingController : ControllerBase
     [HttpPut("{id:guid}/complete")]
     [ProducesResponseType(typeof(HousekeepingTaskDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Complete(
         Guid id,
         [FromBody] CompleteHousekeepingTaskRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement CompleteHousekeepingTaskCommand when available
-        // Should set status to Completed, record CompletedAt and CompletedBy,
-        // and validate task is in InProgress status
         _logger.LogInformation("Completing housekeeping task {TaskId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new CompleteHousekeepingTaskCommand
         {
-            message = "Complete housekeeping task is not yet implemented. Awaiting CompleteHousekeepingTaskCommand."
-        });
+            TaskId = id,
+            Notes = request.Notes,
+            CompletedBy = request.CompletedBy
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -191,22 +188,23 @@ public class HousekeepingController : ControllerBase
     [HttpPut("{id:guid}/verify")]
     [ProducesResponseType(typeof(HousekeepingTaskDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Verify(
         Guid id,
         [FromBody] VerifyHousekeepingTaskRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement VerifyHousekeepingTaskCommand when available
-        // Should set status to Verified, record InspectionRating and InspectionNotes,
-        // validate task is in Completed status, and optionally update room status to Available
         _logger.LogInformation("Verifying housekeeping task {TaskId}, rating: {Rating}",
             id, request.InspectionRating);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new VerifyHousekeepingTaskCommand
         {
-            message = "Verify housekeeping task is not yet implemented. Awaiting VerifyHousekeepingTaskCommand."
-        });
+            TaskId = id,
+            InspectionRating = request.InspectionRating,
+            InspectionNotes = request.InspectionNotes
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -216,18 +214,13 @@ public class HousekeepingController : ControllerBase
     /// <returns>Today's housekeeping dashboard with task list and room status counts.</returns>
     [HttpGet("today")]
     [ProducesResponseType(typeof(HousekeepingDashboardDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetTodaySchedule(CancellationToken cancellationToken)
     {
-        // TODO: Implement GetTodayHousekeepingScheduleQuery when available
-        // Should return today's tasks grouped by status with room status counts
-        // (clean, dirty, in-progress, inspection pending, out-of-order)
         _logger.LogDebug("Getting today's housekeeping schedule");
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Get today's housekeeping schedule is not yet implemented. Awaiting GetTodayHousekeepingScheduleQuery."
-        });
+        var query = new GetTodayHousekeepingScheduleQuery();
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 }
 

@@ -233,6 +233,11 @@ public interface IReservationRepository
 
     Task<List<ReservationSummaryDto>> GetUpcomingCheckOutsAsync(
         DateTime fromDate, DateTime toDate, int take, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing reservation with partial data.
+    /// </summary>
+    Task UpdateReservationAsync(UpdateReservationData data, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -252,6 +257,45 @@ public interface IAccommodationRepository
     Task<int> GetActiveCountAsync(CancellationToken cancellationToken = default);
 
     Task<decimal> GetBaseRateAsync(Guid accommodationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all accommodations as DTOs with optional filtering.
+    /// </summary>
+    Task<List<AccommodationDto>> GetAllAccommodationDtosAsync(
+        string? type, string? status, int? minOccupancy,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a single accommodation as a DTO by ID.
+    /// </summary>
+    Task<AccommodationDto?> GetAccommodationDtoByIdAsync(
+        Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the Accommodation domain entity by ID.
+    /// </summary>
+    Task<Domain.Entities.Accommodation?> GetEntityByIdAsync(
+        Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a new accommodation.
+    /// </summary>
+    Task CreateAsync(
+        Domain.Entities.Accommodation accommodation,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing accommodation.
+    /// </summary>
+    Task UpdateAsync(
+        Domain.Entities.Accommodation accommodation,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether an accommodation has active (non-cancelled, non-checked-out) reservations.
+    /// </summary>
+    Task<bool> HasActiveReservationsAsync(
+        Guid accommodationId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -368,4 +412,140 @@ public sealed class CheckOutAdditionalItem
     public decimal TotalPrice { get; set; }
     public DateTime? ServiceDate { get; set; }
     public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Data model for updating a reservation through the repository.
+/// </summary>
+public sealed class UpdateReservationData
+{
+    public Guid Id { get; set; }
+    public DateTime? CheckInDate { get; set; }
+    public DateTime? CheckOutDate { get; set; }
+    public int? NumberOfGuests { get; set; }
+    public int? NumberOfAdults { get; set; }
+    public int? NumberOfChildren { get; set; }
+    public int? NumberOfNights { get; set; }
+    public string? SpecialRequests { get; set; }
+    public string? InternalNotes { get; set; }
+    public decimal? SubTotal { get; set; }
+    public decimal? DiscountAmount { get; set; }
+    public string? DiscountReason { get; set; }
+    public decimal? VATAmount { get; set; }
+    public decimal? TotalAmount { get; set; }
+    public decimal? BalanceDue { get; set; }
+    public string? UpdatedBy { get; set; }
+    public List<CreateReservationAccommodationData>? Accommodations { get; set; }
+    public List<CreateReservationItemData>? Items { get; set; }
+}
+
+/// <summary>
+/// Repository interface for rate management operations including
+/// rate plans, seasonal rates, and promotions.
+/// </summary>
+public interface IRateManagementRepository
+{
+    // ─── Rate Plans ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Gets all rate plans for the current tenant.
+    /// </summary>
+    Task<List<RatePlanDto>> GetAllRatePlansAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a rate plan DTO by ID.
+    /// </summary>
+    Task<RatePlanDto?> GetRatePlanDtoByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the RatePlan domain entity by ID.
+    /// </summary>
+    Task<Domain.Entities.RatePlan?> GetRatePlanEntityByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a new rate plan.
+    /// </summary>
+    Task CreateRatePlanAsync(Domain.Entities.RatePlan ratePlan, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing rate plan.
+    /// </summary>
+    Task UpdateRatePlanAsync(Domain.Entities.RatePlan ratePlan, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Soft-deletes a rate plan.
+    /// </summary>
+    Task DeleteRatePlanAsync(Guid id, string? deletedBy, CancellationToken cancellationToken = default);
+
+    // ─── Seasonal Rates ──────────────────────────────────────────
+
+    /// <summary>
+    /// Gets seasonal rates, optionally filtered by year.
+    /// </summary>
+    Task<List<SeasonalRateDto>> GetSeasonalRatesAsync(int? year, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the SeasonalRateEntity domain entity by ID.
+    /// </summary>
+    Task<Domain.Entities.SeasonalRateEntity?> GetSeasonalRateEntityByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a new seasonal rate.
+    /// </summary>
+    Task CreateSeasonalRateAsync(Domain.Entities.SeasonalRateEntity rate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing seasonal rate.
+    /// </summary>
+    Task UpdateSeasonalRateAsync(Domain.Entities.SeasonalRateEntity rate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Soft-deletes a seasonal rate.
+    /// </summary>
+    Task DeleteSeasonalRateAsync(Guid id, string? deletedBy, CancellationToken cancellationToken = default);
+
+    // ─── Promotions ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Gets promotions, optionally filtered to active-only.
+    /// </summary>
+    Task<List<PromotionDto>> GetPromotionsAsync(bool? activeOnly, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a promotion DTO by ID.
+    /// </summary>
+    Task<PromotionDto?> GetPromotionDtoByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the Promotion domain entity by ID.
+    /// </summary>
+    Task<Domain.Entities.Promotion?> GetPromotionEntityByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a promotion by its discount code.
+    /// </summary>
+    Task<Domain.Entities.Promotion?> GetPromotionByCodeAsync(string code, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a new promotion.
+    /// </summary>
+    Task CreatePromotionAsync(Domain.Entities.Promotion promotion, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an existing promotion.
+    /// </summary>
+    Task UpdatePromotionAsync(Domain.Entities.Promotion promotion, CancellationToken cancellationToken = default);
+
+    // ─── Bulk Operations ─────────────────────────────────────────
+
+    /// <summary>
+    /// Bulk updates rates for multiple accommodations.
+    /// </summary>
+    Task<int> BulkUpdateRatesAsync(
+        List<Guid> accommodationIds,
+        decimal? rateAdjustment,
+        decimal? rateMultiplier,
+        DateTime? effectiveFrom,
+        DateTime? effectiveTo,
+        CancellationToken cancellationToken = default);
 }

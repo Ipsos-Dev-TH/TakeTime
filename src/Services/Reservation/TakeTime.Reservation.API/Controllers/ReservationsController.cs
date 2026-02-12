@@ -111,10 +111,28 @@ public class ReservationsController : ControllerBase
     {
         dto.Id = id;
 
-        // TODO: Implement UpdateReservationCommand when available
-        // For now, return method not allowed until the command handler is implemented
-        return StatusCode(StatusCodes.Status501NotImplemented,
-            new { message = "Update reservation is not yet implemented." });
+        var command = new UpdateReservationCommand
+        {
+            Id = id,
+            CheckInDate = dto.CheckInDate,
+            CheckOutDate = dto.CheckOutDate,
+            NumberOfGuests = dto.NumberOfGuests,
+            NumberOfAdults = dto.NumberOfAdults,
+            NumberOfChildren = dto.NumberOfChildren,
+            SpecialRequests = dto.SpecialRequests,
+            InternalNotes = dto.InternalNotes,
+            DiscountAmount = dto.DiscountAmount,
+            DiscountReason = dto.DiscountReason,
+            Accommodations = dto.Accommodations,
+            Items = dto.Items,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+
+        _logger.LogInformation("Reservation {ReservationId} updated successfully", id);
+
+        return Ok(result);
     }
 
     /// <summary>

@@ -28,5 +28,10 @@ public enum PaymentStatus
     /// <summary>
     /// Payment has been partially refunded.
     /// </summary>
-    PartiallyRefunded = 4
+    PartiallyRefunded = 4,
+
+    /// <summary>
+    /// Payment has been voided (same-day cancellation).
+    /// </summary>
+    Voided = 5
 }

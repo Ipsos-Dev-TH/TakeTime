@@ -134,6 +134,21 @@ public interface IAccountingQueryRepository
     Task<int> GetReservationCountByMonthAsync(string tenantId, int year, int month, CancellationToken cancellationToken = default);
     Task<int> GetCancellationCountByMonthAsync(string tenantId, int year, int month, CancellationToken cancellationToken = default);
     Task<decimal> GetAverageStayDurationAsync(string tenantId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TransactionRecord>> GetTransactionsByMonthAsync(string tenantId, int year, int month, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ExpenseRecord>> GetExpensesByMonthAsync(string tenantId, int year, int month, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RoomTypeRevenueRecord>> GetRevenueByRoomTypeAsync(string tenantId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
+    Task<(IReadOnlyList<TransactionRecord> transactions, int totalCount)> GetTransactionsPagedAsync(string tenantId, DateTime? startDate, DateTime? endDate, string? category, int page, int pageSize, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Revenue record grouped by room type for reporting.
+/// </summary>
+public sealed class RoomTypeRevenueRecord
+{
+    public string RoomType { get; set; } = string.Empty;
+    public decimal Revenue { get; set; }
+    public int BookingCount { get; set; }
+    public decimal AverageRate { get; set; }
 }
 
 /// <summary>

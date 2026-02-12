@@ -132,60 +132,169 @@ public sealed class AffiliatesController : ControllerBase
         return Ok(new List<AffiliateCommissionDto>());
     }
 
-    /// <summary>Gets all affiliates.</summary>
+    /// <summary>
+    /// Gets all affiliates with optional filtering and pagination.
+    /// </summary>
+    /// <param name="activeOnly">If true, only return active affiliates.</param>
+    /// <param name="name">Filter by name (partial match).</param>
+    /// <param name="page">Page number (default: 1).</param>
+    /// <param name="pageSize">Page size (default: 20).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A list of affiliate profiles.</returns>
     [HttpGet]
-    public IActionResult GetAll([FromQuery] bool? activeOnly, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    [ProducesResponseType(typeof(List<AffiliateDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<AffiliateDto>>> GetAll(
+        [FromQuery] bool? activeOnly,
+        [FromQuery] string? name,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        // TODO: Implement GetAllAffiliatesQuery
-        return StatusCode(501, new { message = "List affiliates not yet implemented." });
+        var query = new GetAllAffiliatesQuery
+        {
+            ActiveOnly = activeOnly,
+            Name = name,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Updates an affiliate's profile.</summary>
+    /// <summary>
+    /// Updates an affiliate's profile.
+    /// </summary>
+    /// <param name="id">The affiliate identifier.</param>
+    /// <param name="request">The updated affiliate details.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated affiliate profile.</returns>
     [HttpPut("{id:guid}")]
-    public IActionResult Update(Guid id, [FromBody] object request)
+    [ProducesResponseType(typeof(AffiliateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AffiliateDto>> Update(
+        Guid id,
+        [FromBody] UpdateAffiliateDto request,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement UpdateAffiliateCommand
-        return StatusCode(501, new { message = "Update affiliate not yet implemented." });
+        var command = new UpdateAffiliateCommand
+        {
+            AffiliateId = id,
+            Name = request.Name,
+            Email = request.Email,
+            Phone = request.Phone,
+            CompanyName = request.CompanyName,
+            CommissionRatePercent = request.CommissionRatePercent,
+            CommissionType = request.CommissionType,
+            BankAccountName = request.BankAccountName,
+            BankAccountNumber = request.BankAccountNumber,
+            BankName = request.BankName,
+            TaxId = request.TaxId
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Activates an affiliate partner.</summary>
+    /// <summary>
+    /// Activates an affiliate partner.
+    /// </summary>
+    /// <param name="id">The affiliate identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated affiliate profile.</returns>
     [HttpPost("{id:guid}/activate")]
-    public IActionResult Activate(Guid id)
+    [ProducesResponseType(typeof(AffiliateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AffiliateDto>> Activate(
+        Guid id,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement ActivateAffiliateCommand
-        return StatusCode(501, new { message = "Activate affiliate not yet implemented." });
+        var command = new ActivateAffiliateCommand { AffiliateId = id };
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Deactivates an affiliate partner.</summary>
+    /// <summary>
+    /// Deactivates an affiliate partner.
+    /// </summary>
+    /// <param name="id">The affiliate identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated affiliate profile.</returns>
     [HttpPost("{id:guid}/deactivate")]
-    public IActionResult Deactivate(Guid id)
+    [ProducesResponseType(typeof(AffiliateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AffiliateDto>> Deactivate(
+        Guid id,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement DeactivateAffiliateCommand
-        return StatusCode(501, new { message = "Deactivate affiliate not yet implemented." });
+        var command = new DeactivateAffiliateCommand { AffiliateId = id };
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Gets payout history for an affiliate.</summary>
+    /// <summary>
+    /// Gets payout history for an affiliate.
+    /// </summary>
+    /// <param name="id">The affiliate identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A list of payout records.</returns>
     [HttpGet("{id:guid}/payouts")]
-    public IActionResult GetPayouts(Guid id)
+    [ProducesResponseType(typeof(List<AffiliatePayoutDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<AffiliatePayoutDto>>> GetPayouts(
+        Guid id,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetAffiliatePayoutsQuery
-        return StatusCode(501, new { message = "Payout history not yet implemented." });
+        var query = new GetAffiliatePayoutsQuery { AffiliateId = id };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Creates a payout for an affiliate.</summary>
+    /// <summary>
+    /// Creates a payout for an affiliate.
+    /// </summary>
+    /// <param name="id">The affiliate identifier.</param>
+    /// <param name="request">The payout creation details.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The created payout record.</returns>
     [HttpPost("{id:guid}/payouts")]
-    public IActionResult CreatePayout(Guid id, [FromBody] object request)
+    [ProducesResponseType(typeof(AffiliatePayoutDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AffiliatePayoutDto>> CreatePayout(
+        Guid id,
+        [FromBody] CreatePayoutDto request,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement CreateAffiliatePayoutCommand
-        return StatusCode(501, new { message = "Create payout not yet implemented." });
+        var command = new CreateAffiliatePayoutCommand
+        {
+            AffiliateId = id,
+            Amount = request.Amount,
+            PaymentMethod = request.PaymentMethod,
+            Notes = request.Notes
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return CreatedAtAction(nameof(GetPayouts), new { id }, result);
     }
 
-    /// <summary>Gets affiliate performance report.</summary>
+    /// <summary>
+    /// Gets affiliate performance report with metrics.
+    /// </summary>
+    /// <param name="from">Start date for the performance period.</param>
+    /// <param name="to">End date for the performance period.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Performance metrics including bookings, commission, and conversion rate.</returns>
     [HttpGet("performance")]
-    public IActionResult GetPerformance([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    [ProducesResponseType(typeof(AffiliatePerformanceDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AffiliatePerformanceDto>> GetPerformance(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetAffiliatePerformanceQuery
-        return StatusCode(501, new { message = "Performance report not yet implemented." });
+        var query = new GetAffiliatePerformanceQuery { From = from, To = to };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 }
 

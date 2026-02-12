@@ -208,6 +208,9 @@ public interface IPaymentRepository
     Task<List<PaymentSummaryDto>> GetPaymentsByReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
     Task<decimal> GetTotalPaidForReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
     Task<decimal> GetTotalRefundedForReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
+    Task<PaginatedPaymentResult> SearchAsync(PaymentSearchCriteria criteria, CancellationToken cancellationToken = default);
+    Task<List<PaymentSummaryDto>> GetPaymentsByDateAsync(DateTime date, CancellationToken cancellationToken = default);
+    Task UpdateAsync(PaymentDto payment, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -154,6 +154,12 @@ public interface IChannelManagerRepository
     Task UpdateSyncLogAsync(Guid logId, string status, int itemCount, string? errorMessage, CancellationToken cancellationToken = default);
     Task<Guid> CreateImportedReservationAsync(ImportedReservationEntry reservation, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ImportedReservationEntry>> GetImportedReservationsAsync(string tenantId, string? channelName, int page, int pageSize, CancellationToken cancellationToken = default);
+    Task UpdateConnectionAsync(ChannelConnectionEntry connection, CancellationToken cancellationToken = default);
+    Task DeactivateConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RoomMappingEntry>> GetRoomMappingsAsync(Guid connectionId, CancellationToken cancellationToken = default);
+    Task UpdateRoomMappingsAsync(Guid connectionId, IReadOnlyList<RoomMappingEntry> mappings, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChannelSyncLogEntry>> GetSyncHistoryAsync(Guid connectionId, int page, int pageSize, CancellationToken cancellationToken = default);
+    Task<Guid> CreateRateUpdateAsync(RateUpdateEntry rateUpdate, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -237,4 +243,30 @@ public sealed class ImportedReservationEntry
     public string Status { get; set; } = "Imported";
     public Guid? LocalReservationId { get; set; }
     public DateTime ImportedAt { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class RoomMappingEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ChannelConnectionId { get; set; }
+    public string LocalRoomType { get; set; } = string.Empty;
+    public string ChannelRoomType { get; set; } = string.Empty;
+    public string? ChannelRoomId { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class RateUpdateEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ChannelConnectionId { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string RoomType { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public decimal Rate { get; set; }
+    public string Currency { get; set; } = "THB";
+    public int Availability { get; set; }
+    public int? MinStay { get; set; }
+    public string Status { get; set; } = "Pending";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

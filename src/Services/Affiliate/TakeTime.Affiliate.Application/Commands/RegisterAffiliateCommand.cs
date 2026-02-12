@@ -138,6 +138,9 @@ public interface IAffiliateRepository
     Task<IReadOnlyList<AffiliateEntry>> SearchAsync(string tenantId, string? status, string? name, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<Guid> CreateCommissionAsync(CommissionEntry commission, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CommissionEntry>> GetCommissionsByAffiliateAsync(Guid affiliateId, CancellationToken cancellationToken = default);
+    Task<Guid> CreatePayoutAsync(PayoutEntry payout, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PayoutEntry>> GetPayoutsByAffiliateAsync(Guid affiliateId, CancellationToken cancellationToken = default);
+    Task<(decimal totalCommission, int totalBookings, int totalReferrals, decimal conversionRate)> GetPerformanceMetricsAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -184,4 +187,22 @@ public sealed class CommissionEntry
     public string Status { get; set; } = "Pending";
     public DateTime EarnedAt { get; set; } = DateTime.UtcNow;
     public DateTime? PaidAt { get; set; }
+}
+
+/// <summary>
+/// Internal payout entry model.
+/// </summary>
+public sealed class PayoutEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AffiliateId { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string PaymentMethod { get; set; } = string.Empty;
+    public string? TransactionReference { get; set; }
+    public string Status { get; set; } = "Pending";
+    public string Currency { get; set; } = "THB";
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ProcessedAt { get; set; }
+    public string? Notes { get; set; }
 }

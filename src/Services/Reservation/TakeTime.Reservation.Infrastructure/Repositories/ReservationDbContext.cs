@@ -21,6 +21,9 @@ public class ReservationDbContext : BaseDbContext
     public DbSet<ReservationItem> ReservationItems => Set<ReservationItem>();
     public DbSet<ReservationPayment> ReservationPayments => Set<ReservationPayment>();
     public DbSet<RentalItem> RentalItems => Set<RentalItem>();
+    public DbSet<RatePlan> RatePlans => Set<RatePlan>();
+    public DbSet<SeasonalRateEntity> SeasonalRates => Set<SeasonalRateEntity>();
+    public DbSet<Promotion> Promotions => Set<Promotion>();
 
     public ReservationDbContext(
         DbContextOptions<ReservationDbContext> options,
@@ -161,6 +164,64 @@ public class ReservationDbContext : BaseDbContext
 
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => e.Category);
+        });
+
+        // RatePlan configuration
+        modelBuilder.Entity<RatePlan>(entity =>
+        {
+            entity.ToTable("RatePlans");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.IsDefault).HasDefaultValue(false);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.TenantId).IsRequired().HasMaxLength(100);
+
+            entity.OwnsOne(e => e.BaseRate, money =>
+            {
+                money.Property(m => m.Amount).HasColumnName("BaseRateAmount").HasPrecision(18, 2);
+                money.Property(m => m.Currency).HasColumnName("BaseRateCurrency").HasMaxLength(3);
+            });
+
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.IsActive);
+            entity.Property(e => e.Version).IsConcurrencyToken();
+        });
+
+        // SeasonalRateEntity configuration
+        modelBuilder.Entity<SeasonalRateEntity>(entity =>
+        {
+            entity.ToTable("SeasonalRates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SeasonName).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.RateMultiplier).HasPrecision(8, 4);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.TenantId).IsRequired().HasMaxLength(100);
+
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => new { e.StartDate, e.EndDate });
+            entity.Property(e => e.Version).IsConcurrencyToken();
+        });
+
+        // Promotion configuration
+        modelBuilder.Entity<Promotion>(entity =>
+        {
+            entity.ToTable("Promotions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Code).HasMaxLength(50);
+            entity.Property(e => e.DiscountType).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.DiscountValue).HasPrecision(18, 2);
+            entity.Property(e => e.MinimumBookingAmount).HasPrecision(18, 2);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.TenantId).IsRequired().HasMaxLength(100);
+
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.Code);
+            entity.HasIndex(e => e.IsActive);
+            entity.Property(e => e.Version).IsConcurrencyToken();
         });
     }
 }

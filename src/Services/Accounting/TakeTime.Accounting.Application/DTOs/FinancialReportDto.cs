@@ -120,3 +120,116 @@ public sealed class KpiDashboardDto
     public decimal AverageStayNights { get; set; }
     public string Currency { get; set; } = "THB";
 }
+
+/// <summary>
+/// Monthly income/expense summary DTO.
+/// </summary>
+public sealed class MonthlySummaryDto
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public decimal TotalIncome { get; set; }
+    public decimal TotalExpenses { get; set; }
+    public decimal NetIncome { get; set; }
+    public int TransactionCount { get; set; }
+    public List<CategorySummaryDto> IncomeByCategory { get; set; } = [];
+    public List<CategorySummaryDto> ExpenseByCategory { get; set; } = [];
+    public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Category-level summary.
+/// </summary>
+public sealed class CategorySummaryDto
+{
+    public string Category { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public int Count { get; set; }
+    public decimal PercentageOfTotal { get; set; }
+}
+
+/// <summary>
+/// Revenue breakdown by room type.
+/// </summary>
+public sealed class RevenueByRoomTypeDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public decimal TotalRevenue { get; set; }
+    public List<RoomTypeRevenueDto> RoomTypes { get; set; } = [];
+    public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Revenue for a single room type.
+/// </summary>
+public sealed class RoomTypeRevenueDto
+{
+    public string RoomType { get; set; } = string.Empty;
+    public decimal Revenue { get; set; }
+    public int BookingCount { get; set; }
+    public decimal AverageRate { get; set; }
+    public decimal PercentageOfTotal { get; set; }
+}
+
+/// <summary>
+/// Tax (VAT) report DTO for tax filing.
+/// </summary>
+public sealed class TaxReportDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public decimal TotalSalesBeforeVAT { get; set; }
+    public decimal TotalVATCollected { get; set; }
+    public decimal TotalPurchasesBeforeVAT { get; set; }
+    public decimal TotalInputVAT { get; set; }
+    public decimal NetVATPayable { get; set; }
+    public decimal VATRate { get; set; }
+    public bool IsVATRegistered { get; set; }
+    public int SalesTransactionCount { get; set; }
+    public int PurchaseTransactionCount { get; set; }
+    public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Report export result DTO.
+/// </summary>
+public sealed class ReportExportResultDto
+{
+    public string FileName { get; set; } = string.Empty;
+    public string Format { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public byte[] Data { get; set; } = [];
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Financial transaction list DTO.
+/// </summary>
+public sealed class TransactionListDto
+{
+    public List<TransactionItemDto> Transactions { get; set; } = [];
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public string Currency { get; set; } = "THB";
+}
+
+/// <summary>
+/// Individual financial transaction DTO.
+/// </summary>
+public sealed class TransactionItemDto
+{
+    public Guid Id { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string? SubCategory { get; set; }
+    public decimal Amount { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public string? Reference { get; set; }
+    public string? Description { get; set; }
+    public string Currency { get; set; } = "THB";
+    public DateTime CreatedAt { get; set; }
+}
