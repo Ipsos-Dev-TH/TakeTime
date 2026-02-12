@@ -15,6 +15,10 @@ namespace TakeTime.MultiTenancy.Configuration;
 public class TenantDbContext : DbContext
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
+    public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
+    public DbSet<SubscriptionInvoice> SubscriptionInvoices => Set<SubscriptionInvoice>();
 
     public TenantDbContext(DbContextOptions<TenantDbContext> options)
         : base(options)
@@ -25,6 +29,10 @@ public class TenantDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfiguration(new TenantEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new SubscriptionPlanEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantSubscriptionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new SubscriptionPaymentEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new SubscriptionInvoiceEntityConfiguration());
     }
 }
 
@@ -177,5 +185,306 @@ internal class TenantEntityConfiguration : IEntityTypeConfiguration<Tenant>
             v => JsonSerializer.Serialize(v, JsonOptions).GetHashCode(),
             v => JsonSerializer.Deserialize<Dictionary<string, string>>(
                 JsonSerializer.Serialize(v, JsonOptions), JsonOptions)!);
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the SubscriptionPlan entity.
+/// </summary>
+internal class SubscriptionPlanEntityConfiguration : IEntityTypeConfiguration<SubscriptionPlan>
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
+    };
+
+    public void Configure(EntityTypeBuilder<SubscriptionPlan> builder)
+    {
+        builder.ToTable("SubscriptionPlans", "multitenancy");
+
+        builder.HasKey(p => p.Id);
+
+        builder.HasIndex(p => p.Code)
+            .IsUnique()
+            .HasDatabaseName("IX_SubscriptionPlans_Code");
+
+        builder.HasIndex(p => p.Tier)
+            .HasDatabaseName("IX_SubscriptionPlans_Tier");
+
+        builder.HasIndex(p => p.IsActive)
+            .HasDatabaseName("IX_SubscriptionPlans_IsActive");
+
+        builder.Property(p => p.Code)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.Name)
+            .IsRequired()
+            .HasMaxLength(200);
+
+        builder.Property(p => p.NameTh)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.Description)
+            .HasMaxLength(2000);
+
+        builder.Property(p => p.DescriptionTh)
+            .HasMaxLength(2000);
+
+        builder.Property(p => p.Tier)
+            .HasConversion<string>()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.MonthlyPrice)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.YearlyPrice)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.Currency)
+            .IsRequired()
+            .HasMaxLength(3)
+            .HasDefaultValue("THB");
+
+        // JSON-serialized list properties
+        builder.Property(p => p.IncludedFeatures)
+            .HasColumnType("nvarchar(max)")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOptions),
+                v => JsonSerializer.Deserialize<List<string>>(v, JsonOptions) ?? new List<string>())
+            .Metadata.SetValueComparer(CreateStringListComparer());
+
+        builder.Property(p => p.IncludedModules)
+            .HasColumnType("nvarchar(max)")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOptions),
+                v => JsonSerializer.Deserialize<List<string>>(v, JsonOptions) ?? new List<string>())
+            .Metadata.SetValueComparer(CreateStringListComparer());
+    }
+
+    private static ValueComparer<List<string>> CreateStringListComparer()
+    {
+        return new ValueComparer<List<string>>(
+            (a, b) => JsonSerializer.Serialize(a, JsonOptions) == JsonSerializer.Serialize(b, JsonOptions),
+            v => JsonSerializer.Serialize(v, JsonOptions).GetHashCode(),
+            v => JsonSerializer.Deserialize<List<string>>(
+                JsonSerializer.Serialize(v, JsonOptions), JsonOptions)!);
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the TenantSubscription entity.
+/// </summary>
+internal class TenantSubscriptionEntityConfiguration : IEntityTypeConfiguration<TenantSubscription>
+{
+    public void Configure(EntityTypeBuilder<TenantSubscription> builder)
+    {
+        builder.ToTable("TenantSubscriptions", "multitenancy");
+
+        builder.HasKey(s => s.Id);
+
+        builder.HasIndex(s => s.TenantId)
+            .HasDatabaseName("IX_TenantSubscriptions_TenantId");
+
+        builder.HasIndex(s => s.Status)
+            .HasDatabaseName("IX_TenantSubscriptions_Status");
+
+        builder.HasIndex(s => new { s.TenantId, s.Status })
+            .HasDatabaseName("IX_TenantSubscriptions_TenantId_Status");
+
+        builder.Property(s => s.Status)
+            .HasConversion<string>()
+            .HasMaxLength(50);
+
+        builder.Property(s => s.BillingCycle)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        builder.Property(s => s.PriceAtSubscription)
+            .HasPrecision(18, 2);
+
+        builder.Property(s => s.DiscountPercentage)
+            .HasPrecision(5, 2);
+
+        builder.Property(s => s.FinalPrice)
+            .HasPrecision(18, 2);
+
+        builder.Property(s => s.Currency)
+            .IsRequired()
+            .HasMaxLength(3)
+            .HasDefaultValue("THB");
+
+        builder.Property(s => s.DiscountCode)
+            .HasMaxLength(50);
+
+        builder.Property(s => s.CancellationReason)
+            .HasMaxLength(1000);
+
+        // Navigation to SubscriptionPlan
+        builder.HasOne(s => s.Plan)
+            .WithMany()
+            .HasForeignKey(s => s.PlanId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the SubscriptionPayment entity.
+/// </summary>
+internal class SubscriptionPaymentEntityConfiguration : IEntityTypeConfiguration<SubscriptionPayment>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionPayment> builder)
+    {
+        builder.ToTable("SubscriptionPayments", "multitenancy");
+
+        builder.HasKey(p => p.Id);
+
+        builder.HasIndex(p => p.TenantId)
+            .HasDatabaseName("IX_SubscriptionPayments_TenantId");
+
+        builder.HasIndex(p => p.SubscriptionId)
+            .HasDatabaseName("IX_SubscriptionPayments_SubscriptionId");
+
+        builder.HasIndex(p => p.PaymentNumber)
+            .IsUnique()
+            .HasDatabaseName("IX_SubscriptionPayments_PaymentNumber");
+
+        builder.HasIndex(p => p.Status)
+            .HasDatabaseName("IX_SubscriptionPayments_Status");
+
+        builder.Property(p => p.PaymentNumber)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.Amount)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.VatAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.TotalAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.Currency)
+            .IsRequired()
+            .HasMaxLength(3)
+            .HasDefaultValue("THB");
+
+        builder.Property(p => p.PaymentMethod)
+            .HasConversion<string>()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.Status)
+            .HasConversion<string>()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.BankName)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.TransferReference)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.SlipImageUrl)
+            .HasMaxLength(1000);
+
+        builder.Property(p => p.CardLast4)
+            .HasMaxLength(4);
+
+        builder.Property(p => p.CardBrand)
+            .HasMaxLength(50);
+
+        builder.Property(p => p.GatewayTransactionId)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.InvoiceNumber)
+            .HasMaxLength(50);
+
+        // Navigation to TenantSubscription
+        builder.HasOne(p => p.Subscription)
+            .WithMany()
+            .HasForeignKey(p => p.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the SubscriptionInvoice entity.
+/// </summary>
+internal class SubscriptionInvoiceEntityConfiguration : IEntityTypeConfiguration<SubscriptionInvoice>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionInvoice> builder)
+    {
+        builder.ToTable("SubscriptionInvoices", "multitenancy");
+
+        builder.HasKey(i => i.Id);
+
+        builder.HasIndex(i => i.TenantId)
+            .HasDatabaseName("IX_SubscriptionInvoices_TenantId");
+
+        builder.HasIndex(i => i.SubscriptionId)
+            .HasDatabaseName("IX_SubscriptionInvoices_SubscriptionId");
+
+        builder.HasIndex(i => i.InvoiceNumber)
+            .IsUnique()
+            .HasDatabaseName("IX_SubscriptionInvoices_InvoiceNumber");
+
+        builder.HasIndex(i => i.Status)
+            .HasDatabaseName("IX_SubscriptionInvoices_Status");
+
+        builder.Property(i => i.InvoiceNumber)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(i => i.PlanName)
+            .IsRequired()
+            .HasMaxLength(200);
+
+        builder.Property(i => i.BillingCycleDescription)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(i => i.SubTotal)
+            .HasPrecision(18, 2);
+
+        builder.Property(i => i.DiscountAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(i => i.VatRate)
+            .HasPrecision(5, 2)
+            .HasDefaultValue(7m);
+
+        builder.Property(i => i.VatAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(i => i.TotalAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(i => i.Currency)
+            .IsRequired()
+            .HasMaxLength(3)
+            .HasDefaultValue("THB");
+
+        builder.Property(i => i.Status)
+            .HasConversion<string>()
+            .HasMaxLength(50);
+
+        builder.Property(i => i.SellerName)
+            .HasMaxLength(500);
+
+        builder.Property(i => i.SellerTaxId)
+            .HasMaxLength(50);
+
+        builder.Property(i => i.SellerAddress)
+            .HasMaxLength(1000);
+
+        builder.Property(i => i.BuyerName)
+            .HasMaxLength(500);
+
+        builder.Property(i => i.BuyerTaxId)
+            .HasMaxLength(50);
+
+        builder.Property(i => i.BuyerAddress)
+            .HasMaxLength(1000);
     }
 }

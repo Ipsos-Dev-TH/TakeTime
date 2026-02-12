@@ -101,6 +101,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICurrentTenantService, CurrentTenantService>();
         services.AddScoped<TenantManagementService>();
         services.AddScoped<TenantSettingsService>();
+        services.AddScoped<SubscriptionService>();
 
         // Register feature management
         services.AddScoped<IFeatureManager, TenantFeatureManager>();

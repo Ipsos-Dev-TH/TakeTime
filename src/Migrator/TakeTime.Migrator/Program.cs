@@ -52,7 +52,13 @@ public class Program
         ["004_CreateInventoryServiceTables.sql"] = "Inventory",
         ["005_CreateHRServiceTables.sql"] = "HR",
         ["006_CreateCRMServiceTables.sql"] = "CRM",
-        ["007_SeedDefaultTenant.sql"] = "TenantManagement"
+        ["007_SeedDefaultTenant.sql"] = "TenantManagement",
+        ["008_CreateChannelManagerServiceTables.sql"] = "ChannelManager",
+        ["009_CreateGuestExperienceServiceTables.sql"] = "GuestExperience",
+        ["010_CreateAccountingServiceTables.sql"] = "Accounting",
+        ["011_CreateNotificationServiceTables.sql"] = "Notification",
+        ["012_CreateAffiliateServiceTables.sql"] = "Affiliate",
+        ["013_CreateSubscriptionTables.sql"] = "TenantManagement"
     };
 
     public static async Task<int> Main(string[] args)

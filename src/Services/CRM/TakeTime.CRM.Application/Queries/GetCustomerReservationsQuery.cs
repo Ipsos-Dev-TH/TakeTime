@@ -1,5 +1,8 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using TakeTime.CRM.Application.DTOs;
+using TakeTime.CRM.Infrastructure.Repositories;
 
 namespace TakeTime.CRM.Application.Queries;
 
@@ -10,20 +13,42 @@ public class GetCustomerReservationsQuery : IRequest<CustomerReservationHistoryD
 
 public class GetCustomerReservationsHandler : IRequestHandler<GetCustomerReservationsQuery, CustomerReservationHistoryDto>
 {
+    private readonly CRMDbContext _db;
+    private readonly ILogger<GetCustomerReservationsHandler> _logger;
+
+    public GetCustomerReservationsHandler(CRMDbContext db, ILogger<GetCustomerReservationsHandler> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
     public async Task<CustomerReservationHistoryDto> Handle(GetCustomerReservationsQuery request, CancellationToken ct)
     {
-        // In real implementation:
-        // 1. Verify customer exists in CRMDbContext
-        // 2. Query reservation data via cross-service communication (e.g., HTTP client to Reservation service)
-        //    or via a read-model/materialized view
-        // 3. Return reservation history with summary stats
+        // Verify customer exists and load basic info
+        var customer = await _db.Customers
+            .Where(c => c.Id == request.CustomerId)
+            .Select(c => new { c.Id, c.FirstName, c.LastName, c.TotalVisits, TotalSpent = c.TotalSpent.Amount })
+            .FirstOrDefaultAsync(ct);
 
-        return await Task.FromResult(new CustomerReservationHistoryDto
+        if (customer is null)
+            throw new InvalidOperationException($"Customer with ID '{request.CustomerId}' not found.");
+
+        // Note: Reservation data lives in the Reservation microservice.
+        // In a full implementation, this would call the Reservation service via HTTP client
+        // or query a read-model/materialized view.
+        // For now, we return the customer stats from the CRM side.
+        _logger.LogInformation(
+            "Fetching reservation history for customer {CustomerId}. Cross-service query required.",
+            request.CustomerId);
+
+        return new CustomerReservationHistoryDto
         {
-            CustomerId = request.CustomerId,
-            Reservations = [],
-            TotalReservations = 0,
-            TotalSpent = 0
-        });
+            CustomerId = customer.Id,
+            CustomerName = $"{customer.FirstName} {customer.LastName}",
+            TotalReservations = customer.TotalVisits,
+            TotalSpent = customer.TotalSpent,
+            Currency = "THB",
+            Reservations = []
+        };
     }
 }

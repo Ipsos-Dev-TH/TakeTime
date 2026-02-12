@@ -1,5 +1,10 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using TakeTime.Core.Domain.ValueObjects;
 using TakeTime.HumanResources.Application.DTOs;
+using TakeTime.HumanResources.Domain.Entities;
+using TakeTime.HumanResources.Infrastructure.Repositories;
 
 namespace TakeTime.HumanResources.Application.Commands;
 
@@ -14,37 +19,64 @@ public class CreateOvertimeRecordCommand : IRequest<OvertimeDto>
 
 public class CreateOvertimeRecordHandler : IRequestHandler<CreateOvertimeRecordCommand, OvertimeDto>
 {
+    private readonly HRDbContext _db;
+    private readonly ILogger<CreateOvertimeRecordHandler> _logger;
+
+    public CreateOvertimeRecordHandler(HRDbContext db, ILogger<CreateOvertimeRecordHandler> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
     public async Task<OvertimeDto> Handle(CreateOvertimeRecordCommand request, CancellationToken ct)
     {
-        // Validate times
         if (request.EndTime <= request.StartTime)
             throw new InvalidOperationException("End time must be after start time.");
 
         if (request.OTRate <= 0)
             throw new InvalidOperationException("OT rate must be positive.");
 
-        // In real implementation:
-        // 1. Load employee from HRDbContext to verify existence and get hourly rate
-        // 2. Calculate hourly rate from monthly salary (salary / 30 / 8 for standard)
-        // 3. Create OvertimeRecord entity via domain constructor
-        // 4. Save to HRDbContext
+        // Load employee to verify existence and calculate hourly rate
+        var employee = await _db.Employees.FirstOrDefaultAsync(e => e.Id == request.EmployeeId, ct);
+        if (employee is null)
+            throw new InvalidOperationException($"Employee with ID '{request.EmployeeId}' not found.");
 
-        var totalHours = Math.Round((decimal)(request.EndTime - request.StartTime).TotalHours, 2);
-        var id = Guid.NewGuid();
+        // Calculate hourly rate from monthly salary: salary / 30 days / 8 hours
+        var hourlyRate = Money.InBaht(Math.Round(employee.Salary.Amount / 30m / 8m, 2));
 
-        return await Task.FromResult(new OvertimeDto
+        // Create OvertimeRecord entity via domain constructor
+        var otRecord = new OvertimeRecord(
+            employeeId: request.EmployeeId,
+            date: request.Date,
+            startTime: request.StartTime,
+            endTime: request.EndTime,
+            otRate: request.OTRate,
+            hourlyRate: hourlyRate
+        );
+
+        _db.OvertimeRecords.Add(otRecord);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Created overtime record for employee {EmployeeCode} on {Date}: {Hours}h at {Rate}x",
+            employee.EmployeeCode, request.Date.Date, otRecord.TotalHours, request.OTRate);
+
+        return new OvertimeDto
         {
-            Id = id,
-            EmployeeId = request.EmployeeId,
-            Date = request.Date.Date,
-            StartTime = request.StartTime,
-            EndTime = request.EndTime,
-            TotalHours = totalHours,
-            OTRate = request.OTRate,
-            Amount = 0, // Calculated from employee's hourly rate in real implementation
+            Id = otRecord.Id,
+            EmployeeId = otRecord.EmployeeId,
+            EmployeeName = employee.FullName,
+            EmployeeNumber = employee.EmployeeCode,
+            Department = employee.Department,
+            Date = otRecord.Date,
+            StartTime = otRecord.StartTime,
+            EndTime = otRecord.EndTime,
+            TotalHours = otRecord.TotalHours,
+            OTRate = otRecord.OTRate,
+            Amount = otRecord.Amount.Amount,
             Currency = "THB",
-            Status = "Pending",
-            CreatedAt = DateTime.UtcNow
-        });
+            Status = otRecord.Status.ToString(),
+            CreatedAt = otRecord.CreatedAt
+        };
     }
 }

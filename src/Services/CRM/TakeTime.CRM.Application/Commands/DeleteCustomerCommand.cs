@@ -1,4 +1,7 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using TakeTime.CRM.Infrastructure.Repositories;
 
 namespace TakeTime.CRM.Application.Commands;
 
@@ -9,15 +12,28 @@ public class DeleteCustomerCommand : IRequest<bool>
 
 public class DeleteCustomerHandler : IRequestHandler<DeleteCustomerCommand, bool>
 {
+    private readonly CRMDbContext _db;
+    private readonly ILogger<DeleteCustomerHandler> _logger;
+
+    public DeleteCustomerHandler(CRMDbContext db, ILogger<DeleteCustomerHandler> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
     public async Task<bool> Handle(DeleteCustomerCommand request, CancellationToken ct)
     {
-        // In real implementation:
-        // 1. Load customer from CRMDbContext by ID
-        // 2. If not found, return false
-        // 3. Call customer.MarkAsDeleted() for soft-delete
-        // 4. Save changes
-        // 5. Return true
+        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId, ct);
+        if (customer is null)
+            return false;
 
-        return await Task.FromResult(true);
+        // Soft-delete via Entity base method
+        customer.MarkAsDeleted();
+
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Soft-deleted customer {CustomerCode} ({FullName})", customer.CustomerCode, customer.FullName);
+
+        return true;
     }
 }

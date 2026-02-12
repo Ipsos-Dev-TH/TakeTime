@@ -1,5 +1,8 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using TakeTime.CRM.Application.DTOs;
+using TakeTime.CRM.Infrastructure.Repositories;
 
 namespace TakeTime.CRM.Application.Commands;
 
@@ -12,6 +15,15 @@ public class RespondToReviewCommand : IRequest<ReviewDto>
 
 public class RespondToReviewHandler : IRequestHandler<RespondToReviewCommand, ReviewDto>
 {
+    private readonly CRMDbContext _db;
+    private readonly ILogger<RespondToReviewHandler> _logger;
+
+    public RespondToReviewHandler(CRMDbContext db, ILogger<RespondToReviewHandler> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
     public async Task<ReviewDto> Handle(RespondToReviewCommand request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Response))
@@ -20,18 +32,36 @@ public class RespondToReviewHandler : IRequestHandler<RespondToReviewCommand, Re
         if (string.IsNullOrWhiteSpace(request.RespondedBy))
             throw new InvalidOperationException("Responded by user is required.");
 
-        // In real implementation:
-        // 1. Load GuestReview from CRMDbContext by ID
-        // 2. If not found, throw NotFoundException
-        // 3. Call review.AddResponse(response, respondedBy)
-        // 4. Save changes
+        var review = await _db.GuestReviews.FirstOrDefaultAsync(r => r.Id == request.ReviewId, ct);
+        if (review is null)
+            throw new InvalidOperationException($"Review with ID '{request.ReviewId}' not found.");
 
-        return await Task.FromResult(new ReviewDto
+        // Apply response via domain method
+        review.AddResponse(request.Response, request.RespondedBy);
+
+        await _db.SaveChangesAsync(ct);
+
+        // Load customer name
+        var customerName = await _db.Customers
+            .Where(c => c.Id == review.CustomerId)
+            .Select(c => c.FirstName + " " + c.LastName)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+
+        _logger.LogInformation(
+            "Responded to review {ReviewId} by {RespondedBy}",
+            review.Id, request.RespondedBy);
+
+        return new ReviewDto
         {
-            Id = request.ReviewId,
-            Response = request.Response,
-            Status = "Approved",
-            CreatedAt = DateTime.UtcNow
-        });
+            Id = review.Id,
+            CustomerId = review.CustomerId,
+            CustomerName = customerName,
+            ReservationId = review.ReservationId == Guid.Empty ? null : review.ReservationId,
+            Rating = review.Rating,
+            Comment = review.Comment,
+            Response = review.Response,
+            Status = review.Status.ToString(),
+            CreatedAt = review.CreatedAt
+        };
     }
 }
