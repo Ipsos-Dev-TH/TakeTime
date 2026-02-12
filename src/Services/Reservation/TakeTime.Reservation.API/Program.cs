@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Reservation.Infrastructure.Repositories;
 using TakeTime.Core.Extensions;
+using TakeTime.MultiTenancy;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +18,9 @@ builder.Host.UseSerilog((context, loggerConfig) =>
 
 // Add Core services (MediatR, FluentValidation, pipeline behaviors)
 builder.Services.AddCore(typeof(TakeTime.Reservation.Application.Commands.CreateReservationCommand).Assembly);
+
+// Add multi-tenancy services (tenant resolution, Core + MultiTenancy ICurrentTenantService)
+builder.Services.AddMultiTenancy(builder.Configuration);
 
 // Register DbContext
 builder.Services.AddDbContext<ReservationDbContext>((serviceProvider, options) =>

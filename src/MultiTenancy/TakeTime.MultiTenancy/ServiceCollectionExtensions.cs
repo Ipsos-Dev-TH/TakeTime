@@ -97,8 +97,10 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<ITenantResolutionStrategy, QueryStringTenantResolutionStrategy>();
         }
 
-        // Register tenant services
-        services.AddScoped<ICurrentTenantService, CurrentTenantService>();
+        // Register tenant services — single scoped instance serves both interfaces
+        services.AddScoped<CurrentTenantService>();
+        services.AddScoped<ICurrentTenantService>(sp => sp.GetRequiredService<CurrentTenantService>());
+        services.AddScoped<TakeTime.Core.Application.Interfaces.ICurrentTenantService>(sp => sp.GetRequiredService<CurrentTenantService>());
         services.AddScoped<TenantManagementService>();
         services.AddScoped<TenantSettingsService>();
         services.AddScoped<SubscriptionService>();

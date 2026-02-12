@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Accounting.Infrastructure.Repositories;
+using TakeTime.Accounting.Application.Queries;
 using TakeTime.Core.Extensions;
+using TakeTime.MultiTenancy;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,7 +18,13 @@ builder.Host.UseSerilog((context, loggerConfig) =>
 });
 
 // Add Core services (MediatR, FluentValidation, pipeline behaviors)
-builder.Services.AddCore(typeof(TakeTime.Accounting.Application.Queries.GetDailyRevenueQuery).Assembly);
+builder.Services.AddCore(typeof(GetDailyRevenueQuery).Assembly);
+
+// Add multi-tenancy services (tenant resolution, Core + MultiTenancy ICurrentTenantService)
+builder.Services.AddMultiTenancy(builder.Configuration);
+
+// Register accounting query repository
+builder.Services.AddScoped<IAccountingQueryRepository, AccountingQueryRepository>();
 
 // Register DbContext
 builder.Services.AddDbContext<AccountingDbContext>((serviceProvider, options) =>

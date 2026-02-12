@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using TakeTime.MultiTenancy.Configuration;
 using TakeTime.MultiTenancy.Core;
 using TakeTime.MultiTenancy.Middleware;
+using CoreTenantService = TakeTime.Core.Application.Interfaces.ICurrentTenantService;
 
 namespace TakeTime.MultiTenancy.Services;
 
@@ -15,8 +16,12 @@ namespace TakeTime.MultiTenancy.Services;
 /// This service is registered as scoped because it is tied to a single HTTP
 /// request. Non-HTTP scenarios (background jobs, message handlers) should use
 /// a different mechanism to set the tenant (e.g., <see cref="SetTenant"/>).
+///
+/// Implements both the MultiTenancy and Core ICurrentTenantService interfaces
+/// so that a single scoped instance can serve BaseDbContext, MediatR handlers,
+/// and any other consumer that depends on either contract.
 /// </summary>
-public class CurrentTenantService : ICurrentTenantService
+public class CurrentTenantService : ICurrentTenantService, CoreTenantService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly TenantConfiguration _config;
@@ -84,6 +89,14 @@ public class CurrentTenantService : ICurrentTenantService
 
     public bool HasTenant => CurrentTenant is not null;
 
+    // ─── Core ICurrentTenantService members ─────────────────────────
+
+    /// <summary>
+    /// Returns tenant settings as a flat dictionary, combining the tenant's
+    /// Metadata dictionary with well-known BusinessSettings properties.
+    /// </summary>
+    IDictionary<string, string> CoreTenantService.TenantSettings => GetTenantSettingsDictionary();
+
     public void SetTenant(Tenant tenant)
     {
         ArgumentNullException.ThrowIfNull(tenant);
@@ -103,6 +116,58 @@ public class CurrentTenantService : ICurrentTenantService
             tenant.Code, tenant.Id);
     }
 
+    /// <summary>
+    /// Implements Core ICurrentTenantService.SetTenantAsync by creating a
+    /// minimal Tenant object and calling the existing SetTenant method.
+    /// </summary>
+    public Task SetTenantAsync(string tenantId, string? tenantName = null, string? connectionString = null)
+    {
+        var tenant = new Tenant
+        {
+            Id = Guid.TryParse(tenantId, out var guid) ? guid : Guid.NewGuid(),
+            Code = tenantId,
+            Name = tenantName ?? tenantId,
+            DatabaseConnectionString = connectionString
+        };
+
+        SetTenant(tenant);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Retrieves a tenant setting by key. Checks the tenant's Metadata dictionary
+    /// first, then falls back to well-known BusinessSettings properties.
+    /// </summary>
+    public string? GetSetting(string key)
+    {
+        var tenant = CurrentTenant;
+        if (tenant is null)
+            return null;
+
+        // 1. Check Metadata dictionary first
+        if (tenant.Metadata.TryGetValue(key, out var metaValue))
+            return metaValue;
+
+        // 2. Map well-known keys to BusinessSettings properties
+        var settings = tenant.BusinessSettings;
+        if (settings is null)
+            return null;
+
+        return key switch
+        {
+            "Currency" => settings.DefaultCurrency,
+            "DefaultCurrency" => settings.DefaultCurrency,
+            "DbProvider" => null, // No specific BusinessSettings property; rely on Metadata
+            "VATRate" => settings.VATRate.ToString(),
+            "EnableVAT" => settings.EnableVAT.ToString(),
+            "TimeZone" => settings.TimeZone,
+            "DefaultLanguage" => settings.DefaultLanguage,
+            "DateFormat" => settings.DateFormat,
+            "PricingModel" => settings.PricingModel.ToString(),
+            _ => null
+        };
+    }
+
     public void ClearTenant()
     {
         _explicitTenant = null;
@@ -116,5 +181,28 @@ public class CurrentTenantService : ICurrentTenantService
         }
 
         _logger.LogDebug("Tenant context cleared");
+    }
+
+    private Dictionary<string, string> GetTenantSettingsDictionary()
+    {
+        var tenant = CurrentTenant;
+        if (tenant is null)
+            return new Dictionary<string, string>();
+
+        // Start with Metadata
+        var dict = new Dictionary<string, string>(tenant.Metadata);
+
+        // Add well-known BusinessSettings values
+        var settings = tenant.BusinessSettings;
+        if (settings is not null)
+        {
+            dict.TryAdd("Currency", settings.DefaultCurrency);
+            dict.TryAdd("TimeZone", settings.TimeZone);
+            dict.TryAdd("DefaultLanguage", settings.DefaultLanguage);
+            dict.TryAdd("VATRate", settings.VATRate.ToString());
+            dict.TryAdd("EnableVAT", settings.EnableVAT.ToString());
+        }
+
+        return dict;
     }
 }

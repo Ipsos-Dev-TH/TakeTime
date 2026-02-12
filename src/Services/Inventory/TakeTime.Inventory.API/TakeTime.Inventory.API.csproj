@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TakeTime.Inventory.Application\TakeTime.Inventory.Application.csproj" />
     <ProjectReference Include="..\TakeTime.Inventory.Infrastructure\TakeTime.Inventory.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
   </ItemGroup>
 
 </Project>

@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TakeTime.HumanResources.Application\TakeTime.HumanResources.Application.csproj" />
     <ProjectReference Include="..\TakeTime.HumanResources.Infrastructure\TakeTime.HumanResources.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
   </ItemGroup>
 
 </Project>

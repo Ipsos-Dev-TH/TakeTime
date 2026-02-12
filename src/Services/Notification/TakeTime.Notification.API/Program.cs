@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Core.Extensions;
+using TakeTime.MultiTenancy;
 using TakeTime.Notification.Application.Interfaces;
 using TakeTime.Notification.Application.Services;
 using TakeTime.Notification.Infrastructure.Providers;
@@ -20,6 +21,9 @@ builder.Host.UseSerilog((context, loggerConfig) =>
 
 // Add Core services (MediatR, FluentValidation, pipeline behaviors)
 builder.Services.AddCore(typeof(TakeTime.Notification.Application.Commands.SendNotificationCommand).Assembly);
+
+// Add multi-tenancy services
+builder.Services.AddMultiTenancy(builder.Configuration);
 
 // Register notification providers
 builder.Services.AddSingleton<INotificationProvider, EmailNotificationProvider>();

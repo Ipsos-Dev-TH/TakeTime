@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.HumanResources.Infrastructure.Repositories;
 using TakeTime.Core.Extensions;
+using TakeTime.MultiTenancy;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +18,9 @@ builder.Host.UseSerilog((context, loggerConfig) =>
 
 // Add Core services (MediatR, FluentValidation, pipeline behaviors)
 builder.Services.AddCore(typeof(TakeTime.HumanResources.Application.Commands.SubmitLeaveRequestCommand).Assembly);
+
+// Add multi-tenancy services
+builder.Services.AddMultiTenancy(builder.Configuration);
 
 // Register DbContext
 builder.Services.AddDbContext<HRDbContext>((serviceProvider, options) =>
