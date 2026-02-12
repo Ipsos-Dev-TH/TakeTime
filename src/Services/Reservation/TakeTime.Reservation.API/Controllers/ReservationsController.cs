@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TakeTime.Reservation.Application.Commands;
 using TakeTime.Reservation.Application.DTOs;
+using TakeTime.Reservation.Application.Interfaces;
 using TakeTime.Reservation.Application.Queries;
 
 namespace TakeTime.Reservation.API.Controllers;
