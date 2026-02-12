@@ -13,4 +13,11 @@
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.2.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\TakeTime.Core\TakeTime.Core.csproj" />
+    <ProjectReference Include="..\..\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\Identity\TakeTime.Identity\TakeTime.Identity.csproj" />
+    <ProjectReference Include="..\..\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>

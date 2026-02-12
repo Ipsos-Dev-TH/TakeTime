@@ -14,9 +14,8 @@ public class GuestExperienceDbContext : BaseDbContext
 
     public GuestExperienceDbContext(
         DbContextOptions<GuestExperienceDbContext> options,
-        ICurrentTenantService tenantService,
-        ICurrentUserService userService)
-        : base(options, tenantService, userService)
+        ICurrentTenantService tenantService)
+        : base(options, tenantService)
     {
     }
 

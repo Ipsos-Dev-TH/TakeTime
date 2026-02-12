@@ -30,7 +30,7 @@ public class SubmitLeaveRequestHandler : IRequestHandler<SubmitLeaveRequestComma
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             TotalDays = totalDays,
-            Reason = request.Reason,
+            Reason = request.Reason ?? string.Empty,
             Status = "Pending",
             CreatedAt = DateTime.UtcNow
         });

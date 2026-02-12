@@ -95,7 +95,7 @@ public sealed class ConfirmReservationCommandHandler : IRequestHandler<ConfirmRe
             ReservationNumber = reservation.ReservationNumber,
             TenantId = tenantSettings.TenantId,
             CustomerName = reservation.CustomerName,
-            CustomerEmail = reservation.CustomerEmail,
+            CustomerEmail = null, // CustomerEmail not available in SummaryDto
             CheckInDate = reservation.CheckInDate,
             CheckOutDate = reservation.CheckOutDate,
             SendConfirmationEmail = request.SendConfirmationEmail,

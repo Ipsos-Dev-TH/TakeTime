@@ -21,7 +21,7 @@ public class ApproveLeaveRequestHandler : IRequestHandler<ApproveLeaveRequestCom
         {
             Id = request.LeaveRequestId,
             Status = status,
-            ApprovedBy = request.ApprovedBy,
+            ApproverName = request.ApprovedBy,
             ApprovedAt = DateTime.UtcNow,
             RejectionReason = request.RejectionReason
         });

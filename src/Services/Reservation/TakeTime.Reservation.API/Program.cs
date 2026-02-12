@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
-using TakeTime.Payment.Infrastructure.Repositories;
+using TakeTime.Reservation.Infrastructure.Repositories;
 using TakeTime.Core.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,15 +11,15 @@ builder.Host.UseSerilog((context, loggerConfig) =>
     loggerConfig
         .ReadFrom.Configuration(context.Configuration)
         .Enrich.FromLogContext()
-        .Enrich.WithProperty("Service", "Payment")
+        .Enrich.WithProperty("Service", "Reservation")
         .WriteTo.Console();
 });
 
 // Add Core services (MediatR, FluentValidation, pipeline behaviors)
-builder.Services.AddCore(typeof(TakeTime.Payment.Application.Commands.ProcessPaymentCommand).Assembly);
+builder.Services.AddCore(typeof(TakeTime.Reservation.Application.Commands.CreateReservationCommand).Assembly);
 
 // Register DbContext
-builder.Services.AddDbContext<PaymentDbContext>((serviceProvider, options) =>
+builder.Services.AddDbContext<ReservationDbContext>((serviceProvider, options) =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     if (!string.IsNullOrEmpty(connectionString))
@@ -37,9 +37,9 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
-        Title = "TakeTime Payment API",
+        Title = "TakeTime Reservation API",
         Version = "v1",
-        Description = "API for processing payments, generating receipts, tax invoices, and financial tracking."
+        Description = "API for managing reservations, accommodations, rates, promotions, and guest booking portal."
     });
 
     options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
@@ -75,7 +75,7 @@ builder.Services.AddAuthentication("Bearer")
         options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
         {
             ValidateAudience = true,
-            ValidAudience = builder.Configuration["Identity:Audience"] ?? "taketime-payment-api"
+            ValidAudience = builder.Configuration["Identity:Audience"] ?? "taketime-reservation-api"
         };
     });
 
@@ -97,7 +97,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(options =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "TakeTime Payment API v1");
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "TakeTime Reservation API v1");
     });
 }
 
@@ -108,6 +108,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-Log.Information("TakeTime Payment API starting up...");
+Log.Information("TakeTime Reservation API starting up...");
 
 app.Run();

@@ -84,7 +84,8 @@ public sealed class CancelReservationCommandHandler : IRequestHandler<CancelRese
 
         // Calculate cancellation fee
         var cancellationFee = request.WaiveCancellationFee ? 0 : policyResult.CancellationFeeAmount;
-        var refundAmount = reservation.AmountPaid - cancellationFee;
+        var amountPaid = reservation.TotalAmount - reservation.BalanceDue;
+        var refundAmount = amountPaid - cancellationFee;
         if (refundAmount < 0) refundAmount = 0;
 
         // Update reservation status
@@ -107,7 +108,7 @@ public sealed class CancelReservationCommandHandler : IRequestHandler<CancelRese
             ReservationNumber = reservation.ReservationNumber,
             TenantId = tenantSettings.TenantId,
             CustomerName = reservation.CustomerName,
-            CustomerEmail = reservation.CustomerEmail,
+            CustomerEmail = null, // CustomerEmail not available in SummaryDto
             CancellationReason = request.Reason,
             CancellationFee = cancellationFee,
             RefundAmount = refundAmount,

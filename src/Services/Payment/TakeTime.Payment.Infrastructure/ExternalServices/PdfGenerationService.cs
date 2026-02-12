@@ -85,14 +85,17 @@ public class PdfGenerationService : IPdfGenerationService
 
     private static string BuildReceiptHtml(Receipt receipt)
     {
-        var itemRows = string.Join("\n", receipt.Items.Select(item => $"""
-            <tr>
-                <td style="padding: 6px; border: 1px solid #ddd;">{item.Description}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{item.Quantity}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{item.UnitPrice.Amount:N2}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{item.Amount.Amount:N2}</td>
-            </tr>
-            """));
+        var itemRows = string.Join("\n", receipt.Items.Select(item =>
+            "<tr>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd;\">{item.Description}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: center;\">{item.Quantity}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: right;\">{item.UnitPrice.Amount:N2}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: right;\">{item.Amount.Amount:N2}</td>" +
+            "</tr>"));
+
+        var voidedHtml = receipt.IsVoided
+            ? "<div style='color: red; font-size: 18px; text-align: center; margin-top: 30px; border: 2px solid red; padding: 10px;'>VOIDED</div>"
+            : "";
 
         return $"""
             <!DOCTYPE html>
@@ -156,7 +159,7 @@ public class PdfGenerationService : IPdfGenerationService
                     </tfoot>
                 </table>
 
-                {(receipt.IsVoided ? "<div style='color: red; font-size: 18px; text-align: center; margin-top: 30px; border: 2px solid red; padding: 10px;'>VOIDED</div>" : "")}
+                {voidedHtml}
 
                 <div style="margin-top: 40px; font-size: 10px; color: #999; text-align: center;">
                     <p>This is a computer-generated document. No signature required.</p>
@@ -168,15 +171,18 @@ public class PdfGenerationService : IPdfGenerationService
 
     private static string BuildTaxInvoiceHtml(TaxInvoice invoice)
     {
-        var itemRows = string.Join("\n", invoice.Items.Select((item, index) => $"""
-            <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{index + 1}</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{item.Description}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{item.Quantity}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{item.UnitPrice.Amount:N2}</td>
-                <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{item.Amount.Amount:N2}</td>
-            </tr>
-            """));
+        var itemRows = string.Join("\n", invoice.Items.Select((item, index) =>
+            "<tr>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: center;\">{index + 1}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd;\">{item.Description}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: center;\">{item.Quantity}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: right;\">{item.UnitPrice.Amount:N2}</td>" +
+            $"<td style=\"padding: 6px; border: 1px solid #ddd; text-align: right;\">{item.Amount.Amount:N2}</td>" +
+            "</tr>"));
+
+        var voidedHtml = invoice.Status == "Voided"
+            ? "<div style='color: red; font-size: 16px; text-align: center; margin-top: 20px; border: 2px solid red; padding: 8px;'>VOIDED / ยกเลิก</div>"
+            : "";
 
         return $"""
             <!DOCTYPE html>
@@ -239,7 +245,7 @@ public class PdfGenerationService : IPdfGenerationService
                     </tfoot>
                 </table>
 
-                {(invoice.Status == "Voided" ? "<div style='color: red; font-size: 16px; text-align: center; margin-top: 20px; border: 2px solid red; padding: 8px;'>VOIDED / ยกเลิก</div>" : "")}
+                {voidedHtml}
 
                 <div style="margin-top: 30px; font-size: 9px; color: #999; text-align: center;">
                     <p>This is a computer-generated tax invoice. No signature required.</p>

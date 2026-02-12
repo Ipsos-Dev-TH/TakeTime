@@ -13,9 +13,8 @@ public class CRMDbContext : BaseDbContext
 
     public CRMDbContext(
         DbContextOptions<CRMDbContext> options,
-        ICurrentTenantService tenantService,
-        ICurrentUserService userService)
-        : base(options, tenantService, userService)
+        ICurrentTenantService tenantService)
+        : base(options, tenantService)
     {
     }
 

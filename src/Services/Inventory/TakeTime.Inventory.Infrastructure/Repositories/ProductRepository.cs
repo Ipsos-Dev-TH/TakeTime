@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TakeTime.Inventory.Domain.Entities;
+using TakeTime.Inventory.Domain.Enums;
 
 namespace TakeTime.Inventory.Infrastructure.Repositories;
 
@@ -25,8 +26,8 @@ public class ProductRepository
         if (!string.IsNullOrWhiteSpace(keyword))
             query = query.Where(p => p.Name.Contains(keyword) || (p.Barcode != null && p.Barcode.Contains(keyword)));
 
-        if (!string.IsNullOrWhiteSpace(category))
-            query = query.Where(p => p.Category == category);
+        if (!string.IsNullOrWhiteSpace(category) && Enum.TryParse<ProductCategory>(category, true, out var categoryEnum))
+            query = query.Where(p => p.Category == categoryEnum);
 
         return await query
             .OrderBy(p => p.Name)

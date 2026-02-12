@@ -14,9 +14,8 @@ public class HRDbContext : BaseDbContext
 
     public HRDbContext(
         DbContextOptions<HRDbContext> options,
-        ICurrentTenantService tenantService,
-        ICurrentUserService userService)
-        : base(options, tenantService, userService)
+        ICurrentTenantService tenantService)
+        : base(options, tenantService)
     {
     }
 

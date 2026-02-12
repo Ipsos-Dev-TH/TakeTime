@@ -14,9 +14,8 @@ public class InventoryDbContext : BaseDbContext
 
     public InventoryDbContext(
         DbContextOptions<InventoryDbContext> options,
-        ICurrentTenantService tenantService,
-        ICurrentUserService userService)
-        : base(options, tenantService, userService)
+        ICurrentTenantService tenantService)
+        : base(options, tenantService)
     {
     }
 

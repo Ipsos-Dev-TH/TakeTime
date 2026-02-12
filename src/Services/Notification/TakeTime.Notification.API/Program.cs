@@ -1,8 +1,10 @@
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Core.Extensions;
 using TakeTime.Notification.Application.Interfaces;
 using TakeTime.Notification.Application.Services;
 using TakeTime.Notification.Infrastructure.Providers;
+using TakeTime.Notification.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +29,16 @@ builder.Services.AddSingleton<INotificationProvider, SmsNotificationProvider>();
 
 // Register notification dispatcher
 builder.Services.AddScoped<NotificationDispatcher>();
+
+// Register DbContext
+builder.Services.AddDbContext<NotificationDbContext>((serviceProvider, options) =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (!string.IsNullOrEmpty(connectionString))
+    {
+        options.UseNpgsql(connectionString);
+    }
+});
 
 // Register HTTP client factory for LINE, Telegram, and SMS providers
 builder.Services.AddHttpClient("LINE");
