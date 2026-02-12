@@ -17,6 +17,28 @@ public class CustomersController : ControllerBase
         _mediator = mediator;
     }
 
+    /// <summary>Search customers with filtering.</summary>
+    [HttpGet]
+    public async Task<ActionResult<List<CustomerDto>>> Search(
+        [FromQuery] string? keyword,
+        [FromQuery] string? tier,
+        [FromQuery] string? source,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        var result = await _mediator.Send(new SearchCustomersQuery
+        {
+            Keyword = keyword,
+            Tier = tier,
+            Source = source,
+            Page = page,
+            PageSize = pageSize
+        }, ct);
+
+        return Ok(result);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<CustomerDto>> GetProfile(Guid id, CancellationToken ct)
     {
@@ -32,6 +54,18 @@ public class CustomersController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Deletes a customer record (soft-delete).</summary>
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var result = await _mediator.Send(new DeleteCustomerCommand
+        {
+            CustomerId = id
+        }, ct);
+
+        return result ? NoContent() : NotFound();
+    }
+
     [HttpGet("analytics")]
     public async Task<ActionResult<CustomerAnalyticsDto>> Analytics(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
@@ -40,54 +74,61 @@ public class CustomersController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Search customers with filtering.</summary>
-    [HttpGet]
-    public IActionResult Search(
-        [FromQuery] string? keyword, [FromQuery] string? tier,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
-    {
-        // TODO: Implement SearchCustomersQuery
-        return StatusCode(501, new { message = "Customer search not yet implemented." });
-    }
-
-    /// <summary>Deletes a customer record.</summary>
-    [HttpDelete("{id:guid}")]
-    public IActionResult Delete(Guid id)
-    {
-        // TODO: Implement DeleteCustomerCommand
-        return StatusCode(501, new { message = "Delete customer not yet implemented." });
-    }
-
     /// <summary>Gets reservation history for a customer.</summary>
     [HttpGet("{id:guid}/reservations")]
-    public IActionResult GetReservationHistory(Guid id)
+    public async Task<ActionResult<CustomerReservationHistoryDto>> GetReservationHistory(
+        Guid id, CancellationToken ct)
     {
-        // TODO: Implement GetCustomerReservationsQuery
-        return StatusCode(501, new { message = "Customer reservation history not yet implemented." });
+        var result = await _mediator.Send(new GetCustomerReservationsQuery
+        {
+            CustomerId = id
+        }, ct);
+
+        return Ok(result);
     }
 
     /// <summary>Gets a customer's loyalty point balance and tier.</summary>
     [HttpGet("{id:guid}/loyalty")]
-    public IActionResult GetLoyaltyStatus(Guid id)
+    public async Task<IActionResult> GetLoyaltyStatus(Guid id, CancellationToken ct)
     {
-        // TODO: Implement GetCustomerLoyaltyQuery
-        return StatusCode(501, new { message = "Customer loyalty status not yet implemented." });
+        var result = await _mediator.Send(new GetCustomerLoyaltyQuery
+        {
+            CustomerId = id
+        }, ct);
+
+        return result is null ? NotFound() : Ok(result);
     }
 
     /// <summary>Merges duplicate customer records.</summary>
     [HttpPost("merge")]
-    public IActionResult MergeCustomers([FromBody] MergeCustomersRequest request)
+    public async Task<ActionResult<CustomerDto>> MergeCustomers(
+        [FromBody] MergeCustomersRequest request, CancellationToken ct)
     {
-        // TODO: Implement MergeCustomersCommand
-        return StatusCode(501, new { message = "Merge customers not yet implemented." });
+        var result = await _mediator.Send(new MergeCustomersCommand
+        {
+            PrimaryCustomerId = request.PrimaryCustomerId,
+            DuplicateCustomerIds = request.DuplicateCustomerIds
+        }, ct);
+
+        return Ok(result);
     }
 
     /// <summary>Exports customer data.</summary>
     [HttpGet("export")]
-    public IActionResult Export([FromQuery] string format = "csv")
+    public async Task<IActionResult> Export(
+        [FromQuery] string format = "csv",
+        [FromQuery] string? tier = null,
+        [FromQuery] string? source = null,
+        CancellationToken ct = default)
     {
-        // TODO: Implement ExportCustomersQuery
-        return StatusCode(501, new { message = "Customer export not yet implemented." });
+        var result = await _mediator.Send(new ExportCustomersQuery
+        {
+            Format = format,
+            Tier = tier,
+            Source = source
+        }, ct);
+
+        return File(result.Data, result.ContentType, result.FileName);
     }
 }
 

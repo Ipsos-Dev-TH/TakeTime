@@ -98,6 +98,34 @@ public sealed class ProductSearchCriteria
 }
 
 /// <summary>
+/// DTO for stock movement history entries.
+/// </summary>
+public sealed class StockMovementDto
+{
+    public Guid Id { get; set; }
+    public Guid ProductId { get; set; }
+    public string ProductName { get; set; } = string.Empty;
+    public string? SKU { get; set; }
+    public string MovementType { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string? ReferenceNumber { get; set; }
+    public string PerformedBy { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// DTO for product category summary with item counts.
+/// </summary>
+public sealed class CategorySummaryDto
+{
+    public string Category { get; set; } = string.Empty;
+    public int ProductCount { get; set; }
+    public int ActiveCount { get; set; }
+    public int LowStockCount { get; set; }
+}
+
+/// <summary>
 /// Paginated result wrapper for inventory queries.
 /// </summary>
 public sealed class PaginatedResult<T>

@@ -266,6 +266,9 @@ public interface IProductRepository
 
     Task<int> GetCurrentStockAsync(Guid productId, CancellationToken cancellationToken = default);
     Task<string> GenerateSKUAsync(string category, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid productId, CancellationToken cancellationToken = default);
+    Task<List<StockMovementDto>> GetStockHistoryAsync(Guid productId, DateTime? from, DateTime? to, CancellationToken cancellationToken = default);
+    Task<List<CategorySummaryDto>> GetCategoriesAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

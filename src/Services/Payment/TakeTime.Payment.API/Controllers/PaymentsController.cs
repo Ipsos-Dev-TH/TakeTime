@@ -52,45 +52,60 @@ public class PaymentsController : ControllerBase
 
     /// <summary>Gets a payment by ID.</summary>
     [HttpGet("{id:guid}")]
-    public IActionResult GetById(Guid id)
+    public async Task<ActionResult<PaymentDto>> GetById(Guid id, CancellationToken ct)
     {
-        // TODO: Implement GetPaymentByIdQuery
-        return StatusCode(501, new { message = "Get payment by ID not yet implemented." });
+        var result = await _mediator.Send(new GetPaymentByIdQuery { PaymentId = id }, ct);
+        return Ok(result);
     }
 
     /// <summary>Searches payments with filtering.</summary>
     [HttpGet]
-    public IActionResult Search(
+    public async Task<ActionResult<PaginatedPaymentResult>> Search(
         [FromQuery] string? status, [FromQuery] string? method,
         [FromQuery] DateTime? from, [FromQuery] DateTime? to,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        // TODO: Implement SearchPaymentsQuery
-        return StatusCode(501, new { message = "Search payments not yet implemented." });
+        var result = await _mediator.Send(new SearchPaymentsQuery
+        {
+            Status = status,
+            PaymentMethod = method,
+            FromDate = from,
+            ToDate = to,
+            Page = page,
+            PageSize = pageSize
+        }, ct);
+        return Ok(result);
     }
 
     /// <summary>Refunds a payment.</summary>
     [HttpPost("{id:guid}/refund")]
-    public IActionResult Refund(Guid id, [FromBody] RefundRequest request)
+    public async Task<ActionResult<PaymentDto>> Refund(
+        Guid id, [FromBody] RefundRequest request, CancellationToken ct)
     {
-        // TODO: Implement RefundPaymentCommand
-        return StatusCode(501, new { message = "Refund not yet implemented." });
+        var result = await _mediator.Send(new RefundPaymentCommand
+        {
+            PaymentId = id,
+            Amount = request.Amount,
+            Reason = request.Reason
+        }, ct);
+        return Ok(result);
     }
 
     /// <summary>Voids a payment.</summary>
     [HttpPost("{id:guid}/void")]
-    public IActionResult VoidPayment(Guid id)
+    public async Task<ActionResult<PaymentDto>> VoidPayment(Guid id, CancellationToken ct)
     {
-        // TODO: Implement VoidPaymentCommand
-        return StatusCode(501, new { message = "Void payment not yet implemented." });
+        var result = await _mediator.Send(new VoidPaymentCommand { PaymentId = id }, ct);
+        return Ok(result);
     }
 
     /// <summary>Gets daily payment summary.</summary>
     [HttpGet("summary/daily")]
-    public IActionResult GetDailySummary([FromQuery] DateTime? date)
+    public async Task<ActionResult<DailyPaymentSummaryDto>> GetDailySummary(
+        [FromQuery] DateTime? date, CancellationToken ct)
     {
-        // TODO: Implement GetDailyPaymentSummaryQuery
-        return StatusCode(501, new { message = "Daily payment summary not yet implemented." });
+        var result = await _mediator.Send(new GetDailyPaymentSummaryQuery { Date = date }, ct);
+        return Ok(result);
     }
 }
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TakeTime.GuestExperience.Application.Commands;
 using TakeTime.GuestExperience.Application.DTOs;
+using TakeTime.GuestExperience.Application.Queries;
 using TakeTime.MultiTenancy.Features;
 
 namespace TakeTime.GuestExperience.API.Controllers;
@@ -61,7 +62,6 @@ public class MaintenanceController : ControllerBase
     /// <returns>A list of maintenance requests.</returns>
     [HttpGet]
     [ProducesResponseType(typeof(List<MaintenanceRequestDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? status,
         [FromQuery] string? priority,
@@ -70,16 +70,20 @@ public class MaintenanceController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        // TODO: Implement GetMaintenanceRequestsQuery when available
-        // Should support filtering by status, priority, category, and date range
-        // Should return paginated results ordered by priority (urgent first) then creation time
         _logger.LogDebug("Listing maintenance requests. Status: {Status}, Priority: {Priority}, Category: {Category}",
             status, priority, category);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var query = new GetMaintenanceRequestsQuery
         {
-            message = "List maintenance requests is not yet implemented. Awaiting GetMaintenanceRequestsQuery."
-        });
+            Status = status,
+            Priority = priority,
+            Category = category,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -91,17 +95,13 @@ public class MaintenanceController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(MaintenanceRequestDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement GetMaintenanceRequestByIdQuery when available
-        // Should return full request details including assignment, cost, and resolution info
         _logger.LogDebug("Getting maintenance request {RequestId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Get maintenance request by ID is not yet implemented. Awaiting GetMaintenanceRequestByIdQuery."
-        });
+        var query = new GetMaintenanceRequestByIdQuery { Id = id };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -114,22 +114,23 @@ public class MaintenanceController : ControllerBase
     [HttpPut("{id:guid}/assign")]
     [ProducesResponseType(typeof(MaintenanceRequestDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Assign(
         Guid id,
         [FromBody] AssignMaintenanceRequestDto request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement AssignMaintenanceRequestCommand when available
-        // Should validate technician exists, set status to Assigned,
-        // and optionally send notification to assigned technician
         _logger.LogInformation("Assigning maintenance request {RequestId} to technician {TechnicianId}",
             id, request.AssignedTo);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new AssignMaintenanceRequestCommand
         {
-            message = "Assign maintenance request is not yet implemented. Awaiting AssignMaintenanceRequestCommand."
-        });
+            RequestId = id,
+            AssignedTo = request.AssignedTo,
+            AssignedToName = request.AssignedToName
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -141,18 +142,13 @@ public class MaintenanceController : ControllerBase
     [HttpPut("{id:guid}/start")]
     [ProducesResponseType(typeof(MaintenanceRequestDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Start(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement StartMaintenanceWorkCommand when available
-        // Should set status to InProgress, record StartedAt timestamp,
-        // and validate request is in Assigned status
         _logger.LogInformation("Starting work on maintenance request {RequestId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Start maintenance work is not yet implemented. Awaiting StartMaintenanceWorkCommand."
-        });
+        var command = new StartMaintenanceWorkCommand { RequestId = id };
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -165,22 +161,22 @@ public class MaintenanceController : ControllerBase
     [HttpPut("{id:guid}/complete")]
     [ProducesResponseType(typeof(MaintenanceRequestDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Complete(
         Guid id,
         [FromBody] CompleteMaintenanceRequestDto request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement CompleteMaintenanceWorkCommand when available
-        // Should set status to Completed, record CompletedAt timestamp,
-        // save resolution notes and actual cost, validate request is in InProgress status,
-        // and optionally update room status back to Available
         _logger.LogInformation("Completing maintenance request {RequestId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new CompleteMaintenanceWorkCommand
         {
-            message = "Complete maintenance work is not yet implemented. Awaiting CompleteMaintenanceWorkCommand."
-        });
+            RequestId = id,
+            ResolutionNotes = request.ResolutionNotes,
+            ActualCost = request.ActualCost
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -190,18 +186,13 @@ public class MaintenanceController : ControllerBase
     /// <returns>A list of pending maintenance requests.</returns>
     [HttpGet("pending")]
     [ProducesResponseType(typeof(List<MaintenanceRequestDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetPending(CancellationToken cancellationToken)
     {
-        // TODO: Implement GetPendingMaintenanceRequestsQuery when available
-        // Should return all Open requests that have not been assigned,
-        // ordered by priority (urgent first) then creation time
         _logger.LogDebug("Getting pending maintenance requests");
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Get pending maintenance requests is not yet implemented. Awaiting GetPendingMaintenanceRequestsQuery."
-        });
+        var query = new GetPendingMaintenanceRequestsQuery();
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 }
 

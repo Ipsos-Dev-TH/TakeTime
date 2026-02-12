@@ -95,3 +95,46 @@ public sealed class AffiliateSearchCriteria
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
 }
+
+/// <summary>
+/// DTO for updating an affiliate's profile.
+/// </summary>
+public sealed class UpdateAffiliateDto
+{
+    public string? Name { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? CompanyName { get; set; }
+    public decimal? CommissionRatePercent { get; set; }
+    public string? CommissionType { get; set; }
+    public string? BankAccountName { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankName { get; set; }
+    public string? TaxId { get; set; }
+}
+
+/// <summary>
+/// DTO for creating an affiliate payout request.
+/// </summary>
+public sealed class CreatePayoutDto
+{
+    public decimal Amount { get; set; }
+    public string PaymentMethod { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// DTO for affiliate performance metrics.
+/// </summary>
+public sealed class AffiliatePerformanceDto
+{
+    public string TenantId { get; set; } = string.Empty;
+    public DateTime? FromDate { get; set; }
+    public DateTime? ToDate { get; set; }
+    public decimal TotalCommission { get; set; }
+    public int TotalBookings { get; set; }
+    public int TotalReferrals { get; set; }
+    public decimal ConversionRatePercent { get; set; }
+    public decimal AverageCommissionPerBooking { get; set; }
+    public string Currency { get; set; } = "THB";
+}

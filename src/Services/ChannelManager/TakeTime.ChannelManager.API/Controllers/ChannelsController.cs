@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TakeTime.ChannelManager.Application.Commands;
 using TakeTime.ChannelManager.Application.DTOs;
+using TakeTime.ChannelManager.Application.Queries;
 using TakeTime.Core.Application.Interfaces;
 
 namespace TakeTime.ChannelManager.API.Controllers;
@@ -119,6 +120,54 @@ public sealed class ChannelsController : ControllerBase
     }
 
     /// <summary>
+    /// Updates a channel connection.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="request">The updated connection settings.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated channel connection.</returns>
+    [HttpPut("connections/{connectionId:guid}")]
+    [ProducesResponseType(typeof(ChannelConnectionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ChannelConnectionDto>> UpdateConnection(
+        Guid connectionId,
+        [FromBody] UpdateChannelConnectionDto request,
+        CancellationToken cancellationToken)
+    {
+        var command = new UpdateChannelConnectionCommand
+        {
+            ConnectionId = connectionId,
+            ChannelName = request.ChannelName,
+            ApiEndpoint = request.ApiEndpoint,
+            ApiKey = request.ApiKey,
+            ApiSecret = request.ApiSecret,
+            PropertyId = request.PropertyId,
+            IsActive = request.IsActive
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Deletes/disconnects a channel connection.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>No content on success.</returns>
+    [HttpDelete("connections/{connectionId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteConnection(
+        Guid connectionId,
+        CancellationToken cancellationToken)
+    {
+        var command = new DeleteChannelConnectionCommand { ConnectionId = connectionId };
+        await _mediator.Send(command, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
     /// Synchronizes room inventory (availability and rates) to an OTA channel.
     /// </summary>
     /// <param name="connectionId">The channel connection identifier.</param>
@@ -126,9 +175,6 @@ public sealed class ChannelsController : ControllerBase
     /// <param name="endDate">End date for the sync period.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sync result summary.</returns>
-    /// <response code="200">Sync completed (check result for success/failure details).</response>
-    /// <response code="400">Invalid request parameters.</response>
-    /// <response code="401">Authentication required.</response>
     [HttpPost("connections/{connectionId:guid}/sync-inventory")]
     [ProducesResponseType(typeof(InventorySyncResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -157,9 +203,6 @@ public sealed class ChannelsController : ControllerBase
     /// <param name="since">Import reservations created or modified since this date.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A list of imported reservations.</returns>
-    /// <response code="200">Reservations imported successfully.</response>
-    /// <response code="400">Invalid request parameters.</response>
-    /// <response code="401">Authentication required.</response>
     [HttpPost("connections/{connectionId:guid}/import-reservations")]
     [ProducesResponseType(typeof(List<ImportedReservationDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -187,8 +230,6 @@ public sealed class ChannelsController : ControllerBase
     /// <param name="pageSize">Page size.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A list of imported reservations.</returns>
-    /// <response code="200">Imported reservations retrieved successfully.</response>
-    /// <response code="401">Authentication required.</response>
     [HttpGet("imported-reservations")]
     [ProducesResponseType(typeof(List<ImportedReservationDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -226,52 +267,101 @@ public sealed class ChannelsController : ControllerBase
         return Ok(dtos);
     }
 
-    /// <summary>Updates a channel connection.</summary>
-    [HttpPut("connections/{connectionId:guid}")]
-    public IActionResult UpdateConnection(Guid connectionId, [FromBody] object request)
-    {
-        // TODO: Implement UpdateChannelConnectionCommand
-        return StatusCode(501, new { message = "Update connection not yet implemented." });
-    }
-
-    /// <summary>Deletes/disconnects a channel connection.</summary>
-    [HttpDelete("connections/{connectionId:guid}")]
-    public IActionResult DeleteConnection(Guid connectionId)
-    {
-        // TODO: Implement DeleteChannelConnectionCommand
-        return StatusCode(501, new { message = "Delete connection not yet implemented." });
-    }
-
-    /// <summary>Gets room mappings for a channel connection.</summary>
+    /// <summary>
+    /// Gets room mappings for a channel connection.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A list of room type mappings.</returns>
     [HttpGet("connections/{connectionId:guid}/room-mappings")]
-    public IActionResult GetRoomMappings(Guid connectionId)
+    [ProducesResponseType(typeof(List<RoomMappingDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<RoomMappingDto>>> GetRoomMappings(
+        Guid connectionId,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetRoomMappingsQuery
-        return StatusCode(501, new { message = "Get room mappings not yet implemented." });
+        var query = new GetRoomMappingsQuery { ConnectionId = connectionId };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Creates/updates room mapping for a channel.</summary>
+    /// <summary>
+    /// Creates/updates room mapping for a channel.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="request">The room mappings to update.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated room mappings.</returns>
     [HttpPut("connections/{connectionId:guid}/room-mappings")]
-    public IActionResult UpdateRoomMappings(Guid connectionId, [FromBody] object request)
+    [ProducesResponseType(typeof(List<RoomMappingDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<RoomMappingDto>>> UpdateRoomMappings(
+        Guid connectionId,
+        [FromBody] UpdateRoomMappingsDto request,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement UpdateRoomMappingsCommand
-        return StatusCode(501, new { message = "Update room mappings not yet implemented." });
+        var command = new UpdateRoomMappingsCommand
+        {
+            ConnectionId = connectionId,
+            Mappings = request.Mappings
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Gets sync history for a channel connection.</summary>
+    /// <summary>
+    /// Gets sync history for a channel connection.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="page">Page number.</param>
+    /// <param name="pageSize">Page size.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A list of sync history entries.</returns>
     [HttpGet("connections/{connectionId:guid}/sync-history")]
-    public IActionResult GetSyncHistory(
-        Guid connectionId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    [ProducesResponseType(typeof(List<ChannelSyncLogDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<ChannelSyncLogDto>>> GetSyncHistory(
+        Guid connectionId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        // TODO: Implement GetSyncHistoryQuery
-        return StatusCode(501, new { message = "Sync history not yet implemented." });
+        var query = new GetSyncHistoryQuery
+        {
+            ConnectionId = connectionId,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Pushes rate update to a channel.</summary>
+    /// <summary>
+    /// Pushes rate update to a channel.
+    /// </summary>
+    /// <param name="connectionId">The channel connection identifier.</param>
+    /// <param name="request">The rates to push.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The push rates result.</returns>
     [HttpPost("connections/{connectionId:guid}/push-rates")]
-    public IActionResult PushRates(Guid connectionId, [FromBody] object request)
+    [ProducesResponseType(typeof(PushRatesResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PushRatesResultDto>> PushRates(
+        Guid connectionId,
+        [FromBody] PushRatesDto request,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement PushRatesCommand
-        return StatusCode(501, new { message = "Push rates not yet implemented." });
+        var command = new PushRatesCommand
+        {
+            ConnectionId = connectionId,
+            StartDate = request.StartDate,
+            EndDate = request.EndDate,
+            Rates = request.Rates
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 }

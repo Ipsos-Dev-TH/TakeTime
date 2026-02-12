@@ -47,49 +47,58 @@ public class ProductsController : ControllerBase
 
     /// <summary>Gets a product by ID.</summary>
     [HttpGet("{id:guid}")]
-    public IActionResult GetById(Guid id)
+    public async Task<ActionResult<ProductDto>> GetById(Guid id, CancellationToken ct)
     {
-        // TODO: Implement GetProductByIdQuery
-        return StatusCode(501, new { message = "Get product by ID not yet implemented." });
+        var result = await _mediator.Send(new GetProductByIdQuery { ProductId = id }, ct);
+        return Ok(result);
     }
 
     /// <summary>Creates a new product.</summary>
     [HttpPost]
-    public IActionResult Create([FromBody] object command)
+    public async Task<ActionResult<ProductDto>> Create(
+        [FromBody] CreateProductCommand command, CancellationToken ct)
     {
-        // TODO: Implement CreateProductCommand
-        return StatusCode(501, new { message = "Create product not yet implemented." });
+        var result = await _mediator.Send(command, ct);
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
     /// <summary>Updates a product.</summary>
     [HttpPut("{id:guid}")]
-    public IActionResult Update(Guid id, [FromBody] object command)
+    public async Task<ActionResult<ProductDto>> Update(
+        Guid id, [FromBody] UpdateProductCommand command, CancellationToken ct)
     {
-        // TODO: Implement UpdateProductCommand
-        return StatusCode(501, new { message = "Update product not yet implemented." });
+        command.ProductId = id;
+        var result = await _mediator.Send(command, ct);
+        return Ok(result);
     }
 
     /// <summary>Deletes a product.</summary>
     [HttpDelete("{id:guid}")]
-    public IActionResult Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
-        // TODO: Implement DeleteProductCommand
-        return StatusCode(501, new { message = "Delete product not yet implemented." });
+        await _mediator.Send(new DeleteProductCommand { ProductId = id }, ct);
+        return NoContent();
     }
 
     /// <summary>Gets stock movements/history for a product.</summary>
     [HttpGet("{id:guid}/stock-history")]
-    public IActionResult GetStockHistory(Guid id, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<ActionResult<List<StockMovementDto>>> GetStockHistory(
+        Guid id, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
-        // TODO: Implement GetStockHistoryQuery
-        return StatusCode(501, new { message = "Stock history not yet implemented." });
+        var result = await _mediator.Send(new GetStockHistoryQuery
+        {
+            ProductId = id,
+            FromDate = from,
+            ToDate = to
+        }, ct);
+        return Ok(result);
     }
 
     /// <summary>Gets product categories.</summary>
     [HttpGet("categories")]
-    public IActionResult GetCategories()
+    public async Task<ActionResult<List<CategorySummaryDto>>> GetCategories(CancellationToken ct)
     {
-        // TODO: Implement GetProductCategoriesQuery
-        return StatusCode(501, new { message = "Get categories not yet implemented." });
+        var result = await _mediator.Send(new GetProductCategoriesQuery(), ct);
+        return Ok(result);
     }
 }

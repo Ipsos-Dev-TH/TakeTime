@@ -65,6 +65,64 @@ public sealed class PaymentSummaryDto
 }
 
 /// <summary>
+/// Search criteria for filtering payments.
+/// </summary>
+public sealed class PaymentSearchCriteria
+{
+    public string? Status { get; set; }
+    public string? PaymentMethod { get; set; }
+    public DateTime? FromDate { get; set; }
+    public DateTime? ToDate { get; set; }
+    public Guid? ReservationId { get; set; }
+    public bool? IsRefund { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+}
+
+/// <summary>
+/// Paginated result wrapper for payment queries.
+/// </summary>
+public sealed class PaginatedPaymentResult
+{
+    public List<PaymentSummaryDto> Items { get; set; } = [];
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public int TotalPages => PageSize > 0 ? (int)Math.Ceiling((double)TotalCount / PageSize) : 0;
+    public bool HasNextPage => Page < TotalPages;
+    public bool HasPreviousPage => Page > 1;
+}
+
+/// <summary>
+/// Daily payment summary showing totals broken down by payment method.
+/// </summary>
+public sealed class DailyPaymentSummaryDto
+{
+    public DateTime Date { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal TotalRefunded { get; set; }
+    public decimal NetAmount { get; set; }
+    public int TransactionCount { get; set; }
+    public int RefundCount { get; set; }
+    public string Currency { get; set; } = "THB";
+    public List<PaymentMethodSummaryDto> ByMethod { get; set; } = [];
+}
+
+/// <summary>
+/// Payment totals for a specific payment method.
+/// </summary>
+public sealed class PaymentMethodSummaryDto
+{
+    public string PaymentMethod { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal TotalRefunded { get; set; }
+    public decimal NetAmount { get; set; }
+    public int TransactionCount { get; set; }
+    public int RefundCount { get; set; }
+}
+
+/// <summary>
 /// DTO for verifying a payment.
 /// </summary>
 public sealed class PaymentVerificationDto

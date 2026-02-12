@@ -1,5 +1,9 @@
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TakeTime.Reservation.Application.Commands;
+using TakeTime.Reservation.Application.DTOs;
+using TakeTime.Reservation.Application.Queries;
 
 namespace TakeTime.Reservation.API.Controllers;
 
@@ -10,126 +14,327 @@ namespace TakeTime.Reservation.API.Controllers;
 [ApiController]
 [Route("api/v1/rates")]
 [Authorize]
+[Produces("application/json")]
 public class RatesController : ControllerBase
 {
+    private readonly IMediator _mediator;
+    private readonly ILogger<RatesController> _logger;
+
+    public RatesController(IMediator mediator, ILogger<RatesController> logger)
+    {
+        _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // ─── Rate Plans ──────────────────────────────────────────────
+
     /// <summary>Gets all rate plans for the tenant.</summary>
     [HttpGet("plans")]
-    public IActionResult GetRatePlans()
+    [ProducesResponseType(typeof(List<RatePlanDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRatePlans(CancellationToken cancellationToken)
     {
-        // TODO: Implement GetRatePlansQuery
-        return StatusCode(501, new { message = "Rate plans query not yet implemented." });
+        var query = new GetRatePlansQuery();
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Gets a rate plan by ID.</summary>
     [HttpGet("plans/{id:guid}")]
-    public IActionResult GetRatePlan(Guid id)
+    [ProducesResponseType(typeof(RatePlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetRatePlan(Guid id, CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Get rate plan not yet implemented." });
+        var query = new GetRatePlanByIdQuery(id);
+        var result = await _mediator.Send(query, cancellationToken);
+
+        if (result is null)
+            return NotFound(new { message = $"Rate plan with ID '{id}' not found." });
+
+        return Ok(result);
     }
 
     /// <summary>Creates a new rate plan.</summary>
     [HttpPost("plans")]
-    public IActionResult CreateRatePlan([FromBody] CreateRatePlanRequest request)
+    [ProducesResponseType(typeof(RatePlanDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateRatePlan(
+        [FromBody] CreateRatePlanRequest request,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement CreateRatePlanCommand
-        return StatusCode(501, new { message = "Create rate plan not yet implemented." });
+        var command = new CreateRatePlanCommand
+        {
+            Name = request.Name,
+            Description = request.Description,
+            BaseRate = request.BaseRate,
+            Currency = request.Currency,
+            IsDefault = request.IsDefault,
+            CreatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return CreatedAtAction(nameof(GetRatePlan), new { id = result.Id }, result);
     }
 
     /// <summary>Updates a rate plan.</summary>
     [HttpPut("plans/{id:guid}")]
-    public IActionResult UpdateRatePlan(Guid id, [FromBody] UpdateRatePlanRequest request)
+    [ProducesResponseType(typeof(RatePlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdateRatePlan(
+        Guid id,
+        [FromBody] UpdateRatePlanRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Update rate plan not yet implemented." });
+        var command = new UpdateRatePlanCommand
+        {
+            Id = id,
+            Name = request.Name,
+            Description = request.Description,
+            BaseRate = request.BaseRate,
+            Currency = request.Currency,
+            IsActive = request.IsActive,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Deletes a rate plan.</summary>
     [HttpDelete("plans/{id:guid}")]
-    public IActionResult DeleteRatePlan(Guid id)
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRatePlan(Guid id, CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Delete rate plan not yet implemented." });
+        var command = new DeleteRatePlanCommand
+        {
+            Id = id,
+            DeletedBy = User.Identity?.Name
+        };
+
+        await _mediator.Send(command, cancellationToken);
+        return NoContent();
     }
 
     // ─── Seasonal Rates ──────────────────────────────────────────────
 
     /// <summary>Gets seasonal rates for the tenant.</summary>
     [HttpGet("seasonal")]
-    public IActionResult GetSeasonalRates([FromQuery] int? year)
+    [ProducesResponseType(typeof(List<SeasonalRateDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSeasonalRates(
+        [FromQuery] int? year,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Get seasonal rates not yet implemented." });
+        var query = new GetSeasonalRatesQuery { Year = year };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Creates a new seasonal rate.</summary>
     [HttpPost("seasonal")]
-    public IActionResult CreateSeasonalRate([FromBody] CreateSeasonalRateRequest request)
+    [ProducesResponseType(typeof(SeasonalRateDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateSeasonalRate(
+        [FromBody] CreateSeasonalRateRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Create seasonal rate not yet implemented." });
+        var command = new CreateSeasonalRateCommand
+        {
+            SeasonName = request.SeasonName,
+            StartDate = request.StartDate,
+            EndDate = request.EndDate,
+            RateMultiplier = request.RateMultiplier,
+            Description = request.Description,
+            CreatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, result);
     }
 
     /// <summary>Updates a seasonal rate.</summary>
     [HttpPut("seasonal/{id:guid}")]
-    public IActionResult UpdateSeasonalRate(Guid id, [FromBody] UpdateSeasonalRateRequest request)
+    [ProducesResponseType(typeof(SeasonalRateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdateSeasonalRate(
+        Guid id,
+        [FromBody] UpdateSeasonalRateRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Update seasonal rate not yet implemented." });
+        var command = new UpdateSeasonalRateCommand
+        {
+            Id = id,
+            SeasonName = request.SeasonName,
+            StartDate = request.StartDate,
+            EndDate = request.EndDate,
+            RateMultiplier = request.RateMultiplier,
+            Description = request.Description,
+            IsActive = request.IsActive,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Deletes a seasonal rate.</summary>
     [HttpDelete("seasonal/{id:guid}")]
-    public IActionResult DeleteSeasonalRate(Guid id)
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteSeasonalRate(Guid id, CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Delete seasonal rate not yet implemented." });
+        var command = new DeleteSeasonalRateCommand
+        {
+            Id = id,
+            DeletedBy = User.Identity?.Name
+        };
+
+        await _mediator.Send(command, cancellationToken);
+        return NoContent();
     }
 
     // ─── Promotions / Discount Codes ─────────────────────────────────
 
     /// <summary>Gets all promotions/discount codes.</summary>
     [HttpGet("promotions")]
-    public IActionResult GetPromotions([FromQuery] bool? activeOnly)
+    [ProducesResponseType(typeof(List<PromotionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPromotions(
+        [FromQuery] bool? activeOnly,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Get promotions not yet implemented." });
+        var query = new GetPromotionsQuery { ActiveOnly = activeOnly };
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Gets a promotion by ID.</summary>
     [HttpGet("promotions/{id:guid}")]
-    public IActionResult GetPromotion(Guid id)
+    [ProducesResponseType(typeof(PromotionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPromotion(Guid id, CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Get promotion not yet implemented." });
+        var query = new GetPromotionByIdQuery(id);
+        var result = await _mediator.Send(query, cancellationToken);
+
+        if (result is null)
+            return NotFound(new { message = $"Promotion with ID '{id}' not found." });
+
+        return Ok(result);
     }
 
     /// <summary>Creates a new promotion/discount code.</summary>
     [HttpPost("promotions")]
-    public IActionResult CreatePromotion([FromBody] CreatePromotionRequest request)
+    [ProducesResponseType(typeof(PromotionDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreatePromotion(
+        [FromBody] CreatePromotionRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Create promotion not yet implemented." });
+        var command = new CreatePromotionCommand
+        {
+            Name = request.Name,
+            Code = request.Code,
+            DiscountType = request.DiscountType,
+            DiscountValue = request.DiscountValue,
+            ValidFrom = request.ValidFrom,
+            ValidTo = request.ValidTo,
+            MaxUses = request.MaxUses,
+            MinimumBookingAmount = request.MinimumBookingAmount,
+            Description = request.Description,
+            CreatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return CreatedAtAction(nameof(GetPromotion), new { id = result.Id }, result);
     }
 
     /// <summary>Updates a promotion.</summary>
     [HttpPut("promotions/{id:guid}")]
-    public IActionResult UpdatePromotion(Guid id, [FromBody] UpdatePromotionRequest request)
+    [ProducesResponseType(typeof(PromotionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdatePromotion(
+        Guid id,
+        [FromBody] UpdatePromotionRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Update promotion not yet implemented." });
+        var command = new UpdatePromotionCommand
+        {
+            Id = id,
+            Name = request.Name,
+            Code = request.Code,
+            DiscountType = request.DiscountType,
+            DiscountValue = request.DiscountValue,
+            ValidFrom = request.ValidFrom,
+            ValidTo = request.ValidTo,
+            MaxUses = request.MaxUses,
+            MinimumBookingAmount = request.MinimumBookingAmount,
+            IsActive = request.IsActive,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>Deactivates a promotion.</summary>
     [HttpPost("promotions/{id:guid}/deactivate")]
-    public IActionResult DeactivatePromotion(Guid id)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeactivatePromotion(Guid id, CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Deactivate promotion not yet implemented." });
+        var command = new DeactivatePromotionCommand
+        {
+            Id = id,
+            DeactivatedBy = User.Identity?.Name
+        };
+
+        await _mediator.Send(command, cancellationToken);
+        return Ok(new { message = "Promotion deactivated successfully." });
     }
 
     /// <summary>Validates a discount code for a given date range.</summary>
     [HttpPost("promotions/validate")]
-    public IActionResult ValidateDiscountCode([FromBody] ValidateDiscountRequest request)
+    [ProducesResponseType(typeof(DiscountValidationResultDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ValidateDiscountCode(
+        [FromBody] ValidateDiscountRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Validate discount code not yet implemented." });
+        var query = new ValidateDiscountCodeQuery
+        {
+            Code = request.Code,
+            CheckInDate = request.CheckInDate,
+            CheckOutDate = request.CheckOutDate,
+            BookingAmount = request.BookingAmount
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     // ─── Bulk Rate Update ────────────────────────────────────────────
 
     /// <summary>Bulk update rates for multiple accommodations.</summary>
     [HttpPut("bulk-update")]
-    public IActionResult BulkUpdateRates([FromBody] BulkRateUpdateRequest request)
+    [ProducesResponseType(typeof(BulkUpdateResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkUpdateRates(
+        [FromBody] BulkRateUpdateRequest request,
+        CancellationToken cancellationToken)
     {
-        return StatusCode(501, new { message = "Bulk rate update not yet implemented." });
+        var command = new BulkUpdateRatesCommand
+        {
+            AccommodationIds = request.AccommodationIds,
+            RateAdjustment = request.RateAdjustment,
+            RateMultiplier = request.RateMultiplier,
+            EffectiveFrom = request.EffectiveFrom,
+            EffectiveTo = request.EffectiveTo,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 }
 

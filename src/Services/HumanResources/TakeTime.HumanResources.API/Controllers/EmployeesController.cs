@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TakeTime.HumanResources.Application.Commands;
 using TakeTime.HumanResources.Application.DTOs;
 using TakeTime.HumanResources.Application.Queries;
 
@@ -70,18 +71,16 @@ public class EmployeesController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(EmployeeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement GetEmployeeByIdQuery when available
-        // Should return full employee details including compensation, leave balances,
-        // social security info, and manager information
         _logger.LogDebug("Getting employee {EmployeeId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new GetEmployeeByIdQuery
         {
-            message = "Get employee by ID is not yet implemented. Awaiting GetEmployeeByIdQuery."
-        });
+            EmployeeId = id
+        }, cancellationToken);
+
+        return result is null ? NotFound() : Ok(result);
     }
 
     /// <summary>
@@ -93,22 +92,38 @@ public class EmployeesController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(EmployeeDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Create(
         [FromBody] CreateEmployeeRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement CreateEmployeeCommand when available
-        // Should auto-generate employee number, validate national ID uniqueness,
-        // set default leave balances based on Thai labor law, and initialize
-        // social security settings based on tenant HR configuration
         _logger.LogInformation("Creating employee: {FirstName} {LastName}, Department: {Department}",
             request.FirstName, request.LastName, request.Department);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new CreateEmployeeCommand
         {
-            message = "Create employee is not yet implemented. Awaiting CreateEmployeeCommand."
-        });
+            FirstName = request.FirstName,
+            LastName = request.LastName,
+            NickName = request.NickName,
+            Email = request.Email,
+            Phone = request.Phone,
+            DateOfBirth = request.DateOfBirth,
+            NationalId = request.NationalId,
+            TaxId = request.TaxId,
+            Address = request.Address,
+            Department = request.Department,
+            Position = request.Position,
+            EmploymentType = request.EmploymentType,
+            HireDate = request.HireDate,
+            ManagerId = request.ManagerId,
+            BaseSalary = request.BaseSalary,
+            SalaryType = request.SalaryType,
+            BankName = request.BankName,
+            BankAccountNumber = request.BankAccountNumber,
+            SocialSecurityNumber = request.SocialSecurityNumber,
+            ProfileImageUrl = request.ProfileImageUrl
+        }, cancellationToken);
+
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
     /// <summary>
@@ -122,21 +137,36 @@ public class EmployeesController : ControllerBase
     [ProducesResponseType(typeof(EmployeeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Update(
         Guid id,
         [FromBody] UpdateEmployeeRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement UpdateEmployeeCommand when available
-        // Should support partial updates, recalculate leave balances on status change,
-        // and track employment history changes
         _logger.LogInformation("Updating employee {EmployeeId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new UpdateEmployeeCommand
         {
-            message = "Update employee is not yet implemented. Awaiting UpdateEmployeeCommand."
-        });
+            EmployeeId = id,
+            FirstName = request.FirstName,
+            LastName = request.LastName,
+            NickName = request.NickName,
+            Email = request.Email,
+            Phone = request.Phone,
+            Address = request.Address,
+            Department = request.Department,
+            Position = request.Position,
+            EmploymentType = request.EmploymentType,
+            EmploymentStatus = request.EmploymentStatus,
+            ManagerId = request.ManagerId,
+            BaseSalary = request.BaseSalary,
+            SalaryType = request.SalaryType,
+            BankName = request.BankName,
+            BankAccountNumber = request.BankAccountNumber,
+            SocialSecurityNumber = request.SocialSecurityNumber,
+            ProfileImageUrl = request.ProfileImageUrl
+        }, cancellationToken);
+
+        return Ok(result);
     }
 
     /// <summary>
@@ -148,18 +178,17 @@ public class EmployeesController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement DeleteEmployeeCommand (soft-delete) when available
-        // Should set EmploymentStatus to Terminated, record termination date,
-        // and process final payroll calculations
         _logger.LogInformation("Deleting employee {EmployeeId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new DeleteEmployeeCommand
         {
-            message = "Delete employee is not yet implemented. Awaiting DeleteEmployeeCommand."
-        });
+            EmployeeId = id,
+            TerminationDate = DateTime.UtcNow
+        }, cancellationToken);
+
+        return result ? NoContent() : NotFound();
     }
 
     /// <summary>
@@ -169,20 +198,18 @@ public class EmployeesController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The employee's current leave balances.</returns>
     [HttpGet("{id:guid}/leave-balance")]
-    [ProducesResponseType(typeof(LeaveBalanceResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(LeaveBalanceDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetLeaveBalance(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement GetEmployeeLeaveBalanceQuery when available
-        // Should return annual, sick, personal leave balances and usage history
-        // Should calculate remaining days based on Thai labor law entitlements
         _logger.LogDebug("Getting leave balance for employee {EmployeeId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new GetEmployeeLeaveBalanceQuery
         {
-            message = "Get leave balance is not yet implemented. Awaiting GetEmployeeLeaveBalanceQuery."
-        });
+            EmployeeId = id
+        }, cancellationToken);
+
+        return result is null ? NotFound() : Ok(result);
     }
 
     /// <summary>
@@ -194,25 +221,25 @@ public class EmployeesController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A list of payslips for the employee.</returns>
     [HttpGet("{id:guid}/payslips")]
-    [ProducesResponseType(typeof(List<PayslipResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(List<PayrollDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetPayslips(
         Guid id,
         [FromQuery] int? year,
         [FromQuery] int? month,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement GetEmployeePayslipsQuery when available
-        // Should return payslip history with salary breakdown, deductions,
-        // OT calculations, social security contributions, and withholding tax
         _logger.LogDebug("Getting payslips for employee {EmployeeId}, Year: {Year}, Month: {Month}",
             id, year, month);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var result = await _mediator.Send(new GetEmployeePayslipsQuery
         {
-            message = "Get payslips is not yet implemented. Awaiting GetEmployeePayslipsQuery."
-        });
+            EmployeeId = id,
+            Year = year,
+            Month = month
+        }, cancellationToken);
+
+        return Ok(result);
     }
 }
 

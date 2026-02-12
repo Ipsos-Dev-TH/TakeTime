@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TakeTime.Reservation.Application.Commands;
 using TakeTime.Reservation.Application.DTOs;
 using TakeTime.Reservation.Application.Queries;
 
@@ -35,23 +36,24 @@ public class AccommodationsController : ControllerBase
     /// <returns>A list of accommodations matching the filter criteria.</returns>
     [HttpGet]
     [ProducesResponseType(typeof(List<AccommodationDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? type,
         [FromQuery] string? status,
         [FromQuery] int? minOccupancy,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement GetAllAccommodationsQuery when available
-        // Should support filtering by type, status, and minimum occupancy
-        // Should return paginated results with sorting options
         _logger.LogDebug("Getting all accommodations. Type: {Type}, Status: {Status}, MinOccupancy: {MinOccupancy}",
             type, status, minOccupancy);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var query = new GetAllAccommodationsQuery
         {
-            message = "List accommodations is not yet implemented. Awaiting GetAllAccommodationsQuery."
-        });
+            Type = type,
+            Status = status,
+            MinOccupancy = minOccupancy
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -63,17 +65,17 @@ public class AccommodationsController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(AccommodationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement GetAccommodationByIdQuery when available
-        // Should return full accommodation details including amenities, images, and pricing
         _logger.LogDebug("Getting accommodation {AccommodationId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
-        {
-            message = "Get accommodation by ID is not yet implemented. Awaiting GetAccommodationByIdQuery."
-        });
+        var query = new GetAccommodationByIdQuery(id);
+        var result = await _mediator.Send(query, cancellationToken);
+
+        if (result is null)
+            return NotFound(new { message = $"Accommodation with ID '{id}' not found." });
+
+        return Ok(result);
     }
 
     /// <summary>
@@ -85,20 +87,35 @@ public class AccommodationsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AccommodationDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Create(
         [FromBody] CreateAccommodationDto dto,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement CreateAccommodationCommand when available
-        // Should validate room number uniqueness, set default status to Available,
-        // and apply tenant-specific currency defaults
         _logger.LogInformation("Creating accommodation: {Name}, Type: {Type}", dto.Name, dto.AccommodationType);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new CreateAccommodationCommand
         {
-            message = "Create accommodation is not yet implemented. Awaiting CreateAccommodationCommand."
-        });
+            Name = dto.Name,
+            AccommodationType = dto.AccommodationType,
+            RoomNumber = dto.RoomNumber,
+            Floor = dto.Floor,
+            Building = dto.Building,
+            Description = dto.Description,
+            MaxOccupancy = dto.MaxOccupancy,
+            DefaultOccupancy = dto.DefaultOccupancy,
+            BaseRatePerNight = dto.BaseRatePerNight,
+            Currency = dto.Currency,
+            Amenities = dto.Amenities,
+            ImageUrls = dto.ImageUrls,
+            AreaSqMeters = dto.AreaSqMeters,
+            BedConfiguration = dto.BedConfiguration,
+            SortOrder = dto.SortOrder,
+            CreatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
     /// <summary>
@@ -112,22 +129,38 @@ public class AccommodationsController : ControllerBase
     [ProducesResponseType(typeof(AccommodationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Update(
         Guid id,
         [FromBody] UpdateAccommodationDto dto,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement UpdateAccommodationCommand when available
-        // Should support partial updates, validate room number uniqueness on change,
-        // and preserve audit trail
         dto.Id = id;
         _logger.LogInformation("Updating accommodation {AccommodationId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new UpdateAccommodationCommand
         {
-            message = "Update accommodation is not yet implemented. Awaiting UpdateAccommodationCommand."
-        });
+            Id = id,
+            Name = dto.Name,
+            AccommodationType = dto.AccommodationType,
+            RoomNumber = dto.RoomNumber,
+            Floor = dto.Floor,
+            Building = dto.Building,
+            Description = dto.Description,
+            MaxOccupancy = dto.MaxOccupancy,
+            DefaultOccupancy = dto.DefaultOccupancy,
+            BaseRatePerNight = dto.BaseRatePerNight,
+            Currency = dto.Currency,
+            IsActive = dto.IsActive,
+            Amenities = dto.Amenities,
+            ImageUrls = dto.ImageUrls,
+            AreaSqMeters = dto.AreaSqMeters,
+            BedConfiguration = dto.BedConfiguration,
+            SortOrder = dto.SortOrder,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return Ok(result);
     }
 
     /// <summary>
@@ -139,18 +172,18 @@ public class AccommodationsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement DeleteAccommodationCommand when available
-        // Should perform soft-delete (set IsActive = false)
-        // Should check for active reservations before allowing deletion
         _logger.LogInformation("Deleting accommodation {AccommodationId}", id);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new DeleteAccommodationCommand
         {
-            message = "Delete accommodation is not yet implemented. Awaiting DeleteAccommodationCommand."
-        });
+            AccommodationId = id,
+            DeletedBy = User.Identity?.Name
+        };
+
+        await _mediator.Send(command, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -212,21 +245,23 @@ public class AccommodationsController : ControllerBase
     [HttpPatch("{id:guid}/status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> UpdateStatus(
         Guid id,
         [FromBody] UpdateStatusRequest request,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement UpdateAccommodationStatusCommand when available
-        // Should validate status transitions (e.g., cannot go from Maintenance to Occupied directly)
-        // Should integrate with housekeeping workflows
         _logger.LogInformation("Updating accommodation {AccommodationId} status to {Status}", id, request.Status);
 
-        return StatusCode(StatusCodes.Status501NotImplemented, new
+        var command = new UpdateAccommodationStatusCommand
         {
-            message = "Update accommodation status is not yet implemented. Awaiting UpdateAccommodationStatusCommand."
-        });
+            AccommodationId = id,
+            Status = request.Status,
+            UpdatedBy = User.Identity?.Name
+        };
+
+        await _mediator.Send(command, cancellationToken);
+
+        return Ok(new { message = $"Accommodation status updated to '{request.Status}' successfully." });
     }
 }
 

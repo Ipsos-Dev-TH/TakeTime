@@ -101,3 +101,73 @@ public sealed class ChannelSyncLogDto
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
+
+/// <summary>
+/// DTO for updating a channel connection.
+/// </summary>
+public sealed class UpdateChannelConnectionDto
+{
+    public string? ChannelName { get; set; }
+    public string? ApiEndpoint { get; set; }
+    public string? ApiKey { get; set; }
+    public string? ApiSecret { get; set; }
+    public string? PropertyId { get; set; }
+    public bool? IsActive { get; set; }
+    public Dictionary<string, string>? Settings { get; set; }
+}
+
+/// <summary>
+/// DTO for a room type mapping between local and channel room types.
+/// </summary>
+public sealed class RoomMappingDto
+{
+    public Guid Id { get; set; }
+    public Guid ChannelConnectionId { get; set; }
+    public string LocalRoomType { get; set; } = string.Empty;
+    public string ChannelRoomType { get; set; } = string.Empty;
+    public string? ChannelRoomId { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// DTO for updating room type mappings.
+/// </summary>
+public sealed class UpdateRoomMappingsDto
+{
+    public List<RoomMappingDto> Mappings { get; set; } = [];
+}
+
+/// <summary>
+/// DTO for pushing rates to a channel.
+/// </summary>
+public sealed class PushRatesDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public List<RateEntryDto> Rates { get; set; } = [];
+}
+
+/// <summary>
+/// DTO for an individual rate entry to push to a channel.
+/// </summary>
+public sealed class RateEntryDto
+{
+    public string RoomType { get; set; } = string.Empty;
+    public decimal Rate { get; set; }
+    public string Currency { get; set; } = "THB";
+    public int Availability { get; set; }
+    public int? MinStay { get; set; }
+}
+
+/// <summary>
+/// DTO for push rates result.
+/// </summary>
+public sealed class PushRatesResultDto
+{
+    public Guid ChannelConnectionId { get; set; }
+    public string ChannelName { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public int RatesPushed { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime PushedAt { get; set; } = DateTime.UtcNow;
+}

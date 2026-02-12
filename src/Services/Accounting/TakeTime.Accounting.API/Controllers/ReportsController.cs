@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TakeTime.Accounting.Application.Commands;
 using TakeTime.Accounting.Application.DTOs;
 using TakeTime.Accounting.Application.Queries;
 using TakeTime.Core.Application.Interfaces;
@@ -176,48 +177,146 @@ public sealed class ReportsController : ControllerBase
 
     // ─── Additional Report Endpoints ─────────────────────────────────
 
-    /// <summary>Gets monthly revenue summary for a specific year.</summary>
+    /// <summary>
+    /// Gets monthly income/expense summary.
+    /// </summary>
+    /// <param name="year">Year for the summary (defaults to current year).</param>
+    /// <param name="month">Month for the summary (1-12, defaults to current month).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Monthly income/expense summary with category breakdowns.</returns>
     [HttpGet("monthly-summary")]
-    public IActionResult GetMonthlySummary([FromQuery] int? year)
+    [ProducesResponseType(typeof(MonthlySummaryDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<MonthlySummaryDto>> GetMonthlySummary(
+        [FromQuery] int? year,
+        [FromQuery] int? month,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetMonthlySummaryQuery
-        return StatusCode(501, new { message = "Monthly summary not yet implemented." });
+        var now = DateTime.UtcNow;
+        var query = new GetMonthlySummaryQuery
+        {
+            Year = year ?? now.Year,
+            Month = month ?? now.Month
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Gets revenue by room type for a date range.</summary>
+    /// <summary>
+    /// Gets revenue breakdown by room type for a date range.
+    /// </summary>
+    /// <param name="startDate">Start date for the report.</param>
+    /// <param name="endDate">End date for the report.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Revenue breakdown by room type.</returns>
     [HttpGet("revenue-by-room-type")]
-    public IActionResult GetRevenueByRoomType(
-        [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+    [ProducesResponseType(typeof(RevenueByRoomTypeDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<RevenueByRoomTypeDto>> GetRevenueByRoomType(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetRevenueByRoomTypeQuery
-        return StatusCode(501, new { message = "Revenue by room type not yet implemented." });
+        if (endDate < startDate)
+            return BadRequest("End date must be on or after start date.");
+
+        var query = new GetRevenueByRoomTypeQuery
+        {
+            StartDate = startDate,
+            EndDate = endDate
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Gets tax report for filing purposes.</summary>
+    /// <summary>
+    /// Gets VAT/tax report for tax filing purposes.
+    /// </summary>
+    /// <param name="month">Month for the tax period.</param>
+    /// <param name="year">Year for the tax period.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tax report with VAT calculations.</returns>
     [HttpGet("tax-report")]
-    public IActionResult GetTaxReport([FromQuery] int month, [FromQuery] int year)
+    [ProducesResponseType(typeof(TaxReportDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<TaxReportDto>> GetTaxReport(
+        [FromQuery] int month,
+        [FromQuery] int year,
+        CancellationToken cancellationToken)
     {
-        // TODO: Implement GetTaxReportQuery
-        return StatusCode(501, new { message = "Tax report not yet implemented." });
+        var startDate = new DateTime(year, month, 1);
+        var endDate = startDate.AddMonths(1).AddDays(-1);
+
+        var query = new GetTaxReportQuery
+        {
+            StartDate = startDate,
+            EndDate = endDate
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 
-    /// <summary>Exports a report in the specified format.</summary>
+    /// <summary>
+    /// Exports a report in the specified format (CSV).
+    /// </summary>
+    /// <param name="reportType">Type of report to export (daily-revenue, profit-loss, transactions).</param>
+    /// <param name="format">Export format (csv). Defaults to csv.</param>
+    /// <param name="startDate">Start date for the report.</param>
+    /// <param name="endDate">End date for the report.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The exported report file.</returns>
     [HttpGet("export")]
-    public IActionResult Export(
-        [FromQuery] string reportType, [FromQuery] string format = "pdf",
-        [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Export(
+        [FromQuery] string reportType,
+        [FromQuery] string format = "csv",
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null,
+        CancellationToken cancellationToken = default)
     {
-        // TODO: Implement ReportExportCommand
-        return StatusCode(501, new { message = "Report export not yet implemented." });
+        var now = DateTime.UtcNow;
+        var command = new ReportExportCommand
+        {
+            ReportType = reportType,
+            StartDate = startDate ?? new DateTime(now.Year, now.Month, 1),
+            EndDate = endDate ?? now.Date,
+            Format = format
+        };
+
+        var result = await _mediator.Send(command, cancellationToken);
+        return File(result.Data, result.ContentType, result.FileName);
     }
 
-    /// <summary>Gets financial transactions for a date range.</summary>
+    /// <summary>
+    /// Gets financial transactions with filters and pagination.
+    /// </summary>
+    /// <param name="startDate">Filter by start date.</param>
+    /// <param name="endDate">Filter by end date.</param>
+    /// <param name="category">Filter by transaction category.</param>
+    /// <param name="page">Page number (default: 1).</param>
+    /// <param name="pageSize">Page size (default: 50).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Paginated list of financial transactions.</returns>
     [HttpGet("transactions")]
-    public IActionResult GetTransactions(
-        [FromQuery] DateTime startDate, [FromQuery] DateTime endDate,
-        [FromQuery] string? category, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    [ProducesResponseType(typeof(TransactionListDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<TransactionListDto>> GetTransactions(
+        [FromQuery] DateTime? startDate,
+        [FromQuery] DateTime? endDate,
+        [FromQuery] string? category,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken cancellationToken = default)
     {
-        // TODO: Implement GetTransactionsQuery
-        return StatusCode(501, new { message = "Transactions query not yet implemented." });
+        var query = new GetTransactionsQuery
+        {
+            StartDate = startDate,
+            EndDate = endDate,
+            Category = category,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        var result = await _mediator.Send(query, cancellationToken);
+        return Ok(result);
     }
 }
