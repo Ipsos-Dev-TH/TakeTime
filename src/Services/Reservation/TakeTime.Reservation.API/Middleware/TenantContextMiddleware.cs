@@ -58,7 +58,7 @@ public class TenantContextMiddleware
         }
 
         // Set the tenant context for the current request scope
-        currentTenantService.SetTenant(tenantId);
+        await currentTenantService.SetTenantAsync(tenantId);
 
         // Push tenant ID into Serilog LogContext for structured logging
         using (LogContext.PushProperty("TenantId", tenantId))

@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TakeTime.Reservation.Application.Commands;
 using TakeTime.Reservation.Application.DTOs;
-using TakeTime.Reservation.Application.Interfaces;
 using TakeTime.Reservation.Application.Queries;
 
 namespace TakeTime.Reservation.API.Controllers;
@@ -50,7 +49,7 @@ public class ReservationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var query = new GetReservationByIdQuery { Id = id };
+        var query = new GetReservationByIdQuery { ReservationId = id };
         var result = await _mediator.Send(query, cancellationToken);
 
         if (result is null)
@@ -201,7 +200,7 @@ public class ReservationsController : ControllerBase
         var command = new CheckInCommand
         {
             ReservationId = id,
-            ActualGuests = request?.ActualGuests,
+            ActualNumberOfGuests = request?.ActualGuests,
             Notes = request?.Notes,
             CheckedInBy = User.Identity?.Name
         };
@@ -229,7 +228,7 @@ public class ReservationsController : ControllerBase
         {
             ReservationId = id,
             Notes = request?.Notes,
-            AdditionalItems = request?.AdditionalItems,
+            AdditionalCharges = request?.AdditionalCharges,
             CheckedOutBy = User.Identity?.Name
         };
 
@@ -315,5 +314,5 @@ public sealed class CheckInRequest
 public sealed class CheckOutRequest
 {
     public string? Notes { get; set; }
-    public List<CheckOutAdditionalItem>? AdditionalItems { get; set; }
+    public List<AdditionalChargeDto>? AdditionalCharges { get; set; }
 }
