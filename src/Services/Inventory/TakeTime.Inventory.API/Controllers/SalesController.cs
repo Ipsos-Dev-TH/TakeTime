@@ -29,7 +29,11 @@ public class SalesController : ControllerBase
     public async Task<IActionResult> GetSalesReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
-        var result = await _mediator.Send(new GetSalesReportQuery { FromDate = from, ToDate = to }, ct);
+        var result = await _mediator.Send(new GetSalesReportQuery
+        {
+            FromDate = from ?? DateTime.Today.AddMonths(-1),
+            ToDate = to ?? DateTime.Today
+        }, ct);
         return Ok(result);
     }
 }

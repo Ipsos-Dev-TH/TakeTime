@@ -55,7 +55,7 @@ public class JwtAuthenticationMiddleware
 
     private static string? ExtractToken(HttpContext context)
     {
-        var authorization = context.Request.Headers.Authorization.FirstOrDefault();
+        var authorization = context.Request.Headers["Authorization"].FirstOrDefault();
         if (!string.IsNullOrEmpty(authorization) && authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             return authorization["Bearer ".Length..].Trim();

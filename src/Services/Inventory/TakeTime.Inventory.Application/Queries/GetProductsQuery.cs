@@ -12,6 +12,13 @@ public sealed class GetProductsQuery : IRequest<PaginatedResult<ProductDto>>
 {
     public ProductSearchCriteria Criteria { get; set; } = new();
 
+    // Convenience properties that delegate to Criteria for controller binding
+    public string? Keyword { get => Criteria.SearchTerm; set => Criteria.SearchTerm = value; }
+    public string? Category { get => Criteria.Category; set => Criteria.Category = value; }
+    public bool LowStockOnly { get => Criteria.IsLowStock ?? false; set => Criteria.IsLowStock = value; }
+    public int Page { get => Criteria.Page; set => Criteria.Page = value; }
+    public int PageSize { get => Criteria.PageSize; set => Criteria.PageSize = value; }
+
     public GetProductsQuery()
     {
     }

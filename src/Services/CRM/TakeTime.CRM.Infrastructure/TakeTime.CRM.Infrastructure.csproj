@@ -13,7 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TakeTime.CRM.Domain\TakeTime.CRM.Domain.csproj" />
-    <ProjectReference Include="..\TakeTime.CRM.Application\TakeTime.CRM.Application.csproj" />
     <ProjectReference Include="..\..\..\..\src\Infrastructure\TakeTime.Infrastructure\TakeTime.Infrastructure.csproj" />
   </ItemGroup>
 

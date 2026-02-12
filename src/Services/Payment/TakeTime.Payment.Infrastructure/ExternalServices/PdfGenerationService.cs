@@ -97,38 +97,38 @@ public class PdfGenerationService : IPdfGenerationService
             ? "<div style='color: red; font-size: 18px; text-align: center; margin-top: 30px; border: 2px solid red; padding: 10px;'>VOIDED</div>"
             : "";
 
-        return $"""
+        return $$"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{ font-family: 'Sarabun', Arial, sans-serif; font-size: 12px; color: #333; margin: 40px; }}
-                    h1 {{ font-size: 24px; margin-bottom: 5px; }}
-                    h2 {{ font-size: 18px; color: #555; margin-top: 0; }}
-                    table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-                    th {{ background-color: #f5f5f5; padding: 8px; border: 1px solid #ddd; text-align: left; }}
-                    .total-row {{ font-weight: bold; background-color: #f9f9f9; }}
-                    .header {{ display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-                    .receipt-info {{ text-align: right; }}
+                    body { font-family: 'Sarabun', Arial, sans-serif; font-size: 12px; color: #333; margin: 40px; }
+                    h1 { font-size: 24px; margin-bottom: 5px; }
+                    h2 { font-size: 18px; color: #555; margin-top: 0; }
+                    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+                    th { background-color: #f5f5f5; padding: 8px; border: 1px solid #ddd; text-align: left; }
+                    .total-row { font-weight: bold; background-color: #f9f9f9; }
+                    .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; }
+                    .receipt-info { text-align: right; }
                 </style>
             </head>
             <body>
                 <div class="header">
                     <div>
                         <h1>Receipt / ใบเสร็จรับเงิน</h1>
-                        <h2>{receipt.ReceiptType}</h2>
+                        <h2>{{receipt.ReceiptType}}</h2>
                     </div>
                     <div class="receipt-info">
-                        <p><strong>Receipt No:</strong> {receipt.ReceiptNumber}</p>
-                        <p><strong>Date:</strong> {receipt.IssuedAt:dd/MM/yyyy}</p>
-                        <p><strong>Issued by:</strong> {receipt.IssuedBy}</p>
+                        <p><strong>Receipt No:</strong> {{receipt.ReceiptNumber}}</p>
+                        <p><strong>Date:</strong> {{receipt.IssuedAt:dd/MM/yyyy}}</p>
+                        <p><strong>Issued by:</strong> {{receipt.IssuedBy}}</p>
                     </div>
                 </div>
 
                 <div style="margin-top: 20px;">
-                    <p><strong>Customer:</strong> {receipt.CustomerId}</p>
-                    <p><strong>Reservation:</strong> {receipt.ReservationId}</p>
+                    <p><strong>Customer:</strong> {{receipt.CustomerId}}</p>
+                    <p><strong>Reservation:</strong> {{receipt.ReservationId}}</p>
                 </div>
 
                 <table>
@@ -141,25 +141,25 @@ public class PdfGenerationService : IPdfGenerationService
                         </tr>
                     </thead>
                     <tbody>
-                        {itemRows}
+                        {{itemRows}}
                     </tbody>
                     <tfoot>
                         <tr>
                             <td colspan="3" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>Subtotal</strong></td>
-                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{receipt.SubTotal.Amount:N2}</td>
+                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{{receipt.SubTotal.Amount:N2}}</td>
                         </tr>
                         <tr>
-                            <td colspan="3" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>VAT ({receipt.VATRate}%)</strong></td>
-                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{receipt.VATAmount.Amount:N2}</td>
+                            <td colspan="3" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>VAT ({{receipt.VATRate}}%)</strong></td>
+                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{{receipt.VATAmount.Amount:N2}}</td>
                         </tr>
                         <tr class="total-row">
                             <td colspan="3" style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 14px;"><strong>Total / รวมทั้งสิ้น</strong></td>
-                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 14px;"><strong>{receipt.TotalAmount.Amount:N2} {receipt.TotalAmount.Currency}</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 14px;"><strong>{{receipt.TotalAmount.Amount:N2}} {{receipt.TotalAmount.Currency}}</strong></td>
                         </tr>
                     </tfoot>
                 </table>
 
-                {voidedHtml}
+                {{voidedHtml}}
 
                 <div style="margin-top: 40px; font-size: 10px; color: #999; text-align: center;">
                     <p>This is a computer-generated document. No signature required.</p>
@@ -184,37 +184,37 @@ public class PdfGenerationService : IPdfGenerationService
             ? "<div style='color: red; font-size: 16px; text-align: center; margin-top: 20px; border: 2px solid red; padding: 8px;'>VOIDED / ยกเลิก</div>"
             : "";
 
-        return $"""
+        return $$"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{ font-family: 'Sarabun', Arial, sans-serif; font-size: 11px; color: #333; margin: 30px; }}
-                    h1 {{ font-size: 20px; text-align: center; }}
-                    table {{ border-collapse: collapse; width: 100%; }}
-                    th {{ background-color: #f5f5f5; padding: 6px; border: 1px solid #ddd; }}
-                    .company-info {{ margin-bottom: 15px; }}
-                    .two-column {{ display: flex; justify-content: space-between; }}
+                    body { font-family: 'Sarabun', Arial, sans-serif; font-size: 11px; color: #333; margin: 30px; }
+                    h1 { font-size: 20px; text-align: center; }
+                    table { border-collapse: collapse; width: 100%; }
+                    th { background-color: #f5f5f5; padding: 6px; border: 1px solid #ddd; }
+                    .company-info { margin-bottom: 15px; }
+                    .two-column { display: flex; justify-content: space-between; }
                 </style>
             </head>
             <body>
                 <h1>TAX INVOICE / ใบกำกับภาษี</h1>
-                <p style="text-align: center; font-size: 10px;">Invoice No: {invoice.InvoiceNumber} | Date: {invoice.IssuedDate:dd/MM/yyyy}</p>
+                <p style="text-align: center; font-size: 10px;">Invoice No: {{invoice.InvoiceNumber}} | Date: {{invoice.IssuedDate:dd/MM/yyyy}}</p>
 
                 <div class="two-column" style="margin-top: 20px;">
                     <div class="company-info" style="width: 48%;">
                         <p><strong>Seller / ผู้ขาย:</strong></p>
-                        <p>{invoice.SellerInfo.CompanyName}</p>
-                        <p>Tax ID: {invoice.SellerInfo.TaxId} Branch: {invoice.SellerInfo.BranchNumber}</p>
-                        <p>{invoice.SellerInfo.Address}</p>
-                        <p>Tel: {invoice.SellerInfo.Phone} Email: {invoice.SellerInfo.Email}</p>
+                        <p>{{invoice.SellerInfo.CompanyName}}</p>
+                        <p>Tax ID: {{invoice.SellerInfo.TaxId}} Branch: {{invoice.SellerInfo.BranchNumber}}</p>
+                        <p>{{invoice.SellerInfo.Address}}</p>
+                        <p>Tel: {{invoice.SellerInfo.Phone}} Email: {{invoice.SellerInfo.Email}}</p>
                     </div>
                     <div class="company-info" style="width: 48%;">
                         <p><strong>Buyer / ผู้ซื้อ:</strong></p>
-                        <p>{invoice.BuyerInfo.CompanyName}</p>
-                        <p>Tax ID: {invoice.BuyerInfo.TaxId} Branch: {invoice.BuyerInfo.BranchNumber}</p>
-                        <p>{invoice.BuyerInfo.Address}</p>
+                        <p>{{invoice.BuyerInfo.CompanyName}}</p>
+                        <p>Tax ID: {{invoice.BuyerInfo.TaxId}} Branch: {{invoice.BuyerInfo.BranchNumber}}</p>
+                        <p>{{invoice.BuyerInfo.Address}}</p>
                     </div>
                 </div>
 
@@ -228,24 +228,24 @@ public class PdfGenerationService : IPdfGenerationService
                             <th style="width: 100px; text-align: right;">Amount</th>
                         </tr>
                     </thead>
-                    <tbody>{itemRows}</tbody>
+                    <tbody>{{itemRows}}</tbody>
                     <tfoot>
                         <tr>
                             <td colspan="4" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>Subtotal / ราคาสินค้า</strong></td>
-                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{invoice.SubTotal.Amount:N2}</td>
+                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{{invoice.SubTotal.Amount:N2}}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>VAT / ภาษีมูลค่าเพิ่ม ({invoice.VATRate}%)</strong></td>
-                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{invoice.VATAmount.Amount:N2}</td>
+                            <td colspan="4" style="padding: 6px; border: 1px solid #ddd; text-align: right;"><strong>VAT / ภาษีมูลค่าเพิ่ม ({{invoice.VATRate}}%)</strong></td>
+                            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">{{invoice.VATAmount.Amount:N2}}</td>
                         </tr>
                         <tr style="font-weight: bold; background: #f5f5f5;">
                             <td colspan="4" style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 13px;"><strong>Total / รวมทั้งสิ้น</strong></td>
-                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 13px;"><strong>{invoice.TotalAmount.Amount:N2} {invoice.TotalAmount.Currency}</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-size: 13px;"><strong>{{invoice.TotalAmount.Amount:N2}} {{invoice.TotalAmount.Currency}}</strong></td>
                         </tr>
                     </tfoot>
                 </table>
 
-                {voidedHtml}
+                {{voidedHtml}}
 
                 <div style="margin-top: 30px; font-size: 9px; color: #999; text-align: center;">
                     <p>This is a computer-generated tax invoice. No signature required.</p>

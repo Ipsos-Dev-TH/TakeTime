@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TakeTime.HumanResources.Domain\TakeTime.HumanResources.Domain.csproj" />
+    <ProjectReference Include="..\TakeTime.HumanResources.Infrastructure\TakeTime.HumanResources.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\..\src\Core\TakeTime.Core\TakeTime.Core.csproj" />
     <ProjectReference Include="..\..\..\..\src\MultiTenancy\TakeTime.MultiTenancy\TakeTime.MultiTenancy.csproj" />
   </ItemGroup>
