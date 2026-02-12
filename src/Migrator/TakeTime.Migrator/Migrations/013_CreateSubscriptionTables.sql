@@ -10,9 +10,9 @@
 -- =============================================
 -- SubscriptionPlans - Available subscription plans
 -- =============================================
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionPlans' AND SCHEMA_NAME(schema_id) = 'dbo')
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionPlans' AND SCHEMA_NAME(schema_id) = 'multitenancy')
 BEGIN
-    CREATE TABLE SubscriptionPlans (
+    CREATE TABLE multitenancy.SubscriptionPlans (
         Id                  UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
         Code                NVARCHAR(50)     NOT NULL,
         Name                NVARCHAR(200)    NOT NULL,
@@ -38,17 +38,17 @@ BEGIN
         CONSTRAINT UQ_SubscriptionPlans_Code UNIQUE (Code)
     );
 
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPlans_Tier ON SubscriptionPlans (Tier) INCLUDE (IsActive, MonthlyPrice);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPlans_IsActive ON SubscriptionPlans (IsActive) INCLUDE (Code, Name, Tier, SortOrder);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPlans_Tier ON multitenancy.SubscriptionPlans (Tier) INCLUDE (IsActive, MonthlyPrice);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPlans_IsActive ON multitenancy.SubscriptionPlans (IsActive) INCLUDE (Code, Name, Tier, SortOrder);
 END
 GO
 
 -- =============================================
 -- Seed default subscription plans
 -- =============================================
-IF NOT EXISTS (SELECT * FROM SubscriptionPlans WHERE Code = 'free')
+IF NOT EXISTS (SELECT * FROM multitenancy.SubscriptionPlans WHERE Code = 'free')
 BEGIN
-    INSERT INTO SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
+    INSERT INTO multitenancy.SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
     VALUES
     ('00000000-0000-0000-0000-000000000001', 'free', 'Free', N'แพ็กเกจฟรี',
      'Basic plan for small properties just getting started.', N'แพ็กเกจพื้นฐานสำหรับที่พักขนาดเล็ก',
@@ -59,9 +59,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM SubscriptionPlans WHERE Code = 'starter')
+IF NOT EXISTS (SELECT * FROM multitenancy.SubscriptionPlans WHERE Code = 'starter')
 BEGIN
-    INSERT INTO SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
+    INSERT INTO multitenancy.SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
     VALUES
     ('00000000-0000-0000-0000-000000000002', 'starter', 'Starter', N'แพ็กเกจสตาร์ทเตอร์',
      'Ideal for small to medium properties with reservation, payment, and CRM.', N'เหมาะสำหรับที่พักขนาดเล็กถึงกลาง รวมระบบจอง ชำระเงิน และ CRM',
@@ -72,9 +72,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM SubscriptionPlans WHERE Code = 'professional')
+IF NOT EXISTS (SELECT * FROM multitenancy.SubscriptionPlans WHERE Code = 'professional')
 BEGIN
-    INSERT INTO SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
+    INSERT INTO multitenancy.SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
     VALUES
     ('00000000-0000-0000-0000-000000000003', 'professional', 'Professional', N'แพ็กเกจโปรเฟสชันนอล',
      'Full operational management including HR, inventory, and channel management.', N'ระบบจัดการครบวงจร รวม HR สต็อกสินค้า และ Channel Manager',
@@ -85,9 +85,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM SubscriptionPlans WHERE Code = 'enterprise')
+IF NOT EXISTS (SELECT * FROM multitenancy.SubscriptionPlans WHERE Code = 'enterprise')
 BEGIN
-    INSERT INTO SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
+    INSERT INTO multitenancy.SubscriptionPlans (Id, Code, Name, NameTh, Description, DescriptionTh, Tier, MonthlyPrice, YearlyPrice, Currency, MaxRooms, MaxUsers, MaxStorageGB, IncludedFeatures, IncludedModules, TrialAvailable, TrialDays, IsActive, SortOrder)
     VALUES
     ('00000000-0000-0000-0000-000000000004', 'enterprise', 'Enterprise', N'แพ็กเกจเอ็นเตอร์ไพรส์',
      'Full-featured plan for large properties and hotel chains.', N'แพ็กเกจเต็มรูปแบบสำหรับที่พักขนาดใหญ่และเครือโรงแรม',
@@ -99,12 +99,11 @@ END
 GO
 
 -- =============================================
--- TenantSubscriptionsV2 - Enhanced subscription tracking per tenant
--- (Named V2 to avoid conflict with existing TenantSubscriptions from migration 001)
+-- TenantSubscriptions - Subscription tracking per tenant
 -- =============================================
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'TenantSubscriptionsV2')
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'TenantSubscriptions' AND SCHEMA_NAME(schema_id) = 'multitenancy')
 BEGIN
-    CREATE TABLE TenantSubscriptionsV2 (
+    CREATE TABLE multitenancy.TenantSubscriptions (
         Id                      UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
         TenantId                UNIQUEIDENTIFIER NOT NULL,
         PlanId                  UNIQUEIDENTIFIER NOT NULL,
@@ -126,24 +125,24 @@ BEGIN
         NextBillingDate         DATETIME2        NULL,
         CreatedAt               DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt               DATETIME2        NULL,
-        CONSTRAINT PK_TenantSubscriptionsV2 PRIMARY KEY CLUSTERED (Id),
-        CONSTRAINT FK_TenantSubscriptionsV2_Tenants FOREIGN KEY (TenantId) REFERENCES Tenants(Id),
-        CONSTRAINT FK_TenantSubscriptionsV2_Plans FOREIGN KEY (PlanId) REFERENCES SubscriptionPlans(Id)
+        CONSTRAINT PK_TenantSubscriptions PRIMARY KEY CLUSTERED (Id),
+        CONSTRAINT FK_TenantSubscriptions_Tenants FOREIGN KEY (TenantId) REFERENCES multitenancy.Tenants(Id),
+        CONSTRAINT FK_TenantSubscriptions_Plans FOREIGN KEY (PlanId) REFERENCES multitenancy.SubscriptionPlans(Id)
     );
 
-    CREATE NONCLUSTERED INDEX IX_TenantSubscriptionsV2_TenantId ON TenantSubscriptionsV2 (TenantId) INCLUDE (Status, PlanId);
-    CREATE NONCLUSTERED INDEX IX_TenantSubscriptionsV2_Status ON TenantSubscriptionsV2 (Status) INCLUDE (TenantId, PlanId);
-    CREATE NONCLUSTERED INDEX IX_TenantSubscriptionsV2_TenantStatus ON TenantSubscriptionsV2 (TenantId, Status) INCLUDE (PlanId, EndDate);
-    CREATE NONCLUSTERED INDEX IX_TenantSubscriptionsV2_NextBilling ON TenantSubscriptionsV2 (NextBillingDate) WHERE AutoRenew = 1 AND Status = 'Active';
+    CREATE NONCLUSTERED INDEX IX_TenantSubscriptions_TenantId ON multitenancy.TenantSubscriptions (TenantId) INCLUDE (Status, PlanId);
+    CREATE NONCLUSTERED INDEX IX_TenantSubscriptions_Status ON multitenancy.TenantSubscriptions (Status) INCLUDE (TenantId, PlanId);
+    CREATE NONCLUSTERED INDEX IX_TenantSubscriptions_TenantStatus ON multitenancy.TenantSubscriptions (TenantId, Status) INCLUDE (PlanId, EndDate);
+    CREATE NONCLUSTERED INDEX IX_TenantSubscriptions_NextBilling ON multitenancy.TenantSubscriptions (NextBillingDate) WHERE AutoRenew = 1 AND Status = 'Active';
 END
 GO
 
 -- =============================================
 -- SubscriptionPayments - Payment records for subscriptions
 -- =============================================
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionPayments')
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionPayments' AND SCHEMA_NAME(schema_id) = 'multitenancy')
 BEGIN
-    CREATE TABLE SubscriptionPayments (
+    CREATE TABLE multitenancy.SubscriptionPayments (
         Id                      UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
         TenantId                UNIQUEIDENTIFIER NOT NULL,
         SubscriptionId          UNIQUEIDENTIFIER NOT NULL,
@@ -167,23 +166,23 @@ BEGIN
         CreatedAt               DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
         CONSTRAINT PK_SubscriptionPayments PRIMARY KEY CLUSTERED (Id),
         CONSTRAINT UQ_SubscriptionPayments_PaymentNumber UNIQUE (PaymentNumber),
-        CONSTRAINT FK_SubscriptionPayments_Tenants FOREIGN KEY (TenantId) REFERENCES Tenants(Id),
-        CONSTRAINT FK_SubscriptionPayments_Subscriptions FOREIGN KEY (SubscriptionId) REFERENCES TenantSubscriptionsV2(Id)
+        CONSTRAINT FK_SubscriptionPayments_Tenants FOREIGN KEY (TenantId) REFERENCES multitenancy.Tenants(Id),
+        CONSTRAINT FK_SubscriptionPayments_Subscriptions FOREIGN KEY (SubscriptionId) REFERENCES multitenancy.TenantSubscriptions(Id)
     );
 
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_TenantId ON SubscriptionPayments (TenantId) INCLUDE (Status, Amount, PaidAt);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_SubscriptionId ON SubscriptionPayments (SubscriptionId) INCLUDE (Status, Amount);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_Status ON SubscriptionPayments (Status) INCLUDE (TenantId, Amount, PaidAt);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_PaidAt ON SubscriptionPayments (PaidAt) WHERE PaidAt IS NOT NULL;
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_TenantId ON multitenancy.SubscriptionPayments (TenantId) INCLUDE (Status, Amount, PaidAt);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_SubscriptionId ON multitenancy.SubscriptionPayments (SubscriptionId) INCLUDE (Status, Amount);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_Status ON multitenancy.SubscriptionPayments (Status) INCLUDE (TenantId, Amount, PaidAt);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionPayments_PaidAt ON multitenancy.SubscriptionPayments (PaidAt) WHERE PaidAt IS NOT NULL;
 END
 GO
 
 -- =============================================
 -- SubscriptionInvoices - Tax invoices for subscription billing
 -- =============================================
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionInvoices')
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionInvoices' AND SCHEMA_NAME(schema_id) = 'multitenancy')
 BEGIN
-    CREATE TABLE SubscriptionInvoices (
+    CREATE TABLE multitenancy.SubscriptionInvoices (
         Id                      UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
         TenantId                UNIQUEIDENTIFIER NOT NULL,
         SubscriptionId          UNIQUEIDENTIFIER NOT NULL,
@@ -212,13 +211,68 @@ BEGIN
         PaidAt                  DATETIME2        NULL,
         CONSTRAINT PK_SubscriptionInvoices PRIMARY KEY CLUSTERED (Id),
         CONSTRAINT UQ_SubscriptionInvoices_InvoiceNumber UNIQUE (InvoiceNumber),
-        CONSTRAINT FK_SubscriptionInvoices_Tenants FOREIGN KEY (TenantId) REFERENCES Tenants(Id),
-        CONSTRAINT FK_SubscriptionInvoices_Subscriptions FOREIGN KEY (SubscriptionId) REFERENCES TenantSubscriptionsV2(Id)
+        CONSTRAINT FK_SubscriptionInvoices_Tenants FOREIGN KEY (TenantId) REFERENCES multitenancy.Tenants(Id),
+        CONSTRAINT FK_SubscriptionInvoices_Subscriptions FOREIGN KEY (SubscriptionId) REFERENCES multitenancy.TenantSubscriptions(Id)
     );
 
-    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_TenantId ON SubscriptionInvoices (TenantId) INCLUDE (Status, TotalAmount);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_SubscriptionId ON SubscriptionInvoices (SubscriptionId);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_Status ON SubscriptionInvoices (Status) INCLUDE (TenantId, TotalAmount, DueDate);
-    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_InvoiceDate ON SubscriptionInvoices (InvoiceDate DESC) INCLUDE (TenantId, Status, TotalAmount);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_TenantId ON multitenancy.SubscriptionInvoices (TenantId) INCLUDE (Status, TotalAmount);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_SubscriptionId ON multitenancy.SubscriptionInvoices (SubscriptionId);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_Status ON multitenancy.SubscriptionInvoices (Status) INCLUDE (TenantId, TotalAmount, DueDate);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionInvoices_InvoiceDate ON multitenancy.SubscriptionInvoices (InvoiceDate DESC) INCLUDE (TenantId, Status, TotalAmount);
+END
+GO
+
+-- =============================================
+-- PromoCodes - Database-backed promotional/discount codes
+-- =============================================
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'PromoCodes' AND SCHEMA_NAME(schema_id) = 'multitenancy')
+BEGIN
+    CREATE TABLE multitenancy.PromoCodes (
+        Id                      UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
+        Code                    NVARCHAR(50)     NOT NULL,
+        Description             NVARCHAR(500)    NULL,
+        DiscountType            NVARCHAR(20)     NOT NULL DEFAULT 'Percentage',
+        DiscountValue           DECIMAL(18,2)    NOT NULL DEFAULT 0,
+        MaxUsageCount           INT              NULL,
+        CurrentUsageCount       INT              NOT NULL DEFAULT 0,
+        ValidFrom               DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        ValidUntil              DATETIME2        NULL,
+        ApplicablePlanIds       NVARCHAR(MAX)    NULL,
+        MinBillingCycles        INT              NOT NULL DEFAULT 0,
+        IsActive                BIT              NOT NULL DEFAULT 1,
+        CreatedAt               DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt               DATETIME2        NULL,
+        CONSTRAINT PK_PromoCodes PRIMARY KEY CLUSTERED (Id),
+        CONSTRAINT UQ_PromoCodes_Code UNIQUE (Code)
+    );
+
+    CREATE NONCLUSTERED INDEX IX_PromoCodes_Code ON multitenancy.PromoCodes (Code) WHERE IsActive = 1;
+    CREATE NONCLUSTERED INDEX IX_PromoCodes_IsActive ON multitenancy.PromoCodes (IsActive) INCLUDE (Code, DiscountType, DiscountValue, ValidUntil);
+END
+GO
+
+-- =============================================
+-- SubscriptionAuditLogs - Audit trail for all subscription changes
+-- =============================================
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionAuditLogs' AND SCHEMA_NAME(schema_id) = 'multitenancy')
+BEGIN
+    CREATE TABLE multitenancy.SubscriptionAuditLogs (
+        Id                      UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
+        TenantId                UNIQUEIDENTIFIER NOT NULL,
+        SubscriptionId          UNIQUEIDENTIFIER NULL,
+        Action                  NVARCHAR(50)     NOT NULL,
+        OldStatus               NVARCHAR(50)     NULL,
+        NewStatus               NVARCHAR(50)     NULL,
+        OldPlanId               UNIQUEIDENTIFIER NULL,
+        NewPlanId               UNIQUEIDENTIFIER NULL,
+        Details                 NVARCHAR(MAX)    NULL,
+        PerformedBy             NVARCHAR(250)    NULL,
+        CreatedAt               DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT PK_SubscriptionAuditLogs PRIMARY KEY CLUSTERED (Id),
+        CONSTRAINT FK_SubscriptionAuditLogs_Tenants FOREIGN KEY (TenantId) REFERENCES multitenancy.Tenants(Id)
+    );
+
+    CREATE NONCLUSTERED INDEX IX_SubscriptionAuditLogs_TenantId ON multitenancy.SubscriptionAuditLogs (TenantId, CreatedAt DESC);
+    CREATE NONCLUSTERED INDEX IX_SubscriptionAuditLogs_Action ON multitenancy.SubscriptionAuditLogs (Action, CreatedAt DESC);
 END
 GO

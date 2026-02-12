@@ -8,8 +8,8 @@ namespace TakeTime.ApiGateway.Controllers;
 
 /// <summary>
 /// Admin API for managing subscription plans, tenant subscriptions,
-/// payments, and invoices. Provides full lifecycle management for
-/// the TakeTime SaaS billing system.
+/// payments, invoices, promo codes, and audit history.
+/// Provides full lifecycle management for the TakeTime SaaS billing system.
 /// </summary>
 [ApiController]
 [Route("api/v1/admin/subscription")]
@@ -160,6 +160,14 @@ public class SubscriptionController : ControllerBase
         return Ok(subscription);
     }
 
+    /// <summary>Gets the full subscription history for a tenant.</summary>
+    [HttpGet("tenants/{tenantId:guid}/history")]
+    public async Task<IActionResult> GetSubscriptionHistory(Guid tenantId, CancellationToken ct)
+    {
+        var history = await _subscriptionService.GetSubscriptionHistoryAsync(tenantId, ct);
+        return Ok(history);
+    }
+
     /// <summary>Creates a new paid subscription for a tenant.</summary>
     [HttpPost("tenants/{tenantId:guid}/subscribe")]
     public async Task<IActionResult> Subscribe(
@@ -201,9 +209,16 @@ public class SubscriptionController : ControllerBase
     {
         try
         {
-            var subscription = await _subscriptionService.UpgradePlanAsync(
+            var result = await _subscriptionService.UpgradePlanAsync(
                 tenantId, request.NewPlanId, request.BillingCycle, ct);
-            return Ok(subscription);
+            return Ok(new
+            {
+                subscription = result.NewSubscription,
+                proRatedCredit = result.ProRatedCredit,
+                message = result.ProRatedCredit > 0
+                    ? $"Upgraded successfully. Pro-rated credit: {result.ProRatedCredit:N2} THB"
+                    : "Upgraded successfully."
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -342,6 +357,29 @@ public class SubscriptionController : ControllerBase
         }
     }
 
+    /// <summary>Processes a refund for a specific payment.</summary>
+    [HttpPost("payments/{paymentId:guid}/refund")]
+    public async Task<IActionResult> RefundPayment(
+        Guid paymentId, [FromBody] RefundRequest? request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _subscriptionService.RefundPaymentAsync(
+                paymentId, request?.Reason, ct);
+            return Ok(new
+            {
+                message = "Payment refunded successfully.",
+                paymentNumber = result.PaymentNumber,
+                refundAmount = result.TotalAmount,
+                status = result.Status.ToString()
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     // ─── Invoice Management ───────────────────────────────────────────
 
     /// <summary>Gets invoice history for a tenant.</summary>
@@ -374,6 +412,125 @@ public class SubscriptionController : ControllerBase
         }
     }
 
+    // ─── Promo Code Management ────────────────────────────────────────
+
+    /// <summary>Lists all promo codes.</summary>
+    [HttpGet("promo-codes")]
+    public async Task<IActionResult> GetPromoCodes(CancellationToken ct)
+    {
+        var codes = await _dbContext.PromoCodes
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync(ct);
+        return Ok(codes);
+    }
+
+    /// <summary>Creates a new promo code.</summary>
+    [HttpPost("promo-codes")]
+    public async Task<IActionResult> CreatePromoCode(
+        [FromBody] CreatePromoCodeRequest request, CancellationToken ct)
+    {
+        var existing = await _dbContext.PromoCodes
+            .AnyAsync(p => p.Code == request.Code.ToUpperInvariant(), ct);
+        if (existing)
+            return BadRequest(new { error = $"Promo code '{request.Code}' already exists." });
+
+        var promoCode = new PromoCode
+        {
+            Code = request.Code.ToUpperInvariant(),
+            Description = request.Description,
+            DiscountType = request.DiscountType,
+            DiscountValue = request.DiscountValue,
+            MaxUsageCount = request.MaxUsageCount,
+            ValidFrom = request.ValidFrom ?? DateTime.UtcNow,
+            ValidUntil = request.ValidUntil,
+            ApplicablePlanIds = request.ApplicablePlanIds ?? [],
+            MinBillingCycles = request.MinBillingCycles,
+            IsActive = true
+        };
+
+        _dbContext.PromoCodes.Add(promoCode);
+        await _dbContext.SaveChangesAsync(ct);
+
+        return CreatedAtAction(nameof(GetPromoCodes), new { }, promoCode);
+    }
+
+    /// <summary>Updates a promo code.</summary>
+    [HttpPut("promo-codes/{id:guid}")]
+    public async Task<IActionResult> UpdatePromoCode(
+        Guid id, [FromBody] UpdatePromoCodeRequest request, CancellationToken ct)
+    {
+        var promoCode = await _dbContext.PromoCodes.FindAsync([id], ct);
+        if (promoCode is null)
+            return NotFound(new { error = $"Promo code '{id}' not found." });
+
+        if (request.Description is not null) promoCode.Description = request.Description;
+        if (request.DiscountType.HasValue) promoCode.DiscountType = request.DiscountType.Value;
+        if (request.DiscountValue.HasValue) promoCode.DiscountValue = request.DiscountValue.Value;
+        if (request.MaxUsageCount.HasValue) promoCode.MaxUsageCount = request.MaxUsageCount.Value == 0 ? null : request.MaxUsageCount.Value;
+        if (request.ValidUntil.HasValue) promoCode.ValidUntil = request.ValidUntil.Value;
+        if (request.ApplicablePlanIds is not null) promoCode.ApplicablePlanIds = request.ApplicablePlanIds;
+        if (request.IsActive.HasValue) promoCode.IsActive = request.IsActive.Value;
+
+        promoCode.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(ct);
+
+        return Ok(promoCode);
+    }
+
+    /// <summary>Deactivates a promo code.</summary>
+    [HttpDelete("promo-codes/{id:guid}")]
+    public async Task<IActionResult> DeactivatePromoCode(Guid id, CancellationToken ct)
+    {
+        var promoCode = await _dbContext.PromoCodes.FindAsync([id], ct);
+        if (promoCode is null)
+            return NotFound(new { error = $"Promo code '{id}' not found." });
+
+        promoCode.IsActive = false;
+        promoCode.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(ct);
+
+        return Ok(new { message = "Promo code deactivated." });
+    }
+
+    /// <summary>Validates a promo code for a specific plan.</summary>
+    [HttpPost("promo-codes/validate")]
+    public async Task<IActionResult> ValidatePromoCode(
+        [FromBody] ValidatePromoCodeRequest request, CancellationToken ct)
+    {
+        var result = await _subscriptionService.ValidatePromoCodeAsync(
+            request.Code, request.PlanId, ct);
+        return Ok(result);
+    }
+
+    // ─── Audit History ────────────────────────────────────────────────
+
+    /// <summary>Gets the subscription audit history for a tenant.</summary>
+    [HttpGet("tenants/{tenantId:guid}/audit")]
+    public async Task<IActionResult> GetAuditHistory(
+        Guid tenantId, [FromQuery] int take = 50, CancellationToken ct = default)
+    {
+        var history = await _subscriptionService.GetAuditHistoryAsync(tenantId, take, ct);
+        return Ok(history);
+    }
+
+    // ─── System Operations ────────────────────────────────────────────
+
+    /// <summary>Expires all trials that have passed their end date.</summary>
+    [HttpPost("system/expire-trials")]
+    public async Task<IActionResult> ExpireTrials(CancellationToken ct)
+    {
+        var expired = await _subscriptionService.ExpireTrialsAsync(ct);
+        return Ok(new { message = $"Expired {expired} trial(s).", expiredCount = expired });
+    }
+
+    /// <summary>Marks overdue invoices and sets subscriptions to past-due.</summary>
+    [HttpPost("system/mark-overdue")]
+    public async Task<IActionResult> MarkOverdueInvoices(CancellationToken ct)
+    {
+        var overdue = await _subscriptionService.MarkOverdueInvoicesAsync(ct);
+        return Ok(new { message = $"Marked {overdue} invoice(s) as overdue.", overdueCount = overdue });
+    }
+
     // ─── Dashboard ────────────────────────────────────────────────────
 
     /// <summary>Gets subscription statistics for the admin dashboard.</summary>
@@ -391,6 +548,8 @@ public class SubscriptionController : ControllerBase
             .CountAsync(s => s.Status == SubscriptionStatus.Paused, ct);
         var pastDueSubscriptions = await _dbContext.TenantSubscriptions
             .CountAsync(s => s.Status == SubscriptionStatus.PastDue, ct);
+        var expiredSubscriptions = await _dbContext.TenantSubscriptions
+            .CountAsync(s => s.Status == SubscriptionStatus.Expired, ct);
 
         var totalRevenue = await _dbContext.SubscriptionPayments
             .Where(p => p.Status == SubscriptionPaymentStatus.Completed)
@@ -400,6 +559,13 @@ public class SubscriptionController : ControllerBase
         var monthlyRevenue = await _dbContext.SubscriptionPayments
             .Where(p => p.Status == SubscriptionPaymentStatus.Completed && p.PaidAt >= monthStart)
             .SumAsync(p => p.TotalAmount, ct);
+
+        var totalRefunds = await _dbContext.SubscriptionPayments
+            .Where(p => p.Status == SubscriptionPaymentStatus.Refunded)
+            .SumAsync(p => p.TotalAmount, ct);
+
+        var activePromoCodes = await _dbContext.PromoCodes
+            .CountAsync(p => p.IsActive, ct);
 
         var planDistribution = await _dbContext.TenantSubscriptions
             .Where(s => s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial)
@@ -416,8 +582,11 @@ public class SubscriptionController : ControllerBase
             cancelledSubscriptions,
             pausedSubscriptions,
             pastDueSubscriptions,
+            expiredSubscriptions,
             totalRevenue,
             monthlyRevenue,
+            totalRefunds,
+            activePromoCodes,
             currency = "THB",
             planDistribution
         });
@@ -480,6 +649,9 @@ public record ChangePlanRequest(
 public record CancelRequest(
     string? Reason = null);
 
+public record RefundRequest(
+    string? Reason = null);
+
 public record RecordPaymentRequest(
     decimal Amount,
     SubscriptionPaymentMethod PaymentMethod = SubscriptionPaymentMethod.BankTransfer,
@@ -490,3 +662,27 @@ public record RecordPaymentRequest(
     string? CardLast4 = null,
     string? CardBrand = null,
     string? GatewayTransactionId = null);
+
+public record CreatePromoCodeRequest(
+    string Code,
+    string? Description = null,
+    DiscountType DiscountType = DiscountType.Percentage,
+    decimal DiscountValue = 10m,
+    int? MaxUsageCount = null,
+    DateTime? ValidFrom = null,
+    DateTime? ValidUntil = null,
+    List<Guid>? ApplicablePlanIds = null,
+    int MinBillingCycles = 0);
+
+public record UpdatePromoCodeRequest(
+    string? Description = null,
+    DiscountType? DiscountType = null,
+    decimal? DiscountValue = null,
+    int? MaxUsageCount = null,
+    DateTime? ValidUntil = null,
+    List<Guid>? ApplicablePlanIds = null,
+    bool? IsActive = null);
+
+public record ValidatePromoCodeRequest(
+    string Code,
+    Guid PlanId);

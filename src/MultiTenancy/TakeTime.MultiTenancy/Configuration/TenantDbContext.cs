@@ -19,6 +19,8 @@ public class TenantDbContext : DbContext
     public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
     public DbSet<SubscriptionInvoice> SubscriptionInvoices => Set<SubscriptionInvoice>();
+    public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
+    public DbSet<SubscriptionAuditLog> SubscriptionAuditLogs => Set<SubscriptionAuditLog>();
 
     public TenantDbContext(DbContextOptions<TenantDbContext> options)
         : base(options)
@@ -33,6 +35,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new TenantSubscriptionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SubscriptionPaymentEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SubscriptionInvoiceEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new PromoCodeEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new SubscriptionAuditLogEntityConfiguration());
     }
 }
 
@@ -486,5 +490,89 @@ internal class SubscriptionInvoiceEntityConfiguration : IEntityTypeConfiguration
 
         builder.Property(i => i.BuyerAddress)
             .HasMaxLength(1000);
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the PromoCode entity.
+/// </summary>
+internal class PromoCodeEntityConfiguration : IEntityTypeConfiguration<PromoCode>
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
+    };
+
+    public void Configure(EntityTypeBuilder<PromoCode> builder)
+    {
+        builder.ToTable("PromoCodes", "multitenancy");
+
+        builder.HasKey(p => p.Id);
+
+        builder.HasIndex(p => p.Code)
+            .IsUnique()
+            .HasDatabaseName("IX_PromoCodes_Code");
+
+        builder.HasIndex(p => p.IsActive)
+            .HasDatabaseName("IX_PromoCodes_IsActive");
+
+        builder.Property(p => p.Code)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(p => p.Description)
+            .HasMaxLength(500);
+
+        builder.Property(p => p.DiscountType)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        builder.Property(p => p.DiscountValue)
+            .HasPrecision(18, 2);
+
+        // JSON-serialized list of applicable plan IDs
+        builder.Property(p => p.ApplicablePlanIds)
+            .HasColumnType("nvarchar(max)")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOptions),
+                v => JsonSerializer.Deserialize<List<Guid>>(v, JsonOptions) ?? new List<Guid>());
+    }
+}
+
+/// <summary>
+/// EF Core entity configuration for the SubscriptionAuditLog entity.
+/// </summary>
+internal class SubscriptionAuditLogEntityConfiguration : IEntityTypeConfiguration<SubscriptionAuditLog>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionAuditLog> builder)
+    {
+        builder.ToTable("SubscriptionAuditLogs", "multitenancy");
+
+        builder.HasKey(a => a.Id);
+
+        builder.HasIndex(a => new { a.TenantId, a.CreatedAt })
+            .IsDescending(false, true)
+            .HasDatabaseName("IX_SubscriptionAuditLogs_TenantId");
+
+        builder.HasIndex(a => new { a.Action, a.CreatedAt })
+            .IsDescending(false, true)
+            .HasDatabaseName("IX_SubscriptionAuditLogs_Action");
+
+        builder.Property(a => a.Action)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(a => a.OldStatus)
+            .HasMaxLength(50);
+
+        builder.Property(a => a.NewStatus)
+            .HasMaxLength(50);
+
+        builder.Property(a => a.Details)
+            .HasColumnType("nvarchar(max)");
+
+        builder.Property(a => a.PerformedBy)
+            .HasMaxLength(250);
     }
 }
