@@ -951,7 +951,7 @@
                 }
             </style>
 
-            <!-- Alert Overlay -->
+            <!-- Chat Alert Overlay -->
             <div class="global-chat-alert" id="globalChatAlert">
                 <div class="chat-alert-box">
                     <i class="fas fa-comments alert-icon"></i>
@@ -964,8 +964,10 @@
                     <div class="alert-message-preview" id="alertMessagePreview">
                         -
                     </div>
+                    <div class="alert-count-info" id="alertCountInfo" style="font-size:13px;color:#999;margin-bottom:15px;">
+                    </div>
                     <div>
-                        <a href="Admin/Chat/ChatManagement.aspx" class="btn-respond-chat">
+                        <a href="<%= ResolveUrl("~/Admin/Chat/ChatManagement") %>" class="btn-respond-chat">
                             <i class="fas fa-reply"></i> ตอบกลับทันที
                         </a>
                         <button type="button" class="btn-dismiss" onclick="dismissChatAlert()">
@@ -975,15 +977,41 @@
                 </div>
             </div>
 
+            <!-- Room Service Alert Overlay -->
+            <div class="global-chat-alert" id="globalRSAlert">
+                <div class="chat-alert-box" style="animation: none;">
+                    <i class="fas fa-concierge-bell alert-icon" style="color: #ff9800;"></i>
+                    <h3>ออเดอร์ Room Service ใหม่!</h3>
+                    <p>กรุณารับออเดอร์โดยเร็ว</p>
+                    <div class="alert-room-info" style="background: linear-gradient(135deg, #ff9800, #f57c00);">
+                        <div class="room-name" id="rsAlertRoomName">-</div>
+                        <div class="guest-name" id="rsAlertGuestName">-</div>
+                    </div>
+                    <div class="alert-message-preview" id="rsAlertPreview">
+                        -
+                    </div>
+                    <div class="alert-count-info" id="rsAlertCountInfo" style="font-size:13px;color:#999;margin-bottom:15px;">
+                    </div>
+                    <div>
+                        <a href="<%= ResolveUrl("~/Admin/RoomService/OrderManagement") %>" class="btn-respond-chat" style="background: linear-gradient(135deg, #ff9800, #f57c00);">
+                            <i class="fas fa-concierge-bell"></i> ดูออเดอร์ทันที
+                        </a>
+                        <button type="button" class="btn-dismiss" onclick="dismissRSAlert()">
+                            ปิดชั่วคราว (5 นาที)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Floating Badge - Chat -->
-            <a href="Admin/Chat/ChatManagement.aspx" class="chat-notification-badge" id="chatNotificationBadge">
+            <a href="<%= ResolveUrl("~/Admin/Chat/ChatManagement") %>" class="chat-notification-badge" id="chatNotificationBadge">
                 <i class="fas fa-comments"></i>
                 <span>แชทใหม่</span>
                 <span class="count" id="chatUnreadCount">0</span>
             </a>
 
             <!-- Floating Badge - Room Service -->
-            <a href="Admin/RoomService/OrderManagement.aspx" class="chat-notification-badge room-service-badge" id="roomServiceBadge" style="bottom: 140px; background: linear-gradient(135deg, #ff9800, #f57c00);">
+            <a href="<%= ResolveUrl("~/Admin/RoomService/OrderManagement") %>" class="chat-notification-badge room-service-badge" id="roomServiceBadge" style="bottom: 140px; background: linear-gradient(135deg, #ff9800, #f57c00);">
                 <i class="fas fa-concierge-bell"></i>
                 <span>ออเดอร์ใหม่</span>
                 <span class="count" id="rsUnreadCount">0</span>
@@ -995,34 +1023,49 @@
             </audio>
 
             <script>
-                // Global Chat Notification System
-                var chatAlertInterval = null;
+                // =============================================
+                // Global Notification System
+                // Chat + Room Service + Persistent Alerts
+                // =============================================
                 var chatSoundInterval = null;
                 var chatCheckInterval = null;
+                var rsCheckInterval = null;
                 var sessionKeepAliveInterval = null;
-                var chatAlertDismissedUntil = null;
-                var lastKnownUnreadCount = 0;
 
-                // Check for unread messages
+                // --- sessionStorage helpers for dismiss state (persists across page navigation) ---
+                function getDismissedUntil(key) {
+                    try {
+                        var val = sessionStorage.getItem(key);
+                        return val ? parseInt(val) : 0;
+                    } catch(e) { return 0; }
+                }
+                function setDismissedUntil(key, time) {
+                    try { sessionStorage.setItem(key, time.toString()); } catch(e) {}
+                }
+                function clearDismissedUntil(key) {
+                    try { sessionStorage.removeItem(key); } catch(e) {}
+                }
+
+                // =============================================
+                // CHAT NOTIFICATIONS
+                // =============================================
                 function checkGlobalChatMessages() {
-                    // Skip if on ChatManagement page
+                    // Skip if currently on ChatManagement page (it has its own UI)
                     if (window.location.href.indexOf('ChatManagement') > -1) {
                         return;
                     }
 
                     fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/CheckUnreadMessages") %>', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
                     })
-                    .then(response => response.json())
-                    .then(data => {
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
                         if (data.d && data.d.hasUnread && data.d.count > 0) {
                             var count = data.d.count;
 
-                            // Update badge
+                            // Always update floating badge
                             var badge = document.getElementById('chatNotificationBadge');
                             var countEl = document.getElementById('chatUnreadCount');
                             if (badge && countEl) {
@@ -1030,86 +1073,92 @@
                                 countEl.innerText = count;
                             }
 
-                            // Show alert if not dismissed and there are new messages
+                            // Show modal alert if:
+                            // 1. Not currently dismissed (dismiss timer not active)
+                            // 2. Alert not already showing
                             var now = new Date().getTime();
-                            if ((!chatAlertDismissedUntil || now > chatAlertDismissedUntil) && count > lastKnownUnreadCount) {
-                                showGlobalChatAlert(data.d.latestRoom, data.d.latestGuest, data.d.latestMessage || 'ข้อความใหม่');
-                            }
+                            var dismissedUntil = getDismissedUntil('chatDismissedUntil');
+                            var alertEl = document.getElementById('globalChatAlert');
+                            var isShowing = alertEl && alertEl.classList.contains('show');
 
-                            lastKnownUnreadCount = count;
-                        } else {
-                            // Hide badge if no unread
-                            var badge = document.getElementById('chatNotificationBadge');
-                            if (badge) {
-                                badge.classList.remove('show');
+                            if (!isShowing && now > dismissedUntil) {
+                                // Show alert with latest message info
+                                showChatAlert(
+                                    data.d.latestRoom || '-',
+                                    data.d.latestGuest || '-',
+                                    data.d.latestMessage || 'ข้อความใหม่',
+                                    count
+                                );
+                            } else if (isShowing) {
+                                // Update displayed info if already showing
+                                document.getElementById('alertRoomName').innerText = data.d.latestRoom || '-';
+                                document.getElementById('alertGuestName').innerText = data.d.latestGuest || '-';
+                                document.getElementById('alertMessagePreview').innerText = data.d.latestMessage || '-';
+                                var countInfo = document.getElementById('alertCountInfo');
+                                if (countInfo) {
+                                    countInfo.innerText = count > 1 ? ('รวม ' + count + ' ข้อความที่ยังไม่ได้อ่าน') : '';
+                                }
                             }
-                            hideGlobalChatAlert();
-                            lastKnownUnreadCount = 0;
+                        } else {
+                            // No unread messages - hide everything
+                            var badge = document.getElementById('chatNotificationBadge');
+                            if (badge) badge.classList.remove('show');
+                            hideChatAlert();
+                            clearDismissedUntil('chatDismissedUntil');
                         }
                     })
-                    .catch(err => console.log('Chat check error:', err));
+                    .catch(function(err) { console.log('Chat check error:', err); });
                 }
 
-                // Show alert
-                function showGlobalChatAlert(roomName, guestName, message) {
-                    document.getElementById('alertRoomName').innerText = roomName || '-';
-                    document.getElementById('alertGuestName').innerText = guestName || '-';
-                    document.getElementById('alertMessagePreview').innerText = message || '-';
+                function showChatAlert(roomName, guestName, message, count) {
+                    document.getElementById('alertRoomName').innerText = roomName;
+                    document.getElementById('alertGuestName').innerText = guestName;
+                    document.getElementById('alertMessagePreview').innerText = message;
+                    var countInfo = document.getElementById('alertCountInfo');
+                    if (countInfo) {
+                        countInfo.innerText = count > 1 ? ('รวม ' + count + ' ข้อความที่ยังไม่ได้อ่าน') : '';
+                    }
                     document.getElementById('globalChatAlert').classList.add('show');
 
-                    // Play sound
-                    playGlobalChatSound();
-
-                    // Repeat sound every 3 seconds
+                    // Play notification sound
+                    playNotificationSound();
+                    // Repeat sound every 3 seconds while alert is showing
                     if (!chatSoundInterval) {
-                        chatSoundInterval = setInterval(playGlobalChatSound, 3000);
+                        chatSoundInterval = setInterval(function() {
+                            var alertEl = document.getElementById('globalChatAlert');
+                            if (alertEl && alertEl.classList.contains('show')) {
+                                playNotificationSound();
+                            } else {
+                                clearInterval(chatSoundInterval);
+                                chatSoundInterval = null;
+                            }
+                        }, 3000);
                     }
                 }
 
-                // Hide alert
-                function hideGlobalChatAlert() {
-                    document.getElementById('globalChatAlert').classList.remove('show');
+                function hideChatAlert() {
+                    var alertEl = document.getElementById('globalChatAlert');
+                    if (alertEl) alertEl.classList.remove('show');
                     if (chatSoundInterval) {
                         clearInterval(chatSoundInterval);
                         chatSoundInterval = null;
                     }
                 }
 
-                // Dismiss alert for 5 minutes
                 function dismissChatAlert() {
-                    hideGlobalChatAlert();
-                    chatAlertDismissedUntil = new Date().getTime() + (5 * 60 * 1000); // 5 minutes
+                    hideChatAlert();
+                    // Dismiss for 5 minutes - stored in sessionStorage so survives page navigation
+                    var dismissUntil = new Date().getTime() + (5 * 60 * 1000);
+                    setDismissedUntil('chatDismissedUntil', dismissUntil);
                 }
 
-                // Play sound
-                function playGlobalChatSound() {
-                    try {
-                        var audio = document.getElementById('globalNotificationSound');
-                        if (audio) {
-                            audio.currentTime = 0;
-                            audio.play().catch(e => {});
-                        }
-                    } catch(e) {}
-                }
-
-                // Session Keep-Alive
-                function keepSessionAlive() {
-                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/KeepAlive") %>', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({})
-                    })
-                    .then(response => response.json())
-                    .catch(err => console.log('Keep-alive error:', err));
-                }
-
-                // Room Service Order Notification
-                var lastKnownRSCount = 0;
+                // =============================================
+                // ROOM SERVICE NOTIFICATIONS
+                // =============================================
+                var rsSoundInterval = null;
 
                 function checkRoomServiceOrders() {
-                    // Skip if on OrderManagement page
+                    // Skip if currently on OrderManagement page
                     if (window.location.href.indexOf('OrderManagement') > -1) {
                         return;
                     }
@@ -1119,12 +1168,14 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
                     })
-                    .then(response => response.json())
-                    .then(data => {
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
                         if (data.d && data.d.success && data.d.orders && data.d.orders.length > 0) {
-                            var count = data.d.orders.length;
+                            var orders = data.d.orders;
+                            var count = orders.length;
+                            var latest = orders[0]; // Most recent pending order
 
-                            // Update badge
+                            // Always update floating badge
                             var badge = document.getElementById('roomServiceBadge');
                             var countEl = document.getElementById('rsUnreadCount');
                             if (badge && countEl) {
@@ -1132,32 +1183,114 @@
                                 countEl.innerText = count;
                             }
 
-                            // Play sound if new orders
-                            if (count > lastKnownRSCount) {
-                                playGlobalChatSound();
-                            }
+                            // Show modal alert if not dismissed and not already showing
+                            var now = new Date().getTime();
+                            var dismissedUntil = getDismissedUntil('rsDismissedUntil');
+                            var alertEl = document.getElementById('globalRSAlert');
+                            var isShowing = alertEl && alertEl.classList.contains('show');
 
-                            lastKnownRSCount = count;
-                        } else {
-                            var badge = document.getElementById('roomServiceBadge');
-                            if (badge) {
-                                badge.classList.remove('show');
+                            if (!isShowing && now > dismissedUntil) {
+                                showRSAlert(
+                                    latest.roomName || '-',
+                                    latest.guestName || '-',
+                                    (latest.itemsPreview || '-') + ' (฿' + (latest.totalAmount || '0') + ')',
+                                    count
+                                );
+                            } else if (isShowing) {
+                                // Update displayed info
+                                document.getElementById('rsAlertRoomName').innerText = latest.roomName || '-';
+                                document.getElementById('rsAlertGuestName').innerText = latest.guestName || '-';
+                                document.getElementById('rsAlertPreview').innerText = (latest.itemsPreview || '-') + ' (฿' + (latest.totalAmount || '0') + ')';
+                                var countInfo = document.getElementById('rsAlertCountInfo');
+                                if (countInfo) {
+                                    countInfo.innerText = count > 1 ? ('รวม ' + count + ' ออเดอร์ที่รอดำเนินการ') : '';
+                                }
                             }
-                            lastKnownRSCount = 0;
+                        } else {
+                            // No pending orders - hide
+                            var badge = document.getElementById('roomServiceBadge');
+                            if (badge) badge.classList.remove('show');
+                            hideRSAlert();
+                            clearDismissedUntil('rsDismissedUntil');
                         }
                     })
-                    .catch(err => console.log('RS check error:', err));
+                    .catch(function(err) { console.log('RS check error:', err); });
                 }
 
-                // Initialize on page load
-                document.addEventListener('DOMContentLoaded', function() {
-                    // Check for new messages every 5 seconds
-                    checkGlobalChatMessages();
-                    chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
+                function showRSAlert(roomName, guestName, preview, count) {
+                    document.getElementById('rsAlertRoomName').innerText = roomName;
+                    document.getElementById('rsAlertGuestName').innerText = guestName;
+                    document.getElementById('rsAlertPreview').innerText = preview;
+                    var countInfo = document.getElementById('rsAlertCountInfo');
+                    if (countInfo) {
+                        countInfo.innerText = count > 1 ? ('รวม ' + count + ' ออเดอร์ที่รอดำเนินการ') : '';
+                    }
+                    document.getElementById('globalRSAlert').classList.add('show');
 
-                    // Check for Room Service orders every 5 seconds
+                    // Play sound
+                    playNotificationSound();
+                    if (!rsSoundInterval) {
+                        rsSoundInterval = setInterval(function() {
+                            var alertEl = document.getElementById('globalRSAlert');
+                            if (alertEl && alertEl.classList.contains('show')) {
+                                playNotificationSound();
+                            } else {
+                                clearInterval(rsSoundInterval);
+                                rsSoundInterval = null;
+                            }
+                        }, 5000);
+                    }
+                }
+
+                function hideRSAlert() {
+                    var alertEl = document.getElementById('globalRSAlert');
+                    if (alertEl) alertEl.classList.remove('show');
+                    if (rsSoundInterval) {
+                        clearInterval(rsSoundInterval);
+                        rsSoundInterval = null;
+                    }
+                }
+
+                function dismissRSAlert() {
+                    hideRSAlert();
+                    var dismissUntil = new Date().getTime() + (5 * 60 * 1000);
+                    setDismissedUntil('rsDismissedUntil', dismissUntil);
+                }
+
+                // =============================================
+                // SHARED: Sound + Session Keep-Alive
+                // =============================================
+                function playNotificationSound() {
+                    try {
+                        var audio = document.getElementById('globalNotificationSound');
+                        if (audio) {
+                            audio.currentTime = 0;
+                            audio.play().catch(function(e) {});
+                        }
+                    } catch(e) {}
+                }
+
+                function keepSessionAlive() {
+                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/KeepAlive") %>', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    })
+                    .then(function(response) { return response.json(); })
+                    .catch(function(err) { console.log('Keep-alive error:', err); });
+                }
+
+                // =============================================
+                // INITIALIZE
+                // =============================================
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Check immediately on page load
+                    checkGlobalChatMessages();
                     checkRoomServiceOrders();
-                    setInterval(checkRoomServiceOrders, 5000);
+
+                    // Then check every 5 seconds
+                    chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
+                    rsCheckInterval = setInterval(checkRoomServiceOrders, 5000);
 
                     // Keep session alive every 5 minutes
                     sessionKeepAliveInterval = setInterval(keepSessionAlive, 5 * 60 * 1000);
@@ -1167,6 +1300,8 @@
                 window.addEventListener('beforeunload', function() {
                     if (chatCheckInterval) clearInterval(chatCheckInterval);
                     if (chatSoundInterval) clearInterval(chatSoundInterval);
+                    if (rsCheckInterval) clearInterval(rsCheckInterval);
+                    if (rsSoundInterval) clearInterval(rsSoundInterval);
                     if (sessionKeepAliveInterval) clearInterval(sessionKeepAliveInterval);
                 });
             </script>
