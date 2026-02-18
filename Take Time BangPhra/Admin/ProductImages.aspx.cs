@@ -284,7 +284,7 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                string createTableSql = @"
+                string sql = @"
                     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Images')
                     BEGIN
                         CREATE TABLE Product_Images (
@@ -303,9 +303,14 @@ namespace Take_Time_BangPhra.Admin
 
                         CREATE INDEX IX_Product_Images_ProductType_ProductID
                             ON Product_Images (ProductType, Product_ID);
+                    END
+
+                    IF EXISTS (SELECT * FROM sys.check_constraints WHERE name = 'CK_Product_Images_ProductType')
+                    BEGIN
+                        ALTER TABLE Product_Images DROP CONSTRAINT CK_Product_Images_ProductType;
                     END";
 
-                codeInstance.DatabaseInsertSafe(connectionString, createTableSql, null);
+                codeInstance.DatabaseInsertSafe(connectionString, sql, null);
             }
             catch (Exception ex)
             {
