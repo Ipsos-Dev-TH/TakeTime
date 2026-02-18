@@ -1,217 +1,171 @@
 using System;
-using System.Collections.Generic;
 using System.Data;
 using System.Web;
-using System.Web.Script.Serialization;
 using System.Web.SessionState;
 
 namespace Take_Time_BangPhra.Admin
 {
-    /// <summary>
-    /// Notification API handler for chat and room service alerts.
-    /// Uses .ashx to bypass FriendlyUrls redirect (which breaks .aspx WebMethod POST calls).
-    /// Implements IRequiresSessionState so every poll extends the ASP.NET session.
-    /// </summary>
     public class NotificationApi : IHttpHandler, IRequiresSessionState
     {
         public void ProcessRequest(HttpContext context)
         {
             context.Response.ContentType = "application/json";
             context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            context.Response.AddHeader("Access-Control-Allow-Origin", "*");
 
-            string action = context.Request.QueryString["action"] ?? "";
-            var serializer = new JavaScriptSerializer();
+            string action = context.Request.QueryString["action"];
+            if (action == null) action = "";
 
             try
             {
-                switch (action)
+                if (action == "chat")
                 {
-                    case "chat":
-                        context.Response.Write(serializer.Serialize(CheckUnreadMessages()));
-                        break;
-                    case "rs":
-                        context.Response.Write(serializer.Serialize(GetPendingOrders()));
-                        break;
-                    case "keepalive":
-                        context.Response.Write(serializer.Serialize(new { success = true }));
-                        break;
-                    default:
-                        context.Response.Write(serializer.Serialize(new { error = "invalid action" }));
-                        break;
+                    context.Response.Write(GetChatJson());
+                }
+                else if (action == "rs")
+                {
+                    context.Response.Write(GetRoomServiceJson());
+                }
+                else if (action == "keepalive")
+                {
+                    context.Response.Write("{\"success\":true}");
+                }
+                else
+                {
+                    context.Response.Write("{\"error\":\"invalid action\"}");
                 }
             }
             catch (Exception ex)
             {
-                context.Response.Write(serializer.Serialize(new { error = ex.Message }));
+                context.Response.Write("{\"error\":\"" + EscapeJson(ex.Message) + "\"}");
             }
         }
 
-        private object CheckUnreadMessages()
+        private string GetChatJson()
         {
             try
             {
-                string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                var db = new code();
+                string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                Take_Time_BangPhra.code db = new Take_Time_BangPhra.code();
 
-                DataTable dtCount = db.DatabaseQuerySafe(connectionString,
-                    @"SELECT COUNT(*) AS UnreadCount
-                      FROM Guest_Chat
-                      WHERE IsFromGuest = 1 AND (Is_Read = 0 OR Is_Read IS NULL)",
+                DataTable dtCount = db.DatabaseQuerySafe(conn,
+                    "SELECT COUNT(*) AS UnreadCount FROM Guest_Chat WHERE IsFromGuest = 1 AND (Is_Read = 0 OR Is_Read IS NULL)",
                     null);
 
-                int unreadCount = dtCount.Rows.Count > 0 ? Convert.ToInt32(dtCount.Rows[0]["UnreadCount"]) : 0;
+                int unreadCount = 0;
+                if (dtCount != null && dtCount.Rows.Count > 0)
+                {
+                    unreadCount = Convert.ToInt32(dtCount.Rows[0]["UnreadCount"]);
+                }
+
+                if (unreadCount == 0)
+                {
+                    return "{\"hasUnread\":false,\"count\":0,\"latestRoom\":\"\",\"latestGuest\":\"\",\"latestMessage\":\"\"}";
+                }
 
                 string latestRoom = "";
                 string latestGuest = "";
                 string latestMessage = "";
-                long latestReservationId = 0;
 
-                if (unreadCount > 0)
+                try
+                {
+                    DataTable dtLatest = db.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ห้องพัก') AS RoomName, c.Name AS GuestName, gc.Message AS LatestMessage FROM Guest_Chat gc INNER JOIN Reservation r ON gc.Reservation_ID = r.ID INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL) ORDER BY gc.Created_Date DESC",
+                        null);
+
+                    if (dtLatest != null && dtLatest.Rows.Count > 0)
+                    {
+                        latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
+                        latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
+                        latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
+                        if (latestMessage.Length > 100)
+                            latestMessage = latestMessage.Substring(0, 100) + "...";
+                    }
+                }
+                catch
                 {
                     try
                     {
-                        DataTable dtLatest = db.DatabaseQuerySafe(connectionString,
-                            @"SELECT TOP 1
-                                ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
-                                c.Name AS GuestName,
-                                gc.Message AS LatestMessage,
-                                gc.Reservation_ID AS ReservationId
-                              FROM Guest_Chat gc
-                              INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                              INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                              WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
-                              ORDER BY gc.Created_Date DESC",
+                        DataTable dtFb = db.DatabaseQuerySafe(conn,
+                            "SELECT TOP 1 c.Name AS GuestName, gc.Message AS LatestMessage FROM Guest_Chat gc INNER JOIN Reservation r ON gc.Reservation_ID = r.ID INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL) ORDER BY gc.Created_Date DESC",
                             null);
 
-                        if (dtLatest.Rows.Count > 0)
+                        if (dtFb != null && dtFb.Rows.Count > 0)
                         {
-                            latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
-                            latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
-                            latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
-                            latestReservationId = Convert.ToInt64(dtLatest.Rows[0]["ReservationId"]);
+                            latestRoom = "ห้องพัก";
+                            latestGuest = dtFb.Rows[0]["GuestName"].ToString();
+                            latestMessage = dtFb.Rows[0]["LatestMessage"].ToString();
                             if (latestMessage.Length > 100)
                                 latestMessage = latestMessage.Substring(0, 100) + "...";
                         }
                     }
                     catch
                     {
-                        try
-                        {
-                            DataTable dtFallback = db.DatabaseQuerySafe(connectionString,
-                                @"SELECT TOP 1
-                                    c.Name AS GuestName,
-                                    gc.Message AS LatestMessage,
-                                    gc.Reservation_ID AS ReservationId
-                                  FROM Guest_Chat gc
-                                  INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                                  INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                                  WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
-                                  ORDER BY gc.Created_Date DESC",
-                                null);
-
-                            if (dtFallback.Rows.Count > 0)
-                            {
-                                latestRoom = "ห้องพัก";
-                                latestGuest = dtFallback.Rows[0]["GuestName"].ToString();
-                                latestMessage = dtFallback.Rows[0]["LatestMessage"].ToString();
-                                latestReservationId = Convert.ToInt64(dtFallback.Rows[0]["ReservationId"]);
-                                if (latestMessage.Length > 100)
-                                    latestMessage = latestMessage.Substring(0, 100) + "...";
-                            }
-                        }
-                        catch
-                        {
-                            latestMessage = "ข้อความใหม่";
-                        }
+                        latestMessage = "ข้อความใหม่";
                     }
                 }
 
-                return new
-                {
-                    hasUnread = unreadCount > 0,
-                    count = unreadCount,
-                    latestRoom = latestRoom,
-                    latestGuest = latestGuest,
-                    latestMessage = latestMessage,
-                    latestReservationId = latestReservationId
-                };
+                return "{\"hasUnread\":true,\"count\":" + unreadCount
+                    + ",\"latestRoom\":\"" + EscapeJson(latestRoom)
+                    + "\",\"latestGuest\":\"" + EscapeJson(latestGuest)
+                    + "\",\"latestMessage\":\"" + EscapeJson(latestMessage) + "\"}";
             }
-            catch
+            catch (Exception ex)
             {
-                return new { hasUnread = false, count = 0, latestRoom = "", latestGuest = "", latestMessage = "", latestReservationId = 0 };
+                return "{\"hasUnread\":false,\"count\":0,\"error\":\"" + EscapeJson(ex.Message) + "\"}";
             }
         }
 
-        private object GetPendingOrders()
+        private string GetRoomServiceJson()
         {
             try
             {
-                string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                var db = new code();
+                string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                Take_Time_BangPhra.code db = new Take_Time_BangPhra.code();
 
                 DataTable dtOrders = null;
-
                 try
                 {
-                    dtOrders = db.DatabaseQuerySafe(connectionString,
-                        @"SELECT
-                            o.ID AS OrderId,
-                            o.Order_Number,
-                            o.Total_Amount,
-                            ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
-                            c.Name AS GuestName,
-                            (SELECT TOP 3 Product_Name + ' x' + CAST(Quantity AS NVARCHAR)
-                             FROM Guest_Room_Service_Items i
-                             WHERE i.Order_ID = o.ID
-                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') AS ItemsPreview
-                          FROM Guest_Room_Service_Orders o
-                          INNER JOIN Reservation r ON o.Reservation_ID = r.ID
-                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                          WHERE o.Order_Status = 'PENDING'
-                          ORDER BY o.Order_Date DESC",
+                    dtOrders = db.DatabaseQuerySafe(conn,
+                        "SELECT o.ID AS OrderId, o.Order_Number, o.Total_Amount, ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ห้องพัก') AS RoomName, c.Name AS GuestName FROM Guest_Room_Service_Orders o INNER JOIN Reservation r ON o.Reservation_ID = r.ID INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone WHERE o.Order_Status = 'PENDING' ORDER BY o.Order_Date DESC",
                         null);
                 }
                 catch
                 {
-                    dtOrders = db.DatabaseQuerySafe(connectionString,
-                        @"SELECT
-                            o.ID AS OrderId,
-                            o.Order_Number,
-                            o.Total_Amount,
-                            N'ห้องพัก' AS RoomName,
-                            c.Name AS GuestName,
-                            N'' AS ItemsPreview
-                          FROM Guest_Room_Service_Orders o
-                          INNER JOIN Reservation r ON o.Reservation_ID = r.ID
-                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                          WHERE o.Order_Status = 'PENDING'
-                          ORDER BY o.Order_Date DESC",
+                    dtOrders = db.DatabaseQuerySafe(conn,
+                        "SELECT o.ID AS OrderId, o.Order_Number, o.Total_Amount, N'ห้องพัก' AS RoomName, c.Name AS GuestName FROM Guest_Room_Service_Orders o INNER JOIN Reservation r ON o.Reservation_ID = r.ID INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone WHERE o.Order_Status = 'PENDING' ORDER BY o.Order_Date DESC",
                         null);
                 }
 
-                var orders = new List<object>();
-                foreach (DataRow row in dtOrders.Rows)
+                if (dtOrders == null || dtOrders.Rows.Count == 0)
                 {
-                    string itemsPreview = row["ItemsPreview"] != DBNull.Value ? row["ItemsPreview"].ToString() : "";
-                    if (itemsPreview.Length > 50) itemsPreview = itemsPreview.Substring(0, 50) + "...";
-
-                    orders.Add(new
-                    {
-                        orderId = Convert.ToInt64(row["OrderId"]),
-                        orderNumber = row["Order_Number"].ToString(),
-                        roomName = row["RoomName"].ToString(),
-                        guestName = row["GuestName"].ToString(),
-                        itemsPreview = itemsPreview,
-                        totalAmount = Convert.ToDecimal(row["Total_Amount"]).ToString("N0")
-                    });
+                    return "{\"success\":true,\"orders\":[]}";
                 }
 
-                return new { success = true, orders = orders };
+                string json = "{\"success\":true,\"orders\":[";
+                for (int i = 0; i < dtOrders.Rows.Count; i++)
+                {
+                    DataRow row = dtOrders.Rows[i];
+                    if (i > 0) json += ",";
+                    json += "{\"orderId\":" + row["OrderId"].ToString()
+                        + ",\"orderNumber\":\"" + EscapeJson(row["Order_Number"].ToString())
+                        + "\",\"roomName\":\"" + EscapeJson(row["RoomName"].ToString())
+                        + "\",\"guestName\":\"" + EscapeJson(row["GuestName"].ToString())
+                        + "\",\"totalAmount\":\"" + Convert.ToDecimal(row["Total_Amount"]).ToString("N0") + "\"}";
+                }
+                json += "]}";
+                return json;
             }
             catch
             {
-                return new { success = false, orders = new object[0] };
+                return "{\"success\":false,\"orders\":[]}";
             }
+        }
+
+        private string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
         }
 
         public bool IsReusable
