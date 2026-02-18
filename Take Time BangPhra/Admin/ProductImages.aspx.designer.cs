@@ -11,7 +11,7 @@ namespace Take_Time_BangPhra.Admin
 {
 
 
-    public partial class ProductImages
+    public partial class ProductImagesPage
     {
 
         /// <summary>

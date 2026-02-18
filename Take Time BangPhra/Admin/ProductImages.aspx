@@ -1,4 +1,4 @@
-﻿<%@ Page Title="จัดการรูปภาพสินค้า" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="ProductImages.aspx.cs" Inherits="Take_Time_BangPhra.Admin.ProductImages" %>
+﻿<%@ Page Title="จัดการรูปภาพสินค้า" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="ProductImages.aspx.cs" Inherits="Take_Time_BangPhra.Admin.ProductImagesPage" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>

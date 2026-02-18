@@ -6,7 +6,7 @@ using System.Web.UI.WebControls;
 
 namespace Take_Time_BangPhra.Admin
 {
-    public partial class ProductImages : System.Web.UI.Page
+    public partial class ProductImagesPage : System.Web.UI.Page
     {
         private readonly string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private ProductService productService;
