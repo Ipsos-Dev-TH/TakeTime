@@ -13,6 +13,41 @@ namespace Take_Time_BangPhra.Guest
 
     public partial class AboutUs
     {
-        // No server controls on this page that require designer fields
+
+        /// <summary>
+        /// rptValues control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptValues;
+
+        /// <summary>
+        /// rptTimeline control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptTimeline;
+
+        /// <summary>
+        /// rptConcepts control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptConcepts;
+
+        /// <summary>
+        /// pnlNoData control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlNoData;
     }
 }

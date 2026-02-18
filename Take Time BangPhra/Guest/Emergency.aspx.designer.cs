@@ -13,6 +13,59 @@ namespace Take_Time_BangPhra.Guest
 
     public partial class Emergency
     {
-        // No server controls on this page that require designer fields
+
+        /// <summary>
+        /// rptQuickDial control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptQuickDial;
+
+        /// <summary>
+        /// rptHospitals control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptHospitals;
+
+        /// <summary>
+        /// rptPolice control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptPolice;
+
+        /// <summary>
+        /// rptHotelServices control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptHotelServices;
+
+        /// <summary>
+        /// rptTransport control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Repeater rptTransport;
+
+        /// <summary>
+        /// pnlNoData control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move the field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlNoData;
     }
 }
