@@ -3,6 +3,7 @@ using Serilog;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 using TakeTime.Notification.Application.Interfaces;
+using TakeTime.Notification.Application.Commands;
 using TakeTime.Notification.Application.Services;
 using TakeTime.Notification.Infrastructure.Providers;
 using TakeTime.Notification.Infrastructure.Repositories;
@@ -48,6 +49,11 @@ builder.Services.AddDbContext<NotificationDbContext>((serviceProvider, options) 
 builder.Services.AddHttpClient("LINE");
 builder.Services.AddHttpClient("Telegram");
 builder.Services.AddHttpClient("SMS");
+
+// Register application repositories
+builder.Services.AddScoped<INotificationLogRepository, NotificationLogRepository>();
+builder.Services.AddScoped<INotificationTemplateRepository, NotificationTemplateRepository>();
+builder.Services.AddScoped<IChatRepository, ChatRepository>();
 
 // Add controllers
 builder.Services.AddControllers();

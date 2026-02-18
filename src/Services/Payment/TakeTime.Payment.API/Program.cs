@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Payment.Infrastructure.Repositories;
+using TakeTime.Payment.Application.Commands;
+using TakeTime.Payment.Application.Services;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -31,6 +33,15 @@ builder.Services.AddDbContext<PaymentDbContext>((serviceProvider, options) =>
         options.UseNpgsql(connectionString);
     }
 });
+
+// Register application repositories and services
+builder.Services.AddScoped<IPaymentRepository, PaymentDtoRepository>();
+builder.Services.AddScoped<IReceiptRepository, ReceiptDtoRepository>();
+builder.Services.AddScoped<ITaxInvoiceRepository, TaxInvoiceDtoRepository>();
+builder.Services.AddScoped<IReservationServiceClient, ReservationServiceClient>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
+builder.Services.AddScoped<VATCalculationService>();
+builder.Services.AddHttpClient("ReservationService");
 
 // Add controllers
 builder.Services.AddControllers();

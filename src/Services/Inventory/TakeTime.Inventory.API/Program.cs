@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Inventory.Infrastructure.Repositories;
+using TakeTime.Inventory.Application.Commands;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -31,6 +32,11 @@ builder.Services.AddDbContext<InventoryDbContext>((serviceProvider, options) =>
         options.UseNpgsql(connectionString);
     }
 });
+
+// Register application repositories and services
+builder.Services.AddScoped<IProductRepository, ProductDtoRepository>();
+builder.Services.AddScoped<ISalesTransactionRepository, SalesTransactionDtoRepository>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
 
 // Add controllers
 builder.Services.AddControllers();

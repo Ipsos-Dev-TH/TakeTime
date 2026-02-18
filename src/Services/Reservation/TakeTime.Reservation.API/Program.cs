@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Reservation.Infrastructure.Repositories;
+using TakeTime.Reservation.Infrastructure.Services;
+using TakeTime.Reservation.Application.Interfaces;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -31,6 +33,13 @@ builder.Services.AddDbContext<ReservationDbContext>((serviceProvider, options) =
         options.UseNpgsql(connectionString);
     }
 });
+
+// Register application repositories and services
+builder.Services.AddScoped<IReservationRepository, ReservationDtoRepository>();
+builder.Services.AddScoped<IAccommodationRepository, AccommodationDtoRepository>();
+builder.Services.AddScoped<IRateManagementRepository, RateManagementRepository>();
+builder.Services.AddScoped<IPricingService, PricingService>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
 
 // Add controllers
 builder.Services.AddControllers();

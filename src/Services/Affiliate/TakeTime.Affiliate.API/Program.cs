@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.Affiliate.Infrastructure.Repositories;
+using TakeTime.Affiliate.Application.Commands;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -31,6 +32,9 @@ builder.Services.AddDbContext<AffiliateDbContext>((serviceProvider, options) =>
         options.UseNpgsql(connectionString);
     }
 });
+
+// Register application repositories
+builder.Services.AddScoped<IAffiliateRepository, AffiliateRepository>();
 
 // Add controllers
 builder.Services.AddControllers();

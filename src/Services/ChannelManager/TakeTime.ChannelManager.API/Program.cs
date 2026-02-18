@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.ChannelManager.Infrastructure.Repositories;
+using TakeTime.ChannelManager.Infrastructure.ExternalServices;
+using TakeTime.ChannelManager.Application.Commands;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -36,6 +38,10 @@ builder.Services.AddDbContext<ChannelManagerDbContext>((serviceProvider, options
 builder.Services.AddHttpClient("BookingCom");
 builder.Services.AddHttpClient("Agoda");
 builder.Services.AddHttpClient("Expedia");
+
+// Register application repositories and services
+builder.Services.AddScoped<IChannelManagerRepository, ChannelManagerRepository>();
+builder.Services.AddScoped<IChannelApiClientFactory, ChannelApiClientFactory>();
 
 // Add controllers
 builder.Services.AddControllers();

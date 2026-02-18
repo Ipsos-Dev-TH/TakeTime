@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using TakeTime.GuestExperience.Infrastructure.Repositories;
+using TakeTime.GuestExperience.Application.Commands;
 using TakeTime.Core.Extensions;
 using TakeTime.MultiTenancy;
 
@@ -31,6 +32,9 @@ builder.Services.AddDbContext<GuestExperienceDbContext>((serviceProvider, option
         options.UseNpgsql(connectionString);
     }
 });
+
+// Register application repositories
+builder.Services.AddScoped<IGuestExperienceRepository, GuestExperienceRepository>();
 
 // Add controllers
 builder.Services.AddControllers();
