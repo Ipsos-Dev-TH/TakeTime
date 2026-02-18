@@ -3,14 +3,16 @@ using System.Collections.Generic;
 using System.Data;
 using System.Web;
 using System.Web.Script.Serialization;
+using System.Web.SessionState;
 
 namespace Take_Time_BangPhra.Admin
 {
     /// <summary>
     /// Notification API handler for chat and room service alerts.
     /// Uses .ashx to bypass FriendlyUrls redirect (which breaks .aspx WebMethod POST calls).
+    /// Implements IRequiresSessionState so every poll extends the ASP.NET session.
     /// </summary>
-    public class NotificationApi : IHttpHandler
+    public class NotificationApi : IHttpHandler, IRequiresSessionState
     {
         public void ProcessRequest(HttpContext context)
         {

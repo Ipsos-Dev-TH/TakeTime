@@ -927,28 +927,54 @@
                     position: fixed;
                     bottom: 20px;
                     right: 20px;
-                    background: linear-gradient(135deg, #f44336, #c62828);
+                    background: #757575;
                     color: white;
-                    padding: 15px 20px;
-                    border-radius: 50px;
+                    padding: 12px;
+                    border-radius: 50%;
                     display: none;
                     align-items: center;
-                    gap: 10px;
+                    justify-content: center;
+                    gap: 0;
                     cursor: pointer;
                     z-index: 9998;
-                    box-shadow: 0 5px 25px rgba(244, 67, 54, 0.4);
-                    animation: badgePulse 2s infinite;
+                    box-shadow: 0 3px 12px rgba(0,0,0,0.2);
                     text-decoration: none;
+                    transition: all 0.3s ease;
+                    width: 48px;
+                    height: 48px;
                 }
 
                 .chat-notification-badge:hover {
                     color: white;
                     text-decoration: none;
-                    transform: scale(1.05);
+                    transform: scale(1.1);
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
                 }
 
                 .chat-notification-badge.show {
                     display: flex;
+                }
+
+                /* When has unread messages - expand and pulse */
+                .chat-notification-badge.has-unread {
+                    background: linear-gradient(135deg, #f44336, #c62828);
+                    padding: 12px 20px;
+                    border-radius: 50px;
+                    width: auto;
+                    height: auto;
+                    gap: 8px;
+                    animation: badgePulse 2s infinite;
+                    box-shadow: 0 5px 25px rgba(244, 67, 54, 0.4);
+                }
+
+                .chat-notification-badge .badge-text,
+                .chat-notification-badge .count {
+                    display: none;
+                }
+
+                .chat-notification-badge.has-unread .badge-text,
+                .chat-notification-badge.has-unread .count {
+                    display: inline;
                 }
 
                 @keyframes badgePulse {
@@ -967,6 +993,20 @@
                     border-radius: 10px;
                     font-weight: 700;
                     font-size: 14px;
+                }
+
+                /* Room Service badge unread state */
+                .room-service-badge {
+                    background: #757575;
+                }
+
+                .room-service-badge.has-unread {
+                    background: linear-gradient(135deg, #ff9800, #f57c00) !important;
+                    box-shadow: 0 5px 25px rgba(255, 152, 0, 0.4);
+                }
+
+                .room-service-badge.has-unread .count {
+                    color: #f57c00;
                 }
             </style>
 
@@ -1022,17 +1062,17 @@
                 </div>
             </div>
 
-            <!-- Floating Badge - Chat -->
+            <!-- Floating Badge - Chat (always visible as shortcut, expands when has messages) -->
             <a href="<%= ResolveUrl("~/Admin/Chat/ChatManagement") %>" class="chat-notification-badge" id="chatNotificationBadge">
                 <i class="fas fa-comments"></i>
-                <span>แชทใหม่</span>
+                <span class="badge-text">แชทใหม่</span>
                 <span class="count" id="chatUnreadCount">0</span>
             </a>
 
-            <!-- Floating Badge - Room Service -->
-            <a href="<%= ResolveUrl("~/Admin/RoomService/OrderManagement") %>" class="chat-notification-badge room-service-badge" id="roomServiceBadge" style="bottom: 140px; background: linear-gradient(135deg, #ff9800, #f57c00);">
+            <!-- Floating Badge - Room Service (only shows when has pending orders) -->
+            <a href="<%= ResolveUrl("~/Admin/RoomService/OrderManagement") %>" class="chat-notification-badge room-service-badge" id="roomServiceBadge" style="bottom: 80px;">
                 <i class="fas fa-concierge-bell"></i>
-                <span>ออเดอร์ใหม่</span>
+                <span class="badge-text">ออเดอร์ใหม่</span>
                 <span class="count" id="rsUnreadCount">0</span>
             </a>
 
@@ -1084,12 +1124,12 @@
                         if (data && data.hasUnread && data.count > 0) {
                             var count = data.count;
 
-                            // Always update floating badge
+                            // Update floating badge - expand to show count
                             var badge = document.getElementById('chatNotificationBadge');
                             var countEl = document.getElementById('chatUnreadCount');
-                            if (badge && countEl) {
-                                badge.classList.add('show');
-                                countEl.innerText = count;
+                            if (badge) {
+                                badge.classList.add('has-unread');
+                                if (countEl) countEl.innerText = count;
                             }
 
                             // Show modal alert if:
@@ -1119,9 +1159,9 @@
                                 }
                             }
                         } else {
-                            // No unread messages - hide everything
+                            // No unread messages - keep badge as subtle shortcut
                             var badge = document.getElementById('chatNotificationBadge');
-                            if (badge) badge.classList.remove('show');
+                            if (badge) badge.classList.remove('has-unread');
                             hideChatAlert();
                             clearDismissedUntil('chatDismissedUntil');
                         }
@@ -1205,12 +1245,13 @@
                             var count = orders.length;
                             var latest = orders[0]; // Most recent pending order
 
-                            // Always update floating badge
+                            // Show and expand room service badge
                             var badge = document.getElementById('roomServiceBadge');
                             var countEl = document.getElementById('rsUnreadCount');
-                            if (badge && countEl) {
+                            if (badge) {
                                 badge.classList.add('show');
-                                countEl.innerText = count;
+                                badge.classList.add('has-unread');
+                                if (countEl) countEl.innerText = count;
                             }
 
                             // Show modal alert if not dismissed and not already showing
@@ -1237,9 +1278,12 @@
                                 }
                             }
                         } else {
-                            // No pending orders - hide
+                            // No pending orders - hide RS badge
                             var badge = document.getElementById('roomServiceBadge');
-                            if (badge) badge.classList.remove('show');
+                            if (badge) {
+                                badge.classList.remove('show');
+                                badge.classList.remove('has-unread');
+                            }
                             hideRSAlert();
                             clearDismissedUntil('rsDismissedUntil');
                         }
@@ -1346,11 +1390,10 @@
                     checkRoomServiceOrders();
 
                     // Then check every 5 seconds
+                    // Each poll also extends the ASP.NET session (handler has IRequiresSessionState)
+                    // so session never expires while browser is open
                     chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
                     rsCheckInterval = setInterval(checkRoomServiceOrders, 5000);
-
-                    // Keep session alive every 5 minutes
-                    sessionKeepAliveInterval = setInterval(keepSessionAlive, 5 * 60 * 1000);
                 });
 
                 // Cleanup on page unload
