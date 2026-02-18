@@ -790,6 +790,20 @@
 
         <!-- Global Chat Notification System (for logged-in admin users) -->
         <asp:Panel ID="pnlChatNotification" runat="server" Visible="false">
+            <!-- Server-side: query DB for initial unread count (runs on every page load for logged-in users) -->
+            <%
+            int __chatInit = 0;
+            try {
+                string __connInit = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                Take_Time_BangPhra.code __dbInit = new Take_Time_BangPhra.code();
+                System.Data.DataTable __dtInit = __dbInit.DatabaseQuerySafe(__connInit,
+                    "SELECT COUNT(*) AS Cnt FROM Guest_Chat WHERE IsFromGuest = 1 AND (Is_Read = 0 OR Is_Read IS NULL)", null);
+                if (__dtInit != null && __dtInit.Rows.Count > 0) {
+                    __chatInit = Convert.ToInt32(__dtInit.Rows[0]["Cnt"]);
+                }
+            } catch {}
+            %>
+            <script>var _ttInitChatCount = <%= __chatInit %>;</script>
             <style>
                 /* Chat Alert Overlay - fullscreen centered modal */
                 .global-chat-alert {
@@ -1114,7 +1128,7 @@
                         return;
                     }
 
-                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=chat&_=' + new Date().getTime())
+                    fetch('<%= ResolveUrl("~/Admin/NotificationCheck") %>?action=chat&_=' + new Date().getTime())
                     .then(function(response) {
                         if (!response.ok) { console.log('[TakeTime] Chat API status:', response.status); }
                         return response.json();
@@ -1166,7 +1180,15 @@
                             clearDismissedUntil('chatDismissedUntil');
                         }
                     })
-                    .catch(function(err) { console.log('Chat check error:', err); });
+                    .catch(function(err) {
+                        console.log('[TakeTime] Chat check error:', err);
+                        // Show error state on badge so user knows API is failing
+                        var badge = document.getElementById('chatNotificationBadge');
+                        if (badge) {
+                            badge.style.background = '#FF9800';
+                            badge.title = 'API Error: ' + err;
+                        }
+                    });
                 }
 
                 function showChatAlert(roomName, guestName, message, count) {
@@ -1237,7 +1259,7 @@
                         return;
                     }
 
-                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=rs&_=' + new Date().getTime())
+                    fetch('<%= ResolveUrl("~/Admin/NotificationCheck") %>?action=rs&_=' + new Date().getTime())
                     .then(function(response) { return response.json(); })
                     .then(function(data) {
                         if (data && data.success && data.orders && data.orders.length > 0) {
@@ -1357,11 +1379,8 @@
                     } catch(e) {}
                 }
 
-                function keepSessionAlive() {
-                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=keepalive&_=' + new Date().getTime())
-                    .then(function(response) { return response.json(); })
-                    .catch(function(err) { console.log('Keep-alive error:', err); });
-                }
+                // keepSessionAlive: not needed as a separate function
+                // Every 5-second poll to NotificationCheck.aspx automatically extends the ASP.NET session
 
                 // =============================================
                 // INITIALIZE
@@ -1383,14 +1402,24 @@
                         chatBadge.classList.add('show');
                     }
 
+                    // Apply server-side initial data immediately (no waiting for first API call)
+                    if (typeof _ttInitChatCount !== 'undefined' && _ttInitChatCount > 0) {
+                        if (chatBadge) {
+                            chatBadge.classList.add('has-unread');
+                            var countEl = document.getElementById('chatUnreadCount');
+                            if (countEl) countEl.innerText = _ttInitChatCount;
+                        }
+                        console.log('[TakeTime] Server-side initial chat count: ' + _ttInitChatCount);
+                    }
+
                     console.log('[TakeTime Notification] System initialized, polling started');
 
-                    // Check immediately on page load
+                    // Check immediately on page load (will also extend session)
                     checkGlobalChatMessages();
                     checkRoomServiceOrders();
 
                     // Then check every 5 seconds
-                    // Each poll also extends the ASP.NET session (handler has IRequiresSessionState)
+                    // Each poll extends the ASP.NET session (.aspx page has session by default)
                     // so session never expires while browser is open
                     chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
                     rsCheckInterval = setInterval(checkRoomServiceOrders, 5000);
@@ -1402,7 +1431,7 @@
                     if (chatSoundInterval) clearInterval(chatSoundInterval);
                     if (rsCheckInterval) clearInterval(rsCheckInterval);
                     if (rsSoundInterval) clearInterval(rsSoundInterval);
-                    if (sessionKeepAliveInterval) clearInterval(sessionKeepAliveInterval);
+                    // sessionKeepAliveInterval removed - chat polling handles session keep-alive
                 });
             </script>
         </asp:Panel>
