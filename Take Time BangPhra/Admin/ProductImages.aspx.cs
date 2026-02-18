@@ -38,16 +38,19 @@ namespace Take_Time_BangPhra.Admin
             try
             {
                 // Query to get products from Product table (Room Service products)
+                // Product table uses Product_Name and Sell_Price columns;
+                // stock is calculated from Product_In - Product_Out
                 string query = @"
                     SELECT
                         p.ID AS ProductID,
-                        p.Name AS ProductName,
-                        p.Price,
-                        p.Quantity,
-                        0 AS TotalImages
+                        p.Product_Name AS ProductName,
+                        p.Sell_Price AS Price,
+                        ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                        ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) AS Quantity,
+                        (SELECT COUNT(*) FROM Product_Images pi2 WHERE pi2.Product_ID = p.ID AND pi2.ProductType = 'PRODUCT' AND pi2.Status = 1) AS TotalImages
                     FROM Product p
                     WHERE p.Status = 'True' OR p.Status = '1'
-                    ORDER BY p.Name";
+                    ORDER BY p.Product_Name";
 
                 DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
                 rptProducts.DataSource = dt;
@@ -70,7 +73,7 @@ namespace Take_Time_BangPhra.Admin
                         a.ID AS AccommodationID,
                         a.AccomName,
                         a.Price,
-                        0 AS TotalImages
+                        (SELECT COUNT(*) FROM Product_Images pi2 WHERE pi2.Product_ID = a.ID AND pi2.ProductType = 'ACCOMMODATION' AND pi2.Status = 1) AS TotalImages
                     FROM Accommodation a
                     WHERE a.Status = 1
                     ORDER BY a.OrderID, a.AccomName";
@@ -96,7 +99,7 @@ namespace Take_Time_BangPhra.Admin
                         i.ID AS ItemID,
                         i.ItemName,
                         i.Price,
-                        0 AS TotalImages
+                        (SELECT COUNT(*) FROM Product_Images pi2 WHERE pi2.Product_ID = i.ID AND pi2.ProductType = 'ITEM' AND pi2.Status = 1) AS TotalImages
                     FROM Items i
                     WHERE i.Status = 1
                     ORDER BY i.ItemName";
@@ -129,17 +132,17 @@ namespace Take_Time_BangPhra.Admin
                 {
                     // Load products for Room Service
                     string query = @"
-                        SELECT ID, Name
+                        SELECT ID, Product_Name
                         FROM Product
                         WHERE Status = 'True' OR Status = '1'
-                        ORDER BY Name";
+                        ORDER BY Product_Name";
 
                     dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
 
                     foreach (DataRow row in dt.Rows)
                     {
                         ddlProduct.Items.Add(new ListItem(
-                            row["Name"].ToString(),
+                            row["Product_Name"].ToString(),
                             row["ID"].ToString()
                         ));
                     }

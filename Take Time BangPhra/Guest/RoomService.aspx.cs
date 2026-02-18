@@ -73,12 +73,19 @@ namespace Take_Time_BangPhra.Guest
             try
             {
                 // Get products with available stock
+                // Product table uses Product_Name and Sell_Price columns;
+                // stock is calculated from Product_In - Product_Out
                 DataTable dtProducts = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT ID, Name, Price, Quantity
-                      FROM Product
-                      WHERE Quantity > 0
-                        AND Status = 1
-                      ORDER BY Name",
+                    @"SELECT p.ID,
+                             p.Product_Name AS Name,
+                             p.Sell_Price AS Price,
+                             ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                             ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0) AS Quantity
+                      FROM Product p
+                      WHERE (ISNULL((SELECT SUM(Amount) FROM Product_In WHERE Product_ID = p.ID), 0) -
+                             ISNULL((SELECT SUM(Amount) FROM Product_Out WHERE Product_ID = p.ID), 0)) > 0
+                        AND (p.Status = 'True' OR p.Status = '1')
+                      ORDER BY p.Product_Name",
                     null);
 
                 rptProducts.DataSource = dtProducts;
