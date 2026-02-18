@@ -16,7 +16,7 @@ namespace Take_Time_BangPhra.Admin
             _code = new code();
             try
             {
-                if (Session["permission"]?.ToString() != "True")
+                if (Session["permission"] == null || Session["permission"].ToString() != "True")
                 {
                     Response.Redirect("/Default");
                     return;
