@@ -16,7 +16,7 @@ namespace Take_Time_BangPhra.Admin
         protected void Page_Load(object sender, EventArgs e)
         {
             // Check admin authentication
-            if (Session["UserID"] == null || Session["permission"]?.ToString() != "True")
+            if (Session["UserID"] == null || (Session["permission"] != null ? Session["permission"].ToString() : "") != "True")
             {
                 Response.Redirect("~/Admin/Login.aspx");
                 return;
@@ -253,9 +253,9 @@ namespace Take_Time_BangPhra.Admin
 
                 if (imageId > 0)
                 {
-                    ShowSuccess($"อัพโหลดรูปภาพสำเร็จ!<br/>" +
-                               $"ID รูปภาพ: {imageId}<br/>" +
-                               $"ขนาดไฟล์: {(imageFile.ContentLength / 1024.0):N2} KB");
+                    ShowSuccess("อัพโหลดรูปภาพสำเร็จ!<br/>" +
+                               "ID รูปภาพ: " + imageId + "<br/>" +
+                               "ขนาดไฟล์: " + (imageFile.ContentLength / 1024.0).ToString("N2") + " KB");
 
                     // Reload product lists
                     LoadProducts();
