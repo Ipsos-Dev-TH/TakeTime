@@ -303,6 +303,34 @@
             .priority-options {
                 flex-direction: column;
             }
+
+            .hk-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .hk-header h2 {
+                font-size: 18px;
+            }
+
+            .request-form {
+                padding: 15px;
+            }
+
+            .requests-list {
+                padding: 15px;
+            }
+
+            .request-card {
+                padding: 12px;
+            }
+
+            .tab-btn {
+                padding: 10px 15px;
+                font-size: 14px;
+            }
         }
     </style>
 

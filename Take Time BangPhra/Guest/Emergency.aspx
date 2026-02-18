@@ -326,11 +326,59 @@
             }
 
             .quick-buttons {
-                justify-content: center;
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+            }
+
+            .quick-btn {
+                min-width: 0;
+                padding: 15px 10px;
+            }
+
+            .quick-btn i {
+                font-size: 22px;
+            }
+
+            .quick-btn span {
+                font-size: 12px;
             }
 
             .emergency-banner .hotline {
-                font-size: 28px;
+                font-size: 24px;
+            }
+
+            .page-header h2 {
+                font-size: 18px;
+            }
+
+            .page-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .emergency-banner {
+                padding: 15px;
+            }
+
+            .emergency-banner h3 {
+                font-size: 18px;
+            }
+
+            .contact-card {
+                padding: 15px;
+            }
+
+            .section-title {
+                font-size: 16px;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .quick-buttons {
+                grid-template-columns: repeat(2, 1fr);
             }
         }
     </style>

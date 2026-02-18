@@ -283,17 +283,47 @@
             }
 
             .map-container {
-                height: 300px;
+                height: 250px;
             }
 
             .category-tabs {
                 overflow-x: auto;
                 flex-wrap: nowrap;
                 padding-bottom: 10px;
+                -webkit-overflow-scrolling: touch;
             }
 
             .category-tab {
                 white-space: nowrap;
+                padding: 10px 18px;
+                font-size: 13px;
+            }
+
+            .page-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .page-header h2 {
+                font-size: 18px;
+            }
+
+            .places-container {
+                padding: 10px;
+            }
+
+            .place-content {
+                padding: 15px;
+            }
+
+            .place-content h4 {
+                font-size: 16px;
+            }
+
+            .section-divider {
+                margin: 25px 0 20px;
             }
         }
     </style>

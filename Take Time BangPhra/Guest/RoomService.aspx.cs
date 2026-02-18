@@ -13,6 +13,7 @@ namespace Take_Time_BangPhra.Guest
     public partial class RoomService : Page
     {
         private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        private const decimal MIN_ORDER_AMOUNT = 200m; // ยอดสั่งซื้อขั้นต่ำ (฿)
         private GuestPortalService _guestPortalService;
         private code _code;
         private long _reservationId;
@@ -251,6 +252,14 @@ namespace Take_Time_BangPhra.Guest
                     decimal price = Convert.ToDecimal(item["price"]);
                     int quantity = Convert.ToInt32(item["quantity"]);
                     totalAmount += price * quantity;
+                }
+
+                // Check minimum order amount
+                if (totalAmount < MIN_ORDER_AMOUNT)
+                {
+                    ScriptManager.RegisterStartupScript(this, GetType(), "alert",
+                        $"alert('ยอดสั่งซื้อขั้นต่ำ ฿{MIN_ORDER_AMOUNT:N0}\\nยอดปัจจุบัน: ฿{totalAmount:N0}');", true);
+                    return;
                 }
 
                 // Get payment method
