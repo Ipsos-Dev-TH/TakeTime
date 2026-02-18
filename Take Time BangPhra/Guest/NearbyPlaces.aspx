@@ -283,17 +283,133 @@
             }
 
             .map-container {
-                height: 300px;
+                height: 250px;
             }
 
             .category-tabs {
                 overflow-x: auto;
                 flex-wrap: nowrap;
                 padding-bottom: 10px;
+                -webkit-overflow-scrolling: touch;
             }
 
             .category-tab {
                 white-space: nowrap;
+                padding: 10px 18px;
+                font-size: 13px;
+            }
+
+            .page-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .page-header h2 {
+                font-size: 18px;
+            }
+
+            .places-container {
+                padding: 10px;
+            }
+
+            .place-content {
+                padding: 15px;
+            }
+
+            .place-content h4 {
+                font-size: 16px;
+            }
+
+            .section-divider {
+                margin: 25px 0 20px;
+            }
+        }
+
+        /* Dynamic place card styles */
+        .place-icon {
+            width: 100%;
+            height: 180px;
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 64px;
+        }
+
+        .place-info {
+            padding: 20px;
+        }
+
+        .place-info h3 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .place-info p {
+            margin: 0 0 12px 0;
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .btn-map {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 15px;
+            background: linear-gradient(135deg, #1565c0, #0d47a1);
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-map:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(21, 101, 192, 0.3);
+            color: white;
+            text-decoration: none;
+        }
+
+        .no-data-panel {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+
+        .no-data-panel i {
+            font-size: 64px;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+
+        .no-data-panel h3 {
+            color: #666;
+            margin: 0 0 10px 0;
+        }
+
+        .no-data-panel p {
+            color: #999;
+            margin: 0;
+        }
+
+        @media (max-width: 768px) {
+            .place-info {
+                padding: 15px;
+            }
+
+            .place-info h3 {
+                font-size: 16px;
             }
         }
     </style>
@@ -340,362 +456,37 @@
             </button>
         </div>
 
-        <!-- Beaches & Nature -->
-        <div class="section-divider">
-            <span><i class="fas fa-umbrella-beach"></i> Beaches & Nature</span>
-        </div>
+        <!-- Places from Database -->
         <div class="places-grid">
-            <div class="place-card" data-category="beach">
-                <div class="place-image">
-                    <i class="fas fa-umbrella-beach"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category beach">Beach</span>
-                    <h4>Bang Phra Beach</h4>
-                    <p>ชายหาดบางพระ หาดทรายสะอาด น้ำทะเลใส เหมาะสำหรับเดินเล่น ว่ายน้ำ และชมพระอาทิตย์ตก</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 0.5 km</span>
-                        <span><i class="fas fa-clock"></i> เปิดตลอด 24 ชม.</span>
-                        <span class="distance-badge">5 min walk</span>
+            <asp:Repeater ID="rptPlaces" runat="server">
+                <ItemTemplate>
+                    <div class="place-card" data-category='<%# Eval("Category") %>'>
+                        <div class="place-icon"><%# Eval("Icon") %></div>
+                        <div class="place-info">
+                            <h3><%# Eval("Name") %></h3>
+                            <p><%# Eval("Description") %></p>
+                            <div class="place-meta">
+                                <span class="distance"><i class="fas fa-map-marker-alt"></i> <%# Eval("Distance") %></span>
+                                <span class="travel-time"><i class="fas fa-clock"></i> <%# Eval("Travel_Time") %></span>
+                            </div>
+                            <div class="place-actions">
+                                <%# !string.IsNullOrEmpty(Eval("Map_Url")?.ToString()) ? "<a href='" + Eval("Map_Url") + "' target='_blank' class='btn-map'><i class='fas fa-map'></i> แผนที่</a>" : "" %>
+                                <%# !string.IsNullOrEmpty(Eval("Phone")?.ToString()) ? "<a href='tel:" + Eval("Phone") + "' class='btn-call'><i class='fas fa-phone'></i> โทร</a>" : "" %>
+                            </div>
+                        </div>
                     </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Bang+Phra+Beach+Chonburi" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="beach">
-                <div class="place-image">
-                    <i class="fas fa-water"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category beach">Beach</span>
-                    <h4>Bang Saen Beach</h4>
-                    <p>หาดบางแสน ชายหาดยอดนิยมของคนกรุงเทพฯ มีร้านอาหารทะเล กิจกรรมทางน้ำมากมาย</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 8 km</span>
-                        <span><i class="fas fa-clock"></i> เปิดตลอด 24 ชม.</span>
-                        <span class="distance-badge">15 min drive</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Bang+Saen+Beach" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="attraction">
-                <div class="place-image">
-                    <i class="fas fa-mountain"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category attraction">Attraction</span>
-                    <h4>Khao Sam Muk</h4>
-                    <p>เขาสามมุข จุดชมวิวทะเล มีลิงแสม วัดเขาสามมุข และร้านอาหารบนเนินเขา</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 10 km</span>
-                        <span><i class="fas fa-clock"></i> 06:00 - 18:00</span>
-                        <span class="distance-badge">20 min drive</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Khao+Sam+Muk+Chonburi" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
+                </ItemTemplate>
+            </asp:Repeater>
         </div>
 
-        <!-- Restaurants -->
-        <div class="section-divider">
-            <span><i class="fas fa-utensils"></i> Recommended Restaurants</span>
-        </div>
-        <div class="places-grid">
-            <div class="place-card" data-category="restaurant">
-                <div class="place-image" style="background: linear-gradient(135deg, #fff3e0, #ffe0b2);">
-                    <i class="fas fa-fish" style="color: #ef6c00;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category restaurant">Seafood</span>
-                    <h4>Laem Charoen Seafood</h4>
-                    <p>ร้านอาหารทะเลสด คุณภาพดี ราคาสมเหตุสมผล บรรยากาศดี วิวทะเล</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 3 km</span>
-                        <span><i class="fas fa-clock"></i> 10:00 - 22:00</span>
-                        <span><i class="fas fa-dollar-sign"></i> ฿฿฿</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Laem+Charoen+Seafood+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                        <a href="tel:038312000" class="btn-call">
-                            <i class="fas fa-phone"></i>
-                        </a>
-                    </div>
-                </div>
+        <!-- No Data Panel -->
+        <asp:Panel ID="pnlNoData" runat="server" Visible="false" CssClass="no-data-panel">
+            <div>
+                <i class="fas fa-map-marked-alt"></i>
+                <h3>No nearby places available</h3>
+                <p>Places and attractions information is currently being updated. Please check back later.</p>
             </div>
-
-            <div class="place-card" data-category="restaurant">
-                <div class="place-image" style="background: linear-gradient(135deg, #fff3e0, #ffe0b2);">
-                    <i class="fas fa-drumstick-bite" style="color: #ef6c00;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category restaurant">Thai Food</span>
-                    <h4>Moom Aroi Restaurant</h4>
-                    <p>อาหารไทยรสชาติจัดจ้าน เมนูหลากหลาย ปริมาณเต็มๆ ราคาไม่แพง</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 2 km</span>
-                        <span><i class="fas fa-clock"></i> 10:00 - 21:00</span>
-                        <span><i class="fas fa-dollar-sign"></i> ฿฿</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Moom+Aroi+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="restaurant">
-                <div class="place-image" style="background: linear-gradient(135deg, #fff3e0, #ffe0b2);">
-                    <i class="fas fa-pepper-hot" style="color: #ef6c00;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category restaurant">Japanese</span>
-                    <h4>Tsukiji Sushi</h4>
-                    <p>ร้านซูชิสดใหม่ วัตถุดิบนำเข้าจากญี่ปุ่น บรรยากาศสไตล์ญี่ปุ่นแท้</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 5 km</span>
-                        <span><i class="fas fa-clock"></i> 11:00 - 21:00</span>
-                        <span><i class="fas fa-dollar-sign"></i> ฿฿฿฿</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Tsukiji+Sushi+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                        <a href="tel:038320000" class="btn-call">
-                            <i class="fas fa-phone"></i>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cafes -->
-        <div class="section-divider">
-            <span><i class="fas fa-coffee"></i> Cafes & Desserts</span>
-        </div>
-        <div class="places-grid">
-            <div class="place-card" data-category="cafe">
-                <div class="place-image" style="background: linear-gradient(135deg, #fce4ec, #f8bbd9);">
-                    <i class="fas fa-mug-hot" style="color: #c2185b;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category cafe">Cafe</span>
-                    <h4>Sea View Cafe</h4>
-                    <p>คาเฟ่วิวทะเล กาแฟดี ขนมหวาน บรรยากาศชิลๆ เหมาะนั่งทำงานหรือพักผ่อน</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 1 km</span>
-                        <span><i class="fas fa-clock"></i> 08:00 - 20:00</span>
-                        <span><i class="fas fa-wifi"></i> Free WiFi</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Sea+View+Cafe+Bang+Phra" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="cafe">
-                <div class="place-image" style="background: linear-gradient(135deg, #fce4ec, #f8bbd9);">
-                    <i class="fas fa-ice-cream" style="color: #c2185b;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category cafe">Cafe</span>
-                    <h4>After You Dessert Cafe</h4>
-                    <p>ร้านขนมหวานชื่อดัง Kakigori, โทสต์ และเครื่องดื่มเย็นๆ หลากหลายเมนู</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 12 km</span>
-                        <span><i class="fas fa-clock"></i> 10:00 - 22:00</span>
-                        <span><i class="fas fa-shopping-bag"></i> Central Sriracha</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=After+You+Central+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="cafe">
-                <div class="place-image" style="background: linear-gradient(135deg, #fce4ec, #f8bbd9);">
-                    <i class="fas fa-leaf" style="color: #c2185b;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category cafe">Cafe</span>
-                    <h4>Forest Brew Cafe</h4>
-                    <p>คาเฟ่สไตล์ธรรมชาติ กลางสวน ร่มรื่น กาแฟคั่วเอง เบเกอรี่โฮมเมด</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 4 km</span>
-                        <span><i class="fas fa-clock"></i> 09:00 - 18:00</span>
-                        <span><i class="fas fa-parking"></i> Free Parking</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Forest+Brew+Cafe+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Attractions -->
-        <div class="section-divider">
-            <span><i class="fas fa-camera"></i> Tourist Attractions</span>
-        </div>
-        <div class="places-grid">
-            <div class="place-card" data-category="attraction">
-                <div class="place-image" style="background: linear-gradient(135deg, #e8f5e9, #c8e6c9);">
-                    <i class="fas fa-fish" style="color: #2e7d32;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category attraction">Attraction</span>
-                    <h4>Sriracha Tiger Zoo</h4>
-                    <p>สวนเสือศรีราชา ชมการแสดงเสือ จระเข้ และสัตว์หลากหลายชนิด เหมาะสำหรับครอบครัว</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 15 km</span>
-                        <span><i class="fas fa-clock"></i> 08:00 - 18:00</span>
-                        <span><i class="fas fa-ticket-alt"></i> ฿450/person</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Sriracha+Tiger+Zoo" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                        <a href="tel:038296556" class="btn-call">
-                            <i class="fas fa-phone"></i>
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="attraction">
-                <div class="place-image" style="background: linear-gradient(135deg, #e8f5e9, #c8e6c9);">
-                    <i class="fas fa-paw" style="color: #2e7d32;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category attraction">Attraction</span>
-                    <h4>Khao Kheow Open Zoo</h4>
-                    <p>สวนสัตว์เปิดเขาเขียว พื้นที่กว้างขวาง สัตว์หลากหลาย Safari Night Tour สุดพิเศษ</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 20 km</span>
-                        <span><i class="fas fa-clock"></i> 08:00 - 18:00</span>
-                        <span><i class="fas fa-ticket-alt"></i> ฿300/person</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Khao+Kheow+Open+Zoo" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                        <a href="tel:038318444" class="btn-call">
-                            <i class="fas fa-phone"></i>
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="temple">
-                <div class="place-image" style="background: linear-gradient(135deg, #fff8e1, #ffecb3);">
-                    <i class="fas fa-pray" style="color: #f9a825;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category temple">Temple</span>
-                    <h4>Wat Khao Phra Bat</h4>
-                    <p>วัดเขาพระบาท วัดบนยอดเขา วิวสวยงาม สถาปัตยกรรมไทยที่งดงาม เหมาะสำหรับผู้แสวงบุญ</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 8 km</span>
-                        <span><i class="fas fa-clock"></i> 06:00 - 18:00</span>
-                        <span class="distance-badge">Free Entry</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Wat+Khao+Phra+Bat+Chonburi" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Shopping -->
-        <div class="section-divider">
-            <span><i class="fas fa-shopping-bag"></i> Shopping</span>
-        </div>
-        <div class="places-grid">
-            <div class="place-card" data-category="shopping">
-                <div class="place-image" style="background: linear-gradient(135deg, #f3e5f5, #e1bee7);">
-                    <i class="fas fa-store" style="color: #7b1fa2;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category shopping">Mall</span>
-                    <h4>Central Sriracha</h4>
-                    <p>ห้างสรรพสินค้าครบวงจร ร้านค้า ร้านอาหาร โรงหนัง ซุปเปอร์มาร์เก็ต</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 12 km</span>
-                        <span><i class="fas fa-clock"></i> 10:00 - 22:00</span>
-                        <span><i class="fas fa-parking"></i> Free Parking</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Central+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="shopping">
-                <div class="place-image" style="background: linear-gradient(135deg, #f3e5f5, #e1bee7);">
-                    <i class="fas fa-shopping-basket" style="color: #7b1fa2;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category shopping">Market</span>
-                    <h4>Sriracha Night Market</h4>
-                    <p>ตลาดนัดกลางคืนศรีราชา อาหารท้องถิ่น ของกิน Street Food ราคาถูก บรรยากาศคึกคัก</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 10 km</span>
-                        <span><i class="fas fa-clock"></i> 17:00 - 23:00</span>
-                        <span class="distance-badge">Fri-Sun</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Sriracha+Night+Market" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="place-card" data-category="shopping">
-                <div class="place-image" style="background: linear-gradient(135deg, #f3e5f5, #e1bee7);">
-                    <i class="fas fa-shopping-cart" style="color: #7b1fa2;"></i>
-                </div>
-                <div class="place-content">
-                    <span class="place-category shopping">Store</span>
-                    <h4>Big C Sriracha</h4>
-                    <p>ไฮเปอร์มาร์เก็ต ของใช้ประจำวัน ของฝาก ของกินเล่น ครบครัน ราคาประหยัด</p>
-                    <div class="place-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> 8 km</span>
-                        <span><i class="fas fa-clock"></i> 09:00 - 23:00</span>
-                        <span><i class="fas fa-parking"></i> Free Parking</span>
-                    </div>
-                    <div class="place-actions">
-                        <a href="https://maps.google.com/?q=Big+C+Sriracha" target="_blank" class="btn-direction">
-                            <i class="fas fa-directions"></i> Directions
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
+        </asp:Panel>
 
         <!-- Travel Tips -->
         <div class="tips-card">

@@ -293,6 +293,33 @@
             text-decoration: none;
         }
 
+        .no-data-panel {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+
+        .no-data-panel i {
+            font-size: 60px;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+
+        .no-data-panel h3 {
+            color: #999;
+            font-size: 20px;
+            margin: 0 0 10px 0;
+        }
+
+        .no-data-panel p {
+            color: #bbb;
+            font-size: 14px;
+            margin: 0;
+        }
+
         @media (max-width: 768px) {
             .facilities-grid {
                 grid-template-columns: 1fr;
@@ -335,241 +362,47 @@
             <p>Experience comfort and convenience with our premium amenities</p>
         </div>
 
+        <!-- No Data Panel -->
+        <asp:Panel ID="pnlNoData" runat="server" Visible="false" CssClass="no-data-panel">
+            <i class="fas fa-info-circle"></i>
+            <h3>ยังไม่มีข้อมูล</h3>
+            <p>กรุณาเพิ่มข้อมูลผ่านหน้า Admin</p>
+        </asp:Panel>
+
         <!-- Main Facilities -->
         <div class="facilities-grid">
-            <div class="facility-card">
-                <div class="facility-image pool">
-                    <i class="fas fa-swimming-pool"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Swimming Pool</h3>
-                    <p>สระว่ายน้ำกลางแจ้ง วิวทะเล น้ำสะอาด ปลอดภัย มีเก้าอี้นอนอาบแดดและร่มชายหาด</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 06:00 - 20:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-ruler"></i> 25m x 12m</span>
+            <asp:Repeater ID="rptFacilities" runat="server">
+                <ItemTemplate>
+                    <div class="facility-card">
+                        <div class="facility-image <%# Eval("Css_Class") %>">
+                            <i class="fas <%# Eval("Icon") %>"></i>
+                        </div>
+                        <div class="facility-content">
+                            <h3><%# Eval("Name") %></h3>
+                            <p><%# Eval("Description") %></p>
+                            <div class="facility-details">
+                                <span><i class="fas fa-clock"></i> <%# Eval("Hours") %></span>
+                                <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
+                                <span><%# Eval("Extra_Info") %></span>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image restaurant">
-                    <i class="fas fa-utensils"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Restaurant & Bar</h3>
-                    <p>ร้านอาหารและบาร์ เสิร์ฟอาหารไทย-นานาชาติ อาหารเช้าบุฟเฟ่ต์ เครื่องดื่มหลากหลาย</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 07:00 - 22:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-users"></i> 80 seats</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image spa">
-                    <i class="fas fa-spa"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Spa & Massage</h3>
-                    <p>สปาและนวดแผนไทย ผ่อนคลายร่างกายและจิตใจ ด้วยทีมงานมืออาชีพ (ต้องจองล่วงหน้า)</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 10:00 - 21:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-phone"></i> Book via Concierge</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image gym">
-                    <i class="fas fa-dumbbell"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Fitness Center</h3>
-                    <p>ห้องออกกำลังกาย อุปกรณ์ครบครัน Cardio และ Weight Training รวมถึงโยคะมุม</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 06:00 - 22:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-key"></i> Room Key Access</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image beach">
-                    <i class="fas fa-umbrella-beach"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Private Beach Access</h3>
-                    <p>ทางลงหาดส่วนตัว เก้าอี้ชายหาด ร่มสนาม บริการน้ำดื่มฟรีสำหรับแขกที่เข้าพัก</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 06:00 - 19:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-walking"></i> 3 min walk</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image bbq">
-                    <i class="fas fa-fire"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>BBQ Area</h3>
-                    <p>พื้นที่ปิ้งบาร์บีคิว อุปกรณ์ครบ เหมาะสำหรับครอบครัวและกลุ่มเพื่อน (ต้องจองล่วงหน้า)</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 16:00 - 22:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Available</span>
-                        <span><i class="fas fa-users"></i> Max 20 persons</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image karaoke">
-                    <i class="fas fa-microphone"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Karaoke Room</h3>
-                    <p>ห้องคาราโอเกะ ระบบเสียงคุณภาพสูง เพลงหลายภาษา (มีค่าใช้จ่ายเพิ่มเติม)</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 14:00 - 23:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Available</span>
-                        <span><i class="fas fa-users"></i> 10-15 persons</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image meeting">
-                    <i class="fas fa-chalkboard-teacher"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Meeting Room</h3>
-                    <p>ห้องประชุมขนาดกลาง อุปกรณ์โสตทัศนูปกรณ์ครบ เหมาะสำหรับสัมมนาและงานเลี้ยงเล็กๆ</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 08:00 - 20:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Available</span>
-                        <span><i class="fas fa-users"></i> 30 persons</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image garden">
-                    <i class="fas fa-tree"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Garden & Playground</h3>
-                    <p>สวนและสนามเด็กเล่น พื้นที่สีเขียวร่มรื่น สนามหญ้าสำหรับเด็กวิ่งเล่น</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> เปิดตลอด 24 ชม.</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Open</span>
-                        <span><i class="fas fa-child"></i> Kid Friendly</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image parking">
-                    <i class="fas fa-car"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Free Parking</h3>
-                    <p>ที่จอดรถฟรี กล้องวงจรปิด 24 ชม. มีพื้นที่จอดรถหลายคันต่อห้อง</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> เปิดตลอด 24 ชม.</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Free</span>
-                        <span><i class="fas fa-video"></i> CCTV 24hr</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image wifi">
-                    <i class="fas fa-wifi"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>High-Speed WiFi</h3>
-                    <p>อินเทอร์เน็ตความเร็วสูงฟรี ครอบคลุมทุกพื้นที่ในรีสอร์ท รองรับ Streaming และ Video Call</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> เปิดตลอด 24 ชม.</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Free</span>
-                        <span><i class="fas fa-tachometer-alt"></i> 100 Mbps</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="facility-card">
-                <div class="facility-image laundry">
-                    <i class="fas fa-tshirt"></i>
-                </div>
-                <div class="facility-content">
-                    <h3>Laundry Service</h3>
-                    <p>บริการซักรีดเสื้อผ้า รับ-ส่งถึงห้อง บริการด่วนภายใน 4 ชม. (มีค่าใช้จ่ายเพิ่มเติม)</p>
-                    <div class="facility-details">
-                        <span><i class="fas fa-clock"></i> 08:00 - 18:00</span>
-                        <span class="status-open"><i class="fas fa-check-circle"></i> Available</span>
-                        <span><i class="fas fa-phone"></i> Ext. 103</span>
-                    </div>
-                </div>
-            </div>
+                </ItemTemplate>
+            </asp:Repeater>
         </div>
 
         <!-- Room Amenities -->
         <div class="amenities-section">
             <h3><i class="fas fa-bed"></i> In-Room Amenities</h3>
             <div class="amenities-grid">
-                <div class="amenity-item">
-                    <i class="fas fa-snowflake"></i>
-                    <span>Air Conditioning</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-tv"></i>
-                    <span>Smart TV with Netflix</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-box"></i>
-                    <span>Mini Bar / Refrigerator</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-coffee"></i>
-                    <span>Coffee & Tea Maker</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-shower"></i>
-                    <span>Rain Shower</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-pump-soap"></i>
-                    <span>Premium Toiletries</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-wind"></i>
-                    <span>Hair Dryer</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-lock"></i>
-                    <span>In-Room Safe</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-phone"></i>
-                    <span>Direct Dial Phone</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-bed"></i>
-                    <span>Premium Bedding</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-door-open"></i>
-                    <span>Private Balcony</span>
-                </div>
-                <div class="amenity-item">
-                    <i class="fas fa-wifi"></i>
-                    <span>Free WiFi</span>
-                </div>
+                <asp:Repeater ID="rptAmenities" runat="server">
+                    <ItemTemplate>
+                        <div class="amenity-item">
+                            <i class="fas <%# Eval("Icon") %>"></i>
+                            <span><%# Eval("Name") %></span>
+                        </div>
+                    </ItemTemplate>
+                </asp:Repeater>
             </div>
         </div>
 
@@ -577,49 +410,17 @@
         <div class="rules-section">
             <h3><i class="fas fa-clipboard-list"></i> Hotel Policies</h3>
             <div class="rules-grid">
-                <div class="rule-item">
-                    <i class="fas fa-clock"></i>
-                    <div>
-                        <strong>Check-in / Check-out:</strong><br>
-                        Check-in: 14:00 น. / Check-out: 12:00 น.<br>
-                        Early check-in และ Late check-out สามารถขอได้ (ขึ้นอยู่กับห้องว่าง)
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <i class="fas fa-smoking-ban"></i>
-                    <div>
-                        <strong>No Smoking:</strong><br>
-                        ห้ามสูบบุหรี่ในห้องพักและพื้นที่ปิด สูบบุหรี่ได้ในพื้นที่กำหนดเท่านั้น
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <i class="fas fa-paw"></i>
-                    <div>
-                        <strong>Pet Policy:</strong><br>
-                        อนุญาตให้นำสัตว์เลี้ยงเข้าพักได้ในบางห้อง กรุณาแจ้งล่วงหน้า (มีค่าใช้จ่ายเพิ่มเติม)
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <i class="fas fa-volume-down"></i>
-                    <div>
-                        <strong>Quiet Hours:</strong><br>
-                        22:00 - 07:00 น. กรุณารักษาความเงียบเพื่อความสะดวกของผู้เข้าพักท่านอื่น
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <i class="fas fa-swimmer"></i>
-                    <div>
-                        <strong>Pool Rules:</strong><br>
-                        อาบน้ำก่อนลงสระ ห้ามนำอาหาร/เครื่องดื่มลงสระ เด็กต้องมีผู้ปกครองดูแล
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <i class="fas fa-user-friends"></i>
-                    <div>
-                        <strong>Visitors:</strong><br>
-                        ผู้เยี่ยมสามารถเข้าพื้นที่ส่วนกลางได้ แต่ไม่อนุญาตให้ค้างคืนโดยไม่ลงทะเบียน
-                    </div>
-                </div>
+                <asp:Repeater ID="rptPolicies" runat="server">
+                    <ItemTemplate>
+                        <div class="rule-item">
+                            <i class="fas <%# Eval("Icon") %>"></i>
+                            <div>
+                                <strong><%# Eval("Name") %></strong><br/>
+                                <%# Eval("Description") %>
+                            </div>
+                        </div>
+                    </ItemTemplate>
+                </asp:Repeater>
             </div>
         </div>
 

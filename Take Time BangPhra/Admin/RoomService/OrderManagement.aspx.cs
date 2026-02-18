@@ -308,23 +308,47 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                 var code = new code();
 
-                DataTable dtOrders = code.DatabaseQuerySafe(connectionString,
-                    @"SELECT
-                        o.ID AS OrderId,
-                        o.Order_Number,
-                        o.Total_Amount,
-                        ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
-                        c.Name AS GuestName,
-                        (SELECT TOP 3 Product_Name + ' x' + CAST(Quantity AS NVARCHAR)
-                         FROM Guest_Room_Service_Items i
-                         WHERE i.Order_ID = o.ID
-                         FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') AS ItemsPreview
-                      FROM Guest_Room_Service_Orders o
-                      INNER JOIN Reservation r ON o.Reservation_ID = r.ID
-                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                      WHERE o.Order_Status = 'PENDING'
-                      ORDER BY o.Order_Date DESC",
-                    null);
+                DataTable dtOrders = null;
+
+                // Try with fn_GetReservationRoomNames first
+                try
+                {
+                    dtOrders = code.DatabaseQuerySafe(connectionString,
+                        @"SELECT
+                            o.ID AS OrderId,
+                            o.Order_Number,
+                            o.Total_Amount,
+                            ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
+                            c.Name AS GuestName,
+                            (SELECT TOP 3 Product_Name + ' x' + CAST(Quantity AS NVARCHAR)
+                             FROM Guest_Room_Service_Items i
+                             WHERE i.Order_ID = o.ID
+                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') AS ItemsPreview
+                          FROM Guest_Room_Service_Orders o
+                          INNER JOIN Reservation r ON o.Reservation_ID = r.ID
+                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                          WHERE o.Order_Status = 'PENDING'
+                          ORDER BY o.Order_Date DESC",
+                        null);
+                }
+                catch
+                {
+                    // Fallback without fn_GetReservationRoomNames
+                    dtOrders = code.DatabaseQuerySafe(connectionString,
+                        @"SELECT
+                            o.ID AS OrderId,
+                            o.Order_Number,
+                            o.Total_Amount,
+                            N'ห้องพัก' AS RoomName,
+                            c.Name AS GuestName,
+                            N'' AS ItemsPreview
+                          FROM Guest_Room_Service_Orders o
+                          INNER JOIN Reservation r ON o.Reservation_ID = r.ID
+                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                          WHERE o.Order_Status = 'PENDING'
+                          ORDER BY o.Order_Date DESC",
+                        null);
+                }
 
                 var orders = new List<object>();
                 foreach (DataRow row in dtOrders.Rows)

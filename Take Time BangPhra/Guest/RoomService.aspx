@@ -2,11 +2,16 @@
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         .rs-container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 15px;
             padding-bottom: 90px;
+            overflow-x: hidden;
         }
 
         .rs-header {
@@ -83,6 +88,90 @@
             display: block;
         }
 
+        /* Search Bar */
+        .search-bar {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 12px 15px 12px 42px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        .search-bar input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+        }
+
+        .search-bar i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+            font-size: 14px;
+        }
+
+        .search-bar .search-clear {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+            border: none;
+            background: none;
+            font-size: 14px;
+            cursor: pointer;
+            display: none;
+            padding: 4px;
+        }
+
+        .search-no-result {
+            text-align: center;
+            padding: 30px 15px;
+            color: #999;
+            display: none;
+            grid-column: 1 / -1;
+        }
+
+        .search-no-result i {
+            font-size: 36px;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        /* Min Order Warning */
+        .min-order-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-size: 13px;
+            color: #856404;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .min-order-warning i {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .min-order-ok {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+
         /* Main Layout */
         .order-layout {
             display: flex;
@@ -118,6 +207,12 @@
             margin-bottom: 4px;
             font-size: 14px;
             line-height: 1.3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            word-break: break-word;
         }
 
         .product-price {
@@ -741,10 +836,25 @@
         <div class="order-layout">
             <!-- Products Section -->
             <div class="products-section">
-                <div class="products-grid">
+                <!-- Search Bar -->
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchProduct" placeholder="ค้นหาเมนู..." oninput="filterProducts()" />
+                    <button type="button" class="search-clear" id="searchClear" onclick="clearSearch()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+
+                <!-- Min Order Warning -->
+                <div class="min-order-warning" id="minOrderWarning">
+                    <i class="fas fa-info-circle"></i>
+                    <span>ยอดสั่งซื้อขั้นต่ำ ฿<span id="minOrderAmount">200</span> (ยอดปัจจุบัน: ฿<span id="currentOrderAmount">0</span>)</span>
+                </div>
+
+                <div class="products-grid" id="productsGrid">
                     <asp:Repeater ID="rptProducts" runat="server">
                         <ItemTemplate>
-                            <div class="product-card">
+                            <div class="product-card" data-name='<%# Eval("Name").ToString().Replace("'","&#39;") %>'>
                                 <div class="product-name"><%# Eval("Name") %></div>
                                 <div class="product-price">฿<%# Eval("Price", "{0:N0}") %></div>
                                 <div class="product-stock">
@@ -767,6 +877,10 @@
                             </div>
                         </ItemTemplate>
                     </asp:Repeater>
+                    <div class="search-no-result" id="noResult">
+                        <i class="fas fa-search"></i>
+                        <p>ไม่พบเมนูที่ค้นหา</p>
+                    </div>
                 </div>
             </div>
 
@@ -942,7 +1056,42 @@
 
     <script>
         var cart = [];
+        var MIN_ORDER_AMOUNT = 200; // ยอดสั่งซื้อขั้นต่ำ (฿)
 
+        // ===== Search =====
+        function filterProducts() {
+            var input = document.getElementById('searchProduct');
+            var clearBtn = document.getElementById('searchClear');
+            var keyword = input.value.trim().toLowerCase();
+            var cards = document.querySelectorAll('.product-card');
+            var noResult = document.getElementById('noResult');
+            var visibleCount = 0;
+
+            clearBtn.style.display = keyword.length > 0 ? 'block' : 'none';
+
+            for (var i = 0; i < cards.length; i++) {
+                var name = (cards[i].getAttribute('data-name') || '').toLowerCase();
+                if (keyword === '' || name.indexOf(keyword) !== -1) {
+                    cards[i].style.display = '';
+                    visibleCount++;
+                } else {
+                    cards[i].style.display = 'none';
+                }
+            }
+
+            if (noResult) {
+                noResult.style.display = (visibleCount === 0 && keyword !== '') ? 'block' : 'none';
+            }
+        }
+
+        function clearSearch() {
+            var input = document.getElementById('searchProduct');
+            input.value = '';
+            filterProducts();
+            input.focus();
+        }
+
+        // ===== Qty Controls =====
         function changeQty(btn, delta) {
             var input = btn.parentElement.querySelector('.qty-input');
             var newValue = parseInt(input.value) + delta;
@@ -952,6 +1101,7 @@
             }
         }
 
+        // ===== Cart =====
         function addToCart(btn, productId, productName, price) {
             var card = btn.closest('.product-card');
             var qtyInput = card.querySelector('.qty-input');
@@ -981,7 +1131,7 @@
             updateCartDisplay();
         }
 
-        function buildCartHtml(containerId) {
+        function buildCartHtml() {
             if (cart.length === 0) {
                 return '<div class="empty-cart"><i class="fas fa-shopping-cart" style="font-size:40px;display:block;margin-bottom:10px;"></i><p>ตะกร้าว่างเปล่า</p></div>';
             }
@@ -1012,6 +1162,7 @@
             var total = getCartTotal();
             var totalStr = total.toLocaleString();
             var cartHtml = buildCartHtml();
+            var meetsMinimum = total >= MIN_ORDER_AMOUNT;
 
             // Desktop sidebar
             var desktopItems = document.getElementById('cartItemsDesktop');
@@ -1030,23 +1181,34 @@
             var barTotal = document.getElementById('cartBarTotal');
             var barCount = document.getElementById('cartBarCount');
             if (floatingBar) {
-                if (cart.length > 0) {
-                    floatingBar.style.display = 'flex';
-                } else {
-                    floatingBar.style.display = 'none';
-                }
+                floatingBar.style.display = cart.length > 0 ? 'flex' : 'none';
             }
             if (barTotal) barTotal.textContent = totalStr;
             if (barCount) barCount.textContent = cart.length;
 
-            // Place order button
+            // Min order warning
+            var warning = document.getElementById('minOrderWarning');
+            var currentAmount = document.getElementById('currentOrderAmount');
+            if (warning && currentAmount) {
+                currentAmount.textContent = total.toLocaleString();
+                if (cart.length === 0) {
+                    warning.className = 'min-order-warning';
+                } else if (meetsMinimum) {
+                    warning.className = 'min-order-warning min-order-ok';
+                } else {
+                    warning.className = 'min-order-warning';
+                }
+            }
+
+            // Place order button - disable if no items or below minimum
             var btnOrder = document.getElementById('<%= btnPlaceOrder.ClientID %>');
-            if (btnOrder) btnOrder.disabled = (cart.length === 0);
+            if (btnOrder) btnOrder.disabled = (cart.length === 0 || !meetsMinimum);
 
             // Hidden field
             document.getElementById('<%= hfCartItems.ClientID %>').value = JSON.stringify(cart);
         }
 
+        // ===== Payment =====
         function selectPayment(element, method) {
             var options = element.closest('.payment-methods').querySelectorAll('.payment-option');
             for (var i = 0; i < options.length; i++) { options[i].classList.remove('selected'); }
@@ -1064,6 +1226,7 @@
             element.classList.add('selected');
         }
 
+        // ===== Cart Overlay =====
         function openCartSheet() {
             var overlay = document.getElementById('cartOverlay');
             if (overlay) overlay.classList.add('active');
@@ -1081,6 +1244,11 @@
                 alert('กรุณาเพิ่มสินค้าลงตะกร้า');
                 return;
             }
+            var total = getCartTotal();
+            if (total < MIN_ORDER_AMOUNT) {
+                alert('ยอดสั่งซื้อขั้นต่ำ ฿' + MIN_ORDER_AMOUNT.toLocaleString() + '\nยอดปัจจุบัน: ฿' + total.toLocaleString());
+                return;
+            }
             // Sync mobile delivery note to desktop field
             var mobileNote = document.getElementById('mobileDeliveryNote');
             var desktopNote = document.getElementById('<%= txtDeliveryInstructions.ClientID %>');
@@ -1089,8 +1257,7 @@
             }
             // Sync payment method
             var mobilePayment = document.querySelector('input[name="paymentMethodMobile"]:checked');
-            var desktopPayment = document.querySelector('input[name="paymentMethod"]');
-            if (mobilePayment && desktopPayment) {
+            if (mobilePayment) {
                 var allDesktop = document.querySelectorAll('input[name="paymentMethod"]');
                 for (var i = 0; i < allDesktop.length; i++) {
                     if (allDesktop[i].value === mobilePayment.value) {
@@ -1099,7 +1266,6 @@
                 }
             }
             closeCartSheet();
-            // Trigger the server-side button click
             document.getElementById('<%= btnPlaceOrder.ClientID %>').click();
         }
 
@@ -1111,6 +1277,7 @@
             }
         });
 
+        // ===== Tabs =====
         function switchTab(evt, tabName) {
             var tabs = document.querySelectorAll('.tab-content');
             for (var i = 0; i < tabs.length; i++) { tabs[i].classList.remove('active'); }
@@ -1125,12 +1292,20 @@
                 alert('กรุณาเพิ่มสินค้าลงตะกร้า');
                 return false;
             }
+            var total = getCartTotal();
+            if (total < MIN_ORDER_AMOUNT) {
+                alert('ยอดสั่งซื้อขั้นต่ำ ฿' + MIN_ORDER_AMOUNT.toLocaleString() + '\nยอดปัจจุบัน: ฿' + total.toLocaleString());
+                return false;
+            }
             return true;
         }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             updateCartDisplay();
+            // Set min order amount display
+            var minEl = document.getElementById('minOrderAmount');
+            if (minEl) minEl.textContent = MIN_ORDER_AMOUNT.toLocaleString();
         });
     </script>
 </asp:Content>

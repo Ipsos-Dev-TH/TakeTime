@@ -326,11 +326,59 @@
             }
 
             .quick-buttons {
-                justify-content: center;
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+            }
+
+            .quick-btn {
+                min-width: 0;
+                padding: 15px 10px;
+            }
+
+            .quick-btn i {
+                font-size: 22px;
+            }
+
+            .quick-btn span {
+                font-size: 12px;
             }
 
             .emergency-banner .hotline {
-                font-size: 28px;
+                font-size: 24px;
+            }
+
+            .page-header h2 {
+                font-size: 18px;
+            }
+
+            .page-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .emergency-banner {
+                padding: 15px;
+            }
+
+            .emergency-banner h3 {
+                font-size: 18px;
+            }
+
+            .contact-card {
+                padding: 15px;
+            }
+
+            .section-title {
+                font-size: 16px;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .quick-buttons {
+                grid-template-columns: repeat(2, 1fr);
             }
         }
     </style>
@@ -348,200 +396,139 @@
         <div class="emergency-banner">
             <h3><i class="fas fa-exclamation-triangle"></i> Hotel Emergency Hotline</h3>
             <div class="hotline">
-                <a href="tel:038000000" style="color: white; text-decoration: none;">
-                    <i class="fas fa-phone-alt"></i> 038-XXX-XXX
-                </a>
+                <asp:Literal ID="litHotline" runat="server" />
             </div>
             <p style="margin: 10px 0 0 0; opacity: 0.9;">Available 24/7 - Front Desk</p>
         </div>
 
-        <!-- Quick Dial Buttons -->
-        <div class="quick-dial">
-            <h3><i class="fas fa-bolt"></i> Quick Dial</h3>
-            <div class="quick-buttons">
-                <a href="tel:1669" class="quick-btn emergency">
-                    <i class="fas fa-ambulance"></i>
-                    <span>1669</span>
-                    <small>Emergency</small>
-                </a>
-                <a href="tel:191" class="quick-btn police">
-                    <i class="fas fa-shield-alt"></i>
-                    <span>191</span>
-                    <small>Police</small>
-                </a>
-                <a href="tel:1554" class="quick-btn ambulance">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>1554</span>
-                    <small>Ambulance</small>
-                </a>
-                <a href="tel:199" class="quick-btn fire">
-                    <i class="fas fa-fire-extinguisher"></i>
-                    <span>199</span>
-                    <small>Fire Dept.</small>
-                </a>
-                <a href="tel:1155" class="quick-btn hotel">
-                    <i class="fas fa-user-shield"></i>
-                    <span>1155</span>
-                    <small>Tourist Police</small>
-                </a>
+        <!-- No Data Panel -->
+        <asp:Panel ID="pnlNoData" runat="server" Visible="false">
+            <div style="text-align: center; padding: 40px 20px; background: white; border-radius: 12px; box-shadow: 0 3px 15px rgba(0,0,0,0.1); margin-bottom: 25px;">
+                <i class="fas fa-phone-slash" style="font-size: 48px; color: #ccc; margin-bottom: 15px;"></i>
+                <h3 style="color: #666; margin: 0 0 10px 0;">No Emergency Contacts Available</h3>
+                <p style="color: #999; margin: 0;">Please contact the front desk for assistance.</p>
             </div>
-        </div>
+        </asp:Panel>
+
+        <!-- Quick Dial Buttons -->
+        <asp:Repeater ID="rptQuickDial" runat="server">
+            <HeaderTemplate>
+                <div class="quick-dial">
+                    <h3><i class="fas fa-bolt"></i> Quick Dial</h3>
+                    <div class="quick-buttons">
+            </HeaderTemplate>
+            <ItemTemplate>
+                <a href='tel:<%# Eval("Phone") %>' class="quick-dial-btn">
+                    <i class="fas <%# Eval("Icon") %>"></i>
+                    <span><%# Eval("Name") %></span>
+                    <small><%# Eval("Phone") %></small>
+                </a>
+            </ItemTemplate>
+            <FooterTemplate>
+                    </div>
+                </div>
+            </FooterTemplate>
+        </asp:Repeater>
 
         <!-- Hospital & Medical -->
-        <h3 class="section-title"><i class="fas fa-hospital"></i> Hospitals & Medical Services</h3>
-        <div class="contacts-grid">
-            <div class="contact-card hospital">
-                <div class="contact-icon">
-                    <i class="fas fa-hospital"></i>
+        <asp:Repeater ID="rptHospitals" runat="server">
+            <HeaderTemplate>
+                <h3 class="section-title"><i class="fas fa-hospital"></i> Hospitals & Medical Services</h3>
+                <div class="contacts-grid">
+            </HeaderTemplate>
+            <ItemTemplate>
+                <div class="contact-card hospital">
+                    <div class="contact-icon">
+                        <i class="fas <%# Eval("Icon") %>"></i>
+                    </div>
+                    <div class="contact-info">
+                        <h4><%# Eval("Name") %></h4>
+                        <p><%# Eval("Description") %></p>
+                        <a href='tel:<%# Eval("Phone") %>' class="phone-link">
+                            <i class="fas fa-phone-alt"></i> <%# Eval("Phone") %>
+                        </a>
+                    </div>
                 </div>
-                <div class="contact-info">
-                    <h4>Samitivej Sriracha Hospital</h4>
-                    <div class="phone"><a href="tel:038320300">038-320-300</a></div>
-                    <p class="description">โรงพยาบาลเอกชนชั้นนำ มีแผนกฉุกเฉิน 24 ชม.</p>
-                    <p class="address"><i class="fas fa-map-marker-alt"></i> 8 ถ.เจิมจอมพล ศรีราชา ชลบุรี</p>
-                    <a href="tel:038320300" class="btn-call"><i class="fas fa-phone"></i> Call</a>
-                    <a href="https://maps.google.com/?q=Samitivej+Sriracha+Hospital" target="_blank" class="btn-map"><i class="fas fa-map"></i> Map</a>
+            </ItemTemplate>
+            <FooterTemplate>
                 </div>
-            </div>
-
-            <div class="contact-card hospital">
-                <div class="contact-icon">
-                    <i class="fas fa-hospital"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Sriracha Nakorn General Hospital</h4>
-                    <div class="phone"><a href="tel:038770200">038-770-200</a></div>
-                    <p class="description">โรงพยาบาลรัฐบาล</p>
-                    <p class="address"><i class="fas fa-map-marker-alt"></i> ศรีราชา ชลบุรี</p>
-                    <a href="tel:038770200" class="btn-call"><i class="fas fa-phone"></i> Call</a>
-                    <a href="https://maps.google.com/?q=Sriracha+Nakorn+Hospital" target="_blank" class="btn-map"><i class="fas fa-map"></i> Map</a>
-                </div>
-            </div>
-
-            <div class="contact-card hospital">
-                <div class="contact-icon">
-                    <i class="fas fa-clinic-medical"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Bangkok Hospital Pattaya</h4>
-                    <div class="phone"><a href="tel:038259999">038-259-999</a></div>
-                    <p class="description">โรงพยาบาลนานาชาติ พูดภาษาอังกฤษได้</p>
-                    <p class="address"><i class="fas fa-map-marker-alt"></i> พัทยา ชลบุรี (ห่าง 30 นาที)</p>
-                    <a href="tel:038259999" class="btn-call"><i class="fas fa-phone"></i> Call</a>
-                    <a href="https://maps.google.com/?q=Bangkok+Hospital+Pattaya" target="_blank" class="btn-map"><i class="fas fa-map"></i> Map</a>
-                </div>
-            </div>
-        </div>
+            </FooterTemplate>
+        </asp:Repeater>
 
         <!-- Police Stations -->
-        <h3 class="section-title"><i class="fas fa-shield-alt"></i> Police Stations</h3>
-        <div class="contacts-grid">
-            <div class="contact-card police">
-                <div class="contact-icon">
-                    <i class="fas fa-shield-alt"></i>
+        <asp:Repeater ID="rptPolice" runat="server">
+            <HeaderTemplate>
+                <h3 class="section-title"><i class="fas fa-shield-alt"></i> Police Stations</h3>
+                <div class="contacts-grid">
+            </HeaderTemplate>
+            <ItemTemplate>
+                <div class="contact-card police">
+                    <div class="contact-icon">
+                        <i class="fas <%# Eval("Icon") %>"></i>
+                    </div>
+                    <div class="contact-info">
+                        <h4><%# Eval("Name") %></h4>
+                        <p><%# Eval("Description") %></p>
+                        <a href='tel:<%# Eval("Phone") %>' class="phone-link">
+                            <i class="fas fa-phone-alt"></i> <%# Eval("Phone") %>
+                        </a>
+                    </div>
                 </div>
-                <div class="contact-info">
-                    <h4>Sriracha Police Station</h4>
-                    <div class="phone"><a href="tel:038311111">038-311-111</a></div>
-                    <p class="description">สถานีตำรวจภูธรศรีราชา</p>
-                    <p class="address"><i class="fas fa-map-marker-alt"></i> ถ.สุขุมวิท ศรีราชา</p>
-                    <a href="tel:038311111" class="btn-call"><i class="fas fa-phone"></i> Call</a>
+            </ItemTemplate>
+            <FooterTemplate>
                 </div>
-            </div>
-
-            <div class="contact-card police">
-                <div class="contact-icon">
-                    <i class="fas fa-user-shield"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Tourist Police</h4>
-                    <div class="phone"><a href="tel:1155">1155</a></div>
-                    <p class="description">ตำรวจท่องเที่ยว - พูดภาษาอังกฤษได้</p>
-                    <p class="address"><i class="fas fa-map-marker-alt"></i> ทั่วประเทศ</p>
-                    <a href="tel:1155" class="btn-call"><i class="fas fa-phone"></i> Call</a>
-                </div>
-            </div>
-        </div>
+            </FooterTemplate>
+        </asp:Repeater>
 
         <!-- Hotel Services -->
-        <h3 class="section-title"><i class="fas fa-hotel"></i> Hotel Services</h3>
-        <div class="contacts-grid">
-            <div class="contact-card hotel">
-                <div class="contact-icon">
-                    <i class="fas fa-concierge-bell"></i>
+        <asp:Repeater ID="rptHotelServices" runat="server">
+            <HeaderTemplate>
+                <h3 class="section-title"><i class="fas fa-hotel"></i> Hotel Services</h3>
+                <div class="contacts-grid">
+            </HeaderTemplate>
+            <ItemTemplate>
+                <div class="contact-card hotel">
+                    <div class="contact-icon">
+                        <i class="fas <%# Eval("Icon") %>"></i>
+                    </div>
+                    <div class="contact-info">
+                        <h4><%# Eval("Name") %></h4>
+                        <p><%# Eval("Description") %></p>
+                        <a href='tel:<%# Eval("Phone") %>' class="phone-link">
+                            <i class="fas fa-phone-alt"></i> <%# Eval("Phone") %>
+                        </a>
+                    </div>
                 </div>
-                <div class="contact-info">
-                    <h4>Front Desk</h4>
-                    <div class="phone"><a href="tel:038000000">038-XXX-XXX</a></div>
-                    <p class="description">บริการต้อนรับ 24 ชั่วโมง</p>
-                    <a href="tel:038000000" class="btn-call"><i class="fas fa-phone"></i> Call</a>
+            </ItemTemplate>
+            <FooterTemplate>
                 </div>
-            </div>
-
-            <div class="contact-card hotel">
-                <div class="contact-icon">
-                    <i class="fas fa-broom"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Housekeeping</h4>
-                    <div class="phone"><a href="tel:038000001">038-XXX-XXX ext.101</a></div>
-                    <p class="description">บริการทำความสะอาดห้องพัก</p>
-                    <a href="Housekeeping.aspx" class="btn-call"><i class="fas fa-mobile-alt"></i> Request Online</a>
-                </div>
-            </div>
-
-            <div class="contact-card hotel">
-                <div class="contact-icon">
-                    <i class="fas fa-utensils"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Room Service</h4>
-                    <div class="phone"><a href="tel:038000002">038-XXX-XXX ext.102</a></div>
-                    <p class="description">สั่งอาหารและเครื่องดื่ม</p>
-                    <a href="RoomService.aspx" class="btn-call"><i class="fas fa-mobile-alt"></i> Order Online</a>
-                </div>
-            </div>
-        </div>
+            </FooterTemplate>
+        </asp:Repeater>
 
         <!-- Transportation -->
-        <h3 class="section-title"><i class="fas fa-car"></i> Transportation</h3>
-        <div class="contacts-grid">
-            <div class="contact-card transport">
-                <div class="contact-icon">
-                    <i class="fas fa-taxi"></i>
+        <asp:Repeater ID="rptTransport" runat="server">
+            <HeaderTemplate>
+                <h3 class="section-title"><i class="fas fa-car"></i> Transportation</h3>
+                <div class="contacts-grid">
+            </HeaderTemplate>
+            <ItemTemplate>
+                <div class="contact-card transport">
+                    <div class="contact-icon">
+                        <i class="fas <%# Eval("Icon") %>"></i>
+                    </div>
+                    <div class="contact-info">
+                        <h4><%# Eval("Name") %></h4>
+                        <p><%# Eval("Description") %></p>
+                        <a href='tel:<%# Eval("Phone") %>' class="phone-link">
+                            <i class="fas fa-phone-alt"></i> <%# Eval("Phone") %>
+                        </a>
+                    </div>
                 </div>
-                <div class="contact-info">
-                    <h4>GrabTaxi / Bolt</h4>
-                    <div class="phone">Use Mobile App</div>
-                    <p class="description">แอพเรียกรถที่นิยมใช้ในประเทศไทย</p>
-                    <a href="https://grab.onelink.me/2695613898" target="_blank" class="btn-call"><i class="fas fa-download"></i> Download Grab</a>
+            </ItemTemplate>
+            <FooterTemplate>
                 </div>
-            </div>
-
-            <div class="contact-card transport">
-                <div class="contact-icon">
-                    <i class="fas fa-shuttle-van"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>Hotel Shuttle Service</h4>
-                    <div class="phone"><a href="tel:038000000">Contact Front Desk</a></div>
-                    <p class="description">บริการรถรับส่งของโรงแรม (มีค่าใช้จ่าย)</p>
-                    <a href="Concierge.aspx" class="btn-call"><i class="fas fa-mobile-alt"></i> Book Online</a>
-                </div>
-            </div>
-
-            <div class="contact-card transport">
-                <div class="contact-icon">
-                    <i class="fas fa-plane"></i>
-                </div>
-                <div class="contact-info">
-                    <h4>U-Tapao Airport</h4>
-                    <div class="phone"><a href="tel:038245595">038-245-595</a></div>
-                    <p class="description">สนามบินนานาชาติอู่ตะเภา (ห่าง 45 นาที)</p>
-                    <a href="https://maps.google.com/?q=U-Tapao+Airport" target="_blank" class="btn-map"><i class="fas fa-map"></i> Map</a>
-                </div>
-            </div>
-        </div>
+            </FooterTemplate>
+        </asp:Repeater>
 
         <!-- Tips Section -->
         <div class="tips-section">

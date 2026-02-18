@@ -301,6 +301,31 @@
             opacity: 0.9;
         }
 
+        .no-data-panel {
+            background: white;
+            border-radius: 20px;
+            padding: 60px 40px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+
+        .no-data-panel i {
+            font-size: 48px;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+
+        .no-data-panel h3 {
+            color: #999;
+            font-size: 20px;
+            margin: 0 0 10px 0;
+        }
+
+        .no-data-panel p {
+            color: #bbb;
+            font-size: 14px;
+        }
+
         @media (max-width: 768px) {
             .hero-section {
                 padding: 50px 25px;
@@ -339,163 +364,85 @@
             </a>
         </div>
 
+        <!-- No Data Panel -->
+        <asp:Panel ID="pnlNoData" runat="server" Visible="false" CssClass="no-data-panel">
+            <i class="fas fa-database"></i>
+            <h3>No About Us Data Available</h3>
+            <p>Content has not been configured yet. Please contact the administrator.</p>
+        </asp:Panel>
+
         <!-- Hero Section -->
         <div class="hero-section">
-            <h1>TakeTime Nature Resort</h1>
-            <p class="tagline">"พักผ่อน ใกล้ชิดธรรมชาติ ห่างไกลความวุ่นวาย"</p>
+            <h1><%= GetSectionValue("hero", "Title") != "" ? GetSectionValue("hero", "Title") : "TakeTime Nature Resort" %></h1>
+            <p class="tagline"><%= GetSectionValue("hero", "Content") != "" ? GetSectionValue("hero", "Content") : "พักผ่อน ใกล้ชิดธรรมชาติ ห่างไกลความวุ่นวาย" %></p>
         </div>
 
         <!-- Our Story -->
         <div class="story-section">
-            <h3><i class="fas fa-book-open"></i> Our Story / เรื่องราวของเรา</h3>
-            <p>
-                TakeTime Nature Resort เกิดจากความฝันของครอบครัวเรา ที่ต้องการสร้างสถานที่พักผ่อนที่ให้ผู้คนได้หยุดพักจากความเร่งรีบของชีวิตประจำวัน
-                กลับมาใกล้ชิดธรรมชาติ และใช้เวลาอย่างมีคุณค่ากับคนที่รัก
-            </p>
-            <p>
-                เริ่มต้นจากพื้นที่สวนผลไม้เล็กๆ ริมทะเลบางพระ เราค่อยๆ พัฒนาที่พักด้วยความใส่ใจในทุกรายละเอียด
-                เลือกใช้วัสดุธรรมชาติ ออกแบบให้กลมกลืนกับสิ่งแวดล้อม และรักษาต้นไม้ใหญ่ที่อยู่มาตั้งแต่รุ่นปู่ย่า
-            </p>
-            <p>
-                วันนี้ TakeTime กลายเป็นบ้านหลังที่สองของผู้คนมากมาย ที่มาพักผ่อน สร้างความทรงจำ และกลับมาเยี่ยมเยียนซ้ำแล้วซ้ำเล่า
-                เรารู้สึกเป็นเกียรติที่ได้เป็นส่วนหนึ่งของช่วงเวลาพิเศษของทุกท่าน
-            </p>
+            <h3><i class="fas fa-book-open"></i> <%= GetSectionValue("story", "Title") != "" ? GetSectionValue("story", "Title") : "Our Story / เรื่องราวของเรา" %></h3>
+            <p><%= GetSectionValue("story", "Content") != "" ? GetSectionValue("story", "Content") : "เรื่องราวของ TakeTime Nature Resort" %></p>
+            <% if (!string.IsNullOrEmpty(GetSectionValue("story", "Sub_Content"))) { %>
+                <p><%= GetSectionValue("story", "Sub_Content") %></p>
+            <% } %>
         </div>
 
         <!-- Our Values -->
         <div class="values-grid">
-            <div class="value-card">
-                <div class="value-icon">
-                    <i class="fas fa-leaf"></i>
-                </div>
-                <h4>Nature First</h4>
-                <p>เราให้ความสำคัญกับสิ่งแวดล้อม ใช้พลังงานสะอาด ลดการใช้พลาสติก และส่งเสริมการท่องเที่ยวอย่างยั่งยืน</p>
-            </div>
-
-            <div class="value-card">
-                <div class="value-icon">
-                    <i class="fas fa-heart"></i>
-                </div>
-                <h4>Heartfelt Service</h4>
-                <p>ทุกบริการมาจากใจ เราดูแลทุกท่านเหมือนแขกที่มาเยือนบ้าน ด้วยความอบอุ่นและจริงใจ</p>
-            </div>
-
-            <div class="value-card">
-                <div class="value-icon">
-                    <i class="fas fa-users"></i>
-                </div>
-                <h4>Community Focus</h4>
-                <p>สนับสนุนชุมชนท้องถิ่น ใช้วัตถุดิบจากเกษตรกรในพื้นที่ และจ้างงานคนในชุมชน</p>
-            </div>
-
-            <div class="value-card">
-                <div class="value-icon">
-                    <i class="fas fa-gem"></i>
-                </div>
-                <h4>Quality Experience</h4>
-                <p>มุ่งมั่นสร้างประสบการณ์ที่ดีที่สุด ตั้งแต่การต้อนรับ การพัก จนถึงการอำลา</p>
-            </div>
+            <asp:Repeater ID="rptValues" runat="server">
+                <ItemTemplate>
+                    <div class="value-card">
+                        <div class="value-icon"><%# Eval("Icon") %></div>
+                        <h4><%# Eval("Title") %></h4>
+                        <p><%# Eval("Content") %></p>
+                    </div>
+                </ItemTemplate>
+            </asp:Repeater>
         </div>
 
         <!-- Timeline -->
         <div class="timeline">
             <h3><i class="fas fa-history"></i> Our Journey</h3>
-
-            <div class="timeline-item">
-                <div class="timeline-year">2015</div>
-                <div class="timeline-content">
-                    <h4>จุดเริ่มต้น</h4>
-                    <p>เริ่มต้นจากกระท่อมไม้ 3 หลังเล็กๆ ริมทะเลบางพระ ต้อนรับแขกกลุ่มแรกที่มาพักผ่อนวันหยุด</p>
-                </div>
-            </div>
-
-            <div class="timeline-item">
-                <div class="timeline-year">2017</div>
-                <div class="timeline-content">
-                    <h4>ขยายพื้นที่</h4>
-                    <p>เพิ่มห้องพักเป็น 10 หลัง พร้อมร้านอาหารและสระว่ายน้ำ เริ่มเป็นที่รู้จักในหมู่นักท่องเที่ยว</p>
-                </div>
-            </div>
-
-            <div class="timeline-item">
-                <div class="timeline-year">2020</div>
-                <div class="timeline-content">
-                    <h4>ปรับตัวและเติบโต</h4>
-                    <p>แม้เผชิญความท้าทาย แต่เราใช้โอกาสนี้ปรับปรุงสิ่งอำนวยความสะดวกและพัฒนาระบบบริการ</p>
-                </div>
-            </div>
-
-            <div class="timeline-item">
-                <div class="timeline-year">2023</div>
-                <div class="timeline-content">
-                    <h4>Smart Resort</h4>
-                    <p>เปิดตัวระบบ Guest Portal ให้แขกสามารถเข้าถึงบริการได้สะดวกผ่านสมาร์ทโฟน</p>
-                </div>
-            </div>
-
-            <div class="timeline-item">
-                <div class="timeline-year">Now</div>
-                <div class="timeline-content">
-                    <h4>ก้าวต่อไป</h4>
-                    <p>พัฒนาอย่างต่อเนื่องเพื่อมอบประสบการณ์ที่ดีที่สุดให้กับแขกทุกท่าน</p>
-                </div>
-            </div>
+            <asp:Repeater ID="rptTimeline" runat="server">
+                <ItemTemplate>
+                    <div class="timeline-item">
+                        <div class="timeline-year"><%# Eval("Year_Text") %></div>
+                        <div class="timeline-content">
+                            <h4><%# Eval("Title") %></h4>
+                            <p><%# Eval("Content") %></p>
+                        </div>
+                    </div>
+                </ItemTemplate>
+            </asp:Repeater>
         </div>
 
         <!-- Resort Concept -->
         <div class="concept-section">
             <h3><i class="fas fa-lightbulb"></i> Resort Concept / แนวคิดที่พัก</h3>
             <div class="concept-grid">
-                <div class="concept-item">
-                    <i class="fas fa-tree"></i>
-                    <div>
-                        <h5>Eco-Friendly Design</h5>
-                        <p>ออกแบบให้กลมกลืนกับธรรมชาติ ใช้วัสดุที่เป็นมิตรกับสิ่งแวดล้อม หลังคาสีเขียวช่วยลดความร้อน</p>
-                    </div>
-                </div>
-
-                <div class="concept-item">
-                    <i class="fas fa-wind"></i>
-                    <div>
-                        <h5>Open Air Living</h5>
-                        <p>ห้องพักออกแบบให้รับลมธรรมชาติ ระเบียงกว้างให้ชมวิว สัมผัสอากาศบริสุทธิ์จากทะเล</p>
-                    </div>
-                </div>
-
-                <div class="concept-item">
-                    <i class="fas fa-spa"></i>
-                    <div>
-                        <h5>Wellness Focus</h5>
-                        <p>สร้างบรรยากาศที่ช่วยให้ผ่อนคลาย ลดความเครียด พร้อมกิจกรรมส่งเสริมสุขภาพ</p>
-                    </div>
-                </div>
-
-                <div class="concept-item">
-                    <i class="fas fa-palette"></i>
-                    <div>
-                        <h5>Local Art & Culture</h5>
-                        <p>ตกแต่งด้วยงานศิลปะท้องถิ่น อนุรักษ์วัฒนธรรมไทย ให้แขกได้สัมผัสเสน่ห์ของชุมชน</p>
-                    </div>
-                </div>
+                <asp:Repeater ID="rptConcepts" runat="server">
+                    <ItemTemplate>
+                        <div class="concept-item">
+                            <div class="concept-icon"><%# Eval("Icon") %></div>
+                            <div>
+                                <h5><%# Eval("Title") %></h5>
+                                <p><%# Eval("Content") %></p>
+                            </div>
+                        </div>
+                    </ItemTemplate>
+                </asp:Repeater>
             </div>
         </div>
 
         <!-- Team -->
         <div class="team-section">
-            <h3><i class="fas fa-users"></i> Our Team / ทีมงานของเรา</h3>
-            <p>
-                ทีมงาน TakeTime ประกอบด้วยคนรุ่นใหม่ที่มีใจรักบริการ ผสมผสานกับผู้มีประสบการณ์ในอุตสาหกรรมโรงแรม
-                เราทุกคนมีเป้าหมายเดียวกัน คือ ทำให้การพักผ่อนของท่านเป็นช่วงเวลาที่ดีที่สุด
-                หากมีสิ่งใดที่เราสามารถช่วยเหลือได้ เพียงแจ้งให้เราทราบ เรายินดีเสมอ
-            </p>
+            <h3><i class="fas fa-users"></i> <%= GetSectionValue("team", "Title") != "" ? GetSectionValue("team", "Title") : "Our Team / ทีมงานของเรา" %></h3>
+            <p><%= GetSectionValue("team", "Content") != "" ? GetSectionValue("team", "Content") : "ทีมงานของเราพร้อมดูแลท่านด้วยความใส่ใจ" %></p>
         </div>
 
         <!-- Quote -->
         <div class="quote-section">
-            <blockquote>
-                "The greatest gift you can give yourself is time — time to rest, time to reflect, and time to reconnect with what matters most."
-            </blockquote>
-            <cite>— TakeTime Philosophy</cite>
+            <blockquote><%= GetSectionValue("quote", "Title") != "" ? GetSectionValue("quote", "Title") : "The greatest gift you can give yourself is time." %></blockquote>
+            <cite><%= GetSectionValue("quote", "Content") != "" ? GetSectionValue("quote", "Content") : "— TakeTime Philosophy" %></cite>
         </div>
     </div>
 </asp:Content>

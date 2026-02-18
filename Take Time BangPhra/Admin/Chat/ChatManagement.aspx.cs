@@ -291,7 +291,7 @@ namespace Take_Time_BangPhra.Admin.Chat
                 string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                 var code = new code();
 
-                // Get unread count
+                // Get unread count (simple query - no function dependencies)
                 DataTable dtCount = code.DatabaseQuerySafe(connectionString,
                     @"SELECT COUNT(*) AS UnreadCount
                       FROM Guest_Chat
@@ -301,37 +301,73 @@ namespace Take_Time_BangPhra.Admin.Chat
                 int unreadCount = dtCount.Rows.Count > 0 ? Convert.ToInt32(dtCount.Rows[0]["UnreadCount"]) : 0;
 
                 // Get latest unread message info
+                // Wrapped in separate try-catch so count still returns even if detail query fails
                 string latestRoom = "";
                 string latestGuest = "";
                 string latestMessage = "";
-
                 long latestReservationId = 0;
 
                 if (unreadCount > 0)
                 {
-                    DataTable dtLatest = code.DatabaseQuerySafe(connectionString,
-                        @"SELECT TOP 1
-                            ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
-                            c.Name AS GuestName,
-                            gc.Message AS LatestMessage,
-                            gc.Reservation_ID AS ReservationId
-                          FROM Guest_Chat gc
-                          INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
-                          INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
-                          WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
-                          ORDER BY gc.Created_Date DESC",
-                        null);
-
-                    if (dtLatest.Rows.Count > 0)
+                    try
                     {
-                        latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
-                        latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
-                        latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
-                        latestReservationId = Convert.ToInt64(dtLatest.Rows[0]["ReservationId"]);
-                        // Truncate message if too long
-                        if (latestMessage.Length > 100)
+                        DataTable dtLatest = code.DatabaseQuerySafe(connectionString,
+                            @"SELECT TOP 1
+                                ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'ไม่ระบุห้อง') AS RoomName,
+                                c.Name AS GuestName,
+                                gc.Message AS LatestMessage,
+                                gc.Reservation_ID AS ReservationId
+                              FROM Guest_Chat gc
+                              INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
+                              INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                              WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
+                              ORDER BY gc.Created_Date DESC",
+                            null);
+
+                        if (dtLatest.Rows.Count > 0)
                         {
-                            latestMessage = latestMessage.Substring(0, 100) + "...";
+                            latestRoom = dtLatest.Rows[0]["RoomName"].ToString();
+                            latestGuest = dtLatest.Rows[0]["GuestName"].ToString();
+                            latestMessage = dtLatest.Rows[0]["LatestMessage"].ToString();
+                            latestReservationId = Convert.ToInt64(dtLatest.Rows[0]["ReservationId"]);
+                            if (latestMessage.Length > 100)
+                            {
+                                latestMessage = latestMessage.Substring(0, 100) + "...";
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Fallback without fn_GetReservationRoomNames
+                        try
+                        {
+                            DataTable dtFallback = code.DatabaseQuerySafe(connectionString,
+                                @"SELECT TOP 1
+                                    c.Name AS GuestName,
+                                    gc.Message AS LatestMessage,
+                                    gc.Reservation_ID AS ReservationId
+                                  FROM Guest_Chat gc
+                                  INNER JOIN Reservation r ON gc.Reservation_ID = r.ID
+                                  INNER JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                                  WHERE gc.IsFromGuest = 1 AND (gc.Is_Read = 0 OR gc.Is_Read IS NULL)
+                                  ORDER BY gc.Created_Date DESC",
+                                null);
+
+                            if (dtFallback.Rows.Count > 0)
+                            {
+                                latestRoom = "ห้องพัก";
+                                latestGuest = dtFallback.Rows[0]["GuestName"].ToString();
+                                latestMessage = dtFallback.Rows[0]["LatestMessage"].ToString();
+                                latestReservationId = Convert.ToInt64(dtFallback.Rows[0]["ReservationId"]);
+                                if (latestMessage.Length > 100)
+                                {
+                                    latestMessage = latestMessage.Substring(0, 100) + "...";
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            latestMessage = "ข้อความใหม่";
                         }
                     }
                 }
