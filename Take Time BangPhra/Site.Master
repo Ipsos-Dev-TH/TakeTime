@@ -626,6 +626,19 @@
                                                     <li><a runat="server" href="~/Account/TierBenefitsManagement">
                                                         <i class="fas fa-crown"></i> Tier Benefits
                                                     </a></li>
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
+                                                    <li><a runat="server" href="~/Admin/ManageFacilities">
+                                                        <i class="fas fa-swimming-pool"></i> จัดการสิ่งอำนวยความสะดวก
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/ManageNearbyPlaces">
+                                                        <i class="fas fa-map-marker-alt"></i> จัดการสถานที่ใกล้เคียง
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/ManageEmergency">
+                                                        <i class="fas fa-phone-alt"></i> จัดการข้อมูลฉุกเฉิน
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/ManageAboutUs">
+                                                        <i class="fas fa-info-circle"></i> จัดการเกี่ยวกับเรา
+                                                    </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
