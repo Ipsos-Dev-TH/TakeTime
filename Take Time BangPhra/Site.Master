@@ -1074,15 +1074,11 @@
                         return;
                     }
 
-                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/CheckUnreadMessages") %>', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
-                    })
+                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=chat&_=' + new Date().getTime())
                     .then(function(response) { return response.json(); })
                     .then(function(data) {
-                        if (data.d && data.d.hasUnread && data.d.count > 0) {
-                            var count = data.d.count;
+                        if (data && data.hasUnread && data.count > 0) {
+                            var count = data.count;
 
                             // Always update floating badge
                             var badge = document.getElementById('chatNotificationBadge');
@@ -1103,16 +1099,16 @@
                             if (!isShowing && now > dismissedUntil) {
                                 // Show alert with latest message info
                                 showChatAlert(
-                                    data.d.latestRoom || '-',
-                                    data.d.latestGuest || '-',
-                                    data.d.latestMessage || 'ข้อความใหม่',
+                                    data.latestRoom || '-',
+                                    data.latestGuest || '-',
+                                    data.latestMessage || 'ข้อความใหม่',
                                     count
                                 );
                             } else if (isShowing) {
                                 // Update displayed info if already showing
-                                document.getElementById('alertRoomName').innerText = data.d.latestRoom || '-';
-                                document.getElementById('alertGuestName').innerText = data.d.latestGuest || '-';
-                                document.getElementById('alertMessagePreview').innerText = data.d.latestMessage || '-';
+                                document.getElementById('alertRoomName').innerText = data.latestRoom || '-';
+                                document.getElementById('alertGuestName').innerText = data.latestGuest || '-';
+                                document.getElementById('alertMessagePreview').innerText = data.latestMessage || '-';
                                 var countInfo = document.getElementById('alertCountInfo');
                                 if (countInfo) {
                                     countInfo.innerText = count > 1 ? ('รวม ' + count + ' ข้อความที่ยังไม่ได้อ่าน') : '';
@@ -1182,15 +1178,11 @@
                         return;
                     }
 
-                    fetch('<%= ResolveUrl("~/Admin/RoomService/OrderManagement.aspx/GetPendingOrders") %>', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
-                    })
+                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=rs&_=' + new Date().getTime())
                     .then(function(response) { return response.json(); })
                     .then(function(data) {
-                        if (data.d && data.d.success && data.d.orders && data.d.orders.length > 0) {
-                            var orders = data.d.orders;
+                        if (data && data.success && data.orders && data.orders.length > 0) {
+                            var orders = data.orders;
                             var count = orders.length;
                             var latest = orders[0]; // Most recent pending order
 
@@ -1290,11 +1282,7 @@
                 }
 
                 function keepSessionAlive() {
-                    fetch('<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/KeepAlive") %>', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
-                    })
+                    fetch('<%= ResolveUrl("~/Admin/NotificationApi.ashx") %>?action=keepalive&_=' + new Date().getTime())
                     .then(function(response) { return response.json(); })
                     .catch(function(err) { console.log('Keep-alive error:', err); });
                 }
