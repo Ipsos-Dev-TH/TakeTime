@@ -315,13 +315,13 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <button class="tab" onclick="switchTab('accommodation')">
+            <button type="button" class="tab" onclick="switchTab('accommodation')">
                 <i class="fa fa-home"></i> ที่พัก
             </button>
-            <button class="tab" onclick="switchTab('items')">
+            <button type="button" class="tab" onclick="switchTab('items')">
                 <i class="fa fa-shopping-bag"></i> อุปกรณ์/บริการ
             </button>
-            <button class="tab active" onclick="switchTab('products')">
+            <button type="button" class="tab active" onclick="switchTab('products')">
                 <i class="fa fa-utensils"></i> สินค้า (Room Service)
             </button>
         </div>

@@ -27,6 +27,7 @@ namespace Take_Time_BangPhra.Admin
 
             if (!IsPostBack)
             {
+                EnsureProductImagesTable();
                 LoadProducts();
                 LoadAccommodations();
                 LoadItems();
@@ -276,6 +277,39 @@ namespace Take_Time_BangPhra.Admin
             catch (Exception ex)
             {
                 ShowError("เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+
+        private void EnsureProductImagesTable()
+        {
+            try
+            {
+                string createTableSql = @"
+                    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Product_Images')
+                    BEGIN
+                        CREATE TABLE Product_Images (
+                            ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+                            ProductType NVARCHAR(50) NOT NULL,
+                            Product_ID INT NOT NULL,
+                            ImageURL NVARCHAR(500) NOT NULL,
+                            ThumbnailURL NVARCHAR(500) NULL,
+                            ImageOrder INT NOT NULL DEFAULT 0,
+                            IsMainImage BIT NOT NULL DEFAULT 0,
+                            Caption NVARCHAR(500) NULL,
+                            UploadedBy_AdminID INT NULL,
+                            Status INT NOT NULL DEFAULT 1,
+                            CreatedDate DATETIME NOT NULL DEFAULT GETDATE()
+                        );
+
+                        CREATE INDEX IX_Product_Images_ProductType_ProductID
+                            ON Product_Images (ProductType, Product_ID);
+                    END";
+
+                codeInstance.DatabaseInsertSafe(connectionString, createTableSql, null);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("EnsureProductImagesTable Error: " + ex.Message);
             }
         }
 
