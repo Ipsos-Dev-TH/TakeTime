@@ -1390,11 +1390,10 @@
                     checkRoomServiceOrders();
 
                     // Then check every 5 seconds
+                    // Each poll also extends the ASP.NET session (handler has IRequiresSessionState)
+                    // so session never expires while browser is open
                     chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
                     rsCheckInterval = setInterval(checkRoomServiceOrders, 5000);
-
-                    // Keep session alive every 5 minutes
-                    sessionKeepAliveInterval = setInterval(keepSessionAlive, 5 * 60 * 1000);
                 });
 
                 // Cleanup on page unload
