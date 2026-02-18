@@ -791,59 +791,65 @@
         <!-- Global Chat Notification System (for logged-in admin users) -->
         <asp:Panel ID="pnlChatNotification" runat="server" Visible="false">
             <style>
-                /* Chat Alert Overlay */
+                /* Chat Alert Overlay - fullscreen centered modal */
                 .global-chat-alert {
-                    display: none;
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0,0,0,0.8);
-                    z-index: 99999;
-                    align-items: center;
-                    justify-content: center;
+                    display: none !important;
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                    background: rgba(0,0,0,0.85) !important;
+                    z-index: 2147483647 !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
                 }
 
                 .global-chat-alert.show {
-                    display: flex;
+                    display: flex !important;
                 }
 
                 .chat-alert-box {
                     background: white;
-                    padding: 35px 45px;
-                    border-radius: 20px;
+                    padding: 40px 50px;
+                    border-radius: 24px;
                     text-align: center;
-                    animation: alertShake 0.5s ease infinite;
-                    max-width: 450px;
-                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    animation: alertPulse 1.5s ease infinite;
+                    width: 90%;
+                    max-width: 480px;
+                    box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+                    position: relative;
                 }
 
-                @keyframes alertShake {
-                    0%, 100% { transform: scale(1); }
-                    50% { transform: scale(1.02); }
+                @keyframes alertPulse {
+                    0%, 100% { transform: scale(1); box-shadow: 0 25px 80px rgba(0,0,0,0.5); }
+                    50% { transform: scale(1.03); box-shadow: 0 30px 100px rgba(244, 67, 54, 0.4); }
                 }
 
                 .chat-alert-box .alert-icon {
-                    font-size: 60px;
+                    font-size: 70px;
                     color: #f44336;
                     margin-bottom: 15px;
-                    animation: alertBlink 0.5s infinite;
+                    animation: alertBlink 0.8s ease-in-out infinite;
+                    display: block;
                 }
 
                 @keyframes alertBlink {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0.3; }
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.4; transform: scale(1.1); }
                 }
 
                 .chat-alert-box h3 {
                     margin: 0 0 10px 0;
-                    color: #333;
-                    font-size: 24px;
+                    color: #d32f2f;
+                    font-size: 26px;
+                    font-weight: 700;
                 }
 
                 .chat-alert-box p {
-                    margin: 0 0 15px 0;
+                    margin: 0 0 18px 0;
                     color: #666;
                     font-size: 16px;
                 }
@@ -1297,6 +1303,17 @@
                 // INITIALIZE
                 // =============================================
                 document.addEventListener('DOMContentLoaded', function() {
+                    // Move alert overlays to document.body to avoid parent CSS interference
+                    // (position:fixed can break inside transformed/overflow-hidden parents)
+                    var chatAlert = document.getElementById('globalChatAlert');
+                    var rsAlert = document.getElementById('globalRSAlert');
+                    var chatBadge = document.getElementById('chatNotificationBadge');
+                    var rsBadge = document.getElementById('roomServiceBadge');
+                    if (chatAlert) document.body.appendChild(chatAlert);
+                    if (rsAlert) document.body.appendChild(rsAlert);
+                    if (chatBadge) document.body.appendChild(chatBadge);
+                    if (rsBadge) document.body.appendChild(rsBadge);
+
                     // Check immediately on page load
                     checkGlobalChatMessages();
                     checkRoomServiceOrders();
