@@ -351,7 +351,7 @@ namespace Take_Time_BangPhra.Admin
 
         public string GetCategoryText(object categoryObj)
         {
-            string category = categoryObj?.ToString() ?? "";
+            string category = categoryObj != null ? categoryObj.ToString() : "";
             switch (category)
             {
                 case "quickdial": return "\U0001F4DE โทรด่วน";
