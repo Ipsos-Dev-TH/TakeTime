@@ -316,10 +316,10 @@
 
     <!-- Tabs -->
     <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab(event, 'new')">
+        <button type="button" class="tab-btn active" onclick="switchTab(event, 'new')">
             <i class="fas fa-plus-circle"></i> New Request
         </button>
-        <button class="tab-btn" onclick="switchTab(event, 'history')">
+        <button type="button" class="tab-btn" onclick="switchTab(event, 'history')">
             <i class="fas fa-history"></i> My Requests
         </button>
     </div>

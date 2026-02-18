@@ -320,22 +320,22 @@
 
         <!-- Category Tabs -->
         <div class="category-tabs">
-            <button class="category-tab active" onclick="filterPlaces('all')">
+            <button type="button" class="category-tab active" onclick="filterPlaces('all')">
                 <i class="fas fa-globe"></i> All
             </button>
-            <button class="category-tab" onclick="filterPlaces('beach')">
+            <button type="button" class="category-tab" onclick="filterPlaces('beach')">
                 <i class="fas fa-umbrella-beach"></i> Beaches
             </button>
-            <button class="category-tab" onclick="filterPlaces('restaurant')">
+            <button type="button" class="category-tab" onclick="filterPlaces('restaurant')">
                 <i class="fas fa-utensils"></i> Restaurants
             </button>
-            <button class="category-tab" onclick="filterPlaces('cafe')">
+            <button type="button" class="category-tab" onclick="filterPlaces('cafe')">
                 <i class="fas fa-coffee"></i> Cafes
             </button>
-            <button class="category-tab" onclick="filterPlaces('attraction')">
+            <button type="button" class="category-tab" onclick="filterPlaces('attraction')">
                 <i class="fas fa-camera"></i> Attractions
             </button>
-            <button class="category-tab" onclick="filterPlaces('shopping')">
+            <button type="button" class="category-tab" onclick="filterPlaces('shopping')">
                 <i class="fas fa-shopping-bag"></i> Shopping
             </button>
         </div>

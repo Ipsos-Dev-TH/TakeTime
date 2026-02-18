@@ -171,6 +171,64 @@
             color: #555;
             font-size: 14px;
         }
+
+        @media (max-width: 600px) {
+            .balance-header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .balance-header h2 {
+                font-size: 20px;
+            }
+
+            .balance-due-card .amount {
+                font-size: 36px;
+            }
+
+            .balance-summary {
+                padding: 15px;
+            }
+
+            .charge-item {
+                flex-direction: column;
+                gap: 4px;
+                text-align: center;
+            }
+
+            .charge-amount {
+                font-size: 16px;
+            }
+
+            .total-row .charge-amount {
+                font-size: 24px;
+            }
+
+            .total-row .charge-label {
+                font-size: 16px;
+            }
+
+            .payment-section {
+                padding: 15px;
+            }
+
+            .btn-pay {
+                font-size: 16px;
+            }
+        }
+
+        @media (min-width: 601px) {
+            .balance-header,
+            .balance-due-card,
+            .balance-summary,
+            .payment-section {
+                max-width: 700px;
+                margin-left: auto;
+                margin-right: auto;
+            }
+        }
     </style>
 
     <!-- Header -->
