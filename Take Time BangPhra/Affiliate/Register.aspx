@@ -44,6 +44,55 @@
         .auto-style5 {
             color: #FF0000;
         }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            table {
+                font-size: 14px;
+            }
+            tr {
+                display: block;
+                margin-bottom: 4px;
+                padding: 4px 0;
+            }
+            td {
+                display: block;
+                width: 100% !important;
+                text-align: left !important;
+                padding: 4px 10px !important;
+                box-sizing: border-box;
+                height: auto !important;
+            }
+            td.auto-style2, td.auto-style3, td.auto-style4 {
+                width: 100% !important;
+                height: auto !important;
+            }
+            td[style*="width:25%"], td[style*="width:33%"], td[style*="width:55%"], td[style*="width:20%"] {
+                width: 100% !important;
+            }
+            input[type="text"], input[type="password"], input[type="number"], select, textarea {
+                width: 100% !important;
+                max-width: 100% !important;
+                box-sizing: border-box;
+                margin: 3px 0;
+                padding: 10px 12px;
+                font-size: 15px;
+            }
+            input[type="file"] {
+                width: 100% !important;
+                margin: 5px 0;
+            }
+            input[type="submit"], button {
+                width: 100% !important;
+                margin: 5px 0;
+                padding: 12px;
+                font-size: 15px;
+                box-sizing: border-box;
+            }
+            .radioBL {
+                width: 100% !important;
+            }
+        }
         </style>
     <p>
         <br />

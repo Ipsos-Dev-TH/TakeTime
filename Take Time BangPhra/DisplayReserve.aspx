@@ -150,13 +150,43 @@
         }
         @media (max-width: 768px) {
             .reservation-grid {
-                font-size: 12px;
+                font-size: 11px;
             }
             .date-column {
-                width: 100px;
+                width: 80px;
+                min-width: 80px;
             }
             .accommodation-cell {
-                min-width: 200px;
+                min-width: 150px;
+                max-width: 200px;
+            }
+            .table-responsive {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .filter-section .row {
+                flex-direction: column;
+            }
+            .filter-section .col-md-3 {
+                width: 100%;
+                margin-bottom: 8px;
+            }
+            .summary-box .row {
+                flex-direction: column;
+            }
+            .summary-box .col-md-4 {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            .summary-value {
+                font-size: 16px;
+            }
+            h2 {
+                font-size: 1.3rem;
+            }
+            .customer-info {
+                padding: 5px;
+                font-size: 11px;
             }
         }
     </style>

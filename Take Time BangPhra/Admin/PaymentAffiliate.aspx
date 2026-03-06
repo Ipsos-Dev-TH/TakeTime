@@ -5,28 +5,103 @@
   <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView.css">
      <style>
-
-
  .header-center{
         text-align:center;
     }
   .header-right{
         text-align:right;
     }
+  th, td {
+    padding: 5px;
+  }
+
+  /* Modern Form Styling */
+  .form-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 600;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  }
+
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    transition: all 0.3s;
+    font-size: 14px;
+  }
+
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    outline: none;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    .form-title {
+      font-size: 16px;
+      padding: 12px 15px;
+    }
+    table {
+      font-size: 14px;
+    }
+    tr {
+      display: block;
+      margin-bottom: 2px;
+      border-bottom: 1px solid #f0f0f0;
+      padding: 4px 0;
+    }
+    td {
+      display: block;
+      width: 100% !important;
+      text-align: left !important;
+      padding: 4px 10px !important;
+      box-sizing: border-box;
+    }
+    td.modal-sm {
+      background: none;
+      font-weight: 700;
+      color: #444;
+      padding: 8px 10px 2px 10px !important;
+      font-size: 13px;
+    }
+    input[type="text"], input[type="number"], input[type="date"], select, textarea {
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box;
+      margin: 3px 0;
+      padding: 10px 12px;
+      font-size: 15px;
+    }
+    input[type="file"] {
+      width: 100%;
+      margin: 5px 0;
+    }
+    input[type="submit"], button {
+      width: 100%;
+      margin: 5px 0;
+      padding: 12px;
+      font-size: 15px;
+    }
+    .mydatagrid {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
          </style>
-            <style>
-            th, td {
-  padding: 5px;
-}
-                </style>
 
     
+    <div class="form-title">
+        สร้างใบสำคัญจ่าย
+    </div>
     <p>
-        &nbsp;</p>
-    <p class="text-center">
-        <strong>สร้างใบสำคัญจ่าย</strong><div class="text-center">
-            <br />
-        </div>
         <table style="width:100%;">
              <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบสำคัญจ่าย:</td>
