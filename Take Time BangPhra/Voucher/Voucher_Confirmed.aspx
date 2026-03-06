@@ -6,6 +6,29 @@
           .auto-style1 {
               height: 47px;
           }
+
+          /* Mobile responsive */
+          @media (max-width: 768px) {
+              table tr {
+                  display: block;
+                  margin-bottom: 4px;
+              }
+              table td {
+                  display: block;
+                  width: 100% !important;
+                  text-align: left !important;
+                  padding: 4px 10px !important;
+                  box-sizing: border-box;
+              }
+              table td[rowspan] {
+                  display: block;
+                  text-align: center !important;
+              }
+              table td[rowspan] img {
+                  width: 100% !important;
+                  max-width: 300px;
+              }
+          }
       </style><div class="ExampleFont">
         <table style="width: 100%;">
                     <tr>

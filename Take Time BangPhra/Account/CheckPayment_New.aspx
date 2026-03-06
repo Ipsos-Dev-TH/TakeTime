@@ -240,6 +240,51 @@
         .gridview-custom td:nth-child(3) input[type="button"]:hover {
             background: linear-gradient(135deg, #e67e22 0%, #f39c12 100%);
         }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .payment-dashboard {
+                padding: 0;
+                max-width: 100%;
+            }
+            .dashboard-header h2 {
+                font-size: 18px;
+            }
+            .search-row {
+                flex-direction: column;
+                gap: 8px;
+            }
+            .search-label {
+                min-width: unset;
+            }
+            .search-input {
+                width: 100% !important;
+            }
+            .btn-search, .btn-export {
+                width: 100%;
+                margin: 5px 0;
+            }
+            .expense-table {
+                font-size: 11px;
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .summary-section > div[style*="display: flex"] {
+                flex-direction: column !important;
+                gap: 10px !important;
+            }
+            .gridview-custom {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                font-size: 12px;
+            }
+            .gridview-custom th, .gridview-custom td {
+                white-space: nowrap;
+                padding: 6px 4px;
+            }
+        }
     </style>
 
     <div class="payment-dashboard">

@@ -60,10 +60,31 @@
 }  
 .myCalendar .myCalendarToday{  background-color: #f2f2f2; -webkit-box-shadow: 0 0 7px 3px #e5e5e5;
 box-shadow: 0 0 7px 3px #e5e5e5;}
-.myCalendar .myCalendarDay a:hover,   
-.myCalendar .myCalendarSelector a:hover {  
-    background-color: #25bae5;  
+.myCalendar .myCalendarDay a:hover,
+.myCalendar .myCalendarSelector a:hover {
+    background-color: #25bae5;
 }
+
+    /* Mobile responsive */
+    @media (max-width: 768px) {
+        .mobile-table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .mydatagrid {
+            font-size: 13px;
+        }
+        .mydatagrid th, .mydatagrid td {
+            padding: 6px 4px !important;
+        }
+        input[type="submit"], button {
+            width: 100%;
+            margin: 5px 0;
+            padding: 12px;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+    }
     </style>
     <p>
         <br />

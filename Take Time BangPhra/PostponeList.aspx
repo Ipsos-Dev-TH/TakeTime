@@ -34,6 +34,24 @@
                     width: 75%;
                     height: 32px;
                 }
+
+                /* Mobile responsive */
+                @media (max-width: 768px) {
+                    .mydatagrid {
+                        display: block;
+                        overflow-x: auto;
+                        -webkit-overflow-scrolling: touch;
+                        font-size: 12px;
+                    }
+                    .mydatagrid th, .mydatagrid td {
+                        padding: 6px 4px !important;
+                        white-space: nowrap;
+                    }
+                    .mydatagrid input[type="submit"], .mydatagrid input[type="button"] {
+                        padding: 8px 12px;
+                        font-size: 13px;
+                    }
+                }
             </style>
     <p class="text-left">
         &nbsp;<p class="text-left">

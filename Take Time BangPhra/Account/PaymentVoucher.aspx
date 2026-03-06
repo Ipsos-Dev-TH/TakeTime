@@ -255,22 +255,71 @@
 
             /* Mobile responsive */
             @media (max-width: 768px) {
-              table {
-                font-size: 13px;
+              .form-title {
+                font-size: 16px;
+                padding: 12px 15px;
+                margin: 0 -5px 15px -5px;
               }
-              input[type="text"], input[type="number"], select {
-                width: 100% !important;
-                max-width: 100%;
+              table {
+                font-size: 14px;
+              }
+              tr {
+                display: block;
+                margin-bottom: 2px;
+                border-bottom: 1px solid #f0f0f0;
+                padding: 4px 0;
               }
               td {
                 display: block;
-                width: 100%;
+                width: 100% !important;
                 text-align: left !important;
-                padding: 8px 5px !important;
+                padding: 4px 10px !important;
+                box-sizing: border-box;
               }
-              td.modal-sm {
-                background: #f5f5f5;
-                font-weight: 600;
+              td.modal-sm, td.auto-style1 {
+                background: none;
+                font-weight: 700;
+                color: #444;
+                padding: 8px 10px 2px 10px !important;
+                font-size: 13px;
+              }
+              input[type="text"], input[type="number"], input[type="date"], select, textarea {
+                width: 100% !important;
+                max-width: 100% !important;
+                box-sizing: border-box;
+                margin: 3px 0;
+                padding: 10px 12px;
+                font-size: 15px;
+              }
+              .autocomplete {
+                width: 100% !important;
+              }
+              .upload-section {
+                padding: 10px 5px;
+              }
+              .upload-section input[type="file"] {
+                width: 100%;
+                margin: 5px 0;
+              }
+              .file-grid td {
+                display: table-cell;
+                width: auto !important;
+              }
+              input[type="submit"], button, .btn,
+              .btn-save, .btn-add, .btn-upload, .btn-secondary {
+                width: 100%;
+                margin: 5px 0;
+                padding: 12px;
+                font-size: 15px;
+                box-sizing: border-box;
+              }
+              input[type="checkbox"] {
+                width: 20px;
+                height: 20px;
+              }
+              /* Asset section inner table */
+              div[style*="border: 2px solid"] table td {
+                padding: 4px 5px !important;
               }
             }
             </style>

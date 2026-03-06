@@ -1,11 +1,33 @@
 ﻿<%@ Page Title="" Language="C#" MaintainScrollPositionOnPostback="true" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Edit_Home.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Edit_Home" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
-    <br />
-    <br />
+    <style>
+        @media (max-width: 768px) {
+            .admin-menu-table tr {
+                display: block;
+                margin-bottom: 8px;
+            }
+            .admin-menu-table td {
+                display: block;
+                width: 100% !important;
+                text-align: left !important;
+                padding: 6px 10px !important;
+                box-sizing: border-box;
+            }
+            .admin-menu-table input[type="submit"] {
+                width: 100% !important;
+                height: 50px !important;
+                font-size: 15px;
+            }
+            .admin-menu-table tr td:empty,
+            .admin-menu-table tr:has(td:empty) {
+                display: none;
+            }
+        }
+    </style>
     <br />
     <p>
-        
-        <table style="width:100%;padding:10px" border="1">
+
+        <table class="admin-menu-table" style="width:100%;padding:10px" border="1">
             <tr>
                 <td>รายชื่อประเภทที่พัก:</td>
                 <td>

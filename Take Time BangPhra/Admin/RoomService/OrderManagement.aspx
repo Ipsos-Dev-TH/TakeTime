@@ -1,4 +1,4 @@
-<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
+<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>

@@ -75,7 +75,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"LoadOrderList error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine("LoadOrderList error: " + ex.Message);
                 pnlNoOrders.Visible = true;
             }
         }
@@ -194,7 +194,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"LoadOrderDetail error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine("LoadOrderDetail error: " + ex.Message);
             }
         }
 
@@ -203,23 +203,25 @@ namespace Take_Time_BangPhra.Admin.RoomService
         /// </summary>
         private string GetPaymentText(string method, string status)
         {
-            string methodText = method switch
+            string methodText;
+            switch (method)
             {
-                "CHARGE_TO_ROOM" => "ชาร์จเข้าห้อง",
-                "TRANSFER" => "โอนเงิน",
-                "CASH" => "เงินสด",
-                _ => method
-            };
+                case "CHARGE_TO_ROOM": methodText = "ชาร์จเข้าห้อง"; break;
+                case "TRANSFER": methodText = "โอนเงิน"; break;
+                case "CASH": methodText = "เงินสด"; break;
+                default: methodText = method; break;
+            }
 
-            string statusText = status switch
+            string statusText;
+            switch (status)
             {
-                "PENDING" => "รอชำระ",
-                "PAID" => "ชำระแล้ว",
-                "CHARGED" => "ชาร์จแล้ว",
-                _ => status
-            };
+                case "PENDING": statusText = "รอชำระ"; break;
+                case "PAID": statusText = "ชำระแล้ว"; break;
+                case "CHARGED": statusText = "ชาร์จแล้ว"; break;
+                default: statusText = status; break;
+            }
 
-            return $"{methodText} ({statusText})";
+            return methodText + " (" + statusText + ")";
         }
 
         /// <summary>
@@ -256,7 +258,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
 
             try
             {
-                string staffName = Session["username"]?.ToString() ?? "Unknown";
+                string staffName = Session["username"] != null ? Session["username"].ToString() : "Unknown";
                 short staffId = Session["admin_id"] != null ? Convert.ToInt16(Session["admin_id"]) : (short)0;
 
                 string updateQuery = "UPDATE Guest_Room_Service_Orders SET Order_Status = @Status";
@@ -288,12 +290,12 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 // Show success message
                 string statusText = GetStatusText(newStatus);
                 ScriptManager.RegisterStartupScript(this, GetType(), "statusUpdate",
-                    $"alert('อัพเดทสถานะเป็น \"{statusText}\" เรียบร้อย');", true);
+                    "alert('อัพเดทสถานะเป็น \"" + statusText + "\" เรียบร้อย');", true);
             }
             catch (Exception ex)
             {
                 ScriptManager.RegisterStartupScript(this, GetType(), "error",
-                    $"alert('เกิดข้อผิดพลาด: {ex.Message}');", true);
+                    "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("'", "\\'") + "');", true);
             }
         }
 
@@ -353,7 +355,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 var orders = new List<object>();
                 foreach (DataRow row in dtOrders.Rows)
                 {
-                    string itemsPreview = row["ItemsPreview"]?.ToString() ?? "";
+                    string itemsPreview = row["ItemsPreview"] != null ? row["ItemsPreview"].ToString() : "";
                     if (itemsPreview.Length > 50) itemsPreview = itemsPreview.Substring(0, 50) + "...";
 
                     orders.Add(new
@@ -384,7 +386,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
             try
             {
                 var context = System.Web.HttpContext.Current;
-                short staffId = context?.Session["admin_id"] != null ? Convert.ToInt16(context.Session["admin_id"]) : (short)0;
+                short staffId = (context != null && context.Session["admin_id"] != null) ? Convert.ToInt16(context.Session["admin_id"]) : (short)0;
 
                 string connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                 var code = new code();
