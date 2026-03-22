@@ -80,16 +80,16 @@ namespace Take_Time_BangPhra.Voucher
             switch (status)
             {
                 case "active":
-                    query += " AND (Used_Status IS NULL OR Used_Status = 0) AND (Expired_Date IS NULL OR Expired_Date >= GETDATE())";
+                    query += " AND (Used_Status IS NULL OR CAST(Used_Status AS VARCHAR(10)) IN ('0','False')) AND (Expired_Date IS NULL OR Expired_Date >= GETDATE())";
                     break;
                 case "used":
-                    query += " AND Used_Status = 1";
+                    query += " AND CAST(Used_Status AS VARCHAR(10)) IN ('1','True')";
                     break;
                 case "expired":
-                    query += " AND (Used_Status IS NULL OR Used_Status = 0) AND Expired_Date < GETDATE()";
+                    query += " AND (Used_Status IS NULL OR CAST(Used_Status AS VARCHAR(10)) IN ('0','False')) AND Expired_Date < GETDATE()";
                     break;
                 case "cancelled":
-                    query += " AND Used_Status = -1";
+                    query += " AND CAST(Used_Status AS VARCHAR(10)) = '-1'";
                     break;
             }
 
@@ -172,16 +172,16 @@ namespace Take_Time_BangPhra.Voucher
                     switch (status)
                     {
                         case "active":
-                            whereClause.Append(" AND (V.Used_Status IS NULL OR V.Used_Status = 0) AND (V.Expired_Date IS NULL OR V.Expired_Date >= GETDATE())");
+                            whereClause.Append(" AND (V.Used_Status IS NULL OR CAST(V.Used_Status AS VARCHAR(10)) IN ('0','False')) AND (V.Expired_Date IS NULL OR V.Expired_Date >= GETDATE())");
                             break;
                         case "used":
-                            whereClause.Append(" AND V.Used_Status = 1");
+                            whereClause.Append(" AND CAST(V.Used_Status AS VARCHAR(10)) IN ('1','True')");
                             break;
                         case "expired":
-                            whereClause.Append(" AND (V.Used_Status IS NULL OR V.Used_Status = 0) AND V.Expired_Date < GETDATE()");
+                            whereClause.Append(" AND (V.Used_Status IS NULL OR CAST(V.Used_Status AS VARCHAR(10)) IN ('0','False')) AND V.Expired_Date < GETDATE()");
                             break;
                         case "cancelled":
-                            whereClause.Append(" AND V.Used_Status = -1");
+                            whereClause.Append(" AND CAST(V.Used_Status AS VARCHAR(10)) = '-1'");
                             break;
                     }
                 }
@@ -415,16 +415,16 @@ namespace Take_Time_BangPhra.Voucher
                     switch (status)
                     {
                         case "active":
-                            whereClause.Append(" AND (V.Used_Status IS NULL OR V.Used_Status = 0) AND (V.Expired_Date IS NULL OR V.Expired_Date >= GETDATE())");
+                            whereClause.Append(" AND (V.Used_Status IS NULL OR CAST(V.Used_Status AS VARCHAR(10)) IN ('0','False')) AND (V.Expired_Date IS NULL OR V.Expired_Date >= GETDATE())");
                             break;
                         case "used":
-                            whereClause.Append(" AND V.Used_Status = 1");
+                            whereClause.Append(" AND CAST(V.Used_Status AS VARCHAR(10)) IN ('1','True')");
                             break;
                         case "expired":
-                            whereClause.Append(" AND (V.Used_Status IS NULL OR V.Used_Status = 0) AND V.Expired_Date < GETDATE()");
+                            whereClause.Append(" AND (V.Used_Status IS NULL OR CAST(V.Used_Status AS VARCHAR(10)) IN ('0','False')) AND V.Expired_Date < GETDATE()");
                             break;
                         case "cancelled":
-                            whereClause.Append(" AND V.Used_Status = -1");
+                            whereClause.Append(" AND CAST(V.Used_Status AS VARCHAR(10)) = '-1'");
                             break;
                     }
                 }
@@ -482,12 +482,17 @@ namespace Take_Time_BangPhra.Voucher
                     object usedStatus = drv["Used_Status"];
                     object expiredDate = drv["Expired_Date"];
 
-                    if (usedStatus != DBNull.Value && Convert.ToInt32(usedStatus) == 1)
+                    // Handle both string ('True'/'False') and int (0/1/-1) Used_Status values
+                    string statusStr = usedStatus != DBNull.Value ? usedStatus.ToString().Trim() : "";
+                    bool isUsed = statusStr == "1" || statusStr.Equals("True", StringComparison.OrdinalIgnoreCase);
+                    bool isCancelled = statusStr == "-1";
+
+                    if (isUsed)
                     {
                         lblStatus.Text = "ใช้แล้ว";
                         lblStatus.CssClass = "status-badge status-used";
                     }
-                    else if (usedStatus != DBNull.Value && Convert.ToInt32(usedStatus) == -1)
+                    else if (isCancelled)
                     {
                         lblStatus.Text = "ยกเลิก";
                         lblStatus.CssClass = "status-badge status-cancelled";
@@ -629,11 +634,16 @@ namespace Take_Time_BangPhra.Voucher
 
         private string GetStatusText(object usedStatus, object expiredDate)
         {
-            if (usedStatus != DBNull.Value && Convert.ToInt32(usedStatus) == 1)
+            // Handle both string ('True'/'False') and int (0/1/-1) Used_Status values
+            string statusStr = usedStatus != DBNull.Value ? usedStatus.ToString().Trim() : "";
+            bool isUsed = statusStr == "1" || statusStr.Equals("True", StringComparison.OrdinalIgnoreCase);
+            bool isCancelled = statusStr == "-1";
+
+            if (isUsed)
             {
                 return "ใช้แล้ว";
             }
-            else if (usedStatus != DBNull.Value && Convert.ToInt32(usedStatus) == -1)
+            else if (isCancelled)
             {
                 return "ยกเลิก";
             }
