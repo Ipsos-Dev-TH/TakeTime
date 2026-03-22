@@ -305,7 +305,7 @@ namespace Take_Time_BangPhra.Admin.HR
         {
             txtOTDate.Text = DateTime.Now.ToString("yyyy-MM-dd");
             txtOTHours.Text = "1";
-            ddlOTRate.SelectedIndex = 0;
+            ddlOTRate.SelectedIndex = 1; // Default to 1.5x (ล่วงเวลา)
             txtWorkDescription.Text = "";
             txtNotes.Text = "";
             if (pnlSupervisorMode.Visible)

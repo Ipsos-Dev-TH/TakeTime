@@ -337,7 +337,8 @@
                     <div class="form-group">
                         <label>อัตรา OT (เท่า)</label>
                         <asp:DropDownList ID="ddlOTRate" runat="server" CssClass="form-control">
-                            <asp:ListItem Value="1.5">1.5 เท่า (ปกติ)</asp:ListItem>
+                            <asp:ListItem Value="1">1 เท่า (ปกติ)</asp:ListItem>
+                            <asp:ListItem Value="1.5" Selected="True">1.5 เท่า (ล่วงเวลา)</asp:ListItem>
                             <asp:ListItem Value="2">2 เท่า (วันหยุด)</asp:ListItem>
                         </asp:DropDownList>
                     </div>

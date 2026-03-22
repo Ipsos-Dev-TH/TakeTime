@@ -3708,7 +3708,7 @@ namespace Take_Time_BangPhra
 
                         code.DatabaseInsertSafe(conn,
                             "UPDATE [dbo].[Voucher] " +
-                            "SET [Used_Status] = 'True',[Used_Date] = @UsedDate,[Reservation_ID] = @ReservationID " +
+                            "SET [Used_Status] = 1,[Used_Date] = @UsedDate,[Reservation_ID] = @ReservationID " +
                             "WHERE [Voucher_Number] = @VoucherNumber",
                             voucherParams);
                     }
@@ -5984,7 +5984,7 @@ namespace Take_Time_BangPhra
                                         "INNER JOIN Accommodation_RatePlan_Group ON Rateplan_GroupID = Accommodation_RatePlan_Group.GroupID " +
                                         "INNER JOIN Accommodation_RatePlan ON Accommodation_RatePlan.ID = Rateplan_ID " +
                                         "WHERE Voucher.Voucher_Number = @VoucherNumber " +
-                                        "AND Used_Status = 'False' " +
+                                        "AND (Used_Status IS NULL OR Used_Status = 0 OR Used_Status = 'False') " +
                                         "AND Accommodation_RatePlan.ID = @RatePlanID " +
                                         "AND Expired_Date >= @ExpiredDate",
                                         voucherParams);
@@ -7077,7 +7077,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                               INNER JOIN Accommodation_RatePlan_Group ON Rateplan_GroupID = Accommodation_RatePlan_Group.GroupID
                               INNER JOIN Accommodation_RatePlan ON Accommodation_RatePlan.ID = Rateplan_ID
                               WHERE Voucher.Voucher_Number = @voucherNumber
-                              AND Used_Status = 'False'
+                              AND (Used_Status IS NULL OR Used_Status = 0 OR Used_Status = 'False')
                               AND Expired_Date >= @expiredDate",
                             voucherParams);
 
@@ -7112,7 +7112,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                                 DateTime expiredDate = Convert.ToDateTime(dtVoucherCheck.Rows[0]["Expired_Date"]);
                                 DateTime checkOutDate = code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1);
 
-                                if (usedStatus == "True")
+                                if (usedStatus == "True" || usedStatus == "1")
                                 {
                                     LogCouponAttempt(couponCode, "Voucher", "FAILED - Already used");
                                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ Voucher นี้ถูกใช้งานไปแล้ว\\n\\nVoucher has already been used.');", true);
