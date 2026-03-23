@@ -2264,22 +2264,76 @@ namespace Take_Time_BangPhra
 
                                             try
                                             {
-                                                // ✅ FIXED: Use parameterized query to prevent SQL Injection
+                                                // Get old dates for reschedule history tracking
+                                                var rescheduleService = new RescheduleService(conn);
+                                                DataTable dtOldDates = reservationDA.GetReservationDates(Convert.ToInt32(id));
+                                                DateTime? oldCheckinDate = null;
+                                                DateTime? oldCheckoutDate = null;
+                                                int oldStayDays = 0;
+                                                bool wasPostponed = false;
+                                                if (dtOldDates != null && dtOldDates.Rows.Count > 0)
+                                                {
+                                                    oldCheckinDate = dtOldDates.Rows[0]["CheckinDate"] != DBNull.Value
+                                                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckinDate"]) : null;
+                                                    oldCheckoutDate = dtOldDates.Rows[0]["CheckoutDate"] != DBNull.Value
+                                                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckoutDate"]) : null;
+                                                    oldStayDays = dtOldDates.Rows[0]["StayDays"] != DBNull.Value
+                                                        ? Convert.ToInt32(dtOldDates.Rows[0]["StayDays"]) : 0;
+                                                    wasPostponed = dtOldDates.Rows[0]["IsPostponed"] != DBNull.Value
+                                                        && Convert.ToBoolean(dtOldDates.Rows[0]["IsPostponed"]);
+                                                }
+
                                                 DateTime? checkinDate = code2.ParseDate(TextBox12.Text);
                                                 if (checkinDate.HasValue)
                                                 {
+                                                    DateTime newCheckoutDate = checkinDate.Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue));
+                                                    int newStayDays = Convert.ToInt32(DropDownList1.SelectedValue);
+
                                                     reservationDA.UpdateReservation(
                                                         Convert.ToInt32(id),
                                                         TextBox1.Text,
                                                         checkinDate.Value,
-                                                        checkinDate.Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
-                                                        Convert.ToInt32(DropDownList1.SelectedValue),
-                                                        calculatedTotalPrice,  // ✅ Use calculated price
+                                                        newCheckoutDate,
+                                                        newStayDays,
+                                                        calculatedTotalPrice,
                                                         Deposit,
                                                         TextBox6.Text
                                                     );
 
-                                                    // 🎁 Log loyalty discount usage if applicable
+                                                    // Log reschedule history if dates changed
+                                                    short? rescheduleAdminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+                                                    string rescheduleAdminName = Session["User"]?.ToString();
+
+                                                    bool datesChanged = oldCheckinDate != checkinDate.Value || oldCheckoutDate != newCheckoutDate;
+                                                    if (wasPostponed)
+                                                    {
+                                                        // Setting dates for a postponed reservation
+                                                        rescheduleService.SetDatesFromPostpone(
+                                                            Convert.ToInt32(id),
+                                                            checkinDate.Value,
+                                                            newCheckoutDate,
+                                                            newStayDays,
+                                                            rescheduleAdminId,
+                                                            rescheduleAdminName,
+                                                            "กำหนดวันเข้าพักจากรายการเลื่อน");
+                                                    }
+                                                    else if (datesChanged && oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate))
+                                                    {
+                                                        // Changing dates on an existing reservation
+                                                        rescheduleService.LogDateChange(
+                                                            Convert.ToInt32(id),
+                                                            oldCheckinDate.Value,
+                                                            oldCheckoutDate ?? oldCheckinDate.Value,
+                                                            oldStayDays,
+                                                            checkinDate.Value,
+                                                            newCheckoutDate,
+                                                            newStayDays,
+                                                            rescheduleAdminId,
+                                                            rescheduleAdminName,
+                                                            "เปลี่ยนวันเข้าพัก");
+                                                    }
+
+                                                    // Log loyalty discount usage if applicable
                                                     if (Session["LoyaltyDiscountAmount"] != null &&
                                                         Convert.ToDecimal(Session["LoyaltyDiscountAmount"]) > 0)
                                                     {
@@ -2297,7 +2351,6 @@ namespace Take_Time_BangPhra
 
                                                             if (!applyResult.Success)
                                                             {
-                                                                // Log error but don't fail the reservation
                                                                 code2.Logs(conn, "Reserve - Apply Loyalty Discount Failed",
                                                                     $"Reservation ID: {id}, Message: {applyResult.Message}",
                                                                     Session["User"]?.ToString());
@@ -2305,7 +2358,6 @@ namespace Take_Time_BangPhra
                                                         }
                                                         catch (Exception discountEx)
                                                         {
-                                                            // Log error but don't fail the reservation
                                                             code2.Logs(conn, "Reserve - Apply Loyalty Discount Error",
                                                                 $"Reservation ID: {id}, Error: {discountEx.Message}",
                                                                 Session["User"]?.ToString());
@@ -2321,19 +2373,37 @@ namespace Take_Time_BangPhra
                                             {
                                                 if (TextBox12.Text == null || TextBox12.Text == "")
                                                 {
-                                                    // ✅ FIXED: Use parameterized query even in fallback case
+                                                    // No check-in date: mark as postponed
                                                     reservationDA.UpdateReservation(
                                                         Convert.ToInt32(id),
                                                         TextBox1.Text,
                                                         DateTime.Parse("1990-01-01"),
                                                         DateTime.Parse("1990-01-01"),
                                                         Convert.ToInt32(DropDownList1.SelectedValue),
-                                                        calculatedTotalPrice,  // ✅ Use calculated price
+                                                        calculatedTotalPrice,
                                                         Deposit,
                                                         TextBox6.Text
                                                     );
 
-                                                    // 🎁 Log loyalty discount usage if applicable
+                                                    // Mark as postponed with proper flag
+                                                    try
+                                                    {
+                                                        var rescheduleService = new RescheduleService(conn);
+                                                        short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+                                                        rescheduleService.MarkAsPostponed(
+                                                            Convert.ToInt32(id),
+                                                            "แก้ไขการจอง - ยังไม่กำหนดวันเข้าพัก",
+                                                            adminId,
+                                                            Session["User"]?.ToString());
+                                                    }
+                                                    catch (Exception postponeEx)
+                                                    {
+                                                        code2.Logs(conn, "Reserve Edit - Mark Postponed Error",
+                                                            $"Reservation ID: {id}, Error: {postponeEx.Message}",
+                                                            Session["User"]?.ToString());
+                                                    }
+
+                                                    // Log loyalty discount usage if applicable
                                                     if (Session["LoyaltyDiscountAmount"] != null &&
                                                         Convert.ToDecimal(Session["LoyaltyDiscountAmount"]) > 0)
                                                     {
@@ -3188,6 +3258,7 @@ namespace Take_Time_BangPhra
                                             }
                                             else
                                             {
+                                                // No check-in date: create reservation with placeholder dates
                                                 Reservation_ID = reservationDA.InsertNewReservation(
                                                     TextBox1.Text,
                                                     DateTime.Parse("1990-01-01"),
@@ -3202,6 +3273,27 @@ namespace Take_Time_BangPhra
                                                     CheckBox4.Checked,
                                                     CheckBox3.Checked
                                                 );
+
+                                                // Mark as postponed with proper flag and log history
+                                                if (Reservation_ID > 0)
+                                                {
+                                                    try
+                                                    {
+                                                        var rescheduleService = new RescheduleService(conn);
+                                                        short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+                                                        rescheduleService.MarkAsPostponed(
+                                                            Reservation_ID,
+                                                            "สร้างการจองใหม่ - ยังไม่กำหนดวันเข้าพัก",
+                                                            adminId,
+                                                            Session["User"]?.ToString());
+                                                    }
+                                                    catch (Exception postponeEx)
+                                                    {
+                                                        code2.Logs(conn, "Reserve - Mark Postponed Error",
+                                                            $"Reservation ID: {Reservation_ID}, Error: {postponeEx.Message}",
+                                                            Session["User"]?.ToString());
+                                                    }
+                                                }
                                             }
 
                                             System.Diagnostics.Debug.WriteLine("Returned Reservation ID: " + Reservation_ID);

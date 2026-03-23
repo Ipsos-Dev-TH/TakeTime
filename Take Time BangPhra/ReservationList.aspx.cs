@@ -107,7 +107,7 @@ namespace Take_Time_BangPhra
         {
             string query = @"SELECT COUNT(*) FROM Reservation
                             WHERE Created_Date >= DATEADD(DAY, -90, GETDATE())
-                            AND Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก')";
+                            AND Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก', N'ยกเลิกการเลื่อนวันเข้าพัก')";
 
             using (SqlCommand cmd = new SqlCommand(query, conn))
             {
@@ -192,7 +192,7 @@ namespace Take_Time_BangPhra
                 {
                     if (status == "ยกเลิก")
                     {
-                        whereClause.Append(" AND R.Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก')");
+                        whereClause.Append(" AND R.Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก', N'ยกเลิกการเลื่อนวันเข้าพัก')");
                     }
                     else if (status == "today")
                     {

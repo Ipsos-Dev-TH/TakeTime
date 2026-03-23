@@ -527,5 +527,80 @@ namespace Take_Time_BangPhra
         }
 
         #endregion
+
+        #region Reschedule Operations
+
+        /// <summary>
+        /// Mark reservation as postponed (proper flag instead of placeholder dates)
+        /// </summary>
+        public void MarkAsPostponed(int reservationId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE [dbo].[Reservation]
+                  SET [IsPostponed] = 1,
+                      [PostponedDate] = GETDATE()
+                  WHERE ID = @reservationId",
+                parameters);
+        }
+
+        /// <summary>
+        /// Clear postponed flag when dates are set
+        /// </summary>
+        public void ClearPostponed(int reservationId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE [dbo].[Reservation]
+                  SET [IsPostponed] = 0,
+                      [RescheduleCount] = ISNULL([RescheduleCount], 0) + 1
+                  WHERE ID = @reservationId",
+                parameters);
+        }
+
+        /// <summary>
+        /// Get current reservation dates (for logging reschedule history)
+        /// </summary>
+        public DataTable GetReservationDates(int reservationId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+
+            return _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT ID, CheckinDate, CheckoutDate, StayDays, Status, IsPostponed, RescheduleCount
+                  FROM [Reservation]
+                  WHERE ID = @reservationId",
+                parameters);
+        }
+
+        /// <summary>
+        /// Cancel postpone - update status to cancelled
+        /// </summary>
+        public void CancelPostpone(int reservationId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@reservationId", reservationId }
+            };
+
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE [dbo].[Reservation]
+                  SET [Status] = N'ยกเลิกการเลื่อนวันเข้าพัก',
+                      [IsPostponed] = 0
+                  WHERE ID = @reservationId",
+                parameters);
+        }
+
+        #endregion
     }
 }
