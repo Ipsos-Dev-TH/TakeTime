@@ -247,6 +247,7 @@ namespace Take_Time_BangPhra
                 CheckBox1.Visible = false;
                 Button1.Enabled = true;
                 Label7.Visible = false;
+                btnPostpone.Visible = true;
 
                 // 🆕 Show payment history
                 LoadPaymentHistory();
@@ -5451,6 +5452,133 @@ namespace Take_Time_BangPhra
             {
                 //e.Cell.ForeColor = System.Drawing.Color.DarkGreen;
                 //e.Cell.Font.Bold = true;
+            }
+        }
+
+        protected async void btnPostpone_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string command = Request.QueryString["command"];
+                string id = Request.QueryString["id"];
+
+                if (command != "edit" || string.IsNullOrEmpty(id))
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                        "alert('ไม่สามารถเลื่อนเข้าพักได้ กรุณาลองใหม่');", true);
+                    return;
+                }
+
+                int reservationId = Convert.ToInt32(id);
+                var reservationDA = new ReservationDataAccess(conn);
+
+                // Get current reservation info before updating
+                DataTable dtOldDates = reservationDA.GetReservationDates(reservationId);
+                DateTime? oldCheckinDate = null;
+                DateTime? oldCheckoutDate = null;
+                int oldStayDays = 0;
+                string customerName = TextBox2.Text;
+                string customerPhone = TextBox1.Text;
+
+                if (dtOldDates != null && dtOldDates.Rows.Count > 0)
+                {
+                    oldCheckinDate = dtOldDates.Rows[0]["CheckinDate"] != DBNull.Value
+                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckinDate"]) : null;
+                    oldCheckoutDate = dtOldDates.Rows[0]["CheckoutDate"] != DBNull.Value
+                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckoutDate"]) : null;
+                    oldStayDays = dtOldDates.Rows[0]["StayDays"] != DBNull.Value
+                        ? Convert.ToInt32(dtOldDates.Rows[0]["StayDays"]) : 0;
+                }
+
+                // Update reservation: set placeholder dates
+                reservationDA.UpdateReservation(
+                    reservationId,
+                    customerPhone,
+                    DateTime.Parse("1990-01-01"),
+                    DateTime.Parse("1990-01-01"),
+                    oldStayDays > 0 ? oldStayDays : Convert.ToInt32(DropDownList1.SelectedValue),
+                    Convert.ToDecimal(TextBox4.Text),
+                    Convert.ToDecimal(TextBox5.Text),
+                    TextBox6.Text
+                );
+
+                // Mark as postponed with proper flag and log history
+                var rescheduleService = new RescheduleService(conn);
+                short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
+                string adminName = Session["User"]?.ToString();
+
+                rescheduleService.MarkAsPostponed(
+                    reservationId,
+                    "เลื่อนเข้าพัก - ยังไม่กำหนดวันใหม่",
+                    adminId,
+                    adminName);
+
+                // Log the date change if there was a real date before
+                if (oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate))
+                {
+                    rescheduleService.LogReschedule(
+                        reservationId,
+                        "POSTPONE",
+                        oldCheckinDate, oldCheckoutDate, oldStayDays,
+                        null, null, null,
+                        "มัดจำแล้ว", "มัดจำแล้ว",
+                        "เลื่อนเข้าพักจากหน้าแก้ไขการจอง",
+                        adminId, adminName);
+                }
+
+                // Send Telegram notification
+                try
+                {
+                    string oldDateStr = oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate)
+                        ? oldCheckinDate.Value.ToString("dd MMMM yyyy", new System.Globalization.CultureInfo("th-TH"))
+                        : "ยังไม่กำหนด";
+                    string oldCheckoutStr = oldCheckoutDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckoutDate)
+                        ? oldCheckoutDate.Value.ToString("dd MMMM yyyy", new System.Globalization.CultureInfo("th-TH"))
+                        : "ยังไม่กำหนด";
+
+                    string message = $@"⏸️ ═══ เลื่อนเข้าพัก ═══
+
+📋 หมายเลขการจอง: {reservationId}
+👤 ชื่อผู้จอง: {customerName}
+📞 เบอร์โทร: {customerPhone}
+
+📅 วันเข้าพักเดิม: {oldDateStr}
+📅 วันออกเดิม: {oldCheckoutStr}
+🌙 จำนวนคืน: {(oldStayDays > 0 ? oldStayDays : Convert.ToInt32(DropDownList1.SelectedValue))} คืน
+
+📌 สถานะ: เลื่อนเข้าพัก - รอกำหนดวันใหม่
+
+💰 ยอดรวม: {Convert.ToDecimal(TextBox4.Text):N2} บาท
+💵 มัดจำ: {Convert.ToDecimal(TextBox5.Text):N2} บาท
+
+{(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 เลื่อนโดย: {Session["UserName"]?.ToString() ?? adminName ?? "System"}
+━━━━━━━━━━━━━━━━━";
+
+                    var bot = new TelegramBot2(ConfigurationSettings.AppSettings["TelegramTokenTakeTime"].ToString());
+                    await bot.SendMessageAsync("-4969611371", message);
+                }
+                catch (Exception telegramEx)
+                {
+                    code2.Logs(conn, "Reserve - Postpone Telegram Error",
+                        $"Reservation ID: {reservationId}, Error: {telegramEx.Message}",
+                        Session["User"]?.ToString());
+                }
+
+                code2.Logs(conn, "Reserve Edit - Postponed",
+                    $"Reservation ID: {reservationId}, OldCheckin: {oldCheckinDate}, Admin: {adminName}",
+                    Session["User"]?.ToString());
+
+                // Redirect to PostponeList
+                Response.Redirect("/PostponeList", false);
+                HttpContext.Current.ApplicationInstance.CompleteRequest();
+            }
+            catch (Exception ex)
+            {
+                code2.Logs(conn, "Reserve - Postpone Error",
+                    $"Error: {ex.Message}",
+                    Session["User"]?.ToString());
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert",
+                    $"alert('เกิดข้อผิดพลาด: {ex.Message.Replace("'", "\\'")}');", true);
             }
         }
 
