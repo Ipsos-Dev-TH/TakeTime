@@ -846,6 +846,7 @@
                 <span style="font-size: 1.1em; color: #5D4037;">***ติ๊กเลือกเพื่อยอมรับกติกาด้านบน และรับทราบเรื่องการห้ามใช้เสียงดังหลัง 22.30 น. (Accept the rule)</span>
                 <div style="margin-top: 20px;">
                     <asp:Button ID="Button1" runat="server" Text="ยืนยันการจอง(Submit)" Height="60px" Width="300px" OnClick="Button1_Click" OnClientClick="return preventDoubleSubmit();" Enabled="False" CssClass="reservation-button" style="font-size: 1.2em;"/>
+                    <asp:Button ID="btnPostpone" runat="server" Text="เลื่อนเข้าพัก" Height="60px" Width="200px" OnClick="btnPostpone_Click" OnClientClick="return confirm('ยืนยันการเลื่อนเข้าพัก? วันเข้าพักจะถูกลบออก และการจองจะถูกย้ายไปรายการเลื่อนเข้าพัก');" Visible="False" CssClass="reservation-button" style="font-size: 1.2em; margin-left: 15px; background: linear-gradient(135deg, #f0ad4e 0%, #ec971f 100%); color: white;"/>
                 </div>
             </div>
         </div>
