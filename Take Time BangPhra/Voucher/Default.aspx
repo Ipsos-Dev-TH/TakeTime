@@ -525,7 +525,7 @@
                 <div class="form-label">ประเภทเรทที่พัก</div>
                 <div class="form-input">
                     <asp:DropDownList ID="DropDownList3" runat="server" Width="300px" DataSourceID="SqlDataSource3" DataTextField="Group_Name" DataValueField="GroupID" AppendDataBoundItems="true">
-                        <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+                        <asp:ListItem Value="">---โปรดเลือก---</asp:ListItem>
                     </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT Distinct([Group_Name]),GroupID FROM [Taketime].[dbo].[Accommodation_RatePlan_Group] Where [Status] = 'True'"></asp:SqlDataSource>
                 </div>

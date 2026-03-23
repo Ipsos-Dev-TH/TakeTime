@@ -313,7 +313,13 @@ namespace Take_Time_BangPhra.Voucher
         protected void Button2_Click(object sender, EventArgs e)
         {
             Label1.Text = DropDownList4.SelectedItem.Text;
-            
+
+            if (DropDownList3.SelectedIndex <= 0)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาเลือกประเภทเรทที่พัก');", true);
+                return;
+            }
+
             if ( TextBox2.Text.Length > 0)
             {
                 DataTable dtDetail = (DataTable)Session["dtDetail"];

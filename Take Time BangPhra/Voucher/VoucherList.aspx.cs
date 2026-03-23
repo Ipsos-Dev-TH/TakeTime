@@ -547,7 +547,7 @@ namespace Take_Time_BangPhra.Voucher
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    string query = @"SELECT G.Group_Name
+                    string query = @"SELECT DISTINCT G.Group_Name
                                     FROM Voucher_RatePlan_Group VR
                                     INNER JOIN Accommodation_RatePlan_Group G ON G.GroupID = VR.RatePlan_GroupID
                                     WHERE VR.Voucher_Number = @VoucherNumber";
@@ -582,8 +582,12 @@ namespace Take_Time_BangPhra.Voucher
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    // Query for reservation with check-in date
-                    string query = @"SELECT TOP 1 ID, CheckinDate FROM Reservation WHERE Voucher_Number = @VoucherNumber";
+                    // Voucher table stores Reservation_ID when a voucher is used
+                    string query = @"SELECT TOP 1 R.ID, R.CheckinDate
+                                     FROM Voucher V
+                                     INNER JOIN Reservation R ON R.ID = V.Reservation_ID
+                                     WHERE V.Voucher_Number = @VoucherNumber
+                                     AND V.Reservation_ID IS NOT NULL";
 
                     using (SqlCommand cmd = new SqlCommand(query, conn))
                     {
