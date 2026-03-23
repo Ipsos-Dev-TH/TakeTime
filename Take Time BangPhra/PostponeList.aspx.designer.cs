@@ -22,5 +22,15 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.GridView GridView1;
+
+        protected global::System.Web.UI.WebControls.Label lblPostponeCount;
+
+        protected global::System.Web.UI.WebControls.Button btnRefresh;
+
+        protected global::System.Web.UI.WebControls.HiddenField hdnCancelReservationId;
+
+        protected global::System.Web.UI.WebControls.HiddenField hdnCancelReason;
+
+        protected global::System.Web.UI.WebControls.Button btnCancelWithReason;
     }
 }
