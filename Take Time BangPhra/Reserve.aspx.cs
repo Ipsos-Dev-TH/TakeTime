@@ -2266,21 +2266,40 @@ namespace Take_Time_BangPhra
                                             {
                                                 // Get old dates for reschedule history tracking
                                                 var rescheduleService = new RescheduleService(conn);
-                                                DataTable dtOldDates = reservationDA.GetReservationDates(Convert.ToInt32(id));
                                                 DateTime? oldCheckinDate = null;
                                                 DateTime? oldCheckoutDate = null;
                                                 int oldStayDays = 0;
                                                 bool wasPostponed = false;
-                                                if (dtOldDates != null && dtOldDates.Rows.Count > 0)
+
+                                                try
                                                 {
-                                                    oldCheckinDate = dtOldDates.Rows[0]["CheckinDate"] != DBNull.Value
-                                                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckinDate"]) : null;
-                                                    oldCheckoutDate = dtOldDates.Rows[0]["CheckoutDate"] != DBNull.Value
-                                                        ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckoutDate"]) : null;
-                                                    oldStayDays = dtOldDates.Rows[0]["StayDays"] != DBNull.Value
-                                                        ? Convert.ToInt32(dtOldDates.Rows[0]["StayDays"]) : 0;
-                                                    wasPostponed = dtOldDates.Rows[0]["IsPostponed"] != DBNull.Value
-                                                        && Convert.ToBoolean(dtOldDates.Rows[0]["IsPostponed"]);
+                                                    DataTable dtOldDates = reservationDA.GetReservationDates(Convert.ToInt32(id));
+                                                    if (dtOldDates != null && dtOldDates.Rows.Count > 0)
+                                                    {
+                                                        oldCheckinDate = dtOldDates.Rows[0]["CheckinDate"] != DBNull.Value
+                                                            ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckinDate"]) : null;
+                                                        oldCheckoutDate = dtOldDates.Rows[0]["CheckoutDate"] != DBNull.Value
+                                                            ? (DateTime?)Convert.ToDateTime(dtOldDates.Rows[0]["CheckoutDate"]) : null;
+                                                        oldStayDays = dtOldDates.Rows[0]["StayDays"] != DBNull.Value
+                                                            ? Convert.ToInt32(dtOldDates.Rows[0]["StayDays"]) : 0;
+
+                                                        // Check IsPostponed flag; also treat placeholder dates as postponed
+                                                        try
+                                                        {
+                                                            wasPostponed = dtOldDates.Rows[0]["IsPostponed"] != DBNull.Value
+                                                                && Convert.ToBoolean(dtOldDates.Rows[0]["IsPostponed"]);
+                                                        }
+                                                        catch
+                                                        {
+                                                            // Column may not exist if migration not applied yet
+                                                            wasPostponed = RescheduleService.IsPlaceholderDate(oldCheckinDate);
+                                                        }
+                                                    }
+                                                }
+                                                catch
+                                                {
+                                                    // Fallback: if GetReservationDates fails, check placeholder dates
+                                                    wasPostponed = false;
                                                 }
 
                                                 DateTime? checkinDate = code2.ParseDate(TextBox12.Text);
@@ -2300,7 +2319,7 @@ namespace Take_Time_BangPhra
                                                         TextBox6.Text
                                                     );
 
-                                                    // Log reschedule history if dates changed
+                                                    // Log reschedule history + clear postponed flag
                                                     short? rescheduleAdminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
                                                     string rescheduleAdminName = Session["User"]?.ToString();
 
@@ -2308,29 +2327,50 @@ namespace Take_Time_BangPhra
                                                     if (wasPostponed)
                                                     {
                                                         // Setting dates for a postponed reservation
-                                                        rescheduleService.SetDatesFromPostpone(
-                                                            Convert.ToInt32(id),
-                                                            checkinDate.Value,
-                                                            newCheckoutDate,
-                                                            newStayDays,
-                                                            rescheduleAdminId,
-                                                            rescheduleAdminName,
-                                                            "กำหนดวันเข้าพักจากรายการเลื่อน");
+                                                        try
+                                                        {
+                                                            rescheduleService.SetDatesFromPostpone(
+                                                                Convert.ToInt32(id),
+                                                                checkinDate.Value,
+                                                                newCheckoutDate,
+                                                                newStayDays,
+                                                                rescheduleAdminId,
+                                                                rescheduleAdminName,
+                                                                "กำหนดวันเข้าพักจากรายการเลื่อน");
+                                                        }
+                                                        catch (Exception setDateEx)
+                                                        {
+                                                            // Critical fallback: ensure IsPostponed is cleared even if history logging fails
+                                                            code2.Logs(conn, "Reserve Edit - SetDatesFromPostpone Error (fallback clearing)",
+                                                                $"Reservation ID: {id}, Error: {setDateEx.Message}",
+                                                                Session["User"]?.ToString());
+                                                            try { reservationDA.ClearPostponed(Convert.ToInt32(id)); } catch { }
+                                                        }
                                                     }
                                                     else if (datesChanged && oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate))
                                                     {
                                                         // Changing dates on an existing reservation
-                                                        rescheduleService.LogDateChange(
-                                                            Convert.ToInt32(id),
-                                                            oldCheckinDate.Value,
-                                                            oldCheckoutDate ?? oldCheckinDate.Value,
-                                                            oldStayDays,
-                                                            checkinDate.Value,
-                                                            newCheckoutDate,
-                                                            newStayDays,
-                                                            rescheduleAdminId,
-                                                            rescheduleAdminName,
-                                                            "เปลี่ยนวันเข้าพัก");
+                                                        try
+                                                        {
+                                                            rescheduleService.LogDateChange(
+                                                                Convert.ToInt32(id),
+                                                                oldCheckinDate.Value,
+                                                                oldCheckoutDate ?? oldCheckinDate.Value,
+                                                                oldStayDays,
+                                                                checkinDate.Value,
+                                                                newCheckoutDate,
+                                                                newStayDays,
+                                                                rescheduleAdminId,
+                                                                rescheduleAdminName,
+                                                                "เปลี่ยนวันเข้าพัก");
+                                                        }
+                                                        catch (Exception logEx)
+                                                        {
+                                                            // History logging failed but dates are already updated - log and continue
+                                                            code2.Logs(conn, "Reserve Edit - LogDateChange Error",
+                                                                $"Reservation ID: {id}, Error: {logEx.Message}",
+                                                                Session["User"]?.ToString());
+                                                        }
                                                     }
 
                                                     // Log loyalty discount usage if applicable

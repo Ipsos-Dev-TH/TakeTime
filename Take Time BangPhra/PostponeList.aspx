@@ -11,9 +11,6 @@
 
         th, td { padding: 5px; }
 
-        .auto-style1 { width: 25%; height: 35px; }
-        .auto-style2 { width: 75%; height: 35px; }
-
         .page-header {
             display: flex;
             justify-content: space-between;
@@ -22,7 +19,6 @@
             flex-wrap: wrap;
             gap: 10px;
         }
-        .page-header h2 { margin: 0; }
 
         .stat-badge {
             display: inline-block;
@@ -41,7 +37,9 @@
             padding: 2px 8px;
             border-radius: 10px;
             font-size: 12px;
+            cursor: pointer;
         }
+        .reschedule-count:hover { background: #46b8da; }
 
         .btn-edit {
             background-color: #337ab7;
@@ -76,11 +74,131 @@
         }
         .btn-refresh:hover { background-color: #449d44; }
 
+        .btn-history {
+            background-color: #5bc0de;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-history:hover { background-color: #46b8da; }
+
         .reason-text {
             color: #888;
             font-size: 12px;
             font-style: italic;
         }
+
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+
+        .modal-content {
+            background: #fff;
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 12px;
+        }
+        .modal-header h3 { margin: 0; }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            padding: 0 4px;
+        }
+        .modal-close:hover { color: #333; }
+
+        .history-item {
+            border-left: 3px solid #5bc0de;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            background: #f9f9f9;
+            border-radius: 0 4px 4px 0;
+        }
+        .history-item.postpone { border-left-color: #f0ad4e; }
+        .history-item.cancel { border-left-color: #d9534f; }
+
+        .history-date { color: #888; font-size: 12px; }
+        .history-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+        }
+        .history-type.date-change { background: #5bc0de; }
+        .history-type.postpone { background: #f0ad4e; }
+        .history-type.cancel { background: #d9534f; }
+
+        .history-dates {
+            margin-top: 6px;
+            font-size: 13px;
+        }
+
+        /* Cancel reason modal */
+        .cancel-reason-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 12px 0;
+            font-size: 14px;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .btn-modal-cancel {
+            background: #ccc;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-modal-confirm {
+            background: #d9534f;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-modal-confirm:hover { background: #c9302c; }
+
+        .no-history { color: #999; font-style: italic; text-align: center; padding: 20px; }
 
         /* Mobile responsive */
         @media (max-width: 768px) {
@@ -94,14 +212,11 @@
                 padding: 6px 4px !important;
                 white-space: nowrap;
             }
-            .mydatagrid input[type="submit"], .mydatagrid input[type="button"] {
-                padding: 8px 12px;
-                font-size: 13px;
-            }
             .page-header {
                 flex-direction: column;
                 align-items: flex-start;
             }
+            .modal-content { width: 95%; padding: 16px; }
         }
     </style>
 
@@ -160,10 +275,10 @@
                 <ItemStyle CssClass="header-center" />
             </asp:BoundField>
 
-            <asp:TemplateField HeaderText="จำนวนครั้งที่เลื่อน" HeaderStyle-CssClass="header-center"
+            <asp:TemplateField HeaderText="เลื่อน" HeaderStyle-CssClass="header-center"
                 ItemStyle-CssClass="header-center">
                 <ItemTemplate>
-                    <span class="reschedule-count">
+                    <span class="reschedule-count" onclick="showHistory(<%# Eval("ID") %>)" title="คลิกดูประวัติ">
                         <%# Eval("RescheduleCount") != DBNull.Value ? Eval("RescheduleCount") : "0" %> ครั้ง
                     </span>
                 </ItemTemplate>
@@ -186,11 +301,10 @@
 
             <asp:TemplateField HeaderStyle-Width="3%">
                 <ItemTemplate>
-                    <asp:Button ID="Button1" runat="server" Text="ยกเลิก" CssClass="btn-cancel"
-                        CommandArgument='<%# Eval("ID") %>'
-                        CommandName="CancelPostpone"
-                        OnClientClick="return confirm('ยืนยันการยกเลิกรายการเลื่อนเข้าพักหรือไม่?');"
-                        OnClick="DeleteButton_Click"/>
+                    <button type="button" class="btn-cancel"
+                        onclick="showCancelModal(<%# Eval("ID") %>, '<%# Eval("Name") %>')">
+                        ยกเลิก
+                    </button>
                 </ItemTemplate>
                 <HeaderStyle Width="3%" />
             </asp:TemplateField>
@@ -201,4 +315,148 @@
         <RowStyle CssClass="rows" />
     </asp:GridView>
     </center>
+
+    <!-- Hidden fields for cancel with reason -->
+    <asp:HiddenField ID="hdnCancelReservationId" runat="server" />
+    <asp:HiddenField ID="hdnCancelReason" runat="server" />
+    <asp:Button ID="btnCancelWithReason" runat="server" OnClick="btnCancelWithReason_Click"
+        style="display:none" />
+
+    <!-- Cancel Reason Modal -->
+    <div id="cancelModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>ยกเลิกรายการเลื่อนเข้าพัก</h3>
+                <button type="button" class="modal-close" onclick="closeCancelModal()">&times;</button>
+            </div>
+            <p>ยืนยันการยกเลิกรายการเลื่อนเข้าพักของ <strong id="cancelCustomerName"></strong> ?</p>
+            <label>เหตุผลในการยกเลิก:</label>
+            <input type="text" id="cancelReasonInput" class="cancel-reason-input"
+                placeholder="ระบุเหตุผล (ไม่บังคับ)" maxlength="500" />
+            <div class="modal-actions">
+                <button type="button" class="btn-modal-cancel" onclick="closeCancelModal()">ปิด</button>
+                <button type="button" class="btn-modal-confirm" onclick="confirmCancel()">ยืนยันยกเลิก</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>ประวัติการเลื่อนเข้าพัก - การจอง #<span id="historyReservationId"></span></h3>
+                <button type="button" class="modal-close" onclick="closeHistoryModal()">&times;</button>
+            </div>
+            <div id="historyContent">
+                <p class="no-history">กำลังโหลด...</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // Cancel modal
+        var cancelReservationId = 0;
+
+        function showCancelModal(reservationId, customerName) {
+            cancelReservationId = reservationId;
+            document.getElementById('cancelCustomerName').textContent = customerName || 'ลูกค้า';
+            document.getElementById('cancelReasonInput').value = '';
+            document.getElementById('cancelModal').classList.add('active');
+        }
+
+        function closeCancelModal() {
+            document.getElementById('cancelModal').classList.remove('active');
+            cancelReservationId = 0;
+        }
+
+        function confirmCancel() {
+            if (cancelReservationId <= 0) return;
+            var reason = document.getElementById('cancelReasonInput').value.trim();
+
+            document.getElementById('<%= hdnCancelReservationId.ClientID %>').value = cancelReservationId;
+            document.getElementById('<%= hdnCancelReason.ClientID %>').value = reason || 'ยกเลิกจากหน้ารายการเลื่อนเข้าพัก';
+
+            closeCancelModal();
+            document.getElementById('<%= btnCancelWithReason.ClientID %>').click();
+        }
+
+        // History modal
+        function showHistory(reservationId) {
+            document.getElementById('historyReservationId').textContent = reservationId;
+            document.getElementById('historyContent').innerHTML = '<p class="no-history">กำลังโหลด...</p>';
+            document.getElementById('historyModal').classList.add('active');
+
+            // Fetch history via page method
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/PostponeList.aspx?action=gethistory&rid=' + reservationId, true);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    if (xhr.status === 200) {
+                        try {
+                            var data = JSON.parse(xhr.responseText);
+                            renderHistory(data);
+                        } catch (e) {
+                            document.getElementById('historyContent').innerHTML =
+                                '<p class="no-history">ไม่สามารถโหลดข้อมูลได้</p>';
+                        }
+                    } else {
+                        document.getElementById('historyContent').innerHTML =
+                            '<p class="no-history">ไม่สามารถโหลดข้อมูลได้</p>';
+                    }
+                }
+            };
+            xhr.send();
+        }
+
+        function renderHistory(items) {
+            var container = document.getElementById('historyContent');
+            if (!items || items.length === 0) {
+                container.innerHTML = '<p class="no-history">ยังไม่มีประวัติการเลื่อน</p>';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var typeClass = 'date-change';
+                var typeName = 'เปลี่ยนวัน';
+                var itemClass = '';
+
+                if (item.Type === 'POSTPONE') {
+                    typeClass = 'postpone'; typeName = 'เลื่อนวัน'; itemClass = ' postpone';
+                } else if (item.Type === 'CANCEL_POSTPONE') {
+                    typeClass = 'cancel'; typeName = 'ยกเลิกเลื่อน'; itemClass = ' cancel';
+                }
+
+                html += '<div class="history-item' + itemClass + '">';
+                html += '<span class="history-type ' + typeClass + '">' + typeName + '</span> ';
+                html += '<span class="history-date">' + item.Date + '</span>';
+                if (item.Admin) {
+                    html += ' <span style="color:#666;font-size:12px">โดย ' + item.Admin + '</span>';
+                }
+                if (item.Reason) {
+                    html += '<div style="margin-top:4px;font-size:13px">เหตุผล: ' + item.Reason + '</div>';
+                }
+                if (item.OldDate || item.NewDate) {
+                    html += '<div class="history-dates">';
+                    if (item.OldDate) html += 'วันเดิม: ' + item.OldDate + ' &rarr; ';
+                    if (item.NewDate) html += 'วันใหม่: ' + item.NewDate;
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            container.innerHTML = html;
+        }
+
+        function closeHistoryModal() {
+            document.getElementById('historyModal').classList.remove('active');
+        }
+
+        // Close modals on overlay click
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal-overlay')) {
+                e.target.classList.remove('active');
+            }
+        });
+    </script>
 </asp:Content>
