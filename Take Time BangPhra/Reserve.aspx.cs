@@ -2637,7 +2637,7 @@ namespace Take_Time_BangPhra
                                         else
                                         {
 
-                                            Response.Redirect("./Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
+                                            Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + id + "&check=" + TextBox1.Text);
                                         }
                                     }
                                     else if (command == "checkin" && Session["permission"].ToString() == "True" && TextBox1.Text != "02")
@@ -3557,7 +3557,7 @@ namespace Take_Time_BangPhra
                                             }
                                             else
                                             {
-                                                Response.Redirect("./Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text + "&sendline=ok", false);
+                                                Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text + "&sendline=ok", false);
                                                 HttpContext.Current.ApplicationInstance.CompleteRequest();
                                             }
                                         }
@@ -3572,7 +3572,7 @@ namespace Take_Time_BangPhra
                                             }
                                             else
                                             {
-                                                Response.Redirect("./Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text, false);
+                                                Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text, false);
                                                 HttpContext.Current.ApplicationInstance.CompleteRequest();
                                             }
                                         }

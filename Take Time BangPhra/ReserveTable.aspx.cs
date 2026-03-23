@@ -515,7 +515,7 @@ namespace Take_Time_BangPhra
                     if (dtDetailCustomer.Rows.Count > 0)
                     {
                         string detailCustomerPhone = dtDetailCustomer.Rows[0]["Customer_MobilePhone"].ToString();
-                        Response.Redirect($"./Reservation_Confirmed?id={detailReservationId}&check={detailCustomerPhone}", false);
+                        Response.Redirect($"https://taketimebangphra.com/Reservation_Confirmed?id={detailReservationId}&check={detailCustomerPhone}", false);
                     }
                     break;
             }

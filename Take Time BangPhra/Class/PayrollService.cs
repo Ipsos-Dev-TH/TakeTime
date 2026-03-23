@@ -279,10 +279,11 @@ public class PayrollService
 
                     using (SqlCommand empCmd = new SqlCommand(@"
                         SELECT A.ID, ISNULL(A.FirstName + ' ' + A.LastName, A.Username) AS Name,
-                               ISNULL(ES.MonthlySalary, 0) AS Salary
+                               ES.MonthlySalary AS Salary
                         FROM Admin A
-                        LEFT JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
-                        WHERE A.Status = 1", conn, transaction))
+                        INNER JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                        WHERE A.Status = 1
+                          AND ES.MonthlySalary > 0", conn, transaction))
                     {
                         using (SqlDataReader reader = empCmd.ExecuteReader())
                         {

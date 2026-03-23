@@ -780,7 +780,7 @@
                         <asp:TemplateField HeaderText="">
                             <ItemTemplate>
                                 <div class="action-buttons">
-                                    <a href='<%# "Reservation_Confirmed.aspx?id=" + Eval("ID") %>' class="btn-action btn-view" target="_blank">
+                                    <a href='<%# "https://taketimebangphra.com/Reservation_Confirmed?id=" + Eval("ID") + "&check=" + Eval("Customer_MobilePhone") %>' class="btn-action btn-view" target="_blank">
                                         <i class="fas fa-eye"></i>
                                     </a>
                                     <a href='<%# "Reserve.aspx?id=" + Eval("ID") + "&phone=" + Eval("Customer_MobilePhone") + "&command=edit" %>' class="btn-action btn-edit">
