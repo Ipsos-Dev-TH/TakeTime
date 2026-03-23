@@ -443,7 +443,9 @@ namespace Take_Time_BangPhra.Voucher
             {
 
             }
-            if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload)
+            DataTable dtDetailValidate = Session["dtDetail"] as DataTable;
+            bool hasRatePlanRows = dtDetailValidate != null && dtDetailValidate.Rows.Count > 0;
+            if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload && hasRatePlanRows)
             {
                 // ✨ Use DocumentHelper to generate receipt number
                 string docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
