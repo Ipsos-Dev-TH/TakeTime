@@ -313,7 +313,13 @@ namespace Take_Time_BangPhra.Voucher
         protected void Button2_Click(object sender, EventArgs e)
         {
             Label1.Text = DropDownList4.SelectedItem.Text;
-            
+
+            if (DropDownList3.SelectedIndex <= 0)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาเลือกประเภทเรทที่พัก');", true);
+                return;
+            }
+
             if ( TextBox2.Text.Length > 0)
             {
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
@@ -443,7 +449,9 @@ namespace Take_Time_BangPhra.Voucher
             {
 
             }
-            if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload)
+            DataTable dtDetailValidate = Session["dtDetail"] as DataTable;
+            bool hasRatePlanRows = dtDetailValidate != null && dtDetailValidate.Rows.Count > 0;
+            if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload && hasRatePlanRows)
             {
                 // ✨ Use DocumentHelper to generate receipt number
                 string docNum = _documentHelper.CreateDocumentNumber("Account_Receipt", "REC", receiptDate);
