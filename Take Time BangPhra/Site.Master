@@ -657,7 +657,7 @@
                                                     <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
                                                         <i class="fas fa-chart-pie"></i> Customer Analytics
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/Edit_Home">
+                                                    <li><a runat="server" href="~/Admin/DatabaseManagement">
                                                         <i class="fas fa-database"></i> ฐานข้อมูล
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/RoomQRGenerator">

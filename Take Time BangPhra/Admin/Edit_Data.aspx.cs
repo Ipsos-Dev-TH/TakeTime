@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -20,13 +20,74 @@ namespace Take_Time_BangPhra.Admin
         static string supplier_type = string.Empty;
         static string supplierid = string.Empty;
         static string Email = "";
+
+        // Centralized whitelist of all allowed tables
+        private static readonly HashSet<string> AllowedTables = new HashSet<string>
+        {
+            // ที่พัก
+            "Accommodation", "Accommodation_HolidayPrice", "Accommodation_RatePlan",
+            "Accommodation_Holiday", "Accommodation_DayType", "Accommodation_Type",
+            // ลูกค้าและที่อยู่
+            "Customer", "Address", "Customer_Type",
+            // สินค้า
+            "Product", "Product_Category", "Items", "Product_Images",
+            // บัญชี
+            "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type",
+            "Account_ProductType", "Account_PaymentMethod", "Business_Info",
+            // การจอง
+            "Reservation", "Reservation_Accommodation", "Reservation_Items",
+            "Reservation_Product_Charges", "Reservation_Reschedule_History",
+            // Voucher
+            "Voucher", "Voucher_RatePlan_Group",
+            // Affiliate
+            "Affiliate_Member", "Affiliate_Reservation",
+            "Affiliate_Discount", "Affiliate_Discount_RatePlan",
+            // Supplier/Vendor
+            "Vendor", "Supplier", "Supplier_Type", "Supplier_Contact",
+            // ระบบ
+            "Admin", "MapDataWithSTAAH",
+            // CRM
+            "Guest_Preferences", "Guest_Notes", "Loyalty_Tiers",
+            "Customer_Loyalty", "Loyalty_Rewards", "Customer_Special_Dates",
+            // HR
+            "Employees", "Employee_Profile", "Employee_Documents",
+            "Employee_Salary", "Leave_Types",
+            // สินทรัพย์
+            "Asset_Category", "Assets"
+        };
+
+        // Tables that don't have a [Status] column - query all rows
+        private static readonly HashSet<string> TablesWithoutStatus = new HashSet<string>
+        {
+            "Address", "Customer_Type", "Product_Category", "Product_Images",
+            "Account_PaymentMethod", "Reservation_Accommodation", "Reservation_Items",
+            "Reservation_Product_Charges", "Reservation_Reschedule_History",
+            "Guest_Preferences", "Guest_Notes", "Loyalty_Tiers",
+            "Customer_Loyalty", "Loyalty_Rewards", "Customer_Special_Dates",
+            "Employee_Profile", "Employee_Documents", "Employee_Salary",
+            "Leave_Types", "Asset_Category"
+        };
+
+        private bool IsTableAllowed(string tableName)
+        {
+            return !string.IsNullOrEmpty(tableName) && AllowedTables.Contains(tableName);
+        }
+
+        private string GetSelectQuery(string tableName)
+        {
+            if (TablesWithoutStatus.Contains(tableName))
+            {
+                return "SELECT * FROM [" + tableName + "]";
+            }
+            return "SELECT * FROM [" + tableName + "] WHERE [Status] = 'True'";
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             try
             {
                 if (Session["permission"].ToString() == "True" && Session["User"].ToString() == "Owner")
                 {
-
 
                 }
                 else
@@ -101,20 +162,13 @@ namespace Take_Time_BangPhra.Admin
                         GridView2.DataSource = dt;
                         GridView2.DataBind();
 
-                        // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                        string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                            "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                            "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                            "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                            "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                            "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-                        if (!allowedTables.Contains(data))
+                        if (!IsTableAllowed(data))
                         {
                             Response.Redirect("/Default");
                             return;
                         }
 
-                        dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
+                        dt = code.DatabaseQuery(conn, GetSelectQuery(data));
                         readData();
                         Label1.Text = "Editing Data of " + data;
                     }
@@ -122,20 +176,13 @@ namespace Take_Time_BangPhra.Admin
                     {
                         GridView2.Visible = false;
 
-                        // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                        string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                            "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                            "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                            "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                            "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                            "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-                        if (!allowedTables.Contains(data))
+                        if (!IsTableAllowed(data))
                         {
                             Response.Redirect("/Default");
                             return;
                         }
 
-                        dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
+                        dt = code.DatabaseQuery(conn, GetSelectQuery(data));
                         readData();
                         Label1.Text = "Editing Data of " + data;
                     }
@@ -203,20 +250,13 @@ namespace Take_Time_BangPhra.Admin
             }
             else if (1 == 1)
             {
-                // SECURE: Whitelist validation for table name (cannot parameterize table names)
-                string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                    "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                    "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                    "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                    "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                    "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-                if (!allowedTables.Contains(data))
+                if (!IsTableAllowed(data))
                 {
                     Response.Redirect("/Default");
                     return;
                 }
 
-                dt = code.DatabaseQuery(conn, "SELECT * FROM [" + data + "] WHERE [Status] = 'True'");
+                dt = code.DatabaseQuery(conn, GetSelectQuery(data));
                 Label1.Text = "Editing Data of " + data;
             }
             else
@@ -226,29 +266,6 @@ namespace Take_Time_BangPhra.Admin
 
             dtshow = new DataTable();
             dtshow.Merge(dt);
-            //for (int i = 0; i < dtshow.Columns.Count; i++)
-            //{
-            //    if (dtshow.Columns[i].ColumnName.ToLower() == "id")
-            //    {
-            //        dtshow.Columns.Remove(dtshow.Columns[i].ColumnName);
-            //        i--;
-            //    }
-            //    else if (dtshow.Columns[i].ColumnName.ToLower() == "supplierid")
-            //    {
-            //        dtshow.Columns.Remove(dtshow.Columns[i].ColumnName);
-            //        i--;
-            //    }
-            //    else if (dtshow.Columns[i].ColumnName.ToLower() == "typeid")
-            //    {
-            //        dtshow.Columns.Remove(dtshow.Columns[i].ColumnName);
-            //        i--;
-            //    }
-            //    else if (dtshow.Columns[i].ColumnName.ToLower() == "status")
-            //    {
-            //        dtshow.Columns.Remove(dtshow.Columns[i].ColumnName);
-            //        i--;
-            //    }
-            //}
 
             GridView1.DataSource = dtshow;
             GridView1.DataBind();
@@ -271,14 +288,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void GridView1_RowUpdating(object sender, GridViewUpdateEventArgs e)
         {
-            // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-            if (!allowedTables.Contains(data))
+            if (!IsTableAllowed(data))
             {
                 Response.Redirect("/Default");
                 return;
@@ -332,14 +342,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void GridView1_RowDeleting(object sender, GridViewDeleteEventArgs e)
         {
-            // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-            if (!allowedTables.Contains(data))
+            if (!IsTableAllowed(data))
             {
                 Response.Redirect("/Default");
                 return;
@@ -351,28 +354,35 @@ namespace Take_Time_BangPhra.Admin
                 logde += dt.Rows[e.RowIndex][i].ToString() + ";";
             }
 
-            // SECURE: Parameterized query for soft delete
-            var deleteParams = new Dictionary<string, object>
+            // For tables without Status column, do a hard delete
+            if (TablesWithoutStatus.Contains(data))
             {
-                { "@ID", Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()) }
-            };
-            code.DatabaseInsertSafe(conn,
-                "UPDATE [" + data + "] SET [Status] = 'False' WHERE ID = @ID",
-                deleteParams);
+                var deleteParams = new Dictionary<string, object>
+                {
+                    { "@ID", Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()) }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "DELETE FROM [" + data + "] WHERE ID = @ID",
+                    deleteParams);
+            }
+            else
+            {
+                // SECURE: Parameterized query for soft delete
+                var deleteParams = new Dictionary<string, object>
+                {
+                    { "@ID", Convert.ToInt64(dt.Rows[e.RowIndex]["ID"].ToString()) }
+                };
+                code.DatabaseInsertSafe(conn,
+                    "UPDATE [" + data + "] SET [Status] = 'False' WHERE ID = @ID",
+                    deleteParams);
+            }
 
             readData();
         }
 
         protected void Button1_Click(object sender, EventArgs e)
         {
-            // SECURE: Whitelist validation for table name
-            string[] allowedTables = { "Accommodation", "Accommodation_HolidayPrice", "Customer", "Items", "Admin",
-                "Business_Info", "Account_Paid_How", "Account_Paid_Type", "Account_Vat_Type", "Vendor",
-                "Accommodation_DayType", "Accommodation_RatePlan", "Accommodation_Holiday",
-                "Affiliate_Member", "Affiliate_Reservation", "Affiliate_Discount", "Affiliate_Discount_RatePlan",
-                "Product", "Voucher", "Voucher_RatePlan_Group", "MapDataWithSTAAH",
-                "Supplier", "Supplier_Type", "Supplier_Contact", "Accommodation_Type", "Account_ProductType" };
-            if (!allowedTables.Contains(data))
+            if (!IsTableAllowed(data))
             {
                 Response.Redirect("/Default");
                 return;
@@ -382,7 +392,14 @@ namespace Take_Time_BangPhra.Admin
             try
             {
                 dtupdate.Columns.Remove("ID");
-                dtupdate.Columns.Remove("Status");
+            }
+            catch { }
+            try
+            {
+                if (!TablesWithoutStatus.Contains(data))
+                {
+                    dtupdate.Columns.Remove("Status");
+                }
             }
             catch { }
 
