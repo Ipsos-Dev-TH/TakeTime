@@ -397,6 +397,8 @@
     <Content Include="Admin\ChannelManager\Dashboard.aspx" />
     <Content Include="Admin\Pricing\DynamicPricing.aspx" />
     <Content Include="Admin\Notifications\Settings.aspx" />
+    <Content Include="Admin\Settings\ConnectionSettings.aspx" />
+    <Content Include="Admin\Settings\AccountingIntegration.aspx" />
     <Content Include="Admin\GuestExperience\Dashboard.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
@@ -972,6 +974,20 @@
     </Compile>
     <Compile Include="Admin\Notifications\Settings.aspx.designer.cs">
       <DependentUpon>Settings.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\ConnectionSettings.aspx.cs">
+      <DependentUpon>ConnectionSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\ConnectionSettings.aspx.designer.cs">
+      <DependentUpon>ConnectionSettings.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\AccountingIntegration.aspx.cs">
+      <DependentUpon>AccountingIntegration.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\AccountingIntegration.aspx.designer.cs">
+      <DependentUpon>AccountingIntegration.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\GuestExperience\Dashboard.aspx.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>

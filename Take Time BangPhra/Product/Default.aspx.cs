@@ -1523,6 +1523,18 @@ namespace Take_Time_BangPhra.Product
                         productOutParams);
                 }
             }
+
+            // Sync POS sale to accounting
+            try
+            {
+                decimal totalSale = decimal.Parse(Session["totalSale"]?.ToString() ?? "0");
+                string paidType = Session["paidType"]?.ToString() ?? "CASH";
+                string receiptNum = Session["receiptId"]?.ToString() ?? "";
+                var sync = new Integration.AccountingSyncService(conn);
+                sync.EnqueuePOSSale(receiptNum, totalSale, 0, paidType, DateTime.Now, "ขายสินค้า POS");
+            }
+            catch { }
+
             // Show success message then redirect
             ClientScript.RegisterStartupScript(this.GetType(), "success",
                 "alert('✅ บันทึกการขายเรียบร้อยแล้ว'); window.location.href='/Product';", true);

@@ -592,5 +592,272 @@ namespace Take_Time_BangPhra.Integration
             // Fallback to generic expense
             return GetAccountId("EXPENSE_OTHER");
         }
+
+        // ──────────────────────────────────────────────
+        // Cancellation No Refund → Journal Entry
+        // Forfeited deposit recognized as Other Income
+        // ──────────────────────────────────────────────
+
+        public CreateJournalEntryRequest MapCancelNoRefundToJournal(
+            int reservationId, decimal depositAmount, string customerName, DateTime cancelDate)
+        {
+            var advanceDepositId = GetAccountId("ADVANCE_DEPOSIT");
+            Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
+
+            return new CreateJournalEntryRequest
+            {
+                entryDate = cancelDate,
+                journalType = NexaaccJournalType.General,
+                description = $"ยกเลิกการจอง (ไม่คืนเงิน) - {customerName} - #{reservationId}",
+                reference = $"CANCEL-NR-{reservationId}",
+                lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        accountId = advanceDepositId,
+                        debitAmount = depositAmount,
+                        creditAmount = 0,
+                        description = $"ล้างเงินรับล่วงหน้า - การจอง #{reservationId}",
+                        lineOrder = 1
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        accountId = otherIncomeId,
+                        debitAmount = 0,
+                        creditAmount = depositAmount,
+                        description = $"รายได้จากการยึดมัดจำ - {customerName}",
+                        lineOrder = 2
+                    }
+                }
+            };
+        }
+
+        // ──────────────────────────────────────────────
+        // POS Sale → Journal Entry
+        // ──────────────────────────────────────────────
+
+        public CreateJournalEntryRequest MapPOSSaleToJournal(
+            string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod,
+            DateTime saleDate, string description)
+        {
+            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+            var productRevenueId = GetAccountId("PRODUCT_REVENUE");
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    accountId = cashAccountId,
+                    debitAmount = totalAmount,
+                    creditAmount = 0,
+                    description = $"รับชำระ POS - {receiptId}",
+                    lineOrder = 1
+                },
+                new JournalEntryLineRequest
+                {
+                    accountId = productRevenueId,
+                    debitAmount = 0,
+                    creditAmount = totalAmount,
+                    description = $"รายได้ขายสินค้า - {description}",
+                    lineOrder = 2
+                }
+            };
+
+            // Add COGS entries if cost is available
+            if (totalCost > 0)
+            {
+                var cogsId = GetAccountId("COGS");
+                var inventoryId = GetAccountId("INVENTORY");
+
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = cogsId,
+                    debitAmount = totalCost,
+                    creditAmount = 0,
+                    description = "ต้นทุนสินค้าขาย",
+                    lineOrder = 3
+                });
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = inventoryId,
+                    debitAmount = 0,
+                    creditAmount = totalCost,
+                    description = "ตัดสินค้าคงเหลือ",
+                    lineOrder = 4
+                });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                entryDate = saleDate,
+                journalType = NexaaccJournalType.Sales,
+                description = $"ขายสินค้า POS - {receiptId}",
+                reference = $"POS-{receiptId}",
+                lines = lines
+            };
+        }
+
+        // ──────────────────────────────────────────────
+        // Postpone Price Diff → Journal Entry
+        // ──────────────────────────────────────────────
+
+        public CreateJournalEntryRequest MapPostponePriceDiffToJournal(
+            int reservationId, decimal priceDifference, DateTime rescheduleDate, string customerName)
+        {
+            var roomArId = GetAccountId("ROOM_AR");
+            var roomRevenueId = GetAccountId("ROOM_REVENUE");
+
+            var lines = new List<JournalEntryLineRequest>();
+
+            if (priceDifference > 0)
+            {
+                // New price higher: customer owes more
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = roomArId,
+                    debitAmount = priceDifference,
+                    creditAmount = 0,
+                    description = $"ส่วนต่างราคาเพิ่ม - เลื่อนวัน #{reservationId}",
+                    lineOrder = 1
+                });
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = roomRevenueId,
+                    debitAmount = 0,
+                    creditAmount = priceDifference,
+                    description = $"รายได้ส่วนต่างราคา - {customerName}",
+                    lineOrder = 2
+                });
+            }
+            else
+            {
+                // New price lower: credit to customer
+                decimal absDiff = Math.Abs(priceDifference);
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = roomRevenueId,
+                    debitAmount = absDiff,
+                    creditAmount = 0,
+                    description = $"ปรับลดราคา - เลื่อนวัน #{reservationId}",
+                    lineOrder = 1
+                });
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = roomArId,
+                    debitAmount = 0,
+                    creditAmount = absDiff,
+                    description = $"เครดิตส่วนต่างราคา - {customerName}",
+                    lineOrder = 2
+                });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                entryDate = rescheduleDate,
+                journalType = NexaaccJournalType.General,
+                description = $"ปรับส่วนต่างราคาเลื่อนวัน - {customerName} - #{reservationId}",
+                reference = $"POSTPONE-DIFF-{reservationId}",
+                lines = lines
+            };
+        }
+
+        // ──────────────────────────────────────────────
+        // Partial Refund → Journal Entry
+        // ──────────────────────────────────────────────
+
+        public CreateJournalEntryRequest MapPartialRefundToJournal(
+            int reservationId, decimal refundAmount, decimal retainedAmount,
+            string paymentMethod, DateTime refundDate, string customerName, string reason)
+        {
+            var advanceDepositId = GetAccountId("ADVANCE_DEPOSIT");
+            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                // Debit: Clear advance deposit for total original amount
+                new JournalEntryLineRequest
+                {
+                    accountId = advanceDepositId,
+                    debitAmount = refundAmount + retainedAmount,
+                    creditAmount = 0,
+                    description = $"ล้างเงินรับล่วงหน้า - #{reservationId}",
+                    lineOrder = 1
+                },
+                // Credit: Refund portion back to customer
+                new JournalEntryLineRequest
+                {
+                    accountId = cashAccountId,
+                    debitAmount = 0,
+                    creditAmount = refundAmount,
+                    description = $"คืนเงินบางส่วน - {customerName}",
+                    lineOrder = 2
+                }
+            };
+
+            // Retained amount recognized as income
+            if (retainedAmount > 0)
+            {
+                Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = otherIncomeId,
+                    debitAmount = 0,
+                    creditAmount = retainedAmount,
+                    description = $"รายได้จากค่าธรรมเนียมยกเลิก - {reason}",
+                    lineOrder = 3
+                });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                entryDate = refundDate,
+                journalType = NexaaccJournalType.CashPayments,
+                description = $"คืนเงินบางส่วน - {customerName} - #{reservationId} ({reason})",
+                reference = $"PARTIAL-REFUND-{reservationId}",
+                lines = lines
+            };
+        }
+
+        // ──────────────────────────────────────────────
+        // Damage/Missing Items Charge → Journal Entry
+        // ──────────────────────────────────────────────
+
+        public CreateJournalEntryRequest MapDamageChargeToJournal(
+            int reservationId, decimal damageAmount, decimal missingItemsAmount,
+            DateTime chargeDate, string customerName, string description)
+        {
+            decimal totalCharge = damageAmount + missingItemsAmount;
+            var roomArId = GetAccountId("ROOM_AR");
+            Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    accountId = roomArId,
+                    debitAmount = totalCharge,
+                    creditAmount = 0,
+                    description = $"ค่าเสียหาย/ของหาย - #{reservationId}",
+                    lineOrder = 1
+                },
+                new JournalEntryLineRequest
+                {
+                    accountId = otherIncomeId,
+                    debitAmount = 0,
+                    creditAmount = totalCharge,
+                    description = $"รายได้ค่าเสียหาย - {customerName} - {description}",
+                    lineOrder = 2
+                }
+            };
+
+            return new CreateJournalEntryRequest
+            {
+                entryDate = chargeDate,
+                journalType = NexaaccJournalType.General,
+                description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
+                reference = $"DMG-{reservationId}",
+                lines = lines
+            };
+        }
     }
 }

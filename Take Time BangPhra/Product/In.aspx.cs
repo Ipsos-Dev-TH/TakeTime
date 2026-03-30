@@ -278,6 +278,29 @@ namespace Take_Time_BangPhra.Product
                         "VALUES (@DateTimeIn,@ProductID,@Amount,@PricePerUnit)",
                         insertParams);
                 }
+
+                // Sync stock-in to accounting
+                try
+                {
+                    DataTable dtOrder = (DataTable)Session["dtOrder"];
+                    if (dtOrder != null)
+                    {
+                        decimal totalCost = 0;
+                        foreach (DataRow row in dtOrder.Rows)
+                        {
+                            decimal amount = Convert.ToDecimal(row["Amount"]);
+                            decimal price = Convert.ToDecimal(row["PricePerUnit"]);
+                            totalCost += amount * price;
+                        }
+                        if (totalCost > 0)
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueueStockIn(0, "Stock In Batch", totalCost, DateTime.Now, "");
+                        }
+                    }
+                }
+                catch { }
+
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
                     "alert('✅ บันทึกการนำเข้าสินค้าเรียบร้อยแล้ว'); window.location.href='/Product/In';", true);

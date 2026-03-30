@@ -269,6 +269,111 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("PAYROLL", 0, "CREATE_PAYROLL_JOURNAL", payload);
         }
 
+        /// <summary>
+        /// Enqueue cancellation without refund — forfeited deposit recognized as revenue.
+        /// Call after cancellation where customer does NOT get a refund.
+        /// DR: Advance Deposit (เงินรับล่วงหน้า)  CR: Other Income (รายได้อื่น)
+        /// </summary>
+        public long EnqueueCancellationNoRefund(int reservationId, decimal depositAmount, string customerName, DateTime cancelDate)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "depositAmount", depositAmount },
+                { "customerName", customerName },
+                { "cancelDate", cancelDate.ToString("yyyy-MM-dd") }
+            };
+
+            return InsertQueue("RESERVATION", reservationId, "CREATE_CANCEL_NO_REFUND_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// Enqueue standalone POS sale (not charged to room).
+        /// DR: Cash/Bank  CR: Product Revenue + COGS entries
+        /// </summary>
+        public long EnqueuePOSSale(string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod, DateTime saleDate, string description)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "receiptId", receiptId },
+                { "totalAmount", totalAmount },
+                { "totalCost", totalCost },
+                { "paymentMethod", paymentMethod },
+                { "saleDate", saleDate.ToString("yyyy-MM-dd") },
+                { "description", description }
+            };
+
+            return InsertQueue("POS_SALE", 0, "CREATE_POS_SALE_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// Enqueue postpone price difference adjustment.
+        /// When a guest reschedules to a different date with price difference.
+        /// If newPrice > oldPrice: DR: Customer AR  CR: Room Revenue (additional charge)
+        /// If newPrice < oldPrice: DR: Room Revenue  CR: Customer AR (partial refund/credit)
+        /// </summary>
+        public long EnqueuePostponePriceDiff(int reservationId, decimal priceDifference, DateTime rescheduleDate, string customerName)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "priceDifference", priceDifference },
+                { "rescheduleDate", rescheduleDate.ToString("yyyy-MM-dd") },
+                { "customerName", customerName }
+            };
+
+            return InsertQueue("RESERVATION", reservationId, "CREATE_POSTPONE_PRICE_DIFF_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// Enqueue partial refund for a reservation.
+        /// When only part of the deposit is refunded (e.g., cancellation fee deducted).
+        /// </summary>
+        public long EnqueuePartialRefund(int reservationId, decimal refundAmount, decimal retainedAmount, string paymentMethod, DateTime refundDate, string customerName, string reason)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "refundAmount", refundAmount },
+                { "retainedAmount", retainedAmount },
+                { "paymentMethod", paymentMethod },
+                { "refundDate", refundDate.ToString("yyyy-MM-dd") },
+                { "customerName", customerName },
+                { "reason", reason }
+            };
+
+            return InsertQueue("RESERVATION", reservationId, "CREATE_PARTIAL_REFUND_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// Enqueue damage/missing item charge at checkout.
+        /// DR: Cash/Bank or Customer AR  CR: Other Income
+        /// </summary>
+        public long EnqueueDamageCharge(int reservationId, decimal damageAmount, decimal missingItemsAmount, DateTime chargeDate, string customerName, string description)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "damageAmount", damageAmount },
+                { "missingItemsAmount", missingItemsAmount },
+                { "chargeDate", chargeDate.ToString("yyyy-MM-dd") },
+                { "customerName", customerName },
+                { "description", description }
+            };
+
+            return InsertQueue("RESERVATION", reservationId, "CREATE_DAMAGE_CHARGE_JOURNAL", payload);
+        }
+
         // ──────────────────────────────────────────────
         // Queue Processing (called by background timer/scheduler)
         // ──────────────────────────────────────────────
@@ -364,6 +469,21 @@ namespace Take_Time_BangPhra.Integration
 
                 case "CREATE_PAYROLL_JOURNAL":
                     return await ProcessPayrollJournal(payload);
+
+                case "CREATE_CANCEL_NO_REFUND_JOURNAL":
+                    return await ProcessCancelNoRefundJournal(payload);
+
+                case "CREATE_POS_SALE_JOURNAL":
+                    return await ProcessPOSSaleJournal(payload);
+
+                case "CREATE_POSTPONE_PRICE_DIFF_JOURNAL":
+                    return await ProcessPostponePriceDiffJournal(payload);
+
+                case "CREATE_PARTIAL_REFUND_JOURNAL":
+                    return await ProcessPartialRefundJournal(payload);
+
+                case "CREATE_DAMAGE_CHARGE_JOURNAL":
+                    return await ProcessDamageChargeJournal(payload);
 
                 default:
                     throw new Exception($"Unknown action type: {actionType}");
@@ -527,6 +647,78 @@ namespace Take_Time_BangPhra.Integration
                 Convert.ToDecimal(p["totalSalary"]),
                 DateTime.Parse(p["payDate"]?.ToString()),
                 p["period"]?.ToString());
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.id);
+            return result.data.id.ToString();
+        }
+
+        private async Task<string> ProcessCancelNoRefundJournal(Dictionary<string, object> p)
+        {
+            var journal = _mapper.MapCancelNoRefundToJournal(
+                Convert.ToInt32(p["reservationId"]),
+                Convert.ToDecimal(p["depositAmount"]),
+                p["customerName"]?.ToString(),
+                DateTime.Parse(p["cancelDate"]?.ToString()));
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.id);
+            return result.data.id.ToString();
+        }
+
+        private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
+        {
+            var journal = _mapper.MapPOSSaleToJournal(
+                p["receiptId"]?.ToString(),
+                Convert.ToDecimal(p["totalAmount"]),
+                Convert.ToDecimal(p["totalCost"]),
+                p["paymentMethod"]?.ToString(),
+                DateTime.Parse(p["saleDate"]?.ToString()),
+                p["description"]?.ToString());
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.id);
+            return result.data.id.ToString();
+        }
+
+        private async Task<string> ProcessPostponePriceDiffJournal(Dictionary<string, object> p)
+        {
+            var journal = _mapper.MapPostponePriceDiffToJournal(
+                Convert.ToInt32(p["reservationId"]),
+                Convert.ToDecimal(p["priceDifference"]),
+                DateTime.Parse(p["rescheduleDate"]?.ToString()),
+                p["customerName"]?.ToString());
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.id);
+            return result.data.id.ToString();
+        }
+
+        private async Task<string> ProcessPartialRefundJournal(Dictionary<string, object> p)
+        {
+            var journal = _mapper.MapPartialRefundToJournal(
+                Convert.ToInt32(p["reservationId"]),
+                Convert.ToDecimal(p["refundAmount"]),
+                Convert.ToDecimal(p["retainedAmount"]),
+                p["paymentMethod"]?.ToString(),
+                DateTime.Parse(p["refundDate"]?.ToString()),
+                p["customerName"]?.ToString(),
+                p["reason"]?.ToString());
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.id);
+            return result.data.id.ToString();
+        }
+
+        private async Task<string> ProcessDamageChargeJournal(Dictionary<string, object> p)
+        {
+            var journal = _mapper.MapDamageChargeToJournal(
+                Convert.ToInt32(p["reservationId"]),
+                Convert.ToDecimal(p["damageAmount"]),
+                Convert.ToDecimal(p["missingItemsAmount"]),
+                DateTime.Parse(p["chargeDate"]?.ToString()),
+                p["customerName"]?.ToString(),
+                p["description"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
             await _apiClient.PostJournalAsync(result.data.id);

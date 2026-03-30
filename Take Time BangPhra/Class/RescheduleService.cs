@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra
 {
@@ -350,6 +351,49 @@ namespace Take_Time_BangPhra
                 {
                     return (int)cmd.ExecuteScalar();
                 }
+            }
+        }
+
+        /// <summary>
+        /// เปลี่ยนวันเข้าพักพร้อมบันทึกส่วนต่างราคาในระบบบัญชี
+        /// </summary>
+        public void LogDateChangeWithPriceDiff(
+            int reservationId,
+            DateTime oldCheckinDate, DateTime oldCheckoutDate, int oldStayDays,
+            DateTime newCheckinDate, DateTime newCheckoutDate, int newStayDays,
+            decimal oldPrice, decimal newPrice,
+            short? adminId = null, string adminName = null, string reason = null)
+        {
+            // Log the date change normally
+            LogDateChange(reservationId, oldCheckinDate, oldCheckoutDate, oldStayDays,
+                newCheckinDate, newCheckoutDate, newStayDays, adminId, adminName, reason);
+
+            // If price changed, enqueue accounting entry for the difference
+            decimal priceDiff = newPrice - oldPrice;
+            if (priceDiff != 0)
+            {
+                try
+                {
+                    string customerName = "ลูกค้า";
+                    using (SqlConnection conn = new SqlConnection(_connectionString))
+                    {
+                        conn.Open();
+                        using (SqlCommand cmd = new SqlCommand(
+                            @"SELECT ISNULL(c.Customer_Name, c.NickName) AS Name
+                              FROM Reservation r
+                              LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                              WHERE r.ID = @ID", conn))
+                        {
+                            cmd.Parameters.AddWithValue("@ID", reservationId);
+                            object result = cmd.ExecuteScalar();
+                            if (result != null) customerName = result.ToString();
+                        }
+                    }
+
+                    var sync = new AccountingSyncService(_connectionString);
+                    sync.EnqueuePostponePriceDiff(reservationId, priceDiff, DateTime.Now, customerName);
+                }
+                catch { }
             }
         }
 
