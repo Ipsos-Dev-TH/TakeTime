@@ -773,6 +773,11 @@
     <Compile Include="Class\CodeHelper.cs" />
     <Compile Include="Class\CustomerService.cs" />
     <Compile Include="Class\AccountingService.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.cs" />
+    <Compile Include="Class\Integration\AccountingApiClient.cs" />
+    <Compile Include="Class\Integration\AccountingConfig.cs" />
+    <Compile Include="Class\Integration\AccountingModels.cs" />
+    <Compile Include="Class\Integration\AccountingDataMapper.cs" />
     <Compile Include="Class\CheckoutService.cs" />
     <Compile Include="Class\DatabaseHelper.cs" />
     <Compile Include="Class\EmailService.cs" />
