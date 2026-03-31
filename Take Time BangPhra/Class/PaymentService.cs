@@ -5,6 +5,7 @@ using System.Web;
 using System.IO;
 using System.Configuration;
 using Take_Time_BangPhra.Services;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra
 {
@@ -115,6 +116,19 @@ namespace Take_Time_BangPhra
                     _code.Logs(_connectionString, "Email Error", emailEx.Message, "SYSTEM");
                 }
 
+                // 8. Sync to accounting system
+                try
+                {
+                    string custName = GetCustomerName(reservationId);
+                    var sync = new AccountingSyncService(_connectionString);
+                    sync.EnqueueReservationPayment(reservationId, amount, paymentMethod, DateTime.Now, custName);
+                    sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
+                }
+                catch (Exception accEx)
+                {
+                    _code.Logs(_connectionString, "Accounting Sync", "Payment enqueue error: " + accEx.Message, "SYSTEM");
+                }
+
                 return new PaymentResult
                 {
                     Success = true,
@@ -201,6 +215,19 @@ namespace Take_Time_BangPhra
                     SendPaymentConfirmationEmail(reservationId, receiptId, depositAmount);
                 }
                 catch { }
+
+                // 7. Sync to accounting system
+                try
+                {
+                    string custName = GetCustomerName(reservationId);
+                    var sync = new AccountingSyncService(_connectionString);
+                    sync.EnqueueReservationDeposit(reservationId, depositAmount, paymentMethod, DateTime.Now, custName);
+                    sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
+                }
+                catch (Exception accEx)
+                {
+                    _code.Logs(_connectionString, "Accounting Sync", "Deposit enqueue error: " + accEx.Message, "SYSTEM");
+                }
 
                 return new PaymentResult
                 {
@@ -491,6 +518,24 @@ namespace Take_Time_BangPhra
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Get customer name for a reservation
+        /// </summary>
+        private string GetCustomerName(int reservationId)
+        {
+            try
+            {
+                var parameters = new Dictionary<string, object> { { "@reservationId", reservationId } };
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ISNULL(c.Customer_Name, c.NickName) AS Name
+                      FROM Reservation r
+                      INNER JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      WHERE r.ID = @reservationId", parameters);
+                return dt?.Rows.Count > 0 ? dt.Rows[0]["Name"]?.ToString() ?? "ลูกค้า" : "ลูกค้า";
+            }
+            catch { return "ลูกค้า"; }
+        }
 
         /// <summary>
         /// Update reservation deposit amount

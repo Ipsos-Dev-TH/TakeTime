@@ -3,9 +3,11 @@
 // Handles Credit Notes, Debit Notes, and Financial Reports
 
 using System;
+using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Collections.Generic;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Services
 {
@@ -108,6 +110,15 @@ namespace Take_Time_BangPhra.Services
                         }
 
                         transaction.Commit();
+
+                        // Sync credit note to accounting system
+                        try
+                        {
+                            string connStr = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString ?? _conn.ConnectionString;
+                            var sync = new AccountingSyncService(connStr);
+                            sync.EnqueueCreditNote(creditNoteId, creditNoteNumber, creditNote.TotalAmount, creditNote.VatAmount, creditNote.CreditNoteDate, creditNote.Reason);
+                        }
+                        catch { }
 
                         return new CreditNoteResult
                         {

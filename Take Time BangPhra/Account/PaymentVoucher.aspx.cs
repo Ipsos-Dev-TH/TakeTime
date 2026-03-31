@@ -722,6 +722,21 @@ namespace Take_Time_BangPhra.Account.Report
                     CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
                 }
 
+                // Sync to accounting system
+                try
+                {
+                    decimal voucherAmount = decimal.Parse(TextBox6.Text);
+                    string paymentMethod = DropDownList3.SelectedItem?.Text ?? "CASH";
+                    string expenseCategory = DropDownList4.SelectedItem?.Text ?? "OTHER";
+                    string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                    string description = "";
+                    if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
+
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName);
+                }
+                catch { }
+
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
                     "alert('✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/PaymentVoucher';", true);

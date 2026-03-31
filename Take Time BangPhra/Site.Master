@@ -620,6 +620,12 @@
                                                     <li><a runat="server" href="~/Admin/Notifications/Settings">
                                                         <i class="fas fa-bell"></i> Notifications
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/ConnectionSettings">
+                                                        <i class="fas fa-plug"></i> Connection Settings
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
+                                                        <i class="fas fa-calculator"></i> Accounting Integration
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience
                                                     </a></li>

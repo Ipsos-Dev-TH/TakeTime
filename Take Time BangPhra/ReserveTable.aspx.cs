@@ -571,6 +571,56 @@ namespace Take_Time_BangPhra
             {
                 ProcessRefund(reservationId);
             }
+
+            // Sync cancellation to accounting system
+            try
+            {
+                string connStr = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString;
+                if (!string.IsNullOrEmpty(connStr))
+                {
+                    // Get deposit amount before it was zeroed
+                    decimal depositAmount = 0;
+                    string customerName = "ลูกค้า";
+                    string paymentMethod = "CASH";
+
+                    DataTable resData = DatabaseQuery(conn,
+                        @"SELECT ISNULL(ph.TotalPaid, 0) AS DepositPaid,
+                                 ISNULL(c.Customer_Name, c.NickName) AS Name,
+                                 ISNULL(ph.PaymentMethod, 'CASH') AS PayMethod
+                          FROM Reservation r
+                          LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                          LEFT JOIN (SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid,
+                                     MAX(PaymentMethod) AS PaymentMethod
+                                     FROM Payment_History WHERE Status = 'CANCELLED'
+                                     GROUP BY Reservation_ID) ph ON ph.Reservation_ID = r.ID
+                          WHERE r.ID = @id",
+                        new SqlParameter("@id", reservationId));
+
+                    if (resData?.Rows.Count > 0)
+                    {
+                        depositAmount = resData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(resData.Rows[0]["DepositPaid"]) : 0;
+                        customerName = resData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
+                        paymentMethod = resData.Rows[0]["PayMethod"]?.ToString() ?? "CASH";
+                    }
+
+                    if (depositAmount > 0)
+                    {
+                        var sync = new Integration.AccountingSyncService(connStr);
+                        if (refund)
+                        {
+                            sync.EnqueueRefund(int.Parse(reservationId), depositAmount, paymentMethod, DateTime.Now, customerName);
+                        }
+                        else
+                        {
+                            sync.EnqueueCancellationNoRefund(int.Parse(reservationId), depositAmount, customerName, DateTime.Now);
+                        }
+                    }
+                }
+            }
+            catch (Exception accEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"Accounting sync error: {accEx.Message}");
+            }
         }
 
         private async Task SendTelegramNotification(string reservationId, bool refund)

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Data;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra
 {
@@ -73,6 +75,31 @@ namespace Take_Time_BangPhra
 
                     if (string.IsNullOrEmpty(errorMsg))
                     {
+                        // Sync to accounting: revenue recognition + damage charges
+                        try
+                        {
+                            var resData = GetReservationData(reservationId);
+                            string customerName = resData?["CustomerName"]?.ToString() ?? "ลูกค้า";
+                            decimal depositAmt = resData != null ? Convert.ToDecimal(resData["Deposit"]) : 0;
+
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueCheckout(reservationId, depositAmt, customerName, DateTime.Now);
+
+                            // If there are damage/missing item charges
+                            decimal totalDamage = damageCharge + missingItemsCharge;
+                            if (totalDamage > 0)
+                            {
+                                string dmgDesc = "";
+                                if (roomDamage) dmgDesc += damageDescription ?? "ความเสียหายห้องพัก";
+                                if (missingItems) dmgDesc += (dmgDesc.Length > 0 ? ", " : "") + (missingItemsDescription ?? "ของหาย");
+                                sync.EnqueueDamageCharge(reservationId, damageCharge, missingItemsCharge, DateTime.Now, customerName, dmgDesc);
+                            }
+                        }
+                        catch (Exception accEx)
+                        {
+                            _code.Logs(_connectionString, "Accounting Sync", "Checkout enqueue error: " + accEx.Message, "SYSTEM");
+                        }
+
                         return new CheckoutResult
                         {
                             Success = true,
@@ -127,6 +154,36 @@ namespace Take_Time_BangPhra
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Get reservation data for accounting sync
+        /// </summary>
+        private Dictionary<string, object> GetReservationData(int reservationId)
+        {
+            try
+            {
+                var parameters = new Dictionary<string, object> { { "@id", reservationId } };
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT r.Deposit, r.TotalPrice,
+                             ISNULL(c.Customer_Name, c.NickName) AS CustomerName
+                      FROM Reservation r
+                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      WHERE r.ID = @id", parameters);
+
+                if (dt?.Rows.Count > 0)
+                {
+                    var row = dt.Rows[0];
+                    return new Dictionary<string, object>
+                    {
+                        { "Deposit", row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m },
+                        { "TotalPrice", row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m },
+                        { "CustomerName", row["CustomerName"]?.ToString() ?? "ลูกค้า" }
+                    };
+                }
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>
