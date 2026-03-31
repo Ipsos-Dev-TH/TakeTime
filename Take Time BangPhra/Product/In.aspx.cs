@@ -282,11 +282,11 @@ namespace Take_Time_BangPhra.Product
                 // Sync stock-in to accounting
                 try
                 {
-                    DataTable dtOrder = (DataTable)Session["dtOrder"];
-                    if (dtOrder != null)
+                    DataTable dtOrderSync = (DataTable)Session["dtOrder"];
+                    if (dtOrderSync != null)
                     {
                         decimal totalCost = 0;
-                        foreach (DataRow row in dtOrder.Rows)
+                        foreach (DataRow row in dtOrderSync.Rows)
                         {
                             decimal amount = Convert.ToDecimal(row["Amount"]);
                             decimal price = Convert.ToDecimal(row["PricePerUnit"]);
