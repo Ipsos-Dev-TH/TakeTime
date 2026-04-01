@@ -587,40 +587,58 @@ namespace Take_Time_BangPhra.Voucher
                     else { }
 
                     // SECURE: Receipt INSERT with parameterized query
-                    var receiptInsertParams = new Dictionary<string, object>
+                    try
                     {
-                        { "@DocNum", docNum },
-                        { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : "0" },
-                        { "@CreatedDate", Convert.ToDateTime(TextBox8.Text) },
-                        { "@TotalAmount", TextBox1.Text },
-                        { "@Vat", TextBox4.Text },
-                        { "@TotalAmountExcludeVat", TextBox3.Text },
-                        { "@PaidType", DropDownList2.SelectedItem.Text },
-                        { "@CreatedByID", Session["UserID"].ToString() },
-                        { "@Etax", CheckBox5.Checked },
-                        { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() }
-                    };
+                        var receiptInsertParams = new Dictionary<string, object>
+                        {
+                            { "@DocNum", docNum },
+                            { "@ReservationID", reservation_id > 0 ? reservation_id.ToString() : "0" },
+                            { "@CreatedDate", Convert.ToDateTime(TextBox8.Text) },
+                            { "@TotalAmount", TextBox1.Text },
+                            { "@Vat", TextBox4.Text },
+                            { "@TotalAmountExcludeVat", TextBox3.Text },
+                            { "@PaidType", DropDownList2.SelectedItem.Text },
+                            { "@CreatedByID", Session["UserID"].ToString() },
+                            { "@Etax", CheckBox5.Checked },
+                            { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() }
+                        };
 
-                    code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Receipt] " +
-                        "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID) " +
-                        "VALUES (@DocNum,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,'False','False',@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID)",
-                        receiptInsertParams);
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Receipt] " +
+                            "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],Etax,Customer_ID) " +
+                            "VALUES (@DocNum,@ReservationID,@CreatedDate,@TotalAmount,@Vat,@TotalAmountExcludeVat,'False','False',@PaidType,'Normal',@CreatedByID,@Etax,@CustomerID)",
+                            receiptInsertParams);
+                    }
+                    catch (Exception ex)
+                    {
+                        code2.Logs(conn, "Voucher - Account_Receipt INSERT Error",
+                            "DocNum=" + docNum + " | " + ex.Message, Session["UserName"]?.ToString() ?? "SYSTEM");
+                        throw;
+                    }
 
                     // SECURE: Receipt Detail INSERT with parameterized query
-                    var receiptDetailInsertParams = new Dictionary<string, object>
+                    try
                     {
-                        { "@DocNum", docNum },
-                        { "@ProductAmount", TextBox19.Text },
-                        { "@PricePerPiece", TextBox6.Text },
-                        { "@PriceAmount", TextBox1.Text }
-                    };
+                        var receiptDetailInsertParams = new Dictionary<string, object>
+                        {
+                            { "@DocNum", docNum },
+                            { "@ProductAmount", TextBox19.Text },
+                            { "@PricePerPiece", TextBox6.Text },
+                            { "@PriceAmount", TextBox1.Text }
+                        };
 
-                    code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Receipt_Detail] " +
-                        "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
-                        "VALUES ('1',@DocNum,'1',0,N'Voucher ที่พัก',@ProductAmount,N'ใบ',@PricePerPiece,@PriceAmount)",
-                        receiptDetailInsertParams);
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                            "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                            "VALUES ('1',@DocNum,'1',0,N'Voucher ที่พัก',@ProductAmount,N'ใบ',@PricePerPiece,@PriceAmount)",
+                            receiptDetailInsertParams);
+                    }
+                    catch (Exception ex)
+                    {
+                        code2.Logs(conn, "Voucher - Account_Receipt_Detail INSERT Error",
+                            "DocNum=" + docNum + " | " + ex.Message, Session["UserName"]?.ToString() ?? "SYSTEM");
+                        throw;
+                    }
 
                     // 🆕 Record payment to Payment_History when voucher receipt is created
                     if (reservation_id > 0)
@@ -1127,21 +1145,31 @@ namespace Take_Time_BangPhra.Voucher
                     decimal sellPriceValue = 0;
                     decimal.TryParse(sellPriceRaw, out sellPriceValue);
 
-                    var voucherInsertParams = new Dictionary<string, object>
+                    try
                     {
-                        { "@VoucherNumber", vnumber },
-                        { "@SellPrice", sellPriceValue },
-                        { "@CreatedDate", createddate },
-                        { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() },
-                        { "@ReceiptID", CheckBox4.Checked ? "" : RecNumber },
-                        { "@Remark", TextBox20.Text ?? "" },
-                        { "@ExpiredDate", Convert.ToDateTime(TextBox21.Text) }
-                    };
+                        var voucherInsertParams = new Dictionary<string, object>
+                        {
+                            { "@VoucherNumber", vnumber },
+                            { "@SellPrice", sellPriceValue },
+                            { "@CreatedDate", createddate },
+                            { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() },
+                            { "@ReceiptID", CheckBox4.Checked ? "" : RecNumber },
+                            { "@Remark", TextBox20.Text ?? "" },
+                            { "@ExpiredDate", Convert.ToDateTime(TextBox21.Text) }
+                        };
 
-                    code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) " +
-                        "VALUES (@VoucherNumber,@SellPrice,@CreatedDate,@CustomerID,@ReceiptID,@Remark,@ExpiredDate)",
-                        voucherInsertParams);
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) " +
+                            "VALUES (@VoucherNumber,@SellPrice,@CreatedDate,@CustomerID,@ReceiptID,@Remark,@ExpiredDate)",
+                            voucherInsertParams);
+                    }
+                    catch (Exception ex)
+                    {
+                        code2.Logs(conn, "Voucher INSERT Error",
+                            "VoucherNumber=" + vnumber + ", ReceiptID=" + (CheckBox4.Checked ? "" : RecNumber) + " | " + ex.Message,
+                            Session["UserName"]?.ToString() ?? "SYSTEM");
+                        throw;
+                    }
 
                     for (int j = 0; j < GridView1.Rows.Count; j++)
                     {
