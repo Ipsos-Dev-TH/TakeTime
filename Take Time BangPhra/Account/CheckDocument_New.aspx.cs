@@ -937,8 +937,9 @@ namespace Take_Time_BangPhra.Account
                 System.Diagnostics.Debug.WriteLine($"🗑️ Attempting to delete document: {docNum}");
 
                 // ✅ Parse document number
-                // Format: REC24100001 (REC + Year(2) + Month(2) + Number(4))
-                // or PAY24100001 (PAY + Year(2) + Month(2) + Number(4))
+                // Format: REC260401001 (REC + Year(2) + Month(2) + Day(2) + Number(3))
+                // or PAY260401001 (PAY + Year(2) + Month(2) + Day(2) + Number(3))
+                // Legacy: REC24100001 (REC + Year(2) + Month(2) + Number(4))
                 string docType = docNum.Remove(3, docNum.Length - 3); // Get first 3 chars: REC or PAY
                 string docYear = "20" + docNum.Remove(0, 3).Remove(2, docNum.Length - 5); // Get year: 24 -> 2024
                 string docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, docNum.Length - 7)).ToString(); // Get month: 10
@@ -1152,8 +1153,9 @@ namespace Take_Time_BangPhra.Account
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
 
                 // ✅ Parse document number (same logic as RowDeleting)
-                // Format: REC24100001 (REC + Year(2) + Month(2) + Number(4))
-                // or PAY24100001 (PAY + Year(2) + Month(2) + Number(4))
+                // Format: REC260401001 (REC + Year(2) + Month(2) + Day(2) + Number(3))
+                // or PAY260401001 (PAY + Year(2) + Month(2) + Day(2) + Number(3))
+                // Legacy: REC24100001 (REC + Year(2) + Month(2) + Number(4))
                 string docType = docNum.Remove(3, docNum.Length - 3); // Get first 3 chars: REC or PAY
                 string docYear = "20" + docNum.Remove(0, 3).Remove(2, docNum.Length - 5); // Get year: 24 -> 2024
                 string docMonth = Convert.ToInt32(docNum.Remove(0, 5).Remove(2, docNum.Length - 7)).ToString(); // Get month: 10
