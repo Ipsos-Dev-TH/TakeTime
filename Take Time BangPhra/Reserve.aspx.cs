@@ -1167,7 +1167,7 @@ namespace Take_Time_BangPhra
             try
             {
 
-                Convert.ToBoolean(Session["UseVoucher"].ToString());
+                usevoucher = Convert.ToBoolean(Session["UseVoucher"].ToString());
             }
             catch
             {
@@ -7331,7 +7331,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         // 🔒 SECURE: Using parameterized query to prevent SQL Injection
                         var voucherParams = new Dictionary<string, object> {
                             { "@voucherNumber", couponCode },
-                            { "@expiredDate", code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1).ToString("yyyy-MM-dd") }
+                            { "@expiredDate", code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1) }
                         };
                         dtVoucher = code2.DatabaseQuerySafe(conn,
                             @"SELECT * FROM [Taketime].[dbo].[Voucher]
@@ -7346,6 +7346,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         if (dtVoucher.Rows.Count >= 1)
                         {
                             Session["UseCoupon"] = "Voucher";
+                            Session["UseVoucherAccomID"] = "";
                             TextBox19.Enabled = false;
                             TextBox12_TextChanged(null, null);
                             Button8.Text = "Clear";
@@ -7370,8 +7371,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
 
                             if (dtVoucherCheck.Rows.Count >= 1)
                             {
-                                string usedStatus = dtVoucherCheck.Rows[0]["Used_Status"].ToString();
-                                DateTime expiredDate = Convert.ToDateTime(dtVoucherCheck.Rows[0]["Expired_Date"]);
+                                string usedStatus = dtVoucherCheck.Rows[0]["Used_Status"]?.ToString() ?? "";
                                 DateTime checkOutDate = code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToInt32(DropDownList1.SelectedValue) - 1);
 
                                 if (usedStatus == "True" || usedStatus == "1")
@@ -7379,8 +7379,9 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                                     LogCouponAttempt(couponCode, "Voucher", "FAILED - Already used");
                                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ Voucher นี้ถูกใช้งานไปแล้ว\\n\\nVoucher has already been used.');", true);
                                 }
-                                else if (expiredDate < checkOutDate)
+                                else if (dtVoucherCheck.Rows[0]["Expired_Date"] != DBNull.Value && Convert.ToDateTime(dtVoucherCheck.Rows[0]["Expired_Date"]) < checkOutDate)
                                 {
+                                    DateTime expiredDate = Convert.ToDateTime(dtVoucherCheck.Rows[0]["Expired_Date"]);
                                     LogCouponAttempt(couponCode, "Voucher", "FAILED - Expired on " + expiredDate.ToString("yyyy-MM-dd"));
                                     ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ Voucher นี้หมดอายุแล้ว\\n\\nวันหมดอายุ: " + expiredDate.ToString("dd/MM/yyyy") + "\\nวันที่เลือก Check-Out: " + checkOutDate.ToString("dd/MM/yyyy") + "\\n\\nVoucher has expired.');", true);
                                 }
