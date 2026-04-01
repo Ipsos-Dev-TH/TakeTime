@@ -660,8 +660,13 @@ namespace Take_Time_BangPhra.Voucher
                             string customerPhone = "";
                             try
                             {
-                                DataTable dtPhone = code.DatabaseQuery(conn,
-                                    "SELECT Customer_MobilePhone FROM Reservation WHERE ID = '" + reservation_id + "'");
+                                var phoneParams = new Dictionary<string, object>
+                                {
+                                    { "@ReservationID", reservation_id }
+                                };
+                                DataTable dtPhone = code.DatabaseQuerySafe(conn,
+                                    "SELECT Customer_MobilePhone FROM Reservation WHERE ID = @ReservationID",
+                                    phoneParams);
                                 if (dtPhone.Rows.Count > 0)
                                 {
                                     customerPhone = dtPhone.Rows[0]["Customer_MobilePhone"].ToString();
@@ -1159,8 +1164,8 @@ namespace Take_Time_BangPhra.Voucher
                         };
 
                         code.DatabaseInsertSafe(conn,
-                            "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date) " +
-                            "VALUES (@VoucherNumber,@SellPrice,@CreatedDate,@CustomerID,@ReceiptID,@Remark,@ExpiredDate)",
+                            "INSERT INTO [dbo].[Voucher] ([Voucher_Number],[Sell_Price],[Created_Date],[Customer_ID],Receipt_ID,Remark,Expired_Date,[Used_Status]) " +
+                            "VALUES (@VoucherNumber,@SellPrice,@CreatedDate,@CustomerID,@ReceiptID,@Remark,@ExpiredDate,0)",
                             voucherInsertParams);
                     }
                     catch (Exception ex)
