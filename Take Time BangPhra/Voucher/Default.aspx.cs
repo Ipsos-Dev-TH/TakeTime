@@ -1295,6 +1295,10 @@ namespace Take_Time_BangPhra.Voucher
                 {
                     NumberAccom = "0" + Number.ToString();
                 }
+                else
+                {
+                    NumberAccom = Number.ToString();
+                }
             
             
             //Random random = new Random();

@@ -7269,7 +7269,9 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 }
 
                 // Affiliate Code (8 characters)
-                if (couponCode.Length == 8)
+                bool isVoucherFormat = couponCode.Length >= 11 && (couponCode[0] == 'v' || couponCode[0] == 'V');
+
+                if (!isVoucherFormat && couponCode.Length == 8)
                 {
                     try
                     {
@@ -7310,8 +7312,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ เกิดข้อผิดพลาดในการตรวจสอบรหัส Affiliate\\n\\nกรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่');", true);
                     }
                 }
-                // Voucher Code (13 characters starting with v/V)
-                else if (couponCode.Length == 13 && (couponCode[0] == 'v' || couponCode[0] == 'V'))
+                // Voucher Code (starts with v/V, typically 11-15 characters: V + AccomGroupID + YYMMDD + 4 random chars)
+                else if (isVoucherFormat)
                 {
                     // Check if date is selected
                     if (string.IsNullOrEmpty(TextBox12.Text))
@@ -7391,7 +7393,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                             else
                             {
                                 LogCouponAttempt(couponCode, "Voucher", "FAILED - Code not found");
-                                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ ไม่พบ Voucher นี้ในระบบ\\n\\nกรุณาตรวจสอบว่า:\\n- พิมพ์ถูกต้อง (ตัวพิมพ์เล็ก/ใหญ่)\\n- รหัสขึ้นต้นด้วย v หรือ V\\n- รหัสมี 13 ตัวอักษร\\n\\nVoucher not found. Please check the code and try again.');", true);
+                                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('❌ ไม่พบ Voucher นี้ในระบบ\\n\\nกรุณาตรวจสอบว่า:\\n- พิมพ์ถูกต้อง (ตัวพิมพ์เล็ก/ใหญ่)\\n- รหัสขึ้นต้นด้วย V\\n\\nVoucher not found. Please check the code and try again.');", true);
                             }
                         }
                     }
@@ -7406,7 +7408,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     // Invalid format
                     string errorMsg = "❌ รูปแบบรหัสส่วนลดไม่ถูกต้อง\\n\\n";
                     errorMsg += "รหัส Affiliate: ต้องมี 8 ตัวอักษร\\n";
-                    errorMsg += "รหัส Voucher: ต้องขึ้นต้นด้วย v หรือ V และมี 13 ตัวอักษร\\n\\n";
+                    errorMsg += "รหัส Voucher: ต้องขึ้นต้นด้วย V และมีอย่างน้อย 11 ตัวอักษร\\n\\n";
                     errorMsg += "รหัสที่ใส่: " + couponCode + " (" + couponCode.Length + " ตัวอักษร)\\n\\n";
                     errorMsg += "Invalid coupon format. Please check the code length and format.";
 
