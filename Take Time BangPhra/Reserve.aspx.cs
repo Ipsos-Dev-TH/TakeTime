@@ -3832,6 +3832,7 @@ namespace Take_Time_BangPhra
                     if (AccomIDs[i] == AccomID)
                     {
                         // SECURE: UPDATE Voucher with parameterized query
+                        // Include Used_Status check in WHERE to prevent race condition (double-redemption)
                         var voucherParams = new Dictionary<string, object>
                         {
                             { "@UsedDate", DateTime.Now },
@@ -3842,7 +3843,8 @@ namespace Take_Time_BangPhra
                         code.DatabaseInsertSafe(conn,
                             "UPDATE [dbo].[Voucher] " +
                             "SET [Used_Status] = 1,[Used_Date] = @UsedDate,[Reservation_ID] = @ReservationID " +
-                            "WHERE [Voucher_Number] = @VoucherNumber",
+                            "WHERE [Voucher_Number] = @VoucherNumber " +
+                            "AND (Used_Status IS NULL OR Used_Status = 0 OR Used_Status = 'False')",
                             voucherParams);
                     }
                 }
