@@ -31,6 +31,7 @@ using System.Net.Http;
 using Take_Time_BangPhra.Account.Report;
 using Take_Time_BangPhra.Class;
 using Take_Time_BangPhra.Services;
+using Take_Time_BangPhra.Integration;
 using Google.Apis.Gmail.v1.Data;
 
 namespace Take_Time_BangPhra
@@ -2102,6 +2103,9 @@ namespace Take_Time_BangPhra
 
                                                     string receiptId = createReceipt(id, Convert.ToDouble(additionalDeposit), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
+                                                    // ✅ Enqueue to accounting sync (async, non-blocking)
+                                                    EnqueueAccountingSync(id, Convert.ToDouble(additionalDeposit), IsDeposit, TextBox3.Text);
+
                                                     // 📝 Log after receipt creation
                                                     code2.Logs(conn, "Reserve Edit - Receipt Created",
                                                         $"Reservation ID: {id}, Receipt ID: {receiptId}",
@@ -2881,6 +2885,9 @@ namespace Take_Time_BangPhra
 
                                                     string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
+                                                    // ✅ Enqueue to accounting sync (async, non-blocking)
+                                                    EnqueueAccountingSync(id, Convert.ToDouble(paymentAmount), IsDeposit, TextBox3.Text);
+
                                                     // ✅ Upload slip AFTER createReceipt with Receipt_ID
                                                     uploadSlip(id, receiptId);
                                                 }
@@ -2996,6 +3003,9 @@ namespace Take_Time_BangPhra
 
                                                         string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
+                                                        // ✅ Enqueue to accounting sync (async, non-blocking)
+                                                        EnqueueAccountingSync(id, Convert.ToDouble(paymentAmount), IsDeposit, TextBox3.Text);
+
                                                         // ✅ Upload slip AFTER createReceipt with Receipt_ID
                                                         uploadSlip(id, receiptId);
                                                     }
@@ -3098,6 +3108,9 @@ namespace Take_Time_BangPhra
                                                         AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
 
                                                         string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+
+                                                        // ✅ Enqueue to accounting sync (async, non-blocking)
+                                                        EnqueueAccountingSync(id, Convert.ToDouble(paymentAmount), IsDeposit, TextBox3.Text);
 
                                                         // ✅ Upload slip AFTER createReceipt with Receipt_ID
                                                         uploadSlip(id, receiptId);
@@ -3599,6 +3612,9 @@ namespace Take_Time_BangPhra
                                             if (CheckBox4.Checked == false)
                                             {
                                                 string receiptId = createReceipt(ID, Convert.ToDouble(TextBox5.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+
+                                                // ✅ Enqueue to accounting sync (async, non-blocking)
+                                                EnqueueAccountingSync(ID, Convert.ToDouble(TextBox5.Text), IsDeposit, TextBox3.Text);
 
                                                 // ✅ Upload slip AFTER createReceipt with Receipt_ID
                                                 try
@@ -4606,6 +4622,47 @@ namespace Take_Time_BangPhra
             }
 
             return ReceiptID;  // ✅ Return Receipt_ID so uploadSlip can use it
+        }
+
+        /// <summary>
+        /// Enqueue booking data to accounting sync queue (async, non-blocking).
+        /// ใช้แนวทาง Local-First + Async Queue: บันทึก DB ก่อน แล้ว sync ทีหลัง
+        /// ถ้า API ล่ม ระบบจองยังทำงานได้ปกติ — queue จะ retry อัตโนมัติ
+        /// </summary>
+        private void EnqueueAccountingSync(string reservationId, double amount, bool isDeposit, string customerName)
+        {
+            try
+            {
+                var syncService = new AccountingSyncService(conn);
+                string paymentMethod = DropDownList2.SelectedItem?.Text ?? "เงินสด";
+                decimal decimalAmount = Convert.ToDecimal(amount);
+
+                if (isDeposit)
+                {
+                    syncService.EnqueueReservationDeposit(
+                        Convert.ToInt32(reservationId),
+                        decimalAmount,
+                        paymentMethod,
+                        DateTime.Now,
+                        customerName);
+                }
+                else
+                {
+                    syncService.EnqueueReservationPayment(
+                        Convert.ToInt32(reservationId),
+                        decimalAmount,
+                        paymentMethod,
+                        DateTime.Now,
+                        customerName);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Sync failure must NOT block booking — log and continue
+                code2.Logs(conn, "AccountingSync Enqueue Error",
+                    $"Reservation: {reservationId}, Amount: {amount}, Error: {ex.Message}",
+                    Session["User"]?.ToString());
+            }
         }
 
         private bool ValidateReceiptDetails(DataTable dtReserve, double expectedTotal)
