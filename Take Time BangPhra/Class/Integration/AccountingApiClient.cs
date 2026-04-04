@@ -32,7 +32,7 @@ namespace Take_Time_BangPhra.Integration
         public AccountingApiClient()
         {
             _config = new AccountingConfig();
-            _connectionString = ConfigurationManager.ConnectionStrings["aboraboraaborabora"].ConnectionString;
+            _connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
             EnsureHttpClient();
         }
 
@@ -286,20 +286,20 @@ namespace Take_Time_BangPhra.Integration
         public async Task<ApiResponse<ContactResponse>> CreateContactAsync(CreateContactRequest contact)
         {
             return await PostAsync<CreateContactRequest, ApiResponse<ContactResponse>>(
-                $"{CompanyPath}/documents/contacts", contact);
+                $"{CompanyPath}/contacts", contact);
         }
 
         public async Task<ApiResponse<ContactResponse>> UpdateContactAsync(Guid contactId, UpdateContactRequest contact)
         {
             return await PutAsync<UpdateContactRequest, ApiResponse<ContactResponse>>(
-                $"{CompanyPath}/documents/contacts/{contactId}", contact);
+                $"{CompanyPath}/contacts/{contactId}", contact);
         }
 
         // Payments
         public async Task<ApiResponse<PaymentResponse>> CreatePaymentAsync(CreatePaymentRequest payment)
         {
             return await PostAsync<CreatePaymentRequest, ApiResponse<PaymentResponse>>(
-                $"{CompanyPath}/documents/payments", payment);
+                $"{CompanyPath}/payments", payment);
         }
 
         // Products

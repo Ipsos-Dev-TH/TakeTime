@@ -26,7 +26,7 @@ namespace Take_Time_BangPhra.Integration
 
         public AccountingSyncService()
         {
-            _connectionString = ConfigurationManager.ConnectionStrings["aboraboraaborabora"].ConnectionString;
+            _connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
             _config = new AccountingConfig(_connectionString);
             _apiClient = new AccountingApiClient(_config, _connectionString);
             _mapper = new AccountingDataMapper(_connectionString);
@@ -128,8 +128,11 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Enqueue payment voucher (expense).
         /// Call after creating voucher in Voucher/Default.aspx.cs
+        /// รองรับ VAT ซื้อ (Input VAT) และภาษีหัก ณ ที่จ่าย (WHT) ตามหลักบัญชีไทย
         /// </summary>
-        public long EnqueuePaymentVoucher(int voucherId, string expenseCategory, decimal amount, string paymentMethod, DateTime voucherDate, string description, string payeeName)
+        public long EnqueuePaymentVoucher(int voucherId, string expenseCategory, decimal amount,
+            string paymentMethod, DateTime voucherDate, string description, string payeeName,
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -141,7 +144,10 @@ namespace Take_Time_BangPhra.Integration
                 { "paymentMethod", paymentMethod },
                 { "voucherDate", voucherDate.ToString("yyyy-MM-dd") },
                 { "description", description },
-                { "payeeName", payeeName }
+                { "payeeName", payeeName },
+                { "hasInputVat", hasInputVat },
+                { "whtRate", whtRate },
+                { "whtAmount", whtAmount }
             };
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
@@ -170,8 +176,10 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Enqueue stock received (purchase).
         /// Call after Product/In.aspx.cs stock adjustment.
+        /// รองรับทั้งซื้อเงินสด (DR Inventory, CR Cash/Bank) และซื้อเชื่อ (DR Inventory, CR AP)
         /// </summary>
-        public long EnqueueStockIn(int productId, string productName, decimal totalCost, DateTime receiveDate, string supplierName)
+        public long EnqueueStockIn(int productId, string productName, decimal totalCost, DateTime receiveDate,
+            string supplierName, string paymentMethod = null, bool hasInputVat = false)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -181,7 +189,9 @@ namespace Take_Time_BangPhra.Integration
                 { "productName", productName },
                 { "totalCost", totalCost },
                 { "receiveDate", receiveDate.ToString("yyyy-MM-dd") },
-                { "supplierName", supplierName }
+                { "supplierName", supplierName },
+                { "paymentMethod", paymentMethod ?? "" },
+                { "hasInputVat", hasInputVat }
             };
 
             return InsertQueue("PRODUCT", productId, "CREATE_STOCK_IN_JOURNAL", payload);
@@ -254,8 +264,11 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Enqueue payroll journal entry.
         /// Call after PayrollService processes payroll.
+        /// รองรับประกันสังคม (SSF) และภาษีหัก ณ ที่จ่าย (WHT) ตามกฎหมายไทย
         /// </summary>
-        public long EnqueuePayroll(decimal totalSalary, DateTime payDate, string period)
+        public long EnqueuePayroll(decimal totalSalary, DateTime payDate, string period,
+            decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
+            decimal whtAmount = 0)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -263,7 +276,10 @@ namespace Take_Time_BangPhra.Integration
             {
                 { "totalSalary", totalSalary },
                 { "payDate", payDate.ToString("yyyy-MM-dd") },
-                { "period", period }
+                { "period", period },
+                { "socialSecurityEmployee", socialSecurityEmployee },
+                { "socialSecurityEmployer", socialSecurityEmployer },
+                { "whtAmount", whtAmount }
             };
 
             return InsertQueue("PAYROLL", 0, "CREATE_PAYROLL_JOURNAL", payload);
@@ -553,6 +569,10 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessVoucherJournal(Dictionary<string, object> p)
         {
+            bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
+            decimal whtRate = p.ContainsKey("whtRate") ? Convert.ToDecimal(p["whtRate"]) : 0;
+            decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
+
             var journal = _mapper.MapVoucherToJournal(
                 Convert.ToInt32(p["voucherId"]),
                 p["expenseCategory"]?.ToString(),
@@ -560,7 +580,10 @@ namespace Take_Time_BangPhra.Integration
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["voucherDate"]?.ToString()),
                 p["description"]?.ToString(),
-                p["payeeName"]?.ToString());
+                p["payeeName"]?.ToString(),
+                hasInputVat,
+                whtRate,
+                whtAmount);
 
             var result = await _apiClient.CreateJournalAsync(journal);
             await _apiClient.PostJournalAsync(result.data.id);
@@ -583,12 +606,17 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessStockInJournal(Dictionary<string, object> p)
         {
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "";
+            bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
+
             var journal = _mapper.MapStockInToJournal(
                 Convert.ToInt32(p["productId"]),
                 p["productName"]?.ToString(),
                 Convert.ToDecimal(p["totalCost"]),
                 DateTime.Parse(p["receiveDate"]?.ToString()),
-                p["supplierName"]?.ToString());
+                p["supplierName"]?.ToString(),
+                paymentMethod,
+                hasInputVat);
 
             var result = await _apiClient.CreateJournalAsync(journal);
             await _apiClient.PostJournalAsync(result.data.id);
@@ -643,10 +671,17 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPayrollJournal(Dictionary<string, object> p)
         {
+            decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
+            decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
+            decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
+
             var journal = _mapper.MapPayrollToJournal(
                 Convert.ToDecimal(p["totalSalary"]),
                 DateTime.Parse(p["payDate"]?.ToString()),
-                p["period"]?.ToString());
+                p["period"]?.ToString(),
+                ssfEmployee,
+                ssfEmployer,
+                whtAmount);
 
             var result = await _apiClient.CreateJournalAsync(journal);
             await _apiClient.PostJournalAsync(result.data.id);

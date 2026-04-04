@@ -18,7 +18,7 @@ namespace Take_Time_BangPhra.Integration
 
         public AccountingDataMapper()
         {
-            _connectionString = ConfigurationManager.ConnectionStrings["aboraboraaborabora"].ConnectionString;
+            _connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         }
 
         public AccountingDataMapper(string connectionString)
@@ -266,14 +266,92 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Maps a payment voucher to a CashPayments journal entry.
-        /// DR: Expense account  CR: Cash/Bank
+        /// รองรับ Input VAT (ภาษีซื้อ) และ WHT (ภาษีหัก ณ ที่จ่าย) ตามหลักบัญชีไทย
+        ///
+        /// กรณีไม่มี VAT/WHT:
+        ///   DR: Expense account (amount)  CR: Cash/Bank (amount)
+        ///
+        /// กรณีมี VAT + WHT:
+        ///   DR: Expense account (netAmount)
+        ///   DR: Input VAT (vatAmount)
+        ///   CR: Cash/Bank (amount - whtAmount)
+        ///   CR: WHT Payable (whtAmount)
         /// </summary>
         public CreateJournalEntryRequest MapVoucherToJournal(
             int voucherId, string expenseCategory, decimal amount, string paymentMethod,
-            DateTime voucherDate, string description, string payeeName)
+            DateTime voucherDate, string description, string payeeName,
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
         {
             var expenseAccountId = GetExpenseCategoryAccountId(expenseCategory);
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+
+            var lines = new List<JournalEntryLineRequest>();
+            int lineOrder = 1;
+
+            if (hasInputVat)
+            {
+                // คำนวณ VAT จากยอดรวม VAT (amount = net + VAT 7%)
+                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                decimal netAmount = amount - vatAmount;
+                var inputVatAccountId = GetAccountId("INPUT_VAT");
+
+                // DR: ค่าใช้จ่าย (ยอดก่อน VAT)
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = expenseAccountId,
+                    debitAmount = netAmount,
+                    creditAmount = 0,
+                    description = description,
+                    lineOrder = lineOrder++
+                });
+
+                // DR: ภาษีซื้อ
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = inputVatAccountId,
+                    debitAmount = vatAmount,
+                    creditAmount = 0,
+                    description = "ภาษีซื้อ 7%",
+                    lineOrder = lineOrder++
+                });
+            }
+            else
+            {
+                // DR: ค่าใช้จ่าย (ยอดเต็ม)
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = expenseAccountId,
+                    debitAmount = amount,
+                    creditAmount = 0,
+                    description = description,
+                    lineOrder = lineOrder++
+                });
+            }
+
+            // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี)
+            if (whtAmount > 0)
+            {
+                var whtAccountId = GetAccountId("WHT_PAYABLE");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = whtAccountId,
+                    debitAmount = 0,
+                    creditAmount = whtAmount,
+                    description = $"ภาษีหัก ณ ที่จ่าย {whtRate}%",
+                    lineOrder = lineOrder++
+                });
+            }
+
+            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = amount - WHT)
+            decimal cashPaid = amount - whtAmount;
+            lines.Add(new JournalEntryLineRequest
+            {
+                accountId = cashAccountId,
+                debitAmount = 0,
+                creditAmount = cashPaid,
+                description = $"จ่ายเงิน - {paymentMethod}",
+                lineOrder = lineOrder++
+            });
 
             return new CreateJournalEntryRequest
             {
@@ -281,25 +359,7 @@ namespace Take_Time_BangPhra.Integration
                 journalType = NexaaccJournalType.CashPayments,
                 description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
                 reference = $"PV-{voucherId}",
-                lines = new List<JournalEntryLineRequest>
-                {
-                    new JournalEntryLineRequest
-                    {
-                        accountId = expenseAccountId,
-                        debitAmount = amount,
-                        creditAmount = 0,
-                        description = description,
-                        lineOrder = 1
-                    },
-                    new JournalEntryLineRequest
-                    {
-                        accountId = cashAccountId,
-                        debitAmount = 0,
-                        creditAmount = amount,
-                        description = $"จ่ายเงิน - {paymentMethod}",
-                        lineOrder = 2
-                    }
-                }
+                lines = lines
             };
         }
 
@@ -373,39 +433,80 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Maps stock purchase/receiving to a Purchase journal entry.
-        /// DR: Inventory  CR: Accounts Payable
+        /// ซื้อเชื่อ: DR Inventory, CR Accounts Payable
+        /// ซื้อสด:   DR Inventory, CR Cash/Bank
+        /// มี VAT:   DR Inventory (net), DR Input VAT, CR Cash/AP (total)
         /// </summary>
         public CreateJournalEntryRequest MapStockInToJournal(
-            int productId, string productName, decimal totalCost, DateTime receiveDate, string supplierName)
+            int productId, string productName, decimal totalCost, DateTime receiveDate,
+            string supplierName, string paymentMethod = null, bool hasInputVat = false)
         {
             var inventoryAccountId = GetAccountId("INVENTORY");
-            var apAccountId = GetAccountId("ACCOUNTS_PAYABLE");
+            bool isCashPurchase = !string.IsNullOrEmpty(paymentMethod);
+
+            // บัญชีด้านเครดิต: ซื้อสด = Cash/Bank, ซื้อเชื่อ = AP
+            Guid creditAccountId = isCashPurchase
+                ? GetPaymentMethodAccountId(paymentMethod)
+                : GetAccountId("ACCOUNTS_PAYABLE");
+
+            string creditDescription = isCashPurchase
+                ? $"จ่ายค่าสินค้า - {paymentMethod}"
+                : $"เจ้าหนี้การค้า - {supplierName}";
+
+            var lines = new List<JournalEntryLineRequest>();
+            int lineOrder = 1;
+
+            if (hasInputVat)
+            {
+                decimal vatAmount = Math.Round(totalCost * 7 / 107, 2);
+                decimal netCost = totalCost - vatAmount;
+                var inputVatAccountId = GetAccountId("INPUT_VAT");
+
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = inventoryAccountId,
+                    debitAmount = netCost,
+                    creditAmount = 0,
+                    description = $"สินค้าคงเหลือ - {productName}",
+                    lineOrder = lineOrder++
+                });
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = inputVatAccountId,
+                    debitAmount = vatAmount,
+                    creditAmount = 0,
+                    description = "ภาษีซื้อ 7%",
+                    lineOrder = lineOrder++
+                });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = inventoryAccountId,
+                    debitAmount = totalCost,
+                    creditAmount = 0,
+                    description = $"สินค้าคงเหลือ - {productName}",
+                    lineOrder = lineOrder++
+                });
+            }
+
+            lines.Add(new JournalEntryLineRequest
+            {
+                accountId = creditAccountId,
+                debitAmount = 0,
+                creditAmount = totalCost,
+                description = creditDescription,
+                lineOrder = lineOrder++
+            });
 
             return new CreateJournalEntryRequest
             {
                 entryDate = receiveDate,
-                journalType = NexaaccJournalType.Purchase,
+                journalType = isCashPurchase ? NexaaccJournalType.CashPayments : NexaaccJournalType.Purchase,
                 description = $"รับสินค้าเข้าสต็อก - {productName} ({supplierName})",
                 reference = $"SI-{productId}-{receiveDate:yyyyMMdd}",
-                lines = new List<JournalEntryLineRequest>
-                {
-                    new JournalEntryLineRequest
-                    {
-                        accountId = inventoryAccountId,
-                        debitAmount = totalCost,
-                        creditAmount = 0,
-                        description = $"สินค้าคงเหลือ - {productName}",
-                        lineOrder = 1
-                    },
-                    new JournalEntryLineRequest
-                    {
-                        accountId = apAccountId,
-                        debitAmount = 0,
-                        creditAmount = totalCost,
-                        description = $"เจ้าหนี้การค้า - {supplierName}",
-                        lineOrder = 2
-                    }
-                }
+                lines = lines
             };
         }
 
@@ -526,13 +627,88 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Maps payroll payment to a CashPayments journal entry.
-        /// DR: Salaries & Wages  CR: Cash/Bank
+        /// ตามหลักบัญชีไทย payroll ต้องแยก:
+        ///
+        /// DR: Salary Expense (เงินเดือน gross)
+        /// DR: SSF Employer Expense (ประกันสังคมส่วนนายจ้าง)
+        /// CR: Cash/Bank (เงินจ่ายจริง = gross - SSF employee - WHT)
+        /// CR: SSF Payable (ประกันสังคมค้างจ่าย = ส่วนลูกจ้าง + ส่วนนายจ้าง)
+        /// CR: WHT Payable (ภาษีหัก ณ ที่จ่ายค้างจ่าย)
         /// </summary>
         public CreateJournalEntryRequest MapPayrollToJournal(
-            decimal totalSalary, DateTime payDate, string period)
+            decimal totalSalary, DateTime payDate, string period,
+            decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
+            decimal whtAmount = 0)
         {
             var salaryAccountId = GetAccountId("SALARY_EXPENSE");
             var cashAccountId = GetAccountId("CASH");
+
+            var lines = new List<JournalEntryLineRequest>();
+            int lineOrder = 1;
+
+            // DR: เงินเดือนและค่าแรง (gross)
+            lines.Add(new JournalEntryLineRequest
+            {
+                accountId = salaryAccountId,
+                debitAmount = totalSalary,
+                creditAmount = 0,
+                description = $"เงินเดือนและค่าแรง - {period}",
+                lineOrder = lineOrder++
+            });
+
+            // DR: ประกันสังคมส่วนนายจ้าง (ถ้ามี)
+            if (socialSecurityEmployer > 0)
+            {
+                Guid ssfExpenseId = TryGetAccountId("SSF_EMPLOYER_EXPENSE", out var se) ? se : salaryAccountId;
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = ssfExpenseId,
+                    debitAmount = socialSecurityEmployer,
+                    creditAmount = 0,
+                    description = $"ประกันสังคมส่วนนายจ้าง - {period}",
+                    lineOrder = lineOrder++
+                });
+            }
+
+            // CR: ประกันสังคมค้างจ่าย (ส่วนลูกจ้าง + ส่วนนายจ้าง)
+            decimal totalSSF = socialSecurityEmployee + socialSecurityEmployer;
+            if (totalSSF > 0)
+            {
+                Guid ssfPayableId = TryGetAccountId("SSF_PAYABLE", out var sp) ? sp : GetAccountId("ACCOUNTS_PAYABLE");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = ssfPayableId,
+                    debitAmount = 0,
+                    creditAmount = totalSSF,
+                    description = $"ประกันสังคมค้างจ่าย (ลูกจ้าง {socialSecurityEmployee:N2} + นายจ้าง {socialSecurityEmployer:N2})",
+                    lineOrder = lineOrder++
+                });
+            }
+
+            // CR: ภาษีหัก ณ ที่จ่ายค้างจ่าย (ถ้ามี)
+            if (whtAmount > 0)
+            {
+                var whtPayableId = GetAccountId("WHT_PAYABLE");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    accountId = whtPayableId,
+                    debitAmount = 0,
+                    creditAmount = whtAmount,
+                    description = $"ภาษีเงินได้หัก ณ ที่จ่าย - {period}",
+                    lineOrder = lineOrder++
+                });
+            }
+
+            // CR: เงินจ่ายจริง (gross - SSF employee - WHT)
+            decimal netPay = totalSalary - socialSecurityEmployee - whtAmount;
+            lines.Add(new JournalEntryLineRequest
+            {
+                accountId = cashAccountId,
+                debitAmount = 0,
+                creditAmount = netPay,
+                description = $"จ่ายเงินเดือนสุทธิ - {period}",
+                lineOrder = lineOrder++
+            });
 
             return new CreateJournalEntryRequest
             {
@@ -540,25 +716,7 @@ namespace Take_Time_BangPhra.Integration
                 journalType = NexaaccJournalType.CashPayments,
                 description = $"จ่ายเงินเดือนพนักงาน - งวด {period}",
                 reference = $"PR-{payDate:yyyyMM}",
-                lines = new List<JournalEntryLineRequest>
-                {
-                    new JournalEntryLineRequest
-                    {
-                        accountId = salaryAccountId,
-                        debitAmount = totalSalary,
-                        creditAmount = 0,
-                        description = $"เงินเดือนและค่าแรง - {period}",
-                        lineOrder = 1
-                    },
-                    new JournalEntryLineRequest
-                    {
-                        accountId = cashAccountId,
-                        debitAmount = 0,
-                        creditAmount = totalSalary,
-                        description = "จ่ายเงินเดือน",
-                        lineOrder = 2
-                    }
-                }
+                lines = lines
             };
         }
 

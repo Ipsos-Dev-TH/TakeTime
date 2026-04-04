@@ -97,9 +97,28 @@ BEGIN
     ('EXPENSE_MAINTENANCE', N'ค่าซ่อมแซมบำรุงรักษา',            '5400', 'EXPENSE'),
     ('EXPENSE_SUPPLIES',  N'ค่าวัสดุสิ้นเปลือง',                '5500', 'EXPENSE'),
     ('EXPENSE_OTA',       N'ค่าคอมมิชชั่น OTA',                 '5600', 'EXPENSE'),
-    ('EXPENSE_OTHER',     N'ค่าใช้จ่ายอื่น',                    '5900', 'EXPENSE');
+    ('EXPENSE_OTHER',     N'ค่าใช้จ่ายอื่น',                    '5900', 'EXPENSE'),
+    ('SSF_EMPLOYER_EXPENSE', N'ประกันสังคมส่วนนายจ้าง',          '5210', 'EXPENSE');
 
     PRINT 'Seeded default account mappings';
+END
+GO
+
+-- Add SSF Payable if missing
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'SSF_PAYABLE')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('SSF_PAYABLE', N'ประกันสังคมค้างจ่าย', '2160', 'LIABILITY');
+    PRINT 'Added SSF_PAYABLE account mapping';
+END
+GO
+
+-- Add SSF Employer Expense if missing (for existing databases)
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'SSF_EMPLOYER_EXPENSE')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('SSF_EMPLOYER_EXPENSE', N'ประกันสังคมส่วนนายจ้าง', '5210', 'EXPENSE');
+    PRINT 'Added SSF_EMPLOYER_EXPENSE account mapping';
 END
 GO
 

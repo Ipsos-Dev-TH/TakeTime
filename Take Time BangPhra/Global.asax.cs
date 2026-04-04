@@ -8,16 +8,79 @@ using System.Web.Security;
 using System.Web.SessionState;
 using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra
 {
     public class Global : HttpApplication
     {
+        private static Timer _accountingSyncTimer;
+        private static readonly object _syncLock = new object();
+        private static bool _isSyncing = false;
+
         void Application_Start(object sender, EventArgs e)
         {
             // Code that runs on application startup
             RouteConfig.RegisterRoutes(RouteTable.Routes);
             BundleConfig.RegisterBundles(BundleTable.Bundles);
+
+            // Start accounting sync background timer
+            StartAccountingSyncTimer();
+        }
+
+        void Application_End(object sender, EventArgs e)
+        {
+            // Dispose timer on app shutdown
+            _accountingSyncTimer?.Dispose();
+        }
+
+        /// <summary>
+        /// Background timer ที่ process accounting sync queue อัตโนมัติ
+        /// ทำงานตาม interval ที่ตั้งค่าใน Accounting_Integration_Config (default 30 วินาที)
+        /// </summary>
+        private static void StartAccountingSyncTimer()
+        {
+            try
+            {
+                var config = new AccountingConfig();
+                if (!config.IsConfigured) return;
+
+                int intervalMs = config.SyncIntervalSeconds * 1000;
+                if (intervalMs < 10000) intervalMs = 30000; // minimum 10 seconds
+
+                _accountingSyncTimer = new Timer(ProcessAccountingSyncQueue, null, 60000, intervalMs); // delay 60s before first run
+            }
+            catch
+            {
+                // Config table may not exist yet — silently skip
+            }
+        }
+
+        private static void ProcessAccountingSyncQueue(object state)
+        {
+            if (_isSyncing) return; // Skip if already processing
+
+            lock (_syncLock)
+            {
+                if (_isSyncing) return;
+                _isSyncing = true;
+            }
+
+            try
+            {
+                var syncService = new AccountingSyncService();
+                var task = syncService.ProcessQueueAsync(20);
+                task.Wait(TimeSpan.FromMinutes(2)); // Timeout safety
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError($"Accounting sync timer error: {ex.Message}");
+            }
+            finally
+            {
+                _isSyncing = false;
+            }
         }
 
         /// <summary>

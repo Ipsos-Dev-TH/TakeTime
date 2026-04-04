@@ -6,6 +6,7 @@ using System.Net.Mail;
 using System.Globalization;
 using System.Threading.Tasks;
 using Take_Time_BangPhra.Helpers;
+using Take_Time_BangPhra.Integration;
 using Microsoft.Reporting.WebForms;
 using iTextSharp.text.pdf;
 using ECertificateAPI;
@@ -317,6 +318,9 @@ namespace Take_Time_BangPhra.Services
                     {
                         GenerateETaxDocument(receiptId, docDate);
                     }
+
+                    // Enqueue accounting sync to Nexaacc
+                    EnqueueAccountingSync(reservationId, receiptId, totalAmount, vat, isDeposit, paidType, docDate, customerId);
                 }
             }
             catch (Exception ex)
@@ -326,13 +330,93 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        /// <summary>
+        /// ส่งข้อมูลใบเสร็จไป Nexaacc Accounting System แบบ async ผ่าน queue
+        /// ไม่ block การทำงานหลัก - ถ้า accounting sync ล้มเหลวจะ retry อัตโนมัติ
+        /// </summary>
+        private void EnqueueAccountingSync(string reservationId, string receiptId, double totalAmount,
+            double vat, bool isDeposit, string paidType, DateTime docDate, string customerId)
+        {
+            try
+            {
+                var syncService = new AccountingSyncService();
+
+                // ดึงชื่อลูกค้าจากการจอง
+                string customerName = GetCustomerName(reservationId);
+                int resId = 0;
+                int.TryParse(reservationId, out resId);
+
+                if (isDeposit)
+                {
+                    // มัดจำ: DR Cash/Bank, CR Advance Deposit (เงินรับล่วงหน้า)
+                    syncService.EnqueueReservationDeposit(
+                        resId,
+                        (decimal)totalAmount,
+                        paidType,
+                        docDate,
+                        customerName);
+                }
+                else
+                {
+                    // ชำระเต็ม: DR Cash/Bank, CR Room Revenue (+ VAT ถ้ามี)
+                    bool hasVat = vat > 0;
+                    syncService.EnqueueReservationPayment(
+                        resId,
+                        (decimal)totalAmount,
+                        paidType,
+                        docDate,
+                        customerName,
+                        hasVat);
+                }
+
+                // สร้าง Receipt Document ใน Nexaacc ด้วย
+                syncService.EnqueueReceipt(
+                    resId,
+                    receiptId,
+                    (decimal)totalAmount,
+                    (decimal)vat,
+                    docDate,
+                    customerName);
+
+                System.Diagnostics.Trace.TraceInformation(
+                    $"Enqueued accounting sync for Receipt {receiptId} (Reservation {reservationId}, {(isDeposit ? "Deposit" : "Payment")})");
+            }
+            catch (Exception ex)
+            {
+                // ไม่ throw — accounting sync เป็น supplementary, ไม่ควรทำให้ receipt creation ล้มเหลว
+                System.Diagnostics.Trace.TraceWarning(
+                    $"Failed to enqueue accounting sync for Receipt {receiptId}: {ex.Message}");
+            }
+        }
+
+        private string GetCustomerName(string reservationId)
+        {
+            try
+            {
+                var parameters = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "@reservationId", reservationId }
+                };
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT c.FullName FROM Reservation r
+                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                      WHERE r.ID = @reservationId",
+                    parameters);
+                return dt.Rows.Count > 0 ? dt.Rows[0]["FullName"]?.ToString() ?? "ลูกค้าทั่วไป" : "ลูกค้าทั่วไป";
+            }
+            catch { return "ลูกค้าทั่วไป"; }
+        }
+
         public void CreateDepositReceipt(string receiptId, string reservationId, DateTime docDate,
                                     double totalAmount, double vat, double priceExcludeVat,
                                     string paidType, string createdById, bool etax, string customerId = "0")
         {
+            string uid = Guid.NewGuid().ToString("N"); // Generate unique identifier for receipt
+
             var parameters = new System.Collections.Generic.Dictionary<string, object>
             {
                 { "@receiptId", receiptId },
+                { "@uid", uid },
                 { "@reservationId", reservationId },
                 { "@docDate", docDate.ToString("yyyy-MM-dd") },
                 { "@totalAmount", totalAmount },
@@ -346,10 +430,10 @@ namespace Take_Time_BangPhra.Services
 
             _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt]
-                    (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                    (ID, UID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                      [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
                      Paid_Type, Created_By_ID, Etax, Customer_ID)
-                    VALUES (@receiptId, @reservationId, @docDate,
+                    VALUES (@receiptId, @uid, @reservationId, @docDate,
                     @totalAmount, @vat, @priceExcludeVat, 'True', 'False', 'Normal',
                     @paidType, @createdById, @etax, @customerId)",
                 parameters);
@@ -435,9 +519,12 @@ namespace Take_Time_BangPhra.Services
                                         string paidType, string createdById, DataTable dtReserve,
                                         bool etax, string customerId)
         {
+            string uid = Guid.NewGuid().ToString("N"); // Generate unique identifier for receipt
+
             var parameters = new System.Collections.Generic.Dictionary<string, object>
             {
                 { "@receiptId", receiptId },
+                { "@uid", uid },
                 { "@reservationId", reservationId },
                 { "@docDate", docDate.ToString("yyyy-MM-dd") },
                 { "@totalAmount", totalAmount },
@@ -451,10 +538,10 @@ namespace Take_Time_BangPhra.Services
 
             _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt]
-                    (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                    (ID, UID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                      [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
                      Paid_Type, Created_By_ID, Etax, Customer_ID)
-                    VALUES (@receiptId, @reservationId, @docDate,
+                    VALUES (@receiptId, @uid, @reservationId, @docDate,
                     @totalAmount, @vat, @priceExcludeVat, 'False', 'False', 'Normal',
                     @paidType, @createdById, @etax, @customerId)",
                 parameters);
