@@ -11,7 +11,7 @@ namespace Take_Time_BangPhra.Integration
     /// </summary>
     public class AccountingDataMapper
     {
-        private readonly code _code = new code();
+        private readonly code _Code = new code();
         private readonly string _connectionString;
         private Dictionary<string, Guid> _accountMappingCache;
         private DateTime _mappingCacheExpiry = DateTime.MinValue;
@@ -63,7 +63,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 foreach (DataRow row in dt.Rows)
                 {
-                    string code = row["TakeTime_Code"]?.ToString();
+                    string Code = row["TakeTime_Code"]?.ToString();
                     if (!string.IsNullOrEmpty(code) && row["Nexaacc_AccountId"] != DBNull.Value)
                     {
                         _accountMappingCache[code] = (Guid)row["Nexaacc_AccountId"];
@@ -90,27 +90,25 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateJournalEntryRequest
             {
-                entryDate = paymentDate,
-                journalType = NexaaccJournalType.CashReceipts,
-                description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
-                reference = $"RES-{reservationId}-DEP",
-                lines = new List<JournalEntryLineRequest>
+                EntryDate = paymentDate,
+                JournalType = NexaaccJournalType.CashReceipts,
+                Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-DEP",
+                Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
                     {
-                        accountId = cashAccountId,
-                        debitAmount = amount,
-                        creditAmount = 0,
-                        description = $"รับมัดจำจากลูกค้า - {paymentMethod}",
-                        lineOrder = 1
+                        AccountId = cashAccountId,
+                        DebitAmount = amount,
+                        CreditAmount = 0,
+                        Description = $"รับมัดจำจากลูกค้า - {paymentMethod}"
                     },
                     new JournalEntryLineRequest
                     {
-                        accountId = advanceDepositAccountId,
-                        debitAmount = 0,
-                        creditAmount = amount,
-                        description = $"เงินรับล่วงหน้า - การจอง #{reservationId}",
-                        lineOrder = 2
+                        AccountId = advanceDepositAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = amount,
+                        Description = $"เงินรับล่วงหน้า - การจอง #{reservationId}"
                     }
                 }
             };
@@ -127,15 +125,14 @@ namespace Take_Time_BangPhra.Integration
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
 
-            var lines = new List<JournalEntryLineRequest>
+            var Lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {
-                    accountId = cashAccountId,
-                    debitAmount = amount,
-                    creditAmount = 0,
-                    description = $"รับชำระค่าห้องพัก - {paymentMethod}",
-                    lineOrder = 1
+                    AccountId = cashAccountId,
+                    DebitAmount = amount,
+                    CreditAmount = 0,
+                    Description = $"รับชำระค่าห้องพัก - {paymentMethod}",
                 }
             };
 
@@ -147,40 +144,37 @@ namespace Take_Time_BangPhra.Integration
 
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = revenueAccountId,
-                    debitAmount = 0,
-                    creditAmount = netAmount,
-                    description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
-                    lineOrder = 2
+                    AccountId = revenueAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = netAmount,
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = outputVatAccountId,
-                    debitAmount = 0,
-                    creditAmount = vatAmount,
-                    description = "ภาษีขาย 7%",
-                    lineOrder = 3
+                    AccountId = outputVatAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = vatAmount,
+                    Description = "ภาษีขาย 7%",
                 });
             }
             else
             {
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = revenueAccountId,
-                    debitAmount = 0,
-                    creditAmount = amount,
-                    description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
-                    lineOrder = 2
+                    AccountId = revenueAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = amount,
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                 });
             }
 
             return new CreateJournalEntryRequest
             {
-                entryDate = paymentDate,
-                journalType = NexaaccJournalType.CashReceipts,
-                description = $"รับชำระค่าห้องพัก - การจอง #{reservationId} ({customerName})",
-                reference = $"RES-{reservationId}-PAY",
-                lines = lines
+                EntryDate = paymentDate,
+                JournalType = NexaaccJournalType.CashReceipts,
+                Description = $"รับชำระค่าห้องพัก - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-PAY",
+                Lines = lines
             };
         }
 
@@ -196,27 +190,25 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateJournalEntryRequest
             {
-                entryDate = checkoutDate,
-                journalType = NexaaccJournalType.Sales,
-                description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
-                reference = $"RES-{reservationId}-CHK",
-                lines = new List<JournalEntryLineRequest>
+                EntryDate = checkoutDate,
+                JournalType = NexaaccJournalType.Sales,
+                Description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-CHK",
+                Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
                     {
-                        accountId = advanceDepositAccountId,
-                        debitAmount = depositAmount,
-                        creditAmount = 0,
-                        description = $"โอนเงินรับล่วงหน้าเป็นรายได้",
-                        lineOrder = 1
+                        AccountId = advanceDepositAccountId,
+                        DebitAmount = depositAmount,
+                        CreditAmount = 0,
+                        Description = $"โอนเงินรับล่วงหน้าเป็นรายได้",
                     },
                     new JournalEntryLineRequest
                     {
-                        accountId = revenueAccountId,
-                        debitAmount = 0,
-                        creditAmount = depositAmount,
-                        description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
-                        lineOrder = 2
+                        AccountId = revenueAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = depositAmount,
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                     }
                 }
             };
@@ -234,27 +226,25 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateJournalEntryRequest
             {
-                entryDate = refundDate,
-                journalType = NexaaccJournalType.CashPayments,
-                description = $"คืนเงินมัดจำ - การจอง #{reservationId} ({customerName})",
-                reference = $"RES-{reservationId}-REF",
-                lines = new List<JournalEntryLineRequest>
+                EntryDate = refundDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"คืนเงินมัดจำ - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-REF",
+                Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
                     {
-                        accountId = advanceDepositAccountId,
-                        debitAmount = refundAmount,
-                        creditAmount = 0,
-                        description = "ล้างเงินรับล่วงหน้า",
-                        lineOrder = 1
+                        AccountId = advanceDepositAccountId,
+                        DebitAmount = refundAmount,
+                        CreditAmount = 0,
+                        Description = "ล้างเงินรับล่วงหน้า",
                     },
                     new JournalEntryLineRequest
                     {
-                        accountId = cashAccountId,
-                        debitAmount = 0,
-                        creditAmount = refundAmount,
-                        description = $"คืนเงิน - {paymentMethod}",
-                        lineOrder = 2
+                        AccountId = cashAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = refundAmount,
+                        Description = $"คืนเงิน - {paymentMethod}",
                     }
                 }
             };
@@ -285,8 +275,7 @@ namespace Take_Time_BangPhra.Integration
             var expenseAccountId = GetExpenseCategoryAccountId(expenseCategory);
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
 
-            var lines = new List<JournalEntryLineRequest>();
-            int lineOrder = 1;
+            var Lines = new List<JournalEntryLineRequest>();
 
             if (hasInputVat)
             {
@@ -298,21 +287,19 @@ namespace Take_Time_BangPhra.Integration
                 // DR: ค่าใช้จ่าย (ยอดก่อน VAT)
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = expenseAccountId,
-                    debitAmount = netAmount,
-                    creditAmount = 0,
-                    description = description,
-                    lineOrder = lineOrder++
+                    AccountId = expenseAccountId,
+                    DebitAmount = netAmount,
+                    CreditAmount = 0,
+                    Description = description,
                 });
 
                 // DR: ภาษีซื้อ
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inputVatAccountId,
-                    debitAmount = vatAmount,
-                    creditAmount = 0,
-                    description = "ภาษีซื้อ 7%",
-                    lineOrder = lineOrder++
+                    AccountId = inputVatAccountId,
+                    DebitAmount = vatAmount,
+                    CreditAmount = 0,
+                    Description = "ภาษีซื้อ 7%",
                 });
             }
             else
@@ -320,11 +307,10 @@ namespace Take_Time_BangPhra.Integration
                 // DR: ค่าใช้จ่าย (ยอดเต็ม)
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = expenseAccountId,
-                    debitAmount = amount,
-                    creditAmount = 0,
-                    description = description,
-                    lineOrder = lineOrder++
+                    AccountId = expenseAccountId,
+                    DebitAmount = amount,
+                    CreditAmount = 0,
+                    Description = description,
                 });
             }
 
@@ -334,11 +320,10 @@ namespace Take_Time_BangPhra.Integration
                 var whtAccountId = GetAccountId("WHT_PAYABLE");
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = whtAccountId,
-                    debitAmount = 0,
-                    creditAmount = whtAmount,
-                    description = $"ภาษีหัก ณ ที่จ่าย {whtRate}%",
-                    lineOrder = lineOrder++
+                    AccountId = whtAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = whtAmount,
+                    Description = $"ภาษีหัก ณ ที่จ่าย {whtRate}%",
                 });
             }
 
@@ -346,20 +331,19 @@ namespace Take_Time_BangPhra.Integration
             decimal cashPaid = amount - whtAmount;
             lines.Add(new JournalEntryLineRequest
             {
-                accountId = cashAccountId,
-                debitAmount = 0,
-                creditAmount = cashPaid,
-                description = $"จ่ายเงิน - {paymentMethod}",
-                lineOrder = lineOrder++
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = cashPaid,
+                Description = $"จ่ายเงิน - {paymentMethod}",
             });
 
             return new CreateJournalEntryRequest
             {
-                entryDate = voucherDate,
-                journalType = NexaaccJournalType.CashPayments,
-                description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
-                reference = $"PV-{voucherId}",
-                lines = lines
+                EntryDate = voucherDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
+                Reference = $"PV-{voucherId}",
+                Lines = lines
             };
         }
 
@@ -377,26 +361,24 @@ namespace Take_Time_BangPhra.Integration
             var roomArAccountId = GetAccountId("ROOM_AR");
             var productRevenueAccountId = GetAccountId("PRODUCT_REVENUE");
             var cogsAccountId = GetAccountId("COGS");
-            var inventoryAccountId = GetAccountId("INVENTORY");
+            var InventoryAccountId = GetAccountId("INVENTORY");
 
-            var lines = new List<JournalEntryLineRequest>
+            var Lines = new List<JournalEntryLineRequest>
             {
                 // Revenue side
                 new JournalEntryLineRequest
                 {
-                    accountId = roomArAccountId,
-                    debitAmount = salesAmount,
-                    creditAmount = 0,
-                    description = $"ค่าสินค้า charge เข้าห้อง - การจอง #{reservationId}",
-                    lineOrder = 1
+                    AccountId = roomArAccountId,
+                    DebitAmount = salesAmount,
+                    CreditAmount = 0,
+                    Description = $"ค่าสินค้า charge เข้าห้อง - การจอง #{reservationId}",
                 },
                 new JournalEntryLineRequest
                 {
-                    accountId = productRevenueAccountId,
-                    debitAmount = 0,
-                    creditAmount = salesAmount,
-                    description = "รายได้ขายสินค้า",
-                    lineOrder = 2
+                    AccountId = productRevenueAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = salesAmount,
+                    Description = "รายได้ขายสินค้า",
                 }
             };
 
@@ -405,29 +387,27 @@ namespace Take_Time_BangPhra.Integration
             {
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = cogsAccountId,
-                    debitAmount = costAmount,
-                    creditAmount = 0,
-                    description = "ต้นทุนสินค้าขาย",
-                    lineOrder = 3
+                    AccountId = cogsAccountId,
+                    DebitAmount = costAmount,
+                    CreditAmount = 0,
+                    Description = "ต้นทุนสินค้าขาย",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inventoryAccountId,
-                    debitAmount = 0,
-                    creditAmount = costAmount,
-                    description = "ลดสินค้าคงเหลือ",
-                    lineOrder = 4
+                    AccountId = inventoryAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = costAmount,
+                    Description = "ลดสินค้าคงเหลือ",
                 });
             }
 
             return new CreateJournalEntryRequest
             {
-                entryDate = chargeDate,
-                journalType = NexaaccJournalType.Sales,
-                description = $"Room Charge - การจอง #{reservationId} - {description}",
-                reference = $"RC-{reservationId}",
-                lines = lines
+                EntryDate = chargeDate,
+                JournalType = NexaaccJournalType.Sales,
+                Description = $"Room Charge - การจอง #{reservationId} - {description}",
+                Reference = $"RC-{reservationId}",
+                Lines = lines
             };
         }
 
@@ -441,7 +421,7 @@ namespace Take_Time_BangPhra.Integration
             int productId, string productName, decimal totalCost, DateTime receiveDate,
             string supplierName, string paymentMethod = null, bool hasInputVat = false)
         {
-            var inventoryAccountId = GetAccountId("INVENTORY");
+            var InventoryAccountId = GetAccountId("INVENTORY");
             bool isCashPurchase = !string.IsNullOrEmpty(paymentMethod);
 
             // บัญชีด้านเครดิต: ซื้อสด = Cash/Bank, ซื้อเชื่อ = AP
@@ -453,8 +433,7 @@ namespace Take_Time_BangPhra.Integration
                 ? $"จ่ายค่าสินค้า - {paymentMethod}"
                 : $"เจ้าหนี้การค้า - {supplierName}";
 
-            var lines = new List<JournalEntryLineRequest>();
-            int lineOrder = 1;
+            var Lines = new List<JournalEntryLineRequest>();
 
             if (hasInputVat)
             {
@@ -464,49 +443,45 @@ namespace Take_Time_BangPhra.Integration
 
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inventoryAccountId,
-                    debitAmount = netCost,
-                    creditAmount = 0,
-                    description = $"สินค้าคงเหลือ - {productName}",
-                    lineOrder = lineOrder++
+                    AccountId = inventoryAccountId,
+                    DebitAmount = netCost,
+                    CreditAmount = 0,
+                    Description = $"สินค้าคงเหลือ - {productName}",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inputVatAccountId,
-                    debitAmount = vatAmount,
-                    creditAmount = 0,
-                    description = "ภาษีซื้อ 7%",
-                    lineOrder = lineOrder++
+                    AccountId = inputVatAccountId,
+                    DebitAmount = vatAmount,
+                    CreditAmount = 0,
+                    Description = "ภาษีซื้อ 7%",
                 });
             }
             else
             {
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inventoryAccountId,
-                    debitAmount = totalCost,
-                    creditAmount = 0,
-                    description = $"สินค้าคงเหลือ - {productName}",
-                    lineOrder = lineOrder++
+                    AccountId = inventoryAccountId,
+                    DebitAmount = totalCost,
+                    CreditAmount = 0,
+                    Description = $"สินค้าคงเหลือ - {productName}",
                 });
             }
 
             lines.Add(new JournalEntryLineRequest
             {
-                accountId = creditAccountId,
-                debitAmount = 0,
-                creditAmount = totalCost,
-                description = creditDescription,
-                lineOrder = lineOrder++
+                AccountId = creditAccountId,
+                DebitAmount = 0,
+                CreditAmount = totalCost,
+                Description = creditDescription,
             });
 
             return new CreateJournalEntryRequest
             {
-                entryDate = receiveDate,
-                journalType = isCashPurchase ? NexaaccJournalType.CashPayments : NexaaccJournalType.Purchase,
-                description = $"รับสินค้าเข้าสต็อก - {productName} ({supplierName})",
-                reference = $"SI-{productId}-{receiveDate:yyyyMMdd}",
-                lines = lines
+                EntryDate = receiveDate,
+                JournalType = isCashPurchase ? NexaaccJournalType.CashPayments : NexaaccJournalType.Purchase,
+                Description = $"รับสินค้าเข้าสต็อก - {productName} ({supplierName})",
+                Reference = $"SI-{productId}-{receiveDate:yyyyMMdd}",
+                Lines = lines
             };
         }
 
@@ -523,20 +498,20 @@ namespace Take_Time_BangPhra.Integration
         {
             return new CreateDocumentRequest
             {
-                documentType = NexaaccDocumentType.Receipt,
-                contactId = contactId,
-                documentDate = receiptDate,
-                reference = $"RES-{reservationId}-{receiptNumber}",
-                notes = description,
-                lines = new List<DocumentLineRequest>
+                DocumentType = NexaaccDocumentType.Receipt,
+                ContactId = contactId,
+                DocumentDate = receiptDate,
+                Reference = $"RES-{reservationId}-{receiptNumber}",
+                Notes = description,
+                Lines = new List<DocumentLineRequest>
                 {
                     new DocumentLineRequest
                     {
-                        description = $"ค่าห้องพัก - การจอง #{reservationId}",
-                        quantity = 1,
-                        unitPrice = totalAmount - vatAmount,
-                        vatPercent = vatAmount > 0 ? 7 : (decimal?)null,
-                        accountId = TryGetAccountId("ROOM_REVENUE", out var accId) ? accId : (Guid?)null
+                        Description = $"ค่าห้องพัก - การจอง #{reservationId}",
+                        Quantity = 1,
+                        UnitPrice = totalAmount - vatAmount,
+                        VatRate = vatAmount > 0 ? 7 : 0,
+                        AccountId = TryGetAccountId("ROOM_REVENUE", out var accId) ? accId : (Guid?)null
                     }
                 }
             };
@@ -551,19 +526,19 @@ namespace Take_Time_BangPhra.Integration
         {
             return new CreateDocumentRequest
             {
-                documentType = NexaaccDocumentType.CreditNote,
-                contactId = contactId,
-                documentDate = creditNoteDate,
-                reference = creditNoteNumber,
-                notes = reason,
-                lines = new List<DocumentLineRequest>
+                DocumentType = NexaaccDocumentType.CreditNote,
+                ContactId = contactId,
+                DocumentDate = creditNoteDate,
+                Reference = creditNoteNumber,
+                Notes = reason,
+                Lines = new List<DocumentLineRequest>
                 {
                     new DocumentLineRequest
                     {
-                        description = $"ใบลดหนี้ - {reason}",
-                        quantity = 1,
-                        unitPrice = totalAmount - vatAmount,
-                        vatPercent = vatAmount > 0 ? 7 : (decimal?)null
+                        Description = $"ใบลดหนี้ - {reason}",
+                        Quantity = 1,
+                        UnitPrice = totalAmount - vatAmount,
+                        VatRate = vatAmount > 0 ? 7 : (decimal?)null
                     }
                 }
             };
@@ -581,13 +556,14 @@ namespace Take_Time_BangPhra.Integration
         {
             return new CreateContactRequest
             {
-                name = name ?? "ลูกค้าทั่วไป",
-                phone = phone,
-                email = email,
-                address = address,
-                taxId = taxId,
-                isCustomer = true,
-                isSupplier = false
+                Name = name ?? "ลูกค้าทั่วไป",
+                Phone = phone,
+                Email = email,
+                Address = address,
+                TaxId = taxId,
+                IsCustomer = true,
+                IsSupplier = false,
+                ContactType = NexaaccContactType.Individual
             };
         }
 
@@ -608,16 +584,16 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateProductRequest
             {
-                code = $"TT-{productId:D5}",
-                name = productName,
-                description = description,
-                sellingPrice = sellingPrice,
-                costPrice = costPrice,
-                unit = unit ?? "ชิ้น",
-                salesAccountId = salesAccId,
-                purchaseAccountId = purchaseAccId,
-                inventoryAccountId = inventoryAccId,
-                trackInventory = true
+                Code = $"TT-{productId:D5}",
+                Name = productName,
+                Description = description,
+                SellingPrice = sellingPrice,
+                CostPrice = costPrice,
+                Unit = unit ?? "ชิ้น",
+                SalesAccountId = salesAccId,
+                PurchaseAccountId = purchaseAccId,
+                InventoryAccountId = inventoryAccId,
+                TrackInventory = true
             };
         }
 
@@ -643,17 +619,15 @@ namespace Take_Time_BangPhra.Integration
             var salaryAccountId = GetAccountId("SALARY_EXPENSE");
             var cashAccountId = GetAccountId("CASH");
 
-            var lines = new List<JournalEntryLineRequest>();
-            int lineOrder = 1;
+            var Lines = new List<JournalEntryLineRequest>();
 
             // DR: เงินเดือนและค่าแรง (gross)
             lines.Add(new JournalEntryLineRequest
             {
-                accountId = salaryAccountId,
-                debitAmount = totalSalary,
-                creditAmount = 0,
-                description = $"เงินเดือนและค่าแรง - {period}",
-                lineOrder = lineOrder++
+                AccountId = salaryAccountId,
+                DebitAmount = totalSalary,
+                CreditAmount = 0,
+                Description = $"เงินเดือนและค่าแรง - {period}",
             });
 
             // DR: ประกันสังคมส่วนนายจ้าง (ถ้ามี)
@@ -662,11 +636,10 @@ namespace Take_Time_BangPhra.Integration
                 Guid ssfExpenseId = TryGetAccountId("SSF_EMPLOYER_EXPENSE", out var se) ? se : salaryAccountId;
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = ssfExpenseId,
-                    debitAmount = socialSecurityEmployer,
-                    creditAmount = 0,
-                    description = $"ประกันสังคมส่วนนายจ้าง - {period}",
-                    lineOrder = lineOrder++
+                    AccountId = ssfExpenseId,
+                    DebitAmount = socialSecurityEmployer,
+                    CreditAmount = 0,
+                    Description = $"ประกันสังคมส่วนนายจ้าง - {period}",
                 });
             }
 
@@ -677,11 +650,10 @@ namespace Take_Time_BangPhra.Integration
                 Guid ssfPayableId = TryGetAccountId("SSF_PAYABLE", out var sp) ? sp : GetAccountId("ACCOUNTS_PAYABLE");
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = ssfPayableId,
-                    debitAmount = 0,
-                    creditAmount = totalSSF,
-                    description = $"ประกันสังคมค้างจ่าย (ลูกจ้าง {socialSecurityEmployee:N2} + นายจ้าง {socialSecurityEmployer:N2})",
-                    lineOrder = lineOrder++
+                    AccountId = ssfPayableId,
+                    DebitAmount = 0,
+                    CreditAmount = totalSSF,
+                    Description = $"ประกันสังคมค้างจ่าย (ลูกจ้าง {socialSecurityEmployee:N2} + นายจ้าง {socialSecurityEmployer:N2})",
                 });
             }
 
@@ -691,11 +663,10 @@ namespace Take_Time_BangPhra.Integration
                 var whtPayableId = GetAccountId("WHT_PAYABLE");
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = whtPayableId,
-                    debitAmount = 0,
-                    creditAmount = whtAmount,
-                    description = $"ภาษีเงินได้หัก ณ ที่จ่าย - {period}",
-                    lineOrder = lineOrder++
+                    AccountId = whtPayableId,
+                    DebitAmount = 0,
+                    CreditAmount = whtAmount,
+                    Description = $"ภาษีเงินได้หัก ณ ที่จ่าย - {period}",
                 });
             }
 
@@ -703,20 +674,19 @@ namespace Take_Time_BangPhra.Integration
             decimal netPay = totalSalary - socialSecurityEmployee - whtAmount;
             lines.Add(new JournalEntryLineRequest
             {
-                accountId = cashAccountId,
-                debitAmount = 0,
-                creditAmount = netPay,
-                description = $"จ่ายเงินเดือนสุทธิ - {period}",
-                lineOrder = lineOrder++
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = netPay,
+                Description = $"จ่ายเงินเดือนสุทธิ - {period}",
             });
 
             return new CreateJournalEntryRequest
             {
-                entryDate = payDate,
-                journalType = NexaaccJournalType.CashPayments,
-                description = $"จ่ายเงินเดือนพนักงาน - งวด {period}",
-                reference = $"PR-{payDate:yyyyMM}",
-                lines = lines
+                EntryDate = payDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"จ่ายเงินเดือนพนักงาน - งวด {period}",
+                Reference = $"PR-{payDate:yyyyMM}",
+                Lines = lines
             };
         }
 
@@ -764,27 +734,25 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateJournalEntryRequest
             {
-                entryDate = cancelDate,
-                journalType = NexaaccJournalType.General,
-                description = $"ยกเลิกการจอง (ไม่คืนเงิน) - {customerName} - #{reservationId}",
-                reference = $"CANCEL-NR-{reservationId}",
-                lines = new List<JournalEntryLineRequest>
+                EntryDate = cancelDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ยกเลิกการจอง (ไม่คืนเงิน) - {customerName} - #{reservationId}",
+                Reference = $"CANCEL-NR-{reservationId}",
+                Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
                     {
-                        accountId = advanceDepositId,
-                        debitAmount = depositAmount,
-                        creditAmount = 0,
-                        description = $"ล้างเงินรับล่วงหน้า - การจอง #{reservationId}",
-                        lineOrder = 1
+                        AccountId = advanceDepositId,
+                        DebitAmount = depositAmount,
+                        CreditAmount = 0,
+                        Description = $"ล้างเงินรับล่วงหน้า - การจอง #{reservationId}",
                     },
                     new JournalEntryLineRequest
                     {
-                        accountId = otherIncomeId,
-                        debitAmount = 0,
-                        creditAmount = depositAmount,
-                        description = $"รายได้จากการยึดมัดจำ - {customerName}",
-                        lineOrder = 2
+                        AccountId = otherIncomeId,
+                        DebitAmount = 0,
+                        CreditAmount = depositAmount,
+                        Description = $"รายได้จากการยึดมัดจำ - {customerName}",
                     }
                 }
             };
@@ -801,23 +769,21 @@ namespace Take_Time_BangPhra.Integration
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
             var productRevenueId = GetAccountId("PRODUCT_REVENUE");
 
-            var lines = new List<JournalEntryLineRequest>
+            var Lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {
-                    accountId = cashAccountId,
-                    debitAmount = totalAmount,
-                    creditAmount = 0,
-                    description = $"รับชำระ POS - {receiptId}",
-                    lineOrder = 1
+                    AccountId = cashAccountId,
+                    DebitAmount = totalAmount,
+                    CreditAmount = 0,
+                    Description = $"รับชำระ POS - {receiptId}",
                 },
                 new JournalEntryLineRequest
                 {
-                    accountId = productRevenueId,
-                    debitAmount = 0,
-                    creditAmount = totalAmount,
-                    description = $"รายได้ขายสินค้า - {description}",
-                    lineOrder = 2
+                    AccountId = productRevenueId,
+                    DebitAmount = 0,
+                    CreditAmount = totalAmount,
+                    Description = $"รายได้ขายสินค้า - {description}",
                 }
             };
 
@@ -829,29 +795,27 @@ namespace Take_Time_BangPhra.Integration
 
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = cogsId,
-                    debitAmount = totalCost,
-                    creditAmount = 0,
-                    description = "ต้นทุนสินค้าขาย",
-                    lineOrder = 3
+                    AccountId = cogsId,
+                    DebitAmount = totalCost,
+                    CreditAmount = 0,
+                    Description = "ต้นทุนสินค้าขาย",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = inventoryId,
-                    debitAmount = 0,
-                    creditAmount = totalCost,
-                    description = "ตัดสินค้าคงเหลือ",
-                    lineOrder = 4
+                    AccountId = inventoryId,
+                    DebitAmount = 0,
+                    CreditAmount = totalCost,
+                    Description = "ตัดสินค้าคงเหลือ",
                 });
             }
 
             return new CreateJournalEntryRequest
             {
-                entryDate = saleDate,
-                journalType = NexaaccJournalType.Sales,
-                description = $"ขายสินค้า POS - {receiptId}",
-                reference = $"POS-{receiptId}",
-                lines = lines
+                EntryDate = saleDate,
+                JournalType = NexaaccJournalType.Sales,
+                Description = $"ขายสินค้า POS - {receiptId}",
+                Reference = $"POS-{receiptId}",
+                Lines = lines
             };
         }
 
@@ -865,26 +829,24 @@ namespace Take_Time_BangPhra.Integration
             var roomArId = GetAccountId("ROOM_AR");
             var roomRevenueId = GetAccountId("ROOM_REVENUE");
 
-            var lines = new List<JournalEntryLineRequest>();
+            var Lines = new List<JournalEntryLineRequest>();
 
             if (priceDifference > 0)
             {
                 // New price higher: customer owes more
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = roomArId,
-                    debitAmount = priceDifference,
-                    creditAmount = 0,
-                    description = $"ส่วนต่างราคาเพิ่ม - เลื่อนวัน #{reservationId}",
-                    lineOrder = 1
+                    AccountId = roomArId,
+                    DebitAmount = priceDifference,
+                    CreditAmount = 0,
+                    Description = $"ส่วนต่างราคาเพิ่ม - เลื่อนวัน #{reservationId}",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = roomRevenueId,
-                    debitAmount = 0,
-                    creditAmount = priceDifference,
-                    description = $"รายได้ส่วนต่างราคา - {customerName}",
-                    lineOrder = 2
+                    AccountId = roomRevenueId,
+                    DebitAmount = 0,
+                    CreditAmount = priceDifference,
+                    Description = $"รายได้ส่วนต่างราคา - {customerName}",
                 });
             }
             else
@@ -893,29 +855,27 @@ namespace Take_Time_BangPhra.Integration
                 decimal absDiff = Math.Abs(priceDifference);
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = roomRevenueId,
-                    debitAmount = absDiff,
-                    creditAmount = 0,
-                    description = $"ปรับลดราคา - เลื่อนวัน #{reservationId}",
-                    lineOrder = 1
+                    AccountId = roomRevenueId,
+                    DebitAmount = absDiff,
+                    CreditAmount = 0,
+                    Description = $"ปรับลดราคา - เลื่อนวัน #{reservationId}",
                 });
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = roomArId,
-                    debitAmount = 0,
-                    creditAmount = absDiff,
-                    description = $"เครดิตส่วนต่างราคา - {customerName}",
-                    lineOrder = 2
+                    AccountId = roomArId,
+                    DebitAmount = 0,
+                    CreditAmount = absDiff,
+                    Description = $"เครดิตส่วนต่างราคา - {customerName}",
                 });
             }
 
             return new CreateJournalEntryRequest
             {
-                entryDate = rescheduleDate,
-                journalType = NexaaccJournalType.General,
-                description = $"ปรับส่วนต่างราคาเลื่อนวัน - {customerName} - #{reservationId}",
-                reference = $"POSTPONE-DIFF-{reservationId}",
-                lines = lines
+                EntryDate = rescheduleDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ปรับส่วนต่างราคาเลื่อนวัน - {customerName} - #{reservationId}",
+                Reference = $"POSTPONE-DIFF-{reservationId}",
+                Lines = lines
             };
         }
 
@@ -930,25 +890,23 @@ namespace Take_Time_BangPhra.Integration
             var advanceDepositId = GetAccountId("ADVANCE_DEPOSIT");
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
 
-            var lines = new List<JournalEntryLineRequest>
+            var Lines = new List<JournalEntryLineRequest>
             {
                 // Debit: Clear advance deposit for total original amount
                 new JournalEntryLineRequest
                 {
-                    accountId = advanceDepositId,
-                    debitAmount = refundAmount + retainedAmount,
-                    creditAmount = 0,
-                    description = $"ล้างเงินรับล่วงหน้า - #{reservationId}",
-                    lineOrder = 1
+                    AccountId = advanceDepositId,
+                    DebitAmount = refundAmount + retainedAmount,
+                    CreditAmount = 0,
+                    Description = $"ล้างเงินรับล่วงหน้า - #{reservationId}",
                 },
                 // Credit: Refund portion back to customer
                 new JournalEntryLineRequest
                 {
-                    accountId = cashAccountId,
-                    debitAmount = 0,
-                    creditAmount = refundAmount,
-                    description = $"คืนเงินบางส่วน - {customerName}",
-                    lineOrder = 2
+                    AccountId = cashAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = refundAmount,
+                    Description = $"คืนเงินบางส่วน - {customerName}",
                 }
             };
 
@@ -958,21 +916,20 @@ namespace Take_Time_BangPhra.Integration
                 Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
                 lines.Add(new JournalEntryLineRequest
                 {
-                    accountId = otherIncomeId,
-                    debitAmount = 0,
-                    creditAmount = retainedAmount,
-                    description = $"รายได้จากค่าธรรมเนียมยกเลิก - {reason}",
-                    lineOrder = 3
+                    AccountId = otherIncomeId,
+                    DebitAmount = 0,
+                    CreditAmount = retainedAmount,
+                    Description = $"รายได้จากค่าธรรมเนียมยกเลิก - {reason}",
                 });
             }
 
             return new CreateJournalEntryRequest
             {
-                entryDate = refundDate,
-                journalType = NexaaccJournalType.CashPayments,
-                description = $"คืนเงินบางส่วน - {customerName} - #{reservationId} ({reason})",
-                reference = $"PARTIAL-REFUND-{reservationId}",
-                lines = lines
+                EntryDate = refundDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"คืนเงินบางส่วน - {customerName} - #{reservationId} ({reason})",
+                Reference = $"PARTIAL-REFUND-{reservationId}",
+                Lines = lines
             };
         }
 
@@ -988,33 +945,31 @@ namespace Take_Time_BangPhra.Integration
             var roomArId = GetAccountId("ROOM_AR");
             Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
 
-            var lines = new List<JournalEntryLineRequest>
+            var Lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {
-                    accountId = roomArId,
-                    debitAmount = totalCharge,
-                    creditAmount = 0,
-                    description = $"ค่าเสียหาย/ของหาย - #{reservationId}",
-                    lineOrder = 1
+                    AccountId = roomArId,
+                    DebitAmount = totalCharge,
+                    CreditAmount = 0,
+                    Description = $"ค่าเสียหาย/ของหาย - #{reservationId}",
                 },
                 new JournalEntryLineRequest
                 {
-                    accountId = otherIncomeId,
-                    debitAmount = 0,
-                    creditAmount = totalCharge,
-                    description = $"รายได้ค่าเสียหาย - {customerName} - {description}",
-                    lineOrder = 2
+                    AccountId = otherIncomeId,
+                    DebitAmount = 0,
+                    CreditAmount = totalCharge,
+                    Description = $"รายได้ค่าเสียหาย - {customerName} - {description}",
                 }
             };
 
             return new CreateJournalEntryRequest
             {
-                entryDate = chargeDate,
-                journalType = NexaaccJournalType.General,
-                description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
-                reference = $"DMG-{reservationId}",
-                lines = lines
+                EntryDate = chargeDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
+                Reference = $"DMG-{reservationId}",
+                Lines = lines
             };
         }
     }

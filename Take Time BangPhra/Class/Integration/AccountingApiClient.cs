@@ -84,8 +84,8 @@ namespace Take_Time_BangPhra.Integration
             var loginUrl = $"{_config.BaseUrl.TrimEnd('/')}/api/auth/login";
             var request = new AuthLoginRequest
             {
-                email = _config.Email,
-                password = _config.Password
+                Email = _config.Email,
+                Password = _config.Password
             };
 
             var json = _serializer.Serialize(request);
@@ -103,9 +103,9 @@ namespace Take_Time_BangPhra.Integration
 
             lock (_tokenLock)
             {
-                _accessToken = authResponse.data.token;
-                _refreshToken = authResponse.data.refreshToken;
-                _tokenExpiry = authResponse.data.expiresAt ?? DateTime.Now.AddMinutes(55);
+                _accessToken = authResponse.data.AccessToken;
+                _refreshToken = authResponse.data.RefreshToken;
+                _tokenExpiry = authResponse.data.ExpiresAt;
             }
 
             LogSync("AUTH", "Login", "Login successful", true);
@@ -114,7 +114,7 @@ namespace Take_Time_BangPhra.Integration
         private async Task<bool> RefreshTokenAsync()
         {
             var refreshUrl = $"{_config.BaseUrl.TrimEnd('/')}/api/auth/refresh";
-            var request = new AuthRefreshRequest { refreshToken = _refreshToken };
+            var request = new AuthRefreshRequest { RefreshToken = _refreshToken };
             var json = _serializer.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync(refreshUrl, content);
@@ -127,9 +127,9 @@ namespace Take_Time_BangPhra.Integration
 
             lock (_tokenLock)
             {
-                _accessToken = authResponse.data.token;
-                _refreshToken = authResponse.data.refreshToken;
-                _tokenExpiry = authResponse.data.expiresAt ?? DateTime.Now.AddMinutes(55);
+                _accessToken = authResponse.data.AccessToken;
+                _refreshToken = authResponse.data.RefreshToken;
+                _tokenExpiry = authResponse.data.ExpiresAt;
             }
 
             return true;
@@ -240,85 +240,85 @@ namespace Take_Time_BangPhra.Integration
 
         private string CompanyPath => $"/api/companies/{_config.CompanyId}";
 
-        // Chart of Accounts
+        // Chart of Accounts (AccountingController)
         public async Task<ApiResponse<List<AccountResponse>>> GetAccountsAsync()
         {
-            return await GetAsync<ApiResponse<List<AccountResponse>>>($"{CompanyPath}/accounts");
+            return await GetAsync<ApiResponse<List<AccountResponse>>>($"{CompanyPath}/accounting/accounts");
         }
 
-        // Journal Entries
+        // Journal Entries (AccountingController)
         public async Task<ApiResponse<JournalEntryResponse>> CreateJournalAsync(CreateJournalEntryRequest journal)
         {
             return await PostAsync<CreateJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
-                $"{CompanyPath}/journals", journal);
+                $"{CompanyPath}/accounting/journals", journal);
         }
 
         public async Task<ApiResponse<JournalEntryResponse>> PostJournalAsync(Guid entryId)
         {
             return await PostAsync<object, ApiResponse<JournalEntryResponse>>(
-                $"{CompanyPath}/journals/{entryId}/post", null);
+                $"{CompanyPath}/accounting/journals/{entryId}/post", null);
         }
 
         public async Task VoidJournalAsync(Guid entryId)
         {
-            await PostActionAsync($"{CompanyPath}/journals/{entryId}/void");
+            await PostActionAsync($"{CompanyPath}/accounting/journals/{entryId}/void");
         }
 
-        // Documents
+        // Documents (DocumentController)
         public async Task<ApiResponse<DocumentResponse>> CreateDocumentAsync(CreateDocumentRequest document)
         {
             return await PostAsync<CreateDocumentRequest, ApiResponse<DocumentResponse>>(
-                $"{CompanyPath}/documents", document);
+                $"{CompanyPath}/document", document);
         }
 
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {
             return await PostAsync<object, ApiResponse<DocumentResponse>>(
-                $"{CompanyPath}/documents/{documentId}/approve", null);
+                $"{CompanyPath}/document/{documentId}/approve", null);
         }
 
         public async Task VoidDocumentAsync(Guid documentId)
         {
-            await PostActionAsync($"{CompanyPath}/documents/{documentId}/void");
+            await PostActionAsync($"{CompanyPath}/document/{documentId}/void");
         }
 
-        // Contacts
+        // Contacts (อยู่ภายใต้ DocumentController ใน Nexaacc)
         public async Task<ApiResponse<ContactResponse>> CreateContactAsync(CreateContactRequest contact)
         {
             return await PostAsync<CreateContactRequest, ApiResponse<ContactResponse>>(
-                $"{CompanyPath}/contacts", contact);
+                $"{CompanyPath}/document/contacts", contact);
         }
 
         public async Task<ApiResponse<ContactResponse>> UpdateContactAsync(Guid contactId, UpdateContactRequest contact)
         {
             return await PutAsync<UpdateContactRequest, ApiResponse<ContactResponse>>(
-                $"{CompanyPath}/contacts/{contactId}", contact);
+                $"{CompanyPath}/document/contacts/{contactId}", contact);
         }
 
-        // Payments
+        // Payments (อยู่ภายใต้ DocumentController ใน Nexaacc)
         public async Task<ApiResponse<PaymentResponse>> CreatePaymentAsync(CreatePaymentRequest payment)
         {
             return await PostAsync<CreatePaymentRequest, ApiResponse<PaymentResponse>>(
-                $"{CompanyPath}/payments", payment);
+                $"{CompanyPath}/document/payments", payment);
         }
 
-        // Products
+        // Products (ProductController)
         public async Task<ApiResponse<ProductResponse>> CreateProductAsync(CreateProductRequest product)
         {
             return await PostAsync<CreateProductRequest, ApiResponse<ProductResponse>>(
-                $"{CompanyPath}/products", product);
+                $"{CompanyPath}/product", product);
         }
 
         public async Task<ApiResponse<ProductResponse>> UpdateProductAsync(Guid productId, UpdateProductRequest product)
         {
             return await PutAsync<UpdateProductRequest, ApiResponse<ProductResponse>>(
-                $"{CompanyPath}/products/{productId}", product);
+                $"{CompanyPath}/product/{productId}", product);
         }
 
         public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest adjustment)
         {
             return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
-                $"{CompanyPath}/products/stock/adjust", adjustment);
+                $"{CompanyPath}/product/stock/adjust", adjustment);
         }
 
         // ──────────────────────────────────────────────

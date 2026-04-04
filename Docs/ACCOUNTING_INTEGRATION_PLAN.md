@@ -44,12 +44,14 @@
 ┌─────────────────────────────────────────────────────┐
 │              Nexaacc Accounting System                │
 │                                                       │
-│  POST /api/auth/login          → JWT Token            │
-│  POST /api/companies/{id}/journals  → Journal Entry   │
-│  POST /api/companies/{id}/documents → Invoice/Receipt │
-│  POST /api/companies/{id}/products  → Product Sync    │
-│  POST /api/companies/{id}/documents/payments → Payment│
-│  POST /api/companies/{id}/documents/contacts → Contact│
+│  POST /api/auth/login                          → JWT Token    │
+│  POST /api/companies/{id}/accounting/journals  → Journal Entry│
+│  POST /api/companies/{id}/accounting/accounts  → Chart of Acc │
+│  POST /api/companies/{id}/document             → Invoice/Rcpt │
+│  POST /api/companies/{id}/document/payments    → Payment      │
+│  POST /api/companies/{id}/document/contacts    → Contact      │
+│  POST /api/companies/{id}/product              → Product Sync │
+│  POST /api/companies/{id}/product/stock/adjust → Stock Adjust │
 │                                                       │
 └─────────────────────────────────────────────────────┘
 ```
