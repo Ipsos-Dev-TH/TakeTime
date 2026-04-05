@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.IO;
-using System.Net;
-using System.Text;
 using System.Web.Script.Serialization;
 using System.Web.UI;
 
@@ -170,39 +168,20 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var config = new Integration.AccountingConfig(ConnStr);
-                if (string.IsNullOrEmpty(config.BaseUrl))
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Base URL" } };
-                if (string.IsNullOrEmpty(config.ApiKey))
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า API Key" } };
-
-                // Test API Key by fetching Chart of Accounts
-                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
-                var request = (HttpWebRequest)WebRequest.Create(testUrl);
-                request.Method = "GET";
-                request.Headers.Add("X-Api-Key", config.ApiKey);
-                request.Timeout = 15000;
-
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                using (var response = (HttpWebResponse)request.GetResponse())
-                using (var reader = new StreamReader(response.GetResponseStream()))
+                var client = new Integration.AccountingApiClient(new Integration.AccountingConfig(ConnStr), ConnStr);
+                var task = client.TestConnectionAsync();
+                task.Wait();
+                var result = task.Result;
+                return new Dictionary<string, object>
                 {
-                    sw.Stop();
-                    string responseBody = reader.ReadToEnd();
-                    bool isSuccess = response.StatusCode == HttpStatusCode.OK;
-                    return new Dictionary<string, object>
-                    {
-                        { "success", isSuccess },
-                        { "message", isSuccess ? $"API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)" : "API Key ไม่สามารถใช้งานได้" }
-                    };
-                }
+                    { "success", result.Success },
+                    { "message", result.Message }
+                };
             }
-            catch (WebException wex)
+            catch (AggregateException aex)
             {
-                string detail = "";
-                if (wex.Response != null)
-                    using (var r = new StreamReader(wex.Response.GetResponseStream())) detail = r.ReadToEnd();
-                return new Dictionary<string, object> { { "success", false }, { "message", "API Error: " + (detail.Length > 0 ? detail : wex.Message) } };
+                var inner = aex.InnerException ?? aex;
+                return new Dictionary<string, object> { { "success", false }, { "message", inner.Message } };
             }
             catch (Exception ex)
             {
@@ -218,31 +197,27 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (!config.IsConfigured)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน (Base URL, API Key, Company ID)" } };
 
-                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
-                var request = (HttpWebRequest)WebRequest.Create(testUrl);
-                request.Method = "GET";
-                request.Headers.Add("X-Api-Key", config.ApiKey);
-                request.Timeout = 15000;
-
-                using (var response = (HttpWebResponse)request.GetResponse())
-                using (var reader = new StreamReader(response.GetResponseStream()))
+                var client = new Integration.AccountingApiClient(config, ConnStr);
+                var task = client.GetAccountsAsync();
+                task.Wait();
+                var result = task.Result;
+                bool success = result != null && result.data != null;
+                return new Dictionary<string, object>
                 {
-                    string responseBody = reader.ReadToEnd();
-                    var result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(responseBody);
-                    bool success = result != null && result.ContainsKey("data");
-                    return new Dictionary<string, object>
-                    {
-                        { "success", success },
-                        { "message", success ? "ดึง Chart of Accounts สำเร็จ" : "ไม่สามารถดึงข้อมูลได้" }
-                    };
-                }
+                    { "success", success },
+                    { "message", success ? "ดึง Chart of Accounts สำเร็จ" : "ไม่สามารถดึงข้อมูลได้" }
+                };
             }
-            catch (WebException wex)
+            catch (AggregateException aex)
             {
-                string detail = "";
-                if (wex.Response != null)
-                    using (var r = new StreamReader(wex.Response.GetResponseStream())) detail = r.ReadToEnd();
-                return new Dictionary<string, object> { { "success", false }, { "message", "API Error: " + (detail.Length > 0 ? detail : wex.Message) } };
+                var inner = aex.InnerException ?? aex;
+                if (inner is Integration.AccountingApiException apiEx)
+                {
+                    if (apiEx.StatusCode == 401)
+                        return new Dictionary<string, object> { { "success", false }, { "message", "API Key ไม่ถูกต้องหรือหมดอายุ (401) — กรุณาตรวจสอบ API Key" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"Nexaacc API Error ({apiEx.StatusCode}): {apiEx.ResponseBody}" } };
+                }
+                return new Dictionary<string, object> { { "success", false }, { "message", inner.Message } };
             }
             catch (Exception ex)
             {

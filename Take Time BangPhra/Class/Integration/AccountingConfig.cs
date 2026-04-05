@@ -39,15 +39,28 @@ namespace Take_Time_BangPhra.Integration
         public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty && Enabled;
 
         /// <summary>
-        /// Strip any /api/companies/{guid}... suffix from the base URL to prevent
+        /// Strip any trailing API path segments from the base URL to prevent
         /// path duplication when CompanyPath is appended by AccountingApiClient.
+        /// Handles: /api/companies/{guid}..., /api/, /api
         /// </summary>
         private static string SanitizeBaseUrl(string url)
         {
             if (string.IsNullOrEmpty(url)) return url;
+
+            // Strip /api/companies/... first (most specific)
             int idx = url.IndexOf("/api/companies", StringComparison.OrdinalIgnoreCase);
             if (idx > 0)
+            {
                 url = url.Substring(0, idx);
+            }
+            else
+            {
+                // Strip trailing /api to prevent /api/api/companies duplication
+                string trimmed = url.TrimEnd('/');
+                if (trimmed.EndsWith("/api", StringComparison.OrdinalIgnoreCase))
+                    url = trimmed.Substring(0, trimmed.Length - 4);
+            }
+
             return url.TrimEnd('/');
         }
 

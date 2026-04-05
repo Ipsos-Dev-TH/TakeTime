@@ -240,6 +240,70 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Connection Test
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Tests the connection to Nexaacc API by fetching the Chart of Accounts.
+        /// Returns a structured result with success/failure and a diagnostic message.
+        /// </summary>
+        public async Task<ConnectionTestResult> TestConnectionAsync()
+        {
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                return new ConnectionTestResult(false, "ยังไม่ได้ตั้งค่า Base URL");
+            if (string.IsNullOrEmpty(_config.ApiKey))
+                return new ConnectionTestResult(false, "ยังไม่ได้ตั้งค่า API Key — กรุณากรอก API Key ในหน้า Accounting Integration Settings");
+            if (_config.CompanyId == Guid.Empty)
+                return new ConnectionTestResult(false, "ยังไม่ได้ตั้งค่า Company ID");
+
+            // Build diagnostic info for error messages
+            string apiKeyPreview = _config.ApiKey.Length > 8
+                ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
+                : new string('*', _config.ApiKey.Length);
+            string targetUrl = $"{_config.BaseUrl}/api/companies/{_config.CompanyId}/accounting/accounts";
+
+            try
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var result = await GetAccountsAsync();
+                sw.Stop();
+                return new ConnectionTestResult(true, $"Nexaacc API เชื่อมต่อสำเร็จ — API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)");
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 401)
+            {
+                string detail = !string.IsNullOrEmpty(ex.ResponseBody) ? $" | Response: {ex.ResponseBody}" : "";
+                return new ConnectionTestResult(false,
+                    $"API Key ไม่ถูกต้องหรือหมดอายุ (401 Unauthorized)\n" +
+                    $"URL: {targetUrl}\n" +
+                    $"API Key: {apiKeyPreview} (ความยาว {_config.ApiKey.Length} ตัวอักษร)\n" +
+                    $"กรุณาตรวจสอบ: 1) API Key ถูกต้อง 2) Key ยังไม่หมดอายุ 3) IP ของ server อยู่ใน whitelist{detail}",
+                    ex.StatusCode, ex.ResponseBody);
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 403)
+            {
+                return new ConnectionTestResult(false,
+                    $"API Key ไม่มีสิทธิ์เข้าถึง Company นี้ (403 Forbidden) — ตรวจสอบว่า API Key ตรงกับ Company ID: {_config.CompanyId}",
+                    ex.StatusCode, ex.ResponseBody);
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 404)
+            {
+                return new ConnectionTestResult(false,
+                    $"ไม่พบ endpoint (404 Not Found)\nURL: {targetUrl}\nตรวจสอบ Base URL และ Company ID",
+                    ex.StatusCode, ex.ResponseBody);
+            }
+            catch (AccountingApiException ex)
+            {
+                return new ConnectionTestResult(false,
+                    $"Nexaacc API Error ({ex.StatusCode}): {ex.ResponseBody}",
+                    ex.StatusCode, ex.ResponseBody);
+            }
+            catch (Exception ex)
+            {
+                return new ConnectionTestResult(false, $"เชื่อมต่อไม่ได้: {ex.Message}\nURL: {targetUrl}");
+            }
+        }
+
+        // ──────────────────────────────────────────────
         // Logging
         // ──────────────────────────────────────────────
 
@@ -293,6 +357,25 @@ namespace Take_Time_BangPhra.Integration
             : base(message)
         {
             StatusCode = statusCode;
+            ResponseBody = responseBody;
+        }
+    }
+
+    /// <summary>
+    /// Result of a connection test to the Nexaacc API.
+    /// </summary>
+    public class ConnectionTestResult
+    {
+        public bool Success { get; }
+        public string Message { get; }
+        public int? HttpStatus { get; }
+        public string ResponseBody { get; }
+
+        public ConnectionTestResult(bool success, string message, int? httpStatus = null, string responseBody = null)
+        {
+            Success = success;
+            Message = message;
+            HttpStatus = httpStatus;
             ResponseBody = responseBody;
         }
     }

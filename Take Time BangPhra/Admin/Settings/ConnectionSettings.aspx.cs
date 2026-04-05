@@ -297,32 +297,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (!config.IsConfigured)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc (URL, API Key, Company ID, หรือยังไม่เปิดใช้งาน)" } };
 
-                // Test API Key by calling accounts endpoint
-                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
-                var request = (HttpWebRequest)WebRequest.Create(testUrl);
-                request.Method = "GET";
-                request.Headers.Add("X-Api-Key", config.ApiKey);
-                request.Timeout = 15000;
-
-                using (var response = (HttpWebResponse)request.GetResponse())
+                var client = new Integration.AccountingApiClient(config, connStr);
+                var task = client.TestConnectionAsync();
+                task.Wait();
+                var result = task.Result;
+                return new Dictionary<string, object>
                 {
-                    bool isOk = response.StatusCode == HttpStatusCode.OK;
-                    return new Dictionary<string, object>
-                    {
-                        { "success", isOk },
-                        { "message", isOk ? "Nexaacc API เชื่อมต่อสำเร็จ (API Key ใช้งานได้)" : "API Key ไม่ถูกต้อง" }
-                    };
-                }
+                    { "success", result.Success },
+                    { "message", result.Message }
+                };
             }
-            catch (WebException wex)
+            catch (AggregateException aex)
             {
-                string detail = "";
-                if (wex.Response != null)
-                {
-                    using (var reader = new StreamReader(wex.Response.GetResponseStream()))
-                        detail = reader.ReadToEnd();
-                }
-                return new Dictionary<string, object> { { "success", false }, { "message", "Nexaacc API Error: " + (detail.Length > 0 ? detail : wex.Message) } };
+                var inner = aex.InnerException ?? aex;
+                return new Dictionary<string, object> { { "success", false }, { "message", inner.Message } };
             }
             catch (Exception ex)
             {
