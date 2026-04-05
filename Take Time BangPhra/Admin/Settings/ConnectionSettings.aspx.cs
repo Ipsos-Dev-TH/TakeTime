@@ -23,17 +23,18 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return;
             }
 
-            // Handle AJAX requests
+            // Handle POST with JSON body first (e.g., saveAccounting)
+            if (Request.HttpMethod == "POST" && Request.ContentType?.Contains("application/json") == true)
+            {
+                HandlePostRequest();
+                return;
+            }
+
+            // Handle AJAX GET requests (e.g., test connections)
             string action = Request.QueryString["action"];
             if (!string.IsNullOrEmpty(action))
             {
                 HandleAjaxRequest(action);
-                return;
-            }
-
-            if (Request.HttpMethod == "POST" && Request.ContentType?.Contains("application/json") == true)
-            {
-                HandlePostRequest();
                 return;
             }
 
