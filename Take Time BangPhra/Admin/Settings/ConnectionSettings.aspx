@@ -116,7 +116,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('database')">
+                    <button type="button" class="btn-test" onclick="testConnection('database')">
                         <i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ
                     </button>
                 </div>
@@ -149,7 +149,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('line')">
+                    <button type="button" class="btn-test" onclick="testConnection('line')">
                         <i class="fas fa-paper-plane"></i> ทดสอบส่งข้อความ
                     </button>
                 </div>
@@ -169,7 +169,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('telegram')">
+                    <button type="button" class="btn-test" onclick="testConnection('telegram')">
                         <i class="fas fa-paper-plane"></i> ทดสอบส่งข้อความ
                     </button>
                 </div>
@@ -206,7 +206,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('email')">
+                    <button type="button" class="btn-test" onclick="testConnection('email')">
                         <i class="fas fa-paper-plane"></i> ทดสอบส่งอีเมล
                     </button>
                 </div>
@@ -244,10 +244,10 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-save" onclick="saveAccountingConfig()">
+                    <button type="button" class="btn-save" onclick="saveAccountingConfig()">
                         <i class="fas fa-save"></i> บันทึก
                     </button>
-                    <button class="btn-test" onclick="testConnection('accounting')">
+                    <button type="button" class="btn-test" onclick="testConnection('accounting')">
                         <i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ
                     </button>
                     <a href="<%= ResolveUrl("~/Admin/Settings/AccountingIntegration") %>" class="btn-test" style="text-decoration:none;">
@@ -270,7 +270,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('google')">
+                    <button type="button" class="btn-test" onclick="testConnection('google')">
                         <i class="fas fa-plug"></i> ทดสอบ API
                     </button>
                 </div>
@@ -290,7 +290,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button class="btn-test" onclick="testConnection('taxinvoice')">
+                    <button type="button" class="btn-test" onclick="testConnection('taxinvoice')">
                         <i class="fas fa-plug"></i> ทดสอบ API
                     </button>
                 </div>
@@ -496,6 +496,8 @@
                     el.className = 'test-result success';
                     el.innerHTML = '<i class="fas fa-check-circle"></i> ' + result.message;
                     setStatus('accountingStatus', result.isConfigured ? 'connected' : 'not-configured');
+                    // Reload page after short delay to show saved data
+                    setTimeout(function() { window.location.reload(); }, 1200);
                 } else {
                     el.className = 'test-result error';
                     el.innerHTML = '<i class="fas fa-times-circle"></i> ' + result.message;

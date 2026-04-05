@@ -102,9 +102,9 @@
                     <input type="text" id="cfgCompanyId" placeholder="00000000-0000-0000-0000-000000000000" />
                 </div>
                 <div class="btn-row">
-                    <button class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
-                    <button class="btn-primary" onclick="testFetchAccounts()"><i class="fas fa-list"></i> ดึง Chart of Accounts</button>
+                    <button type="button" class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
+                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
+                    <button type="button" class="btn-primary" onclick="testFetchAccounts()"><i class="fas fa-list"></i> ดึง Chart of Accounts</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
             </div>
@@ -134,8 +134,8 @@
                     <input type="number" id="cfgTimeout" value="30" min="5" max="120" />
                 </div>
                 <div class="btn-row">
-                    <button class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
+                    <button type="button" class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
+                    <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
                 </div>
                 <div class="test-result" id="syncTestResult"></div>
             </div>
@@ -243,8 +243,8 @@
             </div>
 
             <div class="btn-row" style="margin-bottom:15px;">
-                <button class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
-                <button class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
+                <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
+                <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
             </div>
 
             <div style="overflow-x:auto;">
@@ -416,6 +416,9 @@
             .then(function(result) {
                 el.className = 'test-result ' + (result.success ? 'success' : 'error');
                 el.innerHTML = (result.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + result.message;
+                if (result.success) {
+                    setTimeout(function() { window.location.reload(); }, 1200);
+                }
             })
             .catch(function(err) {
                 el.className = 'test-result error';
