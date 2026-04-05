@@ -390,15 +390,20 @@
             el.className = 'test-result loading';
             el.textContent = 'กำลังดำเนินการ...';
 
-            fetch(pageUrl + '?action=' + action + '&_=' + Date.now())
-                .then(function(r) { return r.json(); })
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+
+            fetch(pageUrl + '?action=' + action + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
                     el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
                 })
                 .catch(function(err) {
+                    clearTimeout(timeoutId);
                     el.className = 'test-result error';
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 60 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
                 });
         }
 

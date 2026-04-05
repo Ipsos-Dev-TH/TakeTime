@@ -97,7 +97,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (attempt > 0)
                 {
-                    await Task.Delay(RetryDelaysMs[Math.Min(attempt - 1, RetryDelaysMs.Length - 1)]);
+                    await Task.Delay(RetryDelaysMs[Math.Min(attempt - 1, RetryDelaysMs.Length - 1)]).ConfigureAwait(false);
                 }
 
                 try
@@ -111,9 +111,9 @@ namespace Take_Time_BangPhra.Integration
                     }
 
                     var startTime = DateTime.Now;
-                    var response = await _httpClient.SendAsync(request);
+                    var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
                     var durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
-                    var responseBody = await response.Content.ReadAsStringAsync();
+                    var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                     // Log the API call
                     LogApiCall(method.Method, path, jsonBody, responseBody, (int)response.StatusCode, response.IsSuccessStatusCode, durationMs);
@@ -265,7 +265,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var result = await GetAccountsAsync();
+                var result = await GetAccountsAsync().ConfigureAwait(false);
                 sw.Stop();
                 return new ConnectionTestResult(true, $"Nexaacc API เชื่อมต่อสำเร็จ — API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)");
             }

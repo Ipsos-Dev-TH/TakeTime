@@ -169,9 +169,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 var client = new Integration.AccountingApiClient(new Integration.AccountingConfig(ConnStr), ConnStr);
-                var task = client.TestConnectionAsync();
-                task.Wait();
-                var result = task.Result;
+                var result = System.Threading.Tasks.Task.Run(() => client.TestConnectionAsync()).Result;
                 return new Dictionary<string, object>
                 {
                     { "success", result.Success },
@@ -198,9 +196,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน (Base URL, API Key, Company ID)" } };
 
                 var client = new Integration.AccountingApiClient(config, ConnStr);
-                var task = client.GetAccountsAsync();
-                task.Wait();
-                var result = task.Result;
+                var result = System.Threading.Tasks.Task.Run(() => client.GetAccountsAsync()).Result;
                 bool success = result != null && result.data != null;
                 return new Dictionary<string, object>
                 {
@@ -230,9 +226,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 var sync = new Integration.AccountingSyncService(ConnStr);
-                var task = sync.ProcessQueueAsync(50);
-                task.Wait();
-                int processed = task.Result;
+                int processed = System.Threading.Tasks.Task.Run(() => sync.ProcessQueueAsync(50)).Result;
 
                 return new Dictionary<string, object>
                 {
