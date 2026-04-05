@@ -42,7 +42,17 @@ namespace Take_Time_BangPhra.Admin
                 Response.Write("{\"error\":\"" + EscapeJson(ex.Message) + "\"}");
             }
 
-            Response.Flush();
+            try
+            {
+                if (Response.IsClientConnected)
+                {
+                    Response.Flush();
+                }
+            }
+            catch (HttpException)
+            {
+                // Client disconnected before flush completed (0x800704CD) - safe to ignore
+            }
             HttpContext.Current.ApplicationInstance.CompleteRequest();
         }
 
