@@ -44,7 +44,7 @@ namespace Take_Time_BangPhra
             try
             {
                 var config = new AccountingConfig();
-                if (!config.IsConfigured) return;
+                if (!config.IsReadyToSync) return;
 
                 int intervalMs = config.SyncIntervalSeconds * 1000;
                 if (intervalMs < 10000) intervalMs = 30000; // minimum 10 seconds

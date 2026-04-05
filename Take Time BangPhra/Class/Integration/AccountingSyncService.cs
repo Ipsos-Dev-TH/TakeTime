@@ -400,7 +400,7 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public async Task<int> ProcessQueueAsync(int batchSize = 20)
         {
-            if (!_config.IsConfigured) return 0;
+            if (!_config.IsReadyToSync) return 0;
 
             DataTable pending = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT TOP (@batchSize) * FROM Accounting_Sync_Queue

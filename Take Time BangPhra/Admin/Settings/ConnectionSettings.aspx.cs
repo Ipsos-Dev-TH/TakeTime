@@ -295,7 +295,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var config = new Integration.AccountingConfig(connStr);
                 if (!config.IsConfigured)
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc (URL, API Key, Company ID, หรือยังไม่เปิดใช้งาน)" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน (Base URL, API Key, Company ID)" } };
 
                 var client = new Integration.AccountingApiClient(config, connStr);
                 var result = System.Threading.Tasks.Task.Run(() => client.TestConnectionAsync()).Result;
