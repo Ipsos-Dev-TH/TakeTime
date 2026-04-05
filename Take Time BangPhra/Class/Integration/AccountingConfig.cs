@@ -28,7 +28,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // Core settings
-        public string BaseUrl => GetConfig("Nexaacc_BaseUrl", "");
+        public string BaseUrl => SanitizeBaseUrl(GetConfig("Nexaacc_BaseUrl", ""));
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
         public Guid CompanyId => Guid.TryParse(GetConfig("Nexaacc_CompanyId", ""), out var id) ? id : Guid.Empty;
         public bool Enabled => GetConfig("Nexaacc_Enabled", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -37,6 +37,19 @@ namespace Take_Time_BangPhra.Integration
         public int TimeoutSeconds => int.TryParse(GetConfig("Nexaacc_TimeoutSec", "30"), out var v) ? v : 30;
 
         public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty && Enabled;
+
+        /// <summary>
+        /// Strip any /api/companies/{guid}... suffix from the base URL to prevent
+        /// path duplication when CompanyPath is appended by AccountingApiClient.
+        /// </summary>
+        private static string SanitizeBaseUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+            int idx = url.IndexOf("/api/companies", StringComparison.OrdinalIgnoreCase);
+            if (idx > 0)
+                url = url.Substring(0, idx);
+            return url.TrimEnd('/');
+        }
 
         private string GetConfig(string key, string defaultValue)
         {
