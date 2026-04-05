@@ -79,7 +79,8 @@ namespace Take_Time_BangPhra.Integration
         public string AccountCode { get; set; }
         public string AccountName { get; set; }
         public string AccountNameEn { get; set; }
-        public int AccountType { get; set; }  // 1=Asset, 2=Liability, 3=Equity, 4=Revenue, 5=Expense
+        public string AccountType { get; set; }      // "Asset", "Liability", "Equity", "Revenue", "Expense"
+        public int AccountTypeValue { get; set; }     // 1=Asset, 2=Liability, 3=Equity, 4=Revenue, 5=Expense
         public Guid? ParentAccountId { get; set; }
         public int Level { get; set; }
         public bool IsActive { get; set; }
@@ -280,11 +281,19 @@ namespace Take_Time_BangPhra.Integration
 
     public static class NexaaccAccountType
     {
+        // Integer values (ใช้เทียบกับ AccountTypeValue)
         public const int Asset = 1;
         public const int Liability = 2;
         public const int Equity = 3;
         public const int Revenue = 4;
         public const int Expense = 5;
+
+        // String values (ใช้เทียบกับ AccountType)
+        public const string AssetName = "Asset";
+        public const string LiabilityName = "Liability";
+        public const string EquityName = "Equity";
+        public const string RevenueName = "Revenue";
+        public const string ExpenseName = "Expense";
     }
 
     /// <summary>
