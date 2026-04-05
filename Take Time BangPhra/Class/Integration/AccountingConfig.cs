@@ -29,15 +29,14 @@ namespace Take_Time_BangPhra.Integration
 
         // Core settings
         public string BaseUrl => GetConfig("Nexaacc_BaseUrl", "");
-        public string Email => GetConfig("Nexaacc_Email", "");
-        public string Password => _code.Derypt(GetConfig("Nexaacc_Password_Encrypted", ""));
+        public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
         public Guid CompanyId => Guid.TryParse(GetConfig("Nexaacc_CompanyId", ""), out var id) ? id : Guid.Empty;
         public bool Enabled => GetConfig("Nexaacc_Enabled", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         public int SyncIntervalSeconds => int.TryParse(GetConfig("Nexaacc_SyncInterval_Sec", "30"), out var v) ? v : 30;
         public int MaxRetries => int.TryParse(GetConfig("Nexaacc_MaxRetries", "5"), out var v) ? v : 5;
         public int TimeoutSeconds => int.TryParse(GetConfig("Nexaacc_TimeoutSec", "30"), out var v) ? v : 30;
 
-        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && CompanyId != Guid.Empty && Enabled;
+        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty && Enabled;
 
         private string GetConfig(string key, string defaultValue)
         {

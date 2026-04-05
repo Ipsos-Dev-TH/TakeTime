@@ -103,7 +103,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var data = new Dictionary<string, object>
                 {
                     { "baseUrl", config.BaseUrl },
-                    { "email", config.Email },
+                    { "hasApiKey", !string.IsNullOrEmpty(config.ApiKey) },
                     { "companyId", config.CompanyId != System.Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
                     { "isConfigured", config.IsConfigured }
@@ -294,27 +294,22 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var config = new Integration.AccountingConfig(connStr);
                 if (!config.IsConfigured)
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc (URL, Company ID, หรือยังไม่เปิดใช้งาน)" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc (URL, API Key, Company ID, หรือยังไม่เปิดใช้งาน)" } };
 
-                var request = (HttpWebRequest)WebRequest.Create(config.BaseUrl.TrimEnd('/') + "/api/auth/login");
-                request.Method = "POST";
-                request.ContentType = "application/json";
+                // Test API Key by calling accounts endpoint
+                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
+                var request = (HttpWebRequest)WebRequest.Create(testUrl);
+                request.Method = "GET";
+                request.Headers.Add("X-Api-Key", config.ApiKey);
                 request.Timeout = 15000;
 
-                var loginData = new JavaScriptSerializer().Serialize(new { email = config.Email, password = config.Password });
-                byte[] data = Encoding.UTF8.GetBytes(loginData);
-                request.ContentLength = data.Length;
-                using (var stream = request.GetRequestStream()) stream.Write(data, 0, data.Length);
-
                 using (var response = (HttpWebResponse)request.GetResponse())
-                using (var reader = new StreamReader(response.GetResponseStream()))
                 {
-                    string body = reader.ReadToEnd();
-                    bool hasToken = body.Contains("token");
+                    bool isOk = response.StatusCode == HttpStatusCode.OK;
                     return new Dictionary<string, object>
                     {
-                        { "success", hasToken },
-                        { "message", hasToken ? "Nexaacc API เชื่อมต่อและ Login สำเร็จ" : "Login ไม่สำเร็จ" }
+                        { "success", isOk },
+                        { "message", isOk ? "Nexaacc API เชื่อมต่อสำเร็จ (API Key ใช้งานได้)" : "API Key ไม่ถูกต้อง" }
                     };
                 }
             }
@@ -362,10 +357,9 @@ namespace Take_Time_BangPhra.Admin.Settings
 
                 var config = new Integration.AccountingConfig(connStr);
                 if (data.ContainsKey("baseUrl")) config.SetConfig("Nexaacc_BaseUrl", data["baseUrl"]?.ToString() ?? "");
-                if (data.ContainsKey("email")) config.SetConfig("Nexaacc_Email", data["email"]?.ToString() ?? "");
-                if (data.ContainsKey("password") && !string.IsNullOrEmpty(data["password"]?.ToString()))
+                if (data.ContainsKey("apiKey") && !string.IsNullOrEmpty(data["apiKey"]?.ToString()))
                 {
-                    config.SetConfig("Nexaacc_Password_Encrypted", _code.Crypt(data["password"].ToString()));
+                    config.SetConfig("Nexaacc_ApiKey_Encrypted", _code.Crypt(data["apiKey"].ToString()));
                 }
                 if (data.ContainsKey("companyId")) config.SetConfig("Nexaacc_CompanyId", data["companyId"]?.ToString() ?? "");
                 if (data.ContainsKey("enabled")) config.SetConfig("Nexaacc_Enabled", Convert.ToBoolean(data["enabled"]) ? "true" : "false");
