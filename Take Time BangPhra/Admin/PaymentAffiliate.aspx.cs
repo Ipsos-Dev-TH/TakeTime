@@ -281,7 +281,7 @@ namespace Take_Time_BangPhra.Admin
                         "UPDATE [dbo].[Affiliate_Reservation] SET [Status] = 'TRANSFERED' WHERE ID = @AffResID",
                         affResUpdateParams);
                 }
-                string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
+                string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);

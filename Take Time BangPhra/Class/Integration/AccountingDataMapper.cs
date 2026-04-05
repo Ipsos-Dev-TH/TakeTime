@@ -55,7 +55,7 @@ namespace Take_Time_BangPhra.Integration
 
             _accountMappingCache = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
-            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+            DataTable dt = _Code.DatabaseQuerySafe(_connectionString,
                 "SELECT TakeTime_Code, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1 AND Nexaacc_AccountId IS NOT NULL",
                 null);
 
@@ -63,10 +63,10 @@ namespace Take_Time_BangPhra.Integration
             {
                 foreach (DataRow row in dt.Rows)
                 {
-                    string Code = row["TakeTime_Code"]?.ToString();
-                    if (!string.IsNullOrEmpty(code) && row["Nexaacc_AccountId"] != DBNull.Value)
+                    string ttCode = row["TakeTime_Code"]?.ToString();
+                    if (!string.IsNullOrEmpty(ttCode) && row["Nexaacc_AccountId"] != DBNull.Value)
                     {
-                        _accountMappingCache[code] = (Guid)row["Nexaacc_AccountId"];
+                        _accountMappingCache[ttCode] = (Guid)row["Nexaacc_AccountId"];
                     }
                 }
             }
@@ -125,7 +125,7 @@ namespace Take_Time_BangPhra.Integration
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
 
-            var Lines = new List<JournalEntryLineRequest>
+            var lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {
@@ -275,7 +275,7 @@ namespace Take_Time_BangPhra.Integration
             var expenseAccountId = GetExpenseCategoryAccountId(expenseCategory);
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
 
-            var Lines = new List<JournalEntryLineRequest>();
+            var lines = new List<JournalEntryLineRequest>();
 
             if (hasInputVat)
             {
@@ -361,9 +361,9 @@ namespace Take_Time_BangPhra.Integration
             var roomArAccountId = GetAccountId("ROOM_AR");
             var productRevenueAccountId = GetAccountId("PRODUCT_REVENUE");
             var cogsAccountId = GetAccountId("COGS");
-            var InventoryAccountId = GetAccountId("INVENTORY");
+            var inventoryAccountId = GetAccountId("INVENTORY");
 
-            var Lines = new List<JournalEntryLineRequest>
+            var lines = new List<JournalEntryLineRequest>
             {
                 // Revenue side
                 new JournalEntryLineRequest
@@ -421,7 +421,7 @@ namespace Take_Time_BangPhra.Integration
             int productId, string productName, decimal totalCost, DateTime receiveDate,
             string supplierName, string paymentMethod = null, bool hasInputVat = false)
         {
-            var InventoryAccountId = GetAccountId("INVENTORY");
+            var inventoryAccountId = GetAccountId("INVENTORY");
             bool isCashPurchase = !string.IsNullOrEmpty(paymentMethod);
 
             // บัญชีด้านเครดิต: ซื้อสด = Cash/Bank, ซื้อเชื่อ = AP
@@ -433,7 +433,7 @@ namespace Take_Time_BangPhra.Integration
                 ? $"จ่ายค่าสินค้า - {paymentMethod}"
                 : $"เจ้าหนี้การค้า - {supplierName}";
 
-            var Lines = new List<JournalEntryLineRequest>();
+            var lines = new List<JournalEntryLineRequest>();
 
             if (hasInputVat)
             {
@@ -538,7 +538,7 @@ namespace Take_Time_BangPhra.Integration
                         Description = $"ใบลดหนี้ - {reason}",
                         Quantity = 1,
                         UnitPrice = totalAmount - vatAmount,
-                        VatRate = vatAmount > 0 ? 7 : (decimal?)null
+                        VatRate = vatAmount > 0 ? 7m : 0m
                     }
                 }
             };
@@ -619,7 +619,7 @@ namespace Take_Time_BangPhra.Integration
             var salaryAccountId = GetAccountId("SALARY_EXPENSE");
             var cashAccountId = GetAccountId("CASH");
 
-            var Lines = new List<JournalEntryLineRequest>();
+            var lines = new List<JournalEntryLineRequest>();
 
             // DR: เงินเดือนและค่าแรง (gross)
             lines.Add(new JournalEntryLineRequest
@@ -769,7 +769,7 @@ namespace Take_Time_BangPhra.Integration
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
             var productRevenueId = GetAccountId("PRODUCT_REVENUE");
 
-            var Lines = new List<JournalEntryLineRequest>
+            var lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {
@@ -829,7 +829,7 @@ namespace Take_Time_BangPhra.Integration
             var roomArId = GetAccountId("ROOM_AR");
             var roomRevenueId = GetAccountId("ROOM_REVENUE");
 
-            var Lines = new List<JournalEntryLineRequest>();
+            var lines = new List<JournalEntryLineRequest>();
 
             if (priceDifference > 0)
             {
@@ -890,7 +890,7 @@ namespace Take_Time_BangPhra.Integration
             var advanceDepositId = GetAccountId("ADVANCE_DEPOSIT");
             var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
 
-            var Lines = new List<JournalEntryLineRequest>
+            var lines = new List<JournalEntryLineRequest>
             {
                 // Debit: Clear advance deposit for total original amount
                 new JournalEntryLineRequest
@@ -945,7 +945,7 @@ namespace Take_Time_BangPhra.Integration
             var roomArId = GetAccountId("ROOM_AR");
             Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
 
-            var Lines = new List<JournalEntryLineRequest>
+            var lines = new List<JournalEntryLineRequest>
             {
                 new JournalEntryLineRequest
                 {

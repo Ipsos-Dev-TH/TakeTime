@@ -27,7 +27,7 @@ namespace ECertificateAPI
             PdfAWriter writer = this.CreatePDFAInstance(pdfAdocument, reader, stream);
 
             // Create Output Intents
-            ICC_Profile icc = ICC_Profile.GetInstance(ConfigurationSettings.AppSettings["BaseFolderPath"].ToString()+"\\Resources\\sRGB Color Space Profile.icm");
+            ICC_Profile icc = ICC_Profile.GetInstance(ConfigurationManager.AppSettings["BaseFolderPath"].ToString()+"\\Resources\\sRGB Color Space Profile.icm");
             writer.SetOutputIntents("sRGB IEC61966-2.1", "", "http://www.color.org", "sRGB IEC61966-2.1", icc);
 
             PdfArray array = new PdfArray();
@@ -40,7 +40,7 @@ namespace ECertificateAPI
             array.Add(contentSpec.Reference);
 
             //// 2 add Electronic Document XMP Metadata
-            string stringExchangeXMP = File.ReadAllText(ConfigurationSettings.AppSettings["BaseFolderPath"].ToString()+"\\Resource\\EDocument_PDFAExtensionSchema.xml");
+            string stringExchangeXMP = File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString()+"\\Resource\\EDocument_PDFAExtensionSchema.xml");
             byte[] exchangeXMP = Encoding.ASCII.GetBytes(stringExchangeXMP.Replace("@DocumentType", documentType));
             writer.XmpMetadata = exchangeXMP;
 
