@@ -2,6 +2,7 @@
 using System.Configuration;
 using System.Data;
 using System.Web.UI;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra
 {
@@ -367,6 +368,48 @@ namespace Take_Time_BangPhra
 
                 if (result.Success)
                 {
+                    // ✅ Enqueue checkout to accounting sync (async, non-blocking)
+                    try
+                    {
+                        var syncService = new AccountingSyncService(connectionString);
+                        var reservationParams = new System.Collections.Generic.Dictionary<string, object>
+                        {
+                            { "@id", reservationId }
+                        };
+                        DataTable dtRes = codeInstance.DatabaseQuerySafe(connectionString,
+                            "SELECT Deposit, Customer_MobilePhone FROM Reservation WHERE ID = @id",
+                            reservationParams);
+                        if (dtRes.Rows.Count > 0)
+                        {
+                            decimal depositAmount = Convert.ToDecimal(dtRes.Rows[0]["Deposit"]);
+                            string customerPhone = dtRes.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
+
+                            // Get customer name
+                            string customerName = customerPhone;
+                            try
+                            {
+                                var custParams = new System.Collections.Generic.Dictionary<string, object>
+                                {
+                                    { "@phone", customerPhone }
+                                };
+                                DataTable dtCust = codeInstance.DatabaseQuerySafe(connectionString,
+                                    "SELECT NickName FROM Customer WHERE MobilePhone = @phone",
+                                    custParams);
+                                if (dtCust.Rows.Count > 0)
+                                    customerName = dtCust.Rows[0]["NickName"]?.ToString() ?? customerPhone;
+                            }
+                            catch { }
+
+                            syncService.EnqueueCheckout(reservationId, depositAmount, customerName, DateTime.Now);
+                        }
+                    }
+                    catch (Exception syncEx)
+                    {
+                        codeInstance.Logs(connectionString, "AccountingSync Checkout Error",
+                            $"Reservation: {reservationId}, Error: {syncEx.Message}",
+                            Session["User"]?.ToString());
+                    }
+
                     ShowSuccess($"เช็คเอาท์สำเร็จ!<br/>" +
                                $"รหัสการจอง: {reservationId}<br/>" +
                                $"เวลาเช็คเอาท์: {DateTime.Now:dd/MM/yyyy HH:mm}<br/>" +

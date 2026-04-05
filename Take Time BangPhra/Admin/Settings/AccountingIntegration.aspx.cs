@@ -23,16 +23,16 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return;
             }
 
+            if (Request.HttpMethod == "POST" && Request.ContentType?.Contains("application/json") == true)
+            {
+                HandlePost();
+                return;
+            }
+
             string action = Request.QueryString["action"];
             if (!string.IsNullOrEmpty(action))
             {
                 HandleAction(action);
-                return;
-            }
-
-            if (Request.HttpMethod == "POST" && Request.ContentType?.Contains("application/json") == true)
-            {
-                HandlePost();
                 return;
             }
 

@@ -19,7 +19,7 @@ namespace Take_Time_BangPhra.Integration
 
         public AccountingConfig()
         {
-            _connectionString = ConfigurationManager.ConnectionStrings["aboraboraaborabora"].ConnectionString;
+            _connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         }
 
         public AccountingConfig(string connectionString)
