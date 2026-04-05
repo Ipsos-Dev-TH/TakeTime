@@ -298,9 +298,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc (URL, API Key, Company ID, หรือยังไม่เปิดใช้งาน)" } };
 
                 var client = new Integration.AccountingApiClient(config, connStr);
-                var task = client.TestConnectionAsync();
-                task.Wait();
-                var result = task.Result;
+                var result = System.Threading.Tasks.Task.Run(() => client.TestConnectionAsync()).Result;
                 return new Dictionary<string, object>
                 {
                     { "success", result.Success },
