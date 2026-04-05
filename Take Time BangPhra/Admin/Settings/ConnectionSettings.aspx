@@ -225,16 +225,10 @@
                     </div>
                 </div>
                 <div class="conn-item">
-                    <label>Email</label>
+                    <label>API Key</label>
                     <div class="field-row">
-                        <input type="text" id="nexaaccEmail" placeholder="user@company.com" />
-                    </div>
-                </div>
-                <div class="conn-item">
-                    <label>Password</label>
-                    <div class="field-row">
-                        <input type="password" id="nexaaccPassword" placeholder="API Password" />
-                        <button class="password-toggle" onclick="togglePassword('nexaaccPassword')"><i class="fas fa-eye"></i></button>
+                        <input type="password" id="nexaaccApiKey" placeholder="ใส่ API Key จากระบบ Nexaacc" />
+                        <button class="password-toggle" onclick="togglePassword('nexaaccApiKey')"><i class="fas fa-eye"></i></button>
                     </div>
                 </div>
                 <div class="conn-item">
@@ -401,9 +395,9 @@
                 try {
                     var acc = JSON.parse(accRaw);
                     document.getElementById('nexaaccUrl').value = acc.baseUrl || '';
-                    document.getElementById('nexaaccEmail').value = acc.email || '';
                     document.getElementById('nexaaccCompanyId').value = acc.companyId || '';
                     if (acc.enabled) document.getElementById('nexaaccEnabled').classList.add('active');
+                    if (acc.hasApiKey) document.getElementById('nexaaccApiKey').placeholder = '••••••••  (มี API Key แล้ว)';
                     setStatus('accountingStatus', acc.isConfigured ? 'connected' : 'not-configured');
                     updateSummary();
                 } catch (e) { }
@@ -485,8 +479,7 @@
         function saveAccountingConfig() {
             var data = {
                 baseUrl: document.getElementById('nexaaccUrl').value,
-                email: document.getElementById('nexaaccEmail').value,
-                password: document.getElementById('nexaaccPassword').value,
+                apiKey: document.getElementById('nexaaccApiKey').value,
                 companyId: document.getElementById('nexaaccCompanyId').value,
                 enabled: document.getElementById('nexaaccEnabled').classList.contains('active')
             };

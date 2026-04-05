@@ -30,8 +30,7 @@ IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Ne
 BEGIN
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description) VALUES
     ('Nexaacc_BaseUrl',          '',       'Base URL of Nexaacc Accounting API (e.g., https://accounting.example.com)'),
-    ('Nexaacc_Email',            '',       'Login email for Nexaacc API'),
-    ('Nexaacc_Password_Encrypted', '',     'Encrypted password (use Code.Crypt() to encrypt)'),
+    ('Nexaacc_ApiKey_Encrypted', '',       'Encrypted API Key for Nexaacc (use X-Api-Key header)'),
     ('Nexaacc_CompanyId',        '',       'Company GUID from Nexaacc system'),
     ('Nexaacc_Enabled',          'false',  'Enable/disable automatic sync (true/false)'),
     ('Nexaacc_SyncInterval_Sec', '30',     'Queue processing interval in seconds'),

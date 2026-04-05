@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Net.Http;
-using System.Net.Http.Headers;
+// X-Api-Key authentication - no Bearer token needed
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -10,8 +10,8 @@ using System.Web.Script.Serialization;
 namespace Take_Time_BangPhra.Integration
 {
     /// <summary>
-    /// HTTP client for Nexaacc Accounting API with JWT authentication,
-    /// automatic token refresh, and retry logic.
+    /// HTTP client for Nexaacc Accounting API with X-Api-Key authentication
+    /// and retry logic.
     /// </summary>
     public class AccountingApiClient
     {
@@ -21,10 +21,6 @@ namespace Take_Time_BangPhra.Integration
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
 
         private static HttpClient _httpClient;
-        private static string _accessToken;
-        private static string _refreshToken;
-        private static DateTime _tokenExpiry = DateTime.MinValue;
-        private static readonly object _tokenLock = new object();
 
         private const int MaxRetries = 3;
         private static readonly int[] RetryDelaysMs = { 1000, 3000, 9000 };
@@ -55,84 +51,13 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
-        // Authentication
+        // Authentication (X-Api-Key header)
         // ──────────────────────────────────────────────
 
-        private async Task EnsureAuthenticatedAsync()
+        private void EnsureApiKeyConfigured()
         {
-            if (!string.IsNullOrEmpty(_accessToken) && DateTime.Now < _tokenExpiry.AddMinutes(-2))
-                return;
-
-            // Try refresh first
-            if (!string.IsNullOrEmpty(_refreshToken))
-            {
-                try
-                {
-                    var refreshResult = await RefreshTokenAsync();
-                    if (refreshResult)
-                        return;
-                }
-                catch { }
-            }
-
-            // Full login
-            await LoginAsync();
-        }
-
-        private async Task LoginAsync()
-        {
-            var loginUrl = $"{_config.BaseUrl.TrimEnd('/')}/api/auth/login";
-            var request = new AuthLoginRequest
-            {
-                Email = _config.Email,
-                Password = _config.Password
-            };
-
-            var json = _serializer.Serialize(request);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync(loginUrl, content);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                throw new Exception($"Accounting API login failed: {response.StatusCode} - {errorBody}");
-            }
-
-            var responseBody = await response.Content.ReadAsStringAsync();
-            var authResponse = _serializer.Deserialize<ApiResponse<AuthLoginResponse>>(responseBody);
-
-            lock (_tokenLock)
-            {
-                _accessToken = authResponse.data.AccessToken;
-                _refreshToken = authResponse.data.RefreshToken;
-                _tokenExpiry = authResponse.data.ExpiresAt;
-            }
-
-            LogSync("AUTH", "Login", "Login successful", true);
-        }
-
-        private async Task<bool> RefreshTokenAsync()
-        {
-            var refreshUrl = $"{_config.BaseUrl.TrimEnd('/')}/api/auth/refresh";
-            var request = new AuthRefreshRequest { RefreshToken = _refreshToken };
-            var json = _serializer.Serialize(request);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync(refreshUrl, content);
-
-            if (!response.IsSuccessStatusCode)
-                return false;
-
-            var responseBody = await response.Content.ReadAsStringAsync();
-            var authResponse = _serializer.Deserialize<ApiResponse<AuthLoginResponse>>(responseBody);
-
-            lock (_tokenLock)
-            {
-                _accessToken = authResponse.data.AccessToken;
-                _refreshToken = authResponse.data.RefreshToken;
-                _tokenExpiry = authResponse.data.ExpiresAt;
-            }
-
-            return true;
+            if (string.IsNullOrEmpty(_config.ApiKey))
+                throw new Exception("Accounting API key is not configured. กรุณาตั้งค่า API Key ในหน้า Accounting Integration Settings");
         }
 
         // ──────────────────────────────────────────────
@@ -163,6 +88,8 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<T> ExecuteWithRetryAsync<T>(HttpMethod method, string path, string jsonBody)
         {
+            EnsureApiKeyConfigured();
+
             var url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
             Exception lastException = null;
 
@@ -175,10 +102,8 @@ namespace Take_Time_BangPhra.Integration
 
                 try
                 {
-                    await EnsureAuthenticatedAsync();
-
                     var request = new HttpRequestMessage(method, url);
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+                    request.Headers.Add("X-Api-Key", _config.ApiKey);
 
                     if (jsonBody != null)
                     {
@@ -193,16 +118,9 @@ namespace Take_Time_BangPhra.Integration
                     // Log the API call
                     LogApiCall(method.Method, path, jsonBody, responseBody, (int)response.StatusCode, response.IsSuccessStatusCode, durationMs);
 
-                    if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && attempt == 0)
-                    {
-                        // Token expired mid-flight, force re-login
-                        lock (_tokenLock) { _accessToken = null; _tokenExpiry = DateTime.MinValue; }
-                        continue;
-                    }
-
                     if (!response.IsSuccessStatusCode)
                     {
-                        // Don't retry 4xx errors (except 401 handled above)
+                        // Don't retry 4xx errors
                         if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
                         {
                             throw new AccountingApiException(

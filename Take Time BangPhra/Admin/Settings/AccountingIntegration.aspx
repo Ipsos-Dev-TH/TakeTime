@@ -93,12 +93,9 @@
                     <div class="help-text">URL ของ Nexaacc API Server</div>
                 </div>
                 <div class="config-item">
-                    <label>Email</label>
-                    <input type="text" id="cfgEmail" placeholder="user@company.com" />
-                </div>
-                <div class="config-item">
-                    <label>Password</label>
-                    <input type="password" id="cfgPassword" placeholder="API Password" />
+                    <label>API Key</label>
+                    <input type="password" id="cfgApiKey" placeholder="ใส่ API Key จากระบบ Nexaacc" />
+                    <div class="help-text">API Key สร้างได้จากหน้า Settings ของระบบ Nexaacc (ส่งผ่าน X-Api-Key header)</div>
                 </div>
                 <div class="config-item">
                     <label>Company ID (GUID)</label>
@@ -106,7 +103,7 @@
                 </div>
                 <div class="btn-row">
                     <button class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ Login</button>
+                    <button class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
                     <button class="btn-primary" onclick="testFetchAccounts()"><i class="fas fa-list"></i> ดึง Chart of Accounts</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
@@ -289,12 +286,15 @@
             try {
                 var cfg = JSON.parse(raw);
                 document.getElementById('cfgBaseUrl').value = cfg.baseUrl || '';
-                document.getElementById('cfgEmail').value = cfg.email || '';
                 document.getElementById('cfgCompanyId').value = cfg.companyId || '';
                 document.getElementById('cfgEnabled').value = cfg.enabled ? 'true' : 'false';
                 document.getElementById('cfgSyncInterval').value = cfg.syncInterval || 30;
                 document.getElementById('cfgMaxRetries').value = cfg.maxRetries || 5;
                 document.getElementById('cfgTimeout').value = cfg.timeout || 30;
+                // API Key จะไม่โหลดกลับมาแสดง เพื่อความปลอดภัย (เหมือน password)
+                if (cfg.hasApiKey) {
+                    document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                }
             } catch (e) { console.error(e); }
         }
 
@@ -302,8 +302,7 @@
             var data = {
                 action: 'saveApi',
                 baseUrl: document.getElementById('cfgBaseUrl').value,
-                email: document.getElementById('cfgEmail').value,
-                password: document.getElementById('cfgPassword').value,
+                apiKey: document.getElementById('cfgApiKey').value,
                 companyId: document.getElementById('cfgCompanyId').value
             };
             postAction(data, 'apiTestResult');

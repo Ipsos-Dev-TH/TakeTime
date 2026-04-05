@@ -6,7 +6,7 @@
 เพื่อยิงข้อมูลการจอง ใบสำคัญจ่าย การจัดการสินค้า และธุรกรรมบัญชีทั้งหมดอัตโนมัติผ่าน REST API
 
 **Source System:** TakeTime (ASP.NET Web Forms, .NET Framework, SQL Server)
-**Target System:** Nexaacc Accounting (ASP.NET Core 8.0, SQL Server, JWT Auth, REST API)
+**Target System:** Nexaacc Accounting (ASP.NET Core 8.0, SQL Server, X-Api-Key Auth, REST API)
 **Repository:** https://github.com/Wachira-d/Accounting
 
 ---
@@ -44,7 +44,7 @@
 ┌─────────────────────────────────────────────────────┐
 │              Nexaacc Accounting System                │
 │                                                       │
-│  POST /api/auth/login                          → JWT Token    │
+│  Header: X-Api-Key                             → API Key Auth │
 │  POST /api/companies/{id}/accounting/journals  → Journal Entry│
 │  POST /api/companies/{id}/accounting/accounts  → Chart of Acc │
 │  POST /api/companies/{id}/document             → Invoice/Rcpt │
@@ -203,8 +203,7 @@ Database/
 ### 5.2 Component Details
 
 #### AccountingApiClient.cs
-- JWT authentication (login + token refresh)
-- Token caching with auto-refresh before expiry
+- X-Api-Key header authentication (ตรงตาม Nexaacc ApiKeyMiddleware.cs)
 - HTTP methods: GET, POST, PUT with typed responses
 - Retry logic with exponential backoff (3 retries)
 - Error logging to System_Logs table
@@ -284,17 +283,21 @@ CREATE TABLE Accounting_Sync_Log (
 
 ---
 
-## 6. API Authentication Flow
+## 6. API Authentication Flow (X-Api-Key)
 
 ```
 1. TakeTime boots → Load config from Accounting_Integration_Config
-2. First API call → POST /api/auth/login { email, password }
-3. Receive JWT token (60 min expiry) + refresh token (7 days)
-4. Cache token in memory
-5. Before each call → Check token expiry
-6. If expired → POST /api/auth/refresh { refreshToken }
-7. If refresh fails → Re-login
+2. API Key ถูกเก็บเข้ารหัสใน DB (Nexaacc_ApiKey_Encrypted)
+3. ทุก API call → ส่ง header "X-Api-Key: {decrypted_key}"
+4. Nexaacc ApiKeyMiddleware ตรวจสอบ:
+   - Format validation (ความยาว >= 8 ตัวอักษร)
+   - Prefix lookup + BCrypt hash verification
+   - Expiry check
+   - IP whitelist (ถ้าตั้งค่าไว้)
+5. ไม่ต้อง login/refresh token — API Key ใช้ได้ตลอดจนกว่าจะหมดอายุ
 ```
+
+**หมายเหตุ:** API Key สร้างได้จากหน้า Settings ของระบบ Nexaacc
 
 ---
 
@@ -380,14 +383,13 @@ CREATE TABLE Accounting_Sync_Log (
 
 ```
 -- ใส่ค่าเหล่านี้ใน Accounting_Integration_Config
-Nexaacc_BaseUrl          = https://accounting.example.com
-Nexaacc_Email            = integration@taketime.com
-Nexaacc_Password         = (encrypted)
-Nexaacc_CompanyId        = (GUID from Nexaacc)
-Nexaacc_Enabled          = true
-Nexaacc_SyncInterval_Sec = 30
-Nexaacc_MaxRetries       = 5
-Nexaacc_TimeoutSec       = 30
+Nexaacc_BaseUrl            = https://accounting.example.com
+Nexaacc_ApiKey_Encrypted   = (encrypted API Key — สร้างจากหน้า Settings ของ Nexaacc)
+Nexaacc_CompanyId          = (GUID from Nexaacc)
+Nexaacc_Enabled            = true
+Nexaacc_SyncInterval_Sec   = 30
+Nexaacc_MaxRetries         = 5
+Nexaacc_TimeoutSec         = 30
 ```
 
 ---
@@ -417,9 +419,10 @@ WHERE Created_Date >= DATEADD(HOUR, -1, GETDATE());
 
 ## 12. Security Considerations
 
-1. **Credentials:** เก็บ password แบบเข้ารหัสใน DB (ใช้ Code.Crypt() ที่มีอยู่)
+1. **API Key:** เก็บ API Key แบบเข้ารหัสใน DB (ใช้ Code.Crypt() ที่มีอยู่)
 2. **Transport:** HTTPS only (TLS 1.2+)
-3. **Token:** เก็บ JWT token ใน memory เท่านั้น ไม่เก็บลง DB
+3. **Authentication:** ส่ง X-Api-Key header ทุก request (ไม่ต้องจัดการ JWT token)
 4. **Audit:** Log ทุก API call ใน Accounting_Sync_Log
 5. **Access:** จำกัดสิทธิ์ admin เท่านั้นที่เข้าถึง config
 6. **Rate Limiting:** Nexaacc มี limit 600 req/min → ควบคุมจาก queue processor
+7. **IP Whitelist:** Nexaacc รองรับ IP whitelist ต่อ API Key (ตั้งค่าได้จาก Nexaacc)

@@ -4,36 +4,9 @@ using System.Collections.Generic;
 namespace Take_Time_BangPhra.Integration
 {
     // ──────────────────────────────────────────────
-    // Authentication (ตรงตาม Nexaacc AuthDtos.cs)
+    // Authentication: ใช้ X-Api-Key header (ตรงตาม Nexaacc ApiKeyMiddleware.cs)
+    // ไม่ต้องมี login/refresh models — API Key ส่งผ่าน header ทุก request
     // ──────────────────────────────────────────────
-
-    public class AuthLoginRequest
-    {
-        public string Email { get; set; }
-        public string Password { get; set; }
-    }
-
-    public class AuthLoginResponse
-    {
-        public string AccessToken { get; set; }
-        public string RefreshToken { get; set; }
-        public DateTime ExpiresAt { get; set; }
-        public NexaaccUserInfo User { get; set; }
-    }
-
-    public class NexaaccUserInfo
-    {
-        public Guid Id { get; set; }
-        public string Email { get; set; }
-        public string FullName { get; set; }
-        public string Phone { get; set; }
-        public bool IsSystemAdmin { get; set; }
-    }
-
-    public class AuthRefreshRequest
-    {
-        public string RefreshToken { get; set; }
-    }
 
     // ──────────────────────────────────────────────
     // Generic API Response Wrapper (ตรงตาม Nexaacc Common.cs)

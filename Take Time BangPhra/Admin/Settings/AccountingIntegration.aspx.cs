@@ -51,7 +51,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var data = new Dictionary<string, object>
                 {
                     { "baseUrl", config.BaseUrl },
-                    { "email", config.Email },
+                    { "hasApiKey", !string.IsNullOrEmpty(config.ApiKey) },
                     { "companyId", config.CompanyId != Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
                     { "syncInterval", config.SyncIntervalSeconds },
@@ -136,9 +136,8 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var config = new Integration.AccountingConfig(ConnStr);
                 if (data.ContainsKey("baseUrl")) config.SetConfig("Nexaacc_BaseUrl", data["baseUrl"]?.ToString() ?? "");
-                if (data.ContainsKey("email")) config.SetConfig("Nexaacc_Email", data["email"]?.ToString() ?? "");
-                if (data.ContainsKey("password") && !string.IsNullOrEmpty(data["password"]?.ToString()))
-                    config.SetConfig("Nexaacc_Password_Encrypted", _code.Crypt(data["password"].ToString()));
+                if (data.ContainsKey("apiKey") && !string.IsNullOrEmpty(data["apiKey"]?.ToString()))
+                    config.SetConfig("Nexaacc_ApiKey_Encrypted", _code.Crypt(data["apiKey"].ToString()));
                 if (data.ContainsKey("companyId")) config.SetConfig("Nexaacc_CompanyId", data["companyId"]?.ToString() ?? "");
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "บันทึก API Config สำเร็จ" } };
@@ -174,16 +173,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var config = new Integration.AccountingConfig(ConnStr);
                 if (string.IsNullOrEmpty(config.BaseUrl))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Base URL" } };
+                if (string.IsNullOrEmpty(config.ApiKey))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า API Key" } };
 
-                var request = (HttpWebRequest)WebRequest.Create(config.BaseUrl.TrimEnd('/') + "/api/auth/login");
-                request.Method = "POST";
-                request.ContentType = "application/json";
+                // Test API Key by fetching Chart of Accounts
+                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
+                var request = (HttpWebRequest)WebRequest.Create(testUrl);
+                request.Method = "GET";
+                request.Headers.Add("X-Api-Key", config.ApiKey);
                 request.Timeout = 15000;
-
-                var loginPayload = new JavaScriptSerializer().Serialize(new { email = config.Email, password = config.Password });
-                byte[] bytes = Encoding.UTF8.GetBytes(loginPayload);
-                request.ContentLength = bytes.Length;
-                using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 using (var response = (HttpWebResponse)request.GetResponse())
@@ -191,11 +189,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     sw.Stop();
                     string responseBody = reader.ReadToEnd();
-                    bool hasToken = responseBody.Contains("token");
+                    bool isSuccess = response.StatusCode == HttpStatusCode.OK;
                     return new Dictionary<string, object>
                     {
-                        { "success", hasToken },
-                        { "message", hasToken ? $"Login สำเร็จ ({sw.ElapsedMilliseconds}ms)" : "Response ไม่มี token" }
+                        { "success", isSuccess },
+                        { "message", isSuccess ? $"API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)" : "API Key ไม่สามารถใช้งานได้" }
                     };
                 }
             }
@@ -218,13 +216,33 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var config = new Integration.AccountingConfig(ConnStr);
                 if (!config.IsConfigured)
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน (Base URL, API Key, Company ID)" } };
 
-                return new Dictionary<string, object>
+                var testUrl = config.BaseUrl.TrimEnd('/') + $"/api/companies/{config.CompanyId}/accounting/accounts";
+                var request = (HttpWebRequest)WebRequest.Create(testUrl);
+                request.Method = "GET";
+                request.Headers.Add("X-Api-Key", config.ApiKey);
+                request.Timeout = 15000;
+
+                using (var response = (HttpWebResponse)request.GetResponse())
+                using (var reader = new StreamReader(response.GetResponseStream()))
                 {
-                    { "success", true },
-                    { "message", "Chart of Accounts: ต้อง Login ก่อนจึงจะดึงข้อมูลได้ (ใช้ปุ่ม Process Queue เพื่อเริ่มระบบ)" }
-                };
+                    string responseBody = reader.ReadToEnd();
+                    var result = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(responseBody);
+                    bool success = result != null && result.ContainsKey("data");
+                    return new Dictionary<string, object>
+                    {
+                        { "success", success },
+                        { "message", success ? "ดึง Chart of Accounts สำเร็จ" : "ไม่สามารถดึงข้อมูลได้" }
+                    };
+                }
+            }
+            catch (WebException wex)
+            {
+                string detail = "";
+                if (wex.Response != null)
+                    using (var r = new StreamReader(wex.Response.GetResponseStream())) detail = r.ReadToEnd();
+                return new Dictionary<string, object> { { "success", false }, { "message", "API Error: " + (detail.Length > 0 ? detail : wex.Message) } };
             }
             catch (Exception ex)
             {
