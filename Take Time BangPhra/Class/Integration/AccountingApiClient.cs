@@ -256,6 +256,12 @@ namespace Take_Time_BangPhra.Integration
             if (_config.CompanyId == Guid.Empty)
                 return new ConnectionTestResult(false, "ยังไม่ได้ตั้งค่า Company ID");
 
+            // Build diagnostic info for error messages
+            string apiKeyPreview = _config.ApiKey.Length > 8
+                ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
+                : new string('*', _config.ApiKey.Length);
+            string targetUrl = $"{_config.BaseUrl}/api/companies/{_config.CompanyId}/accounting/accounts";
+
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -265,20 +271,24 @@ namespace Take_Time_BangPhra.Integration
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 401)
             {
+                string detail = !string.IsNullOrEmpty(ex.ResponseBody) ? $" | Response: {ex.ResponseBody}" : "";
                 return new ConnectionTestResult(false,
-                    "API Key ไม่ถูกต้องหรือหมดอายุ (401 Unauthorized) — กรุณาตรวจสอบ API Key ในหน้า Settings ของ Nexaacc แล้วกรอกใหม่",
+                    $"API Key ไม่ถูกต้องหรือหมดอายุ (401 Unauthorized)\n" +
+                    $"URL: {targetUrl}\n" +
+                    $"API Key: {apiKeyPreview} (ความยาว {_config.ApiKey.Length} ตัวอักษร)\n" +
+                    $"กรุณาตรวจสอบ: 1) API Key ถูกต้อง 2) Key ยังไม่หมดอายุ 3) IP ของ server อยู่ใน whitelist{detail}",
                     ex.StatusCode, ex.ResponseBody);
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 403)
             {
                 return new ConnectionTestResult(false,
-                    "API Key ไม่มีสิทธิ์เข้าถึง Company นี้ (403 Forbidden) — ตรวจสอบว่า API Key ตรงกับ Company ID",
+                    $"API Key ไม่มีสิทธิ์เข้าถึง Company นี้ (403 Forbidden) — ตรวจสอบว่า API Key ตรงกับ Company ID: {_config.CompanyId}",
                     ex.StatusCode, ex.ResponseBody);
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 404)
             {
                 return new ConnectionTestResult(false,
-                    $"ไม่พบ Company ID ใน Nexaacc (404 Not Found) — ตรวจสอบ Company ID: {_config.CompanyId}",
+                    $"ไม่พบ endpoint (404 Not Found)\nURL: {targetUrl}\nตรวจสอบ Base URL และ Company ID",
                     ex.StatusCode, ex.ResponseBody);
             }
             catch (AccountingApiException ex)
@@ -289,7 +299,7 @@ namespace Take_Time_BangPhra.Integration
             }
             catch (Exception ex)
             {
-                return new ConnectionTestResult(false, $"เชื่อมต่อไม่ได้: {ex.Message}");
+                return new ConnectionTestResult(false, $"เชื่อมต่อไม่ได้: {ex.Message}\nURL: {targetUrl}");
             }
         }
 
