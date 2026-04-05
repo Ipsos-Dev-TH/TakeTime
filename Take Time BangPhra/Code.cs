@@ -891,13 +891,13 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                string lineToken = ConfigurationSettings.AppSettings["linetoken"].ToString();
+                string lineToken = ConfigurationManager.AppSettings["linetoken"].ToString();
                 string message = Message;
                 int stickerPackageID = 0;
                 int stickerID = 0;
-                //string pictureUrl = ConfigurationSettings.AppSettings["prefixurl"].ToString() + HttpContext.Current.Request.Url.Authority + "/" + ConfigurationSettings.AppSettings["virtualprefixpicturepath"].ToString() + "/Images/CheckIn_Display/" + ID + ".jpg";
+                //string pictureUrl = ConfigurationManager.AppSettings["prefixurl"].ToString() + HttpContext.Current.Request.Url.Authority + "/" + ConfigurationManager.AppSettings["virtualprefixpicturepath"].ToString() + "/Images/CheckIn_Display/" + ID + ".jpg";
                 //string message = HttpUtility.UrlEncode(message, Encoding.UTF8);
-                var request = (HttpWebRequest)WebRequest.Create(ConfigurationSettings.AppSettings["lineurl"].ToString());
+                var request = (HttpWebRequest)WebRequest.Create(ConfigurationManager.AppSettings["lineurl"].ToString());
                 var postData = string.Format("message={0}", message.Replace("*", "x").Replace("\"", ""));
 
                 if (stickerPackageID > 0 && stickerID > 0)

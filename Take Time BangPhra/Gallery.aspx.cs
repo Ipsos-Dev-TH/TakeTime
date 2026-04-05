@@ -15,7 +15,7 @@ namespace Take_Time_BangPhra
         protected void Page_Load(object sender, EventArgs e)
         {
             string folder = Request.QueryString["folder"];
-            string imgfolder = ConfigurationSettings.AppSettings["ImagesFolderPath"].ToString();
+            string imgfolder = ConfigurationManager.AppSettings["ImagesFolderPath"].ToString();
             string[] files = Directory.GetFiles(Path.Combine(imgfolder, "Accommodation", folder));
 
             // Sort files alphabetically

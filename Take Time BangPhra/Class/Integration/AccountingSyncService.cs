@@ -521,8 +521,8 @@ namespace Take_Time_BangPhra.Integration
 
             var result = await _apiClient.CreateJournalAsync(journal);
             // Auto-post the journal entry
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessPaymentJournal(Dictionary<string, object> p)
@@ -536,8 +536,8 @@ namespace Take_Time_BangPhra.Integration
                 p.ContainsKey("hasVat") && Convert.ToBoolean(p["hasVat"]));
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessCheckoutJournal(Dictionary<string, object> p)
@@ -549,8 +549,8 @@ namespace Take_Time_BangPhra.Integration
                 DateTime.Parse(p["checkoutDate"]?.ToString()));
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessRefundJournal(Dictionary<string, object> p)
@@ -563,8 +563,8 @@ namespace Take_Time_BangPhra.Integration
                 p["customerName"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessVoucherJournal(Dictionary<string, object> p)
@@ -586,8 +586,8 @@ namespace Take_Time_BangPhra.Integration
                 whtAmount);
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessRoomChargeJournal(Dictionary<string, object> p)
@@ -600,8 +600,8 @@ namespace Take_Time_BangPhra.Integration
                 p["description"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessStockInJournal(Dictionary<string, object> p)
@@ -619,8 +619,8 @@ namespace Take_Time_BangPhra.Integration
                 hasInputVat);
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessProductSync(Dictionary<string, object> p)
@@ -635,7 +635,7 @@ namespace Take_Time_BangPhra.Integration
                 p["categoryName"]?.ToString());
 
             var result = await _apiClient.CreateProductAsync(product);
-            return result.data.id.ToString();
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessReceiptDocument(Dictionary<string, object> p)
@@ -650,8 +650,8 @@ namespace Take_Time_BangPhra.Integration
                 $"ใบเสร็จ - การจอง #{p["reservationId"]}");
 
             var result = await _apiClient.CreateDocumentAsync(document);
-            await _apiClient.ApproveDocumentAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.ApproveDocumentAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessCreditNoteDocument(Dictionary<string, object> p)
@@ -665,8 +665,8 @@ namespace Take_Time_BangPhra.Integration
                 p["reason"]?.ToString());
 
             var result = await _apiClient.CreateDocumentAsync(document);
-            await _apiClient.ApproveDocumentAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.ApproveDocumentAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessPayrollJournal(Dictionary<string, object> p)
@@ -684,8 +684,8 @@ namespace Take_Time_BangPhra.Integration
                 whtAmount);
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessCancelNoRefundJournal(Dictionary<string, object> p)
@@ -697,8 +697,8 @@ namespace Take_Time_BangPhra.Integration
                 DateTime.Parse(p["cancelDate"]?.ToString()));
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
@@ -712,8 +712,8 @@ namespace Take_Time_BangPhra.Integration
                 p["description"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessPostponePriceDiffJournal(Dictionary<string, object> p)
@@ -725,8 +725,8 @@ namespace Take_Time_BangPhra.Integration
                 p["customerName"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessPartialRefundJournal(Dictionary<string, object> p)
@@ -741,8 +741,8 @@ namespace Take_Time_BangPhra.Integration
                 p["reason"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessDamageChargeJournal(Dictionary<string, object> p)
@@ -756,8 +756,8 @@ namespace Take_Time_BangPhra.Integration
                 p["description"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.id);
-            return result.data.id.ToString();
+            await _apiClient.PostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
         }
 
         // ──────────────────────────────────────────────

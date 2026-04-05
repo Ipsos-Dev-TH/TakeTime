@@ -154,7 +154,7 @@ namespace Take_Time_BangPhra.Account.Report
                     DropDownList1.SelectedIndex = DropDownList1.Items.IndexOf(DropDownList1.Items.FindByValue(dtVendorSelected.Rows[0]["ID"].ToString()));
                     DropDownList1.DataBind();
 
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                     string paymentPath = path + "\\" + docdate.Year + "\\" + docdate.Month;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(paymentPath))
@@ -458,7 +458,7 @@ namespace Take_Time_BangPhra.Account.Report
                         "VALUES (@PaymentID,@Number,@Detail,@Amount)",
                         detailInsertParams);
                 }
-                string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
+                string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -878,7 +878,7 @@ namespace Take_Time_BangPhra.Account.Report
                 string searchPattern = fileName.ToString(); // filename ที่ถูก strip แล้ว (เช่น "ใบเสร็จ.pdf")
 
                 // Get payment folder path
-                string basePath = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"]?.ToString();
+                string basePath = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"]?.ToString();
                 if (string.IsNullOrEmpty(basePath))
                     return "#";
 

@@ -2729,7 +2729,7 @@ namespace Take_Time_BangPhra
 👨‍💼 แก้ไขโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                                    var bot = new TelegramBot2(ConfigurationSettings.AppSettings["TelegramTokenTakeTime"].ToString());
+                                                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
                                                     await bot.SendMessageAsync("-4969611371", message);
                                                 }
                                             }
@@ -3693,7 +3693,7 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 ลงจองโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                            var bot = new TelegramBot2(ConfigurationSettings.AppSettings["TelegramTokenTakeTime"].ToString());
+                                            var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
                                             await bot.SendMessageAsync("-4969611371", message);
 
                                             // ✅ Reload page to show uploaded slip image (don't redirect to Confirmed yet)
@@ -3881,13 +3881,13 @@ namespace Take_Time_BangPhra
         //{
         //    try
         //    {
-        //        string lineToken = ConfigurationSettings.AppSettings["linetoken"].ToString();
+        //        string lineToken = ConfigurationManager.AppSettings["linetoken"].ToString();
         //        string message = Message;
         //        int stickerPackageID = 0;
         //        int stickerID = 0;
-        //        //string pictureUrl = ConfigurationSettings.AppSettings["prefixurl"].ToString() + HttpContext.Current.Request.Url.Authority + "/" + ConfigurationSettings.AppSettings["virtualprefixpicturepath"].ToString() + "/Images/CheckIn_Display/" + ID + ".jpg";
+        //        //string pictureUrl = ConfigurationManager.AppSettings["prefixurl"].ToString() + HttpContext.Current.Request.Url.Authority + "/" + ConfigurationManager.AppSettings["virtualprefixpicturepath"].ToString() + "/Images/CheckIn_Display/" + ID + ".jpg";
         //        //string message = HttpUtility.UrlEncode(message, Encoding.UTF8);
-        //        var request = (HttpWebRequest)WebRequest.Create(ConfigurationSettings.AppSettings["lineurl"].ToString());
+        //        var request = (HttpWebRequest)WebRequest.Create(ConfigurationManager.AppSettings["lineurl"].ToString());
         //        var postData = string.Format("message={0}", message.Replace("*", "x").Replace("\"", ""));
 
         //        if (stickerPackageID > 0 && stickerID > 0)
@@ -4556,7 +4556,7 @@ namespace Take_Time_BangPhra
                         receiptParams);
 
                     string uid = dtReceipt.Rows[0]["UID"].ToString();
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
                     string pdfpath = "";
                     if (File.Exists(path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf"))
                     {
@@ -4611,7 +4611,7 @@ namespace Take_Time_BangPhra
                     string subject = "[" + docCreateThaiDate + "][INV][" + dtReceipt.Rows[0]["ID"].ToString() + "]";
                     string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
-                    SendEmail(ConfigurationSettings.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationSettings.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationSettings.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationSettings.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationSettings.AppSettings["Email_From"].ToString(), ConfigurationSettings.AppSettings["Email_Password_From"].ToString(), TextBox13.Text, ConfigurationSettings.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                    SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox13.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
                 }
 
                 // 🏨 Mark product charges as paid
@@ -4872,7 +4872,7 @@ namespace Take_Time_BangPhra
         }
         public void createReport(string DocNumber,string status,DateTime docDate)
         {
-            string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
+            string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
             try
             {
                 System.IO.Directory.CreateDirectory(path+"\\"+docDate.Year.ToString());
@@ -5133,7 +5133,7 @@ namespace Take_Time_BangPhra
                 {
                     uid = dtReceipt.Rows[0]["UID"].ToString();
                     string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ ".xml";
-                    string xmlString = System.IO.File.ReadAllText(ConfigurationSettings.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
+                    string xmlString = System.IO.File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
                     xmlString = xmlString.Replace("*invoice_id", DocNumber);
                     xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                     xmlString = xmlString.Replace("*invoice_typecode", "T03");
@@ -5613,7 +5613,7 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 เลื่อนโดย: {Session["UserName"]?.ToString() ?? adminName ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                    var bot = new TelegramBot2(ConfigurationSettings.AppSettings["TelegramTokenTakeTime"].ToString());
+                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
                     await bot.SendMessageAsync("-4969611371", message);
                 }
                 catch (Exception telegramEx)

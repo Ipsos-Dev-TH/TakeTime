@@ -311,7 +311,7 @@ namespace Take_Time_BangPhra.Account
                 // Fallback: check padded month directory for files created with zero-padded month
                 {
                     string ck = (docType == "REC") ? "ReceiptFolderPath" : "PaymentFolderPath";
-                    string bp = System.Configuration.ConfigurationSettings.AppSettings[ck]?.ToString() ?? "";
+                    string bp = System.Configuration.ConfigurationManager.AppSettings[ck]?.ToString() ?? "";
                     if (!string.IsNullOrEmpty(bp) && !Directory.Exists(bp + "\\" + docYear + "\\" + docMonth))
                     {
                         string pm = docMonth.PadLeft(2, '0');
@@ -321,7 +321,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 if (docType == "REC")
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History
                     try
@@ -402,7 +402,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // SECURE: Delete payment record
                     var deletePaymentParams = new Dictionary<string, object>
@@ -468,7 +468,7 @@ namespace Take_Time_BangPhra.Account
             // Fallback: check padded month directory for files created with zero-padded month
             {
                 string ck = (docType == "REC") ? "ReceiptFolderPath" : "PaymentFolderPath";
-                string bp = System.Configuration.ConfigurationSettings.AppSettings[ck]?.ToString() ?? "";
+                string bp = System.Configuration.ConfigurationManager.AppSettings[ck]?.ToString() ?? "";
                 if (!string.IsNullOrEmpty(bp) && !Directory.Exists(bp + "\\" + docYear + "\\" + docMonth))
                 {
                     string pm = docMonth.PadLeft(2, '0');
@@ -490,7 +490,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + receiptUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + "_Cancel.pdf");
@@ -503,7 +503,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + receiptUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + ".pdf");
@@ -531,7 +531,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + "_Cancel.pdf");
@@ -544,7 +544,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationSettings.AppSettings["PaymentFolderPath"].ToString();
+                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + ".pdf");

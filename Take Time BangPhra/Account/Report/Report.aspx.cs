@@ -23,7 +23,7 @@ namespace Take_Time_BangPhra.Account.Report
         code code = new code();
         string Email = "";
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-        //int cutoffday = Convert.ToInt32(ConfigurationSettings.AppSettings["PaymentCutOffDay"].ToString());
+        //int cutoffday = Convert.ToInt32(ConfigurationManager.AppSettings["PaymentCutOffDay"].ToString());
         protected void Page_Load(object sender, EventArgs e)
         {
             Panel6.Visible = true;
