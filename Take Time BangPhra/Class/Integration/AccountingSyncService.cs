@@ -335,6 +335,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueuePostponePriceDiff(int reservationId, decimal priceDifference, DateTime rescheduleDate, string customerName)
         {
             if (!_config.IsConfigured) return -1;
+            if (priceDifference == 0) return -1; // No price difference, no journal entry needed
 
             var payload = new Dictionary<string, object>
             {
