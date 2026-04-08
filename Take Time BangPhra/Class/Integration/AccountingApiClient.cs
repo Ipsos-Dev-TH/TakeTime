@@ -5,6 +5,7 @@ using System.Net.Http;
 // X-Api-Key authentication - no Bearer token needed
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
@@ -21,7 +22,7 @@ namespace Take_Time_BangPhra.Integration
         private readonly string _connectionString;
         private static readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
         {
-            ContractResolver = new DefaultContractResolver(),
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
             DateFormatString = "yyyy-MM-ddTHH:mm:ss",
             NullValueHandling = NullValueHandling.Ignore
         };
@@ -173,6 +174,13 @@ namespace Take_Time_BangPhra.Integration
         // Journal Entries (AccountingController)
         public async Task<ApiResponse<JournalEntryResponse>> CreateJournalAsync(CreateJournalEntryRequest journal)
         {
+            // Validate lines before sending to avoid cryptic API errors
+            if (journal.Lines == null || journal.Lines.Count == 0)
+                throw new ArgumentException("Journal entry must have at least 1 debit/credit line.");
+
+            if (!journal.Lines.Any(l => l.DebitAmount > 0) || !journal.Lines.Any(l => l.CreditAmount > 0))
+                throw new ArgumentException("Journal entry must have at least 1 debit line and 1 credit line.");
+
             return await PostAsync<CreateJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
                 $"{CompanyPath}/accounting/journals", journal);
         }

@@ -826,6 +826,9 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapPostponePriceDiffToJournal(
             int reservationId, decimal priceDifference, DateTime rescheduleDate, string customerName)
         {
+            if (priceDifference == 0)
+                throw new ArgumentException($"Price difference is zero for reservation #{reservationId}. No journal entry needed.");
+
             var roomArId = GetAccountId("ROOM_AR");
             var roomRevenueId = GetAccountId("ROOM_REVENUE");
 
