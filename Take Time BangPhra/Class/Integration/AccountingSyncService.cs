@@ -52,6 +52,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueReservationDeposit(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
         {
             if (!_config.IsConfigured) return -1;
+            if (amount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -72,6 +73,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueReservationPayment(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName, bool hasVat = false)
         {
             if (!_config.IsConfigured) return -1;
+            if (amount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -93,6 +95,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueCheckout(int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
         {
             if (!_config.IsConfigured) return -1;
+            if (depositAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -112,6 +115,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueRefund(int reservationId, decimal refundAmount, string paymentMethod, DateTime refundDate, string customerName)
         {
             if (!_config.IsConfigured) return -1;
+            if (refundAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -135,6 +139,7 @@ namespace Take_Time_BangPhra.Integration
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
         {
             if (!_config.IsConfigured) return -1;
+            if (amount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -160,6 +165,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueRoomCharge(int reservationId, decimal salesAmount, decimal costAmount, DateTime chargeDate, string description)
         {
             if (!_config.IsConfigured) return -1;
+            if (salesAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -182,6 +188,7 @@ namespace Take_Time_BangPhra.Integration
             string supplierName, string paymentMethod = null, bool hasInputVat = false)
         {
             if (!_config.IsConfigured) return -1;
+            if (totalCost <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -271,6 +278,7 @@ namespace Take_Time_BangPhra.Integration
             decimal whtAmount = 0)
         {
             if (!_config.IsConfigured) return -1;
+            if (totalSalary <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -293,6 +301,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueCancellationNoRefund(int reservationId, decimal depositAmount, string customerName, DateTime cancelDate)
         {
             if (!_config.IsConfigured) return -1;
+            if (depositAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -312,6 +321,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueuePOSSale(string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod, DateTime saleDate, string description)
         {
             if (!_config.IsConfigured) return -1;
+            if (totalAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -355,6 +365,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueuePartialRefund(int reservationId, decimal refundAmount, decimal retainedAmount, string paymentMethod, DateTime refundDate, string customerName, string reason)
         {
             if (!_config.IsConfigured) return -1;
+            if (refundAmount <= 0 && retainedAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -377,6 +388,7 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueDamageCharge(int reservationId, decimal damageAmount, decimal missingItemsAmount, DateTime chargeDate, string customerName, string description)
         {
             if (!_config.IsConfigured) return -1;
+            if (damageAmount <= 0 && missingItemsAmount <= 0) return -1;
 
             var payload = new Dictionary<string, object>
             {
@@ -429,6 +441,12 @@ namespace Take_Time_BangPhra.Integration
                     string nexaaccId = await ProcessSingleItemAsync(actionType, payload);
                     UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
                     processed++;
+                }
+                catch (ArgumentException ex)
+                {
+                    // Validation error (e.g., zero amounts) — don't retry
+                    UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                    IncrementRetry(queueId, _config.MaxRetries);
                 }
                 catch (AccountingApiException ex)
                 {
