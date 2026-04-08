@@ -5,7 +5,8 @@ using System.Net.Http;
 // X-Api-Key authentication - no Bearer token needed
 using System.Text;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace Take_Time_BangPhra.Integration
 {
@@ -18,7 +19,12 @@ namespace Take_Time_BangPhra.Integration
         private readonly AccountingConfig _config;
         private readonly code _code = new code();
         private readonly string _connectionString;
-        private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
+        private static readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
+        {
+            ContractResolver = new DefaultContractResolver(),
+            DateFormatString = "yyyy-MM-ddTHH:mm:ss",
+            NullValueHandling = NullValueHandling.Ignore
+        };
 
         private static HttpClient _httpClient;
 
@@ -71,13 +77,13 @@ namespace Take_Time_BangPhra.Integration
 
         public async Task<TResponse> PostAsync<TRequest, TResponse>(string path, TRequest body)
         {
-            var json = _serializer.Serialize(body);
+            var json = JsonConvert.SerializeObject(body, _jsonSettings);
             return await ExecuteWithRetryAsync<TResponse>(HttpMethod.Post, path, json);
         }
 
         public async Task<TResponse> PutAsync<TRequest, TResponse>(string path, TRequest body)
         {
-            var json = _serializer.Serialize(body);
+            var json = JsonConvert.SerializeObject(body, _jsonSettings);
             return await ExecuteWithRetryAsync<TResponse>(HttpMethod.Put, path, json);
         }
 
@@ -135,7 +141,7 @@ namespace Take_Time_BangPhra.Integration
                     if (typeof(T) == typeof(object) && string.IsNullOrWhiteSpace(responseBody))
                         return default(T);
 
-                    return _serializer.Deserialize<T>(responseBody);
+                    return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
                 }
                 catch (AccountingApiException)
                 {
