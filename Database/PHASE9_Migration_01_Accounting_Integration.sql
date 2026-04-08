@@ -66,38 +66,38 @@ GO
 IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'CASH')
 BEGIN
     INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
-    -- Assets (หมวด 1)
-    ('CASH',              N'เงินสด',                            '1110', 'ASSET'),
-    ('BANK_KBANK',        N'เงินฝากธนาคาร - กสิกรไทย',           '1111', 'ASSET'),
-    ('BANK_KTB',          N'เงินฝากธนาคาร - กรุงไทย',            '1112', 'ASSET'),
-    ('BANK_CARD',         N'เงินฝากธนาคาร - บัตรเครดิต',         '1113', 'ASSET'),
-    ('DIRECTOR_ADVANCE',  N'เงินทดรองจ่าย - กรรมการ',            '1114', 'ASSET'),
-    ('ROOM_AR',           N'ลูกหนี้ค่าห้องพัก',                  '1121', 'ASSET'),
-    ('INVENTORY',         N'สินค้าคงเหลือ',                     '1150', 'ASSET'),
-    ('INPUT_VAT',         N'ภาษีซื้อ',                          '1160', 'ASSET'),
+    -- Assets (หมวด 1) — codes match NextAcc chart of accounts
+    ('CASH',              N'เงินสด',                            '111',   'ASSET'),
+    ('BANK_KBANK',        N'เงินฝากธนาคาร - กสิกรไทย',           '1111',  'ASSET'),
+    ('BANK_KTB',          N'เงินฝากธนาคาร - กรุงไทย',            '1112',  'ASSET'),
+    ('BANK_CARD',         N'เงินฝากธนาคาร - บัตรเครดิต',         '1113',  'ASSET'),
+    ('DIRECTOR_ADVANCE',  N'เงินทดรองจ่าย - กรรมการ',            '1114',  'ASSET'),
+    ('ROOM_AR',           N'ลูกหนี้ค่าห้องพัก',                  '11310', 'ASSET'),
+    ('INVENTORY',         N'สินค้าคงเหลือ',                     '1150',  'ASSET'),
+    ('INPUT_VAT',         N'ภาษีซื้อ',                          '1160',  'ASSET'),
 
     -- Liabilities (หมวด 2)
-    ('ACCOUNTS_PAYABLE',  N'เจ้าหนี้การค้า',                    '2110', 'LIABILITY'),
-    ('ADVANCE_DEPOSIT',   N'เงินรับล่วงหน้า - มัดจำ',            '2130', 'LIABILITY'),
-    ('OUTPUT_VAT',        N'ภาษีขาย',                           '2140', 'LIABILITY'),
-    ('WHT_PAYABLE',       N'ภาษีหัก ณ ที่จ่าย ค้างจ่าย',         '2150', 'LIABILITY'),
+    ('ACCOUNTS_PAYABLE',  N'เจ้าหนี้การค้า',                    '2110',  'LIABILITY'),
+    ('ADVANCE_DEPOSIT',   N'เงินรับล่วงหน้า - มัดจำ',            '21510', 'LIABILITY'),
+    ('OUTPUT_VAT',        N'ภาษีขาย',                           '2140',  'LIABILITY'),
+    ('WHT_PAYABLE',       N'ภาษีหัก ณ ที่จ่าย ค้างจ่าย',         '2150',  'LIABILITY'),
 
     -- Revenue (หมวด 4)
-    ('ROOM_REVENUE',      N'รายได้ค่าห้องพัก',                  '4100', 'REVENUE'),
-    ('PRODUCT_REVENUE',   N'รายได้ขายสินค้า',                   '4200', 'REVENUE'),
-    ('FB_REVENUE',        N'รายได้ค่าอาหารและเครื่องดื่ม',       '4210', 'REVENUE'),
-    ('SERVICE_REVENUE',   N'รายได้ค่าบริการอื่น',               '4300', 'REVENUE'),
-    ('OTHER_INCOME',      N'รายได้อื่น',                        '4900', 'REVENUE'),
+    ('ROOM_REVENUE',      N'รายได้ค่าห้องพัก',                  '411',   'REVENUE'),
+    ('PRODUCT_REVENUE',   N'รายได้ขายสินค้า',                   '4200',  'REVENUE'),
+    ('FB_REVENUE',        N'รายได้ค่าอาหารและเครื่องดื่ม',       '4210',  'REVENUE'),
+    ('SERVICE_REVENUE',   N'รายได้ค่าบริการอื่น',               '4300',  'REVENUE'),
+    ('OTHER_INCOME',      N'รายได้อื่น',                        '4900',  'REVENUE'),
 
     -- Expenses (หมวด 5)
-    ('COGS',              N'ต้นทุนสินค้าขาย',                   '5100', 'EXPENSE'),
-    ('SALARY_EXPENSE',    N'เงินเดือนและค่าแรง',                '5200', 'EXPENSE'),
-    ('EXPENSE_UTILITY',   N'ค่าสาธารณูปโภค',                    '5300', 'EXPENSE'),
-    ('EXPENSE_MAINTENANCE', N'ค่าซ่อมแซมบำรุงรักษา',            '5400', 'EXPENSE'),
-    ('EXPENSE_SUPPLIES',  N'ค่าวัสดุสิ้นเปลือง',                '5500', 'EXPENSE'),
-    ('EXPENSE_OTA',       N'ค่าคอมมิชชั่น OTA',                 '5600', 'EXPENSE'),
-    ('EXPENSE_OTHER',     N'ค่าใช้จ่ายอื่น',                    '5900', 'EXPENSE'),
-    ('SSF_EMPLOYER_EXPENSE', N'ประกันสังคมส่วนนายจ้าง',          '5210', 'EXPENSE');
+    ('COGS',              N'ต้นทุนสินค้าขาย',                   '5100',  'EXPENSE'),
+    ('SALARY_EXPENSE',    N'เงินเดือนและค่าแรง',                '5200',  'EXPENSE'),
+    ('EXPENSE_UTILITY',   N'ค่าสาธารณูปโภค',                    '5300',  'EXPENSE'),
+    ('EXPENSE_MAINTENANCE', N'ค่าซ่อมแซมบำรุงรักษา',            '5400',  'EXPENSE'),
+    ('EXPENSE_SUPPLIES',  N'ค่าวัสดุสิ้นเปลือง',                '5500',  'EXPENSE'),
+    ('EXPENSE_OTA',       N'ค่าคอมมิชชั่น OTA',                 '5600',  'EXPENSE'),
+    ('EXPENSE_OTHER',     N'ค่าใช้จ่ายอื่น',                    '5900',  'EXPENSE'),
+    ('SSF_EMPLOYER_EXPENSE', N'ประกันสังคมส่วนนายจ้าง',          '5210',  'EXPENSE');
 
     PRINT 'Seeded default account mappings';
 END

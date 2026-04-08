@@ -94,6 +94,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "retryAllFailed":
                     result = RetryAllFailed();
                     break;
+                case "mappings":
+                    result = GetAccountMappings();
+                    break;
+                case "updateMapping":
+                    result = UpdateAccountMapping();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -198,10 +204,86 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var client = new Integration.AccountingApiClient(config, ConnStr);
                 var result = System.Threading.Tasks.Task.Run(() => client.GetAccountsAsync()).Result;
                 bool success = result != null && result.data != null;
+
+                if (!success)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่สามารถดึงข้อมูลได้" } };
+
+                // Build lookup: AccountCode → AccountId from Nexaacc API response
+                var nexaaccAccounts = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                foreach (var acc in result.data)
+                {
+                    if (!string.IsNullOrEmpty(acc.AccountCode) && acc.Id != Guid.Empty)
+                        nexaaccAccounts[acc.AccountCode.Trim()] = acc.Id;
+                }
+
+                // Load current mappings from Accounting_Account_Mapping
+                DataTable mappings = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT ID, TakeTime_Code, Nexaacc_AccountCode FROM Accounting_Account_Mapping WHERE Is_Active = 1", null);
+
+                int matched = 0;
+                int unmatched = 0;
+                var unmatchedCodes = new List<string>();
+
+                if (mappings != null)
+                {
+                    foreach (DataRow row in mappings.Rows)
+                    {
+                        int mappingId = Convert.ToInt32(row["ID"]);
+                        string ttCode = row["TakeTime_Code"]?.ToString() ?? "";
+                        string accountCode = (row["Nexaacc_AccountCode"]?.ToString() ?? "").Trim();
+
+                        if (string.IsNullOrEmpty(accountCode)) continue;
+
+                        // Try exact match first, then prefix match (e.g., "1110" matches "111" or vice versa)
+                        Guid? matchedId = null;
+
+                        if (nexaaccAccounts.ContainsKey(accountCode))
+                        {
+                            matchedId = nexaaccAccounts[accountCode];
+                        }
+                        else
+                        {
+                            // Try: Nexaacc code starts with our code, or our code starts with Nexaacc code
+                            foreach (var kvp in nexaaccAccounts)
+                            {
+                                if (kvp.Key.StartsWith(accountCode) || accountCode.StartsWith(kvp.Key))
+                                {
+                                    matchedId = kvp.Value;
+                                    // Update the stored account code to match exactly what Nexaacc has
+                                    _code.DatabaseInsertSafe(ConnStr,
+                                        "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountCode = @code WHERE ID = @id",
+                                        new Dictionary<string, object> { { "@code", kvp.Key }, { "@id", mappingId } });
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (matchedId.HasValue)
+                        {
+                            _code.DatabaseInsertSafe(ConnStr,
+                                "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountId = @accId WHERE ID = @id",
+                                new Dictionary<string, object> { { "@accId", matchedId.Value }, { "@id", mappingId } });
+                            matched++;
+                        }
+                        else
+                        {
+                            unmatched++;
+                            unmatchedCodes.Add($"{ttCode}({accountCode})");
+                        }
+                    }
+                }
+
+                string msg = $"ดึง Chart of Accounts สำเร็จ — จับคู่ได้ {matched} รายการ";
+                if (unmatched > 0)
+                    msg += $", ไม่พบ {unmatched} รายการ: {string.Join(", ", unmatchedCodes)}";
+
                 return new Dictionary<string, object>
                 {
-                    { "success", success },
-                    { "message", success ? "ดึง Chart of Accounts สำเร็จ" : "ไม่สามารถดึงข้อมูลได้" }
+                    { "success", true },
+                    { "message", msg },
+                    { "matched", matched },
+                    { "unmatched", unmatched },
+                    { "nexaaccTotal", nexaaccAccounts.Count }
                 };
             }
             catch (AggregateException aex)
@@ -341,6 +423,63 @@ namespace Take_Time_BangPhra.Admin.Settings
                       WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries", null);
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "Reset failed items ทั้งหมดเป็น PENDING แล้ว" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> GetAccountMappings()
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT ID, TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Nexaacc_AccountId, Mapping_Type, Is_Active
+                      FROM Accounting_Account_Mapping ORDER BY Mapping_Type, TakeTime_Code", null);
+
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "id", Convert.ToInt32(row["ID"]) },
+                            { "code", row["TakeTime_Code"]?.ToString() },
+                            { "description", row["TakeTime_Description"]?.ToString() },
+                            { "accountCode", row["Nexaacc_AccountCode"]?.ToString() },
+                            { "accountId", row["Nexaacc_AccountId"] != DBNull.Value ? row["Nexaacc_AccountId"].ToString() : "" },
+                            { "mappingType", row["Mapping_Type"]?.ToString() },
+                            { "isActive", Convert.ToBoolean(row["Is_Active"]) }
+                        });
+                    }
+                }
+
+                return new Dictionary<string, object> { { "success", true }, { "items", items } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> UpdateAccountMapping()
+        {
+            try
+            {
+                int id = int.Parse(Request.QueryString["id"] ?? "0");
+                string newCode = Request.QueryString["accountCode"] ?? "";
+
+                if (id <= 0 || string.IsNullOrEmpty(newCode))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้องระบุ id และ accountCode" } };
+
+                // Update the account code and clear the old account ID (will be re-resolved on next fetch)
+                _code.DatabaseInsertSafe(ConnStr,
+                    "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountCode = @code, Nexaacc_AccountId = NULL WHERE ID = @id",
+                    new Dictionary<string, object> { { "@code", newCode }, { "@id", id } });
+
+                return new Dictionary<string, object> { { "success", true }, { "message", $"อัปเดต Account Code เป็น {newCode} แล้ว — กรุณากด 'ดึง Chart of Accounts' เพื่อจับคู่ Account ID ใหม่" } };
             }
             catch (Exception ex)
             {
