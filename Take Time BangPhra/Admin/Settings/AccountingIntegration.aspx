@@ -267,6 +267,36 @@
                 </table>
             </div>
         </div>
+
+        <!-- Account Mapping Management -->
+        <div class="journey-card">
+            <h3><i class="fas fa-exchange-alt"></i> Account Mapping (TakeTime &harr; Nexaacc)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">จับคู่รหัสบัญชี TakeTime กับ Nexaacc — กด "ดึง Chart of Accounts" ด้านบนเพื่อ auto-resolve Account ID</p>
+
+            <div class="btn-row" style="margin-bottom:15px;">
+                <button type="button" class="btn-primary" onclick="loadMappings()"><i class="fas fa-sync"></i> โหลด Mapping</button>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table class="queue-table" id="mappingTable">
+                    <thead>
+                        <tr>
+                            <th>TakeTime Code</th>
+                            <th>คำอธิบาย</th>
+                            <th>Account Code (Nexaacc)</th>
+                            <th>Account ID</th>
+                            <th>ประเภท</th>
+                            <th>สถานะ</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappingBody">
+                        <tr><td colspan="7" style="text-align:center; color:#999;">กดปุ่ม "โหลด Mapping" เพื่อดูข้อมูล</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="test-result" id="mappingResult"></div>
+        </div>
     </div>
 
     <asp:HiddenField ID="hfConfigData" runat="server" />
@@ -429,6 +459,63 @@
                 el.className = 'test-result error';
                 el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
             });
+        }
+        function loadMappings() {
+            fetch(pageUrl + '?action=mappings&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { alert(data.message); return; }
+                    renderMappings(data.items || []);
+                })
+                .catch(function(err) { console.error(err); });
+        }
+
+        function renderMappings(items) {
+            var tbody = document.getElementById('mappingBody');
+            if (!items.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#999;">ไม่พบข้อมูล Mapping</td></tr>';
+                return;
+            }
+            var html = '';
+            items.forEach(function(item) {
+                var hasId = item.accountId && item.accountId !== '';
+                var statusBadge = hasId
+                    ? '<span class="status-badge status-connected">Linked</span>'
+                    : '<span class="status-badge status-error">Not Linked</span>';
+                var idDisplay = hasId ? item.accountId.substring(0, 8) + '...' : '<span style="color:#C62828;">-</span>';
+
+                html += '<tr>';
+                html += '<td><strong>' + item.code + '</strong></td>';
+                html += '<td>' + (item.description || '-') + '</td>';
+                html += '<td><input type="text" id="mapCode_' + item.id + '" value="' + (item.accountCode || '') + '" style="width:80px; padding:4px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;" /></td>';
+                html += '<td style="font-size:11px; font-family:monospace;">' + idDisplay + '</td>';
+                html += '<td><span style="font-size:11px; color:#666;">' + (item.mappingType || '') + '</span></td>';
+                html += '<td>' + statusBadge + '</td>';
+                html += '<td><button class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="updateMapping(' + item.id + ')"><i class="fas fa-save"></i></button></td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        function updateMapping(id) {
+            var newCode = document.getElementById('mapCode_' + id).value.trim();
+            if (!newCode) { alert('กรุณาใส่ Account Code'); return; }
+
+            var el = document.getElementById('mappingResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังอัปเดต...';
+
+            fetch(pageUrl + '?action=updateMapping&id=' + id + '&accountCode=' + encodeURIComponent(newCode) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.success) loadMappings();
+                })
+                .catch(function(err) {
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                });
         }
     </script>
 </asp:Content>

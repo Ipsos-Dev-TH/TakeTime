@@ -36,7 +36,16 @@ namespace Take_Time_BangPhra.Integration
         public int MaxRetries => int.TryParse(GetConfig("Nexaacc_MaxRetries", "5"), out var v) ? v : 5;
         public int TimeoutSeconds => int.TryParse(GetConfig("Nexaacc_TimeoutSec", "30"), out var v) ? v : 30;
 
-        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty && Enabled;
+        /// <summary>
+        /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
+        /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง
+        /// </summary>
+        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty;
+
+        /// <summary>
+        /// พร้อม sync อัตโนมัติ = ตั้งค่าครบ + เปิดใช้งาน
+        /// </summary>
+        public bool IsReadyToSync => IsConfigured && Enabled;
 
         /// <summary>
         /// Strip any trailing API path segments from the base URL to prevent
