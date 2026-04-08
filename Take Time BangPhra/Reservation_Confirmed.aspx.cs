@@ -25,11 +25,13 @@ namespace Take_Time_BangPhra
                 string id = Request.QueryString["id"];
                 string check = Request.QueryString["check"];
 
-                DataTable dtReservationAccommodation = code.DatabaseQuery(conn,
+                var accomParams = new Dictionary<string, object> { { "@ReservationID", id }, { "@CustomerPhone", check } };
+                DataTable dtReservationAccommodation = code2.DatabaseQuerySafe(conn,
                     "SELECT * FROM [Reservation] left join Customer on Customer.MobilePhone = Customer_MobilePhone " +
                     "right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID " +
                     "inner join Accommodation on Accommodation.ID = Accommodation_ID " +
-                    "where Reservation.ID = " + id + " AND Customer_MobilePhone = '" + check + "' order by Accommodation.OrderID asc");
+                    "where Reservation.ID = @ReservationID AND Customer_MobilePhone = @CustomerPhone order by Accommodation.OrderID asc",
+                    accomParams);
 
                 // 🔍 Check if data exists
                 if (dtReservationAccommodation == null || dtReservationAccommodation.Rows.Count == 0)
@@ -57,10 +59,12 @@ namespace Take_Time_BangPhra
                 Label7.Text = dtReservationAccommodation.Rows[0]["StayDays"].ToString() + " คืน";
 
                 // Set accommodation details with number of guests
-                DataTable dtReservation = code.DatabaseQuery(conn,
+                var resParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtReservation = code2.DatabaseQuerySafe(conn,
                     "SELECT * FROM [Reservation] right join Reservation_Accommodation on Reservation.ID = Reservation_Accommodation.Reservation_ID " +
                     "inner join Accommodation on Accommodation.ID = Accommodation_ID " +
-                    "where Reservation.ID = " + id + " order by Accommodation.OrderID asc");
+                    "where Reservation.ID = @ReservationID order by Accommodation.OrderID asc",
+                    resParams);
 
                 string Accom = "";
                 for (int i = 0; i < dtReservation.Rows.Count; i++)
@@ -85,9 +89,11 @@ namespace Take_Time_BangPhra
 
                 // Set rent items
                 string Items = "";
-                DataTable dtReservationItems = code.DatabaseQuery(conn,
+                var itemsParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtReservationItems = code2.DatabaseQuerySafe(conn,
                     "SELECT * FROM [Reservation] right join Reservation_Items on Reservation.ID = Reservation_Items.Reservation_ID " +
-                    "inner join Items on Items.ID = Items_ID where Reservation.ID = " + id);
+                    "inner join Items on Items.ID = Items_ID where Reservation.ID = @ReservationID",
+                    itemsParams);
 
                 if (dtReservationItems.Rows.Count > 0)
                 {
@@ -100,12 +106,14 @@ namespace Take_Time_BangPhra
                 }
 
                 // Add product charges (room charges)
-                DataTable dtProductCharges = code.DatabaseQuery(conn,
+                var chargesParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtProductCharges = code2.DatabaseQuerySafe(conn,
                     "SELECT PC.*, P.Product_Name, PC.Quantity, PC.UnitPrice, PC.TotalAmount, PC.Status, PC.ChargedDate " +
                     "FROM Reservation_Product_Charges PC " +
                     "INNER JOIN Product P ON PC.Product_ID = P.ID " +
-                    "WHERE PC.Reservation_ID = " + id + " AND PC.Status <> 'CANCELLED' " +
-                    "ORDER BY PC.ChargedDate");
+                    "WHERE PC.Reservation_ID = @ReservationID AND PC.Status <> 'CANCELLED' " +
+                    "ORDER BY PC.ChargedDate",
+                    chargesParams);
 
                 if (dtProductCharges.Rows.Count > 0)
                 {
@@ -131,8 +139,9 @@ namespace Take_Time_BangPhra
 
                 // 1. Get base total price from Reservation
                 decimal baseTotalPrice = 0;
-                DataTable dtReservationPrice = code.DatabaseQuery(conn,
-                    $"SELECT TotalPrice FROM Reservation WHERE ID = {id}");
+                var priceParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtReservationPrice = code2.DatabaseQuerySafe(conn,
+                    "SELECT TotalPrice FROM Reservation WHERE ID = @ReservationID", priceParams);
                 if (dtReservationPrice.Rows.Count > 0 && dtReservationPrice.Rows[0]["TotalPrice"] != DBNull.Value)
                 {
                     baseTotalPrice = Convert.ToDecimal(dtReservationPrice.Rows[0]["TotalPrice"]);
@@ -140,11 +149,12 @@ namespace Take_Time_BangPhra
 
                 // 2. Get product charges from Reservation_Product_Charges
                 decimal productCharges = 0;
-                DataTable dtProductCharges2 = code.DatabaseQuery(conn,
-                    $@"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
+                var charges2Params = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtProductCharges2 = code2.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
                        FROM Reservation_Product_Charges
-                       WHERE Reservation_ID = {id}
-                       AND Status <> 'CANCELLED'");
+                       WHERE Reservation_ID = @ReservationID
+                       AND Status <> 'CANCELLED'", charges2Params);
                 if (dtProductCharges2.Rows.Count > 0 && dtProductCharges2.Rows[0]["TotalCharges"] != DBNull.Value)
                 {
                     productCharges = Convert.ToDecimal(dtProductCharges2.Rows[0]["TotalCharges"]);
@@ -155,11 +165,12 @@ namespace Take_Time_BangPhra
 
                 // 5. Get total paid from Payment_History
                 decimal totalPaid = 0;
-                DataTable dtPaid = code.DatabaseQuery(conn,
-                    $@"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
+                var paidParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                DataTable dtPaid = code2.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
                        FROM Payment_History
-                       WHERE Reservation_ID = {id}
-                       AND Status = 'COMPLETED'");
+                       WHERE Reservation_ID = @ReservationID
+                       AND Status = 'COMPLETED'", paidParams);
                 if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
                 {
                     totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
@@ -168,8 +179,9 @@ namespace Take_Time_BangPhra
                 // 6. If no payment history, fallback to Deposit column
                 if (totalPaid == 0)
                 {
-                    DataTable dtDeposit = code.DatabaseQuery(conn,
-                        $"SELECT ISNULL(Deposit, 0) as Deposit FROM Reservation WHERE ID = {id}");
+                    var depositParams = new Dictionary<string, object> { { "@ReservationID", id } };
+                    DataTable dtDeposit = code2.DatabaseQuerySafe(conn,
+                        "SELECT ISNULL(Deposit, 0) as Deposit FROM Reservation WHERE ID = @ReservationID", depositParams);
                     if (dtDeposit.Rows.Count > 0 && dtDeposit.Rows[0]["Deposit"] != DBNull.Value)
                     {
                         totalPaid = Convert.ToDecimal(dtDeposit.Rows[0]["Deposit"]);

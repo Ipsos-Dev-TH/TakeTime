@@ -30,9 +30,12 @@ namespace Take_Time_BangPhra.Account.Report
             string RecNumber = "REC221227004";
             DataTable dtbusinessinfo = code.DatabaseQuery(conn, "Select * from Business_Info");
             
-            DataTable dtReceiptDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = '"+RecNumber+ "' order by Number ASC");
-            DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = '" + RecNumber+"'");
-            DataTable dtcustomer = code.DatabaseQuery(conn, "Select * from Customer Where MobilePhone = '"+dtReceipt.Rows[0]["Customer_MobilePhone"].ToString()+"'");
+            var recDetailParams = new Dictionary<string, object> { { "@ReceiptID", RecNumber } };
+            DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn, "SELECT * FROM [Account_Receipt_Detail] inner join Account_ProductType on Account_ProductType.ID = ProductType_ID Where Receipt_ID = @ReceiptID order by Number ASC", recDetailParams);
+            var recParams = new Dictionary<string, object> { { "@ReceiptID", RecNumber } };
+            DataTable dtReceipt = code.DatabaseQuerySafe(conn, "SELECT * FROM [Account_Receipt] inner join Reservation on Reservation.ID = Reservation_ID Where Account_Receipt.ID = @ReceiptID", recParams);
+            var custParams = new Dictionary<string, object> { { "@MobilePhone", dtReceipt.Rows[0]["Customer_MobilePhone"].ToString() } };
+            DataTable dtcustomer = code.DatabaseQuerySafe(conn, "Select * from Customer Where MobilePhone = @MobilePhone", custParams);
             //GridView1.DataSource = dt;
             //GridView1.DataBind();
             try
