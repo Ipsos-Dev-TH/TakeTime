@@ -929,7 +929,7 @@ namespace Take_Time_BangPhra
             string status = "";
             try
             {
-                string channelAccessToken = "gnZ0OSsWjgtCnp6z0+AZF5V6+g225R5NQpAhOrLe7DL6dFoWjGQ6kvaRcnuFmseHqMdhnY7HpzA9Uk+rauq5XG2CAZLKDKa6vkKz9cWyFIQsHj5+VZMdLOLdRW2MfLDNKxxy5nZ1CsGT86H0e9dXfgdB04t89/1O/w1cDnyilFU=";
+                string channelAccessToken = ConfigurationManager.AppSettings["linechannelaccesstokentaketime"]?.ToString() ?? "";
                 var lineMessagingClient = new LineMessagingClient(channelAccessToken);
 
                 // สร้างข้อความ

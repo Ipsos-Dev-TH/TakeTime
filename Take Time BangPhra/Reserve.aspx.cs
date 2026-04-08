@@ -4380,40 +4380,80 @@ namespace Take_Time_BangPhra
 
                 if (IsDeposit == true)
                 {
-                    code.DatabaseInsert(conn,
+                    var receiptParams = new Dictionary<string, object>
+                    {
+                        { "@ID", ReceiptID },
+                        { "@ReservationID", Reservation_ID },
+                        // Use InvariantCulture to ensure Christian year (2025), NOT Buddhist year (2568)
+                        { "@CreatedDate", docDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) },
+                        { "@TotalAmount", Total_Amount },
+                        { "@Vat", Vat },
+                        { "@TotalExclVat", PriceExcludeVat },
+                        { "@IsDeposit", "True" },
+                        { "@UseDeposit", "False" },
+                        { "@Status", "Normal" },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", created_By_ID },
+                        { "@Etax", CheckBox5.Checked.ToString() },
+                        { "@CustomerID", customerId }
+                    };
+                    code.DatabaseInsertSafe(conn,
                         "INSERT INTO [dbo].[Account_Receipt] " +
                         "(ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat]," +
                         "[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type," +
                         "Created_By_ID,Etax,Customer_ID) " +
-                        "VALUES ('" + ReceiptID + "','" + Reservation_ID + "'," +
-                        // Use InvariantCulture to ensure Christian year (2025), NOT Buddhist year (2568)
-                        "'" + docDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "'," +
-                        Total_Amount + "," + Vat + "," + PriceExcludeVat + "," +
-                        "'True','False','Normal',N'" + DropDownList2.SelectedItem.Text + "'," +
-                        "N'" + created_By_ID + "','" + CheckBox5.Checked + "','" + customerId + "');");
+                        "VALUES (@ID, @ReservationID, @CreatedDate, @TotalAmount, @Vat, @TotalExclVat," +
+                        "@IsDeposit, @UseDeposit, @Status, @PaidType, @CreatedByID, @Etax, @CustomerID)",
+                        receiptParams);
 
-                    code.DatabaseInsert(conn,
+                    var detailParams = new Dictionary<string, object>
+                    {
+                        { "@Number", "1" },
+                        { "@ReceiptID", ReceiptID },
+                        { "@ProductTypeID", 1 },
+                        { "@ProductID", 7 },
+                        { "@ProductData", "ค่ามัดจำที่พักของหมายเลขการจอง " + Reservation_ID + " [" + ReceiptID + "]" },
+                        { "@ProductAmount", "1" },
+                        { "@ProductUnit", "ครั้ง" },
+                        { "@PricePerPiece", Total_Amount },
+                        { "@PriceAmount", Total_Amount }
+                    };
+                    code.DatabaseInsertSafe(conn,
                         "INSERT INTO [dbo].[Account_Receipt_Detail] " +
                         "([Number],[Receipt_ID],[ProductType_ID],[Product_ID]," +
                         "[Product_Data],[Product_Amount],[Product_Unit]," +
                         "[Price_PerPeice],[Price_Amount]) " +
-                        "Values ('1','" + ReceiptID + "',1,7," +
-                        "N'ค่ามัดจำที่พักของหมายเลขการจอง " + Reservation_ID + " [" + ReceiptID + "]'," +
-                        "'1',N'ครั้ง'," + Total_Amount + "," + Total_Amount + ")");
+                        "VALUES (@Number, @ReceiptID, @ProductTypeID, @ProductID," +
+                        "@ProductData, @ProductAmount, @ProductUnit, @PricePerPiece, @PriceAmount)",
+                        detailParams);
                 }
                 else
                 {
-                    code.DatabaseInsert(conn,
+                    var receiptParams = new Dictionary<string, object>
+                    {
+                        { "@ID", ReceiptID },
+                        { "@ReservationID", Reservation_ID },
+                        // Use InvariantCulture to ensure Christian year (2025), NOT Buddhist year (2568)
+                        { "@CreatedDate", docDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) },
+                        { "@TotalAmount", Total_Amount },
+                        { "@Vat", Vat },
+                        { "@TotalExclVat", PriceExcludeVat },
+                        { "@IsDeposit", "False" },
+                        { "@UseDeposit", "False" },
+                        { "@Status", "Normal" },
+                        { "@PaidType", DropDownList2.SelectedItem.Text },
+                        { "@CreatedByID", created_By_ID },
+                        { "@Etax", CheckBox5.Checked.ToString() },
+                        { "@CustomerID", customerId }
+                    };
+                    code.DatabaseInsertSafe(conn,
                         "INSERT INTO [dbo].[Account_Receipt] " +
                         "(ID,[Reservation_ID],[Created_Date],[Total_Amount],[Vat]," +
                         "[Total_Amount_Exclude_Vat],[IsDeposit],[UseDeposit],Status,Paid_Type," +
                         "Created_By_ID,Etax,Customer_ID) " +
-                        "VALUES ('" + ReceiptID + "','" + Reservation_ID + "'," +
-                        // Use InvariantCulture to ensure Christian year (2025), NOT Buddhist year (2568)
-                        "'" + docDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "'," +
-                        Total_Amount + "," + Vat + "," + PriceExcludeVat + "," +
-                        "'False','False','Normal',N'" + DropDownList2.SelectedItem.Text + "'," +
-                        "N'" + created_By_ID + "','" + CheckBox5.Checked + "','" + customerId + "');");
+                        "VALUES (@ID, @ReservationID, @CreatedDate, @TotalAmount, @Vat, @TotalExclVat," +
+                        "@IsDeposit, @UseDeposit, @Status, @PaidType, @CreatedByID, @Etax, @CustomerID)",
+                        receiptParams);
 
                     // เพิ่ม Receipt Detail โดยตรวจสอบความถูกต้องก่อน
                     double receiptTotal = 0;
@@ -4427,20 +4467,26 @@ namespace Take_Time_BangPhra
                         double calculatedAmount = TwoDecimalPoints(pricePerPiece * productAmount);
                         receiptTotal += calculatedAmount;
 
-                        code.DatabaseInsert(conn,
+                        var detailParams = new Dictionary<string, object>
+                        {
+                            { "@Number", dtReserve.Rows[i]["Number"].ToString() },
+                            { "@ReceiptID", ReceiptID },
+                            { "@ProductTypeID", Convert.ToInt32(dtReserve.Rows[i]["ProductType_ID"]) },
+                            { "@ProductID", Convert.ToInt32(dtReserve.Rows[i]["Product_ID"]) },
+                            { "@ProductData", dtReserve.Rows[i]["Product_Data"].ToString() },
+                            { "@ProductAmount", productAmount },
+                            { "@ProductUnit", dtReserve.Rows[i]["Product_Unit"].ToString() },
+                            { "@PricePerPiece", pricePerPiece },
+                            { "@PriceAmount", calculatedAmount }
+                        };
+                        code.DatabaseInsertSafe(conn,
                             "INSERT INTO [dbo].[Account_Receipt_Detail] " +
                             "([Number],[Receipt_ID],[ProductType_ID],[Product_ID]," +
                             "[Product_Data],[Product_Amount],[Product_Unit]," +
                             "[Price_PerPeice],[Price_Amount]) " +
-                            "Values ('" + dtReserve.Rows[i]["Number"].ToString() + "'," +
-                            "'" + ReceiptID + "'," +
-                            dtReserve.Rows[i]["ProductType_ID"].ToString() + "," +
-                            dtReserve.Rows[i]["Product_ID"].ToString() + "," +
-                            "N'" + dtReserve.Rows[i]["Product_Data"].ToString() + "'," +
-                            dtReserve.Rows[i]["Product_Amount"].ToString() + "," +
-                            "N'" + dtReserve.Rows[i]["Product_Unit"].ToString() + "'," +
-                            pricePerPiece.ToString() + "," +
-                            calculatedAmount.ToString() + ")");
+                            "VALUES (@Number, @ReceiptID, @ProductTypeID, @ProductID," +
+                            "@ProductData, @ProductAmount, @ProductUnit, @PricePerPiece, @PriceAmount)",
+                            detailParams);
                     }
 
                     // ตรวจสอบว่ายอดรวมตรงกัน

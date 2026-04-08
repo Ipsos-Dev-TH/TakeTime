@@ -498,7 +498,8 @@ namespace Take_Time_BangPhra.Account.Report
                     dtBusinessinfoReport.Rows[0]["Address"] = dtbusinessinfo.Rows[0]["Address"].ToString();
                 }
 
-                DataTable dtVendor = code.DatabaseQuery(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where Vendor.ID = '" + DropDownList1.SelectedValue + "'");
+                var vendorParams = new Dictionary<string, object> { { "@VendorID", DropDownList1.SelectedValue } };
+                DataTable dtVendor = code.DatabaseQuerySafe(conn, "Select * from Vendor left join Customer_Type on Customer_Type.ID = Vendor_Type_ID left join Address on Address.ID = Address_ID Where Vendor.ID = @VendorID", vendorParams);
 
                 DataTable dtVendorReport = new DataTable();
                 dtVendorReport = dtVendor.Copy();
@@ -538,9 +539,11 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch { }
 
-                DataTable dtPaymentDetail = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = '" + PayNumber + "' order by Number ASC");
+                var payDetailParams = new Dictionary<string, object> { { "@PaymentID", PayNumber } };
+                DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn, "SELECT * FROM [Account_Payment_Detail] Where Payment_ID = @PaymentID order by Number ASC", payDetailParams);
 
-                DataTable dtPayment = code.DatabaseQuery(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = '" + PayNumber + "'");
+                var payParams = new Dictionary<string, object> { { "@PaymentID", PayNumber } };
+                DataTable dtPayment = code.DatabaseQuerySafe(conn, "SELECT * FROM [Account_Payment] inner join Account_Vat_Type on Account_Vat_Type.ID = Vat_Type_ID Where Account_Payment.ID = @PaymentID", payParams);
 
                 // For payroll payments (เงินเดือน), get employee name from Payroll_Records via VoucherNumber
                 // This shows employee name instead of "เงินเดือนพนักงาน"
@@ -590,7 +593,8 @@ namespace Take_Time_BangPhra.Account.Report
                 string Signaturepath = System.Configuration.ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
 
                 // Get creator name
-                DataTable dtCreator = code.DatabaseQuery(conn, "Select * from Admin Where ID = " + Session["UserID"].ToString());
+                var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"]?.ToString() } };
+                DataTable dtCreator = code.DatabaseQuerySafe(conn, "Select * from Admin Where ID = @UserID", creatorParams);
                 string CreatorFullName = dtCreator.Rows.Count > 0 ?
                     dtCreator.Rows[0]["FirstName"].ToString() + " " + dtCreator.Rows[0]["LastName"].ToString() : "";
 
@@ -607,7 +611,8 @@ namespace Take_Time_BangPhra.Account.Report
                     string idNumber = dtVendor.Rows[0]["IDNumber"].ToString();
                     if (!string.IsNullOrEmpty(idNumber))
                     {
-                        DataTable dtEmployee = code.DatabaseQuery(conn, "Select * From Admin Where IDNumber = '" + idNumber + "'");
+                        var empParams = new Dictionary<string, object> { { "@IDNumber", idNumber } };
+                        DataTable dtEmployee = code.DatabaseQuerySafe(conn, "Select * From Admin Where IDNumber = @IDNumber", empParams);
                         if (dtEmployee.Rows.Count > 0)
                         {
                             ReceivedFullName = dtEmployee.Rows[0]["FirstName"].ToString() + " " + dtEmployee.Rows[0]["LastName"].ToString();
@@ -850,7 +855,8 @@ namespace Take_Time_BangPhra.Account.Report
         {
             try
             {
-                DataTable dt = code.DatabaseQuery(conn, "SELECT * FROM [Taketime].[dbo].[Vendor] Where [Name] like N'" + TextBox9.Text + "'");
+                var searchParams = new Dictionary<string, object> { { "@VendorName", TextBox9.Text } };
+                DataTable dt = code.DatabaseQuerySafe(conn, "SELECT * FROM [Taketime].[dbo].[Vendor] Where [Name] like @VendorName", searchParams);
                 DropDownList5.SelectedIndex = DropDownList5.Items.IndexOf(DropDownList5.Items.FindByText(dt.Rows[0]["Vendor_Group"].ToString()));
                 DropDownList5_SelectedIndexChanged(null, null);
                 DropDownList1.SelectedIndex = DropDownList1.Items.IndexOf(DropDownList1.Items.FindByValue(dt.Rows[0]["ID"].ToString()));

@@ -246,12 +246,36 @@ namespace Take_Time_BangPhra.Helpers
 
         public string GenerateDocumentNumber(string tableName, string docType, DateTime documentDate)
         {
+            // Whitelist allowed table names to prevent SQL injection
+            var allowedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Account_Receipt", "Account_Payment", "Account_Receipt_Detail",
+                "Account_Payment_Detail", "Reservation"
+            };
+            if (!allowedTables.Contains(tableName))
+            {
+                throw new ArgumentException($"Table name '{tableName}' is not allowed for document number generation.");
+            }
+
             string year = documentDate.Year.ToString().Substring(2);
             string month = documentDate.Month.ToString("00");
             string day = documentDate.Day.ToString("00");
 
-            string query = $"SELECT TOP 1 ID FROM {tableName} WHERE ID LIKE '{docType}{year}{month}{day}%' ORDER BY ID DESC";
-            DataTable dt = ExecuteQuery(query);
+            string prefix = $"{docType}{year}{month}{day}";
+            // tableName is validated above via whitelist, safe to use in query
+            string query = $"SELECT TOP 1 ID FROM {tableName} WHERE ID LIKE @Prefix ORDER BY ID DESC";
+            DataTable dt;
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            using (SqlCommand command = new SqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@Prefix", prefix + "%");
+                connection.Open();
+                using (SqlDataAdapter adapter = new SqlDataAdapter(command))
+                {
+                    dt = new DataTable();
+                    adapter.Fill(dt);
+                }
+            }
 
             int nextNumber = 1;
             if (dt.Rows.Count > 0)
