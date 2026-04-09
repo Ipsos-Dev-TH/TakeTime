@@ -473,8 +473,21 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessSingleItemAsync(string actionType, string payloadJson)
         {
-            var payload = _serializer.Deserialize<Dictionary<string, object>>(payloadJson);
+            Dictionary<string, object> payload;
+            try
+            {
+                payload = _serializer.Deserialize<Dictionary<string, object>>(payloadJson);
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Invalid payload JSON for {actionType}: {ex.Message}");
+            }
 
+            if (payload == null || payload.Count == 0)
+                throw new ArgumentException($"Empty or null payload for {actionType}.");
+
+            try
+            {
             switch (actionType)
             {
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -528,6 +541,24 @@ namespace Take_Time_BangPhra.Integration
                 default:
                     throw new Exception($"Unknown action type: {actionType}");
             }
+            }
+            catch (ArgumentException) { throw; } // Already a validation error — don't wrap
+            catch (AccountingApiException) { throw; } // API error — don't wrap
+            catch (KeyNotFoundException ex)
+            {
+                // Missing required field in payload — no point retrying
+                throw new ArgumentException($"Missing required field in payload for {actionType}: {ex.Message}");
+            }
+            catch (FormatException ex)
+            {
+                // Invalid data format (e.g., bad date string) — no point retrying
+                throw new ArgumentException($"Invalid data format in payload for {actionType}: {ex.Message}");
+            }
+            catch (InvalidCastException ex)
+            {
+                // Type conversion error — no point retrying
+                throw new ArgumentException($"Invalid data type in payload for {actionType}: {ex.Message}");
+            }
         }
 
         // ──────────────────────────────────────────────
@@ -553,9 +584,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPaymentJournal(Dictionary<string, object> p)
         {
+            var amount = Convert.ToDecimal(p["amount"]);
+            if (amount <= 0)
+                throw new ArgumentException($"Cannot create payment journal: amount is {amount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var invoice = _mapper.MapPaymentToInvoice(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["amount"]),
+                amount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["paymentDate"]?.ToString()),
                 p["customerName"]?.ToString(),
@@ -602,9 +637,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessRefundJournal(Dictionary<string, object> p)
         {
+            var refundAmount = Convert.ToDecimal(p["refundAmount"]);
+            if (refundAmount <= 0)
+                throw new ArgumentException($"Cannot create refund journal: refundAmount is {refundAmount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var journal = _mapper.MapRefundToJournal(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["refundAmount"]),
+                refundAmount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["refundDate"]?.ToString()),
                 p["customerName"]?.ToString());
@@ -616,6 +655,10 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessVoucherJournal(Dictionary<string, object> p)
         {
+            var amount = Convert.ToDecimal(p["amount"]);
+            if (amount <= 0)
+                throw new ArgumentException($"Cannot create voucher journal: amount is {amount} (must be > 0). Voucher #{p["voucherId"]}");
+
             bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
             decimal whtRate = p.ContainsKey("whtRate") ? Convert.ToDecimal(p["whtRate"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
@@ -623,7 +666,7 @@ namespace Take_Time_BangPhra.Integration
             var expense = _mapper.MapVoucherToExpense(
                 Convert.ToInt32(p["voucherId"]),
                 p["expenseCategory"]?.ToString(),
-                Convert.ToDecimal(p["amount"]),
+                amount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["voucherDate"]?.ToString()),
                 p["description"]?.ToString(),
@@ -638,9 +681,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessRoomChargeJournal(Dictionary<string, object> p)
         {
+            var salesAmount = Convert.ToDecimal(p["salesAmount"]);
+            if (salesAmount <= 0)
+                throw new ArgumentException($"Cannot create room charge journal: salesAmount is {salesAmount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var invoice = _mapper.MapRoomChargeToInvoice(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["salesAmount"]),
+                salesAmount,
                 Convert.ToDecimal(p["costAmount"]),
                 DateTime.Parse(p["chargeDate"]?.ToString()),
                 p["description"]?.ToString());
@@ -651,12 +698,16 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessStockInJournal(Dictionary<string, object> p)
         {
+            var totalCost = Convert.ToDecimal(p["totalCost"]);
+            if (totalCost <= 0)
+                throw new ArgumentException($"Cannot create stock-in journal: totalCost is {totalCost} (must be > 0). Product #{p["productId"]}");
+
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
 
             var expense = _mapper.MapStockInToExpense(
                 Convert.ToInt32(p["productId"]),
                 p["productName"]?.ToString(),
-                Convert.ToDecimal(p["totalCost"]),
+                totalCost,
                 paymentMethod,
                 DateTime.Parse(p["receiveDate"]?.ToString()),
                 p["supplierName"]?.ToString());
@@ -682,10 +733,14 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessReceiptDocument(Dictionary<string, object> p)
         {
+            var totalAmount = Convert.ToDecimal(p["totalAmount"]);
+            if (totalAmount <= 0)
+                throw new ArgumentException($"Cannot create receipt document: totalAmount is {totalAmount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var document = _mapper.MapReceiptToDocument(
                 Convert.ToInt32(p["reservationId"]),
                 p["receiptNumber"]?.ToString(),
-                Convert.ToDecimal(p["totalAmount"]),
+                totalAmount,
                 Convert.ToDecimal(p["vatAmount"]),
                 DateTime.Parse(p["receiptDate"]?.ToString()),
                 null, // contactId — would need lookup
@@ -698,9 +753,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessCreditNoteDocument(Dictionary<string, object> p)
         {
+            var totalAmount = Convert.ToDecimal(p["totalAmount"]);
+            if (totalAmount <= 0)
+                throw new ArgumentException($"Cannot create credit note document: totalAmount is {totalAmount} (must be > 0). CreditNote #{p["creditNoteId"]}");
+
             var document = _mapper.MapCreditNoteToDocument(
                 p["creditNoteNumber"]?.ToString(),
-                Convert.ToDecimal(p["totalAmount"]),
+                totalAmount,
                 Convert.ToDecimal(p["vatAmount"]),
                 DateTime.Parse(p["creditNoteDate"]?.ToString()),
                 null,
@@ -713,13 +772,17 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPayrollJournal(Dictionary<string, object> p)
         {
+            var totalSalary = Convert.ToDecimal(p["totalSalary"]);
+            if (totalSalary <= 0)
+                throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary} (must be > 0). Period: {p["period"]}");
+
             decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
             decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
 
             var expense = _mapper.MapPayrollToExpense(
                 p["period"]?.ToString(),
-                Convert.ToDecimal(p["totalSalary"]),
+                totalSalary,
                 ssfEmployee + ssfEmployer,
                 whtAmount,
                 DateTime.Parse(p["payDate"]?.ToString()),
@@ -731,9 +794,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessCancelNoRefundJournal(Dictionary<string, object> p)
         {
+            var depositAmount = Convert.ToDecimal(p["depositAmount"]);
+            if (depositAmount <= 0)
+                throw new ArgumentException($"Cannot create cancel-no-refund journal: depositAmount is {depositAmount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var invoice = _mapper.MapCancelNoRefundToInvoice(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["depositAmount"]),
+                depositAmount,
                 p["customerName"]?.ToString(),
                 DateTime.Parse(p["cancelDate"]?.ToString()));
 
@@ -762,9 +829,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPostponePriceDiffJournal(Dictionary<string, object> p)
         {
+            var priceDifference = Convert.ToDecimal(p["priceDifference"]);
+            if (priceDifference == 0)
+                throw new ArgumentException($"Cannot create postpone price-diff journal: priceDifference is 0. Reservation #{p["reservationId"]}");
+
             var journal = _mapper.MapPostponePriceDiffToJournal(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["priceDifference"]),
+                priceDifference,
                 DateTime.Parse(p["rescheduleDate"]?.ToString()),
                 p["customerName"]?.ToString());
 
@@ -775,10 +846,15 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPartialRefundJournal(Dictionary<string, object> p)
         {
+            var refundAmount = Convert.ToDecimal(p["refundAmount"]);
+            var retainedAmount = Convert.ToDecimal(p["retainedAmount"]);
+            if (refundAmount <= 0 && retainedAmount <= 0)
+                throw new ArgumentException($"Cannot create partial refund journal: refundAmount is {refundAmount} and retainedAmount is {retainedAmount} (at least one must be > 0). Reservation #{p["reservationId"]}");
+
             var journal = _mapper.MapPartialRefundToJournal(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["refundAmount"]),
-                Convert.ToDecimal(p["retainedAmount"]),
+                refundAmount,
+                retainedAmount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["refundDate"]?.ToString()),
                 p["customerName"]?.ToString(),
@@ -791,10 +867,15 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessDamageChargeJournal(Dictionary<string, object> p)
         {
+            var damageAmount = Convert.ToDecimal(p["damageAmount"]);
+            var missingItemsAmount = Convert.ToDecimal(p["missingItemsAmount"]);
+            if (damageAmount <= 0 && missingItemsAmount <= 0)
+                throw new ArgumentException($"Cannot create damage charge journal: damageAmount is {damageAmount} and missingItemsAmount is {missingItemsAmount} (at least one must be > 0). Reservation #{p["reservationId"]}");
+
             var invoice = _mapper.MapDamageChargeToInvoice(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["damageAmount"]),
-                Convert.ToDecimal(p["missingItemsAmount"]),
+                damageAmount,
+                missingItemsAmount,
                 DateTime.Parse(p["chargeDate"]?.ToString()),
                 p["customerName"]?.ToString(),
                 p["description"]?.ToString());
