@@ -234,6 +234,28 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/document/payments", payment);
         }
 
+        // Integration Endpoints — สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceAsync(CreateIntegrationInvoiceRequest invoice)
+        {
+            if (invoice.Lines == null || invoice.Lines.Count == 0)
+                throw new ArgumentException("Invoice must have at least 1 line item.");
+
+            if (!invoice.Lines.Any(l => l.UnitPrice > 0 && l.Quantity > 0))
+                throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
+
+            return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/invoices", invoice);
+        }
+
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseAsync(CreateIntegrationExpenseRequest expense)
+        {
+            if (expense.Lines == null || expense.Lines.Count == 0)
+                throw new ArgumentException("Expense must have at least 1 line item.");
+
+            return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/expenses", expense);
+        }
+
         // Products (ProductController)
         public async Task<ApiResponse<ProductResponse>> CreateProductAsync(CreateProductRequest product)
         {

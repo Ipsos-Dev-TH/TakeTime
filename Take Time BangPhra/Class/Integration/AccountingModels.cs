@@ -427,4 +427,54 @@ namespace Take_Time_BangPhra.Integration
             writer.WriteValue(value);
         }
     }
+
+    // ──────────────────────────────────────────────
+    // Integration Endpoints — Invoice & Expense
+    // ใช้ /api/integration/invoices (ยอดขาย/รายรับ)
+    // และ /api/integration/expenses (ค่าใช้จ่าย)
+    // สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationInvoiceRequest
+    {
+        public DateTime DocumentDate { get; set; }
+        public string CustomerName { get; set; }
+        public string Reference { get; set; }
+        public string Description { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public string PaymentMethod { get; set; }
+        public Guid? PaymentAccountId { get; set; }
+    }
+
+    public class CreateIntegrationExpenseRequest
+    {
+        public DateTime DocumentDate { get; set; }
+        public string SupplierName { get; set; }
+        public string Reference { get; set; }
+        public string Description { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public string PaymentMethod { get; set; }
+        public Guid? PaymentAccountId { get; set; }
+    }
+
+    public class IntegrationLineRequest
+    {
+        public string Description { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+        public string Unit { get; set; }
+        public Guid? AccountId { get; set; }
+        public decimal VatRate { get; set; }
+        public decimal WithholdingTaxRate { get; set; }
+    }
+
+    public class IntegrationDocumentResponse
+    {
+        public Guid Id { get; set; }
+        public string DocumentNumber { get; set; }
+        public string DocumentType { get; set; }
+        public decimal TotalAmount { get; set; }
+        public string Status { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
 }

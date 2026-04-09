@@ -326,11 +326,19 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                // Get summary counts
+                // Parse pagination & filter params
+                int page = 1, pageSize = 20;
+                int.TryParse(Request.QueryString["page"] ?? "1", out page);
+                int.TryParse(Request.QueryString["pageSize"] ?? "20", out pageSize);
+                string statusFilter = Request.QueryString["status"] ?? "";
+                if (page < 1) page = 1;
+                if (pageSize < 5) pageSize = 5;
+                if (pageSize > 100) pageSize = 100;
+
+                // Get summary counts (all time)
                 DataTable summary = _code.DatabaseQuerySafe(ConnStr,
                     @"SELECT Status, COUNT(*) as Cnt
                       FROM Accounting_Sync_Queue
-                      WHERE Created_Date >= DATEADD(DAY, -7, GETDATE())
                       GROUP BY Status", null);
 
                 int pending = 0, processing = 0, completed = 0, failed = 0;
@@ -338,9 +346,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     foreach (DataRow row in summary.Rows)
                     {
-                        string status = row["Status"]?.ToString() ?? "";
+                        string s = row["Status"]?.ToString() ?? "";
                         int cnt = Convert.ToInt32(row["Cnt"]);
-                        switch (status)
+                        switch (s)
                         {
                             case "PENDING": pending = cnt; break;
                             case "PROCESSING": processing = cnt; break;
@@ -350,12 +358,42 @@ namespace Take_Time_BangPhra.Admin.Settings
                     }
                 }
 
-                // Get recent items
+                // Build WHERE clause for status filter
+                string whereClause = "";
+                var queryParams = new Dictionary<string, object>();
+                var validStatuses = new HashSet<string> { "PENDING", "PROCESSING", "COMPLETED", "FAILED" };
+                if (!string.IsNullOrEmpty(statusFilter) && validStatuses.Contains(statusFilter.ToUpper()))
+                {
+                    whereClause = "WHERE Status = @statusFilter";
+                    queryParams["@statusFilter"] = statusFilter.ToUpper();
+                }
+
+                // Get total count for pagination
+                DataTable countDt = _code.DatabaseQuerySafe(ConnStr,
+                    $"SELECT COUNT(*) as Total FROM Accounting_Sync_Queue {whereClause}",
+                    queryParams.Count > 0 ? queryParams : null);
+                int totalItems = countDt?.Rows.Count > 0 ? Convert.ToInt32(countDt.Rows[0]["Total"]) : 0;
+                int totalPages = totalItems > 0 ? (int)Math.Ceiling((double)totalItems / pageSize) : 1;
+                if (page > totalPages) page = totalPages;
+
+                // Get paginated items using OFFSET...FETCH (SQL Server 2012+)
+                int offset = (page - 1) * pageSize;
+                var itemParams = new Dictionary<string, object>
+                {
+                    { "@offset", offset },
+                    { "@pageSize", pageSize }
+                };
+                if (queryParams.ContainsKey("@statusFilter"))
+                    itemParams["@statusFilter"] = queryParams["@statusFilter"];
+
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
-                    @"SELECT TOP 50 ID, Entity_Type, Entity_ID, Action_Type, Status,
-                             Retry_Count, Max_Retries, Error_Message, Created_Date
-                      FROM Accounting_Sync_Queue
-                      ORDER BY Created_Date DESC", null);
+                    $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
+                              Retry_Count, Max_Retries, Error_Message, Created_Date
+                       FROM Accounting_Sync_Queue
+                       {whereClause}
+                       ORDER BY Created_Date DESC
+                       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY",
+                    itemParams);
 
                 var itemList = new List<Dictionary<string, object>>();
                 if (items != null)
@@ -384,7 +422,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "processing", processing },
                     { "completed", completed },
                     { "failed", failed },
-                    { "items", itemList }
+                    { "items", itemList },
+                    { "page", page },
+                    { "pageSize", pageSize },
+                    { "totalItems", totalItems },
+                    { "totalPages", totalPages }
                 };
             }
             catch
@@ -393,7 +435,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     { "success", true },
                     { "pending", 0 }, { "processing", 0 }, { "completed", 0 }, { "failed", 0 },
-                    { "items", new List<object>() }
+                    { "items", new List<object>() },
+                    { "page", 1 }, { "pageSize", 20 }, { "totalItems", 0 }, { "totalPages", 1 }
                 };
             }
         }

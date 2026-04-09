@@ -696,8 +696,10 @@ namespace Take_Time_BangPhra.Integration
 
         private Guid GetPaymentMethodAccountId(string paymentMethod)
         {
+            string pm = (paymentMethod ?? "").ToUpper();
             string mappingKey;
-            switch ((paymentMethod ?? "").ToUpper())
+
+            switch (pm)
             {
                 case "CASH": mappingKey = "CASH"; break;
                 case "KBANK": mappingKey = "BANK_KBANK"; break;
@@ -705,7 +707,21 @@ namespace Take_Time_BangPhra.Integration
                 case "PROMPTPAY": mappingKey = "BANK_KBANK"; break;
                 case "CARD": mappingKey = "BANK_CARD"; break;
                 case "DIRECTOR": mappingKey = "DIRECTOR_ADVANCE"; break;
-                default: mappingKey = "CASH"; break;
+                default:
+                    // Match Thai payment method names from Account_Paid_How table
+                    if (pm.Contains("กสิกร") || pm.Contains("KBANK"))
+                        mappingKey = "BANK_KBANK";
+                    else if (pm.Contains("กรุงไทย") || pm.Contains("KTB"))
+                        mappingKey = "BANK_KTB";
+                    else if (pm.Contains("พร้อมเพย์") || pm.Contains("PROMPTPAY"))
+                        mappingKey = "BANK_KBANK";
+                    else if (pm.Contains("บัตร") || pm.Contains("CARD") || pm.Contains("เครดิต"))
+                        mappingKey = "BANK_CARD";
+                    else if (pm.Contains("กรรมการ") || pm.Contains("DIRECTOR") || pm.Contains("ทดรอง"))
+                        mappingKey = "DIRECTOR_ADVANCE";
+                    else
+                        mappingKey = "CASH";
+                    break;
             }
 
             return GetAccountId(mappingKey);
@@ -976,6 +992,299 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.General,
                 Description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
                 Reference = $"DMG-{reservationId}",
+                Lines = lines
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // Integration Invoice Mappers (ยอดขาย/รายรับ)
+        // ใช้กับ /api/integration/invoices
+        // ══════════════════════════════════════════════
+
+        public CreateIntegrationInvoiceRequest MapDepositToInvoice(
+            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
+        {
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = paymentDate,
+                CustomerName = customerName,
+                Reference = $"RES-{reservationId}-DEP",
+                Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = $"เงินรับล่วงหน้า - การจอง #{reservationId}",
+                        Quantity = 1,
+                        UnitPrice = amount,
+                        AccountId = GetAccountId("ADVANCE_DEPOSIT"),
+                    }
+                }
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapPaymentToInvoice(
+            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate,
+            string customerName, bool hasVat = false)
+        {
+            var lines = new List<IntegrationLineRequest>();
+
+            if (hasVat)
+            {
+                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                decimal netAmount = amount - vatAmount;
+                lines.Add(new IntegrationLineRequest
+                {
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                    Quantity = 1, UnitPrice = netAmount, VatRate = 7,
+                    AccountId = GetAccountId("ROOM_REVENUE"),
+                });
+            }
+            else
+            {
+                lines.Add(new IntegrationLineRequest
+                {
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                    Quantity = 1, UnitPrice = amount,
+                    AccountId = GetAccountId("ROOM_REVENUE"),
+                });
+            }
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = paymentDate,
+                CustomerName = customerName,
+                Reference = $"RES-{reservationId}-PAY",
+                Description = $"รับชำระค่าห้อง - การจอง #{reservationId} ({customerName})",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                Lines = lines
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapCheckoutToInvoice(
+            int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
+        {
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = checkoutDate,
+                CustomerName = customerName,
+                Reference = $"RES-{reservationId}-CHK",
+                Description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                        Quantity = 1, UnitPrice = depositAmount,
+                        AccountId = GetAccountId("ROOM_REVENUE"),
+                    }
+                }
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapPOSSaleToInvoice(
+            string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod,
+            DateTime saleDate, string description)
+        {
+            var lines = new List<IntegrationLineRequest>
+            {
+                new IntegrationLineRequest
+                {
+                    Description = $"รายได้ขายสินค้า - {description}",
+                    Quantity = 1, UnitPrice = totalAmount,
+                    AccountId = GetAccountId("PRODUCT_REVENUE"),
+                }
+            };
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = saleDate,
+                CustomerName = "ลูกค้าทั่วไป",
+                Reference = $"POS-{receiptId}",
+                Description = $"ขายสินค้า POS - {receiptId}",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                Lines = lines
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapRoomChargeToInvoice(
+            int reservationId, decimal salesAmount, decimal costAmount, DateTime chargeDate, string description)
+        {
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = chargeDate,
+                CustomerName = $"ลูกค้า - การจอง #{reservationId}",
+                Reference = $"RC-{reservationId}",
+                Description = $"ชาร์จสินค้าเข้าห้อง - #{reservationId} - {description}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = description,
+                        Quantity = 1, UnitPrice = salesAmount,
+                        AccountId = GetAccountId("PRODUCT_REVENUE"),
+                    }
+                }
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapCancelNoRefundToInvoice(
+            int reservationId, decimal depositAmount, string customerName, DateTime cancelDate)
+        {
+            Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = cancelDate,
+                CustomerName = customerName,
+                Reference = $"CANCEL-NR-{reservationId}",
+                Description = $"ยกเลิกการจอง (ไม่คืนเงิน) - {customerName} - #{reservationId}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = $"รายได้จากการยึดมัดจำ - การจอง #{reservationId}",
+                        Quantity = 1, UnitPrice = depositAmount,
+                        AccountId = otherIncomeId,
+                    }
+                }
+            };
+        }
+
+        public CreateIntegrationInvoiceRequest MapDamageChargeToInvoice(
+            int reservationId, decimal damageAmount, decimal missingItemsAmount,
+            DateTime chargeDate, string customerName, string description)
+        {
+            decimal totalCharge = damageAmount + missingItemsAmount;
+            Guid otherIncomeId = TryGetAccountId("OTHER_INCOME", out var oi) ? oi : GetAccountId("ROOM_REVENUE");
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = chargeDate,
+                CustomerName = customerName,
+                Reference = $"DMG-{reservationId}",
+                Description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = $"ค่าเสียหาย/ของหาย - {description}",
+                        Quantity = 1, UnitPrice = totalCharge,
+                        AccountId = otherIncomeId,
+                    }
+                }
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // Integration Expense Mappers (ค่าใช้จ่าย)
+        // ใช้กับ /api/integration/expenses
+        // ══════════════════════════════════════════════
+
+        public CreateIntegrationExpenseRequest MapVoucherToExpense(
+            int voucherId, string expenseCategory, decimal amount, string paymentMethod,
+            DateTime voucherDate, string description, string payeeName,
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
+        {
+            var lines = new List<IntegrationLineRequest>();
+
+            if (hasInputVat)
+            {
+                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                decimal netAmount = amount - vatAmount;
+                lines.Add(new IntegrationLineRequest
+                {
+                    Description = description,
+                    Quantity = 1, UnitPrice = netAmount, VatRate = 7,
+                    WithholdingTaxRate = whtRate,
+                    AccountId = GetExpenseCategoryAccountId(expenseCategory),
+                });
+            }
+            else
+            {
+                lines.Add(new IntegrationLineRequest
+                {
+                    Description = description,
+                    Quantity = 1, UnitPrice = amount,
+                    WithholdingTaxRate = whtRate,
+                    AccountId = GetExpenseCategoryAccountId(expenseCategory),
+                });
+            }
+
+            return new CreateIntegrationExpenseRequest
+            {
+                DocumentDate = voucherDate,
+                SupplierName = payeeName,
+                Reference = $"PV-{voucherId}",
+                Description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                Lines = lines
+            };
+        }
+
+        public CreateIntegrationExpenseRequest MapStockInToExpense(
+            int productId, string productName, decimal totalCost, string paymentMethod,
+            DateTime purchaseDate, string supplierName)
+        {
+            return new CreateIntegrationExpenseRequest
+            {
+                DocumentDate = purchaseDate,
+                SupplierName = supplierName ?? "ซัพพลายเออร์",
+                Reference = $"STOCK-IN-{productId}",
+                Description = $"ซื้อสินค้า - {productName}",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        Description = $"สินค้า - {productName}",
+                        Quantity = 1, UnitPrice = totalCost,
+                        AccountId = GetAccountId("INVENTORY"),
+                    }
+                }
+            };
+        }
+
+        public CreateIntegrationExpenseRequest MapPayrollToExpense(
+            string period, decimal totalSalary, decimal totalSsf, decimal totalWht,
+            DateTime payrollDate, string description)
+        {
+            var lines = new List<IntegrationLineRequest>
+            {
+                new IntegrationLineRequest
+                {
+                    Description = $"เงินเดือน - {period}",
+                    Quantity = 1, UnitPrice = totalSalary,
+                    AccountId = GetAccountId("SALARY_EXPENSE"),
+                }
+            };
+
+            if (totalSsf > 0)
+            {
+                Guid ssfExpenseId = TryGetAccountId("SSF_EMPLOYER_EXPENSE", out var se)
+                    ? se : GetAccountId("SALARY_EXPENSE");
+                lines.Add(new IntegrationLineRequest
+                {
+                    Description = $"ประกันสังคม (ส่วนนายจ้าง) - {period}",
+                    Quantity = 1, UnitPrice = totalSsf,
+                    AccountId = ssfExpenseId,
+                });
+            }
+
+            return new CreateIntegrationExpenseRequest
+            {
+                DocumentDate = payrollDate,
+                SupplierName = "เงินเดือนพนักงาน",
+                Reference = $"PAYROLL-{period}",
+                Description = description ?? $"เงินเดือน - {period}",
+                PaymentMethod = "CASH",
+                PaymentAccountId = GetAccountId("CASH"),
                 Lines = lines
             };
         }
