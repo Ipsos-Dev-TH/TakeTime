@@ -588,7 +588,7 @@ namespace Take_Time_BangPhra.Integration
             }
 
             if (depositAmount <= 0)
-                throw new ArgumentException($"Cannot create checkout invoice: depositAmount is {depositAmount} (must be > 0). Reservation #{reservationId}");
+                throw new ArgumentException($"Cannot create checkout journal: depositAmount is {depositAmount} (must be > 0). Reservation #{reservationId}");
 
             var invoice = _mapper.MapCheckoutToInvoice(
                 reservationId,
@@ -745,9 +745,9 @@ namespace Take_Time_BangPhra.Integration
         {
             var totalAmount = Convert.ToDecimal(p["totalAmount"]);
             if (totalAmount <= 0)
-                throw new ArgumentException($"Cannot create POS sale invoice: totalAmount is {totalAmount} (must be > 0). Receipt: {p["receiptId"]}");
+                throw new ArgumentException($"Cannot create POS sale journal: totalAmount is {totalAmount} (must be > 0). Receipt: {p["receiptId"]}");
 
-            var invoice = _mapper.MapPOSSaleToInvoice(
+            var journal = _mapper.MapPOSSaleToJournal(
                 p["receiptId"]?.ToString(),
                 totalAmount,
                 Convert.ToDecimal(p["totalCost"]),
@@ -755,7 +755,8 @@ namespace Take_Time_BangPhra.Integration
                 DateTime.Parse(p["saleDate"]?.ToString()),
                 p["description"]?.ToString());
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await _apiClient.PostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
         }
 

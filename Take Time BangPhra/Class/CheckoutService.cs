@@ -41,6 +41,12 @@ namespace Take_Time_BangPhra
         {
             try
             {
+                // Capture reservation data BEFORE sp_ProcessCheckout, because the SP
+                // may zero out Reservation.Deposit during checkout processing.
+                var resData = GetReservationData(reservationId);
+                string customerName = resData?["CustomerName"]?.ToString() ?? "ลูกค้า";
+                decimal depositAmt = resData != null ? Convert.ToDecimal(resData["Deposit"]) : 0;
+
                 var parameters = new Dictionary<string, object>
                 {
                     { "@ReservationID", reservationId },
@@ -78,10 +84,6 @@ namespace Take_Time_BangPhra
                         // Sync to accounting: revenue recognition + damage charges
                         try
                         {
-                            var resData = GetReservationData(reservationId);
-                            string customerName = resData?["CustomerName"]?.ToString() ?? "ลูกค้า";
-                            decimal depositAmt = resData != null ? Convert.ToDecimal(resData["Deposit"]) : 0;
-
                             var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueCheckout(reservationId, depositAmt, customerName, DateTime.Now);
 
