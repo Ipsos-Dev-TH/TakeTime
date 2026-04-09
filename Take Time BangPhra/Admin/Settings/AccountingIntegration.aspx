@@ -61,13 +61,27 @@
         .queue-table tr:hover { background: #fafafa; }
 
         .queue-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 15px; }
-        .queue-stat { background: #f9f9f9; border-radius: 8px; padding: 12px; text-align: center; }
+        .queue-stat { background: #f9f9f9; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; border: 2px solid transparent; }
+        .queue-stat:hover { border-color: #ddd; }
+        .queue-stat.active { border-color: #5D4037; background: #EFEBE9; }
         .queue-stat .num { font-size: 22px; font-weight: 700; }
         .queue-stat .lbl { font-size: 11px; color: #999; }
         .num-pending { color: #FF9800; }
         .num-processing { color: #2196F3; }
         .num-completed { color: #4CAF50; }
         .num-failed { color: #F44336; }
+
+        /* Pagination */
+        .queue-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+        .queue-toolbar-left { display: flex; align-items: center; gap: 8px; }
+        .queue-toolbar-right { display: flex; align-items: center; gap: 8px; }
+        .queue-toolbar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; font-family: 'Prompt', sans-serif; }
+        .pagination { display: flex; align-items: center; gap: 4px; }
+        .pagination button { width: 32px; height: 32px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: 'Prompt', sans-serif; display: flex; align-items: center; justify-content: center; }
+        .pagination button:hover:not(:disabled) { background: #f5f5f5; border-color: #bbb; }
+        .pagination button:disabled { opacity: 0.4; cursor: default; }
+        .pagination button.active { background: #5D4037; color: white; border-color: #5D4037; }
+        .pagination .page-info { font-size: 12px; color: #777; padding: 0 8px; white-space: nowrap; }
     </style>
 
     <div class="acc-page">
@@ -236,15 +250,28 @@
             <h3><i class="fas fa-tasks"></i> Sync Queue Monitor</h3>
 
             <div class="queue-stats" id="queueStats">
-                <div class="queue-stat"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
-                <div class="queue-stat"><div class="num num-processing" id="qsProcessing">-</div><div class="lbl">Processing</div></div>
-                <div class="queue-stat"><div class="num num-completed" id="qsCompleted">-</div><div class="lbl">Completed</div></div>
-                <div class="queue-stat"><div class="num num-failed" id="qsFailed">-</div><div class="lbl">Failed</div></div>
+                <div class="queue-stat" onclick="filterByStatus('')" id="qsAll"><div class="num" id="qsTotal" style="color:#333;">-</div><div class="lbl">ทั้งหมด</div></div>
+                <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
+                <div class="queue-stat" onclick="filterByStatus('PROCESSING')" id="qsProcessingCard"><div class="num num-processing" id="qsProcessing">-</div><div class="lbl">Processing</div></div>
+                <div class="queue-stat" onclick="filterByStatus('COMPLETED')" id="qsCompletedCard"><div class="num num-completed" id="qsCompleted">-</div><div class="lbl">Completed</div></div>
+                <div class="queue-stat" onclick="filterByStatus('FAILED')" id="qsFailedCard"><div class="num num-failed" id="qsFailed">-</div><div class="lbl">Failed</div></div>
             </div>
 
-            <div class="btn-row" style="margin-bottom:15px;">
-                <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
-                <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
+            <div class="queue-toolbar">
+                <div class="queue-toolbar-left">
+                    <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
+                    <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
+                </div>
+                <div class="queue-toolbar-right">
+                    <label style="font-size:12px; color:#777;">แสดง</label>
+                    <select id="queuePageSize" onchange="changePageSize()">
+                        <option value="10">10</option>
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <label style="font-size:12px; color:#777;">รายการ/หน้า</label>
+                </div>
             </div>
 
             <div style="overflow-x:auto;">
@@ -266,6 +293,8 @@
                     </tbody>
                 </table>
             </div>
+
+            <div class="pagination" id="queuePagination" style="margin-top:15px; justify-content:center;"></div>
         </div>
 
         <!-- Account Mapping Management -->
@@ -304,6 +333,7 @@
 
     <script>
         var pageUrl = '<%= ResolveUrl("~/Admin/Settings/AccountingIntegration") %>';
+        var queueState = { page: 1, pageSize: 20, status: '', totalPages: 1 };
 
         document.addEventListener('DOMContentLoaded', function () {
             loadConfigData();
@@ -321,7 +351,6 @@
                 document.getElementById('cfgSyncInterval').value = cfg.syncInterval || 30;
                 document.getElementById('cfgMaxRetries').value = cfg.maxRetries || 5;
                 document.getElementById('cfgTimeout').value = cfg.timeout || 30;
-                // API Key จะไม่โหลดกลับมาแสดง เพื่อความปลอดภัย (เหมือน password)
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
@@ -361,15 +390,60 @@
             getAction('processQueue', 'syncTestResult');
         }
 
+        // ── Queue Pagination & Filter ──
+
+        function filterByStatus(status) {
+            queueState.status = status;
+            queueState.page = 1;
+            updateFilterUI();
+            loadQueueData();
+        }
+
+        function changePageSize() {
+            queueState.pageSize = parseInt(document.getElementById('queuePageSize').value) || 20;
+            queueState.page = 1;
+            loadQueueData();
+        }
+
+        function goToPage(p) {
+            if (p < 1 || p > queueState.totalPages) return;
+            queueState.page = p;
+            loadQueueData();
+        }
+
+        function updateFilterUI() {
+            var cards = {
+                '': 'qsAll', 'PENDING': 'qsPendingCard', 'PROCESSING': 'qsProcessingCard',
+                'COMPLETED': 'qsCompletedCard', 'FAILED': 'qsFailedCard'
+            };
+            for (var key in cards) {
+                var el = document.getElementById(cards[key]);
+                if (el) el.className = 'queue-stat' + (queueState.status === key ? ' active' : '');
+            }
+        }
+
         function loadQueueData() {
-            fetch(pageUrl + '?action=queueData&_=' + Date.now())
+            var url = pageUrl + '?action=queueData&page=' + queueState.page
+                + '&pageSize=' + queueState.pageSize
+                + (queueState.status ? '&status=' + queueState.status : '')
+                + '&_=' + Date.now();
+
+            fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
+                    var total = (data.pending || 0) + (data.processing || 0) + (data.completed || 0) + (data.failed || 0);
+                    document.getElementById('qsTotal').textContent = total;
                     document.getElementById('qsPending').textContent = data.pending || 0;
                     document.getElementById('qsProcessing').textContent = data.processing || 0;
                     document.getElementById('qsCompleted').textContent = data.completed || 0;
                     document.getElementById('qsFailed').textContent = data.failed || 0;
+
+                    queueState.page = data.page || 1;
+                    queueState.totalPages = data.totalPages || 1;
+
                     renderQueue(data.items || []);
+                    renderPagination(data.page, data.totalPages, data.totalItems);
+                    updateFilterUI();
                 })
                 .catch(function(err) { console.error(err); });
         }
@@ -377,7 +451,8 @@
         function renderQueue(items) {
             var tbody = document.getElementById('queueBody');
             if (!items.length) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">ไม่มีรายการใน Queue</td></tr>';
+                var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">' + msg + '</td></tr>';
                 return;
             }
             var html = '';
@@ -391,7 +466,7 @@
                 html += '<td>' + item.actionType + '</td>';
                 html += '<td><span class="status-badge ' + statusClass + '">' + item.status + '</span></td>';
                 html += '<td>' + item.retryCount + '/' + item.maxRetries + '</td>';
-                html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">' + (item.error || '-') + '</td>';
+                html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + (item.error || '').replace(/"/g, '&quot;') + '">' + (item.error || '-') + '</td>';
                 html += '<td>' + item.created + '</td>';
                 html += '<td>';
                 if (item.status === 'FAILED') {
@@ -401,6 +476,39 @@
                 html += '</tr>';
             });
             tbody.innerHTML = html;
+        }
+
+        function renderPagination(currentPage, totalPages, totalItems) {
+            var el = document.getElementById('queuePagination');
+            if (totalPages <= 1) {
+                el.innerHTML = '<span class="page-info">' + totalItems + ' รายการ</span>';
+                return;
+            }
+
+            var html = '';
+            html += '<button onclick="goToPage(1)" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-double-left"></i></button>';
+            html += '<button onclick="goToPage(' + (currentPage - 1) + ')" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-left"></i></button>';
+
+            // Show page numbers with ellipsis
+            var startPage = Math.max(1, currentPage - 2);
+            var endPage = Math.min(totalPages, currentPage + 2);
+            if (startPage > 1) {
+                html += '<button onclick="goToPage(1)">1</button>';
+                if (startPage > 2) html += '<span class="page-info">...</span>';
+            }
+            for (var i = startPage; i <= endPage; i++) {
+                html += '<button onclick="goToPage(' + i + ')" class="' + (i === currentPage ? 'active' : '') + '">' + i + '</button>';
+            }
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) html += '<span class="page-info">...</span>';
+                html += '<button onclick="goToPage(' + totalPages + ')">' + totalPages + '</button>';
+            }
+
+            html += '<button onclick="goToPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-right"></i></button>';
+            html += '<button onclick="goToPage(' + totalPages + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-double-right"></i></button>';
+            html += '<span class="page-info">หน้า ' + currentPage + '/' + totalPages + ' (' + totalItems + ' รายการ)</span>';
+
+            el.innerHTML = html;
         }
 
         function retryItem(queueId) {
