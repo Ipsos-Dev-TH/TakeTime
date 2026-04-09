@@ -902,16 +902,20 @@ namespace Take_Time_BangPhra.Integration
                     DebitAmount = refundAmount + retainedAmount,
                     CreditAmount = 0,
                     Description = $"ล้างเงินรับล่วงหน้า - #{reservationId}",
-                },
-                // Credit: Refund portion back to customer
-                new JournalEntryLineRequest
+                }
+            };
+
+            // Credit: Refund portion back to customer (only if > 0)
+            if (refundAmount > 0)
+            {
+                lines.Add(new JournalEntryLineRequest
                 {
                     AccountId = cashAccountId,
                     DebitAmount = 0,
                     CreditAmount = refundAmount,
                     Description = $"คืนเงินบางส่วน - {customerName}",
-                }
-            };
+                });
+            }
 
             // Retained amount recognized as income
             if (retainedAmount > 0)
