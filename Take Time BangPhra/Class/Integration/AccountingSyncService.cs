@@ -95,7 +95,12 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueCheckout(int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
         {
             if (!_config.IsConfigured) return -1;
-            if (depositAmount <= 0) return -1;
+            if (depositAmount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueCheckout skipped: depositAmount is {depositAmount} for Reservation #{reservationId}. No journal will be created.", "SYSTEM");
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -565,12 +570,32 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessCheckoutJournal(Dictionary<string, object> p)
         {
+            int reservationId = Convert.ToInt32(p["reservationId"]);
             var depositAmount = Convert.ToDecimal(p["depositAmount"]);
+
+            // Fallback: if payload depositAmount is 0, look up actual paid amount from Payment_History.
+            // This handles cases where Reservation.Deposit was zeroed before enqueue (e.g., cancellation flow).
             if (depositAmount <= 0)
-                throw new ArgumentException($"Cannot create checkout journal: depositAmount is {depositAmount} (must be > 0). Reservation #{p["reservationId"]}");
+            {
+                try
+                {
+                    var fallbackParams = new Dictionary<string, object> { { "@id", reservationId } };
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
+                          FROM Payment_History
+                          WHERE Reservation_ID = @id AND Status = 'COMPLETED'",
+                        fallbackParams);
+                    if (dt?.Rows.Count > 0)
+                        depositAmount = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+                }
+                catch { }
+            }
+
+            if (depositAmount <= 0)
+                throw new ArgumentException($"Cannot create checkout journal: depositAmount is {depositAmount} (must be > 0). Reservation #{reservationId}");
 
             var journal = _mapper.MapCheckoutToJournal(
-                Convert.ToInt32(p["reservationId"]),
+                reservationId,
                 depositAmount,
                 p["customerName"]?.ToString(),
                 DateTime.Parse(p["checkoutDate"]?.ToString()));

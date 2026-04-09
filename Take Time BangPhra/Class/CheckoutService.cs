@@ -166,17 +166,32 @@ namespace Take_Time_BangPhra
                 var parameters = new Dictionary<string, object> { { "@id", reservationId } };
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT r.Deposit, r.TotalPrice,
-                             ISNULL(c.Customer_Name, c.NickName) AS CustomerName
+                             ISNULL(c.Customer_Name, c.NickName) AS CustomerName,
+                             ISNULL(ph.TotalPaid, 0) AS TotalPaid
                       FROM Reservation r
                       LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      LEFT JOIN (
+                          SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid
+                          FROM Payment_History
+                          WHERE Status = 'COMPLETED'
+                          GROUP BY Reservation_ID
+                      ) ph ON ph.Reservation_ID = r.ID
                       WHERE r.ID = @id", parameters);
 
                 if (dt?.Rows.Count > 0)
                 {
                     var row = dt.Rows[0];
+                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    decimal totalPaid = row["TotalPaid"] != DBNull.Value ? Convert.ToDecimal(row["TotalPaid"]) : 0m;
+
+                    // Use TotalPaid from Payment_History as the reliable deposit amount.
+                    // Reservation.Deposit can be zeroed by cancellation flows,
+                    // but Payment_History reflects actual payments received.
+                    decimal effectiveDeposit = totalPaid > 0 ? totalPaid : deposit;
+
                     return new Dictionary<string, object>
                     {
-                        { "Deposit", row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m },
+                        { "Deposit", effectiveDeposit },
                         { "TotalPrice", row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m },
                         { "CustomerName", row["CustomerName"]?.ToString() ?? "ลูกค้า" }
                     };
