@@ -1527,11 +1527,21 @@ namespace Take_Time_BangPhra.Product
             // Sync POS sale to accounting
             try
             {
-                decimal totalSale = decimal.Parse(Session["totalSale"]?.ToString() ?? "0");
-                string paidType = Session["paidType"]?.ToString() ?? "CASH";
-                string receiptNum = Session["receiptId"]?.ToString() ?? "";
-                var sync = new Integration.AccountingSyncService(conn);
-                sync.EnqueuePOSSale(receiptNum, totalSale, 0, paidType, DateTime.Now, "ขายสินค้า POS");
+                // Calculate total from actual order data
+                decimal totalSale = 0;
+                foreach (DataRow row in dtOrder.Rows)
+                {
+                    totalSale += Convert.ToDecimal(row["Price_Total"]);
+                }
+
+                // Get payment method name from dropdown (maps to CASH/KBANK/KTB/CARD etc.)
+                string paidType = DropDownList1.SelectedItem != null ? DropDownList1.SelectedItem.Text : "CASH";
+
+                if (totalSale > 0)
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueuePOSSale(docNum, totalSale, 0, paidType, DateTime.Now, "ขายสินค้า POS");
+                }
             }
             catch { }
 

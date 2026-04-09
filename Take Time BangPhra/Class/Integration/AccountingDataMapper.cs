@@ -696,8 +696,10 @@ namespace Take_Time_BangPhra.Integration
 
         private Guid GetPaymentMethodAccountId(string paymentMethod)
         {
+            string pm = (paymentMethod ?? "").ToUpper();
             string mappingKey;
-            switch ((paymentMethod ?? "").ToUpper())
+
+            switch (pm)
             {
                 case "CASH": mappingKey = "CASH"; break;
                 case "KBANK": mappingKey = "BANK_KBANK"; break;
@@ -705,7 +707,21 @@ namespace Take_Time_BangPhra.Integration
                 case "PROMPTPAY": mappingKey = "BANK_KBANK"; break;
                 case "CARD": mappingKey = "BANK_CARD"; break;
                 case "DIRECTOR": mappingKey = "DIRECTOR_ADVANCE"; break;
-                default: mappingKey = "CASH"; break;
+                default:
+                    // Match Thai payment method names from Account_Paid_How table
+                    if (pm.Contains("กสิกร") || pm.Contains("KBANK"))
+                        mappingKey = "BANK_KBANK";
+                    else if (pm.Contains("กรุงไทย") || pm.Contains("KTB"))
+                        mappingKey = "BANK_KTB";
+                    else if (pm.Contains("พร้อมเพย์") || pm.Contains("PROMPTPAY"))
+                        mappingKey = "BANK_KBANK";
+                    else if (pm.Contains("บัตร") || pm.Contains("CARD") || pm.Contains("เครดิต"))
+                        mappingKey = "BANK_CARD";
+                    else if (pm.Contains("กรรมการ") || pm.Contains("DIRECTOR") || pm.Contains("ทดรอง"))
+                        mappingKey = "DIRECTOR_ADVANCE";
+                    else
+                        mappingKey = "CASH";
+                    break;
             }
 
             return GetAccountId(mappingKey);

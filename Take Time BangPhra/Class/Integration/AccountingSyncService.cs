@@ -755,9 +755,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
         {
+            var totalAmount = Convert.ToDecimal(p["totalAmount"]);
+            if (totalAmount <= 0)
+                throw new ArgumentException($"Cannot create POS sale journal: totalAmount is {totalAmount} (must be > 0). Receipt: {p["receiptId"]}");
+
             var journal = _mapper.MapPOSSaleToJournal(
                 p["receiptId"]?.ToString(),
-                Convert.ToDecimal(p["totalAmount"]),
+                totalAmount,
                 Convert.ToDecimal(p["totalCost"]),
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["saleDate"]?.ToString()),
