@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace Take_Time_BangPhra.Integration
 {
@@ -46,6 +47,7 @@ namespace Take_Time_BangPhra.Integration
         public Guid Id { get; set; }
         public string EntryNumber { get; set; }
         public DateTime EntryDate { get; set; }
+        [JsonConverter(typeof(JournalTypeConverter))]
         public int JournalType { get; set; }
         public string Description { get; set; }
         public string Reference { get; set; }
@@ -334,5 +336,46 @@ namespace Take_Time_BangPhra.Integration
         public const int Individual = 1;        // บุคคลธรรมดา → ภ.ง.ด.3
         public const int JuristicPerson = 2;    // นิติบุคคล → ภ.ง.ด.53
         public const int GovernmentAgency = 3;  // หน่วยงานราชการ
+    }
+
+    /// <summary>
+    /// Handles JournalType deserialization from both int and string values.
+    /// The Nexaacc API may return either format (e.g. 3 or "CashReceipts").
+    /// </summary>
+    public class JournalTypeConverter : JsonConverter<int>
+    {
+        private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "General", NexaaccJournalType.General },
+            { "Sales", NexaaccJournalType.Sales },
+            { "Purchase", NexaaccJournalType.Purchase },
+            { "CashReceipts", NexaaccJournalType.CashReceipts },
+            { "CashPayments", NexaaccJournalType.CashPayments }
+        };
+
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer)
+                return Convert.ToInt32(reader.Value);
+
+            if (reader.TokenType == JsonToken.String)
+            {
+                var str = (string)reader.Value;
+                if (_nameToValue.TryGetValue(str, out int value))
+                    return value;
+
+                if (int.TryParse(str, out int parsed))
+                    return parsed;
+
+                throw new JsonSerializationException($"Unknown JournalType value: '{str}'");
+            }
+
+            throw new JsonSerializationException($"Unexpected token type {reader.TokenType} for JournalType");
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
     }
 }
