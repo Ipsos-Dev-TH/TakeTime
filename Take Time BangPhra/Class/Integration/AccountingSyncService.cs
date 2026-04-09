@@ -531,9 +531,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessDepositJournal(Dictionary<string, object> p)
         {
+            var amount = Convert.ToDecimal(p["amount"]);
+            if (amount <= 0)
+                throw new ArgumentException($"Cannot create deposit journal: amount is {amount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var journal = _mapper.MapDepositToJournal(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["amount"]),
+                amount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["paymentDate"]?.ToString()),
                 p["customerName"]?.ToString());
@@ -561,9 +565,13 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessCheckoutJournal(Dictionary<string, object> p)
         {
+            var depositAmount = Convert.ToDecimal(p["depositAmount"]);
+            if (depositAmount <= 0)
+                throw new ArgumentException($"Cannot create checkout journal: depositAmount is {depositAmount} (must be > 0). Reservation #{p["reservationId"]}");
+
             var journal = _mapper.MapCheckoutToJournal(
                 Convert.ToInt32(p["reservationId"]),
-                Convert.ToDecimal(p["depositAmount"]),
+                depositAmount,
                 p["customerName"]?.ToString(),
                 DateTime.Parse(p["checkoutDate"]?.ToString()));
 
