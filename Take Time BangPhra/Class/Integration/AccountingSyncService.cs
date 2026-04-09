@@ -718,12 +718,12 @@ namespace Take_Time_BangPhra.Integration
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
 
             var expense = _mapper.MapPayrollToExpense(
-                Convert.ToDecimal(p["totalSalary"]),
-                DateTime.Parse(p["payDate"]?.ToString()),
                 p["period"]?.ToString(),
-                ssfEmployee,
-                ssfEmployer,
-                whtAmount);
+                Convert.ToDecimal(p["totalSalary"]),
+                ssfEmployee + ssfEmployer,
+                whtAmount,
+                DateTime.Parse(p["payDate"]?.ToString()),
+                p.ContainsKey("description") ? p["description"]?.ToString() : null);
 
             var result = await _apiClient.CreateExpenseAsync(expense);
             return result.data.Id.ToString();
