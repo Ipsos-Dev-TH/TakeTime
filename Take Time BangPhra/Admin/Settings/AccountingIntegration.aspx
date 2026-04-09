@@ -470,7 +470,7 @@
                 html += '<td>' + item.created + '</td>';
                 html += '<td>';
                 if (item.status === 'FAILED') {
-                    html += '<button class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')"><i class="fas fa-redo"></i></button>';
+                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')"><i class="fas fa-redo"></i></button>';
                 }
                 html += '</td>';
                 html += '</tr>';
@@ -486,26 +486,26 @@
             }
 
             var html = '';
-            html += '<button onclick="goToPage(1)" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-double-left"></i></button>';
-            html += '<button onclick="goToPage(' + (currentPage - 1) + ')" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-left"></i></button>';
+            html += '<button type="button" onclick="goToPage(1)" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-double-left"></i></button>';
+            html += '<button type="button" onclick="goToPage(' + (currentPage - 1) + ')" ' + (currentPage <= 1 ? 'disabled' : '') + '><i class="fas fa-angle-left"></i></button>';
 
             // Show page numbers with ellipsis
             var startPage = Math.max(1, currentPage - 2);
             var endPage = Math.min(totalPages, currentPage + 2);
             if (startPage > 1) {
-                html += '<button onclick="goToPage(1)">1</button>';
+                html += '<button type="button" onclick="goToPage(1)">1</button>';
                 if (startPage > 2) html += '<span class="page-info">...</span>';
             }
             for (var i = startPage; i <= endPage; i++) {
-                html += '<button onclick="goToPage(' + i + ')" class="' + (i === currentPage ? 'active' : '') + '">' + i + '</button>';
+                html += '<button type="button" onclick="goToPage(' + i + ')" class="' + (i === currentPage ? 'active' : '') + '">' + i + '</button>';
             }
             if (endPage < totalPages) {
                 if (endPage < totalPages - 1) html += '<span class="page-info">...</span>';
-                html += '<button onclick="goToPage(' + totalPages + ')">' + totalPages + '</button>';
+                html += '<button type="button" onclick="goToPage(' + totalPages + ')">' + totalPages + '</button>';
             }
 
-            html += '<button onclick="goToPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-right"></i></button>';
-            html += '<button onclick="goToPage(' + totalPages + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-double-right"></i></button>';
+            html += '<button type="button" onclick="goToPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-right"></i></button>';
+            html += '<button type="button" onclick="goToPage(' + totalPages + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-angle-double-right"></i></button>';
             html += '<span class="page-info">หน้า ' + currentPage + '/' + totalPages + ' (' + totalItems + ' รายการ)</span>';
 
             el.innerHTML = html;
