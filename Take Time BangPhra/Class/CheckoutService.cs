@@ -159,7 +159,9 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>
-        /// Get reservation data for accounting sync
+        /// Get reservation data for accounting sync.
+        /// Uses multi-source fallback to ensure deposit amount is always recovered:
+        /// Priority: Payment_History.TotalPaid > Reservation.Deposit > Reservation.TotalPrice
         /// </summary>
         private Dictionary<string, object> GetReservationData(int reservationId)
         {
@@ -185,21 +187,39 @@ namespace Take_Time_BangPhra
                     var row = dt.Rows[0];
                     decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
                     decimal totalPaid = row["TotalPaid"] != DBNull.Value ? Convert.ToDecimal(row["TotalPaid"]) : 0m;
+                    decimal totalPrice = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
 
                     // Use TotalPaid from Payment_History as the reliable deposit amount.
                     // Reservation.Deposit can be zeroed by cancellation flows,
                     // but Payment_History reflects actual payments received.
-                    decimal effectiveDeposit = totalPaid > 0 ? totalPaid : deposit;
+                    // Fallback chain: TotalPaid > Deposit > TotalPrice
+                    decimal effectiveDeposit;
+                    if (totalPaid > 0)
+                        effectiveDeposit = totalPaid;
+                    else if (deposit > 0)
+                        effectiveDeposit = deposit;
+                    else
+                        effectiveDeposit = totalPrice; // Last resort: use total price for revenue recognition
+
+                    if (effectiveDeposit <= 0)
+                    {
+                        _code.Logs(_connectionString, "Checkout",
+                            $"GetReservationData: all deposit sources are 0 for Reservation #{reservationId} (TotalPaid={totalPaid:N2}, Deposit={deposit:N2}, TotalPrice={totalPrice:N2})", "SYSTEM");
+                    }
 
                     return new Dictionary<string, object>
                     {
                         { "Deposit", effectiveDeposit },
-                        { "TotalPrice", row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m },
+                        { "TotalPrice", totalPrice },
                         { "CustomerName", row["CustomerName"]?.ToString() ?? "ลูกค้า" }
                     };
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"GetReservationData failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+            }
             return null;
         }
 

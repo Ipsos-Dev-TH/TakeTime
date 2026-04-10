@@ -52,7 +52,12 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueReservationDeposit(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
         {
             if (!_config.IsConfigured) return -1;
-            if (amount <= 0) return -1;
+            if (amount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReservationDeposit skipped: amount is {amount} for Reservation #{reservationId}. Caller should check amount before enqueuing.", "SYSTEM");
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -73,7 +78,12 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueReservationPayment(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName, bool hasVat = false)
         {
             if (!_config.IsConfigured) return -1;
-            if (amount <= 0) return -1;
+            if (amount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReservationPayment skipped: amount is {amount} for Reservation #{reservationId}. Caller should check amount before enqueuing.", "SYSTEM");
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -95,11 +105,37 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueCheckout(int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
         {
             if (!_config.IsConfigured) return -1;
+
+            // If depositAmount is 0, try to recover from Payment_History before skipping
+            if (depositAmount <= 0)
+            {
+                try
+                {
+                    var fallbackParams = new Dictionary<string, object> { { "@id", reservationId } };
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
+                          FROM Payment_History
+                          WHERE Reservation_ID = @id AND Status = 'COMPLETED'",
+                        fallbackParams);
+                    if (dt?.Rows.Count > 0)
+                    {
+                        decimal recovered = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+                        if (recovered > 0)
+                        {
+                            depositAmount = recovered;
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"EnqueueCheckout: depositAmount was 0, recovered {depositAmount:N2} from Payment_History for Reservation #{reservationId}.", "SYSTEM");
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Still 0? Enqueue anyway - the processor has its own fallback chain
             if (depositAmount <= 0)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueCheckout skipped: depositAmount is {depositAmount} for Reservation #{reservationId}. No journal will be created.", "SYSTEM");
-                return -1;
+                    $"EnqueueCheckout: depositAmount is {depositAmount} for Reservation #{reservationId}. Enqueuing with 0 - processor will attempt fallback.", "SYSTEM");
             }
 
             var payload = new Dictionary<string, object>
@@ -326,7 +362,12 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueuePOSSale(string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod, DateTime saleDate, string description)
         {
             if (!_config.IsConfigured) return -1;
-            if (totalAmount <= 0) return -1;
+            if (totalAmount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueuePOSSale skipped: totalAmount is {totalAmount} for Receipt: {receiptId}.", "SYSTEM");
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -444,7 +485,16 @@ namespace Take_Time_BangPhra.Integration
                 try
                 {
                     string nexaaccId = await ProcessSingleItemAsync(actionType, payload);
-                    UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
+
+                    // If skipped due to zero amount (not an error, just no accounting entry needed)
+                    if (nexaaccId == "SKIPPED_ZERO_AMOUNT")
+                    {
+                        UpdateQueueStatus(queueId, "COMPLETED", "Skipped: zero amount after fallback lookup - no accounting entry needed", nexaaccId);
+                    }
+                    else
+                    {
+                        UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
+                    }
                     processed++;
                 }
                 catch (ArgumentException ex)
@@ -567,12 +617,27 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessDepositJournal(Dictionary<string, object> p)
         {
+            int reservationId = Convert.ToInt32(p["reservationId"]);
             var amount = Convert.ToDecimal(p["amount"]);
+
+            // Fallback: if payload amount is 0, look up actual deposit from Payment_History
             if (amount <= 0)
-                throw new ArgumentException($"Cannot create deposit invoice: amount is {amount} (must be > 0). Reservation #{p["reservationId"]}");
+            {
+                amount = LookupPaidAmount(reservationId, "DEPOSIT");
+                if (amount > 0)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessDepositJournal: payload amount was 0, recovered {amount:N2} from Payment_History. Reservation #{reservationId}", "SYSTEM");
+            }
+
+            if (amount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositJournal skipped: amount is {amount} after fallback lookup. Reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_ZERO_AMOUNT";
+            }
 
             var invoice = _mapper.MapDepositToInvoice(
-                Convert.ToInt32(p["reservationId"]),
+                reservationId,
                 amount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["paymentDate"]?.ToString()),
@@ -584,12 +649,27 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPaymentJournal(Dictionary<string, object> p)
         {
+            int reservationId = Convert.ToInt32(p["reservationId"]);
             var amount = Convert.ToDecimal(p["amount"]);
+
+            // Fallback: if payload amount is 0, look up actual payment from Payment_History
             if (amount <= 0)
-                throw new ArgumentException($"Cannot create payment journal: amount is {amount} (must be > 0). Reservation #{p["reservationId"]}");
+            {
+                amount = LookupPaidAmount(reservationId, "ADDITIONAL");
+                if (amount > 0)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPaymentJournal: payload amount was 0, recovered {amount:N2} from Payment_History. Reservation #{reservationId}", "SYSTEM");
+            }
+
+            if (amount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPaymentJournal skipped: amount is {amount} after fallback lookup. Reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_ZERO_AMOUNT";
+            }
 
             var invoice = _mapper.MapPaymentToInvoice(
-                Convert.ToInt32(p["reservationId"]),
+                reservationId,
                 amount,
                 p["paymentMethod"]?.ToString(),
                 DateTime.Parse(p["paymentDate"]?.ToString()),
@@ -605,25 +685,62 @@ namespace Take_Time_BangPhra.Integration
             int reservationId = Convert.ToInt32(p["reservationId"]);
             var depositAmount = Convert.ToDecimal(p["depositAmount"]);
 
-            // Fallback: if payload depositAmount is 0, look up actual paid amount from Payment_History.
+            // Fallback chain when payload depositAmount is 0:
+            // 1. Payment_History (most reliable - actual payments received)
+            // 2. Reservation.Deposit field
+            // 3. Reservation.TotalPrice (last resort for revenue recognition)
             if (depositAmount <= 0)
             {
                 try
                 {
                     var fallbackParams = new Dictionary<string, object> { { "@id", reservationId } };
                     var dt = _code.DatabaseQuerySafe(_connectionString,
-                        @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
-                          FROM Payment_History
-                          WHERE Reservation_ID = @id AND Status = 'COMPLETED'",
+                        @"SELECT
+                            ISNULL(ph.TotalPaid, 0) AS TotalPaid,
+                            ISNULL(r.Deposit, 0) AS Deposit,
+                            ISNULL(r.TotalPrice, 0) AS TotalPrice
+                          FROM Reservation r
+                          LEFT JOIN (
+                              SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid
+                              FROM Payment_History
+                              WHERE Status = 'COMPLETED'
+                              GROUP BY Reservation_ID
+                          ) ph ON ph.Reservation_ID = r.ID
+                          WHERE r.ID = @id",
                         fallbackParams);
+
                     if (dt?.Rows.Count > 0)
-                        depositAmount = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+                    {
+                        decimal totalPaid = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+                        decimal deposit = Convert.ToDecimal(dt.Rows[0]["Deposit"]);
+                        decimal totalPrice = Convert.ToDecimal(dt.Rows[0]["TotalPrice"]);
+
+                        // Priority: TotalPaid > Deposit > TotalPrice
+                        if (totalPaid > 0)
+                            depositAmount = totalPaid;
+                        else if (deposit > 0)
+                            depositAmount = deposit;
+                        else if (totalPrice > 0)
+                            depositAmount = totalPrice;
+
+                        if (depositAmount > 0)
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessCheckoutJournal: payload depositAmount was 0, recovered {depositAmount:N2} from DB (TotalPaid={totalPaid:N2}, Deposit={deposit:N2}, TotalPrice={totalPrice:N2}). Reservation #{reservationId}", "SYSTEM");
+                    }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessCheckoutJournal: fallback lookup failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+                }
             }
 
             if (depositAmount <= 0)
-                throw new ArgumentException($"Cannot create checkout journal: depositAmount is {depositAmount} (must be > 0). Reservation #{reservationId}");
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessCheckoutJournal skipped: depositAmount is {depositAmount} after all fallback lookups. Reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_ZERO_AMOUNT";
+            }
 
             var invoice = _mapper.MapCheckoutToInvoice(
                 reservationId,
@@ -811,20 +928,75 @@ namespace Take_Time_BangPhra.Integration
         private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
         {
             var totalAmount = Convert.ToDecimal(p["totalAmount"]);
+            string receiptId = p["receiptId"]?.ToString() ?? "UNKNOWN";
+            string paymentMethod = p["paymentMethod"]?.ToString() ?? "CASH";
+
             if (totalAmount <= 0)
-                throw new ArgumentException($"Cannot create POS sale journal: totalAmount is {totalAmount} (must be > 0). Receipt: {p["receiptId"]}");
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPOSSaleJournal skipped: totalAmount is {totalAmount}. Receipt: {receiptId}", "SYSTEM");
+                return "SKIPPED_ZERO_AMOUNT";
+            }
+
+            // Validate account mappings exist before calling API to prevent "must have debit/credit" errors
+            if (!_mapper.TryGetAccountId("PRODUCT_REVENUE", out _))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPOSSaleJournal skipped: PRODUCT_REVENUE account not mapped. Receipt: {receiptId}", "SYSTEM");
+                throw new ArgumentException($"Cannot create POS sale journal: PRODUCT_REVENUE account is not mapped. Please configure in Accounting_Account_Mapping table. Receipt: {receiptId}");
+            }
+
+            // Validate payment method account exists
+            string paymentAccountKey = ResolvePaymentMethodKey(paymentMethod);
+            if (!_mapper.TryGetAccountId(paymentAccountKey, out _))
+            {
+                // Try CASH as fallback
+                if (!_mapper.TryGetAccountId("CASH", out _))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPOSSaleJournal skipped: No account mapping for payment method '{paymentMethod}' (key: {paymentAccountKey}) and no CASH fallback. Receipt: {receiptId}", "SYSTEM");
+                    throw new ArgumentException($"Cannot create POS sale journal: No account mapping for payment method '{paymentMethod}'. Please configure in Accounting_Account_Mapping table. Receipt: {receiptId}");
+                }
+                paymentMethod = "CASH"; // Use CASH as fallback
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPOSSaleJournal: No mapping for '{p["paymentMethod"]}', falling back to CASH. Receipt: {receiptId}", "SYSTEM");
+            }
 
             var journal = _mapper.MapPOSSaleToJournal(
-                p["receiptId"]?.ToString(),
+                receiptId,
                 totalAmount,
                 Convert.ToDecimal(p["totalCost"]),
-                p["paymentMethod"]?.ToString(),
+                paymentMethod,
                 DateTime.Parse(p["saleDate"]?.ToString()),
                 p["description"]?.ToString());
+
+            // Final validation: ensure journal has valid lines
+            if (journal.Lines == null || journal.Lines.Count < 2)
+            {
+                throw new ArgumentException($"Cannot create POS sale journal: mapped journal has {journal.Lines?.Count ?? 0} lines (need at least 2). Receipt: {receiptId}");
+            }
 
             var result = await _apiClient.CreateJournalAsync(journal);
             await _apiClient.PostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
+        }
+
+        /// <summary>
+        /// Resolve payment method string to account mapping key.
+        /// </summary>
+        private string ResolvePaymentMethodKey(string paymentMethod)
+        {
+            if (string.IsNullOrEmpty(paymentMethod)) return "CASH";
+            switch (paymentMethod.ToUpper())
+            {
+                case "CASH": case "เงินสด": return "CASH";
+                case "KBANK": return "BANK_KBANK";
+                case "KTB": return "BANK_KTB";
+                case "PROMPTPAY": case "พร้อมเพย์": return "BANK_KBANK";
+                case "CARD": case "บัตรเครดิต": return "BANK_CARD";
+                case "DIRECTOR": return "DIRECTOR_ADVANCE";
+                default: return "CASH";
+            }
         }
 
         private async Task<string> ProcessPostponePriceDiffJournal(Dictionary<string, object> p)
@@ -882,6 +1054,64 @@ namespace Take_Time_BangPhra.Integration
 
             var result = await _apiClient.CreateInvoiceAsync(invoice);
             return result.data.Id.ToString();
+        }
+
+        // ──────────────────────────────────────────────
+        // Fallback Data Lookup Helpers
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Look up actual paid amount from Payment_History when payload amount is 0.
+        /// Returns total paid for the given reservation and payment type, or 0 if not found.
+        /// </summary>
+        private decimal LookupPaidAmount(int reservationId, string paymentType = null)
+        {
+            try
+            {
+                string sql;
+                var parameters = new Dictionary<string, object> { { "@id", reservationId } };
+
+                if (!string.IsNullOrEmpty(paymentType))
+                {
+                    sql = @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
+                            FROM Payment_History
+                            WHERE Reservation_ID = @id AND Status = 'COMPLETED' AND PaymentType = @type
+                            ORDER BY Created_Date DESC";
+                    parameters.Add("@type", paymentType);
+                }
+                else
+                {
+                    sql = @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
+                            FROM Payment_History
+                            WHERE Reservation_ID = @id AND Status = 'COMPLETED'";
+                }
+
+                var dt = _code.DatabaseQuerySafe(_connectionString, sql, parameters);
+                if (dt?.Rows.Count > 0)
+                {
+                    decimal amount = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+                    if (amount > 0) return amount;
+                }
+
+                // If specific type returned 0, try all payments
+                if (!string.IsNullOrEmpty(paymentType))
+                {
+                    var allParams = new Dictionary<string, object> { { "@id", reservationId } };
+                    var dtAll = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
+                          FROM Payment_History
+                          WHERE Reservation_ID = @id AND Status = 'COMPLETED'",
+                        allParams);
+                    if (dtAll?.Rows.Count > 0)
+                        return Convert.ToDecimal(dtAll.Rows[0]["TotalPaid"]);
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupPaidAmount failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return 0;
         }
 
         // ──────────────────────────────────────────────
