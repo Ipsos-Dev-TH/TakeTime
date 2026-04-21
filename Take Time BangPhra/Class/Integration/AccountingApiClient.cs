@@ -311,6 +311,8 @@ namespace Take_Time_BangPhra.Integration
                     // Create a fresh request on each attempt (HttpRequestMessage cannot be reused)
                     var request = new HttpRequestMessage(method, url);
                     request.Headers.Add("X-Api-Key", _config.ApiKey);
+                    if (path.StartsWith("/api/integration/"))
+                        request.Headers.Add("X-Integration-Key", _config.ApiKey);
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -479,7 +481,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // Integration Endpoints — สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
-        // ใช้ company-scoped path เพราะ Nexaacc ApiKeyMiddleware validate API key ต่อ company
+        // ใช้ /api/integration/* (ไม่มี company path — API key ระบุ company อยู่แล้ว)
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceAsync(CreateIntegrationInvoiceRequest invoice)
         {
             if (invoice.Lines == null || invoice.Lines.Count == 0)
@@ -489,7 +491,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
 
             return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
-                $"{CompanyPath}/integration/invoices", invoice);
+                "/api/integration/invoices", invoice);
         }
 
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseAsync(CreateIntegrationExpenseRequest expense)
@@ -498,7 +500,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Expense must have at least 1 line item.");
 
             return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
-                $"{CompanyPath}/integration/expenses", expense);
+                "/api/integration/expenses", expense);
         }
 
         // Integration Payments (/api/integration/payments)
@@ -508,7 +510,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Payment amount must be > 0.");
 
             return await PostAsync<CreateIntegrationPaymentRequest, ApiResponse<IntegrationPaymentResponse>>(
-                $"{CompanyPath}/integration/payments", payment);
+                "/api/integration/payments", payment);
         }
 
         // Products (ProductController)
