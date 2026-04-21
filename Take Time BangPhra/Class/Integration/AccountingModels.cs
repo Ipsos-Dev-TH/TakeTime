@@ -459,6 +459,7 @@ namespace Take_Time_BangPhra.Integration
 
     public class IntegrationLineRequest
     {
+        public string ItemName { get; set; }
         public string Description { get; set; }
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }

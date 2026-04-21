@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Web;
 using System.Web.Optimization;
 using System.Web.Routing;
@@ -21,6 +22,20 @@ namespace Take_Time_BangPhra
 
         void Application_Start(object sender, EventArgs e)
         {
+            // Enforce TLS 1.2 for all outbound HTTPS connections.
+            // .NET Framework defaults to SSL3/TLS1.0 which modern APIs (Nexaacc) reject.
+            // This fixes "An error occurred while sending the request" errors.
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
+                | SecurityProtocolType.Tls11
+                | SecurityProtocolType.Tls;
+
+            // Increase default connection limit to prevent throttling on concurrent API calls
+            ServicePointManager.DefaultConnectionLimit = 100;
+
+            // Disable Nagle's algorithm for better responsiveness on small API requests
+            ServicePointManager.UseNagleAlgorithm = false;
+            ServicePointManager.Expect100Continue = false;
+
             // Code that runs on application startup
             RouteConfig.RegisterRoutes(RouteTable.Routes);
             BundleConfig.RegisterBundles(BundleTable.Bundles);
