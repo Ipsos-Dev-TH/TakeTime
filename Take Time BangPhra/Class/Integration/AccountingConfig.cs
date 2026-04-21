@@ -29,6 +29,7 @@ namespace Take_Time_BangPhra.Integration
 
         // Core settings
         public string BaseUrl => SanitizeBaseUrl(GetConfig("Nexaacc_BaseUrl", ""));
+        public string RawBaseUrl => GetConfig("Nexaacc_BaseUrl", "");
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
         public Guid CompanyId => Guid.TryParse(GetConfig("Nexaacc_CompanyId", ""), out var id) ? id : Guid.Empty;
         public bool Enabled => GetConfig("Nexaacc_Enabled", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -40,12 +41,46 @@ namespace Take_Time_BangPhra.Integration
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง
         /// </summary>
-        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty;
+        public bool IsConfigured => !string.IsNullOrEmpty(BaseUrl) && IsValidUrl(BaseUrl) && !string.IsNullOrEmpty(ApiKey) && CompanyId != Guid.Empty;
 
         /// <summary>
         /// พร้อม sync อัตโนมัติ = ตั้งค่าครบ + เปิดใช้งาน
         /// </summary>
         public bool IsReadyToSync => IsConfigured && Enabled;
+
+        /// <summary>
+        /// Validate that a URL is well-formed and uses HTTPS.
+        /// </summary>
+        private static bool IsValidUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            Uri uri;
+            return Uri.TryCreate(url, UriKind.Absolute, out uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+        }
+
+        /// <summary>
+        /// Validate the Base URL and return diagnostic messages.
+        /// Returns null if valid; error message if invalid.
+        /// </summary>
+        public string ValidateBaseUrl()
+        {
+            string raw = RawBaseUrl;
+            if (string.IsNullOrWhiteSpace(raw))
+                return "Nexaacc_BaseUrl ยังไม่ได้ตั้งค่า";
+
+            Uri uri;
+            if (!Uri.TryCreate(raw, UriKind.Absolute, out uri))
+                return $"Nexaacc_BaseUrl format ไม่ถูกต้อง: '{raw}'";
+
+            if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+                return $"Nexaacc_BaseUrl ต้องเป็น http:// หรือ https:// — ปัจจุบันเป็น: '{uri.Scheme}'";
+
+            if (string.IsNullOrEmpty(uri.Host) || uri.Host == "localhost")
+                return $"Nexaacc_BaseUrl host ไม่ถูกต้อง: '{uri.Host}'";
+
+            return null;
+        }
 
         /// <summary>
         /// Strip any trailing API path segments from the base URL to prevent
