@@ -183,6 +183,12 @@ namespace Take_Time_BangPhra.Integration
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
 
+            if (!string.IsNullOrEmpty(documentNumber))
+            {
+                long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
+                if (existing > 0) return existing;
+            }
+
             var payload = new Dictionary<string, object>
             {
                 { "voucherId", voucherId },
@@ -277,6 +283,9 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName)
         {
             if (!_config.IsConfigured) return -1;
+
+            long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
+            if (existing > 0) return existing;
 
             var payload = new Dictionary<string, object>
             {
@@ -464,6 +473,9 @@ namespace Take_Time_BangPhra.Integration
         {
             if (!_config.IsConfigured) return -1;
 
+            long existing = FindPendingEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber);
+            if (existing > 0) return existing;
+
             string nexaaccId = LookupNexaaccId(receiptNumber, "RECEIPT");
             if (string.IsNullOrEmpty(nexaaccId)) return -1;
 
@@ -482,6 +494,9 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueVoidPaymentVoucher(string documentNumber)
         {
             if (!_config.IsConfigured) return -1;
+
+            long existing = FindPendingEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber);
+            if (existing > 0) return existing;
 
             string nexaaccId = LookupNexaaccId(documentNumber, "VOUCHER");
             if (string.IsNullOrEmpty(nexaaccId)) return -1;
@@ -1378,6 +1393,28 @@ namespace Take_Time_BangPhra.Integration
         // ──────────────────────────────────────────────
         // Queue Database Operations
         // ──────────────────────────────────────────────
+
+        private long FindPendingEntry(string entityType, string actionType, string payloadKey, string payloadValue)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND Status IN ('PENDING', 'PROCESSING')
+                        AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", actionType },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
+            }
+            catch { return -1; }
+        }
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
         {
