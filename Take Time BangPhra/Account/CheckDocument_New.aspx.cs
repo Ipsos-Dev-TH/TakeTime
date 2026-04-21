@@ -8,6 +8,7 @@ using System.Text;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Class;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Account
 {
@@ -1322,6 +1323,13 @@ namespace Take_Time_BangPhra.Account
 
         protected void gvDetails_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            if (e.CommandName == "sync")
+            {
+                string docId = e.CommandArgument.ToString();
+                HandleSyncDocument(docId);
+                return;
+            }
+
             if (e.CommandName == "edit")
             {
                 try
@@ -1573,6 +1581,187 @@ namespace Take_Time_BangPhra.Account
                 codeInstance.Logs(conn, "GetSlipURL Error", $"ReceiptID: {receiptId}, Error: {ex.Message}", "SYSTEM");
             }
             return "#";
+        }
+
+        // ──────────────────────────────────────────────
+        // Accounting Sync Status
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, DataRow> _syncStatusCache;
+
+        private void LoadSyncStatusCache()
+        {
+            _syncStatusCache = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var dt = codeInstance.DatabaseQuerySafe(conn,
+                    @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload
+                      FROM Accounting_Sync_Queue
+                      WHERE (Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT')
+                         OR (Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL')
+                         OR (Entity_Type = 'RESERVATION')
+                      ORDER BY ID DESC",
+                    null);
+
+                if (dt == null) return;
+
+                foreach (DataRow row in dt.Rows)
+                {
+                    string payload = row["Payload"]?.ToString() ?? "";
+
+                    string key = ExtractJsonValue(payload, "receiptNumber");
+                    if (string.IsNullOrEmpty(key))
+                        key = ExtractJsonValue(payload, "documentNumber");
+
+                    if (!string.IsNullOrEmpty(key) && !_syncStatusCache.ContainsKey(key))
+                        _syncStatusCache[key] = row;
+                }
+            }
+            catch { }
+        }
+
+        private string ExtractJsonValue(string json, string key)
+        {
+            string search = "\"" + key + "\":\"";
+            int idx = json.IndexOf(search);
+            if (idx < 0) return null;
+            idx += search.Length;
+            int end = json.IndexOf("\"", idx);
+            return end > idx ? json.Substring(idx, end - idx) : null;
+        }
+
+        protected void gvDetails_RowDataBound(object sender, GridViewRowEventArgs e)
+        {
+            if (e.Row.RowType != DataControlRowType.DataRow) return;
+
+            var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
+            var btnSync = (Button)e.Row.FindControl("btnSync");
+            if (lblSync == null || btnSync == null) return;
+
+            string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
+            string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
+
+            if (docStatus == "Cancel")
+            {
+                lblSync.Text = "<span class='sync-badge none'>-</span>";
+                btnSync.Visible = false;
+                return;
+            }
+
+            if (_syncStatusCache == null) LoadSyncStatusCache();
+
+            if (_syncStatusCache.ContainsKey(docId))
+            {
+                var queueRow = _syncStatusCache[docId];
+                string syncStatus = queueRow["Status"]?.ToString() ?? "";
+                string queueId = queueRow["ID"]?.ToString() ?? "";
+
+                switch (syncStatus)
+                {
+                    case "COMPLETED":
+                        lblSync.Text = $"<span class='sync-badge completed'>Synced #{queueId}</span>";
+                        btnSync.Visible = false;
+                        break;
+                    case "PENDING":
+                    case "PROCESSING":
+                        lblSync.Text = $"<span class='sync-badge pending'>รอดำเนินการ #{queueId}</span>";
+                        btnSync.Visible = false;
+                        break;
+                    case "FAILED":
+                        string err = queueRow["Error_Message"]?.ToString() ?? "";
+                        if (err.Length > 40) err = err.Substring(0, 40) + "...";
+                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(err)}'>Failed #{queueId}</span>";
+                        btnSync.Visible = true;
+                        btnSync.Text = "🔄 Retry";
+                        break;
+                    default:
+                        lblSync.Text = $"<span class='sync-badge pending'>{syncStatus} #{queueId}</span>";
+                        btnSync.Visible = false;
+                        break;
+                }
+            }
+            else
+            {
+                lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
+                btnSync.Visible = true;
+            }
+        }
+
+        private void HandleSyncDocument(string docId)
+        {
+            try
+            {
+                string docType = docId.Length >= 3 ? docId.Substring(0, 3) : "";
+                var sync = new AccountingSyncService(conn);
+                long queueId = -1;
+
+                if (docType == "REC")
+                {
+                    var docParams = new Dictionary<string, object> { { "@ID", docId } };
+                    var dt = codeInstance.DatabaseQuerySafe(conn,
+                        @"SELECT ar.Total_Amount, ar.Vat, ar.Created_Date, ar.Reservation_ID,
+                                 ISNULL(c.FullName, '-') AS CustomerName
+                          FROM Account_Receipt ar
+                          LEFT JOIN Reservation res ON res.ID = ar.Reservation_ID
+                          LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone
+                          WHERE ar.ID = @ID", docParams);
+
+                    if (dt?.Rows.Count > 0)
+                    {
+                        var r = dt.Rows[0];
+                        int resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
+                        queueId = sync.EnqueueReceipt(resId, docId,
+                            Convert.ToDecimal(r["Total_Amount"]),
+                            Convert.ToDecimal(r["Vat"]),
+                            Convert.ToDateTime(r["Created_Date"]),
+                            r["CustomerName"]?.ToString() ?? "");
+                    }
+                }
+                else if (docType == "PAY")
+                {
+                    var docParams = new Dictionary<string, object> { { "@ID", docId } };
+                    var dt = codeInstance.DatabaseQuerySafe(conn,
+                        @"SELECT ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type, ap.Created_Date,
+                                 ISNULL(v.Name, '-') AS Vendor_Name
+                          FROM Account_Payment ap
+                          LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
+                          WHERE ap.ID = @ID", docParams);
+
+                    if (dt?.Rows.Count > 0)
+                    {
+                        var r = dt.Rows[0];
+                        string desc = "";
+                        var detDt = codeInstance.DatabaseQuerySafe(conn,
+                            "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID", docParams);
+                        if (detDt?.Rows.Count > 0) desc = detDt.Rows[0]["Detail"]?.ToString() ?? "";
+
+                        queueId = sync.EnqueuePaymentVoucher(0,
+                            r["Paid_Type"]?.ToString() ?? "OTHER",
+                            Convert.ToDecimal(r["Total_Amount"]),
+                            r["Paid_How"]?.ToString() ?? "CASH",
+                            Convert.ToDateTime(r["Created_Date"]),
+                            desc,
+                            r["Vendor_Name"]?.ToString() ?? "",
+                            hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
+                            documentNumber: docId);
+                    }
+                }
+
+                if (queueId > 0)
+                {
+                    _syncStatusCache = null;
+                    ScriptManager.RegisterStartupScript(this, GetType(), "syncOk",
+                        $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{queueId})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
+                }
+                else
+                {
+                    ShowError("ไม่สามารถสร้าง sync job ได้ — ตรวจสอบการตั้งค่า Accounting Integration");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Sync error: " + ex.Message);
+            }
         }
 
         // Helper method to generate slip link button HTML
