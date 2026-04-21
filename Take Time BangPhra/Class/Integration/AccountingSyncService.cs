@@ -177,7 +177,8 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public long EnqueuePaymentVoucher(int voucherId, string expenseCategory, decimal amount,
             string paymentMethod, DateTime voucherDate, string description, string payeeName,
-            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
+            string documentNumber = null)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -195,6 +196,8 @@ namespace Take_Time_BangPhra.Integration
                 { "whtRate", whtRate },
                 { "whtAmount", whtAmount }
             };
+            if (!string.IsNullOrEmpty(documentNumber))
+                payload["documentNumber"] = documentNumber;
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
         }

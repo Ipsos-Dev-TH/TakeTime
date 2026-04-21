@@ -8,6 +8,7 @@ using System.Data;
 using System.Configuration;
 using System.IO;
 using System.Text;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Account
 {
@@ -247,6 +248,12 @@ namespace Take_Time_BangPhra.Account
                 }
                 cmd += " order by ID asc";
                 DataTable dt = code.DatabaseQuerySafe(conn, cmd, parameters);
+
+                // Add sync status column for receipt/payment views (not detail views)
+                if (dt != null && (DropDownList1.SelectedValue == "Account_Payment" || DropDownList1.SelectedValue == "Account_Receipt"))
+                {
+                    AddSyncStatusColumn(dt, DropDownList1.SelectedValue);
+                }
 
                 GridView1.DataSource = dt;
                 GridView1.DataBind();
@@ -562,6 +569,13 @@ namespace Take_Time_BangPhra.Account
 
         protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            if (e.CommandName == "sync")
+            {
+                string docId = e.CommandArgument.ToString();
+                HandleSyncDocument(docId);
+                return;
+            }
+
             string docNum = GridView1.Rows[Convert.ToInt32(e.CommandArgument)].Cells[3].Text;
             string docType = docNum.Remove(3, 9);
             if (docType.Length > 3)
@@ -595,6 +609,196 @@ namespace Take_Time_BangPhra.Account
                         paymentUidParams).Rows[0][0].ToString();
                     Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + uid);
                 }
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Accounting Sync
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, string[]> _syncCache;
+
+        private void AddSyncStatusColumn(DataTable dt, string docType)
+        {
+            dt.Columns.Add("Sync_บัญชี", typeof(string));
+
+            try
+            {
+                string entityType = docType == "Account_Payment" ? "VOUCHER" : "RECEIPT";
+                string actionType = docType == "Account_Payment" ? "CREATE_VOUCHER_JOURNAL" : "CREATE_RECEIPT_DOCUMENT";
+
+                var queueDt = code.DatabaseQuerySafe(conn,
+                    @"SELECT ID, Status, Payload FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @et AND Action_Type = @at ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@et", entityType }, { "@at", actionType } });
+
+                _syncCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+                if (queueDt != null)
+                {
+                    foreach (DataRow qr in queueDt.Rows)
+                    {
+                        string payload = qr["Payload"]?.ToString() ?? "";
+                        string key = docType == "Account_Payment"
+                            ? ExtractJsonValue(payload, "documentNumber")
+                            : ExtractJsonValue(payload, "receiptNumber");
+                        if (!string.IsNullOrEmpty(key) && !_syncCache.ContainsKey(key))
+                            _syncCache[key] = new[] { qr["ID"].ToString(), qr["Status"].ToString() };
+                    }
+                }
+
+                foreach (DataRow row in dt.Rows)
+                {
+                    string docId = row["ID"]?.ToString() ?? "";
+                    string status = "";
+                    try { status = row["Status"]?.ToString() ?? ""; } catch { }
+
+                    if (status == "Cancel")
+                    {
+                        row["Sync_บัญชี"] = "-";
+                    }
+                    else if (_syncCache.ContainsKey(docId))
+                    {
+                        var info = _syncCache[docId];
+                        row["Sync_บัญชี"] = info[1] == "COMPLETED" ? "Synced #" + info[0]
+                            : info[1] == "FAILED" ? "Failed #" + info[0]
+                            : "รอ #" + info[0];
+                    }
+                    else
+                    {
+                        row["Sync_บัญชี"] = "ยังไม่ sync";
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private string ExtractJsonValue(string json, string key)
+        {
+            string search = "\"" + key + "\":\"";
+            int idx = json.IndexOf(search);
+            if (idx < 0) return null;
+            idx += search.Length;
+            int end = json.IndexOf("\"", idx);
+            return end > idx ? json.Substring(idx, end - idx) : null;
+        }
+
+        protected void GridView1_RowDataBound(object sender, GridViewRowEventArgs e)
+        {
+            if (e.Row.RowType != DataControlRowType.DataRow) return;
+
+            // Find the Sync_บัญชี column index
+            int syncColIdx = -1;
+            for (int i = 0; i < GridView1.Columns.Count + GridView1.HeaderRow.Cells.Count; i++)
+            {
+                try
+                {
+                    if (GridView1.HeaderRow.Cells[i].Text == "Sync_บัญชี")
+                    {
+                        syncColIdx = i;
+                        break;
+                    }
+                }
+                catch { break; }
+            }
+            if (syncColIdx < 0) return;
+
+            string cellText = e.Row.Cells[syncColIdx].Text;
+            string docId = e.Row.Cells[3].Text;
+
+            if (cellText.StartsWith("Synced"))
+            {
+                e.Row.Cells[syncColIdx].Text = $"<span class='sync-badge completed'>{cellText}</span>";
+            }
+            else if (cellText.StartsWith("Failed"))
+            {
+                e.Row.Cells[syncColIdx].Text = $"<span class='sync-badge failed'>{cellText}</span> " +
+                    $"<input type='button' class='btn-sync-sm' value='🔄' onclick=\"{Page.ClientScript.GetPostBackEventReference(GridView1, "sync$" + docId)}\" />";
+            }
+            else if (cellText.StartsWith("รอ"))
+            {
+                e.Row.Cells[syncColIdx].Text = $"<span class='sync-badge pending'>{cellText}</span>";
+            }
+            else if (cellText == "ยังไม่ sync")
+            {
+                e.Row.Cells[syncColIdx].Text = $"<span class='sync-badge none'>{cellText}</span> " +
+                    $"<input type='button' class='btn-sync-sm' value='📤 Sync' onclick=\"if(confirm('ยืนยันส่งเข้าระบบบัญชี?')){{{Page.ClientScript.GetPostBackEventReference(GridView1, "sync$" + docId)}}}\" />";
+            }
+        }
+
+        private void HandleSyncDocument(string docId)
+        {
+            try
+            {
+                string docType = docId.Length >= 3 ? docId.Substring(0, 3) : "";
+                var sync = new AccountingSyncService(conn);
+                long queueId = -1;
+
+                if (docType == "PAY")
+                {
+                    var docParams = new Dictionary<string, object> { { "@ID", docId } };
+                    var dt = code.DatabaseQuerySafe(conn,
+                        @"SELECT ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type, ap.Created_Date,
+                                 ISNULL(v.Name, '-') AS Vendor_Name
+                          FROM Account_Payment ap LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
+                          WHERE ap.ID = @ID", docParams);
+
+                    if (dt?.Rows.Count > 0)
+                    {
+                        var r = dt.Rows[0];
+                        string desc = "";
+                        var detDt = code.DatabaseQuerySafe(conn,
+                            "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID", docParams);
+                        if (detDt?.Rows.Count > 0) desc = detDt.Rows[0]["Detail"]?.ToString() ?? "";
+
+                        queueId = sync.EnqueuePaymentVoucher(0,
+                            r["Paid_Type"]?.ToString() ?? "OTHER",
+                            Convert.ToDecimal(r["Total_Amount"]),
+                            r["Paid_How"]?.ToString() ?? "CASH",
+                            Convert.ToDateTime(r["Created_Date"]),
+                            desc,
+                            r["Vendor_Name"]?.ToString() ?? "",
+                            hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
+                            documentNumber: docId);
+                    }
+                }
+                else if (docType == "REC")
+                {
+                    var docParams = new Dictionary<string, object> { { "@ID", docId } };
+                    var dt = code.DatabaseQuerySafe(conn,
+                        @"SELECT ar.Total_Amount, ar.Vat, ar.Created_Date, ar.Reservation_ID,
+                                 ISNULL(c.FullName, '-') AS CustomerName
+                          FROM Account_Receipt ar
+                          LEFT JOIN Reservation res ON res.ID = ar.Reservation_ID
+                          LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone
+                          WHERE ar.ID = @ID", docParams);
+
+                    if (dt?.Rows.Count > 0)
+                    {
+                        var r = dt.Rows[0];
+                        int resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
+                        queueId = sync.EnqueueReceipt(resId, docId,
+                            Convert.ToDecimal(r["Total_Amount"]),
+                            Convert.ToDecimal(r["Vat"]),
+                            Convert.ToDateTime(r["Created_Date"]),
+                            r["CustomerName"]?.ToString() ?? "");
+                    }
+                }
+
+                if (queueId > 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "syncOk",
+                        $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{queueId})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
+                }
+                else
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "syncFail",
+                        "alert('ไม่สามารถสร้าง sync job ได้ — ตรวจสอบการตั้งค่า Accounting Integration');", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "syncErr",
+                    $"alert('Sync error: {ex.Message.Replace("'", "\\'")}');", true);
             }
         }
 
