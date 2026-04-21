@@ -337,7 +337,36 @@ namespace Take_Time_BangPhra.Services
         private void EnqueueAccountingSync(string reservationId, string receiptId, double totalAmount,
             double vat, bool isDeposit, string paidType, DateTime docDate, string customerId)
         {
-            // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+            try
+            {
+                var config = new AccountingConfig(_connectionString);
+                if (config.IsConfigured && config.Enabled)
+                {
+                    int resId = 0;
+                    int.TryParse(reservationId, out resId);
+                    string customerName = GetCustomerName(reservationId);
+
+                    if (config.IsDocumentMode)
+                    {
+                        // DOCUMENT mode: ยิง API เลยไม่ต้องตรวจสอบเอกสาร
+                        var sync = new AccountingSyncService(_connectionString);
+                        sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName);
+                    }
+                    else
+                    {
+                        // JOURNAL_ONLY mode: ตรวจสอบว่าเอกสารสร้างสำเร็จก่อน
+                        if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Auto-sync receipt {receiptId}: {ex.Message}");
+            }
         }
 
         private string GetCustomerName(string reservationId)

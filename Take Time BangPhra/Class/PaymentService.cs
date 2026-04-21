@@ -116,7 +116,29 @@ namespace Take_Time_BangPhra
                     _code.Logs(_connectionString, "Email Error", emailEx.Message, "SYSTEM");
                 }
 
-                // 8. Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                // 8. Auto-sync receipt to accounting
+                try
+                {
+                    var config = new AccountingConfig(_connectionString);
+                    if (config.IsConfigured && config.Enabled)
+                    {
+                        string custName = GetCustomerName(reservationId);
+                        if (config.IsDocumentMode)
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
+                        }
+                        else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
+                        }
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    _code.Logs(_connectionString, "Accounting Sync", "Receipt auto-sync error: " + accEx.Message, "SYSTEM");
+                }
 
                 return new PaymentResult
                 {
@@ -205,7 +227,29 @@ namespace Take_Time_BangPhra
                 }
                 catch { }
 
-                // 7. Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                // 7. Auto-sync receipt to accounting
+                try
+                {
+                    var config = new AccountingConfig(_connectionString);
+                    if (config.IsConfigured && config.Enabled)
+                    {
+                        string custName = GetCustomerName(reservationId);
+                        if (config.IsDocumentMode)
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
+                        }
+                        else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
+                        }
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    _code.Logs(_connectionString, "Accounting Sync", "Receipt auto-sync error: " + accEx.Message, "SYSTEM");
+                }
 
                 return new PaymentResult
                 {
