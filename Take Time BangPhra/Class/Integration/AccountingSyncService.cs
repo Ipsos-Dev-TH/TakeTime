@@ -624,15 +624,17 @@ namespace Take_Time_BangPhra.Integration
                 }
                 catch (ArgumentException ex)
                 {
-                    // Validation error (e.g., zero amounts) — don't retry
-                    UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                    string errorDetail = $"Queue #{queueId} [{actionType}] validation error: {ex.Message}";
+                    UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
                     IncrementRetry(queueId, _config.MaxRetries);
+                    _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
                 }
                 catch (AccountingApiException ex)
                 {
-                    // Client error (4xx) — don't retry
-                    UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                    string errorDetail = $"Queue #{queueId} [{actionType}] API {ex.StatusCode}: {ex.ResponseBody}";
+                    UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
                     IncrementRetry(queueId, _config.MaxRetries);
+                    _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
                 }
                 catch (Exception ex)
                 {
@@ -646,10 +648,11 @@ namespace Take_Time_BangPhra.Integration
                     }
                     else
                     {
-                        // Server/network error — schedule retry
+                        string errorDetail = $"Queue #{queueId} [{actionType}] error: {ex.Message}";
                         int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
                         IncrementRetry(queueId, retryCount);
-                        UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                        UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
+                        _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
                     }
                 }
             }
@@ -1068,10 +1071,14 @@ namespace Take_Time_BangPhra.Integration
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() : "";
             DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
             decimal vatAmount = Convert.ToDecimal(p["vatAmount"]);
+            string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessReceiptDocument: receipt={receiptNumber} resId={reservationId} amount={totalAmount} isDeposit={isDeposit} paymentMethod={paymentMethod} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                "SYSTEM");
 
             if (isDeposit)
             {
-                // มัดจำ: DR Cash/Bank, CR เงินรับล่วงหน้า (ADVANCE_DEPOSIT)
                 if (_config.IsDocumentMode)
                 {
                     var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
@@ -1088,12 +1095,11 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
-                // ใบเสร็จปกติ: DR Cash/Bank, CR รายได้ค่าห้อง (ROOM_REVENUE)
                 if (_config.IsDocumentMode)
                 {
                     var document = _mapper.MapReceiptToDocument(
                         reservationId,
-                        p["receiptNumber"]?.ToString(),
+                        receiptNumber,
                         totalAmount,
                         vatAmount,
                         receiptDate,

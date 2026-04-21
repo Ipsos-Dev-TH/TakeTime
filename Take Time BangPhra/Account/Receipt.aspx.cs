@@ -1642,7 +1642,10 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
+                }
 
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
@@ -1887,13 +1890,15 @@ namespace Take_Time_BangPhra.Account.Report
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ID",
                     updateParams);
 
-                // Void ในระบบบัญชี
                 try
                 {
                     var sync = new AccountingSyncService(conn);
                     sync.EnqueueVoidReceipt(docNum);
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Void receipt error (Receipt cancel): docNum={docNum} {accEx.Message}", "SYSTEM");
+                }
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
 

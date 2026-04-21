@@ -4515,7 +4515,10 @@ namespace Take_Time_BangPhra
                         }
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Reserve): {accEx.Message}", "SYSTEM");
+                }
 
                 // 🆕 Record payment to Payment_History when receipt is created
                 try
