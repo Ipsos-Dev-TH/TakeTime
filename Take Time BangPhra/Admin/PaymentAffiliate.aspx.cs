@@ -289,6 +289,28 @@ namespace Take_Time_BangPhra.Admin
                         "UPDATE [dbo].[Affiliate_Reservation] SET [Status] = 'TRANSFERED' WHERE ID = @AffResID",
                         affResUpdateParams);
                 }
+                // Auto-sync voucher to accounting
+                try
+                {
+                    var acctConfig = new Integration.AccountingConfig(conn);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        decimal voucherAmount = Convert.ToDecimal(TextBox6.Text);
+                        string payMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
+                        string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                        string desc = dtDetail.Rows.Count > 0 ? dtDetail.Rows[0][1]?.ToString() ?? "" : "";
+                        DateTime voucherDate = Convert.ToDateTime(TextBox8.Text);
+
+                        if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueuePaymentVoucher(0, "AFFILIATE", voucherAmount, payMethod,
+                                voucherDate, desc, vendorName, documentNumber: docNum);
+                        }
+                    }
+                }
+                catch { }
+
                 string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                 try
                 {

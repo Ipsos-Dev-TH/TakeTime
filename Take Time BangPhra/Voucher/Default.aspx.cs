@@ -640,6 +640,25 @@ namespace Take_Time_BangPhra.Voucher
                         throw;
                     }
 
+                    // Auto-sync receipt to accounting
+                    try
+                    {
+                        var acctConfig = new Integration.AccountingConfig(conn);
+                        if (acctConfig.IsConfigured && acctConfig.Enabled)
+                        {
+                            if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                            {
+                                var sync = new Integration.AccountingSyncService(conn);
+                                decimal totalAmt = Convert.ToDecimal(TextBox1.Text);
+                                decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
+                                DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
+                                sync.EnqueueReceipt(reservation_id, docNum, totalAmt, vatAmt, receiptDate,
+                                    dtcustomer.Rows[0]["Name"]?.ToString() ?? "");
+                            }
+                        }
+                    }
+                    catch { }
+
                     // 🆕 Record payment to Payment_History when voucher receipt is created
                     if (reservation_id > 0)
                     {

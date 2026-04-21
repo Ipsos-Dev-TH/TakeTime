@@ -4498,6 +4498,24 @@ namespace Take_Time_BangPhra
                     }
                 }
 
+                // Auto-sync receipt to accounting
+                try
+                {
+                    var acctConfig = new Integration.AccountingConfig(conn);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        int resId = 0;
+                        int.TryParse(Reservation_ID, out resId);
+                        if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(ReceiptID) && ReceiptID != "0"))
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueueReceipt(resId, ReceiptID, (decimal)Total_Amount, (decimal)Vat,
+                                docDate, TextBox3.Text);
+                        }
+                    }
+                }
+                catch { }
+
                 // 🆕 Record payment to Payment_History when receipt is created
                 try
                 {

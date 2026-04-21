@@ -1069,6 +1069,22 @@ namespace Take_Time_BangPhra.Product
                     "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
                     detailParams);
 
+                // Auto-sync receipt to accounting
+                try
+                {
+                    var acctConfig = new Integration.AccountingConfig(conn);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
+                                Convert.ToDateTime(TextBox15.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "");
+                        }
+                    }
+                }
+                catch { }
+
                 // 🎁 Log product category discount usage to Loyalty_Benefit_Usage
                 if (totalDiscount > 0 && !string.IsNullOrEmpty(customerPhone))
                 {
