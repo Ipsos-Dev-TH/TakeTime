@@ -1069,6 +1069,23 @@ namespace Take_Time_BangPhra.Product
                     "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
                     detailParams);
 
+                // Auto-sync receipt to accounting
+                try
+                {
+                    var acctConfig = new Integration.AccountingConfig(conn);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
+                                Convert.ToDateTime(TextBox15.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
+                                isDeposit: false, paymentMethod: DropDownList1.SelectedItem?.Text ?? "CASH");
+                        }
+                    }
+                }
+                catch { }
+
                 // 🎁 Log product category discount usage to Loyalty_Benefit_Usage
                 if (totalDiscount > 0 && !string.IsNullOrEmpty(customerPhone))
                 {
@@ -1547,18 +1564,7 @@ namespace Take_Time_BangPhra.Product
                 string paidType = DropDownList1.SelectedItem != null ? DropDownList1.SelectedItem.Text : "CASH";
 
                 // Only enqueue if we have a valid receipt number and positive amount
-                if (totalSale > 0 && docNum != "0" && !string.IsNullOrEmpty(docNum))
-                {
-                    var sync = new Integration.AccountingSyncService(conn);
-                    sync.EnqueuePOSSale(docNum, totalSale, totalCost, paidType, DateTime.Now, "ขายสินค้า POS");
-                }
-                else if (totalSale > 0 && (docNum == "0" || string.IsNullOrEmpty(docNum)))
-                {
-                    // Receipt creation may have failed - log for investigation
-                    var logCode = new code();
-                    logCode.Logs(conn, "AccountingSync",
-                        $"POS sale accounting skipped: docNum is '{docNum}' (receipt not created). totalSale={totalSale:N2}, paidType={paidType}", "SYSTEM");
-                }
+                // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
             }
             catch (Exception accEx)
             {

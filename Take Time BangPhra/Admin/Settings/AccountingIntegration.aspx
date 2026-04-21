@@ -269,6 +269,7 @@
                 <div class="queue-toolbar-left">
                     <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
                     <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
+                    <button type="button" style="background:#dc3545;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;" onclick="cleanupAutoSync()"><i class="fas fa-broom"></i> ล้าง Auto-Sync เก่า</button>
                 </div>
                 <div class="queue-toolbar-right">
                     <label style="font-size:12px; color:#777;">แสดง</label>
@@ -556,6 +557,30 @@
         function retryAllFailed() {
             getAction('retryAllFailed', 'syncTestResult');
             setTimeout(loadQueueData, 1000);
+        }
+
+        function cleanupAutoSync() {
+            fetch(pageUrl + '?action=previewCleanup&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { alert('Error: ' + data.message); return; }
+                    if (data.total === 0) { alert('ไม่มี auto-sync entries ที่ต้องล้าง'); return; }
+                    var msg = 'พบ auto-sync entries จำนวน ' + data.total + ' รายการ:\n\n';
+                    if (data.items) {
+                        data.items.forEach(function(item) {
+                            msg += '  ' + item.status + ' | ' + item.actionType + ': ' + item.count + ' รายการ\n';
+                        });
+                    }
+                    msg += '\nต้องการยกเลิก (cancel) entries ที่ PENDING/FAILED ทั้งหมดหรือไม่?';
+                    if (confirm(msg)) {
+                        fetch(pageUrl + '?action=cleanupAutoSync&_=' + Date.now())
+                            .then(function(r) { return r.json(); })
+                            .then(function(result) {
+                                alert(result.success ? result.message : 'Error: ' + result.message);
+                                loadQueueData();
+                            });
+                    }
+                });
         }
 
         function getAction(action, resultId) {

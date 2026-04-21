@@ -52,6 +52,14 @@ namespace Take_Time_BangPhra.Services
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @receiptId",
                     parameters);
 
+                // Void ในระบบบัญชี
+                try
+                {
+                    var sync = new AccountingSyncService(_connectionString);
+                    sync.EnqueueVoidReceipt(receiptId);
+                }
+                catch { }
+
                 // Stamp PDF with cancellation mark
                 await StampPdfWithCancellation(receiptId, uid);
             }
@@ -339,53 +347,33 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                var syncService = new AccountingSyncService();
-
-                // ดึงชื่อลูกค้าจากการจอง
-                string customerName = GetCustomerName(reservationId);
-                int resId = 0;
-                int.TryParse(reservationId, out resId);
-
-                if (isDeposit)
+                var config = new AccountingConfig(_connectionString);
+                if (config.IsConfigured && config.Enabled)
                 {
-                    // มัดจำ: DR Cash/Bank, CR Advance Deposit (เงินรับล่วงหน้า)
-                    syncService.EnqueueReservationDeposit(
-                        resId,
-                        (decimal)totalAmount,
-                        paidType,
-                        docDate,
-                        customerName);
-                }
-                else
-                {
-                    // ชำระเต็ม: DR Cash/Bank, CR Room Revenue (+ VAT ถ้ามี)
-                    bool hasVat = vat > 0;
-                    syncService.EnqueueReservationPayment(
-                        resId,
-                        (decimal)totalAmount,
-                        paidType,
-                        docDate,
-                        customerName,
-                        hasVat);
-                }
+                    int resId = 0;
+                    int.TryParse(reservationId, out resId);
+                    string customerName = GetCustomerName(reservationId);
 
-                // สร้าง Receipt Document ใน Nexaacc ด้วย
-                syncService.EnqueueReceipt(
-                    resId,
-                    receiptId,
-                    (decimal)totalAmount,
-                    (decimal)vat,
-                    docDate,
-                    customerName);
-
-                System.Diagnostics.Trace.TraceInformation(
-                    $"Enqueued accounting sync for Receipt {receiptId} (Reservation {reservationId}, {(isDeposit ? "Deposit" : "Payment")})");
+                    if (config.IsDocumentMode)
+                    {
+                        var sync = new AccountingSyncService(_connectionString);
+                        sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
+                            isDeposit: isDeposit, paymentMethod: paidType);
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
+                        {
+                            var sync = new AccountingSyncService(_connectionString);
+                            sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
+                                isDeposit: isDeposit, paymentMethod: paidType);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                // ไม่ throw — accounting sync เป็น supplementary, ไม่ควรทำให้ receipt creation ล้มเหลว
-                System.Diagnostics.Trace.TraceWarning(
-                    $"Failed to enqueue accounting sync for Receipt {receiptId}: {ex.Message}");
+                System.Diagnostics.Trace.TraceWarning($"Auto-sync receipt {receiptId}: {ex.Message}");
             }
         }
 

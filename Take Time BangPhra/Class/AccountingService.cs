@@ -111,14 +111,7 @@ namespace Take_Time_BangPhra.Services
 
                         transaction.Commit();
 
-                        // Sync credit note to accounting system
-                        try
-                        {
-                            string connStr = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString ?? _conn.ConnectionString;
-                            var sync = new AccountingSyncService(connStr);
-                            sync.EnqueueCreditNote(creditNoteId, creditNoteNumber, creditNote.TotalAmount, creditNote.VatAmount, creditNote.CreditNoteDate, creditNote.Reason);
-                        }
-                        catch { }
+                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                         return new CreditNoteResult
                         {

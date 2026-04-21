@@ -430,16 +430,7 @@ public class PayrollService
 
                     transaction.Commit();
 
-                    // Sync payroll to accounting
-                    try
-                    {
-                        if (totalNet > 0)
-                        {
-                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                            sync.EnqueuePayroll(totalNet, DateTime.Now, $"{year}/{month:D2}");
-                        }
-                    }
-                    catch { }
+                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                     return new PayrollOperationResult(true, $"สร้างรอบเงินเดือนสำเร็จ ({employeeCount} คน)", periodId);
                 }
@@ -879,6 +870,23 @@ public class PayrollService
                     }
 
                     transaction.Commit();
+
+                    // Auto-sync voucher to accounting
+                    try
+                    {
+                        var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                        if (acctConfig.IsConfigured && acctConfig.Enabled)
+                        {
+                            if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0"))
+                            {
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                                sync.EnqueuePaymentVoucher(0, "PAYROLL", netSalary, paidHow,
+                                    DateTime.Now, $"เงินเดือน {periodName} - {employeeName}", employeeName,
+                                    documentNumber: voucherNumber);
+                            }
+                        }
+                    }
+                    catch { }
 
                     // Generate PDF after successful commit
                     try

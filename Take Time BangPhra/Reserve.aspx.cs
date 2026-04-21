@@ -4498,6 +4498,25 @@ namespace Take_Time_BangPhra
                     }
                 }
 
+                // Auto-sync receipt to accounting
+                try
+                {
+                    var acctConfig = new Integration.AccountingConfig(conn);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        int resId = 0;
+                        int.TryParse(Reservation_ID, out resId);
+                        if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(ReceiptID) && ReceiptID != "0"))
+                        {
+                            string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueueReceipt(resId, ReceiptID, (decimal)Total_Amount, (decimal)Vat,
+                                docDate, TextBox3.Text, isDeposit: IsDeposit, paymentMethod: paidMethod);
+                        }
+                    }
+                }
+                catch { }
+
                 // 🆕 Record payment to Payment_History when receipt is created
                 try
                 {
@@ -4679,28 +4698,8 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                var syncService = new AccountingSyncService(conn);
-                string paymentMethod = DropDownList2.SelectedItem?.Text ?? "เงินสด";
-                decimal decimalAmount = Convert.ToDecimal(amount);
-
-                if (isDeposit)
-                {
-                    syncService.EnqueueReservationDeposit(
-                        Convert.ToInt32(reservationId),
-                        decimalAmount,
-                        paymentMethod,
-                        DateTime.Now,
-                        customerName);
-                }
-                else
-                {
-                    syncService.EnqueueReservationPayment(
-                        Convert.ToInt32(reservationId),
-                        decimalAmount,
-                        paymentMethod,
-                        DateTime.Now,
-                        customerName);
-                }
+                // Auto-sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                // var syncService = new AccountingSyncService(conn);
             }
             catch (Exception ex)
             {

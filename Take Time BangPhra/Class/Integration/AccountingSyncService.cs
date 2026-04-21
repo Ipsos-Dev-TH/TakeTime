@@ -183,6 +183,12 @@ namespace Take_Time_BangPhra.Integration
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
 
+            if (!string.IsNullOrEmpty(documentNumber))
+            {
+                long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
+                if (existing > 0) return existing;
+            }
+
             var payload = new Dictionary<string, object>
             {
                 { "voucherId", voucherId },
@@ -274,9 +280,13 @@ namespace Take_Time_BangPhra.Integration
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
-        public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName)
+        public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName,
+            bool isDeposit = false, string paymentMethod = null)
         {
             if (!_config.IsConfigured) return -1;
+
+            long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
+            if (existing > 0) return existing;
 
             var payload = new Dictionary<string, object>
             {
@@ -285,7 +295,9 @@ namespace Take_Time_BangPhra.Integration
                 { "totalAmount", totalAmount },
                 { "vatAmount", vatAmount },
                 { "receiptDate", receiptDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName }
+                { "customerName", customerName },
+                { "isDeposit", isDeposit },
+                { "paymentMethod", paymentMethod ?? "CASH" }
             };
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
@@ -450,6 +462,88 @@ namespace Take_Time_BangPhra.Integration
             };
 
             return InsertQueue("RESERVATION", reservationId, "CREATE_DAMAGE_CHARGE_JOURNAL", payload);
+        }
+
+        // ──────────────────────────────────────────────
+        // Void/Cancel Enqueue Methods
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Enqueue void for a receipt that was deleted or cancelled.
+        /// Looks up the original Nexaacc_Response_Id from queue and voids it.
+        /// </summary>
+        public long EnqueueVoidReceipt(string receiptNumber)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            long existing = FindPendingEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber);
+            if (existing > 0) return existing;
+
+            string nexaaccId = LookupNexaaccId(receiptNumber, "RECEIPT");
+            if (string.IsNullOrEmpty(nexaaccId)) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "receiptNumber", receiptNumber },
+                { "nexaaccId", nexaaccId }
+            };
+
+            return InsertQueue("RECEIPT", 0, "VOID_RECEIPT", payload);
+        }
+
+        /// <summary>
+        /// Enqueue void for a payment voucher that was deleted or cancelled.
+        /// </summary>
+        public long EnqueueVoidPaymentVoucher(string documentNumber)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            long existing = FindPendingEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber);
+            if (existing > 0) return existing;
+
+            string nexaaccId = LookupNexaaccId(documentNumber, "VOUCHER");
+            if (string.IsNullOrEmpty(nexaaccId)) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "documentNumber", documentNumber },
+                { "nexaaccId", nexaaccId }
+            };
+
+            return InsertQueue("VOUCHER", 0, "VOID_VOUCHER", payload);
+        }
+
+        /// <summary>
+        /// Look up the Nexaacc_Response_Id for a previously synced document.
+        /// </summary>
+        private string LookupNexaaccId(string documentNumber, string entityType)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Response_Id
+                      FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType
+                        AND Status = 'COMPLETED'
+                        AND Nexaacc_Response_Id IS NOT NULL
+                        AND (Payload LIKE @pattern1 OR Payload LIKE @pattern2)
+                      ORDER BY Processed_Date DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@pattern1", $"%\"receiptNumber\":\"{documentNumber}\"%"},
+                        { "@pattern2", $"%\"documentNumber\":\"{documentNumber}\"%"}
+                    });
+
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Response_Id"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_Response_Id"].ToString();
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupNexaaccId failed for {entityType} '{documentNumber}': {ex.Message}", "SYSTEM");
+            }
+            return null;
         }
 
         // ──────────────────────────────────────────────
@@ -647,6 +741,12 @@ namespace Take_Time_BangPhra.Integration
 
                 case "CREATE_DAMAGE_CHARGE_JOURNAL":
                     return await ProcessDamageChargeJournal(payload);
+
+                case "VOID_RECEIPT":
+                    return await ProcessVoidReceipt(payload);
+
+                case "VOID_VOUCHER":
+                    return await ProcessVoidVoucher(payload);
 
                 default:
                     throw new Exception($"Unknown action type: {actionType}");
@@ -962,18 +1062,57 @@ namespace Take_Time_BangPhra.Integration
             if (totalAmount <= 0)
                 throw new ArgumentException($"Cannot create receipt document: totalAmount is {totalAmount} (must be > 0). Reservation #{p["reservationId"]}");
 
-            var document = _mapper.MapReceiptToDocument(
-                Convert.ToInt32(p["reservationId"]),
-                p["receiptNumber"]?.ToString(),
-                totalAmount,
-                Convert.ToDecimal(p["vatAmount"]),
-                DateTime.Parse(p["receiptDate"]?.ToString()),
-                null, // contactId — would need lookup
-                $"ใบเสร็จ - การจอง #{p["reservationId"]}");
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
+            string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() : "";
+            DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
+            decimal vatAmount = Convert.ToDecimal(p["vatAmount"]);
 
-            var result = await _apiClient.CreateDocumentAsync(document);
-            await _apiClient.ApproveDocumentAsync(result.data.Id);
-            return result.data.Id.ToString();
+            if (isDeposit)
+            {
+                // มัดจำ: DR Cash/Bank, CR เงินรับล่วงหน้า (ADVANCE_DEPOSIT)
+                if (_config.IsDocumentMode)
+                {
+                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var result = await _apiClient.CreateInvoiceAsync(invoice);
+                    return result.data.Id.ToString();
+                }
+                else
+                {
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var result = await _apiClient.CreateJournalAsync(journal);
+                    await _apiClient.PostJournalAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+            }
+            else
+            {
+                // ใบเสร็จปกติ: DR Cash/Bank, CR รายได้ค่าห้อง (ROOM_REVENUE)
+                if (_config.IsDocumentMode)
+                {
+                    var document = _mapper.MapReceiptToDocument(
+                        reservationId,
+                        p["receiptNumber"]?.ToString(),
+                        totalAmount,
+                        vatAmount,
+                        receiptDate,
+                        null,
+                        $"ใบเสร็จ - การจอง #{reservationId}");
+
+                    var result = await _apiClient.CreateDocumentAsync(document);
+                    await _apiClient.ApproveDocumentAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+                else
+                {
+                    bool hasVat = vatAmount > 0;
+                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
+                    var result = await _apiClient.CreateJournalAsync(journal);
+                    await _apiClient.PostJournalAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+            }
         }
 
         private async Task<string> ProcessCreditNoteDocument(Dictionary<string, object> p)
@@ -1192,6 +1331,50 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Void/Cancel Processors
+        // ──────────────────────────────────────────────
+
+        private async Task<string> ProcessVoidReceipt(Dictionary<string, object> p)
+        {
+            string nexaaccId = p["nexaaccId"]?.ToString();
+            if (string.IsNullOrEmpty(nexaaccId))
+                throw new ArgumentException("Cannot void receipt: nexaaccId is missing");
+
+            Guid docId = Guid.Parse(nexaaccId);
+
+            if (_config.IsDocumentMode)
+            {
+                await _apiClient.VoidDocumentAsync(docId);
+            }
+            else
+            {
+                await _apiClient.VoidJournalAsync(docId);
+            }
+
+            return $"VOIDED:{nexaaccId}";
+        }
+
+        private async Task<string> ProcessVoidVoucher(Dictionary<string, object> p)
+        {
+            string nexaaccId = p["nexaaccId"]?.ToString();
+            if (string.IsNullOrEmpty(nexaaccId))
+                throw new ArgumentException("Cannot void voucher: nexaaccId is missing");
+
+            Guid docId = Guid.Parse(nexaaccId);
+
+            if (_config.IsDocumentMode)
+            {
+                await _apiClient.VoidDocumentAsync(docId);
+            }
+            else
+            {
+                await _apiClient.VoidJournalAsync(docId);
+            }
+
+            return $"VOIDED:{nexaaccId}";
+        }
+
+        // ──────────────────────────────────────────────
         // Fallback Data Lookup Helpers
         // ──────────────────────────────────────────────
 
@@ -1252,6 +1435,28 @@ namespace Take_Time_BangPhra.Integration
         // ──────────────────────────────────────────────
         // Queue Database Operations
         // ──────────────────────────────────────────────
+
+        private long FindPendingEntry(string entityType, string actionType, string payloadKey, string payloadValue)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND Status IN ('PENDING', 'PROCESSING')
+                        AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", actionType },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
+            }
+            catch { return -1; }
+        }
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
         {
@@ -1371,6 +1576,39 @@ namespace Take_Time_BangPhra.Integration
                   SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
                   WHERE ID = @id",
                 parameters);
+        }
+
+        /// <summary>
+        /// Cancel old auto-sync queue entries that were NOT triggered from manual document pages.
+        /// Returns the number of entries cancelled.
+        /// </summary>
+        public int CancelOldAutoSyncEntries()
+        {
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"UPDATE Accounting_Sync_Queue
+                  SET Status = 'CANCELLED', Error_Message = 'Auto-sync disabled — replaced by manual document sync'
+                  WHERE Status IN ('PENDING', 'FAILED')
+                    AND Payload NOT LIKE '%""receiptNumber""%'
+                    AND Payload NOT LIKE '%""documentNumber""%';
+                  SELECT @@ROWCOUNT AS Affected",
+                null);
+            return dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["Affected"]) : 0;
+        }
+
+        /// <summary>
+        /// Get count of old auto-sync entries that can be cleaned up.
+        /// </summary>
+        public DataTable GetAutoSyncCleanupPreview()
+        {
+            return _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT Status, Action_Type, COUNT(*) as Count
+                  FROM Accounting_Sync_Queue
+                  WHERE Status IN ('PENDING', 'FAILED', 'COMPLETED')
+                    AND Payload NOT LIKE '%""receiptNumber""%'
+                    AND Payload NOT LIKE '%""documentNumber""%'
+                  GROUP BY Status, Action_Type
+                  ORDER BY Status, Action_Type",
+                null);
         }
     }
 }

@@ -81,26 +81,7 @@ namespace Take_Time_BangPhra
 
                     if (string.IsNullOrEmpty(errorMsg))
                     {
-                        // Sync to accounting: revenue recognition + damage charges
-                        try
-                        {
-                            var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueCheckout(reservationId, depositAmt, customerName, DateTime.Now);
-
-                            // If there are damage/missing item charges
-                            decimal totalDamage = damageCharge + missingItemsCharge;
-                            if (totalDamage > 0)
-                            {
-                                string dmgDesc = "";
-                                if (roomDamage) dmgDesc += damageDescription ?? "ความเสียหายห้องพัก";
-                                if (missingItems) dmgDesc += (dmgDesc.Length > 0 ? ", " : "") + (missingItemsDescription ?? "ของหาย");
-                                sync.EnqueueDamageCharge(reservationId, damageCharge, missingItemsCharge, DateTime.Now, customerName, dmgDesc);
-                            }
-                        }
-                        catch (Exception accEx)
-                        {
-                            _code.Logs(_connectionString, "Accounting Sync", "Checkout enqueue error: " + accEx.Message, "SYSTEM");
-                        }
+                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                         return new CheckoutResult
                         {

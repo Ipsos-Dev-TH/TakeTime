@@ -406,6 +406,13 @@ namespace Take_Time_BangPhra.Account
                         File.Delete(dirs[i].ToString());
                     }
 
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new AccountingSyncService(conn);
+                        sync.EnqueueVoidReceipt(docNum);
+                    }
+                    catch { }
                 }
                 else if (docType == "PAY")
                 {
@@ -433,6 +440,14 @@ namespace Take_Time_BangPhra.Account
                     {
                         File.Delete(dirs[i].ToString());
                     }
+
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new AccountingSyncService(conn);
+                        sync.EnqueueVoidPaymentVoucher(docNum);
+                    }
+                    catch { }
                 }
 
                 // Show success message then redirect
@@ -766,6 +781,7 @@ namespace Take_Time_BangPhra.Account
                     var docParams = new Dictionary<string, object> { { "@ID", docId } };
                     var dt = code.DatabaseQuerySafe(conn,
                         @"SELECT ar.Total_Amount, ar.Vat, ar.Created_Date, ar.Reservation_ID,
+                                 ar.IsDeposit, ar.Paid_Type,
                                  ISNULL(c.FullName, '-') AS CustomerName
                           FROM Account_Receipt ar
                           LEFT JOIN Reservation res ON res.ID = ar.Reservation_ID
@@ -776,11 +792,14 @@ namespace Take_Time_BangPhra.Account
                     {
                         var r = dt.Rows[0];
                         int resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
+                        bool isDeposit = r["IsDeposit"] != DBNull.Value && Convert.ToBoolean(r["IsDeposit"]);
+                        string paidType = r["Paid_Type"]?.ToString() ?? "CASH";
                         queueId = sync.EnqueueReceipt(resId, docId,
                             Convert.ToDecimal(r["Total_Amount"]),
                             Convert.ToDecimal(r["Vat"]),
                             Convert.ToDateTime(r["Created_Date"]),
-                            r["CustomerName"]?.ToString() ?? "");
+                            r["CustomerName"]?.ToString() ?? "",
+                            isDeposit: isDeposit, paymentMethod: paidType);
                     }
                 }
 

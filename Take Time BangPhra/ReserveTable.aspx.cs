@@ -603,18 +603,7 @@ namespace Take_Time_BangPhra
                         paymentMethod = resData.Rows[0]["PayMethod"]?.ToString() ?? "CASH";
                     }
 
-                    if (depositAmount > 0)
-                    {
-                        var sync = new Integration.AccountingSyncService(connStr);
-                        if (refund)
-                        {
-                            sync.EnqueueRefund(int.Parse(reservationId), depositAmount, paymentMethod, DateTime.Now, customerName);
-                        }
-                        else
-                        {
-                            sync.EnqueueCancellationNoRefund(int.Parse(reservationId), depositAmount, customerName, DateTime.Now);
-                        }
-                    }
+                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
                 }
             }
             catch (Exception accEx)
@@ -723,7 +712,15 @@ namespace Take_Time_BangPhra
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ReceiptId",
                     new SqlParameter("@ReceiptId", receiptId));
 
-                // ✅ 3. Stamp "Cancel" on PDF
+                // ✅ 3. Void ในระบบบัญชี
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidReceipt(receiptId);
+                }
+                catch { }
+
+                // ✅ 4. Stamp "Cancel" on PDF
                 string uid = dtRec.Rows[i]["UID"].ToString();
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"]);
 

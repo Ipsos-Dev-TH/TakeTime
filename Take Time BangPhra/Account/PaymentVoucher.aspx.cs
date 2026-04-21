@@ -361,6 +361,14 @@ namespace Take_Time_BangPhra.Account.Report
 
             if (command == "edit")
             {
+                // Void เอกสารเก่าในระบบบัญชี (ก่���น delete)
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidPaymentVoucher(id);
+                }
+                catch { }
+
                 // SECURE: Delete payment record with parameterized query
                 var deletePaymentParams = new Dictionary<string, object>
                 {
@@ -727,19 +735,32 @@ namespace Take_Time_BangPhra.Account.Report
                     CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
                 }
 
-                // Sync to accounting system
+                // Auto-sync voucher to accounting
                 try
                 {
-                    decimal voucherAmount = decimal.Parse(TextBox6.Text);
-                    string paymentMethod = DropDownList3.SelectedItem?.Text ?? "CASH";
-                    string expenseCategory = DropDownList4.SelectedItem?.Text ?? "OTHER";
-                    string vendorName = DropDownList1.SelectedItem?.Text ?? "";
-                    string description = "";
-                    if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
+                    var config = new Integration.AccountingConfig(conn);
+                    if (config.IsConfigured && config.Enabled)
+                    {
+                        decimal voucherAmount = decimal.Parse(TextBox6.Text);
+                        string paymentMethod = DropDownList3.SelectedItem?.Text ?? "CASH";
+                        string expenseCategory = DropDownList4.SelectedItem?.Text ?? "OTHER";
+                        string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                        string description = "";
+                        if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
 
-                    var sync = new Integration.AccountingSyncService(conn);
-                    sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                        documentNumber: docNum);
+                        if (config.IsDocumentMode)
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                                documentNumber: docNum);
+                        }
+                        else if (!string.IsNullOrEmpty(docNum) && docNum != "0")
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                                documentNumber: docNum);
+                        }
+                    }
                 }
                 catch { }
 

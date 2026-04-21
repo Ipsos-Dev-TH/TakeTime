@@ -16,6 +16,7 @@ using System.Net.Mail;
 using Take_Time_BangPhra.Admin;
 using iTextSharp.text.pdf.parser;
 using Take_Time_BangPhra.Class;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Account.Report
 {
@@ -973,8 +974,9 @@ namespace Take_Time_BangPhra.Account.Report
                         deleteDetailParams);
                     System.Diagnostics.Debug.WriteLine($"✅ Deleted old Account_Receipt_Detail (Receipt_ID={docNum}) for re-insert");
 
-                    // Store UID for re-use
+                    // Store UID and original doc number for re-use
                     Session["EditReceiptUID"] = originalUID;
+                    Session["EditOriginalDocNum"] = originalID;
                 }
                 else { }
 
@@ -1610,6 +1612,38 @@ namespace Take_Time_BangPhra.Account.Report
                 catch { }
 
 
+                // Auto-sync receipt to accounting
+                try
+                {
+                    var config = new AccountingConfig(conn);
+                    if (config.IsConfigured && config.Enabled)
+                    {
+                        var sync = new AccountingSyncService(conn);
+
+                        // Edit mode: void เอกสารเก่าก่อน
+                        if (command == "edit")
+                        {
+                            string originalDocNum = Session["EditOriginalDocNum"]?.ToString() ?? docNum;
+                            sync.EnqueueVoidReceipt(originalDocNum);
+                        }
+
+                        // Enqueue เอกสารใหม่/อัพเดท
+                        int resId = 0;
+                        int.TryParse(reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text, out resId);
+                        decimal totalAmt = Convert.ToDecimal(TextBox6.Text);
+                        decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
+                        DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
+                        string custName = TextBox16.Text;
+
+                        if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                        {
+                            sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
+                                isDeposit: CheckBox1.Checked, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
+                        }
+                    }
+                }
+                catch { }
+
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
                     "alert('✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
@@ -1852,6 +1886,14 @@ namespace Take_Time_BangPhra.Account.Report
                 code.DatabaseInsertSafe(conn,
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ID",
                     updateParams);
+
+                // Void ในระบบบัญชี
+                try
+                {
+                    var sync = new AccountingSyncService(conn);
+                    sync.EnqueueVoidReceipt(docNum);
+                }
+                catch { }
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
 
