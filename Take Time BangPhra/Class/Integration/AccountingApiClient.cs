@@ -479,6 +479,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // Integration Endpoints — สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
+        // ใช้ company-scoped path เพราะ Nexaacc ApiKeyMiddleware validate API key ต่อ company
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceAsync(CreateIntegrationInvoiceRequest invoice)
         {
             if (invoice.Lines == null || invoice.Lines.Count == 0)
@@ -488,7 +489,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
 
             return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
-                "/api/integration/invoices", invoice);
+                $"{CompanyPath}/integration/invoices", invoice);
         }
 
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseAsync(CreateIntegrationExpenseRequest expense)
@@ -497,7 +498,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Expense must have at least 1 line item.");
 
             return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
-                "/api/integration/expenses", expense);
+                $"{CompanyPath}/integration/expenses", expense);
         }
 
         // Products (ProductController)
