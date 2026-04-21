@@ -461,6 +461,15 @@ namespace Take_Time_BangPhra.Integration
         {
             if (!_config.IsReadyToSync) return 0;
 
+            // Pre-flight connectivity check — skip entire batch if API unreachable
+            string connectError;
+            if (!_apiClient.IsApiReachable(out connectError))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessQueueAsync skipped: API unreachable — {connectError}", "SYSTEM");
+                return 0;
+            }
+
             DataTable pending = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT TOP (@batchSize) * FROM Accounting_Sync_Queue
                   WHERE Status IN ('PENDING', 'FAILED')
@@ -472,9 +481,13 @@ namespace Take_Time_BangPhra.Integration
             if (pending == null || pending.Rows.Count == 0) return 0;
 
             int processed = 0;
+            bool dnsFailed = false;
 
             foreach (DataRow row in pending.Rows)
             {
+                // If DNS failed during this batch, stop processing remaining items
+                if (dnsFailed) break;
+
                 long queueId = Convert.ToInt64(row["ID"]);
                 string actionType = row["Action_Type"]?.ToString();
                 string payload = row["Payload"]?.ToString();
@@ -486,7 +499,6 @@ namespace Take_Time_BangPhra.Integration
                 {
                     string nexaaccId = await ProcessSingleItemAsync(actionType, payload);
 
-                    // If skipped due to zero amount (not an error, just no accounting entry needed)
                     if (nexaaccId == "SKIPPED_ZERO_AMOUNT")
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", "Skipped: zero amount after fallback lookup - no accounting entry needed", nexaaccId);
@@ -496,6 +508,14 @@ namespace Take_Time_BangPhra.Integration
                         UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
                     }
                     processed++;
+                }
+                catch (DnsResolutionException ex)
+                {
+                    // DNS/infrastructure error — don't count against item retry limit, revert to PENDING
+                    UpdateQueueStatus(queueId, "PENDING", $"DNS error (not counted as retry): {ex.Message}", null);
+                    dnsFailed = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessQueueAsync halted: DNS resolution failed — remaining items will be retried next cycle. Error: {ex.Message}", "SYSTEM");
                 }
                 catch (ArgumentException ex)
                 {
@@ -507,18 +527,40 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // Client error (4xx) — don't retry
                     UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
-                    IncrementRetry(queueId, _config.MaxRetries); // Set to max to prevent retry
+                    IncrementRetry(queueId, _config.MaxRetries);
                 }
                 catch (Exception ex)
                 {
-                    // Server/network error — schedule retry
-                    int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
-                    IncrementRetry(queueId, retryCount);
-                    UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                    // Check if this is a wrapped DNS error
+                    if (IsDnsError(ex))
+                    {
+                        UpdateQueueStatus(queueId, "PENDING", $"DNS error (not counted as retry): {ex.Message}", null);
+                        dnsFailed = true;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessQueueAsync halted: DNS error detected — {ex.Message}", "SYSTEM");
+                    }
+                    else
+                    {
+                        // Server/network error — schedule retry
+                        int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
+                        IncrementRetry(queueId, retryCount);
+                        UpdateQueueStatus(queueId, "FAILED", ex.Message, null);
+                    }
                 }
             }
 
             return processed;
+        }
+
+        private static bool IsDnsError(Exception ex)
+        {
+            if (ex is DnsResolutionException) return true;
+            string msg = ex.Message ?? "";
+            string innerMsg = ex.InnerException?.Message ?? "";
+            return msg.Contains("remote name could not be resolved") ||
+                   innerMsg.Contains("remote name could not be resolved") ||
+                   msg.Contains("No such host") ||
+                   innerMsg.Contains("No such host");
         }
 
         private async Task<string> ProcessSingleItemAsync(string actionType, string payloadJson)
@@ -592,6 +634,7 @@ namespace Take_Time_BangPhra.Integration
                     throw new Exception($"Unknown action type: {actionType}");
             }
             }
+            catch (DnsResolutionException) { throw; } // DNS/infra error — don't wrap
             catch (ArgumentException) { throw; } // Already a validation error — don't wrap
             catch (AccountingApiException) { throw; } // API error — don't wrap
             catch (KeyNotFoundException ex)

@@ -72,9 +72,11 @@ namespace Take_Time_BangPhra
             }
         }
 
+        private static int _consecutiveTimerErrors = 0;
+
         private static void ProcessAccountingSyncQueue(object state)
         {
-            if (_isSyncing) return; // Skip if already processing
+            if (_isSyncing) return;
 
             lock (_syncLock)
             {
@@ -86,11 +88,22 @@ namespace Take_Time_BangPhra
             {
                 var syncService = new AccountingSyncService();
                 var task = syncService.ProcessQueueAsync(20);
-                task.Wait(TimeSpan.FromMinutes(2)); // Timeout safety
+                task.Wait(TimeSpan.FromMinutes(2));
+                _consecutiveTimerErrors = 0;
+            }
+            catch (AggregateException aex)
+            {
+                var inner = aex.InnerException ?? aex;
+                _consecutiveTimerErrors++;
+                // Only log every 10th consecutive error to avoid log flooding during outages
+                if (_consecutiveTimerErrors <= 3 || _consecutiveTimerErrors % 10 == 0)
+                    System.Diagnostics.Trace.TraceError($"Accounting sync timer error (#{_consecutiveTimerErrors}): {inner.Message}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Trace.TraceError($"Accounting sync timer error: {ex.Message}");
+                _consecutiveTimerErrors++;
+                if (_consecutiveTimerErrors <= 3 || _consecutiveTimerErrors % 10 == 0)
+                    System.Diagnostics.Trace.TraceError($"Accounting sync timer error (#{_consecutiveTimerErrors}): {ex.Message}");
             }
             finally
             {

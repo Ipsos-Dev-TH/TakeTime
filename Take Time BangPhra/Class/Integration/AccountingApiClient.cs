@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 // X-Api-Key authentication - no Bearer token needed
 using System.Text;
 using System.Threading.Tasks;
@@ -33,6 +34,12 @@ namespace Take_Time_BangPhra.Integration
 
         private const int MaxRetries = 4;
         private static readonly int[] RetryDelaysMs = { 1000, 3000, 9000, 20000 };
+
+        // DNS health tracking — avoid hammering an unresolvable domain on every queue item
+        private static DateTime _dnsFailedUntil = DateTime.MinValue;
+        private static string _lastDnsError = null;
+        private static readonly object _dnsLock = new object();
+        private static readonly TimeSpan DnsCooldownPeriod = TimeSpan.FromMinutes(2);
 
         // Static constructor ensures TLS 1.2 is enabled even before Application_Start.
         // Critical for .NET Framework apps where default protocol may be SSL3/TLS1.0.
@@ -126,12 +133,111 @@ namespace Take_Time_BangPhra.Integration
             await ExecuteWithRetryAsync<object>(HttpMethod.Post, path, null);
         }
 
+        /// <summary>
+        /// Pre-flight DNS check — resolves the API hostname once before retry loop.
+        /// Prevents wasting all retry attempts on an unresolvable domain.
+        /// </summary>
+        private void ValidateDnsResolution(string baseUrl)
+        {
+            // Check cooldown: if DNS recently failed, throw immediately to avoid flooding
+            lock (_dnsLock)
+            {
+                if (DateTime.Now < _dnsFailedUntil)
+                {
+                    throw new DnsResolutionException(
+                        $"DNS resolution skipped (cooldown until {_dnsFailedUntil:HH:mm:ss}): {_lastDnsError}");
+                }
+            }
+
+            Uri uri;
+            try
+            {
+                uri = new Uri(baseUrl);
+            }
+            catch (UriFormatException ex)
+            {
+                throw new DnsResolutionException($"Invalid Base URL format '{baseUrl}': {ex.Message}");
+            }
+
+            try
+            {
+                var addresses = Dns.GetHostAddresses(uri.Host);
+                if (addresses == null || addresses.Length == 0)
+                {
+                    SetDnsFailed($"DNS resolved but returned no addresses for '{uri.Host}'");
+                    throw new DnsResolutionException($"DNS resolved but returned no IP addresses for '{uri.Host}'. ตรวจสอบ Nexaacc_BaseUrl ใน Accounting_Integration_Config");
+                }
+
+                // DNS OK — clear any previous failure state
+                lock (_dnsLock)
+                {
+                    _dnsFailedUntil = DateTime.MinValue;
+                    _lastDnsError = null;
+                }
+            }
+            catch (DnsResolutionException) { throw; }
+            catch (SocketException ex)
+            {
+                string msg = $"Cannot resolve hostname '{uri.Host}': {ex.Message}. ตรวจสอบ Nexaacc_BaseUrl ใน Accounting_Integration_Config — โดเมนอาจผิดหรือ DNS server ไม่พร้อม";
+                SetDnsFailed(msg);
+                throw new DnsResolutionException(msg);
+            }
+            catch (Exception ex)
+            {
+                string msg = $"DNS check failed for '{uri.Host}': {ex.Message}";
+                SetDnsFailed(msg);
+                throw new DnsResolutionException(msg);
+            }
+        }
+
+        private void SetDnsFailed(string errorMessage)
+        {
+            lock (_dnsLock)
+            {
+                _dnsFailedUntil = DateTime.Now.Add(DnsCooldownPeriod);
+                _lastDnsError = errorMessage;
+            }
+        }
+
+        /// <summary>
+        /// Quick health check — validates DNS + basic reachability without full API call.
+        /// Used by queue processor to skip entire batch when API is unreachable.
+        /// </summary>
+        public bool IsApiReachable(out string errorDetail)
+        {
+            errorDetail = null;
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+            {
+                errorDetail = "Base URL not configured";
+                return false;
+            }
+            if (string.IsNullOrEmpty(_config.ApiKey))
+            {
+                errorDetail = "API Key not configured";
+                return false;
+            }
+
+            try
+            {
+                ValidateDnsResolution(_config.BaseUrl);
+                return true;
+            }
+            catch (DnsResolutionException ex)
+            {
+                errorDetail = ex.Message;
+                return false;
+            }
+        }
+
         private async Task<T> ExecuteWithRetryAsync<T>(HttpMethod method, string path, string jsonBody)
         {
             EnsureApiKeyConfigured();
 
             if (string.IsNullOrEmpty(_config.BaseUrl))
                 throw new Exception("Accounting Base URL is not configured.");
+
+            // Pre-flight DNS check — fail fast if domain can't be resolved
+            ValidateDnsResolution(_config.BaseUrl);
 
             var url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
             Exception lastException = null;
@@ -189,14 +295,24 @@ namespace Take_Time_BangPhra.Integration
                 }
                 catch (TaskCanceledException tcEx)
                 {
-                    // Timeout — retryable, but add diagnostic
                     lastException = new Exception($"Request timeout after {_httpClient.Timeout.TotalSeconds}s: {tcEx.Message}", tcEx);
                     if (attempt >= MaxRetries) break;
                 }
                 catch (HttpRequestException httpEx)
                 {
-                    // Network/connection error — retryable
                     string innerMsg = httpEx.InnerException?.Message ?? "";
+
+                    // DNS resolution failure mid-request — set cooldown and stop retrying
+                    if (innerMsg.Contains("remote name could not be resolved") ||
+                        innerMsg.Contains("No such host") ||
+                        httpEx.Message.Contains("remote name could not be resolved"))
+                    {
+                        SetDnsFailed($"DNS failure during request: {innerMsg}");
+                        throw new DnsResolutionException(
+                            $"DNS resolution failed for API host: {innerMsg}. ตรวจสอบ Nexaacc_BaseUrl ใน Accounting_Integration_Config",
+                            httpEx);
+                    }
+
                     lastException = new Exception($"Network error: {httpEx.Message} | Inner: {innerMsg}", httpEx);
                     if (attempt >= MaxRetries) break;
                 }
@@ -351,7 +467,26 @@ namespace Take_Time_BangPhra.Integration
             if (_config.CompanyId == Guid.Empty)
                 return new ConnectionTestResult(false, "ยังไม่ได้ตั้งค่า Company ID");
 
-            // Build diagnostic info for error messages
+            // DNS pre-check — catch domain issues before attempting API call
+            try
+            {
+                ValidateDnsResolution(_config.BaseUrl);
+            }
+            catch (DnsResolutionException ex)
+            {
+                Uri parsedUri = null;
+                try { parsedUri = new Uri(_config.BaseUrl); } catch { }
+                string host = parsedUri?.Host ?? _config.BaseUrl;
+                return new ConnectionTestResult(false,
+                    $"ไม่สามารถ resolve DNS ของ '{host}' ได้\n" +
+                    $"Base URL ที่ตั้งค่า: {_config.BaseUrl}\n" +
+                    $"ปัญหาที่เป็นไปได้:\n" +
+                    $"  1) โดเมนผิด — ตรวจสอบว่าเป็น nexaacc.net หรือ nextacc.net\n" +
+                    $"  2) โดเมนหมดอายุ\n" +
+                    $"  3) DNS server ของ server ไม่สามารถ resolve ได้\n" +
+                    $"Error: {ex.Message}");
+            }
+
             string apiKeyPreview = _config.ApiKey.Length > 8
                 ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
                 : new string('*', _config.ApiKey.Length);
@@ -363,6 +498,11 @@ namespace Take_Time_BangPhra.Integration
                 var result = await GetAccountsAsync().ConfigureAwait(false);
                 sw.Stop();
                 return new ConnectionTestResult(true, $"Nexaacc API เชื่อมต่อสำเร็จ — API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)");
+            }
+            catch (DnsResolutionException ex)
+            {
+                return new ConnectionTestResult(false,
+                    $"DNS resolution failed ระหว่าง API call: {ex.Message}\nURL: {targetUrl}");
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 401)
             {
@@ -454,6 +594,16 @@ namespace Take_Time_BangPhra.Integration
             StatusCode = statusCode;
             ResponseBody = responseBody;
         }
+    }
+
+    /// <summary>
+    /// DNS resolution failure — the API hostname cannot be resolved.
+    /// Non-retryable at the item level; indicates a configuration or infrastructure issue.
+    /// </summary>
+    public class DnsResolutionException : Exception
+    {
+        public DnsResolutionException(string message) : base(message) { }
+        public DnsResolutionException(string message, Exception inner) : base(message, inner) { }
     }
 
     /// <summary>
