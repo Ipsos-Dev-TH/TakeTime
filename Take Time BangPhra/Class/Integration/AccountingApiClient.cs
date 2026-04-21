@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Net;
 using System.Net.Http;
 // X-Api-Key authentication - no Bearer token needed
 using System.Text;
@@ -28,9 +29,26 @@ namespace Take_Time_BangPhra.Integration
         };
 
         private static HttpClient _httpClient;
+        private static readonly object _httpClientLock = new object();
 
-        private const int MaxRetries = 3;
-        private static readonly int[] RetryDelaysMs = { 1000, 3000, 9000 };
+        private const int MaxRetries = 4;
+        private static readonly int[] RetryDelaysMs = { 1000, 3000, 9000, 20000 };
+
+        // Static constructor ensures TLS 1.2 is enabled even before Application_Start.
+        // Critical for .NET Framework apps where default protocol may be SSL3/TLS1.0.
+        static AccountingApiClient()
+        {
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
+                    | SecurityProtocolType.Tls11
+                    | SecurityProtocolType.Tls;
+                ServicePointManager.DefaultConnectionLimit = 100;
+                ServicePointManager.Expect100Continue = false;
+                ServicePointManager.UseNagleAlgorithm = false;
+            }
+            catch { }
+        }
 
         public AccountingApiClient()
         {
@@ -50,10 +68,25 @@ namespace Take_Time_BangPhra.Integration
         {
             if (_httpClient == null)
             {
-                _httpClient = new HttpClient
+                lock (_httpClientLock)
                 {
-                    Timeout = TimeSpan.FromSeconds(_config.TimeoutSeconds > 0 ? _config.TimeoutSeconds : 30)
-                };
+                    if (_httpClient == null)
+                    {
+                        var handler = new HttpClientHandler
+                        {
+                            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+                        };
+
+                        // Use longer timeout for better tolerance of slow network
+                        int timeoutSec = _config.TimeoutSeconds > 0 ? _config.TimeoutSeconds : 60;
+
+                        _httpClient = new HttpClient(handler)
+                        {
+                            Timeout = TimeSpan.FromSeconds(timeoutSec)
+                        };
+                        _httpClient.DefaultRequestHeaders.ConnectionClose = false;
+                    }
+                }
             }
         }
 
@@ -97,6 +130,9 @@ namespace Take_Time_BangPhra.Integration
         {
             EnsureApiKeyConfigured();
 
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+
             var url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
             Exception lastException = null;
 
@@ -109,8 +145,10 @@ namespace Take_Time_BangPhra.Integration
 
                 try
                 {
+                    // Create a fresh request on each attempt (HttpRequestMessage cannot be reused)
                     var request = new HttpRequestMessage(method, url);
                     request.Headers.Add("X-Api-Key", _config.ApiKey);
+                    request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
                     {
@@ -127,15 +165,16 @@ namespace Take_Time_BangPhra.Integration
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        // Don't retry 4xx errors
-                        if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
+                        // Don't retry 4xx errors (except 408 Timeout and 429 Too Many Requests)
+                        int status = (int)response.StatusCode;
+                        if (status >= 400 && status < 500 && status != 408 && status != 429)
                         {
                             throw new AccountingApiException(
                                 $"API error {response.StatusCode}: {responseBody}",
-                                (int)response.StatusCode, responseBody);
+                                status, responseBody);
                         }
 
-                        // 5xx errors: retry
+                        // 408/429/5xx errors: retry
                         throw new HttpRequestException($"Server error {response.StatusCode}: {responseBody}");
                     }
 
@@ -148,6 +187,19 @@ namespace Take_Time_BangPhra.Integration
                 {
                     throw; // Don't retry client errors
                 }
+                catch (TaskCanceledException tcEx)
+                {
+                    // Timeout — retryable, but add diagnostic
+                    lastException = new Exception($"Request timeout after {_httpClient.Timeout.TotalSeconds}s: {tcEx.Message}", tcEx);
+                    if (attempt >= MaxRetries) break;
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    // Network/connection error — retryable
+                    string innerMsg = httpEx.InnerException?.Message ?? "";
+                    lastException = new Exception($"Network error: {httpEx.Message} | Inner: {innerMsg}", httpEx);
+                    if (attempt >= MaxRetries) break;
+                }
                 catch (Exception ex)
                 {
                     lastException = ex;
@@ -156,7 +208,14 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
-            throw new Exception($"Accounting API call failed after {MaxRetries + 1} attempts: {lastException?.Message}", lastException);
+            // Build detailed diagnostic message
+            string diagnostic = lastException?.Message ?? "unknown error";
+            if (lastException?.InnerException != null)
+                diagnostic += $" | Inner: {lastException.InnerException.Message}";
+
+            throw new Exception(
+                $"Accounting API call failed after {MaxRetries + 1} attempts to {method.Method} {path}: {diagnostic}",
+                lastException);
         }
 
         // ──────────────────────────────────────────────

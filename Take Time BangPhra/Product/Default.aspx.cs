@@ -1529,21 +1529,46 @@ namespace Take_Time_BangPhra.Product
             {
                 // Calculate total from actual order data
                 decimal totalSale = 0;
+                decimal totalCost = 0;
                 foreach (DataRow row in dtOrder.Rows)
                 {
                     totalSale += Convert.ToDecimal(row["Price_Total"]);
+                    // Attempt to capture cost if available
+                    if (row.Table.Columns.Contains("Cost_Price") && row["Cost_Price"] != DBNull.Value)
+                    {
+                        decimal costPrice = Convert.ToDecimal(row["Cost_Price"]);
+                        int qty = row.Table.Columns.Contains("Amount") && row["Amount"] != DBNull.Value
+                            ? Convert.ToInt32(row["Amount"]) : 1;
+                        totalCost += costPrice * qty;
+                    }
                 }
 
                 // Get payment method name from dropdown (maps to CASH/KBANK/KTB/CARD etc.)
                 string paidType = DropDownList1.SelectedItem != null ? DropDownList1.SelectedItem.Text : "CASH";
 
-                if (totalSale > 0)
+                // Only enqueue if we have a valid receipt number and positive amount
+                if (totalSale > 0 && docNum != "0" && !string.IsNullOrEmpty(docNum))
                 {
                     var sync = new Integration.AccountingSyncService(conn);
-                    sync.EnqueuePOSSale(docNum, totalSale, 0, paidType, DateTime.Now, "ขายสินค้า POS");
+                    sync.EnqueuePOSSale(docNum, totalSale, totalCost, paidType, DateTime.Now, "ขายสินค้า POS");
+                }
+                else if (totalSale > 0 && (docNum == "0" || string.IsNullOrEmpty(docNum)))
+                {
+                    // Receipt creation may have failed - log for investigation
+                    var logCode = new code();
+                    logCode.Logs(conn, "AccountingSync",
+                        $"POS sale accounting skipped: docNum is '{docNum}' (receipt not created). totalSale={totalSale:N2}, paidType={paidType}", "SYSTEM");
                 }
             }
-            catch { }
+            catch (Exception accEx)
+            {
+                try
+                {
+                    var logCode = new code();
+                    logCode.Logs(conn, "AccountingSync", "POS sale enqueue error: " + accEx.Message, "SYSTEM");
+                }
+                catch { }
+            }
 
             // Show success message then redirect
             ClientScript.RegisterStartupScript(this.GetType(), "success",

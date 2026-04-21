@@ -1016,6 +1016,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = "เงินรับล่วงหน้า",
                         Description = $"เงินรับล่วงหน้า - การจอง #{reservationId}",
                         Quantity = 1,
                         UnitPrice = amount,
@@ -1037,6 +1038,7 @@ namespace Take_Time_BangPhra.Integration
                 decimal netAmount = amount - vatAmount;
                 lines.Add(new IntegrationLineRequest
                 {
+                    ItemName = "ค่าห้องพัก",
                     Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                     Quantity = 1, UnitPrice = netAmount, VatRate = 7,
                     AccountId = GetAccountId("ROOM_REVENUE"),
@@ -1046,6 +1048,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 lines.Add(new IntegrationLineRequest
                 {
+                    ItemName = "ค่าห้องพัก",
                     Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                     Quantity = 1, UnitPrice = amount,
                     AccountId = GetAccountId("ROOM_REVENUE"),
@@ -1077,6 +1080,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = "ค่าห้องพัก",
                         Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
                         Quantity = 1, UnitPrice = depositAmount,
                         AccountId = GetAccountId("ROOM_REVENUE"),
@@ -1093,6 +1097,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 new IntegrationLineRequest
                 {
+                    ItemName = !string.IsNullOrEmpty(description) ? description : "สินค้า POS",
                     Description = $"รายได้ขายสินค้า - {description}",
                     Quantity = 1, UnitPrice = totalAmount,
                     AccountId = GetAccountId("PRODUCT_REVENUE"),
@@ -1124,6 +1129,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = !string.IsNullOrEmpty(description) ? description : "ชาร์จสินค้าเข้าห้อง",
                         Description = description,
                         Quantity = 1, UnitPrice = salesAmount,
                         AccountId = GetAccountId("PRODUCT_REVENUE"),
@@ -1147,6 +1153,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = "รายได้จากการยึดมัดจำ",
                         Description = $"รายได้จากการยึดมัดจำ - การจอง #{reservationId}",
                         Quantity = 1, UnitPrice = depositAmount,
                         AccountId = otherIncomeId,
@@ -1172,6 +1179,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = "ค่าเสียหาย/ของหาย",
                         Description = $"ค่าเสียหาย/ของหาย - {description}",
                         Quantity = 1, UnitPrice = totalCharge,
                         AccountId = otherIncomeId,
@@ -1192,12 +1200,16 @@ namespace Take_Time_BangPhra.Integration
         {
             var lines = new List<IntegrationLineRequest>();
 
+            string itemName = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory
+                : !string.IsNullOrEmpty(description) ? description : "ค่าใช้จ่าย";
+
             if (hasInputVat)
             {
                 decimal vatAmount = Math.Round(amount * 7 / 107, 2);
                 decimal netAmount = amount - vatAmount;
                 lines.Add(new IntegrationLineRequest
                 {
+                    ItemName = itemName,
                     Description = description,
                     Quantity = 1, UnitPrice = netAmount, VatRate = 7,
                     WithholdingTaxRate = whtRate,
@@ -1208,6 +1220,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 lines.Add(new IntegrationLineRequest
                 {
+                    ItemName = itemName,
                     Description = description,
                     Quantity = 1, UnitPrice = amount,
                     WithholdingTaxRate = whtRate,
@@ -1243,6 +1256,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     new IntegrationLineRequest
                     {
+                        ItemName = !string.IsNullOrEmpty(productName) ? productName : "สินค้า",
                         Description = $"สินค้า - {productName}",
                         Quantity = 1, UnitPrice = totalCost,
                         AccountId = GetAccountId("INVENTORY"),
@@ -1259,6 +1273,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 new IntegrationLineRequest
                 {
+                    ItemName = "เงินเดือน",
                     Description = $"เงินเดือน - {period}",
                     Quantity = 1, UnitPrice = totalSalary,
                     AccountId = GetAccountId("SALARY_EXPENSE"),
@@ -1271,6 +1286,7 @@ namespace Take_Time_BangPhra.Integration
                     ? se : GetAccountId("SALARY_EXPENSE");
                 lines.Add(new IntegrationLineRequest
                 {
+                    ItemName = "ประกันสังคม (ส่วนนายจ้าง)",
                     Description = $"ประกันสังคม (ส่วนนายจ้าง) - {period}",
                     Quantity = 1, UnitPrice = totalSsf,
                     AccountId = ssfExpenseId,
