@@ -41,6 +41,12 @@ namespace Take_Time_BangPhra.Integration
         private static readonly object _dnsLock = new object();
         private static readonly TimeSpan DnsCooldownPeriod = TimeSpan.FromMinutes(2);
 
+        // Auth failure tracking — avoid hammering API with an invalid key on every queue item
+        private static DateTime _authFailedUntil = DateTime.MinValue;
+        private static string _lastAuthError = null;
+        private static readonly object _authLock = new object();
+        private static readonly TimeSpan AuthCooldownPeriod = TimeSpan.FromMinutes(5);
+
         // Static constructor ensures TLS 1.2 is enabled even before Application_Start.
         // Critical for .NET Framework apps where default protocol may be SSL3/TLS1.0.
         static AccountingApiClient()
@@ -199,9 +205,45 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        private void SetAuthFailed(string errorMessage)
+        {
+            lock (_authLock)
+            {
+                _authFailedUntil = DateTime.Now.Add(AuthCooldownPeriod);
+                _lastAuthError = errorMessage;
+            }
+        }
+
         /// <summary>
-        /// Quick health check — validates DNS + basic reachability without full API call.
-        /// Used by queue processor to skip entire batch when API is unreachable.
+        /// Clear auth failure state — call when API key is updated.
+        /// </summary>
+        public static void ClearAuthFailure()
+        {
+            lock (_authLock)
+            {
+                _authFailedUntil = DateTime.MinValue;
+                _lastAuthError = null;
+            }
+        }
+
+        /// <summary>
+        /// Check if auth is in cooldown due to recent 401 failure.
+        /// </summary>
+        private void CheckAuthCooldown()
+        {
+            lock (_authLock)
+            {
+                if (DateTime.Now < _authFailedUntil)
+                {
+                    throw new AuthenticationFailedException(
+                        $"API Key authentication skipped (cooldown until {_authFailedUntil:HH:mm:ss}): {_lastAuthError}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Quick health check — validates DNS + auth status without full API call.
+        /// Used by queue processor to skip entire batch when API is unreachable or auth is failing.
         /// </summary>
         public bool IsApiReachable(out string errorDetail)
         {
@@ -220,13 +262,27 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 ValidateDnsResolution(_config.BaseUrl);
-                return true;
             }
             catch (DnsResolutionException ex)
             {
                 errorDetail = ex.Message;
                 return false;
             }
+
+            // Check auth cooldown
+            lock (_authLock)
+            {
+                if (DateTime.Now < _authFailedUntil)
+                {
+                    string keyPreview = _config.ApiKey.Length > 8
+                        ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
+                        : "****";
+                    errorDetail = $"API Key invalid (cooldown until {_authFailedUntil:HH:mm:ss}). Key: {keyPreview}. กรุณาตรวจสอบ API Key ใน Accounting Integration Settings — {_lastAuthError}";
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private async Task<T> ExecuteWithRetryAsync<T>(HttpMethod method, string path, string jsonBody)
@@ -236,8 +292,9 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(_config.BaseUrl))
                 throw new Exception("Accounting Base URL is not configured.");
 
-            // Pre-flight DNS check — fail fast if domain can't be resolved
+            // Pre-flight checks — fail fast on known infrastructure issues
             ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
 
             var url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
             Exception lastException = null;
@@ -271,8 +328,20 @@ namespace Take_Time_BangPhra.Integration
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        // Don't retry 4xx errors (except 408 Timeout and 429 Too Many Requests)
                         int status = (int)response.StatusCode;
+
+                        // 401/403 = auth failure — set cooldown to stop all queue items from retrying
+                        if (status == 401 || status == 403)
+                        {
+                            string keyPreview = _config.ApiKey.Length > 8
+                                ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
+                                : "****";
+                            string authMsg = $"API Key authentication failed ({status}): {responseBody}. Key: {keyPreview} (length={_config.ApiKey.Length}). กรุณาตรวจสอบ API Key ใน Accounting Integration Settings";
+                            SetAuthFailed(authMsg);
+                            throw new AuthenticationFailedException(authMsg);
+                        }
+
+                        // Don't retry other 4xx errors (except 408 Timeout and 429 Too Many Requests)
                         if (status >= 400 && status < 500 && status != 408 && status != 429)
                         {
                             throw new AccountingApiException(
@@ -410,6 +479,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // Integration Endpoints — สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
+        // ใช้ company-scoped path เพราะ Nexaacc ApiKeyMiddleware validate API key ต่อ company
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceAsync(CreateIntegrationInvoiceRequest invoice)
         {
             if (invoice.Lines == null || invoice.Lines.Count == 0)
@@ -419,7 +489,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
 
             return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
-                "/api/integration/invoices", invoice);
+                $"{CompanyPath}/integration/invoices", invoice);
         }
 
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseAsync(CreateIntegrationExpenseRequest expense)
@@ -428,7 +498,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Expense must have at least 1 line item.");
 
             return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
-                "/api/integration/expenses", expense);
+                $"{CompanyPath}/integration/expenses", expense);
         }
 
         // Products (ProductController)
@@ -487,6 +557,9 @@ namespace Take_Time_BangPhra.Integration
                     $"Error: {ex.Message}");
             }
 
+            // Clear auth cooldown for test — user may have just updated the key
+            ClearAuthFailure();
+
             string apiKeyPreview = _config.ApiKey.Length > 8
                 ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
                 : new string('*', _config.ApiKey.Length);
@@ -503,6 +576,19 @@ namespace Take_Time_BangPhra.Integration
             {
                 return new ConnectionTestResult(false,
                     $"DNS resolution failed ระหว่าง API call: {ex.Message}\nURL: {targetUrl}");
+            }
+            catch (AuthenticationFailedException ex)
+            {
+                return new ConnectionTestResult(false,
+                    $"API Key ไม่ถูกต้องหรือหมดอายุ\n" +
+                    $"URL: {targetUrl}\n" +
+                    $"API Key: {apiKeyPreview} (ความยาว {_config.ApiKey.Length} ตัวอักษร)\n" +
+                    $"กรุณาตรวจสอบ:\n" +
+                    $"  1) API Key ถูกต้อง — copy จาก Nexaacc dashboard ใหม่\n" +
+                    $"  2) Key ยังไม่หมดอายุ\n" +
+                    $"  3) IP ของ server อยู่ใน whitelist\n" +
+                    $"  4) การเข้ารหัส (encrypt) API Key ถูกต้อง\n" +
+                    $"Error: {ex.Message}", 401);
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 401)
             {
@@ -604,6 +690,15 @@ namespace Take_Time_BangPhra.Integration
     {
         public DnsResolutionException(string message) : base(message) { }
         public DnsResolutionException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    /// <summary>
+    /// API Key authentication failure (401/403).
+    /// Non-retryable — all queue items will fail with the same error until the key is fixed.
+    /// </summary>
+    public class AuthenticationFailedException : Exception
+    {
+        public AuthenticationFailedException(string message) : base(message) { }
     }
 
     /// <summary>

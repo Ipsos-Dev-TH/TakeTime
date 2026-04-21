@@ -481,12 +481,12 @@ namespace Take_Time_BangPhra.Integration
             if (pending == null || pending.Rows.Count == 0) return 0;
 
             int processed = 0;
-            bool dnsFailed = false;
+            bool infrastructureFailed = false;
 
             foreach (DataRow row in pending.Rows)
             {
-                // If DNS failed during this batch, stop processing remaining items
-                if (dnsFailed) break;
+                // If DNS or auth failed during this batch, stop processing remaining items
+                if (infrastructureFailed) break;
 
                 long queueId = Convert.ToInt64(row["ID"]);
                 string actionType = row["Action_Type"]?.ToString();
@@ -513,9 +513,17 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // DNS/infrastructure error — don't count against item retry limit, revert to PENDING
                     UpdateQueueStatus(queueId, "PENDING", $"DNS error (not counted as retry): {ex.Message}", null);
-                    dnsFailed = true;
+                    infrastructureFailed = true;
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessQueueAsync halted: DNS resolution failed — remaining items will be retried next cycle. Error: {ex.Message}", "SYSTEM");
+                }
+                catch (AuthenticationFailedException ex)
+                {
+                    // Auth failure (401/403) — don't count against item retry limit, revert to PENDING
+                    UpdateQueueStatus(queueId, "PENDING", $"Auth error (not counted as retry): {ex.Message}", null);
+                    infrastructureFailed = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessQueueAsync halted: API Key authentication failed — all items paused until key is fixed. Error: {ex.Message}", "SYSTEM");
                 }
                 catch (ArgumentException ex)
                 {
@@ -531,13 +539,13 @@ namespace Take_Time_BangPhra.Integration
                 }
                 catch (Exception ex)
                 {
-                    // Check if this is a wrapped DNS error
-                    if (IsDnsError(ex))
+                    // Check if this is a wrapped infrastructure error
+                    if (IsDnsError(ex) || IsAuthError(ex))
                     {
-                        UpdateQueueStatus(queueId, "PENDING", $"DNS error (not counted as retry): {ex.Message}", null);
-                        dnsFailed = true;
+                        UpdateQueueStatus(queueId, "PENDING", $"Infrastructure error (not counted as retry): {ex.Message}", null);
+                        infrastructureFailed = true;
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessQueueAsync halted: DNS error detected — {ex.Message}", "SYSTEM");
+                            $"ProcessQueueAsync halted: infrastructure error detected — {ex.Message}", "SYSTEM");
                     }
                     else
                     {
@@ -561,6 +569,13 @@ namespace Take_Time_BangPhra.Integration
                    innerMsg.Contains("remote name could not be resolved") ||
                    msg.Contains("No such host") ||
                    innerMsg.Contains("No such host");
+        }
+
+        private static bool IsAuthError(Exception ex)
+        {
+            if (ex is AuthenticationFailedException) return true;
+            string msg = ex.Message ?? "";
+            return msg.Contains("Invalid API Key") || msg.Contains("Unauthorized") || msg.Contains("authentication failed");
         }
 
         private async Task<string> ProcessSingleItemAsync(string actionType, string payloadJson)
@@ -634,9 +649,10 @@ namespace Take_Time_BangPhra.Integration
                     throw new Exception($"Unknown action type: {actionType}");
             }
             }
-            catch (DnsResolutionException) { throw; } // DNS/infra error — don't wrap
-            catch (ArgumentException) { throw; } // Already a validation error — don't wrap
-            catch (AccountingApiException) { throw; } // API error — don't wrap
+            catch (DnsResolutionException) { throw; }
+            catch (AuthenticationFailedException) { throw; }
+            catch (ArgumentException) { throw; }
+            catch (AccountingApiException) { throw; }
             catch (KeyNotFoundException ex)
             {
                 // Missing required field in payload — no point retrying
