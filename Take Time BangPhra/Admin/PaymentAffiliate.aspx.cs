@@ -184,6 +184,14 @@ namespace Take_Time_BangPhra.Admin
             string id = Request.QueryString["id"];
             if (command == "edit")
             {
+                // Void เอกสารเก่าในระบบบัญชี
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidPaymentVoucher(id);
+                }
+                catch { }
+
                 // SECURE: DELETE operations with parameterized queries
                 var deletePaymentParams = new Dictionary<string, object>
                 {

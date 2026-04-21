@@ -453,6 +453,82 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Void/Cancel Enqueue Methods
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Enqueue void for a receipt that was deleted or cancelled.
+        /// Looks up the original Nexaacc_Response_Id from queue and voids it.
+        /// </summary>
+        public long EnqueueVoidReceipt(string receiptNumber)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            string nexaaccId = LookupNexaaccId(receiptNumber, "RECEIPT");
+            if (string.IsNullOrEmpty(nexaaccId)) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "receiptNumber", receiptNumber },
+                { "nexaaccId", nexaaccId }
+            };
+
+            return InsertQueue("RECEIPT", 0, "VOID_RECEIPT", payload);
+        }
+
+        /// <summary>
+        /// Enqueue void for a payment voucher that was deleted or cancelled.
+        /// </summary>
+        public long EnqueueVoidPaymentVoucher(string documentNumber)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            string nexaaccId = LookupNexaaccId(documentNumber, "VOUCHER");
+            if (string.IsNullOrEmpty(nexaaccId)) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "documentNumber", documentNumber },
+                { "nexaaccId", nexaaccId }
+            };
+
+            return InsertQueue("VOUCHER", 0, "VOID_VOUCHER", payload);
+        }
+
+        /// <summary>
+        /// Look up the Nexaacc_Response_Id for a previously synced document.
+        /// </summary>
+        private string LookupNexaaccId(string documentNumber, string entityType)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Response_Id
+                      FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType
+                        AND Status = 'COMPLETED'
+                        AND Nexaacc_Response_Id IS NOT NULL
+                        AND (Payload LIKE @pattern1 OR Payload LIKE @pattern2)
+                      ORDER BY Processed_Date DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@pattern1", $"%\"receiptNumber\":\"{documentNumber}\"%"},
+                        { "@pattern2", $"%\"documentNumber\":\"{documentNumber}\"%"}
+                    });
+
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Response_Id"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_Response_Id"].ToString();
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupNexaaccId failed for {entityType} '{documentNumber}': {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        // ──────────────────────────────────────────────
         // Queue Processing (called by background timer/scheduler)
         // ──────────────────────────────────────────────
 
@@ -647,6 +723,12 @@ namespace Take_Time_BangPhra.Integration
 
                 case "CREATE_DAMAGE_CHARGE_JOURNAL":
                     return await ProcessDamageChargeJournal(payload);
+
+                case "VOID_RECEIPT":
+                    return await ProcessVoidReceipt(payload);
+
+                case "VOID_VOUCHER":
+                    return await ProcessVoidVoucher(payload);
 
                 default:
                     throw new Exception($"Unknown action type: {actionType}");
@@ -1189,6 +1271,50 @@ namespace Take_Time_BangPhra.Integration
                 await _apiClient.PostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // Void/Cancel Processors
+        // ──────────────────────────────────────────────
+
+        private async Task<string> ProcessVoidReceipt(Dictionary<string, object> p)
+        {
+            string nexaaccId = p["nexaaccId"]?.ToString();
+            if (string.IsNullOrEmpty(nexaaccId))
+                throw new ArgumentException("Cannot void receipt: nexaaccId is missing");
+
+            Guid docId = Guid.Parse(nexaaccId);
+
+            if (_config.IsDocumentMode)
+            {
+                await _apiClient.VoidDocumentAsync(docId);
+            }
+            else
+            {
+                await _apiClient.VoidJournalAsync(docId);
+            }
+
+            return $"VOIDED:{nexaaccId}";
+        }
+
+        private async Task<string> ProcessVoidVoucher(Dictionary<string, object> p)
+        {
+            string nexaaccId = p["nexaaccId"]?.ToString();
+            if (string.IsNullOrEmpty(nexaaccId))
+                throw new ArgumentException("Cannot void voucher: nexaaccId is missing");
+
+            Guid docId = Guid.Parse(nexaaccId);
+
+            if (_config.IsDocumentMode)
+            {
+                await _apiClient.VoidDocumentAsync(docId);
+            }
+            else
+            {
+                await _apiClient.VoidJournalAsync(docId);
+            }
+
+            return $"VOIDED:{nexaaccId}";
         }
 
         // ──────────────────────────────────────────────

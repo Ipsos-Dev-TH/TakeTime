@@ -52,6 +52,14 @@ namespace Take_Time_BangPhra.Services
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @receiptId",
                     parameters);
 
+                // Void ในระบบบัญชี
+                try
+                {
+                    var sync = new AccountingSyncService(_connectionString);
+                    sync.EnqueueVoidReceipt(receiptId);
+                }
+                catch { }
+
                 // Stamp PDF with cancellation mark
                 await StampPdfWithCancellation(receiptId, uid);
             }

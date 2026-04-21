@@ -1400,6 +1400,14 @@ namespace Take_Time_BangPhra.Voucher
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ID",
                     receiptUpdateParams);
 
+                // Void ในระบบบัญชี
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidReceipt(id);
+                }
+                catch { }
+
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
                 string recMonth = createdDate.Month.ToString();
                 // Fallback: check padded month directory for files created with zero-padded month

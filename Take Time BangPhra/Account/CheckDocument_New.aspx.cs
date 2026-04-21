@@ -1059,6 +1059,14 @@ namespace Take_Time_BangPhra.Account
                         System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
                     }
 
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new Integration.AccountingSyncService(conn);
+                        sync.EnqueueVoidReceipt(docNum);
+                    }
+                    catch { }
+
                     System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted receipt: {docNum}");
                 }
                 else if (docType == "PAY")
@@ -1104,6 +1112,14 @@ namespace Take_Time_BangPhra.Account
                     {
                         System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
                     }
+
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new Integration.AccountingSyncService(conn);
+                        sync.EnqueueVoidPaymentVoucher(docNum);
+                    }
+                    catch { }
 
                     System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted payment: {docNum}");
                 }

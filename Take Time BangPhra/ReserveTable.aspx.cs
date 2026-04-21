@@ -712,7 +712,15 @@ namespace Take_Time_BangPhra
                     "UPDATE [dbo].[Account_Receipt] SET [Status] = 'Cancel' WHERE ID = @ReceiptId",
                     new SqlParameter("@ReceiptId", receiptId));
 
-                // ✅ 3. Stamp "Cancel" on PDF
+                // ✅ 3. Void ในระบบบัญชี
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidReceipt(receiptId);
+                }
+                catch { }
+
+                // ✅ 4. Stamp "Cancel" on PDF
                 string uid = dtRec.Rows[i]["UID"].ToString();
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"]);
 

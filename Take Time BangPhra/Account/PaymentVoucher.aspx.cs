@@ -361,6 +361,14 @@ namespace Take_Time_BangPhra.Account.Report
 
             if (command == "edit")
             {
+                // Void เอกสารเก่าในระบบบัญชี (ก่���น delete)
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    sync.EnqueueVoidPaymentVoucher(id);
+                }
+                catch { }
+
                 // SECURE: Delete payment record with parameterized query
                 var deletePaymentParams = new Dictionary<string, object>
                 {

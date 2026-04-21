@@ -406,6 +406,13 @@ namespace Take_Time_BangPhra.Account
                         File.Delete(dirs[i].ToString());
                     }
 
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new AccountingSyncService(conn);
+                        sync.EnqueueVoidReceipt(docNum);
+                    }
+                    catch { }
                 }
                 else if (docType == "PAY")
                 {
@@ -433,6 +440,14 @@ namespace Take_Time_BangPhra.Account
                     {
                         File.Delete(dirs[i].ToString());
                     }
+
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new AccountingSyncService(conn);
+                        sync.EnqueueVoidPaymentVoucher(docNum);
+                    }
+                    catch { }
                 }
 
                 // Show success message then redirect

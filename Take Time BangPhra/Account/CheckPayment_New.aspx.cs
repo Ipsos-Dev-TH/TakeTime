@@ -578,6 +578,14 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
+                    // Void ในระบบบัญชี
+                    try
+                    {
+                        var sync = new Integration.AccountingSyncService(conn);
+                        sync.EnqueueVoidPaymentVoucher(docNum);
+                    }
+                    catch { }
+
                     // Show success message then redirect
                     ClientScript.RegisterStartupScript(this.GetType(), "success",
                         "alert('✅ ลบใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/CheckPayment_New';", true);
