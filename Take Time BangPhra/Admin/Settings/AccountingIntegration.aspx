@@ -134,6 +134,14 @@
                     </select>
                 </div>
                 <div class="config-item">
+                    <label>โหมดการ Sync</label>
+                    <select id="cfgSyncMode">
+                        <option value="DOCUMENT">สร้างเอกสาร + บันทึกบัญชีอัตโนมัติ</option>
+                        <option value="JOURNAL_ONLY">บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                    <div class="help-text">DOCUMENT = สร้างใบกำกับภาษี/ใบสำคัญจ่ายในระบบบัญชี แล้วระบบจะบันทึก Journal ให้อัตโนมัติ<br/>JOURNAL_ONLY = บันทึกเฉพาะ Journal Entry (เดบิต/เครดิต) โดยไม่สร้างเอกสาร</div>
+                </div>
+                <div class="config-item">
                     <label>Sync Interval (วินาที)</label>
                     <input type="number" id="cfgSyncInterval" value="30" min="10" max="3600" />
                     <div class="help-text">ระยะเวลาระหว่าง queue processing cycles (10-3600 วินาที)</div>
@@ -171,14 +179,14 @@
                 <div class="journey-step active">
                     <div class="step-icon"><i class="fas fa-money-bill-wave"></i></div>
                     <div class="step-name">มัดจำ (Deposit)</div>
-                    <div class="step-accounting">DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า</div>
+                    <div class="step-accounting" id="jnDeposit">DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า</div>
                 </div>
                 <div class="journey-arrow"><i class="fas fa-arrow-right"></i></div>
 
                 <div class="journey-step active">
                     <div class="step-icon"><i class="fas fa-credit-card"></i></div>
                     <div class="step-name">ชำระเพิ่ม (Payment)</div>
-                    <div class="step-accounting">DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก</div>
+                    <div class="step-accounting" id="jnPayment">DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก</div>
                 </div>
                 <div class="journey-arrow"><i class="fas fa-arrow-right"></i></div>
 
@@ -199,7 +207,7 @@
                 <div class="journey-step active">
                     <div class="step-icon"><i class="fas fa-door-closed"></i></div>
                     <div class="step-name">เช็คเอาท์ (Checkout)</div>
-                    <div class="step-accounting">DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก</div>
+                    <div class="step-accounting" id="jnCheckout">DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก</div>
                 </div>
             </div>
 
@@ -233,7 +241,7 @@
                     <div class="journey-step active">
                         <div class="step-icon"><i class="fas fa-file-invoice-dollar"></i></div>
                         <div class="step-name">ใบสำคัญจ่าย</div>
-                        <div class="step-accounting">DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร</div>
+                        <div class="step-accounting" id="jnVoucher">DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร</div>
                     </div>
 
                     <div class="journey-step active">
@@ -338,7 +346,31 @@
         document.addEventListener('DOMContentLoaded', function () {
             loadConfigData();
             loadQueueData();
+            document.getElementById('cfgSyncMode').addEventListener('change', updateJourneyMap);
         });
+
+        function updateJourneyMap() {
+            var mode = document.getElementById('cfgSyncMode').value;
+            var isDoc = mode === 'DOCUMENT';
+            var jn = {
+                jnDeposit: isDoc
+                    ? 'สร้างใบกำกับภาษี<br/>(รับมัดจำ) + Journal'
+                    : 'DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า',
+                jnPayment: isDoc
+                    ? 'สร้างใบกำกับภาษี<br/>(รับชำระ) + Journal'
+                    : 'DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก',
+                jnCheckout: isDoc
+                    ? 'สร้างใบกำกับภาษี<br/>(รับรู้รายได้) + Journal'
+                    : 'DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก',
+                jnVoucher: isDoc
+                    ? 'สร้างใบสำคัญจ่าย<br/>(ค่าใช้จ่าย) + Journal'
+                    : 'DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร'
+            };
+            for (var id in jn) {
+                var el = document.getElementById(id);
+                if (el) el.innerHTML = jn[id];
+            }
+        }
 
         function loadConfigData() {
             var raw = document.getElementById('<%= hfConfigData.ClientID %>').value;
@@ -348,12 +380,14 @@
                 document.getElementById('cfgBaseUrl').value = cfg.baseUrl || '';
                 document.getElementById('cfgCompanyId').value = cfg.companyId || '';
                 document.getElementById('cfgEnabled').value = cfg.enabled ? 'true' : 'false';
+                document.getElementById('cfgSyncMode').value = cfg.syncMode || 'DOCUMENT';
                 document.getElementById('cfgSyncInterval').value = cfg.syncInterval || 30;
                 document.getElementById('cfgMaxRetries').value = cfg.maxRetries || 5;
                 document.getElementById('cfgTimeout').value = cfg.timeout || 30;
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
+                updateJourneyMap();
             } catch (e) { console.error(e); }
         }
 
@@ -371,6 +405,7 @@
             var data = {
                 action: 'saveSyncSettings',
                 enabled: document.getElementById('cfgEnabled').value,
+                syncMode: document.getElementById('cfgSyncMode').value,
                 syncInterval: document.getElementById('cfgSyncInterval').value,
                 maxRetries: document.getElementById('cfgMaxRetries').value,
                 timeout: document.getElementById('cfgTimeout').value

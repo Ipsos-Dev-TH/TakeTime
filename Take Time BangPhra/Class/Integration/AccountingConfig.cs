@@ -38,6 +38,13 @@ namespace Take_Time_BangPhra.Integration
         public int TimeoutSeconds => int.TryParse(GetConfig("Nexaacc_TimeoutSec", "30"), out var v) ? v : 30;
 
         /// <summary>
+        /// JOURNAL_ONLY = บันทึกสมุดบัญชีอย่างเดียว (debit/credit journal entries)
+        /// DOCUMENT = สร้างเอกสาร (ใบกำกับภาษี/ใบสำคัญจ่าย) + ระบบสร้าง journal ให้อัตโนมัติ
+        /// </summary>
+        public string SyncMode => GetConfig("Nexaacc_SyncMode", "DOCUMENT");
+        public bool IsDocumentMode => SyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง
         /// </summary>

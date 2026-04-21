@@ -52,6 +52,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "hasApiKey", !string.IsNullOrEmpty(config.ApiKey) },
                     { "companyId", config.CompanyId != Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
+                    { "syncMode", config.SyncMode },
                     { "syncInterval", config.SyncIntervalSeconds },
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
@@ -158,6 +159,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var config = new Integration.AccountingConfig(ConnStr);
                 if (data.ContainsKey("enabled")) config.SetConfig("Nexaacc_Enabled", data["enabled"]?.ToString() ?? "false");
+                if (data.ContainsKey("syncMode")) config.SetConfig("Nexaacc_SyncMode", data["syncMode"]?.ToString() ?? "DOCUMENT");
                 if (data.ContainsKey("syncInterval")) config.SetConfig("Nexaacc_SyncInterval_Sec", data["syncInterval"]?.ToString() ?? "30");
                 if (data.ContainsKey("maxRetries")) config.SetConfig("Nexaacc_MaxRetries", data["maxRetries"]?.ToString() ?? "5");
                 if (data.ContainsKey("timeout")) config.SetConfig("Nexaacc_TimeoutSec", data["timeout"]?.ToString() ?? "30");

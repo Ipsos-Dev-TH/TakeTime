@@ -682,7 +682,6 @@ namespace Take_Time_BangPhra.Integration
             int reservationId = Convert.ToInt32(p["reservationId"]);
             var amount = Convert.ToDecimal(p["amount"]);
 
-            // Fallback: if payload amount is 0, look up actual deposit from Payment_History
             if (amount <= 0)
             {
                 amount = LookupPaidAmount(reservationId, "DEPOSIT");
@@ -698,15 +697,23 @@ namespace Take_Time_BangPhra.Integration
                 return "SKIPPED_ZERO_AMOUNT";
             }
 
-            var invoice = _mapper.MapDepositToInvoice(
-                reservationId,
-                amount,
-                p["paymentMethod"]?.ToString(),
-                DateTime.Parse(p["paymentDate"]?.ToString()),
-                p["customerName"]?.ToString());
+            string paymentMethod = p["paymentMethod"]?.ToString();
+            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
+            string customerName = p["customerName"]?.ToString();
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapDepositToInvoice(reservationId, amount, paymentMethod, paymentDate, customerName);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapDepositToJournal(reservationId, amount, paymentMethod, paymentDate, customerName);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessPaymentJournal(Dictionary<string, object> p)
@@ -714,7 +721,6 @@ namespace Take_Time_BangPhra.Integration
             int reservationId = Convert.ToInt32(p["reservationId"]);
             var amount = Convert.ToDecimal(p["amount"]);
 
-            // Fallback: if payload amount is 0, look up actual payment from Payment_History
             if (amount <= 0)
             {
                 amount = LookupPaidAmount(reservationId, "ADDITIONAL");
@@ -730,16 +736,24 @@ namespace Take_Time_BangPhra.Integration
                 return "SKIPPED_ZERO_AMOUNT";
             }
 
-            var invoice = _mapper.MapPaymentToInvoice(
-                reservationId,
-                amount,
-                p["paymentMethod"]?.ToString(),
-                DateTime.Parse(p["paymentDate"]?.ToString()),
-                p["customerName"]?.ToString(),
-                p.ContainsKey("hasVat") && Convert.ToBoolean(p["hasVat"]));
+            string paymentMethod = p["paymentMethod"]?.ToString();
+            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
+            string customerName = p["customerName"]?.ToString();
+            bool hasVat = p.ContainsKey("hasVat") && Convert.ToBoolean(p["hasVat"]);
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapPaymentToInvoice(reservationId, amount, paymentMethod, paymentDate, customerName, hasVat);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapPaymentToJournal(reservationId, amount, paymentMethod, paymentDate, customerName, hasVat);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessCheckoutJournal(Dictionary<string, object> p)
@@ -804,14 +818,22 @@ namespace Take_Time_BangPhra.Integration
                 return "SKIPPED_ZERO_AMOUNT";
             }
 
-            var invoice = _mapper.MapCheckoutToInvoice(
-                reservationId,
-                depositAmount,
-                p["customerName"]?.ToString(),
-                DateTime.Parse(p["checkoutDate"]?.ToString()));
+            string customerName = p["customerName"]?.ToString();
+            DateTime checkoutDate = DateTime.Parse(p["checkoutDate"]?.ToString());
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapCheckoutToInvoice(reservationId, depositAmount, customerName, checkoutDate);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessRefundJournal(Dictionary<string, object> p)
@@ -838,24 +860,31 @@ namespace Take_Time_BangPhra.Integration
             if (amount <= 0)
                 throw new ArgumentException($"Cannot create voucher journal: amount is {amount} (must be > 0). Voucher #{p["voucherId"]}");
 
+            int voucherId = Convert.ToInt32(p["voucherId"]);
+            string expenseCategory = p["expenseCategory"]?.ToString();
+            string paymentMethod = p["paymentMethod"]?.ToString();
+            DateTime voucherDate = DateTime.Parse(p["voucherDate"]?.ToString());
+            string description = p["description"]?.ToString();
+            string payeeName = p["payeeName"]?.ToString();
             bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
             decimal whtRate = p.ContainsKey("whtRate") ? Convert.ToDecimal(p["whtRate"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
 
-            var expense = _mapper.MapVoucherToExpense(
-                Convert.ToInt32(p["voucherId"]),
-                p["expenseCategory"]?.ToString(),
-                amount,
-                p["paymentMethod"]?.ToString(),
-                DateTime.Parse(p["voucherDate"]?.ToString()),
-                p["description"]?.ToString(),
-                p["payeeName"]?.ToString(),
-                hasInputVat,
-                whtRate,
-                whtAmount);
-
-            var result = await _apiClient.CreateExpenseAsync(expense);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
+                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount);
+                var result = await _apiClient.CreateExpenseAsync(expense);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
+                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessRoomChargeJournal(Dictionary<string, object> p)
@@ -864,15 +893,24 @@ namespace Take_Time_BangPhra.Integration
             if (salesAmount <= 0)
                 throw new ArgumentException($"Cannot create room charge journal: salesAmount is {salesAmount} (must be > 0). Reservation #{p["reservationId"]}");
 
-            var invoice = _mapper.MapRoomChargeToInvoice(
-                Convert.ToInt32(p["reservationId"]),
-                salesAmount,
-                Convert.ToDecimal(p["costAmount"]),
-                DateTime.Parse(p["chargeDate"]?.ToString()),
-                p["description"]?.ToString());
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            decimal costAmount = Convert.ToDecimal(p["costAmount"]);
+            DateTime chargeDate = DateTime.Parse(p["chargeDate"]?.ToString());
+            string description = p["description"]?.ToString();
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapRoomChargeToInvoice(reservationId, salesAmount, costAmount, chargeDate, description);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapRoomChargeToJournal(reservationId, salesAmount, costAmount, chargeDate, description);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessStockInJournal(Dictionary<string, object> p)
@@ -881,18 +919,26 @@ namespace Take_Time_BangPhra.Integration
             if (totalCost <= 0)
                 throw new ArgumentException($"Cannot create stock-in journal: totalCost is {totalCost} (must be > 0). Product #{p["productId"]}");
 
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p["productName"]?.ToString();
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
+            DateTime receiveDate = DateTime.Parse(p["receiveDate"]?.ToString());
+            string supplierName = p["supplierName"]?.ToString();
 
-            var expense = _mapper.MapStockInToExpense(
-                Convert.ToInt32(p["productId"]),
-                p["productName"]?.ToString(),
-                totalCost,
-                paymentMethod,
-                DateTime.Parse(p["receiveDate"]?.ToString()),
-                p["supplierName"]?.ToString());
-
-            var result = await _apiClient.CreateExpenseAsync(expense);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var expense = _mapper.MapStockInToExpense(productId, productName, totalCost, paymentMethod, receiveDate, supplierName);
+                var result = await _apiClient.CreateExpenseAsync(expense);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                bool hasVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
+                var journal = _mapper.MapStockInToJournal(productId, productName, totalCost, receiveDate, supplierName, paymentMethod, hasVat);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessProductSync(Dictionary<string, object> p)
@@ -955,20 +1001,26 @@ namespace Take_Time_BangPhra.Integration
             if (totalSalary <= 0)
                 throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary} (must be > 0). Period: {p["period"]}");
 
+            string period = p["period"]?.ToString();
             decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
             decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
+            DateTime payDate = DateTime.Parse(p["payDate"]?.ToString());
+            string description = p.ContainsKey("description") ? p["description"]?.ToString() : null;
 
-            var expense = _mapper.MapPayrollToExpense(
-                p["period"]?.ToString(),
-                totalSalary,
-                ssfEmployee + ssfEmployer,
-                whtAmount,
-                DateTime.Parse(p["payDate"]?.ToString()),
-                p.ContainsKey("description") ? p["description"]?.ToString() : null);
-
-            var result = await _apiClient.CreateExpenseAsync(expense);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate, description);
+                var result = await _apiClient.CreateExpenseAsync(expense);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period, ssfEmployee, ssfEmployer, whtAmount);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessCancelNoRefundJournal(Dictionary<string, object> p)
@@ -977,14 +1029,23 @@ namespace Take_Time_BangPhra.Integration
             if (depositAmount <= 0)
                 throw new ArgumentException($"Cannot create cancel-no-refund journal: depositAmount is {depositAmount} (must be > 0). Reservation #{p["reservationId"]}");
 
-            var invoice = _mapper.MapCancelNoRefundToInvoice(
-                Convert.ToInt32(p["reservationId"]),
-                depositAmount,
-                p["customerName"]?.ToString(),
-                DateTime.Parse(p["cancelDate"]?.ToString()));
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            string customerName = p["customerName"]?.ToString();
+            DateTime cancelDate = DateTime.Parse(p["cancelDate"]?.ToString());
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapCancelNoRefundToInvoice(reservationId, depositAmount, customerName, cancelDate);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapCancelNoRefundToJournal(reservationId, depositAmount, customerName, cancelDate);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
@@ -1024,23 +1085,27 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessPOSSaleJournal: No mapping for '{p["paymentMethod"]}', falling back to CASH. Receipt: {receiptId}", "SYSTEM");
             }
 
-            var journal = _mapper.MapPOSSaleToJournal(
-                receiptId,
-                totalAmount,
-                Convert.ToDecimal(p["totalCost"]),
-                paymentMethod,
-                DateTime.Parse(p["saleDate"]?.ToString()),
-                p["description"]?.ToString());
+            decimal totalCost = Convert.ToDecimal(p["totalCost"]);
+            DateTime saleDate = DateTime.Parse(p["saleDate"]?.ToString());
+            string description = p["description"]?.ToString();
 
-            // Final validation: ensure journal has valid lines
-            if (journal.Lines == null || journal.Lines.Count < 2)
+            if (_config.IsDocumentMode)
             {
-                throw new ArgumentException($"Cannot create POS sale journal: mapped journal has {journal.Lines?.Count ?? 0} lines (need at least 2). Receipt: {receiptId}");
+                var invoice = _mapper.MapPOSSaleToInvoice(receiptId, totalAmount, totalCost, paymentMethod, saleDate, description);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
             }
+            else
+            {
+                var journal = _mapper.MapPOSSaleToJournal(receiptId, totalAmount, totalCost, paymentMethod, saleDate, description);
 
-            var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
+                if (journal.Lines == null || journal.Lines.Count < 2)
+                    throw new ArgumentException($"Cannot create POS sale journal: mapped journal has {journal.Lines?.Count ?? 0} lines (need at least 2). Receipt: {receiptId}");
+
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         /// <summary>
@@ -1106,16 +1171,24 @@ namespace Take_Time_BangPhra.Integration
             if (damageAmount <= 0 && missingItemsAmount <= 0)
                 throw new ArgumentException($"Cannot create damage charge journal: damageAmount is {damageAmount} and missingItemsAmount is {missingItemsAmount} (at least one must be > 0). Reservation #{p["reservationId"]}");
 
-            var invoice = _mapper.MapDamageChargeToInvoice(
-                Convert.ToInt32(p["reservationId"]),
-                damageAmount,
-                missingItemsAmount,
-                DateTime.Parse(p["chargeDate"]?.ToString()),
-                p["customerName"]?.ToString(),
-                p["description"]?.ToString());
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            DateTime chargeDate = DateTime.Parse(p["chargeDate"]?.ToString());
+            string customerName = p["customerName"]?.ToString();
+            string description = p["description"]?.ToString();
 
-            var result = await _apiClient.CreateInvoiceAsync(invoice);
-            return result.data.Id.ToString();
+            if (_config.IsDocumentMode)
+            {
+                var invoice = _mapper.MapDamageChargeToInvoice(reservationId, damageAmount, missingItemsAmount, chargeDate, customerName, description);
+                var result = await _apiClient.CreateInvoiceAsync(invoice);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapDamageChargeToJournal(reservationId, damageAmount, missingItemsAmount, chargeDate, customerName, description);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await _apiClient.PostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
         }
 
         // ──────────────────────────────────────────────
