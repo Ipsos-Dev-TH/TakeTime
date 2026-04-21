@@ -166,6 +166,29 @@
             font-size: 12px;
         }
 
+        .sync-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .sync-badge.completed { background: #d4edda; color: #155724; }
+        .sync-badge.pending { background: #fff3cd; color: #856404; }
+        .sync-badge.failed { background: #f8d7da; color: #721c24; }
+        .sync-badge.none { background: #e2e3e5; color: #383d41; }
+        .btn-sync-sm {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 4px 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
         @media (max-width: 768px) {
             .check-document-page {
                 padding: 10px;
@@ -308,7 +331,8 @@
                 <asp:GridView ID="GridView1" runat="server" CssClass="gridview-table"
                     OnRowDeleting="GridView1_RowDeleting1"
                     OnSelectedIndexChanging="GridView1_SelectedIndexChanging"
-                    OnRowCommand="GridView1_RowCommand">
+                    OnRowCommand="GridView1_RowCommand"
+                    OnRowDataBound="GridView1_RowDataBound">
                     <Columns>
                         <asp:CommandField ButtonType="Button" HeaderText="ลบ" ShowDeleteButton="True" />
                         <asp:CommandField ButtonType="Button" HeaderText="ดู" SelectText="ดู" ShowSelectButton="True" />

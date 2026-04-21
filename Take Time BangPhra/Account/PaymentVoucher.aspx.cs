@@ -738,7 +738,8 @@ namespace Take_Time_BangPhra.Account.Report
                     if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
 
                     var sync = new Integration.AccountingSyncService(conn);
-                    sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName);
+                    sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                        documentNumber: docNum);
                 }
                 catch { }
 

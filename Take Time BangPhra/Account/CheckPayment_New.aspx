@@ -241,6 +241,36 @@
             background: linear-gradient(135deg, #e67e22 0%, #f39c12 100%);
         }
 
+        .btn-sync-action {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 5px 12px;
+            border: none;
+            border-radius: 5px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn-sync-action:hover {
+            background: linear-gradient(135deg, #2980b9 0%, #2471a3 100%);
+        }
+
+        .sync-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .sync-badge.completed { background: #d4edda; color: #155724; }
+        .sync-badge.pending { background: #fff3cd; color: #856404; }
+        .sync-badge.processing { background: #cce5ff; color: #004085; }
+        .sync-badge.failed { background: #f8d7da; color: #721c24; }
+        .sync-badge.none { background: #e2e3e5; color: #383d41; }
+
         /* Mobile responsive */
         @media (max-width: 768px) {
             .payment-dashboard {
@@ -434,7 +464,8 @@
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
-                OnRowCommand="gvDetails_RowCommand">
+                OnRowCommand="gvDetails_RowCommand"
+                OnRowDataBound="gvDetails_RowDataBound">
                 <Columns>
                     <asp:CommandField ButtonType="Button" HeaderText="ลบ" DeleteText="🗑️ ลบ" ShowDeleteButton="True" />
                     <asp:CommandField ButtonType="Button" HeaderText="ดู PDF" SelectText="📄 ดู PDF" ShowSelectButton="True" />
@@ -448,6 +479,15 @@
                     <asp:BoundField DataField="Vat" HeaderText="VAT" DataFormatString="{0:N2}" ItemStyle-CssClass="amount-cell" />
                     <asp:BoundField DataField="Status" HeaderText="สถานะ" />
                     <asp:BoundField DataField="Created_By" HeaderText="ผู้สร้าง" />
+                    <asp:TemplateField HeaderText="Sync บัญชี">
+                        <ItemTemplate>
+                            <asp:Label ID="lblSyncStatus" runat="server"></asp:Label>
+                            <asp:Button ID="btnSync" runat="server" Text="📤 Sync" CommandName="sync"
+                                CommandArgument='<%# Eval("ID") %>' CssClass="btn-sync-action"
+                                OnClientClick="return confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?');"
+                                Visible="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
                 </Columns>
             </asp:GridView>
         </div>

@@ -501,6 +501,16 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/integration/expenses", expense);
         }
 
+        // Integration Payments (/api/integration/payments)
+        public async Task<ApiResponse<IntegrationPaymentResponse>> CreateIntegrationPaymentAsync(CreateIntegrationPaymentRequest payment)
+        {
+            if (payment.Amount <= 0)
+                throw new ArgumentException("Payment amount must be > 0.");
+
+            return await PostAsync<CreateIntegrationPaymentRequest, ApiResponse<IntegrationPaymentResponse>>(
+                $"{CompanyPath}/integration/payments", payment);
+        }
+
         // Products (ProductController)
         public async Task<ApiResponse<ProductResponse>> CreateProductAsync(CreateProductRequest product)
         {

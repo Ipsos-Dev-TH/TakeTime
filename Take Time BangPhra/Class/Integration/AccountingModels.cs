@@ -478,4 +478,29 @@ namespace Take_Time_BangPhra.Integration
         public string Status { get; set; }
         public DateTime CreatedAt { get; set; }
     }
+
+    // ──────────────────────────────────────────────
+    // Integration Payment (บันทึกรับเงินต่อเอกสาร)
+    // ใช้ /api/integration/payments
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationPaymentRequest
+    {
+        public string ExternalRef { get; set; }
+        public string InvoiceExternalRef { get; set; }
+        public DateTime PaymentDate { get; set; }
+        public decimal Amount { get; set; }
+        public string PaymentMethod { get; set; }
+        public string ReferenceNo { get; set; }
+        public string Notes { get; set; }
+    }
+
+    public class IntegrationPaymentResponse
+    {
+        public Guid Id { get; set; }
+        public string PaymentNumber { get; set; }
+        public decimal Amount { get; set; }
+        public string Status { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
 }
