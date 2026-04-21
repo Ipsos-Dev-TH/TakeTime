@@ -280,7 +280,8 @@ namespace Take_Time_BangPhra.Integration
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
-        public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName)
+        public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName,
+            bool isDeposit = false, string paymentMethod = null)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -294,7 +295,9 @@ namespace Take_Time_BangPhra.Integration
                 { "totalAmount", totalAmount },
                 { "vatAmount", vatAmount },
                 { "receiptDate", receiptDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName }
+                { "customerName", customerName },
+                { "isDeposit", isDeposit },
+                { "paymentMethod", paymentMethod ?? "CASH" }
             };
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
@@ -1059,18 +1062,57 @@ namespace Take_Time_BangPhra.Integration
             if (totalAmount <= 0)
                 throw new ArgumentException($"Cannot create receipt document: totalAmount is {totalAmount} (must be > 0). Reservation #{p["reservationId"]}");
 
-            var document = _mapper.MapReceiptToDocument(
-                Convert.ToInt32(p["reservationId"]),
-                p["receiptNumber"]?.ToString(),
-                totalAmount,
-                Convert.ToDecimal(p["vatAmount"]),
-                DateTime.Parse(p["receiptDate"]?.ToString()),
-                null, // contactId — would need lookup
-                $"ใบเสร็จ - การจอง #{p["reservationId"]}");
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
+            string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() : "";
+            DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
+            decimal vatAmount = Convert.ToDecimal(p["vatAmount"]);
 
-            var result = await _apiClient.CreateDocumentAsync(document);
-            await _apiClient.ApproveDocumentAsync(result.data.Id);
-            return result.data.Id.ToString();
+            if (isDeposit)
+            {
+                // มัดจำ: DR Cash/Bank, CR เงินรับล่วงหน้า (ADVANCE_DEPOSIT)
+                if (_config.IsDocumentMode)
+                {
+                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var result = await _apiClient.CreateInvoiceAsync(invoice);
+                    return result.data.Id.ToString();
+                }
+                else
+                {
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var result = await _apiClient.CreateJournalAsync(journal);
+                    await _apiClient.PostJournalAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+            }
+            else
+            {
+                // ใบเสร็จปกติ: DR Cash/Bank, CR รายได้ค่าห้อง (ROOM_REVENUE)
+                if (_config.IsDocumentMode)
+                {
+                    var document = _mapper.MapReceiptToDocument(
+                        reservationId,
+                        p["receiptNumber"]?.ToString(),
+                        totalAmount,
+                        vatAmount,
+                        receiptDate,
+                        null,
+                        $"ใบเสร็จ - การจอง #{reservationId}");
+
+                    var result = await _apiClient.CreateDocumentAsync(document);
+                    await _apiClient.ApproveDocumentAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+                else
+                {
+                    bool hasVat = vatAmount > 0;
+                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
+                    var result = await _apiClient.CreateJournalAsync(journal);
+                    await _apiClient.PostJournalAsync(result.data.Id);
+                    return result.data.Id.ToString();
+                }
+            }
         }
 
         private async Task<string> ProcessCreditNoteDocument(Dictionary<string, object> p)

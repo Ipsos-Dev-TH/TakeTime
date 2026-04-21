@@ -126,12 +126,14 @@ namespace Take_Time_BangPhra
                         if (config.IsDocumentMode)
                         {
                             var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
+                                isDeposit: false, paymentMethod: paymentMethod);
                         }
                         else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
                             var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
+                                isDeposit: false, paymentMethod: paymentMethod);
                         }
                     }
                 }
@@ -237,12 +239,14 @@ namespace Take_Time_BangPhra
                         if (config.IsDocumentMode)
                         {
                             var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
+                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
+                                isDeposit: true, paymentMethod: paymentMethod);
                         }
                         else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
                             var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
+                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
+                                isDeposit: true, paymentMethod: paymentMethod);
                         }
                     }
                 }

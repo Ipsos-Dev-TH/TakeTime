@@ -356,17 +356,17 @@ namespace Take_Time_BangPhra.Services
 
                     if (config.IsDocumentMode)
                     {
-                        // DOCUMENT mode: ยิง API เลยไม่ต้องตรวจสอบเอกสาร
                         var sync = new AccountingSyncService(_connectionString);
-                        sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName);
+                        sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
+                            isDeposit: isDeposit, paymentMethod: paidType);
                     }
                     else
                     {
-                        // JOURNAL_ONLY mode: ตรวจสอบว่าเอกสารสร้างสำเร็จก่อน
                         if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
                             var sync = new AccountingSyncService(_connectionString);
-                            sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName);
+                            sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
+                                isDeposit: isDeposit, paymentMethod: paidType);
                         }
                     }
                 }

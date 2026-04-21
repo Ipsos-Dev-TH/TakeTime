@@ -653,7 +653,8 @@ namespace Take_Time_BangPhra.Voucher
                                 decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
                                 DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
                                 sync.EnqueueReceipt(reservation_id, docNum, totalAmt, vatAmt, receiptDate,
-                                    dtcustomer.Rows[0]["Name"]?.ToString() ?? "");
+                                    dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
+                                    isDeposit: false, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
                             }
                         }
                     }

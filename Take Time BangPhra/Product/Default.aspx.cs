@@ -1079,7 +1079,8 @@ namespace Take_Time_BangPhra.Product
                         {
                             var sync = new Integration.AccountingSyncService(conn);
                             sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
-                                Convert.ToDateTime(TextBox15.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "");
+                                Convert.ToDateTime(TextBox15.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
+                                isDeposit: false, paymentMethod: DropDownList1.SelectedItem?.Text ?? "CASH");
                         }
                     }
                 }

@@ -1637,7 +1637,8 @@ namespace Take_Time_BangPhra.Account.Report
 
                         if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {
-                            sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName);
+                            sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
+                                isDeposit: CheckBox1.Checked, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
                         }
                     }
                 }

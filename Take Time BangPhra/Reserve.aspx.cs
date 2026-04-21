@@ -4508,9 +4508,10 @@ namespace Take_Time_BangPhra
                         int.TryParse(Reservation_ID, out resId);
                         if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(ReceiptID) && ReceiptID != "0"))
                         {
+                            string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
                             var sync = new Integration.AccountingSyncService(conn);
                             sync.EnqueueReceipt(resId, ReceiptID, (decimal)Total_Amount, (decimal)Vat,
-                                docDate, TextBox3.Text);
+                                docDate, TextBox3.Text, isDeposit: IsDeposit, paymentMethod: paidMethod);
                         }
                     }
                 }
