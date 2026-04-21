@@ -101,6 +101,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "updateMapping":
                     result = UpdateAccountMapping();
                     break;
+                case "cleanupAutoSync":
+                    result = CleanupOldAutoSync();
+                    break;
+                case "previewCleanup":
+                    result = PreviewAutoSyncCleanup();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -525,6 +531,55 @@ namespace Take_Time_BangPhra.Admin.Settings
                     new Dictionary<string, object> { { "@code", newCode }, { "@id", id } });
 
                 return new Dictionary<string, object> { { "success", true }, { "message", $"อัปเดต Account Code เป็น {newCode} แล้ว — กรุณากด 'ดึง Chart of Accounts' เพื่อจับคู่ Account ID ใหม่" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> PreviewAutoSyncCleanup()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                DataTable dt = sync.GetAutoSyncCleanupPreview();
+                var items = new List<Dictionary<string, object>>();
+                int total = 0;
+                if (dt != null)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        int count = Convert.ToInt32(row["Count"]);
+                        total += count;
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "status", row["Status"]?.ToString() },
+                            { "actionType", row["Action_Type"]?.ToString() },
+                            { "count", count }
+                        });
+                    }
+                }
+                return new Dictionary<string, object> { { "success", true }, { "total", total }, { "items", items } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> CleanupOldAutoSync()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                int cancelled = sync.CancelOldAutoSyncEntries();
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"ยกเลิก auto-sync entries จำนวน {cancelled} รายการ เรียบร้อยแล้ว" },
+                    { "cancelled", cancelled }
+                };
             }
             catch (Exception ex)
             {

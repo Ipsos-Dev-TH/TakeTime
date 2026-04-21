@@ -1547,18 +1547,7 @@ namespace Take_Time_BangPhra.Product
                 string paidType = DropDownList1.SelectedItem != null ? DropDownList1.SelectedItem.Text : "CASH";
 
                 // Only enqueue if we have a valid receipt number and positive amount
-                if (totalSale > 0 && docNum != "0" && !string.IsNullOrEmpty(docNum))
-                {
-                    var sync = new Integration.AccountingSyncService(conn);
-                    sync.EnqueuePOSSale(docNum, totalSale, totalCost, paidType, DateTime.Now, "ขายสินค้า POS");
-                }
-                else if (totalSale > 0 && (docNum == "0" || string.IsNullOrEmpty(docNum)))
-                {
-                    // Receipt creation may have failed - log for investigation
-                    var logCode = new code();
-                    logCode.Logs(conn, "AccountingSync",
-                        $"POS sale accounting skipped: docNum is '{docNum}' (receipt not created). totalSale={totalSale:N2}, paidType={paidType}", "SYSTEM");
-                }
+                // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
             }
             catch (Exception accEx)
             {

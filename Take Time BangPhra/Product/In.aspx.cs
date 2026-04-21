@@ -292,11 +292,7 @@ namespace Take_Time_BangPhra.Product
                             decimal price = Convert.ToDecimal(row["PricePerUnit"]);
                             totalCost += amount * price;
                         }
-                        if (totalCost > 0)
-                        {
-                            var sync = new Integration.AccountingSyncService(conn);
-                            sync.EnqueueStockIn(0, "Stock In Batch", totalCost, DateTime.Now, "");
-                        }
+                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
                     }
                 }
                 catch { }

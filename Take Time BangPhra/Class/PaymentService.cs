@@ -116,18 +116,7 @@ namespace Take_Time_BangPhra
                     _code.Logs(_connectionString, "Email Error", emailEx.Message, "SYSTEM");
                 }
 
-                // 8. Sync to accounting system
-                try
-                {
-                    string custName = GetCustomerName(reservationId);
-                    var sync = new AccountingSyncService(_connectionString);
-                    sync.EnqueueReservationPayment(reservationId, amount, paymentMethod, DateTime.Now, custName);
-                    sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName);
-                }
-                catch (Exception accEx)
-                {
-                    _code.Logs(_connectionString, "Accounting Sync", "Payment enqueue error: " + accEx.Message, "SYSTEM");
-                }
+                // 8. Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                 return new PaymentResult
                 {
@@ -216,18 +205,7 @@ namespace Take_Time_BangPhra
                 }
                 catch { }
 
-                // 7. Sync to accounting system
-                try
-                {
-                    string custName = GetCustomerName(reservationId);
-                    var sync = new AccountingSyncService(_connectionString);
-                    sync.EnqueueReservationDeposit(reservationId, depositAmount, paymentMethod, DateTime.Now, custName);
-                    sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName);
-                }
-                catch (Exception accEx)
-                {
-                    _code.Logs(_connectionString, "Accounting Sync", "Deposit enqueue error: " + accEx.Message, "SYSTEM");
-                }
+                // 7. Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                 return new PaymentResult
                 {

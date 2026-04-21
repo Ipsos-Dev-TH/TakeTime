@@ -333,18 +333,7 @@ namespace Take_Time_BangPhra.Guest
                           WHERE ID = @Order_ID",
                         parameters);
 
-                    // Sync room charge to accounting
-                    try
-                    {
-                        int reservationId = 0;
-                        int.TryParse(Session["ReservationID"]?.ToString(), out reservationId);
-                        if (reservationId > 0)
-                        {
-                            var sync = new Integration.AccountingSyncService(_connectionString);
-                            sync.EnqueueRoomCharge(reservationId, totalAmount, 0, DateTime.Now, $"Room Service Order #{orderId}");
-                        }
-                    }
-                    catch { }
+                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
                 }
 
                 // Clear cart and refresh

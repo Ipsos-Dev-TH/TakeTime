@@ -390,8 +390,7 @@ namespace Take_Time_BangPhra
                         }
                     }
 
-                    var sync = new AccountingSyncService(_connectionString);
-                    sync.EnqueuePostponePriceDiff(reservationId, priceDiff, DateTime.Now, customerName);
+                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
                 }
                 catch { }
             }

@@ -1372,5 +1372,38 @@ namespace Take_Time_BangPhra.Integration
                   WHERE ID = @id",
                 parameters);
         }
+
+        /// <summary>
+        /// Cancel old auto-sync queue entries that were NOT triggered from manual document pages.
+        /// Returns the number of entries cancelled.
+        /// </summary>
+        public int CancelOldAutoSyncEntries()
+        {
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"UPDATE Accounting_Sync_Queue
+                  SET Status = 'CANCELLED', Error_Message = 'Auto-sync disabled — replaced by manual document sync'
+                  WHERE Status IN ('PENDING', 'FAILED')
+                    AND Payload NOT LIKE '%""receiptNumber""%'
+                    AND Payload NOT LIKE '%""documentNumber""%';
+                  SELECT @@ROWCOUNT AS Affected",
+                null);
+            return dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["Affected"]) : 0;
+        }
+
+        /// <summary>
+        /// Get count of old auto-sync entries that can be cleaned up.
+        /// </summary>
+        public DataTable GetAutoSyncCleanupPreview()
+        {
+            return _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT Status, Action_Type, COUNT(*) as Count
+                  FROM Accounting_Sync_Queue
+                  WHERE Status IN ('PENDING', 'FAILED', 'COMPLETED')
+                    AND Payload NOT LIKE '%""receiptNumber""%'
+                    AND Payload NOT LIKE '%""documentNumber""%'
+                  GROUP BY Status, Action_Type
+                  ORDER BY Status, Action_Type",
+                null);
+        }
     }
 }

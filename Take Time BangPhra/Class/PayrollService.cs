@@ -430,16 +430,7 @@ public class PayrollService
 
                     transaction.Commit();
 
-                    // Sync payroll to accounting
-                    try
-                    {
-                        if (totalNet > 0)
-                        {
-                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                            sync.EnqueuePayroll(totalNet, DateTime.Now, $"{year}/{month:D2}");
-                        }
-                    }
-                    catch { }
+                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
 
                     return new PayrollOperationResult(true, $"สร้างรอบเงินเดือนสำเร็จ ({employeeCount} คน)", periodId);
                 }
