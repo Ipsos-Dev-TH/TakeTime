@@ -777,6 +777,36 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Safe Post/Approve helpers (NextAcc may auto-post on create)
+        // ──────────────────────────────────────────────
+
+        private async Task SafePostJournalAsync(Guid journalId)
+        {
+            try
+            {
+                await _apiClient.PostJournalAsync(journalId);
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 400 && ex.ResponseBody != null && ex.ResponseBody.Contains("Draft"))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"Journal {journalId} already posted (not Draft) - treating as success", "SYSTEM");
+            }
+        }
+
+        private async Task SafeApproveDocumentAsync(Guid documentId)
+        {
+            try
+            {
+                await _apiClient.ApproveDocumentAsync(documentId);
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 400 && ex.ResponseBody != null && ex.ResponseBody.Contains("Draft"))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"Document {documentId} already approved (not Draft) - treating as success", "SYSTEM");
+            }
+        }
+
+        // ──────────────────────────────────────────────
         // Individual Processors
         // ──────────────────────────────────────────────
 
@@ -814,7 +844,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapDepositToJournal(reservationId, amount, paymentMethod, paymentDate, customerName);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -854,7 +884,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapPaymentToJournal(reservationId, amount, paymentMethod, paymentDate, customerName, hasVat);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -934,7 +964,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -953,7 +983,7 @@ namespace Take_Time_BangPhra.Integration
                 p["customerName"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.Id);
+            await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
         }
 
@@ -990,7 +1020,7 @@ namespace Take_Time_BangPhra.Integration
                 var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1016,7 +1046,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapRoomChargeToJournal(reservationId, salesAmount, costAmount, chargeDate, description);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1044,7 +1074,7 @@ namespace Take_Time_BangPhra.Integration
                 bool hasVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
                 var journal = _mapper.MapStockInToJournal(productId, productName, totalCost, receiveDate, supplierName, paymentMethod, hasVat);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1094,7 +1124,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
                     var result = await _apiClient.CreateJournalAsync(journal);
-                    await _apiClient.PostJournalAsync(result.data.Id);
+                    await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
                 }
             }
@@ -1112,7 +1142,7 @@ namespace Take_Time_BangPhra.Integration
                         $"ใบเสร็จ - การจอง #{reservationId}");
 
                     var result = await _apiClient.CreateDocumentAsync(document);
-                    await _apiClient.ApproveDocumentAsync(result.data.Id);
+                    await SafeApproveDocumentAsync(result.data.Id);
                     return result.data.Id.ToString();
                 }
                 else
@@ -1120,7 +1150,7 @@ namespace Take_Time_BangPhra.Integration
                     bool hasVat = vatAmount > 0;
                     var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
                     var result = await _apiClient.CreateJournalAsync(journal);
-                    await _apiClient.PostJournalAsync(result.data.Id);
+                    await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
                 }
             }
@@ -1141,7 +1171,7 @@ namespace Take_Time_BangPhra.Integration
                 p["reason"]?.ToString());
 
             var result = await _apiClient.CreateDocumentAsync(document);
-            await _apiClient.ApproveDocumentAsync(result.data.Id);
+            await SafeApproveDocumentAsync(result.data.Id);
             return result.data.Id.ToString();
         }
 
@@ -1168,7 +1198,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period, ssfEmployee, ssfEmployer, whtAmount);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1193,7 +1223,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapCancelNoRefundToJournal(reservationId, depositAmount, customerName, cancelDate);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1253,7 +1283,7 @@ namespace Take_Time_BangPhra.Integration
                     throw new ArgumentException($"Cannot create POS sale journal: mapped journal has {journal.Lines?.Count ?? 0} lines (need at least 2). Receipt: {receiptId}");
 
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
@@ -1289,7 +1319,7 @@ namespace Take_Time_BangPhra.Integration
                 p["customerName"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.Id);
+            await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
         }
 
@@ -1310,7 +1340,7 @@ namespace Take_Time_BangPhra.Integration
                 p["reason"]?.ToString());
 
             var result = await _apiClient.CreateJournalAsync(journal);
-            await _apiClient.PostJournalAsync(result.data.Id);
+            await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
         }
 
@@ -1336,7 +1366,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapDamageChargeToJournal(reservationId, damageAmount, missingItemsAmount, chargeDate, customerName, description);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await _apiClient.PostJournalAsync(result.data.Id);
+                await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
         }
