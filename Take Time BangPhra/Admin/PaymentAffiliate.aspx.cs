@@ -279,25 +279,41 @@ namespace Take_Time_BangPhra.Admin
                         affResPaymentParams);
 
                     // SECURE: Account_Payment_Detail INSERT with parameterized query (including per-line category)
-                    string linePaidTypeId = dtDetail.Columns.Contains("PaidTypeId") ? dtDetail.Rows[i]["PaidTypeId"]?.ToString() : "";
-                    string linePaidTypeName = dtDetail.Columns.Contains("PaidTypeName") ? dtDetail.Rows[i]["PaidTypeName"]?.ToString() : "";
-                    string lineNexaaccId = dtDetail.Columns.Contains("NexaaccAccountId") ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : "";
-
-                    var paymentDetailParams = new Dictionary<string, object>
+                    try
                     {
-                        { "@DocNum", docNum },
-                        { "@Number", dtDetail.Rows[i]["Number"].ToString() },
-                        { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
-                        { "@Amount", dtDetail.Rows[i]["Amount"].ToString() },
-                        { "@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId) },
-                        { "@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName },
-                        { "@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId }
-                    };
+                        string linePaidTypeId = dtDetail.Columns.Contains("PaidTypeId") ? dtDetail.Rows[i]["PaidTypeId"]?.ToString() : "";
+                        string linePaidTypeName = dtDetail.Columns.Contains("PaidTypeName") ? dtDetail.Rows[i]["PaidTypeName"]?.ToString() : "";
+                        string lineNexaaccId = dtDetail.Columns.Contains("NexaaccAccountId") ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : "";
 
-                    code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
-                        "VALUES (@DocNum,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
-                        paymentDetailParams);
+                        var paymentDetailParams = new Dictionary<string, object>
+                        {
+                            { "@DocNum", docNum },
+                            { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                            { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
+                            { "@Amount", dtDetail.Rows[i]["Amount"].ToString() },
+                            { "@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId) },
+                            { "@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName },
+                            { "@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId }
+                        };
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
+                            "VALUES (@DocNum,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
+                            paymentDetailParams);
+                    }
+                    catch
+                    {
+                        var fallbackParams = new Dictionary<string, object>
+                        {
+                            { "@DocNum", docNum },
+                            { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                            { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
+                            { "@Amount", dtDetail.Rows[i]["Amount"].ToString() }
+                        };
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
+                            "VALUES (@DocNum,@Number,@Detail,@Amount)",
+                            fallbackParams);
+                    }
 
                     // SECURE: Affiliate_Reservation UPDATE with parameterized query
                     var affResUpdateParams = new Dictionary<string, object>

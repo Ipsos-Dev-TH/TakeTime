@@ -1166,17 +1166,33 @@ public class PayrollService
         string voucherNumber, int lineNumber, string detail, decimal amount,
         string paidTypeName = null, string nexaaccAccountId = null)
     {
-        using (SqlCommand cmd = new SqlCommand(@"
-            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount, Paid_Type_Name, Nexaacc_AccountId)
-            VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount, @PaidTypeName, @NexaaccAccountId)", conn, transaction))
+        try
         {
-            cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
-            cmd.Parameters.AddWithValue("@LineNumber", lineNumber);
-            cmd.Parameters.AddWithValue("@Detail", detail);
-            cmd.Parameters.AddWithValue("@Amount", amount);
-            cmd.Parameters.AddWithValue("@PaidTypeName", (object)paidTypeName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@NexaaccAccountId", (object)nexaaccAccountId ?? DBNull.Value);
-            cmd.ExecuteNonQuery();
+            using (SqlCommand cmd = new SqlCommand(@"
+                INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount, Paid_Type_Name, Nexaacc_AccountId)
+                VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount, @PaidTypeName, @NexaaccAccountId)", conn, transaction))
+            {
+                cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                cmd.Parameters.AddWithValue("@LineNumber", lineNumber);
+                cmd.Parameters.AddWithValue("@Detail", detail);
+                cmd.Parameters.AddWithValue("@Amount", amount);
+                cmd.Parameters.AddWithValue("@PaidTypeName", (object)paidTypeName ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@NexaaccAccountId", (object)nexaaccAccountId ?? DBNull.Value);
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch
+        {
+            using (SqlCommand cmd = new SqlCommand(@"
+                INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
+                VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount)", conn, transaction))
+            {
+                cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
+                cmd.Parameters.AddWithValue("@LineNumber", lineNumber);
+                cmd.Parameters.AddWithValue("@Detail", detail);
+                cmd.Parameters.AddWithValue("@Amount", amount);
+                cmd.ExecuteNonQuery();
+            }
         }
     }
 

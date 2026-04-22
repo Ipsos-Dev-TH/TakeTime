@@ -569,15 +569,33 @@ namespace Take_Time_BangPhra.Account.Report
                         { "@PaymentID", docNum },
                         { "@Number", dtDetail.Rows[i]["Number"].ToString() },
                         { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
-                        { "@Amount", dtDetail.Rows[i]["Amount"].ToString() },
-                        { "@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId) },
-                        { "@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName },
-                        { "@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId }
+                        { "@Amount", dtDetail.Rows[i]["Amount"].ToString() }
                     };
-                    code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
-                        "VALUES (@PaymentID,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
-                        detailInsertParams);
+
+                    try
+                    {
+                        detailInsertParams.Add("@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId));
+                        detailInsertParams.Add("@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName);
+                        detailInsertParams.Add("@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId);
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
+                            "VALUES (@PaymentID,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
+                            detailInsertParams);
+                    }
+                    catch
+                    {
+                        var fallbackParams = new Dictionary<string, object>
+                        {
+                            { "@PaymentID", docNum },
+                            { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                            { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
+                            { "@Amount", dtDetail.Rows[i]["Amount"].ToString() }
+                        };
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
+                            "VALUES (@PaymentID,@Number,@Detail,@Amount)",
+                            fallbackParams);
+                    }
                 }
                 string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                 try
