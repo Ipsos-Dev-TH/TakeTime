@@ -143,6 +143,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "saveSyncSettings":
                     result = SaveSyncSettings(data);
                     break;
+                case "deleteQueueItems":
+                    result = DeleteQueueItems(data);
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -403,6 +406,37 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     { "success", true },
                     { "message", $"Queue #{queueId} reset เป็น PENDING — จะยิง API ใหม่รอบถั��ไป" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> DeleteQueueItems(Dictionary<string, object> data)
+        {
+            try
+            {
+                if (!data.ContainsKey("ids"))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มี ids" } };
+
+                var rawIds = data["ids"] as System.Collections.ArrayList;
+                if (rawIds == null || rawIds.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่ได้เลือกรายการ" } };
+
+                var idList = new List<string>();
+                foreach (var id in rawIds)
+                    idList.Add(Convert.ToInt64(id).ToString());
+
+                string idsCsv = string.Join(",", idList);
+                _code.DatabaseInsertSafe(ConnStr,
+                    $"DELETE FROM Accounting_Sync_Queue WHERE ID IN ({idsCsv})", null);
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"ลบ {idList.Count} รายการจาก Queue สำเร็จ" }
                 };
             }
             catch (Exception ex)
