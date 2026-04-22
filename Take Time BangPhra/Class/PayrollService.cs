@@ -888,7 +888,7 @@ public class PayrollService
                     }
                     catch (Exception accEx)
                     {
-                        try { new code().Logs(connectionString, "Accounting Sync", $"Payroll voucher auto-sync error: voucherNumber={voucherNumber} {accEx.Message}", "SYSTEM"); } catch { }
+                        try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll voucher auto-sync error: voucherNumber={voucherNumber} {accEx.Message}", "SYSTEM"); } catch { }
                     }
 
                     // Generate PDF after successful commit
