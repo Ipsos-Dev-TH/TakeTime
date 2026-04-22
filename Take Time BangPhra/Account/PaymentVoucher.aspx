@@ -394,8 +394,8 @@
 
             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">ประเภทการจ่ายเงิน:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" AppendDataBoundItems="true">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>    
+                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList3_SelectedIndexChanged">
+                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                 </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_Type] WHERE ([Status] = 'True')">
                         <SelectParameters>

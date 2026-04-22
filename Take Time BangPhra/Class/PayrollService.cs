@@ -1163,16 +1163,19 @@ public class PayrollService
     /// Insert a payment detail line item
     /// </summary>
     private void InsertPaymentDetail(SqlConnection conn, SqlTransaction transaction,
-        string voucherNumber, int lineNumber, string detail, decimal amount)
+        string voucherNumber, int lineNumber, string detail, decimal amount,
+        string paidTypeName = null, string nexaaccAccountId = null)
     {
         using (SqlCommand cmd = new SqlCommand(@"
-            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount)
-            VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount)", conn, transaction))
+            INSERT INTO Account_Payment_Detail (Payment_ID, Number, Detail, Amount, Paid_Type_Name, Nexaacc_AccountId)
+            VALUES (@VoucherNumber, @LineNumber, @Detail, @Amount, @PaidTypeName, @NexaaccAccountId)", conn, transaction))
         {
             cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber);
             cmd.Parameters.AddWithValue("@LineNumber", lineNumber);
             cmd.Parameters.AddWithValue("@Detail", detail);
             cmd.Parameters.AddWithValue("@Amount", amount);
+            cmd.Parameters.AddWithValue("@PaidTypeName", (object)paidTypeName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NexaaccAccountId", (object)nexaaccAccountId ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
     }
