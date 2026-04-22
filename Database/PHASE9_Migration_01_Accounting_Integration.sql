@@ -71,7 +71,7 @@ BEGIN
     ('BANK_KBANK',        N'เงินฝากธนาคาร - กสิกรไทย',           '',      'ASSET'),
     ('BANK_KTB',          N'เงินฝากธนาคาร - กรุงไทย',            '',      'ASSET'),
     ('BANK_CARD',         N'เงินฝากธนาคาร - บัตรเครดิต',         '',      'ASSET'),
-    ('DIRECTOR_ADVANCE',  N'เงินทดรองจ่าย - กรรมการ',            '11820', 'ASSET'),
+    ('DIRECTOR_ADVANCE',  N'ลูกหนี้กรรมการ/เงินทดรองกรรมการ',    '11330', 'ASSET'),
     ('ROOM_AR',           N'ลูกหนี้ค่าห้องพัก',                  '11310', 'ASSET'),
     ('INVENTORY',         N'สินค้าคงเหลือ',                     '11500', 'ASSET'),
     ('INPUT_VAT',         N'ภาษีซื้อ',                          '11610', 'ASSET'),
@@ -347,8 +347,33 @@ GO
 IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'DIRECTOR_ADVANCE_REPAY')
 BEGIN
     INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
-    ('DIRECTOR_ADVANCE_REPAY', N'คืนเงินทดรองจ่ายกรรมการ', '11820', 'ASSET');
+    ('DIRECTOR_ADVANCE_REPAY', N'เจ้าหนี้กรรมการ/เงินทดรองรับจากกรรมการ', '21230', 'LIABILITY');
     PRINT 'Added DIRECTOR_ADVANCE_REPAY account mapping';
+END
+GO
+
+-- ──────────────────────────────────────────────
+-- 10. Per-line Expense Category on Payment Detail
+-- ──────────────────────────────────────────────
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment_Detail' AND COLUMN_NAME = 'Paid_Type_ID')
+BEGIN
+    ALTER TABLE Account_Payment_Detail ADD Paid_Type_ID INT NULL;
+    PRINT 'Added Paid_Type_ID column to Account_Payment_Detail';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment_Detail' AND COLUMN_NAME = 'Paid_Type_Name')
+BEGIN
+    ALTER TABLE Account_Payment_Detail ADD Paid_Type_Name NVARCHAR(100) NULL;
+    PRINT 'Added Paid_Type_Name column to Account_Payment_Detail';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Payment_Detail' AND COLUMN_NAME = 'Nexaacc_AccountId')
+BEGIN
+    ALTER TABLE Account_Payment_Detail ADD Nexaacc_AccountId UNIQUEIDENTIFIER NULL;
+    PRINT 'Added Nexaacc_AccountId column to Account_Payment_Detail';
 END
 GO
 

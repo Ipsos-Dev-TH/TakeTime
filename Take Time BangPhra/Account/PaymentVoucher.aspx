@@ -394,8 +394,8 @@
 
             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">ประเภทการจ่ายเงิน:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" AppendDataBoundItems="true">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>    
+                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList3_SelectedIndexChanged">
+                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                 </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_Type] WHERE ([Status] = 'True')">
                         <SelectParameters>
@@ -424,22 +424,31 @@
            
 
             <tr style="background-color:whitesmoke;">
+                 <td class="modal-sm" style="width: 20%; text-align: right">หมวดค่าใช้จ่าย (รายการ): </td>
+                <td>
+                    &nbsp;<asp:DropDownList ID="ddlLineCategory" runat="server" Width="60%" AppendDataBoundItems="true">
+                    <asp:ListItem Value="">---เลือกหมวดค่าใช้จ่าย---</asp:ListItem>
+                    </asp:DropDownList>
+                 </td>
+            </tr>
+
+            <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">รายละเอียดค่าใช้จ่าย: </td>
                 <td>
                     &nbsp;<asp:TextBox ID="TextBox1" runat="server" Width="60%"></asp:TextBox>
                  </td>
-            
+
             </tr>
 
-            <tr>
+            <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">จำนวนเงิน(ไม่รวมภาษี): </td>
                 <td>
                     &nbsp;<asp:TextBox ID="TextBox2" runat="server" Width="30%"></asp:TextBox>
                  &nbsp;บาท</td>
-            
+
             </tr>
 
-            <tr style="background-color:whitesmoke;">
+            <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                 <td>
                     &nbsp;<asp:Button ID="Button2" runat="server" Text="➕ เพิ่ม" CssClass="btn-add" OnClick="Button2_Click" />
@@ -453,8 +462,9 @@
                      <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting">
                          <Columns>
                              <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
+                             <asp:BoundField DataField="PaidTypeName" HeaderText="หมวดค่าใช้จ่าย" />
                              <asp:BoundField DataField="Detail" HeaderText="รายละเอียด" />
-                             <asp:BoundField DataField="Amount" HeaderText="จำนวนเงิน" />
+                             <asp:BoundField DataField="Amount" HeaderText="จำนวนเงิน" DataFormatString="{0:N2}" />
                              <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
                          </Columns>
                      </asp:GridView>

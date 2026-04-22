@@ -62,9 +62,19 @@ namespace Take_Time_BangPhra.Admin
                         { "@PaymentID", id ?? "" }
                     };
 
-                    DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn,
-                        "SELECT Number,Detail,Amount FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
-                        paymentDetailParams);
+                    DataTable dtPaymentDetail;
+                    try
+                    {
+                        dtPaymentDetail = code.DatabaseQuerySafe(conn,
+                            "SELECT Number, Detail, Amount, ISNULL(Paid_Type_ID, 0) AS PaidTypeId, ISNULL(Paid_Type_Name, N'') AS PaidTypeName, ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), N'') AS NexaaccAccountId FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
+                            paymentDetailParams);
+                    }
+                    catch
+                    {
+                        dtPaymentDetail = code.DatabaseQuerySafe(conn,
+                            "SELECT Number, Detail, Amount FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
+                            paymentDetailParams);
+                    }
 
                     TextBox8.Text = Convert.ToDateTime(dtPayment.Rows[0]["Created_Date"].ToString()).ToString("yyyy-MM-dd");
                     TextBox3.Text = dtPayment.Rows[0]["Total_Amount_Exclude_Vat"].ToString();
@@ -268,18 +278,25 @@ namespace Take_Time_BangPhra.Admin
                         "VALUES (@AccountPaymentID,@AffResID)",
                         affResPaymentParams);
 
-                    // SECURE: Account_Payment_Detail INSERT with parameterized query
+                    // SECURE: Account_Payment_Detail INSERT with parameterized query (including per-line category)
+                    string linePaidTypeId = dtDetail.Columns.Contains("PaidTypeId") ? dtDetail.Rows[i]["PaidTypeId"]?.ToString() : "";
+                    string linePaidTypeName = dtDetail.Columns.Contains("PaidTypeName") ? dtDetail.Rows[i]["PaidTypeName"]?.ToString() : "";
+                    string lineNexaaccId = dtDetail.Columns.Contains("NexaaccAccountId") ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : "";
+
                     var paymentDetailParams = new Dictionary<string, object>
                     {
                         { "@DocNum", docNum },
-                        { "@Number", dtDetail.Rows[i][0].ToString() },
-                        { "@Detail", dtDetail.Rows[i][1].ToString() },
-                        { "@Amount", dtDetail.Rows[i][2].ToString() }
+                        { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                        { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
+                        { "@Amount", dtDetail.Rows[i]["Amount"].ToString() },
+                        { "@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId) },
+                        { "@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName },
+                        { "@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId }
                     };
 
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
-                        "VALUES (@DocNum,@Number,@Detail,@Amount)",
+                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
+                        "VALUES (@DocNum,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
                         paymentDetailParams);
 
                     // SECURE: Affiliate_Reservation UPDATE with parameterized query

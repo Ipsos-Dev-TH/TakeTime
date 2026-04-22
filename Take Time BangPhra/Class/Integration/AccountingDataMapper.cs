@@ -277,48 +277,95 @@ namespace Take_Time_BangPhra.Integration
             int voucherId, string expenseCategory, decimal amount, string paymentMethod,
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
-            string paymentAccountId = null, string expenseAccountId = null)
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<ExpenseLine> expenseLines = null)
         {
-            var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
             var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
-
             var lines = new List<JournalEntryLineRequest>();
 
-            if (hasInputVat)
+            bool hasMultipleLines = expenseLines != null && expenseLines.Count > 0;
+
+            if (hasMultipleLines)
             {
-                // คำนวณ VAT จากยอดรวม VAT (amount = net + VAT 7%)
-                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
-                decimal netAmount = amount - vatAmount;
-                var inputVatAccountId = GetAccountId("INPUT_VAT");
-
-                // DR: ค่าใช้จ่าย (ยอดก่อน VAT)
-                lines.Add(new JournalEntryLineRequest
+                // Multiple DR lines — one per expense category
+                foreach (var el in expenseLines)
                 {
-                    AccountId = expAccId,
-                    DebitAmount = netAmount,
-                    CreditAmount = 0,
-                    Description = description,
-                });
+                    var lineAccId = ResolveAccountId(el.AccountId) ?? GetExpenseCategoryAccountId(el.Category);
+                    decimal lineAmount = el.Amount;
 
-                // DR: ภาษีซื้อ
-                lines.Add(new JournalEntryLineRequest
+                    if (hasInputVat)
+                    {
+                        decimal lineVat = Math.Round(lineAmount * 7 / 107, 2);
+                        decimal lineNet = lineAmount - lineVat;
+                        lines.Add(new JournalEntryLineRequest
+                        {
+                            AccountId = lineAccId,
+                            DebitAmount = lineNet,
+                            CreditAmount = 0,
+                            Description = el.Description,
+                        });
+                    }
+                    else
+                    {
+                        lines.Add(new JournalEntryLineRequest
+                        {
+                            AccountId = lineAccId,
+                            DebitAmount = lineAmount,
+                            CreditAmount = 0,
+                            Description = el.Description,
+                        });
+                    }
+                }
+
+                if (hasInputVat)
                 {
-                    AccountId = inputVatAccountId,
-                    DebitAmount = vatAmount,
-                    CreditAmount = 0,
-                    Description = "ภาษีซื้อ 7%",
-                });
+                    decimal totalVat = Math.Round(amount * 7 / 107, 2);
+                    var inputVatAccountId = GetAccountId("INPUT_VAT");
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = inputVatAccountId,
+                        DebitAmount = totalVat,
+                        CreditAmount = 0,
+                        Description = "ภาษีซื้อ 7%",
+                    });
+                }
             }
             else
             {
-                // DR: ค่าใช้จ่าย (ยอดเต็ม)
-                lines.Add(new JournalEntryLineRequest
+                // Single DR line (backward compatible)
+                var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
+
+                if (hasInputVat)
                 {
-                    AccountId = expAccId,
-                    DebitAmount = amount,
-                    CreditAmount = 0,
-                    Description = description,
-                });
+                    decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                    decimal netAmount = amount - vatAmount;
+                    var inputVatAccountId = GetAccountId("INPUT_VAT");
+
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = expAccId,
+                        DebitAmount = netAmount,
+                        CreditAmount = 0,
+                        Description = description,
+                    });
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = inputVatAccountId,
+                        DebitAmount = vatAmount,
+                        CreditAmount = 0,
+                        Description = "ภาษีซื้อ 7%",
+                    });
+                }
+                else
+                {
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = expAccId,
+                        DebitAmount = amount,
+                        CreditAmount = 0,
+                        Description = description,
+                    });
+                }
             }
 
             // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี)
@@ -1242,37 +1289,75 @@ namespace Take_Time_BangPhra.Integration
             int voucherId, string expenseCategory, decimal amount, string paymentMethod,
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
-            string paymentAccountId = null, string expenseAccountId = null)
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<ExpenseLine> expenseLines = null)
         {
             var lines = new List<IntegrationLineRequest>();
-            var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
+            bool hasMultipleLines = expenseLines != null && expenseLines.Count > 0;
 
-            string itemName = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory
-                : !string.IsNullOrEmpty(description) ? description : "ค่าใช้จ่าย";
-
-            if (hasInputVat)
+            if (hasMultipleLines)
             {
-                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
-                decimal netAmount = amount - vatAmount;
-                lines.Add(new IntegrationLineRequest
+                foreach (var el in expenseLines)
                 {
-                    ItemName = itemName,
-                    Description = description,
-                    Quantity = 1, UnitPrice = netAmount, VatRate = 7,
-                    WithholdingTaxRate = whtRate,
-                    AccountId = expAccId,
-                });
+                    var lineAccId = ResolveAccountId(el.AccountId) ?? GetExpenseCategoryAccountId(el.Category);
+                    string lineItemName = !string.IsNullOrEmpty(el.Category) ? el.Category : "ค่าใช้จ่าย";
+
+                    if (hasInputVat)
+                    {
+                        decimal lineVat = Math.Round(el.Amount * 7 / 107, 2);
+                        decimal lineNet = el.Amount - lineVat;
+                        lines.Add(new IntegrationLineRequest
+                        {
+                            ItemName = lineItemName,
+                            Description = el.Description,
+                            Quantity = 1, UnitPrice = lineNet, VatRate = 7,
+                            WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
+                            AccountId = lineAccId,
+                        });
+                    }
+                    else
+                    {
+                        lines.Add(new IntegrationLineRequest
+                        {
+                            ItemName = lineItemName,
+                            Description = el.Description,
+                            Quantity = 1, UnitPrice = el.Amount,
+                            WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
+                            AccountId = lineAccId,
+                        });
+                    }
+                }
             }
             else
             {
-                lines.Add(new IntegrationLineRequest
+                var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
+                string itemName = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory
+                    : !string.IsNullOrEmpty(description) ? description : "ค่าใช้จ่าย";
+
+                if (hasInputVat)
                 {
-                    ItemName = itemName,
-                    Description = description,
-                    Quantity = 1, UnitPrice = amount,
-                    WithholdingTaxRate = whtRate,
-                    AccountId = expAccId,
-                });
+                    decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                    decimal netAmount = amount - vatAmount;
+                    lines.Add(new IntegrationLineRequest
+                    {
+                        ItemName = itemName,
+                        Description = description,
+                        Quantity = 1, UnitPrice = netAmount, VatRate = 7,
+                        WithholdingTaxRate = whtRate,
+                        AccountId = expAccId,
+                    });
+                }
+                else
+                {
+                    lines.Add(new IntegrationLineRequest
+                    {
+                        ItemName = itemName,
+                        Description = description,
+                        Quantity = 1, UnitPrice = amount,
+                        WithholdingTaxRate = whtRate,
+                        AccountId = expAccId,
+                    });
+                }
             }
 
             return new CreateIntegrationExpenseRequest
