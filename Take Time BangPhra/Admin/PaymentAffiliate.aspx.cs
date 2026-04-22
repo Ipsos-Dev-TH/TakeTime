@@ -192,7 +192,7 @@ namespace Take_Time_BangPhra.Admin
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Void voucher error (PaymentAffiliate): id={id} {accEx.Message}", "SYSTEM");
+                    new code().Logs(conn, "Accounting Sync", $"Void voucher error (PaymentAffiliate): id={id} {accEx.Message}", "SYSTEM");
                 }
 
                 // SECURE: DELETE operations with parameterized queries
@@ -300,7 +300,7 @@ namespace Take_Time_BangPhra.Admin
                     {
                         decimal voucherAmount = Convert.ToDecimal(TextBox6.Text);
                         string payMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
-                        string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                        string vendorName = DropDownList5.SelectedItem?.Text ?? "";
                         string desc = dtDetail.Rows.Count > 0 ? dtDetail.Rows[0][1]?.ToString() ?? "" : "";
                         DateTime voucherDate = Convert.ToDateTime(TextBox8.Text);
 
@@ -314,7 +314,7 @@ namespace Take_Time_BangPhra.Admin
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentAffiliate): {accEx.Message}", "SYSTEM");
+                    new code().Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentAffiliate): {accEx.Message}", "SYSTEM");
                 }
 
                 string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();

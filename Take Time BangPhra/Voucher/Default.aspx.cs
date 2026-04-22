@@ -651,7 +651,6 @@ namespace Take_Time_BangPhra.Voucher
                                 var sync = new Integration.AccountingSyncService(conn);
                                 decimal totalAmt = Convert.ToDecimal(TextBox1.Text);
                                 decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
-                                DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
                                 sync.EnqueueReceipt(reservation_id, docNum, totalAmt, vatAmt, receiptDate,
                                     dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
                                     isDeposit: false, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
@@ -660,7 +659,7 @@ namespace Take_Time_BangPhra.Voucher
                     }
                     catch (Exception accEx)
                     {
-                        code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Voucher): {accEx.Message}", "SYSTEM");
+                        code2.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Voucher): {accEx.Message}", "SYSTEM");
                     }
 
                     // 🆕 Record payment to Payment_History when voucher receipt is created
@@ -1431,7 +1430,7 @@ namespace Take_Time_BangPhra.Voucher
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Void receipt error (Voucher): id={id} {accEx.Message}", "SYSTEM");
+                    code2.Logs(conn, "Accounting Sync", $"Void receipt error (Voucher): id={id} {accEx.Message}", "SYSTEM");
                 }
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());

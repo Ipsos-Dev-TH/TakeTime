@@ -719,7 +719,7 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Void receipt error (ReserveTable): receiptId={receiptId} {accEx.Message}", "SYSTEM");
+                    code2.Logs(conn, "Accounting Sync", $"Void receipt error (ReserveTable): receiptId={receiptId} {accEx.Message}", "SYSTEM");
                 }
 
                 // ✅ 4. Stamp "Cancel" on PDF
