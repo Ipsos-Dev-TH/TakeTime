@@ -410,8 +410,22 @@
         document.addEventListener('DOMContentLoaded', function () {
             loadConfigData();
             loadQueueData();
+            preloadNexaaccAccounts();
             document.getElementById('cfgSyncMode').addEventListener('change', updateJourneyMap);
         });
+
+        function preloadNexaaccAccounts() {
+            fetch(pageUrl + '?action=nexaaccAccounts&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success && data.items) {
+                        nexaaccAccountsCache = data.items;
+                        var syncEl = document.getElementById('accountSyncStatus');
+                        if (syncEl) syncEl.textContent = 'ผังบัญชี ' + data.total + ' รายการ (sync ล่าสุด: ' + (data.lastSync || '-') + ')';
+                    }
+                })
+                .catch(function() {});
+        }
 
         function updateJourneyMap() {
             var mode = document.getElementById('cfgSyncMode').value;
@@ -482,7 +496,29 @@
         }
 
         function syncAccounts() {
-            getAction('syncAccounts', 'apiTestResult');
+            var el = document.getElementById('apiTestResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลัง Sync ผังบัญชี...';
+
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+
+            fetch(pageUrl + '?action=syncAccounts&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.success) {
+                        nexaaccAccountsCache = [];
+                        preloadNexaaccAccounts();
+                    }
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 60 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
         }
 
         function processQueue() {
@@ -843,16 +879,20 @@
         function ensureAccountsLoaded(callback) {
             if (nexaaccAccountsCache && nexaaccAccountsCache.length > 0) { callback(); return; }
             fetch(pageUrl + '?action=nexaaccAccounts&_=' + Date.now())
-                .then(function(r) { return r.json(); })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
                 .then(function(data) {
-                    if (data.success) {
-                        nexaaccAccountsCache = data.items || [];
-                        var syncEl = document.getElementById('accountSyncStatus');
-                        if (syncEl) syncEl.textContent = 'ผังบัญชี ' + data.total + ' รายการ (sync ล่าสุด: ' + (data.lastSync || '-') + ')';
+                    if (data.success && data.items) {
+                        nexaaccAccountsCache = data.items;
                     }
                     callback();
                 })
-                .catch(function() { callback(); });
+                .catch(function(err) {
+                    console.error('ensureAccountsLoaded error:', err);
+                    callback();
+                });
         }
 
         function loadPaidHowMapping() {
@@ -887,7 +927,7 @@
 
         function buildPaidHowSelect(itemId, currentCode, currentAccountId) {
             if (!nexaaccAccountsCache || nexaaccAccountsCache.length === 0) {
-                return '<span style="color:#999;font-size:12px;">กรุณา Sync บัญชี ก่อน</span>';
+                return '<span style="color:#e65100;font-size:12px;">กรุณากด "Sync บัญชี" ด้านบน แล้วรีเฟรชหน้านี้</span>';
             }
             var accs = nexaaccAccountsCache;
             var groups = {};
@@ -975,7 +1015,7 @@
 
         function buildPaidTypeSelect(itemId, currentCode, currentAccountId) {
             if (!nexaaccAccountsCache || nexaaccAccountsCache.length === 0) {
-                return '<span style="color:#999;font-size:12px;">กรุณา Sync บัญชี ก่อน</span>';
+                return '<span style="color:#e65100;font-size:12px;">กรุณากด "Sync บัญชี" ด้านบน แล้วรีเฟรชหน้านี้</span>';
             }
             var accs = nexaaccAccountsCache;
             var groups = {};
