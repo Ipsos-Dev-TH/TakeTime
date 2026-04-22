@@ -519,17 +519,10 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (_config.IsDocumentMode)
                 {
-                    var document = _mapper.MapReceiptToDocument(
-                        reservationId,
-                        receiptNumber,
-                        totalAmount,
-                        vatAmount,
-                        receiptDate,
-                        null,
-                        $"ใบเสร็จ - การจอง #{reservationId}");
-
-                    var result = await _apiClient.CreateDocumentAsync(document);
-                    await SafeApproveDocumentAsync(result.data.Id);
+                    bool hasVat = vatAmount > 0;
+                    var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
+                    invoice.Reference = $"RES-{reservationId}-{receiptNumber}";
+                    var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
                 else
