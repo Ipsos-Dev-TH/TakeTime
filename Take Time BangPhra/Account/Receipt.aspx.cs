@@ -1632,7 +1632,6 @@ namespace Take_Time_BangPhra.Account.Report
                         int.TryParse(reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text, out resId);
                         decimal totalAmt = Convert.ToDecimal(TextBox6.Text);
                         decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
-                        DateTime receiptDate = Convert.ToDateTime(TextBox8.Text);
                         string custName = TextBox16.Text;
 
                         if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
@@ -1644,7 +1643,7 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
+                    code2.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
                 }
 
                 // Show success message then redirect
@@ -1897,7 +1896,7 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Void receipt error (Receipt cancel): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    code2.Logs(conn, "Accounting Sync", $"Void receipt error (Receipt cancel): docNum={docNum} {accEx.Message}", "SYSTEM");
                 }
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());

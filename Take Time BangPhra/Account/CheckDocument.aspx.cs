@@ -413,7 +413,7 @@ namespace Take_Time_BangPhra.Account
                     }
                     catch (Exception accEx)
                     {
-                        code.Logs(conn, "Accounting Sync", $"Void receipt error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
+                        new code().Logs(conn, "Accounting Sync", $"Void receipt error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
                     }
                 }
                 else if (docType == "PAY")
@@ -450,7 +450,7 @@ namespace Take_Time_BangPhra.Account
                     }
                     catch (Exception accEx)
                     {
-                        code.Logs(conn, "Accounting Sync", $"Void voucher error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
+                        new code().Logs(conn, "Accounting Sync", $"Void voucher error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
                     }
                 }
 

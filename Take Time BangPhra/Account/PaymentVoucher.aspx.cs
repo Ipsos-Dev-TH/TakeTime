@@ -368,7 +368,7 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Void voucher error (PaymentVoucher edit): id={id} {accEx.Message}", "SYSTEM");
+                    new code().Logs(conn, "Accounting Sync", $"Void voucher error (PaymentVoucher edit): id={id} {accEx.Message}", "SYSTEM");
                 }
 
                 // SECURE: Delete payment record with parameterized query
@@ -766,7 +766,7 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
-                    code.Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentVoucher): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    new code().Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentVoucher): docNum={docNum} {accEx.Message}", "SYSTEM");
                 }
 
                 // Show success message then redirect
