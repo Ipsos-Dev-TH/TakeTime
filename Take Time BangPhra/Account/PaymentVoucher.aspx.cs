@@ -750,17 +750,19 @@ namespace Take_Time_BangPhra.Account.Report
                         string description = "";
                         if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
 
+                        var sync = new Integration.AccountingSyncService(conn);
+                        string payAccId = sync.LookupPaidHowAccountId(paymentMethod);
+                        string expAccId = sync.LookupPaidTypeAccountId(expenseCategory);
+
                         if (config.IsDocumentMode)
                         {
-                            var sync = new Integration.AccountingSyncService(conn);
                             sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                                documentNumber: docNum);
+                                documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId);
                         }
                         else if (!string.IsNullOrEmpty(docNum) && docNum != "0")
                         {
-                            var sync = new Integration.AccountingSyncService(conn);
                             sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                                documentNumber: docNum);
+                                documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId);
                         }
                     }
                 }

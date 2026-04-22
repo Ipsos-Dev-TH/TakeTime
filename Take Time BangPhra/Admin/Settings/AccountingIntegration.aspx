@@ -348,6 +348,56 @@
             </div>
             <div class="test-result" id="mappingResult"></div>
         </div>
+
+        <!-- Payment Method → Account Mapping -->
+        <div class="journey-card">
+            <h3><i class="fas fa-credit-card"></i> วิธีจ่ายเงิน &rarr; บัญชี NextAcc</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">
+                ผูกวิธีจ่ายเงินแต่ละรายการกับบัญชี NextAcc โดยตรง — ระบบจะส่งไปบัญชีที่เลือกไว้ทุกครั้ง (ไม่ต้องพึ่ง text matching)
+            </p>
+            <button type="button" class="btn-primary" onclick="loadPaidHowMapping()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> โหลดวิธีจ่ายเงิน</button>
+            <div style="overflow-x:auto;">
+                <table class="queue-table" id="paidHowTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>วิธีจ่ายเงิน</th>
+                            <th style="min-width:280px;">บัญชี NextAcc</th>
+                            <th>สถานะ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paidHowBody">
+                        <tr><td colspan="4" style="text-align:center; color:#999;">กดปุ่ม "โหลดวิธีจ่ายเงิน" เพื่อดูข้อมูล</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="test-result" id="paidHowResult"></div>
+        </div>
+
+        <!-- Expense Category → Account Mapping -->
+        <div class="journey-card">
+            <h3><i class="fas fa-receipt"></i> ประเภทค่าใช้จ่าย &rarr; บัญชี NextAcc</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">
+                ผูกประเภทค่าใช้จ่ายกับบัญชี NextAcc — เช่น ค่าไฟ, ค่าน้ำ, ค่าแรง ฯลฯ จะไปลงบัญชีที่ถูกต้องอัตโนมัติ
+            </p>
+            <button type="button" class="btn-primary" onclick="loadPaidTypeMapping()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> โหลดประเภทค่าใช้จ่าย</button>
+            <div style="overflow-x:auto;">
+                <table class="queue-table" id="paidTypeTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>ประเภทค่าใช้จ่าย</th>
+                            <th style="min-width:280px;">บัญชี NextAcc</th>
+                            <th>สถานะ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paidTypeBody">
+                        <tr><td colspan="4" style="text-align:center; color:#999;">กดปุ่ม "โหลดประเภทค่าใช้จ่าย" เพื่อดูข้อมูล</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="test-result" id="paidTypeResult"></div>
+        </div>
     </div>
 
     <asp:HiddenField ID="hfConfigData" runat="server" />
@@ -786,6 +836,178 @@
 
             html += '</select>';
             return html;
+        }
+
+        // ═══════════ Payment Method → Account Mapping ═══════════
+
+        function loadPaidHowMapping() {
+            var body = document.getElementById('paidHowBody');
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">กำลังโหลด...</td></tr>';
+
+            fetch(pageUrl + '?action=getPaidHowMapping&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { body.innerHTML = '<tr><td colspan="4" class="text-center" style="color:red;">' + data.message + '</td></tr>'; return; }
+                    var items = data.items || [];
+                    if (items.length === 0) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">ไม่พบข้อมูลวิธีจ่ายเงิน — กรุณาเพิ่มใน Admin > Edit Data > Account_Paid_How</td></tr>'; return; }
+                    var html = '';
+                    items.forEach(function(item) {
+                        var linked = item.accountId && item.accountId !== '00000000-0000-0000-0000-000000000000';
+                        var badge = linked
+                            ? '<span class="status-badge status-connected">' + (item.accountCode || '') + ' ✓</span>'
+                            : '<span class="status-badge status-not-configured">ยังไม่ผูก</span>';
+                        html += '<tr>'
+                            + '<td>' + item.id + '</td>'
+                            + '<td><strong>' + (item.name || '') + '</strong></td>'
+                            + '<td>' + buildPaidHowSelect(item.id, item.accountCode, item.accountId) + '</td>'
+                            + '<td>' + badge + '</td>'
+                            + '</tr>';
+                    });
+                    body.innerHTML = html;
+                })
+                .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + err.message + '</td></tr>'; });
+        }
+
+        function buildPaidHowSelect(itemId, currentCode, currentAccountId) {
+            if (!window._nexaaccAccounts || window._nexaaccAccounts.length === 0) {
+                return '<span style="color:#999;font-size:12px;">กรุณา Sync บัญชี ก่อน</span>';
+            }
+            var accs = window._nexaaccAccounts;
+            var groups = {};
+            accs.forEach(function(a) { var t = a.type || 'OTHER'; if (!groups[t]) groups[t] = []; groups[t].push(a); });
+            var typeOrder = ['Asset', 'Liability'];
+            var html = '<select id="phSelect_' + itemId + '" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;" onchange="updatePaidHowAccount(' + itemId + ')">';
+            html += '<option value="">-- เลือกบัญชี --</option>';
+            typeOrder.forEach(function(t) {
+                if (!groups[t]) return;
+                html += '<optgroup label="' + t + '">';
+                groups[t].forEach(function(acc) {
+                    var sel = '';
+                    if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
+                    else if (!currentAccountId && currentCode && acc.code === currentCode) sel = ' selected';
+                    html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                });
+                html += '</optgroup>';
+            });
+            for (var t in groups) {
+                if (typeOrder.indexOf(t) === -1) {
+                    html += '<optgroup label="' + t + '">';
+                    groups[t].forEach(function(acc) {
+                        var sel = '';
+                        if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
+                        html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                    });
+                    html += '</optgroup>';
+                }
+            }
+            html += '</select>';
+            return html;
+        }
+
+        function updatePaidHowAccount(itemId) {
+            var sel = document.getElementById('phSelect_' + itemId);
+            if (!sel || !sel.value) return;
+            var parts = sel.value.split('|');
+            var accountId = parts[0], accountCode = parts[1] || '';
+            var el = document.getElementById('paidHowResult');
+            el.className = 'test-result loading'; el.textContent = 'กำลังบันทึก...';
+
+            fetch(pageUrl + '?action=updatePaidHowAccount&id=' + itemId
+                + '&accountId=' + encodeURIComponent(accountId)
+                + '&accountCode=' + encodeURIComponent(accountCode) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + data.message;
+                    if (data.success) loadPaidHowMapping();
+                })
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + err.message; });
+        }
+
+        // ═══════════ Expense Category → Account Mapping ═══════════
+
+        function loadPaidTypeMapping() {
+            var body = document.getElementById('paidTypeBody');
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">กำลังโหลด...</td></tr>';
+
+            fetch(pageUrl + '?action=getPaidTypeMapping&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + data.message + '</td></tr>'; return; }
+                    var items = data.items || [];
+                    if (items.length === 0) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">ไม่พบข้อมูลประเภทค่าใช้จ่าย — กรุณาเพิ่มใน Admin > Edit Data > Account_Paid_Type</td></tr>'; return; }
+                    var html = '';
+                    items.forEach(function(item) {
+                        var linked = item.accountId && item.accountId !== '00000000-0000-0000-0000-000000000000';
+                        var badge = linked
+                            ? '<span class="status-badge status-connected">' + (item.accountCode || '') + ' ✓</span>'
+                            : '<span class="status-badge status-not-configured">ยังไม่ผูก</span>';
+                        html += '<tr>'
+                            + '<td>' + item.id + '</td>'
+                            + '<td><strong>' + (item.name || '') + '</strong></td>'
+                            + '<td>' + buildPaidTypeSelect(item.id, item.accountCode, item.accountId) + '</td>'
+                            + '<td>' + badge + '</td>'
+                            + '</tr>';
+                    });
+                    body.innerHTML = html;
+                })
+                .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + err.message + '</td></tr>'; });
+        }
+
+        function buildPaidTypeSelect(itemId, currentCode, currentAccountId) {
+            if (!window._nexaaccAccounts || window._nexaaccAccounts.length === 0) {
+                return '<span style="color:#999;font-size:12px;">กรุณา Sync บัญชี ก่อน</span>';
+            }
+            var accs = window._nexaaccAccounts;
+            var groups = {};
+            accs.forEach(function(a) { var t = a.type || 'OTHER'; if (!groups[t]) groups[t] = []; groups[t].push(a); });
+            var typeOrder = ['Expense', 'Asset', 'Liability'];
+            var html = '<select id="ptSelect_' + itemId + '" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;" onchange="updatePaidTypeAccount(' + itemId + ')">';
+            html += '<option value="">-- เลือกบัญชี --</option>';
+            typeOrder.forEach(function(t) {
+                if (!groups[t]) return;
+                html += '<optgroup label="' + t + '">';
+                groups[t].forEach(function(acc) {
+                    var sel = '';
+                    if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
+                    else if (!currentAccountId && currentCode && acc.code === currentCode) sel = ' selected';
+                    html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                });
+                html += '</optgroup>';
+            });
+            for (var t in groups) {
+                if (typeOrder.indexOf(t) === -1) {
+                    html += '<optgroup label="' + t + '">';
+                    groups[t].forEach(function(acc) {
+                        var sel = '';
+                        if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
+                        html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                    });
+                    html += '</optgroup>';
+                }
+            }
+            html += '</select>';
+            return html;
+        }
+
+        function updatePaidTypeAccount(itemId) {
+            var sel = document.getElementById('ptSelect_' + itemId);
+            if (!sel || !sel.value) return;
+            var parts = sel.value.split('|');
+            var accountId = parts[0], accountCode = parts[1] || '';
+            var el = document.getElementById('paidTypeResult');
+            el.className = 'test-result loading'; el.textContent = 'กำลังบันทึก...';
+
+            fetch(pageUrl + '?action=updatePaidTypeAccount&id=' + itemId
+                + '&accountId=' + encodeURIComponent(accountId)
+                + '&accountCode=' + encodeURIComponent(accountCode) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + data.message;
+                    if (data.success) loadPaidTypeMapping();
+                })
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + err.message; });
         }
 
         function updateMapping(id) {

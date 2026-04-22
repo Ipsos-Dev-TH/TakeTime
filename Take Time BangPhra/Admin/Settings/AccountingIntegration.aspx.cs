@@ -117,6 +117,18 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "previewCleanup":
                     result = PreviewAutoSyncCleanup();
                     break;
+                case "getPaidHowMapping":
+                    result = GetPaidHowMapping();
+                    break;
+                case "getPaidTypeMapping":
+                    result = GetPaidTypeMapping();
+                    break;
+                case "updatePaidHowAccount":
+                    result = UpdatePaidHowAccount();
+                    break;
+                case "updatePaidTypeAccount":
+                    result = UpdatePaidTypeAccount();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -854,6 +866,154 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "success", true },
                     { "message", $"ยกเลิก auto-sync entries จำนวน {cancelled} รายการ เรียบร้อยแล้ว" },
                     { "cancelled", cancelled }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Payment Method → Account Mapping (Account_Paid_How)
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> GetPaidHowMapping()
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT ID, Paid_How,
+                             ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
+                             ISNULL(Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
+                             Status
+                      FROM Account_Paid_How WHERE Status = 1 ORDER BY ID", null);
+
+                var items = new List<Dictionary<string, object>>();
+                if (dt?.Rows.Count > 0)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "id", Convert.ToInt32(row["ID"]) },
+                            { "name", row["Paid_How"]?.ToString() ?? "" },
+                            { "accountId", row["Nexaacc_AccountId"]?.ToString() ?? "" },
+                            { "accountCode", row["Nexaacc_AccountCode"]?.ToString() ?? "" }
+                        });
+                    }
+                }
+                return new Dictionary<string, object> { { "success", true }, { "items", items } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> UpdatePaidHowAccount()
+        {
+            try
+            {
+                int id = int.Parse(Request.QueryString["id"]);
+                string accountId = Request.QueryString["accountId"] ?? "";
+                string accountCode = Request.QueryString["accountCode"] ?? "";
+
+                if (string.IsNullOrEmpty(accountId))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่ได้เลือกบัญชี" } };
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE Account_Paid_How SET Nexaacc_AccountId = @accId, Nexaacc_AccountCode = @accCode WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@accId", Guid.Parse(accountId) },
+                        { "@accCode", accountCode },
+                        { "@id", id }
+                    });
+
+                DataTable name = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Paid_How FROM Account_Paid_How WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", id } });
+                string paidHowName = name?.Rows.Count > 0 ? name.Rows[0]["Paid_How"]?.ToString() : "";
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"ผูก \"{paidHowName}\" กับบัญชี {accountCode} เรียบร้อย" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Expense Category → Account Mapping (Account_Paid_Type)
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> GetPaidTypeMapping()
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT ID, Paid_Type,
+                             ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
+                             ISNULL(Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
+                             Status
+                      FROM Account_Paid_Type WHERE Status = 1 ORDER BY ID", null);
+
+                var items = new List<Dictionary<string, object>>();
+                if (dt?.Rows.Count > 0)
+                {
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "id", Convert.ToInt32(row["ID"]) },
+                            { "name", row["Paid_Type"]?.ToString() ?? "" },
+                            { "accountId", row["Nexaacc_AccountId"]?.ToString() ?? "" },
+                            { "accountCode", row["Nexaacc_AccountCode"]?.ToString() ?? "" }
+                        });
+                    }
+                }
+                return new Dictionary<string, object> { { "success", true }, { "items", items } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> UpdatePaidTypeAccount()
+        {
+            try
+            {
+                int id = int.Parse(Request.QueryString["id"]);
+                string accountId = Request.QueryString["accountId"] ?? "";
+                string accountCode = Request.QueryString["accountCode"] ?? "";
+
+                if (string.IsNullOrEmpty(accountId))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่ได้เลือกบัญชี" } };
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE Account_Paid_Type SET Nexaacc_AccountId = @accId, Nexaacc_AccountCode = @accCode WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@accId", Guid.Parse(accountId) },
+                        { "@accCode", accountCode },
+                        { "@id", id }
+                    });
+
+                DataTable name = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Paid_Type FROM Account_Paid_Type WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", id } });
+                string paidTypeName = name?.Rows.Count > 0 ? name.Rows[0]["Paid_Type"]?.ToString() : "";
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"ผูก \"{paidTypeName}\" กับบัญชี {accountCode} เรียบร้อย" }
                 };
             }
             catch (Exception ex)

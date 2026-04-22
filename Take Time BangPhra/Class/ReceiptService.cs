@@ -354,19 +354,21 @@ namespace Take_Time_BangPhra.Services
                     int.TryParse(reservationId, out resId);
                     string customerName = GetCustomerName(reservationId);
 
+                    var sync = new AccountingSyncService(_connectionString);
+                    string rsPayAccId = sync.LookupPaidHowAccountId(paidType);
                     if (config.IsDocumentMode)
                     {
-                        var sync = new AccountingSyncService(_connectionString);
                         sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
-                            isDeposit: isDeposit, paymentMethod: paidType);
+                            isDeposit: isDeposit, paymentMethod: paidType,
+                            revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId);
                     }
                     else
                     {
                         if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
-                            var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
-                                isDeposit: isDeposit, paymentMethod: paidType);
+                                isDeposit: isDeposit, paymentMethod: paidType,
+                                revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId);
                         }
                     }
                 }

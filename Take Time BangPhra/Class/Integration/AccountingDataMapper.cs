@@ -87,9 +87,10 @@ namespace Take_Time_BangPhra.Integration
         /// DR: Cash/Bank account  CR: Advance Deposits (เงินรับล่วงหน้า)
         /// </summary>
         public CreateJournalEntryRequest MapDepositToJournal(
-            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
+            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName,
+            string paymentAccountId = null)
         {
-            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
 
             return new CreateJournalEntryRequest
@@ -124,10 +125,11 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapPaymentToJournal(
             int reservationId, decimal amount, string paymentMethod, DateTime paymentDate,
-            string customerName, bool hasVat = false)
+            string customerName, bool hasVat = false,
+            string revenueType = null, string paymentAccountId = null)
         {
-            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
-            var revenueAccountId = GetAccountId("ROOM_REVENUE");
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            var revenueAccountId = !string.IsNullOrEmpty(revenueType) ? GetAccountId(revenueType) : GetAccountId("ROOM_REVENUE");
 
             var lines = new List<JournalEntryLineRequest>
             {
@@ -274,10 +276,11 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapVoucherToJournal(
             int voucherId, string expenseCategory, decimal amount, string paymentMethod,
             DateTime voucherDate, string description, string payeeName,
-            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
+            string paymentAccountId = null, string expenseAccountId = null)
         {
-            var expenseAccountId = GetExpenseCategoryAccountId(expenseCategory);
-            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+            var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
 
             var lines = new List<JournalEntryLineRequest>();
 
@@ -291,7 +294,7 @@ namespace Take_Time_BangPhra.Integration
                 // DR: ค่าใช้จ่าย (ยอดก่อน VAT)
                 lines.Add(new JournalEntryLineRequest
                 {
-                    AccountId = expenseAccountId,
+                    AccountId = expAccId,
                     DebitAmount = netAmount,
                     CreditAmount = 0,
                     Description = description,
@@ -311,7 +314,7 @@ namespace Take_Time_BangPhra.Integration
                 // DR: ค่าใช้จ่าย (ยอดเต็ม)
                 lines.Add(new JournalEntryLineRequest
                 {
-                    AccountId = expenseAccountId,
+                    AccountId = expAccId,
                     DebitAmount = amount,
                     CreditAmount = 0,
                     Description = description,
@@ -695,7 +698,19 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
-        // Helper: Payment Method → Account
+        // Helper: Resolve explicit account ID (GUID string → Guid?)
+        // ──────────────────────────────────────────────
+
+        private Guid? ResolveAccountId(string accountIdStr)
+        {
+            if (string.IsNullOrEmpty(accountIdStr)) return null;
+            if (Guid.TryParse(accountIdStr, out Guid id) && id != Guid.Empty)
+                return id;
+            return null;
+        }
+
+        // ──────────────────────────────────────────────
+        // Helper: Payment Method → Account (fallback when no explicit ID)
         // ──────────────────────────────────────────────
 
         private Guid GetPaymentMethodAccountId(string paymentMethod)
@@ -1028,7 +1043,8 @@ namespace Take_Time_BangPhra.Integration
         // ══════════════════════════════════════════════
 
         public CreateIntegrationInvoiceRequest MapDepositToInvoice(
-            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
+            int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName,
+            string paymentAccountId = null)
         {
             return new CreateIntegrationInvoiceRequest
             {
@@ -1037,7 +1053,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"RES-{reservationId}-DEP",
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
-                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = new List<IntegrationLineRequest>
                 {
                     new IntegrationLineRequest
@@ -1054,9 +1070,12 @@ namespace Take_Time_BangPhra.Integration
 
         public CreateIntegrationInvoiceRequest MapPaymentToInvoice(
             int reservationId, decimal amount, string paymentMethod, DateTime paymentDate,
-            string customerName, bool hasVat = false)
+            string customerName, bool hasVat = false,
+            string revenueType = null, string paymentAccountId = null)
         {
             var lines = new List<IntegrationLineRequest>();
+            var revenueAccountId = !string.IsNullOrEmpty(revenueType) ? GetAccountId(revenueType) : GetAccountId("ROOM_REVENUE");
+            string revenueLabel = !string.IsNullOrEmpty(revenueType) ? revenueType : "ค่าห้องพัก";
 
             if (hasVat)
             {
@@ -1064,20 +1083,20 @@ namespace Take_Time_BangPhra.Integration
                 decimal netAmount = amount - vatAmount;
                 lines.Add(new IntegrationLineRequest
                 {
-                    ItemName = "ค่าห้องพัก",
-                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                    ItemName = revenueLabel,
+                    Description = $"รายได้ - การจอง #{reservationId}",
                     Quantity = 1, UnitPrice = netAmount, VatRate = 7,
-                    AccountId = GetAccountId("ROOM_REVENUE"),
+                    AccountId = revenueAccountId,
                 });
             }
             else
             {
                 lines.Add(new IntegrationLineRequest
                 {
-                    ItemName = "ค่าห้องพัก",
-                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                    ItemName = revenueLabel,
+                    Description = $"รายได้ - การจอง #{reservationId}",
                     Quantity = 1, UnitPrice = amount,
-                    AccountId = GetAccountId("ROOM_REVENUE"),
+                    AccountId = revenueAccountId,
                 });
             }
 
@@ -1086,9 +1105,9 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-PAY",
-                Description = $"รับชำระค่าห้อง - การจอง #{reservationId} ({customerName})",
+                Description = $"รับชำระ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
-                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
             };
         }
@@ -1222,9 +1241,11 @@ namespace Take_Time_BangPhra.Integration
         public CreateIntegrationExpenseRequest MapVoucherToExpense(
             int voucherId, string expenseCategory, decimal amount, string paymentMethod,
             DateTime voucherDate, string description, string payeeName,
-            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0)
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
+            string paymentAccountId = null, string expenseAccountId = null)
         {
             var lines = new List<IntegrationLineRequest>();
+            var expAccId = ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory);
 
             string itemName = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory
                 : !string.IsNullOrEmpty(description) ? description : "ค่าใช้จ่าย";
@@ -1239,7 +1260,7 @@ namespace Take_Time_BangPhra.Integration
                     Description = description,
                     Quantity = 1, UnitPrice = netAmount, VatRate = 7,
                     WithholdingTaxRate = whtRate,
-                    AccountId = GetExpenseCategoryAccountId(expenseCategory),
+                    AccountId = expAccId,
                 });
             }
             else
@@ -1250,7 +1271,7 @@ namespace Take_Time_BangPhra.Integration
                     Description = description,
                     Quantity = 1, UnitPrice = amount,
                     WithholdingTaxRate = whtRate,
-                    AccountId = GetExpenseCategoryAccountId(expenseCategory),
+                    AccountId = expAccId,
                 });
             }
 
@@ -1261,7 +1282,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"PV-{voucherId}",
                 Description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
                 PaymentMethod = paymentMethod,
-                PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
+                PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
             };
         }

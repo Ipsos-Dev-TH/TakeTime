@@ -58,7 +58,8 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueuePaymentVoucher(int voucherId, string expenseCategory, decimal amount,
             string paymentMethod, DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
-            string documentNumber = null)
+            string documentNumber = null,
+            string paymentAccountId = null, string expenseAccountId = null)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -84,6 +85,10 @@ namespace Take_Time_BangPhra.Integration
             };
             if (!string.IsNullOrEmpty(documentNumber))
                 payload["documentNumber"] = documentNumber;
+            if (!string.IsNullOrEmpty(paymentAccountId))
+                payload["paymentAccountId"] = paymentAccountId;
+            if (!string.IsNullOrEmpty(expenseAccountId))
+                payload["expenseAccountId"] = expenseAccountId;
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
         }
@@ -93,7 +98,8 @@ namespace Take_Time_BangPhra.Integration
         /// Call after ReceiptService generates a receipt.
         /// </summary>
         public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName,
-            bool isDeposit = false, string paymentMethod = null)
+            bool isDeposit = false, string paymentMethod = null,
+            string revenueType = null, string paymentAccountId = null)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -111,6 +117,10 @@ namespace Take_Time_BangPhra.Integration
                 { "isDeposit", isDeposit },
                 { "paymentMethod", paymentMethod ?? "CASH" }
             };
+            if (!string.IsNullOrEmpty(revenueType))
+                payload["revenueType"] = revenueType;
+            if (!string.IsNullOrEmpty(paymentAccountId))
+                payload["paymentAccountId"] = paymentAccountId;
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
         }
@@ -194,6 +204,40 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"LookupNexaaccId failed for {entityType} '{documentNumber}': {ex.Message}", "SYSTEM");
             }
+            return null;
+        }
+
+        // ──────────────────────────────────────────────
+        // Account ID Lookup Helpers (for caller pages)
+        // ──────────────────────────────────────────────
+
+        public string LookupPaidHowAccountId(string paidHowText)
+        {
+            if (string.IsNullOrEmpty(paidHowText)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Nexaacc_AccountId FROM Account_Paid_How WHERE Paid_How = @name AND Status = 1",
+                    new Dictionary<string, object> { { "@name", paidHowText } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountId"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_AccountId"].ToString();
+            }
+            catch { }
+            return null;
+        }
+
+        public string LookupPaidTypeAccountId(string paidTypeText)
+        {
+            if (string.IsNullOrEmpty(paidTypeText)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Nexaacc_AccountId FROM Account_Paid_Type WHERE Paid_Type = @name AND Status = 1",
+                    new Dictionary<string, object> { { "@name", paidTypeText } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountId"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_AccountId"].ToString();
+            }
+            catch { }
             return null;
         }
 
@@ -459,6 +503,8 @@ namespace Take_Time_BangPhra.Integration
             decimal whtRate = p.ContainsKey("whtRate") ? Convert.ToDecimal(p["whtRate"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
             string docNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : "";
+            string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
+            string expenseAccountId = p.ContainsKey("expenseAccountId") ? p["expenseAccountId"]?.ToString() : null;
 
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
@@ -467,14 +513,16 @@ namespace Take_Time_BangPhra.Integration
             if (_config.IsDocumentMode)
             {
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
-                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount);
+                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId);
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 return result.data.Id.ToString();
             }
             else
             {
                 var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
-                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount);
+                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId);
                 var result = await _apiClient.CreateJournalAsync(journal);
                 await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
@@ -494,22 +542,24 @@ namespace Take_Time_BangPhra.Integration
             DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
             decimal vatAmount = Convert.ToDecimal(p["vatAmount"]);
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
+            string revenueType = p.ContainsKey("revenueType") ? p["revenueType"]?.ToString() : null;
+            string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessReceiptDocument: receipt={receiptNumber} resId={reservationId} amount={totalAmount} isDeposit={isDeposit} paymentMethod={paymentMethod} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                $"ProcessReceiptDocument: receipt={receiptNumber} resId={reservationId} amount={totalAmount} isDeposit={isDeposit} paymentMethod={paymentMethod} revenueType={revenueType ?? "auto"} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
                 "SYSTEM");
 
             if (isDeposit)
             {
                 if (_config.IsDocumentMode)
                 {
-                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
                 else
                 {
-                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName);
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
@@ -520,7 +570,7 @@ namespace Take_Time_BangPhra.Integration
                 if (_config.IsDocumentMode)
                 {
                     bool hasVat = vatAmount > 0;
-                    var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
+                    var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
                     invoice.Reference = $"RES-{reservationId}-{receiptNumber}";
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
@@ -528,7 +578,7 @@ namespace Take_Time_BangPhra.Integration
                 else
                 {
                     bool hasVat = vatAmount > 0;
-                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat);
+                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();

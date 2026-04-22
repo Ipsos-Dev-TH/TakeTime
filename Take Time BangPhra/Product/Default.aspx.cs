@@ -1078,9 +1078,12 @@ namespace Take_Time_BangPhra.Product
                         if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {
                             var sync = new Integration.AccountingSyncService(conn);
+                            string posPayMethod = DropDownList1.SelectedItem?.Text ?? "CASH";
+                            string posPayAccId = sync.LookupPaidHowAccountId(posPayMethod);
                             sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
                                 Convert.ToDateTime(TextBox12.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
-                                isDeposit: false, paymentMethod: DropDownList1.SelectedItem?.Text ?? "CASH");
+                                isDeposit: false, paymentMethod: posPayMethod,
+                                revenueType: "PRODUCT_REVENUE", paymentAccountId: posPayAccId);
                         }
                     }
                 }

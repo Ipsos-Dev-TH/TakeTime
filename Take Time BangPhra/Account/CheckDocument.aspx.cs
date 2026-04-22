@@ -769,15 +769,19 @@ namespace Take_Time_BangPhra.Account
                             "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID", docParams);
                         if (detDt?.Rows.Count > 0) desc = detDt.Rows[0]["Detail"]?.ToString() ?? "";
 
+                        string cdPaidHow = r["Paid_How"]?.ToString() ?? "CASH";
+                        string cdPaidType = r["Paid_Type"]?.ToString() ?? "OTHER";
                         queueId = sync.EnqueuePaymentVoucher(0,
-                            r["Paid_Type"]?.ToString() ?? "OTHER",
+                            cdPaidType,
                             Convert.ToDecimal(r["Total_Amount"]),
-                            r["Paid_How"]?.ToString() ?? "CASH",
+                            cdPaidHow,
                             Convert.ToDateTime(r["Created_Date"]),
                             desc,
                             r["Vendor_Name"]?.ToString() ?? "",
                             hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
-                            documentNumber: docId);
+                            documentNumber: docId,
+                            paymentAccountId: sync.LookupPaidHowAccountId(cdPaidHow),
+                            expenseAccountId: sync.LookupPaidTypeAccountId(cdPaidType));
                     }
                 }
                 else if (docType == "REC")
@@ -803,7 +807,8 @@ namespace Take_Time_BangPhra.Account
                             Convert.ToDecimal(r["Vat"]),
                             Convert.ToDateTime(r["Created_Date"]),
                             r["CustomerName"]?.ToString() ?? "",
-                            isDeposit: isDeposit, paymentMethod: paidType);
+                            isDeposit: isDeposit, paymentMethod: paidType,
+                            revenueType: "ROOM_REVENUE", paymentAccountId: sync.LookupPaidHowAccountId(paidType));
                     }
                 }
 

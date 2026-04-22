@@ -121,6 +121,24 @@ BEGIN
 END
 GO
 
+-- Add missing expense mapping for Payroll
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'EXPENSE_PAYROLL')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('EXPENSE_PAYROLL', N'ค่าใช้จ่ายเงินเดือน', '', 'EXPENSE');
+    PRINT 'Added EXPENSE_PAYROLL account mapping';
+END
+GO
+
+-- Add missing expense mapping for Affiliate
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'EXPENSE_AFFILIATE')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('EXPENSE_AFFILIATE', N'ค่าคอมมิชชั่น Affiliate', '', 'EXPENSE');
+    PRINT 'Added EXPENSE_AFFILIATE account mapping';
+END
+GO
+
 -- ──────────────────────────────────────────────
 -- 3. Sync Queue Table
 -- ──────────────────────────────────────────────
@@ -268,11 +286,79 @@ GO
 PRINT 'Created view: vw_Accounting_Api_Performance';
 GO
 
+-- ────────────���─────────────────────────────────
+-- 7. Payment Method → NextAcc Account Direct Link
+-- ───────────────────────────────���──────────────
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Paid_How' AND COLUMN_NAME = 'Nexaacc_AccountId')
+BEGIN
+    ALTER TABLE Account_Paid_How ADD Nexaacc_AccountId UNIQUEIDENTIFIER NULL;
+    PRINT 'Added Nexaacc_AccountId column to Account_Paid_How';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Paid_How' AND COLUMN_NAME = 'Nexaacc_AccountCode')
+BEGIN
+    ALTER TABLE Account_Paid_How ADD Nexaacc_AccountCode NVARCHAR(20) NULL;
+    PRINT 'Added Nexaacc_AccountCode column to Account_Paid_How';
+END
+GO
+
+-- ─────────────────────────────────────────��────
+-- 8. Expense Category → NextAcc Account Direct Link
+-- ─────────────────────────────────────────���────
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Paid_Type' AND COLUMN_NAME = 'Nexaacc_AccountId')
+BEGIN
+    ALTER TABLE Account_Paid_Type ADD Nexaacc_AccountId UNIQUEIDENTIFIER NULL;
+    PRINT 'Added Nexaacc_AccountId column to Account_Paid_Type';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Account_Paid_Type' AND COLUMN_NAME = 'Nexaacc_AccountCode')
+BEGIN
+    ALTER TABLE Account_Paid_Type ADD Nexaacc_AccountCode NVARCHAR(20) NULL;
+    PRINT 'Added Nexaacc_AccountCode column to Account_Paid_Type';
+END
+GO
+
+-- ────────────���─────────────────────────────���───
+-- 9. Revenue Type mapping (for receipts)
+-- ───��──────────────────────────────────────────
+
+-- Add PAYMENT_METHOD entries to Accounting_Account_Mapping for payment methods that aren't already covered
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'BANK_BBL')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('BANK_BBL', N'เงินฝากธนาคาร - กรุงเทพ', '', 'ASSET');
+    PRINT 'Added BANK_BBL account mapping';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'BANK_SCB')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('BANK_SCB', N'เงินฝากธ��าคาร - ไทยพาณิชย์', '', 'ASSET');
+    PRINT 'Added BANK_SCB account mapping';
+END
+GO
+
+-- Add DIRECTOR_ADVANCE_REPAY for reimbursement flow
+IF NOT EXISTS (SELECT 1 FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'DIRECTOR_ADVANCE_REPAY')
+BEGIN
+    INSERT INTO Accounting_Account_Mapping (TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Mapping_Type) VALUES
+    ('DIRECTOR_ADVANCE_REPAY', N'คืนเงินทดรองจ่ายกรรมการ', '11820', 'ASSET');
+    PRINT 'Added DIRECTOR_ADVANCE_REPAY account mapping';
+END
+GO
+
 PRINT '================================================================';
 PRINT 'PHASE 9 Migration 01 completed successfully.';
 PRINT '';
 PRINT 'Next steps:';
 PRINT '1. Configure Nexaacc API credentials in Accounting_Integration_Config';
 PRINT '2. Map Nexaacc Account GUIDs in Accounting_Account_Mapping (Nexaacc_AccountId)';
-PRINT '3. Set Nexaacc_Enabled = true to start sync';
+PRINT '3. Link payment methods in Account_Paid_How to NextAcc accounts';
+PRINT '4. Link expense categories in Account_Paid_Type to NextAcc accounts';
+PRINT '5. Set Nexaacc_Enabled = true to start sync';
 PRINT '================================================================';
