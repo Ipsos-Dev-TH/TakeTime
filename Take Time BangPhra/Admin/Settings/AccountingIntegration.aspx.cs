@@ -526,15 +526,31 @@ namespace Take_Time_BangPhra.Admin.Settings
                     upserted++;
                 }
 
-                // Auto-match: update Accounting_Account_Mapping with matched GUIDs
+                // Fix legacy wrong codes before matching
+                int fixed5d = FixLegacyAccountCodes();
+
+                // Auto-match: update Accounting_Account_Mapping with matched GUIDs (exact match only)
                 int matched = AutoMatchMappings();
+
+                string msg = $"Sync ผังบั���ชีสำเร็จ — ดึงมา {upserted} บัญชี, จับคู่ mapping ได้ {matched} รายการ";
+                if (fixed5d > 0)
+                    msg += $", แก้รหัสเก่า {fixed5d} รายการ";
+
+                // Count unmatched for warning
+                DataTable unmatchedDt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TakeTime_Code, Nexaacc_AccountCode FROM Accounting_Account_Mapping
+                      WHERE Is_Active = 1 AND (Nexaacc_AccountId IS NULL OR Nexaacc_AccountCode = '')", null);
+                int unmatched = unmatchedDt?.Rows.Count ?? 0;
+                if (unmatched > 0)
+                    msg += $"\n⚠ ยังไม่ได้จับคู่ {unmatched} รายการ — กรุณาเลือกบัญชีจาก dropdown ในหน้า Mapping";
 
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"Sync ผังบัญชีสำเร็จ — ดึงมา {upserted} บัญชี, จับคู่ mapping ได้ {matched} รายการ" },
+                    { "message", msg },
                     { "totalAccounts", upserted },
-                    { "matched", matched }
+                    { "matched", matched },
+                    { "unmatched", unmatched }
                 };
             }
             catch (AggregateException aex)
@@ -568,44 +584,111 @@ namespace Take_Time_BangPhra.Admin.Settings
                 string accountCode = (row["Nexaacc_AccountCode"]?.ToString() ?? "").Trim();
                 if (string.IsNullOrEmpty(accountCode)) continue;
 
-                // Exact match from cache
+                // Exact match only — no prefix matching (prefix caused wrong matches like "1111" → "11111")
                 DataTable found = _code.DatabaseQuerySafe(ConnStr,
                     "SELECT TOP 1 Nexaacc_AccountId FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code AND Is_Active = 1",
                     new Dictionary<string, object> { { "@code", accountCode } });
 
-                Guid? matchedId = null;
                 if (found?.Rows.Count > 0)
                 {
-                    matchedId = (Guid)found.Rows[0]["Nexaacc_AccountId"];
-                }
-                else
-                {
-                    // Prefix match: our code starts with cached code or vice versa
-                    DataTable prefixFound = _code.DatabaseQuerySafe(ConnStr,
-                        @"SELECT TOP 1 Nexaacc_AccountId, Account_Code FROM Accounting_Nexaacc_Accounts
-                          WHERE (Account_Code LIKE @code + '%' OR @code LIKE Account_Code + '%') AND Is_Active = 1
-                          ORDER BY LEN(Account_Code) DESC",
-                        new Dictionary<string, object> { { "@code", accountCode } });
-
-                    if (prefixFound?.Rows.Count > 0)
-                    {
-                        matchedId = (Guid)prefixFound.Rows[0]["Nexaacc_AccountId"];
-                        string matchedCode = prefixFound.Rows[0]["Account_Code"]?.ToString();
-                        _code.DatabaseInsertSafe(ConnStr,
-                            "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountCode = @code WHERE ID = @id",
-                            new Dictionary<string, object> { { "@code", matchedCode }, { "@id", mappingId } });
-                    }
-                }
-
-                if (matchedId.HasValue)
-                {
+                    Guid matchedId = (Guid)found.Rows[0]["Nexaacc_AccountId"];
                     _code.DatabaseInsertSafe(ConnStr,
                         "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountId = @accId WHERE ID = @id",
-                        new Dictionary<string, object> { { "@accId", matchedId.Value }, { "@id", mappingId } });
+                        new Dictionary<string, object> { { "@accId", matchedId }, { "@id", mappingId } });
                     matched++;
                 }
             }
             return matched;
+        }
+
+        private int FixLegacyAccountCodes()
+        {
+            // Fix old 3-4 digit codes that don't match NextAcc's 5-digit codes
+            // Only fix if the old code doesn't exist in cache but a correct 5-digit code does
+            var fixes = new Dictionary<string, string>
+            {
+                // Asset codes known from NextAcc chart
+                { "111", "11111" },   // เงินสด → exact leaf account
+                { "1150", "11500" },  // สินค้าคงเหลือ
+                { "1160", "11610" },  // ภาษีซื้อ → ภาษีซื้อ ภ.พ.30
+            };
+
+            int fixCount = 0;
+            foreach (var fix in fixes)
+            {
+                // Only fix if old code is still in mapping AND new code exists in cache AND old code doesn't exist in cache
+                DataTable hasOld = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 1 FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code",
+                    new Dictionary<string, object> { { "@code", fix.Key } });
+                DataTable hasNew = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 1 FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code",
+                    new Dictionary<string, object> { { "@code", fix.Value } });
+
+                if ((hasOld == null || hasOld.Rows.Count == 0) && hasNew?.Rows.Count > 0)
+                {
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"UPDATE Accounting_Account_Mapping
+                          SET Nexaacc_AccountCode = @newCode, Nexaacc_AccountId = NULL
+                          WHERE Nexaacc_AccountCode = @oldCode AND Is_Active = 1",
+                        new Dictionary<string, object> { { "@oldCode", fix.Key }, { "@newCode", fix.Value } });
+                    fixCount++;
+                }
+            }
+
+            // Clear codes that are definitely wrong (old 4-digit bank codes that don't exist in NextAcc)
+            // These will show as "Not Linked" and user picks correct one from dropdown
+            string[] legacyBankCodes = { "1111", "1112", "1113", "1114" };
+            foreach (string code in legacyBankCodes)
+            {
+                DataTable exists = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 1 FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code",
+                    new Dictionary<string, object> { { "@code", code } });
+
+                if (exists == null || exists.Rows.Count == 0)
+                {
+                    DataTable affected = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT COUNT(*) AS cnt FROM Accounting_Account_Mapping WHERE Nexaacc_AccountCode = @code AND Is_Active = 1",
+                        new Dictionary<string, object> { { "@code", code } });
+                    int cnt = affected?.Rows.Count > 0 ? Convert.ToInt32(affected.Rows[0]["cnt"]) : 0;
+                    if (cnt > 0)
+                    {
+                        _code.DatabaseInsertSafe(ConnStr,
+                            @"UPDATE Accounting_Account_Mapping
+                              SET Nexaacc_AccountCode = '', Nexaacc_AccountId = NULL
+                              WHERE Nexaacc_AccountCode = @code AND Is_Active = 1",
+                            new Dictionary<string, object> { { "@code", code } });
+                        fixCount += cnt;
+                    }
+                }
+            }
+
+            // Also clear old liability/revenue/expense codes that don't exist
+            string[] legacyOtherCodes = { "2110", "21510", "2140", "2150", "2160", "411", "4200", "4210", "4300", "4900", "5100", "5200", "5210", "5300", "5400", "5500", "5600", "5900" };
+            foreach (string code in legacyOtherCodes)
+            {
+                DataTable exists = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 1 FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code",
+                    new Dictionary<string, object> { { "@code", code } });
+
+                if (exists == null || exists.Rows.Count == 0)
+                {
+                    DataTable affected = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT COUNT(*) AS cnt FROM Accounting_Account_Mapping WHERE Nexaacc_AccountCode = @code AND Is_Active = 1",
+                        new Dictionary<string, object> { { "@code", code } });
+                    int cnt = affected?.Rows.Count > 0 ? Convert.ToInt32(affected.Rows[0]["cnt"]) : 0;
+                    if (cnt > 0)
+                    {
+                        _code.DatabaseInsertSafe(ConnStr,
+                            @"UPDATE Accounting_Account_Mapping
+                              SET Nexaacc_AccountCode = '', Nexaacc_AccountId = NULL
+                              WHERE Nexaacc_AccountCode = @code AND Is_Active = 1",
+                            new Dictionary<string, object> { { "@code", code } });
+                        fixCount += cnt;
+                    }
+                }
+            }
+
+            return fixCount;
         }
 
         private Dictionary<string, object> GetNexaaccAccounts()
