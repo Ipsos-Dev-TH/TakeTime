@@ -118,7 +118,7 @@
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
                     <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
-                    <button type="button" class="btn-primary" onclick="testFetchAccounts()"><i class="fas fa-list"></i> ดึง Chart of Accounts</button>
+                    <button type="button" class="btn-primary" onclick="syncAccounts()"><i class="fas fa-cloud-download-alt"></i> Sync บัญชี</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
             </div>
@@ -309,10 +309,23 @@
         <!-- Account Mapping Management -->
         <div class="journey-card">
             <h3><i class="fas fa-exchange-alt"></i> Account Mapping (TakeTime &harr; Nexaacc)</h3>
-            <p style="font-size:13px; color:#666; margin-bottom:15px;">จับคู่รหัสบัญชี TakeTime กับ Nexaacc — กด "ดึง Chart of Accounts" ด้านบนเพื่อ auto-resolve Account ID</p>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">
+                จับคู่รหัสบัญชี TakeTime กับ Nexaacc — กด "Sync บัญชี" ด้านบนเพื่อดึงผังบัญชีล่าสุด
+            </p>
+            <div style="font-size:12px; color:#888; margin-bottom:15px;" id="accountSyncInfo">
+                <i class="fas fa-info-circle"></i> <span id="accountSyncStatus">ยังไม่ได้โหลดข้อมูล</span>
+            </div>
 
             <div class="btn-row" style="margin-bottom:15px;">
-                <button type="button" class="btn-primary" onclick="loadMappings()"><i class="fas fa-sync"></i> โหลด Mapping</button>
+                <button type="button" class="btn-primary" onclick="loadMappingsWithAccounts()"><i class="fas fa-sync"></i> โหลด Mapping</button>
+                <select id="mappingTypeFilter" style="padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;" onchange="filterMappingsByType()">
+                    <option value="">ทุกประเภท</option>
+                    <option value="PAYMENT_METHOD">PAYMENT_METHOD</option>
+                    <option value="REVENUE">REVENUE</option>
+                    <option value="EXPENSE">EXPENSE</option>
+                    <option value="ASSET">ASSET</option>
+                    <option value="LIABILITY">LIABILITY</option>
+                </select>
             </div>
 
             <div style="overflow-x:auto;">
@@ -321,15 +334,14 @@
                         <tr>
                             <th>TakeTime Code</th>
                             <th>คำอธิบาย</th>
-                            <th>Account Code (Nexaacc)</th>
-                            <th>Account ID</th>
+                            <th style="min-width:260px;">บัญชี Nexaacc</th>
                             <th>ประเภท</th>
                             <th>สถานะ</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody id="mappingBody">
-                        <tr><td colspan="7" style="text-align:center; color:#999;">กดปุ่ม "โหลด Mapping" เพื่อดูข้อมูล</td></tr>
+                        <tr><td colspan="6" style="text-align:center; color:#999;">กดปุ่ม "โหลด Mapping" เพื่อดูข้อมูล</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -418,8 +430,8 @@
             getAction('testApi', 'apiTestResult');
         }
 
-        function testFetchAccounts() {
-            getAction('fetchAccounts', 'apiTestResult');
+        function syncAccounts() {
+            getAction('syncAccounts', 'apiTestResult');
         }
 
         function processQueue() {
@@ -506,7 +518,10 @@
                 html += '<td>' + item.created + '</td>';
                 html += '<td>';
                 if (item.status === 'FAILED') {
-                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')"><i class="fas fa-redo"></i></button>';
+                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
+                }
+                if (item.status === 'COMPLETED' || item.status === 'FAILED') {
+                    html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
                 }
                 html += '</td>';
                 html += '</tr>';
@@ -551,6 +566,18 @@
             fetch(pageUrl + '?action=retryItem&queueId=' + queueId + '&_=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(data) { loadQueueData(); })
+                .catch(function(err) { alert(err.message); });
+        }
+
+        function resyncItem(queueId) {
+            if (!confirm('ยืนยันยิง API ใหม่สำหรับ Queue #' + queueId + '?\n(จะลบผลเดิมและสร้างใหม่บน NextAcc)'))
+                return;
+            fetch(pageUrl + '?action=resyncItem&queueId=' + queueId + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    alert(data.message);
+                    loadQueueData();
+                })
                 .catch(function(err) { alert(err.message); });
         }
 
@@ -628,20 +655,42 @@
                 el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
             });
         }
-        function loadMappings() {
-            fetch(pageUrl + '?action=mappings&_=' + Date.now())
+        // ── Account Sync & Mapping ──
+
+        var nexaaccAccountsCache = [];
+        var allMappings = [];
+
+        function loadMappingsWithAccounts() {
+            // Load cached accounts first, then mappings
+            fetch(pageUrl + '?action=nexaaccAccounts&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        nexaaccAccountsCache = data.items || [];
+                        var syncEl = document.getElementById('accountSyncStatus');
+                        syncEl.textContent = 'ผังบัญชี ' + data.total + ' รายการ (sync ล่าสุด: ' + (data.lastSync || '-') + ')';
+                    }
+                    return fetch(pageUrl + '?action=mappings&_=' + Date.now());
+                })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (!data.success) { alert(data.message); return; }
-                    renderMappings(data.items || []);
+                    allMappings = data.items || [];
+                    filterMappingsByType();
                 })
                 .catch(function(err) { console.error(err); });
+        }
+
+        function filterMappingsByType() {
+            var filter = document.getElementById('mappingTypeFilter').value;
+            var filtered = filter ? allMappings.filter(function(m) { return m.mappingType === filter; }) : allMappings;
+            renderMappings(filtered);
         }
 
         function renderMappings(items) {
             var tbody = document.getElementById('mappingBody');
             if (!items.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#999;">ไม่พบข้อมูล Mapping</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999;">ไม่พบข้อมูล Mapping</td></tr>';
                 return;
             }
             var html = '';
@@ -650,13 +699,11 @@
                 var statusBadge = hasId
                     ? '<span class="status-badge status-connected">Linked</span>'
                     : '<span class="status-badge status-error">Not Linked</span>';
-                var idDisplay = hasId ? item.accountId.substring(0, 8) + '...' : '<span style="color:#C62828;">-</span>';
 
                 html += '<tr>';
                 html += '<td><strong>' + item.code + '</strong></td>';
-                html += '<td>' + (item.description || '-') + '</td>';
-                html += '<td><input type="text" id="mapCode_' + item.id + '" value="' + (item.accountCode || '') + '" style="width:80px; padding:4px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;" /></td>';
-                html += '<td style="font-size:11px; font-family:monospace;">' + idDisplay + '</td>';
+                html += '<td style="font-size:12px;">' + (item.description || '-') + '</td>';
+                html += '<td>' + buildAccountSelect(item.id, item.accountCode, item.accountId) + '</td>';
                 html += '<td><span style="font-size:11px; color:#666;">' + (item.mappingType || '') + '</span></td>';
                 html += '<td>' + statusBadge + '</td>';
                 html += '<td><button class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="updateMapping(' + item.id + ')"><i class="fas fa-save"></i></button></td>';
@@ -665,20 +712,96 @@
             tbody.innerHTML = html;
         }
 
+        function buildAccountSelect(mappingId, currentCode, currentAccountId) {
+            if (nexaaccAccountsCache.length === 0) {
+                // Fallback to text input if no cached accounts
+                return '<input type="text" id="mapCode_' + mappingId + '" value="' + (currentCode || '') + '" '
+                    + 'style="width:120px; padding:4px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />'
+                    + '<input type="hidden" id="mapAccId_' + mappingId + '" value="" />'
+                    + '<div style="font-size:10px; color:#999; margin-top:2px;">กด Sync บัญชี เพื่อแสดง dropdown</div>';
+            }
+
+            var selId = 'mapSelect_' + mappingId;
+            var html = '<select id="' + selId + '" style="width:100%; max-width:320px; padding:5px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;">';
+            html += '<option value="">-- เลือกบัญชี --</option>';
+
+            var groups = {};
+            nexaaccAccountsCache.forEach(function(acc) {
+                var t = acc.type || 'Other';
+                if (!groups[t]) groups[t] = [];
+                groups[t].push(acc);
+            });
+
+            var typeOrder = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
+            typeOrder.forEach(function(typeName) {
+                var accs = groups[typeName];
+                if (!accs) return;
+                html += '<optgroup label="' + typeName + '">';
+                accs.forEach(function(acc) {
+                    var indent = '';
+                    for (var i = 0; i < (acc.level || 0); i++) indent += '&nbsp;&nbsp;';
+                    var selected = '';
+                    if (currentAccountId && acc.id === currentAccountId) selected = ' selected';
+                    else if (!currentAccountId && currentCode && acc.code === currentCode) selected = ' selected';
+                    html += '<option value="' + acc.id + '|' + acc.code + '"' + selected + '>'
+                        + indent + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                });
+                html += '</optgroup>';
+            });
+
+            // Any remaining types not in typeOrder
+            for (var t in groups) {
+                if (typeOrder.indexOf(t) === -1) {
+                    var accs = groups[t];
+                    html += '<optgroup label="' + t + '">';
+                    accs.forEach(function(acc) {
+                        var selected = '';
+                        if (currentAccountId && acc.id === currentAccountId) selected = ' selected';
+                        else if (!currentAccountId && currentCode && acc.code === currentCode) selected = ' selected';
+                        html += '<option value="' + acc.id + '|' + acc.code + '"' + selected + '>'
+                            + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                    });
+                    html += '</optgroup>';
+                }
+            }
+
+            html += '</select>';
+            return html;
+        }
+
         function updateMapping(id) {
-            var newCode = document.getElementById('mapCode_' + id).value.trim();
-            if (!newCode) { alert('กรุณาใส่ Account Code'); return; }
+            var sel = document.getElementById('mapSelect_' + id);
+            var accountCode = '';
+            var accountId = '';
+
+            if (sel) {
+                var val = sel.value;
+                if (!val) { alert('กรุณาเลือกบัญชี'); return; }
+                var parts = val.split('|');
+                accountId = parts[0] || '';
+                accountCode = parts[1] || '';
+            } else {
+                // Fallback: text input mode
+                var inp = document.getElementById('mapCode_' + id);
+                if (inp) accountCode = inp.value.trim();
+                if (!accountCode) { alert('กรุณาใส่ Account Code'); return; }
+            }
 
             var el = document.getElementById('mappingResult');
             el.className = 'test-result loading';
             el.textContent = 'กำลังอัปเดต...';
 
-            fetch(pageUrl + '?action=updateMapping&id=' + id + '&accountCode=' + encodeURIComponent(newCode) + '&_=' + Date.now())
+            var url = pageUrl + '?action=updateMapping&id=' + id
+                + '&accountCode=' + encodeURIComponent(accountCode)
+                + '&accountId=' + encodeURIComponent(accountId)
+                + '&_=' + Date.now();
+
+            fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
                     el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
-                    if (data.success) loadMappings();
+                    if (data.success) loadMappingsWithAccounts();
                 })
                 .catch(function(err) {
                     el.className = 'test-result error';

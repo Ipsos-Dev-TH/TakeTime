@@ -11,9 +11,11 @@ namespace Take_Time_BangPhra.Integration
     /// Orchestrates automatic sync between TakeTime and Nexaacc Accounting.
     /// Uses a database queue for reliable async processing with retry logic.
     ///
-    /// Usage from trigger points:
-    ///   var sync = new AccountingSyncService();
-    ///   sync.EnqueueReservationDeposit(reservationId, amount, paymentMethod, date, customerName);
+    /// ทุก entry ต้องผูกกับเอกสารจริง — ใช้เฉพาะ:
+    ///   sync.EnqueueReceipt(resId, receiptNumber, ...);
+    ///   sync.EnqueuePaymentVoucher(voucherId, ..., documentNumber: docNum);
+    ///   sync.EnqueueVoidReceipt(receiptNumber);
+    ///   sync.EnqueueVoidPaymentVoucher(documentNumber);
     /// </summary>
     public class AccountingSyncService
     {
@@ -43,132 +45,10 @@ namespace Take_Time_BangPhra.Integration
         // ──────────────────────────────────────────────
         // Enqueue Methods (called from trigger points)
         // Fire-and-forget — adds to queue for background processing
+        //
+        // ทุก entry ต้องผูกกับเอกสารจริง (receiptNumber หรือ documentNumber)
+        // ใช้เฉพาะ: EnqueueReceipt, EnqueuePaymentVoucher, EnqueueVoidReceipt, EnqueueVoidPaymentVoucher
         // ──────────────────────────────────────────────
-
-        /// <summary>
-        /// Enqueue deposit received for a reservation.
-        /// Call after recording deposit in MakePayment.aspx.cs
-        /// </summary>
-        public long EnqueueReservationDeposit(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (amount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueReservationDeposit skipped: amount is {amount} for Reservation #{reservationId}. Caller should check amount before enqueuing.", "SYSTEM");
-                return -1;
-            }
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "amount", amount },
-                { "paymentMethod", paymentMethod },
-                { "paymentDate", paymentDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_DEPOSIT_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue full payment received for a reservation.
-        /// Call after recording payment in MakePayment.aspx.cs
-        /// </summary>
-        public long EnqueueReservationPayment(int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName, bool hasVat = false)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (amount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueReservationPayment skipped: amount is {amount} for Reservation #{reservationId}. Caller should check amount before enqueuing.", "SYSTEM");
-                return -1;
-            }
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "amount", amount },
-                { "paymentMethod", paymentMethod },
-                { "paymentDate", paymentDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName },
-                { "hasVat", hasVat }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_PAYMENT_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue checkout for revenue recognition.
-        /// Call after successful checkout in Checkout.aspx.cs
-        /// </summary>
-        public long EnqueueCheckout(int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
-        {
-            if (!_config.IsConfigured) return -1;
-
-            // If depositAmount is 0, try to recover from Payment_History before skipping
-            if (depositAmount <= 0)
-            {
-                try
-                {
-                    var fallbackParams = new Dictionary<string, object> { { "@id", reservationId } };
-                    var dt = _code.DatabaseQuerySafe(_connectionString,
-                        @"SELECT ISNULL(SUM(PaymentAmount), 0) AS TotalPaid
-                          FROM Payment_History
-                          WHERE Reservation_ID = @id AND Status = 'COMPLETED'",
-                        fallbackParams);
-                    if (dt?.Rows.Count > 0)
-                    {
-                        decimal recovered = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
-                        if (recovered > 0)
-                        {
-                            depositAmount = recovered;
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"EnqueueCheckout: depositAmount was 0, recovered {depositAmount:N2} from Payment_History for Reservation #{reservationId}.", "SYSTEM");
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            // Still 0? Enqueue anyway - the processor has its own fallback chain
-            if (depositAmount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueCheckout: depositAmount is {depositAmount} for Reservation #{reservationId}. Enqueuing with 0 - processor will attempt fallback.", "SYSTEM");
-            }
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "depositAmount", depositAmount },
-                { "customerName", customerName },
-                { "checkoutDate", checkoutDate.ToString("yyyy-MM-dd") }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_CHECKOUT_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue refund for a cancelled reservation.
-        /// Call after cancellation with refund.
-        /// </summary>
-        public long EnqueueRefund(int reservationId, decimal refundAmount, string paymentMethod, DateTime refundDate, string customerName)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (refundAmount <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "refundAmount", refundAmount },
-                { "paymentMethod", paymentMethod },
-                { "refundDate", refundDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_REFUND_JOURNAL", payload);
-        }
 
         /// <summary>
         /// Enqueue payment voucher (expense).
@@ -209,74 +89,6 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// Enqueue room charge (product sold to guest).
-        /// Call after RoomChargeService.ChargeToRoom()
-        /// </summary>
-        public long EnqueueRoomCharge(int reservationId, decimal salesAmount, decimal costAmount, DateTime chargeDate, string description)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (salesAmount <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "salesAmount", salesAmount },
-                { "costAmount", costAmount },
-                { "chargeDate", chargeDate.ToString("yyyy-MM-dd") },
-                { "description", description }
-            };
-
-            return InsertQueue("ROOM_CHARGE", reservationId, "CREATE_ROOM_CHARGE_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue stock received (purchase).
-        /// Call after Product/In.aspx.cs stock adjustment.
-        /// รองรับทั้งซื้อเงินสด (DR Inventory, CR Cash/Bank) และซื้อเชื่อ (DR Inventory, CR AP)
-        /// </summary>
-        public long EnqueueStockIn(int productId, string productName, decimal totalCost, DateTime receiveDate,
-            string supplierName, string paymentMethod = null, bool hasInputVat = false)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (totalCost <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "productId", productId },
-                { "productName", productName },
-                { "totalCost", totalCost },
-                { "receiveDate", receiveDate.ToString("yyyy-MM-dd") },
-                { "supplierName", supplierName },
-                { "paymentMethod", paymentMethod ?? "" },
-                { "hasInputVat", hasInputVat }
-            };
-
-            return InsertQueue("PRODUCT", productId, "CREATE_STOCK_IN_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue product sync (create/update product in Nexaacc).
-        /// Call after product creation in Product/Default.aspx.cs
-        /// </summary>
-        public long EnqueueProductSync(int productId, string productName, string description, decimal sellingPrice, decimal costPrice, string unit, string categoryName)
-        {
-            if (!_config.IsConfigured) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "productId", productId },
-                { "productName", productName },
-                { "description", description },
-                { "sellingPrice", sellingPrice },
-                { "costPrice", costPrice },
-                { "unit", unit },
-                { "categoryName", categoryName }
-            };
-
-            return InsertQueue("PRODUCT", productId, "SYNC_PRODUCT", payload);
-        }
-
-        /// <summary>
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
@@ -301,167 +113,6 @@ namespace Take_Time_BangPhra.Integration
             };
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
-        }
-
-        /// <summary>
-        /// Enqueue credit note document creation.
-        /// Call after AccountingService.CreateCreditNote()
-        /// </summary>
-        public long EnqueueCreditNote(long creditNoteId, string creditNoteNumber, decimal totalAmount, decimal vatAmount, DateTime creditNoteDate, string reason)
-        {
-            if (!_config.IsConfigured) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "creditNoteId", creditNoteId },
-                { "creditNoteNumber", creditNoteNumber },
-                { "totalAmount", totalAmount },
-                { "vatAmount", vatAmount },
-                { "creditNoteDate", creditNoteDate.ToString("yyyy-MM-dd") },
-                { "reason", reason }
-            };
-
-            return InsertQueue("CREDIT_NOTE", (int)creditNoteId, "CREATE_CREDIT_NOTE_DOCUMENT", payload);
-        }
-
-        /// <summary>
-        /// Enqueue payroll journal entry.
-        /// Call after PayrollService processes payroll.
-        /// รองรับประกันสังคม (SSF) และภาษีหัก ณ ที่จ่าย (WHT) ตามกฎหมายไทย
-        /// </summary>
-        public long EnqueuePayroll(decimal totalSalary, DateTime payDate, string period,
-            decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
-            decimal whtAmount = 0)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (totalSalary <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "totalSalary", totalSalary },
-                { "payDate", payDate.ToString("yyyy-MM-dd") },
-                { "period", period },
-                { "socialSecurityEmployee", socialSecurityEmployee },
-                { "socialSecurityEmployer", socialSecurityEmployer },
-                { "whtAmount", whtAmount }
-            };
-
-            return InsertQueue("PAYROLL", 0, "CREATE_PAYROLL_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue cancellation without refund — forfeited deposit recognized as revenue.
-        /// Call after cancellation where customer does NOT get a refund.
-        /// DR: Advance Deposit (เงินรับล่วงหน้า)  CR: Other Income (รายได้อื่น)
-        /// </summary>
-        public long EnqueueCancellationNoRefund(int reservationId, decimal depositAmount, string customerName, DateTime cancelDate)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (depositAmount <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "depositAmount", depositAmount },
-                { "customerName", customerName },
-                { "cancelDate", cancelDate.ToString("yyyy-MM-dd") }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_CANCEL_NO_REFUND_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue standalone POS sale (not charged to room).
-        /// DR: Cash/Bank  CR: Product Revenue + COGS entries
-        /// </summary>
-        public long EnqueuePOSSale(string receiptId, decimal totalAmount, decimal totalCost, string paymentMethod, DateTime saleDate, string description)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (totalAmount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueuePOSSale skipped: totalAmount is {totalAmount} for Receipt: {receiptId}.", "SYSTEM");
-                return -1;
-            }
-
-            var payload = new Dictionary<string, object>
-            {
-                { "receiptId", receiptId },
-                { "totalAmount", totalAmount },
-                { "totalCost", totalCost },
-                { "paymentMethod", paymentMethod },
-                { "saleDate", saleDate.ToString("yyyy-MM-dd") },
-                { "description", description }
-            };
-
-            return InsertQueue("POS_SALE", 0, "CREATE_POS_SALE_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue postpone price difference adjustment.
-        /// When a guest reschedules to a different date with price difference.
-        /// If newPrice > oldPrice: DR: Customer AR  CR: Room Revenue (additional charge)
-        /// If newPrice < oldPrice: DR: Room Revenue  CR: Customer AR (partial refund/credit)
-        /// </summary>
-        public long EnqueuePostponePriceDiff(int reservationId, decimal priceDifference, DateTime rescheduleDate, string customerName)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (priceDifference == 0) return -1; // No price difference, no journal entry needed
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "priceDifference", priceDifference },
-                { "rescheduleDate", rescheduleDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_POSTPONE_PRICE_DIFF_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue partial refund for a reservation.
-        /// When only part of the deposit is refunded (e.g., cancellation fee deducted).
-        /// </summary>
-        public long EnqueuePartialRefund(int reservationId, decimal refundAmount, decimal retainedAmount, string paymentMethod, DateTime refundDate, string customerName, string reason)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (refundAmount <= 0 && retainedAmount <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "refundAmount", refundAmount },
-                { "retainedAmount", retainedAmount },
-                { "paymentMethod", paymentMethod },
-                { "refundDate", refundDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName },
-                { "reason", reason }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_PARTIAL_REFUND_JOURNAL", payload);
-        }
-
-        /// <summary>
-        /// Enqueue damage/missing item charge at checkout.
-        /// DR: Cash/Bank or Customer AR  CR: Other Income
-        /// </summary>
-        public long EnqueueDamageCharge(int reservationId, decimal damageAmount, decimal missingItemsAmount, DateTime chargeDate, string customerName, string description)
-        {
-            if (!_config.IsConfigured) return -1;
-            if (damageAmount <= 0 && missingItemsAmount <= 0) return -1;
-
-            var payload = new Dictionary<string, object>
-            {
-                { "reservationId", reservationId },
-                { "damageAmount", damageAmount },
-                { "missingItemsAmount", missingItemsAmount },
-                { "chargeDate", chargeDate.ToString("yyyy-MM-dd") },
-                { "customerName", customerName },
-                { "description", description }
-            };
-
-            return InsertQueue("RESERVATION", reservationId, "CREATE_DAMAGE_CHARGE_JOURNAL", payload);
         }
 
         // ──────────────────────────────────────────────
@@ -600,6 +251,10 @@ namespace Take_Time_BangPhra.Integration
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", "Skipped: zero amount after fallback lookup - no accounting entry needed", nexaaccId);
                     }
+                    else if (nexaaccId == "SKIPPED_DEPRECATED")
+                    {
+                        UpdateQueueStatus(queueId, "COMPLETED", $"Skipped: deprecated action type '{actionType}' — ไม่มีเอกสารผูก", nexaaccId);
+                    }
                     else
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
@@ -697,59 +352,37 @@ namespace Take_Time_BangPhra.Integration
             {
             switch (actionType)
             {
-                case "CREATE_DEPOSIT_JOURNAL":
-                    return await ProcessDepositJournal(payload);
-
-                case "CREATE_PAYMENT_JOURNAL":
-                    return await ProcessPaymentJournal(payload);
-
-                case "CREATE_CHECKOUT_JOURNAL":
-                    return await ProcessCheckoutJournal(payload);
-
-                case "CREATE_REFUND_JOURNAL":
-                    return await ProcessRefundJournal(payload);
-
-                case "CREATE_VOUCHER_JOURNAL":
-                    return await ProcessVoucherJournal(payload);
-
-                case "CREATE_ROOM_CHARGE_JOURNAL":
-                    return await ProcessRoomChargeJournal(payload);
-
-                case "CREATE_STOCK_IN_JOURNAL":
-                    return await ProcessStockInJournal(payload);
-
-                case "SYNC_PRODUCT":
-                    return await ProcessProductSync(payload);
-
+                // ── Active processors (ผูกกับเอกสารจริง) ──
                 case "CREATE_RECEIPT_DOCUMENT":
                     return await ProcessReceiptDocument(payload);
 
-                case "CREATE_CREDIT_NOTE_DOCUMENT":
-                    return await ProcessCreditNoteDocument(payload);
-
-                case "CREATE_PAYROLL_JOURNAL":
-                    return await ProcessPayrollJournal(payload);
-
-                case "CREATE_CANCEL_NO_REFUND_JOURNAL":
-                    return await ProcessCancelNoRefundJournal(payload);
-
-                case "CREATE_POS_SALE_JOURNAL":
-                    return await ProcessPOSSaleJournal(payload);
-
-                case "CREATE_POSTPONE_PRICE_DIFF_JOURNAL":
-                    return await ProcessPostponePriceDiffJournal(payload);
-
-                case "CREATE_PARTIAL_REFUND_JOURNAL":
-                    return await ProcessPartialRefundJournal(payload);
-
-                case "CREATE_DAMAGE_CHARGE_JOURNAL":
-                    return await ProcessDamageChargeJournal(payload);
+                case "CREATE_VOUCHER_JOURNAL":
+                    return await ProcessVoucherJournal(payload);
 
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);
 
                 case "VOID_VOUCHER":
                     return await ProcessVoidVoucher(payload);
+
+                // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
+                case "CREATE_DEPOSIT_JOURNAL":
+                case "CREATE_PAYMENT_JOURNAL":
+                case "CREATE_CHECKOUT_JOURNAL":
+                case "CREATE_REFUND_JOURNAL":
+                case "CREATE_ROOM_CHARGE_JOURNAL":
+                case "CREATE_STOCK_IN_JOURNAL":
+                case "SYNC_PRODUCT":
+                case "CREATE_CREDIT_NOTE_DOCUMENT":
+                case "CREATE_PAYROLL_JOURNAL":
+                case "CREATE_CANCEL_NO_REFUND_JOURNAL":
+                case "CREATE_POS_SALE_JOURNAL":
+                case "CREATE_POSTPONE_PRICE_DIFF_JOURNAL":
+                case "CREATE_PARTIAL_REFUND_JOURNAL":
+                case "CREATE_DAMAGE_CHARGE_JOURNAL":
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SKIPPED deprecated action type '{actionType}' — ไม่มีเอกสารผูก ใช้ EnqueueReceipt/EnqueuePaymentVoucher แทน", "SYSTEM");
+                    return "SKIPPED_DEPRECATED";
 
                 default:
                     throw new Exception($"Unknown action type: {actionType}");
@@ -810,183 +443,6 @@ namespace Take_Time_BangPhra.Integration
         // Individual Processors
         // ──────────────────────────────────────────────
 
-        private async Task<string> ProcessDepositJournal(Dictionary<string, object> p)
-        {
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            var amount = Convert.ToDecimal(p["amount"]);
-
-            if (amount <= 0)
-            {
-                amount = LookupPaidAmount(reservationId, "DEPOSIT");
-                if (amount > 0)
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessDepositJournal: payload amount was 0, recovered {amount:N2} from Payment_History. Reservation #{reservationId}", "SYSTEM");
-            }
-
-            if (amount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositJournal skipped: amount is {amount} after fallback lookup. Reservation #{reservationId}", "SYSTEM");
-                return "SKIPPED_ZERO_AMOUNT";
-            }
-
-            string paymentMethod = p["paymentMethod"]?.ToString();
-            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
-            string customerName = p["customerName"]?.ToString();
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapDepositToInvoice(reservationId, amount, paymentMethod, paymentDate, customerName);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapDepositToJournal(reservationId, amount, paymentMethod, paymentDate, customerName);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessPaymentJournal(Dictionary<string, object> p)
-        {
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            var amount = Convert.ToDecimal(p["amount"]);
-
-            if (amount <= 0)
-            {
-                amount = LookupPaidAmount(reservationId, "ADDITIONAL");
-                if (amount > 0)
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessPaymentJournal: payload amount was 0, recovered {amount:N2} from Payment_History. Reservation #{reservationId}", "SYSTEM");
-            }
-
-            if (amount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPaymentJournal skipped: amount is {amount} after fallback lookup. Reservation #{reservationId}", "SYSTEM");
-                return "SKIPPED_ZERO_AMOUNT";
-            }
-
-            string paymentMethod = p["paymentMethod"]?.ToString();
-            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
-            string customerName = p["customerName"]?.ToString();
-            bool hasVat = p.ContainsKey("hasVat") && Convert.ToBoolean(p["hasVat"]);
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapPaymentToInvoice(reservationId, amount, paymentMethod, paymentDate, customerName, hasVat);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapPaymentToJournal(reservationId, amount, paymentMethod, paymentDate, customerName, hasVat);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessCheckoutJournal(Dictionary<string, object> p)
-        {
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            var depositAmount = Convert.ToDecimal(p["depositAmount"]);
-
-            // Fallback chain when payload depositAmount is 0:
-            // 1. Payment_History (most reliable - actual payments received)
-            // 2. Reservation.Deposit field
-            // 3. Reservation.TotalPrice (last resort for revenue recognition)
-            if (depositAmount <= 0)
-            {
-                try
-                {
-                    var fallbackParams = new Dictionary<string, object> { { "@id", reservationId } };
-                    var dt = _code.DatabaseQuerySafe(_connectionString,
-                        @"SELECT
-                            ISNULL(ph.TotalPaid, 0) AS TotalPaid,
-                            ISNULL(r.Deposit, 0) AS Deposit,
-                            ISNULL(r.TotalPrice, 0) AS TotalPrice
-                          FROM Reservation r
-                          LEFT JOIN (
-                              SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid
-                              FROM Payment_History
-                              WHERE Status = 'COMPLETED'
-                              GROUP BY Reservation_ID
-                          ) ph ON ph.Reservation_ID = r.ID
-                          WHERE r.ID = @id",
-                        fallbackParams);
-
-                    if (dt?.Rows.Count > 0)
-                    {
-                        decimal totalPaid = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
-                        decimal deposit = Convert.ToDecimal(dt.Rows[0]["Deposit"]);
-                        decimal totalPrice = Convert.ToDecimal(dt.Rows[0]["TotalPrice"]);
-
-                        // Priority: TotalPaid > Deposit > TotalPrice
-                        if (totalPaid > 0)
-                            depositAmount = totalPaid;
-                        else if (deposit > 0)
-                            depositAmount = deposit;
-                        else if (totalPrice > 0)
-                            depositAmount = totalPrice;
-
-                        if (depositAmount > 0)
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessCheckoutJournal: payload depositAmount was 0, recovered {depositAmount:N2} from DB (TotalPaid={totalPaid:N2}, Deposit={deposit:N2}, TotalPrice={totalPrice:N2}). Reservation #{reservationId}", "SYSTEM");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessCheckoutJournal: fallback lookup failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
-                }
-            }
-
-            if (depositAmount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessCheckoutJournal skipped: depositAmount is {depositAmount} after all fallback lookups. Reservation #{reservationId}", "SYSTEM");
-                return "SKIPPED_ZERO_AMOUNT";
-            }
-
-            string customerName = p["customerName"]?.ToString();
-            DateTime checkoutDate = DateTime.Parse(p["checkoutDate"]?.ToString());
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapCheckoutToInvoice(reservationId, depositAmount, customerName, checkoutDate);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessRefundJournal(Dictionary<string, object> p)
-        {
-            var refundAmount = Convert.ToDecimal(p["refundAmount"]);
-            if (refundAmount <= 0)
-                throw new ArgumentException($"Cannot create refund journal: refundAmount is {refundAmount} (must be > 0). Reservation #{p["reservationId"]}");
-
-            var journal = _mapper.MapRefundToJournal(
-                Convert.ToInt32(p["reservationId"]),
-                refundAmount,
-                p["paymentMethod"]?.ToString(),
-                DateTime.Parse(p["refundDate"]?.ToString()),
-                p["customerName"]?.ToString());
-
-            var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
-        }
-
         private async Task<string> ProcessVoucherJournal(Dictionary<string, object> p)
         {
             var amount = Convert.ToDecimal(p["amount"]);
@@ -1023,75 +479,6 @@ namespace Take_Time_BangPhra.Integration
                 await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
             }
-        }
-
-        private async Task<string> ProcessRoomChargeJournal(Dictionary<string, object> p)
-        {
-            var salesAmount = Convert.ToDecimal(p["salesAmount"]);
-            if (salesAmount <= 0)
-                throw new ArgumentException($"Cannot create room charge journal: salesAmount is {salesAmount} (must be > 0). Reservation #{p["reservationId"]}");
-
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            decimal costAmount = Convert.ToDecimal(p["costAmount"]);
-            DateTime chargeDate = DateTime.Parse(p["chargeDate"]?.ToString());
-            string description = p["description"]?.ToString();
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapRoomChargeToInvoice(reservationId, salesAmount, costAmount, chargeDate, description);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapRoomChargeToJournal(reservationId, salesAmount, costAmount, chargeDate, description);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessStockInJournal(Dictionary<string, object> p)
-        {
-            var totalCost = Convert.ToDecimal(p["totalCost"]);
-            if (totalCost <= 0)
-                throw new ArgumentException($"Cannot create stock-in journal: totalCost is {totalCost} (must be > 0). Product #{p["productId"]}");
-
-            int productId = Convert.ToInt32(p["productId"]);
-            string productName = p["productName"]?.ToString();
-            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
-            DateTime receiveDate = DateTime.Parse(p["receiveDate"]?.ToString());
-            string supplierName = p["supplierName"]?.ToString();
-
-            if (_config.IsDocumentMode)
-            {
-                var expense = _mapper.MapStockInToExpense(productId, productName, totalCost, paymentMethod, receiveDate, supplierName);
-                var result = await _apiClient.CreateExpenseAsync(expense);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                bool hasVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
-                var journal = _mapper.MapStockInToJournal(productId, productName, totalCost, receiveDate, supplierName, paymentMethod, hasVat);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessProductSync(Dictionary<string, object> p)
-        {
-            var product = _mapper.MapProductToNexaacc(
-                Convert.ToInt32(p["productId"]),
-                p["productName"]?.ToString(),
-                p["description"]?.ToString(),
-                Convert.ToDecimal(p["sellingPrice"]),
-                Convert.ToDecimal(p["costPrice"]),
-                p["unit"]?.ToString(),
-                p["categoryName"]?.ToString());
-
-            var result = await _apiClient.CreateProductAsync(product);
-            return result.data.Id.ToString();
         }
 
         private async Task<string> ProcessReceiptDocument(Dictionary<string, object> p)
@@ -1153,221 +540,6 @@ namespace Take_Time_BangPhra.Integration
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
                 }
-            }
-        }
-
-        private async Task<string> ProcessCreditNoteDocument(Dictionary<string, object> p)
-        {
-            var totalAmount = Convert.ToDecimal(p["totalAmount"]);
-            if (totalAmount <= 0)
-                throw new ArgumentException($"Cannot create credit note document: totalAmount is {totalAmount} (must be > 0). CreditNote #{p["creditNoteId"]}");
-
-            var document = _mapper.MapCreditNoteToDocument(
-                p["creditNoteNumber"]?.ToString(),
-                totalAmount,
-                Convert.ToDecimal(p["vatAmount"]),
-                DateTime.Parse(p["creditNoteDate"]?.ToString()),
-                null,
-                p["reason"]?.ToString());
-
-            var result = await _apiClient.CreateDocumentAsync(document);
-            await SafeApproveDocumentAsync(result.data.Id);
-            return result.data.Id.ToString();
-        }
-
-        private async Task<string> ProcessPayrollJournal(Dictionary<string, object> p)
-        {
-            var totalSalary = Convert.ToDecimal(p["totalSalary"]);
-            if (totalSalary <= 0)
-                throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary} (must be > 0). Period: {p["period"]}");
-
-            string period = p["period"]?.ToString();
-            decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
-            decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
-            decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
-            DateTime payDate = DateTime.Parse(p["payDate"]?.ToString());
-            string description = p.ContainsKey("description") ? p["description"]?.ToString() : null;
-
-            if (_config.IsDocumentMode)
-            {
-                var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate, description);
-                var result = await _apiClient.CreateExpenseAsync(expense);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period, ssfEmployee, ssfEmployer, whtAmount);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessCancelNoRefundJournal(Dictionary<string, object> p)
-        {
-            var depositAmount = Convert.ToDecimal(p["depositAmount"]);
-            if (depositAmount <= 0)
-                throw new ArgumentException($"Cannot create cancel-no-refund journal: depositAmount is {depositAmount} (must be > 0). Reservation #{p["reservationId"]}");
-
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            string customerName = p["customerName"]?.ToString();
-            DateTime cancelDate = DateTime.Parse(p["cancelDate"]?.ToString());
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapCancelNoRefundToInvoice(reservationId, depositAmount, customerName, cancelDate);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapCancelNoRefundToJournal(reservationId, depositAmount, customerName, cancelDate);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        private async Task<string> ProcessPOSSaleJournal(Dictionary<string, object> p)
-        {
-            var totalAmount = Convert.ToDecimal(p["totalAmount"]);
-            string receiptId = p["receiptId"]?.ToString() ?? "UNKNOWN";
-            string paymentMethod = p["paymentMethod"]?.ToString() ?? "CASH";
-
-            if (totalAmount <= 0)
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPOSSaleJournal skipped: totalAmount is {totalAmount}. Receipt: {receiptId}", "SYSTEM");
-                return "SKIPPED_ZERO_AMOUNT";
-            }
-
-            // Validate account mappings exist before calling API to prevent "must have debit/credit" errors
-            if (!_mapper.TryGetAccountId("PRODUCT_REVENUE", out _))
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPOSSaleJournal skipped: PRODUCT_REVENUE account not mapped. Receipt: {receiptId}", "SYSTEM");
-                throw new ArgumentException($"Cannot create POS sale journal: PRODUCT_REVENUE account is not mapped. Please configure in Accounting_Account_Mapping table. Receipt: {receiptId}");
-            }
-
-            // Validate payment method account exists
-            string paymentAccountKey = ResolvePaymentMethodKey(paymentMethod);
-            if (!_mapper.TryGetAccountId(paymentAccountKey, out _))
-            {
-                // Try CASH as fallback
-                if (!_mapper.TryGetAccountId("CASH", out _))
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessPOSSaleJournal skipped: No account mapping for payment method '{paymentMethod}' (key: {paymentAccountKey}) and no CASH fallback. Receipt: {receiptId}", "SYSTEM");
-                    throw new ArgumentException($"Cannot create POS sale journal: No account mapping for payment method '{paymentMethod}'. Please configure in Accounting_Account_Mapping table. Receipt: {receiptId}");
-                }
-                paymentMethod = "CASH"; // Use CASH as fallback
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPOSSaleJournal: No mapping for '{p["paymentMethod"]}', falling back to CASH. Receipt: {receiptId}", "SYSTEM");
-            }
-
-            decimal totalCost = Convert.ToDecimal(p["totalCost"]);
-            DateTime saleDate = DateTime.Parse(p["saleDate"]?.ToString());
-            string description = p["description"]?.ToString();
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapPOSSaleToInvoice(receiptId, totalAmount, totalCost, paymentMethod, saleDate, description);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapPOSSaleToJournal(receiptId, totalAmount, totalCost, paymentMethod, saleDate, description);
-
-                if (journal.Lines == null || journal.Lines.Count < 2)
-                    throw new ArgumentException($"Cannot create POS sale journal: mapped journal has {journal.Lines?.Count ?? 0} lines (need at least 2). Receipt: {receiptId}");
-
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
-            }
-        }
-
-        /// <summary>
-        /// Resolve payment method string to account mapping key.
-        /// </summary>
-        private string ResolvePaymentMethodKey(string paymentMethod)
-        {
-            if (string.IsNullOrEmpty(paymentMethod)) return "CASH";
-            switch (paymentMethod.ToUpper())
-            {
-                case "CASH": case "เงินสด": return "CASH";
-                case "KBANK": return "BANK_KBANK";
-                case "KTB": return "BANK_KTB";
-                case "PROMPTPAY": case "พร้อมเพย์": return "BANK_KBANK";
-                case "CARD": case "บัตรเครดิต": return "BANK_CARD";
-                case "DIRECTOR": return "DIRECTOR_ADVANCE";
-                default: return "CASH";
-            }
-        }
-
-        private async Task<string> ProcessPostponePriceDiffJournal(Dictionary<string, object> p)
-        {
-            var priceDifference = Convert.ToDecimal(p["priceDifference"]);
-            if (priceDifference == 0)
-                throw new ArgumentException($"Cannot create postpone price-diff journal: priceDifference is 0. Reservation #{p["reservationId"]}");
-
-            var journal = _mapper.MapPostponePriceDiffToJournal(
-                Convert.ToInt32(p["reservationId"]),
-                priceDifference,
-                DateTime.Parse(p["rescheduleDate"]?.ToString()),
-                p["customerName"]?.ToString());
-
-            var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
-        }
-
-        private async Task<string> ProcessPartialRefundJournal(Dictionary<string, object> p)
-        {
-            var refundAmount = Convert.ToDecimal(p["refundAmount"]);
-            var retainedAmount = Convert.ToDecimal(p["retainedAmount"]);
-            if (refundAmount <= 0 && retainedAmount <= 0)
-                throw new ArgumentException($"Cannot create partial refund journal: refundAmount is {refundAmount} and retainedAmount is {retainedAmount} (at least one must be > 0). Reservation #{p["reservationId"]}");
-
-            var journal = _mapper.MapPartialRefundToJournal(
-                Convert.ToInt32(p["reservationId"]),
-                refundAmount,
-                retainedAmount,
-                p["paymentMethod"]?.ToString(),
-                DateTime.Parse(p["refundDate"]?.ToString()),
-                p["customerName"]?.ToString(),
-                p["reason"]?.ToString());
-
-            var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
-        }
-
-        private async Task<string> ProcessDamageChargeJournal(Dictionary<string, object> p)
-        {
-            var damageAmount = Convert.ToDecimal(p["damageAmount"]);
-            var missingItemsAmount = Convert.ToDecimal(p["missingItemsAmount"]);
-            if (damageAmount <= 0 && missingItemsAmount <= 0)
-                throw new ArgumentException($"Cannot create damage charge journal: damageAmount is {damageAmount} and missingItemsAmount is {missingItemsAmount} (at least one must be > 0). Reservation #{p["reservationId"]}");
-
-            int reservationId = Convert.ToInt32(p["reservationId"]);
-            DateTime chargeDate = DateTime.Parse(p["chargeDate"]?.ToString());
-            string customerName = p["customerName"]?.ToString();
-            string description = p["description"]?.ToString();
-
-            if (_config.IsDocumentMode)
-            {
-                var invoice = _mapper.MapDamageChargeToInvoice(reservationId, damageAmount, missingItemsAmount, chargeDate, customerName, description);
-                var result = await _apiClient.CreateInvoiceAsync(invoice);
-                return result.data.Id.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapDamageChargeToJournal(reservationId, damageAmount, missingItemsAmount, chargeDate, customerName, description);
-                var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
             }
         }
 

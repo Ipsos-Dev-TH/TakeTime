@@ -700,10 +700,11 @@ namespace Take_Time_BangPhra.Integration
 
         private Guid GetPaymentMethodAccountId(string paymentMethod)
         {
-            string pm = (paymentMethod ?? "").ToUpper();
+            string pm = (paymentMethod ?? "").Trim();
+            string pmUpper = pm.ToUpper();
             string mappingKey;
 
-            switch (pm)
+            switch (pmUpper)
             {
                 case "CASH": mappingKey = "CASH"; break;
                 case "KBANK": mappingKey = "BANK_KBANK"; break;
@@ -712,23 +713,44 @@ namespace Take_Time_BangPhra.Integration
                 case "CARD": mappingKey = "BANK_CARD"; break;
                 case "DIRECTOR": mappingKey = "DIRECTOR_ADVANCE"; break;
                 default:
-                    // Match Thai payment method names from Account_Paid_How table
-                    if (pm.Contains("กสิกร") || pm.Contains("KBANK"))
+                    if (pm.Contains("กสิกร") || pmUpper.Contains("KBANK"))
                         mappingKey = "BANK_KBANK";
-                    else if (pm.Contains("กรุงไทย") || pm.Contains("KTB"))
+                    else if (pm.Contains("กรุงไทย") || pmUpper.Contains("KTB"))
                         mappingKey = "BANK_KTB";
-                    else if (pm.Contains("พร้อมเพย์") || pm.Contains("PROMPTPAY"))
+                    else if (pm.Contains("กรุงเทพ") || pmUpper.Contains("BBL"))
+                        mappingKey = "BANK_BBL";
+                    else if (pm.Contains("ไทยพาณิชย์") || pmUpper.Contains("SCB"))
+                        mappingKey = "BANK_SCB";
+                    else if (pm.Contains("พร้อมเพย์") || pmUpper.Contains("PROMPTPAY") || pmUpper.Contains("QR"))
                         mappingKey = "BANK_KBANK";
-                    else if (pm.Contains("บัตร") || pm.Contains("CARD") || pm.Contains("เครดิต"))
+                    else if (pm.Contains("บัตร") || pmUpper.Contains("CARD") || pm.Contains("เครดิต") || pm.Contains("เดบิต"))
                         mappingKey = "BANK_CARD";
-                    else if (pm.Contains("กรรมการ") || pm.Contains("DIRECTOR") || pm.Contains("ทดรอง"))
+                    else if (pm.Contains("กรรมการ") || pmUpper.Contains("DIRECTOR") || pm.Contains("ทดรอง"))
                         mappingKey = "DIRECTOR_ADVANCE";
-                    else
+                    else if (pm.Contains("เงินสด"))
                         mappingKey = "CASH";
+                    else if (pm.Contains("โอน") || pm.Contains("ธนาคาร") || pmUpper.Contains("TRANSFER"))
+                        mappingKey = "BANK_KBANK";
+                    else if (pm.Contains("เช็ค") || pmUpper.Contains("CHECK") || pmUpper.Contains("CHEQUE"))
+                        mappingKey = "BANK_KBANK";
+                    else
+                    {
+                        mappingKey = "CASH";
+                        try { _Code.Logs(_connectionString, "AccountingSync", $"GetPaymentMethodAccountId: ไม่รู้จัก '{pm}' — default เป็น CASH", "SYSTEM"); } catch { }
+                    }
                     break;
             }
 
-            return GetAccountId(mappingKey);
+            if (!TryGetAccountId(mappingKey, out var accountId))
+            {
+                if (mappingKey != "CASH" && TryGetAccountId("CASH", out accountId))
+                {
+                    try { _Code.Logs(_connectionString, "AccountingSync", $"GetPaymentMethodAccountId: ไม่พบ mapping '{mappingKey}' สำหรับ '{pm}' — fallback เป็น CASH", "SYSTEM"); } catch { }
+                    return accountId;
+                }
+                return GetAccountId(mappingKey);
+            }
+            return accountId;
         }
 
         private Guid GetExpenseCategoryAccountId(string category)
