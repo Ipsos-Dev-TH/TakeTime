@@ -346,8 +346,9 @@ namespace Take_Time_BangPhra.Integration
                         // Don't retry other 4xx errors (except 408 Timeout and 429 Too Many Requests)
                         if (status >= 400 && status < 500 && status != 408 && status != 429)
                         {
+                            string requestPreview = (jsonBody ?? "").Length > 2000 ? jsonBody.Substring(0, 2000) + "..." : jsonBody;
                             throw new AccountingApiException(
-                                $"API error {response.StatusCode}: {responseBody}",
+                                $"API error {response.StatusCode} [{method.Method} {path}]: {responseBody} | Request: {requestPreview}",
                                 status, responseBody);
                         }
 
@@ -668,7 +669,15 @@ namespace Take_Time_BangPhra.Integration
                       VALUES (NULL, @action, @request, @response, @httpStatus, @success, @durationMs, GETDATE())",
                     parameters);
             }
-            catch { }
+            catch
+            {
+                try
+                {
+                    string detail = $"[{method} {path}] HTTP {httpStatus} | Req: {TruncateForLog(requestBody)} | Res: {TruncateForLog(responseBody)}";
+                    _code.Logs(_connectionString, "AccountingSync-API", detail, "SYSTEM");
+                }
+                catch { }
+            }
         }
 
         private string TruncateForLog(string value)

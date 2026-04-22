@@ -972,6 +972,11 @@ namespace Take_Time_BangPhra.Integration
             bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
             decimal whtRate = p.ContainsKey("whtRate") ? Convert.ToDecimal(p["whtRate"]) : 0;
             decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
+            string docNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : "";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                "SYSTEM");
 
             if (_config.IsDocumentMode)
             {
