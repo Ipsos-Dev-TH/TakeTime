@@ -361,13 +361,15 @@ namespace Take_Time_BangPhra.Account.Report
 
             if (command == "edit")
             {
-                // Void เอกสารเก่าในระบบบัญชี (ก่���น delete)
                 try
                 {
                     var sync = new Integration.AccountingSyncService(conn);
                     sync.EnqueueVoidPaymentVoucher(id);
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Void voucher error (PaymentVoucher edit): id={id} {accEx.Message}", "SYSTEM");
+                }
 
                 // SECURE: Delete payment record with parameterized query
                 var deletePaymentParams = new Dictionary<string, object>
@@ -762,7 +764,10 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentVoucher): docNum={docNum} {accEx.Message}", "SYSTEM");
+                }
 
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",

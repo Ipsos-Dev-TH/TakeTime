@@ -406,13 +406,15 @@ namespace Take_Time_BangPhra.Account
                         File.Delete(dirs[i].ToString());
                     }
 
-                    // Void ในระบบบัญชี
                     try
                     {
                         var sync = new AccountingSyncService(conn);
                         sync.EnqueueVoidReceipt(docNum);
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        code.Logs(conn, "Accounting Sync", $"Void receipt error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    }
                 }
                 else if (docType == "PAY")
                 {
@@ -441,13 +443,15 @@ namespace Take_Time_BangPhra.Account
                         File.Delete(dirs[i].ToString());
                     }
 
-                    // Void ในระบบบัญชี
                     try
                     {
                         var sync = new AccountingSyncService(conn);
                         sync.EnqueueVoidPaymentVoucher(docNum);
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        code.Logs(conn, "Accounting Sync", $"Void voucher error (CheckDocument): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    }
                 }
 
                 // Show success message then redirect

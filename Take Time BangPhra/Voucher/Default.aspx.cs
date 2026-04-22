@@ -658,7 +658,10 @@ namespace Take_Time_BangPhra.Voucher
                             }
                         }
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Voucher): {accEx.Message}", "SYSTEM");
+                    }
 
                     // 🆕 Record payment to Payment_History when voucher receipt is created
                     if (reservation_id > 0)
@@ -1426,7 +1429,10 @@ namespace Take_Time_BangPhra.Voucher
                     var sync = new Integration.AccountingSyncService(conn);
                     sync.EnqueueVoidReceipt(id);
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Void receipt error (Voucher): id={id} {accEx.Message}", "SYSTEM");
+                }
 
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"].ToString());
                 string recMonth = createdDate.Month.ToString();

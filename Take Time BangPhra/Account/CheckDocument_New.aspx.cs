@@ -1059,13 +1059,15 @@ namespace Take_Time_BangPhra.Account
                         System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
                     }
 
-                    // Void ในระบบบัญชี
                     try
                     {
                         var sync = new Integration.AccountingSyncService(conn);
                         sync.EnqueueVoidReceipt(docNum);
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        codeInstance.Logs(conn, "Accounting Sync", $"Void receipt error (CheckDocument_New): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    }
 
                     System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted receipt: {docNum}");
                 }
@@ -1113,13 +1115,15 @@ namespace Take_Time_BangPhra.Account
                         System.Diagnostics.Debug.WriteLine($"   ⚠️ Path does not exist: {path}");
                     }
 
-                    // Void ในระบบบัญชี
                     try
                     {
                         var sync = new Integration.AccountingSyncService(conn);
                         sync.EnqueueVoidPaymentVoucher(docNum);
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        codeInstance.Logs(conn, "Accounting Sync", $"Void voucher error (CheckDocument_New): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    }
 
                     System.Diagnostics.Debug.WriteLine($"✅ Successfully deleted payment: {docNum}");
                 }

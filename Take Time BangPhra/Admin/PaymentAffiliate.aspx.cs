@@ -190,7 +190,10 @@ namespace Take_Time_BangPhra.Admin
                     var sync = new Integration.AccountingSyncService(conn);
                     sync.EnqueueVoidPaymentVoucher(id);
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Void voucher error (PaymentAffiliate): id={id} {accEx.Message}", "SYSTEM");
+                }
 
                 // SECURE: DELETE operations with parameterized queries
                 var deletePaymentParams = new Dictionary<string, object>
@@ -309,7 +312,10 @@ namespace Take_Time_BangPhra.Admin
                         }
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentAffiliate): {accEx.Message}", "SYSTEM");
+                }
 
                 string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
                 try

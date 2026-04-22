@@ -578,13 +578,15 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    // Void ในระบบบัญชี
                     try
                     {
                         var sync = new Integration.AccountingSyncService(conn);
                         sync.EnqueueVoidPaymentVoucher(docNum);
                     }
-                    catch { }
+                    catch (Exception accEx)
+                    {
+                        codeInstance.Logs(conn, "Accounting Sync", $"Void voucher error (CheckPayment_New): docNum={docNum} {accEx.Message}", "SYSTEM");
+                    }
 
                     // Show success message then redirect
                     ClientScript.RegisterStartupScript(this.GetType(), "success",

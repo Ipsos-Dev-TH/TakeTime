@@ -37,9 +37,13 @@ namespace Take_Time_BangPhra.Integration
         {
             EnsureMappingCache();
             if (_accountMappingCache.TryGetValue(takeTimeCode.ToUpper(), out var accountId))
+            {
+                if (accountId == Guid.Empty)
+                    throw new Exception($"Account mapping '{takeTimeCode}' has empty GUID. กรุณากดปุ่ม 'ดึง Chart of Accounts' ในหน้า Accounting Integration Settings เพื่ออัพเดท Account ID");
                 return accountId;
+            }
 
-            throw new Exception($"No Nexaacc account mapping found for TakeTime code: {takeTimeCode}. Please configure in Accounting_Account_Mapping table.");
+            throw new Exception($"No Nexaacc account mapping found for TakeTime code: {takeTimeCode}. กรุณาตั้งค่าใน Accounting_Account_Mapping table");
         }
 
         public bool TryGetAccountId(string takeTimeCode, out Guid accountId)

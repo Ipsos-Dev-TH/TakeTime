@@ -373,7 +373,7 @@ namespace Take_Time_BangPhra.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Trace.TraceWarning($"Auto-sync receipt {receiptId}: {ex.Message}");
+                try { _code.Logs(_connectionString, "Accounting Sync", $"Receipt auto-sync error (ReceiptService): receipt={receiptId} {ex.Message}", "SYSTEM"); } catch { }
             }
         }
 

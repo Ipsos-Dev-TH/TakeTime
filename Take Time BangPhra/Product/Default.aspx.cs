@@ -1084,7 +1084,10 @@ namespace Take_Time_BangPhra.Product
                         }
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    code.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (POS): {accEx.Message}", "SYSTEM");
+                }
 
                 // 🎁 Log product category discount usage to Loyalty_Benefit_Usage
                 if (totalDiscount > 0 && !string.IsNullOrEmpty(customerPhone))
