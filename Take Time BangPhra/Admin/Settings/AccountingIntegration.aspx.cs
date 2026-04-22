@@ -92,6 +92,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "retryItem":
                     result = RetryQueueItem();
                     break;
+                case "resyncItem":
+                    result = ResyncCompletedItem();
+                    break;
                 case "retryAllFailed":
                     result = RetryAllFailed();
                     break;
@@ -474,6 +477,30 @@ namespace Take_Time_BangPhra.Admin.Settings
                       WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries", null);
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "Reset failed items ทั้งหมดเป็น PENDING แล้ว" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ResyncCompletedItem()
+        {
+            try
+            {
+                long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'PENDING', Retry_Count = 0, Nexaacc_Response_Id = NULL,
+                          Next_Retry_Date = NULL, Error_Message = NULL, Processed_Date = NULL
+                      WHERE ID = @id AND Status IN ('COMPLETED', 'FAILED')",
+                    new Dictionary<string, object> { { "@id", queueId } });
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Queue #{queueId} reset เป็น PENDING — จะยิง API ใหม่รอบถั��ไป" }
+                };
             }
             catch (Exception ex)
             {

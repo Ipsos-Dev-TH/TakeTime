@@ -506,7 +506,10 @@
                 html += '<td>' + item.created + '</td>';
                 html += '<td>';
                 if (item.status === 'FAILED') {
-                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')"><i class="fas fa-redo"></i></button>';
+                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
+                }
+                if (item.status === 'COMPLETED' || item.status === 'FAILED') {
+                    html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
                 }
                 html += '</td>';
                 html += '</tr>';
@@ -551,6 +554,18 @@
             fetch(pageUrl + '?action=retryItem&queueId=' + queueId + '&_=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(data) { loadQueueData(); })
+                .catch(function(err) { alert(err.message); });
+        }
+
+        function resyncItem(queueId) {
+            if (!confirm('ยืนยันยิง API ใหม่สำหรับ Queue #' + queueId + '?\n(จะลบผลเดิมและสร้างใหม่บน NextAcc)'))
+                return;
+            fetch(pageUrl + '?action=resyncItem&queueId=' + queueId + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    alert(data.message);
+                    loadQueueData();
+                })
                 .catch(function(err) { alert(err.message); });
         }
 

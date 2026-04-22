@@ -744,8 +744,8 @@ namespace Take_Time_BangPhra.Account.Report
                     if (config.IsConfigured && config.Enabled)
                     {
                         decimal voucherAmount = decimal.Parse(TextBox6.Text);
-                        string paymentMethod = DropDownList3.SelectedItem?.Text ?? "CASH";
-                        string expenseCategory = DropDownList4.SelectedItem?.Text ?? "OTHER";
+                        string paymentMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
+                        string expenseCategory = DropDownList3.SelectedItem?.Text ?? "OTHER";
                         string vendorName = DropDownList1.SelectedItem?.Text ?? "";
                         string description = "";
                         if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
