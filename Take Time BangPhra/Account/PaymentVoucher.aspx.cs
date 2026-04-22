@@ -218,7 +218,8 @@ namespace Take_Time_BangPhra.Account.Report
                         if (string.IsNullOrEmpty(dtPaymentDetail.Rows[i]["PaidTypeName"]?.ToString()))
                         {
                             dtPaymentDetail.Rows[i]["PaidTypeName"] = DropDownList3.SelectedItem?.Text ?? "";
-                            dtPaymentDetail.Rows[i]["PaidTypeId"] = DropDownList3.SelectedValue ?? "0";
+                            int ptId;
+                            dtPaymentDetail.Rows[i]["PaidTypeId"] = int.TryParse(DropDownList3.SelectedValue, out ptId) ? (object)ptId : DBNull.Value;
                         }
                     }
 
