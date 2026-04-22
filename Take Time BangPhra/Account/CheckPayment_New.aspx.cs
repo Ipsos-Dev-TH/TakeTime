@@ -864,7 +864,9 @@ namespace Take_Time_BangPhra.Account
 
                 var sync = new AccountingSyncService(conn);
                 long queueId = sync.EnqueuePaymentVoucher(0, expenseCategory, amount, paymentMethod,
-                    docDate, description, vendorName, hasInputVat: hasVat, documentNumber: docId);
+                    docDate, description, vendorName, hasInputVat: hasVat, documentNumber: docId,
+                    paymentAccountId: sync.LookupPaidHowAccountId(paymentMethod),
+                    expenseAccountId: sync.LookupPaidTypeAccountId(expenseCategory));
 
                 if (queueId > 0)
                 {

@@ -882,7 +882,8 @@ public class PayrollService
                                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
                                 sync.EnqueuePaymentVoucher(0, "PAYROLL", netSalary, paidHow,
                                     DateTime.Now, $"เงินเดือน {periodName} - {employeeName}", employeeName,
-                                    documentNumber: voucherNumber);
+                                    documentNumber: voucherNumber,
+                                    paymentAccountId: sync.LookupPaidHowAccountId(paidHow));
                             }
                         }
                     }

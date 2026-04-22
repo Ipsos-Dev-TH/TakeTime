@@ -307,8 +307,10 @@ namespace Take_Time_BangPhra.Admin
                         if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {
                             var sync = new Integration.AccountingSyncService(conn);
+                            string affPayAccId = sync.LookupPaidHowAccountId(payMethod);
                             sync.EnqueuePaymentVoucher(0, "AFFILIATE", voucherAmount, payMethod,
-                                voucherDate, desc, vendorName, documentNumber: docNum);
+                                voucherDate, desc, vendorName, documentNumber: docNum,
+                                paymentAccountId: affPayAccId);
                         }
                     }
                 }

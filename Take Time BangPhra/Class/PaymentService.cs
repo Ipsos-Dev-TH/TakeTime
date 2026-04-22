@@ -123,17 +123,19 @@ namespace Take_Time_BangPhra
                     if (config.IsConfigured && config.Enabled)
                     {
                         string custName = GetCustomerName(reservationId);
+                        var sync = new AccountingSyncService(_connectionString);
+                        string psPayAccId = sync.LookupPaidHowAccountId(paymentMethod);
                         if (config.IsDocumentMode)
                         {
-                            var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
-                                isDeposit: false, paymentMethod: paymentMethod);
+                                isDeposit: false, paymentMethod: paymentMethod,
+                                revenueType: "ROOM_REVENUE", paymentAccountId: psPayAccId);
                         }
                         else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
-                            var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
-                                isDeposit: false, paymentMethod: paymentMethod);
+                                isDeposit: false, paymentMethod: paymentMethod,
+                                revenueType: "ROOM_REVENUE", paymentAccountId: psPayAccId);
                         }
                     }
                 }
@@ -236,17 +238,17 @@ namespace Take_Time_BangPhra
                     if (config.IsConfigured && config.Enabled)
                     {
                         string custName = GetCustomerName(reservationId);
+                        var sync = new AccountingSyncService(_connectionString);
+                        string depPayAccId = sync.LookupPaidHowAccountId(paymentMethod);
                         if (config.IsDocumentMode)
                         {
-                            var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
-                                isDeposit: true, paymentMethod: paymentMethod);
+                                isDeposit: true, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
                         }
                         else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
-                            var sync = new AccountingSyncService(_connectionString);
                             sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
-                                isDeposit: true, paymentMethod: paymentMethod);
+                                isDeposit: true, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
                         }
                     }
                 }

@@ -1636,8 +1636,11 @@ namespace Take_Time_BangPhra.Account.Report
 
                         if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {
+                            string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
+                            string payAccId = sync.LookupPaidHowAccountId(paidMethod);
                             sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
-                                isDeposit: CheckBox1.Checked, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
+                                isDeposit: CheckBox1.Checked, paymentMethod: paidMethod,
+                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId);
                         }
                     }
                 }

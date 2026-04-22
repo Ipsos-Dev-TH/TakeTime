@@ -651,9 +651,12 @@ namespace Take_Time_BangPhra.Voucher
                                 var sync = new Integration.AccountingSyncService(conn);
                                 decimal totalAmt = Convert.ToDecimal(TextBox1.Text);
                                 decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
+                                string vPayMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
+                                string vPayAccId = sync.LookupPaidHowAccountId(vPayMethod);
                                 sync.EnqueueReceipt(reservation_id, docNum, totalAmt, vatAmt, receiptDate,
                                     dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
-                                    isDeposit: false, paymentMethod: DropDownList2.SelectedItem?.Text ?? "CASH");
+                                    isDeposit: false, paymentMethod: vPayMethod,
+                                    revenueType: "ROOM_REVENUE", paymentAccountId: vPayAccId);
                             }
                         }
                     }

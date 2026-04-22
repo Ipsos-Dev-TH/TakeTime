@@ -1733,12 +1733,14 @@ namespace Take_Time_BangPhra.Account
                         int resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
                         bool isDeposit = r["IsDeposit"] != DBNull.Value && Convert.ToBoolean(r["IsDeposit"]);
                         string paidType = r["Paid_Type"]?.ToString() ?? "CASH";
+                        string rcptPayAccId = sync.LookupPaidHowAccountId(paidType);
                         queueId = sync.EnqueueReceipt(resId, docId,
                             Convert.ToDecimal(r["Total_Amount"]),
                             Convert.ToDecimal(r["Vat"]),
                             Convert.ToDateTime(r["Created_Date"]),
                             r["CustomerName"]?.ToString() ?? "",
-                            isDeposit: isDeposit, paymentMethod: paidType);
+                            isDeposit: isDeposit, paymentMethod: paidType,
+                            revenueType: "ROOM_REVENUE", paymentAccountId: rcptPayAccId);
                     }
                 }
                 else if (docType == "PAY")
@@ -1759,15 +1761,20 @@ namespace Take_Time_BangPhra.Account
                             "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID", docParams);
                         if (detDt?.Rows.Count > 0) desc = detDt.Rows[0]["Detail"]?.ToString() ?? "";
 
+                        string paidHow = r["Paid_How"]?.ToString() ?? "CASH";
+                        string paidTypeV = r["Paid_Type"]?.ToString() ?? "OTHER";
+                        string payVAccId = sync.LookupPaidHowAccountId(paidHow);
+                        string expVAccId = sync.LookupPaidTypeAccountId(paidTypeV);
                         queueId = sync.EnqueuePaymentVoucher(0,
-                            r["Paid_Type"]?.ToString() ?? "OTHER",
+                            paidTypeV,
                             Convert.ToDecimal(r["Total_Amount"]),
-                            r["Paid_How"]?.ToString() ?? "CASH",
+                            paidHow,
                             Convert.ToDateTime(r["Created_Date"]),
                             desc,
                             r["Vendor_Name"]?.ToString() ?? "",
                             hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
-                            documentNumber: docId);
+                            documentNumber: docId,
+                            paymentAccountId: payVAccId, expenseAccountId: expVAccId);
                     }
                 }
 

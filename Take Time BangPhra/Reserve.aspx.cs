@@ -4510,8 +4510,10 @@ namespace Take_Time_BangPhra
                         {
                             string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
                             var sync = new Integration.AccountingSyncService(conn);
+                            string payAccId = sync.LookupPaidHowAccountId(paidMethod);
                             sync.EnqueueReceipt(resId, ReceiptID, (decimal)Total_Amount, (decimal)Vat,
-                                docDate, TextBox3.Text, isDeposit: IsDeposit, paymentMethod: paidMethod);
+                                docDate, TextBox3.Text, isDeposit: IsDeposit, paymentMethod: paidMethod,
+                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId);
                         }
                     }
                 }
