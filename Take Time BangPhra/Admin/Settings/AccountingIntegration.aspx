@@ -269,7 +269,7 @@
                 <div class="queue-toolbar-left">
                     <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
                     <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
-                    <button type="button" style="background:#dc3545;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;" onclick="cleanupAutoSync()"><i class="fas fa-broom"></i> ล้าง Auto-Sync เก่า</button>
+                    <button type="button" id="btnDeleteSelected" style="background:#dc3545;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;display:none;" onclick="deleteSelected()"><i class="fas fa-trash"></i> ลบที่เลือก (<span id="selectedCount">0</span>)</button>
                 </div>
                 <div class="queue-toolbar-right">
                     <label style="font-size:12px; color:#777;">แสดง</label>
@@ -287,6 +287,7 @@
                 <table class="queue-table" id="queueTable">
                     <thead>
                         <tr>
+                            <th style="width:30px;"><input type="checkbox" id="selectAllQueue" onchange="toggleSelectAll(this)" title="เลือกทั้งหมด" /></th>
                             <th>ID</th>
                             <th>Entity</th>
                             <th>Action</th>
@@ -298,7 +299,7 @@
                         </tr>
                     </thead>
                     <tbody id="queueBody">
-                        <tr><td colspan="8" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
+                        <tr><td colspan="9" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -498,9 +499,13 @@
 
         function renderQueue(items) {
             var tbody = document.getElementById('queueBody');
+            var selectAll = document.getElementById('selectAllQueue');
+            if (selectAll) selectAll.checked = false;
+            updateSelectedCount();
+
             if (!items.length) {
                 var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">' + msg + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#999;">' + msg + '</td></tr>';
                 return;
             }
             var html = '';
@@ -509,6 +514,7 @@
                                   item.status === 'FAILED' ? 'status-error' :
                                   item.status === 'PROCESSING' ? 'status-testing' : 'status-not-configured';
                 html += '<tr>';
+                html += '<td><input type="checkbox" class="queue-check" value="' + item.id + '" onchange="updateSelectedCount()" /></td>';
                 html += '<td>' + item.id + '</td>';
                 html += '<td>' + item.entityType + ' #' + item.entityId + '</td>';
                 html += '<td>' + item.actionType + '</td>';
@@ -527,6 +533,43 @@
                 html += '</tr>';
             });
             tbody.innerHTML = html;
+        }
+
+        function toggleSelectAll(el) {
+            var checks = document.querySelectorAll('.queue-check');
+            checks.forEach(function(cb) { cb.checked = el.checked; });
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            var checks = document.querySelectorAll('.queue-check:checked');
+            var count = checks.length;
+            document.getElementById('selectedCount').textContent = count;
+            document.getElementById('btnDeleteSelected').style.display = count > 0 ? 'inline-block' : 'none';
+        }
+
+        function getSelectedIds() {
+            var ids = [];
+            document.querySelectorAll('.queue-check:checked').forEach(function(cb) { ids.push(parseInt(cb.value)); });
+            return ids;
+        }
+
+        function deleteSelected() {
+            var ids = getSelectedIds();
+            if (!ids.length) return;
+            if (!confirm('ยืนยันลบ ' + ids.length + ' รายการที่เลือก?\n(จะลบออกจาก Queue ถาวร)')) return;
+
+            fetch(pageUrl + '?action=deleteQueueItems', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                alert(data.message);
+                if (data.success) loadQueueData();
+            })
+            .catch(function(err) { alert(err.message); });
         }
 
         function renderPagination(currentPage, totalPages, totalItems) {
@@ -584,30 +627,6 @@
         function retryAllFailed() {
             getAction('retryAllFailed', 'syncTestResult');
             setTimeout(loadQueueData, 1000);
-        }
-
-        function cleanupAutoSync() {
-            fetch(pageUrl + '?action=previewCleanup&_=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (!data.success) { alert('Error: ' + data.message); return; }
-                    if (data.total === 0) { alert('ไม่มี auto-sync entries ที่ต้องล้าง'); return; }
-                    var msg = 'พบ auto-sync entries จำนวน ' + data.total + ' รายการ:\n\n';
-                    if (data.items) {
-                        data.items.forEach(function(item) {
-                            msg += '  ' + item.status + ' | ' + item.actionType + ': ' + item.count + ' รายการ\n';
-                        });
-                    }
-                    msg += '\nต้องการยกเลิก (cancel) entries ที่ PENDING/FAILED ทั้งหมดหรือไม่?';
-                    if (confirm(msg)) {
-                        fetch(pageUrl + '?action=cleanupAutoSync&_=' + Date.now())
-                            .then(function(r) { return r.json(); })
-                            .then(function(result) {
-                                alert(result.success ? result.message : 'Error: ' + result.message);
-                                loadQueueData();
-                            });
-                    }
-                });
         }
 
         function getAction(action, resultId) {
