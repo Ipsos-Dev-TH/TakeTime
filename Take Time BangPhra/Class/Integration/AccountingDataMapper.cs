@@ -288,46 +288,36 @@ namespace Take_Time_BangPhra.Integration
             if (hasMultipleLines)
             {
                 // Multiple DR lines — one per expense category
+                // Line amounts are already pre-VAT (user enters "จำนวนเงิน ไม่รวมภาษี")
+                decimal drTotal = 0;
                 foreach (var el in expenseLines)
                 {
                     var lineAccId = ResolveAccountId(el.AccountId) ?? GetExpenseCategoryAccountId(el.Category);
-                    decimal lineAmount = el.Amount;
-
-                    if (hasInputVat)
+                    lines.Add(new JournalEntryLineRequest
                     {
-                        decimal lineVat = Math.Round(lineAmount * 7 / 107, 2);
-                        decimal lineNet = lineAmount - lineVat;
-                        lines.Add(new JournalEntryLineRequest
-                        {
-                            AccountId = lineAccId,
-                            DebitAmount = lineNet,
-                            CreditAmount = 0,
-                            Description = el.Description,
-                        });
-                    }
-                    else
-                    {
-                        lines.Add(new JournalEntryLineRequest
-                        {
-                            AccountId = lineAccId,
-                            DebitAmount = lineAmount,
-                            CreditAmount = 0,
-                            Description = el.Description,
-                        });
-                    }
+                        AccountId = lineAccId,
+                        DebitAmount = el.Amount,
+                        CreditAmount = 0,
+                        Description = el.Description,
+                    });
+                    drTotal += el.Amount;
                 }
 
                 if (hasInputVat)
                 {
-                    decimal totalVat = Math.Round(amount * 7 / 107, 2);
-                    var inputVatAccountId = GetAccountId("INPUT_VAT");
-                    lines.Add(new JournalEntryLineRequest
+                    // VAT = post-VAT total minus sum of pre-VAT lines (exact, no rounding drift)
+                    decimal vatAmount = amount - drTotal;
+                    if (vatAmount > 0)
                     {
-                        AccountId = inputVatAccountId,
-                        DebitAmount = totalVat,
-                        CreditAmount = 0,
-                        Description = "ภาษีซื้อ 7%",
-                    });
+                        var inputVatAccountId = GetAccountId("INPUT_VAT");
+                        lines.Add(new JournalEntryLineRequest
+                        {
+                            AccountId = inputVatAccountId,
+                            DebitAmount = vatAmount,
+                            CreditAmount = 0,
+                            Description = "ภาษีซื้อ 7%",
+                        });
+                    }
                 }
             }
             else
@@ -1297,35 +1287,20 @@ namespace Take_Time_BangPhra.Integration
 
             if (hasMultipleLines)
             {
+                // Line amounts are already pre-VAT (user enters "จำนวนเงิน ไม่รวมภาษี")
                 foreach (var el in expenseLines)
                 {
                     var lineAccId = ResolveAccountId(el.AccountId) ?? GetExpenseCategoryAccountId(el.Category);
                     string lineItemName = !string.IsNullOrEmpty(el.Category) ? el.Category : "ค่าใช้จ่าย";
 
-                    if (hasInputVat)
+                    lines.Add(new IntegrationLineRequest
                     {
-                        decimal lineVat = Math.Round(el.Amount * 7 / 107, 2);
-                        decimal lineNet = el.Amount - lineVat;
-                        lines.Add(new IntegrationLineRequest
-                        {
-                            ItemName = lineItemName,
-                            Description = el.Description,
-                            Quantity = 1, UnitPrice = lineNet, VatRate = 7,
-                            WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
-                            AccountId = lineAccId,
-                        });
-                    }
-                    else
-                    {
-                        lines.Add(new IntegrationLineRequest
-                        {
-                            ItemName = lineItemName,
-                            Description = el.Description,
-                            Quantity = 1, UnitPrice = el.Amount,
-                            WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
-                            AccountId = lineAccId,
-                        });
-                    }
+                        ItemName = lineItemName,
+                        Description = el.Description,
+                        Quantity = 1, UnitPrice = el.Amount, VatRate = hasInputVat ? 7 : 0,
+                        WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
+                        AccountId = lineAccId,
+                    });
                 }
             }
             else

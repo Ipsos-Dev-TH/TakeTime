@@ -903,7 +903,11 @@ namespace Take_Time_BangPhra.Account.Report
 
                         string expAccId = sync.LookupPaidTypeAccountId(expenseCategory);
 
+                        bool hasVat = false;
+                        try { hasVat = Convert.ToDecimal(TextBox4.Text) > 0; } catch { }
+
                         sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                            hasInputVat: hasVat,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines);
                     }
