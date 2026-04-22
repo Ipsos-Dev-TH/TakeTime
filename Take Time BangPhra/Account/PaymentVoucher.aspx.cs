@@ -68,8 +68,10 @@ namespace Take_Time_BangPhra.Account.Report
                 for (int i = 0; i < dtPaidType.Rows.Count; i++)
                 {
                     DropDownList3.Items.Add(new ListItem( dtPaidType.Rows[i]["Paid_Type"].ToString() , dtPaidType.Rows[i]["ID"].ToString()));
+                    ddlLineCategory.Items.Add(new ListItem( dtPaidType.Rows[i]["Paid_Type"].ToString() , dtPaidType.Rows[i]["ID"].ToString()));
                 }
                 DropDownList3.DataBind();
+                ddlLineCategory.DataBind();
 
                 DataTable dtVatType = code.DatabaseQuery(SqlDataSource4.ConnectionString, SqlDataSource4.SelectCommand);
                 for (int i = 0; i < dtVatType.Rows.Count; i++)
@@ -119,7 +121,7 @@ namespace Take_Time_BangPhra.Account.Report
                         { "@PaymentID", id }
                     };
                     DataTable dtPaymentDetail = code.DatabaseQuerySafe(conn,
-                        "SELECT Number,Detail,Amount FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
+                        "SELECT Number, Detail, Amount, ISNULL(Paid_Type_ID, 0) AS PaidTypeId, ISNULL(Paid_Type_Name, N'') AS PaidTypeName, ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), N'') AS NexaaccAccountId FROM Account_Payment_Detail WHERE Payment_ID = @PaymentID",
                         detailParams);
 
                     // SECURE: Get vendor details with parameterized query
@@ -204,7 +206,9 @@ namespace Take_Time_BangPhra.Account.Report
                     dtDetail.Columns.Add("Number");
                     dtDetail.Columns.Add("Detail");
                     dtDetail.Columns.Add("Amount");
-
+                    dtDetail.Columns.Add("PaidTypeId");
+                    dtDetail.Columns.Add("PaidTypeName");
+                    dtDetail.Columns.Add("NexaaccAccountId");
                 }
                 catch
                 {
@@ -267,11 +271,36 @@ namespace Take_Time_BangPhra.Account.Report
         protected void Button2_Click(object sender, EventArgs e)
         {
             Label1.Text = DropDownList4.SelectedItem.Text;
-            
+
+            if (string.IsNullOrEmpty(ddlLineCategory.SelectedValue))
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "catAlert", "alert('กรุณาเลือกหมวดค่าใช้จ่ายสำหรับรายการนี้');", true);
+                return;
+            }
+
             if (TextBox1.Text.Length > 1 && TextBox2.Text.Length > 0)
             {
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
-                dtDetail.Rows.Add(dtDetail.Rows.Count+1,TextBox1.Text,NumberHelper.TwoDecimalPoints(Convert.ToDouble(TextBox2.Text)));
+                if (!dtDetail.Columns.Contains("PaidTypeId"))
+                {
+                    dtDetail.Columns.Add("PaidTypeId");
+                    dtDetail.Columns.Add("PaidTypeName");
+                    dtDetail.Columns.Add("NexaaccAccountId");
+                }
+
+                string paidTypeId = ddlLineCategory.SelectedValue;
+                string paidTypeName = ddlLineCategory.SelectedItem.Text;
+                string nexaaccAccId = "";
+                try
+                {
+                    var sync = new Integration.AccountingSyncService(conn);
+                    nexaaccAccId = sync.LookupPaidTypeAccountId(paidTypeName) ?? "";
+                }
+                catch { }
+
+                dtDetail.Rows.Add(dtDetail.Rows.Count + 1, TextBox1.Text,
+                    NumberHelper.TwoDecimalPoints(Convert.ToDouble(TextBox2.Text)),
+                    paidTypeId, paidTypeName, nexaaccAccId);
                 Session["dtDetail"] = (DataTable)dtDetail;
                 GridView1.DataSource = dtDetail;
                 GridView1.DataBind();
@@ -453,19 +482,26 @@ namespace Take_Time_BangPhra.Account.Report
                         paymentInsertParams);
                 }
 
-                // SECURE: Insert payment details with parameterized queries
+                // SECURE: Insert payment details with parameterized queries (including per-line category)
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
                 {
+                    string linePaidTypeId = dtDetail.Columns.Contains("PaidTypeId") ? dtDetail.Rows[i]["PaidTypeId"]?.ToString() : "";
+                    string linePaidTypeName = dtDetail.Columns.Contains("PaidTypeName") ? dtDetail.Rows[i]["PaidTypeName"]?.ToString() : "";
+                    string lineNexaaccId = dtDetail.Columns.Contains("NexaaccAccountId") ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : "";
+
                     var detailInsertParams = new Dictionary<string, object>
                     {
                         { "@PaymentID", docNum },
-                        { "@Number", dtDetail.Rows[i][0].ToString() },
-                        { "@Detail", dtDetail.Rows[i][1].ToString() },
-                        { "@Amount", dtDetail.Rows[i][2].ToString() }
+                        { "@Number", dtDetail.Rows[i]["Number"].ToString() },
+                        { "@Detail", dtDetail.Rows[i]["Detail"].ToString() },
+                        { "@Amount", dtDetail.Rows[i]["Amount"].ToString() },
+                        { "@PaidTypeId", string.IsNullOrEmpty(linePaidTypeId) || linePaidTypeId == "0" ? (object)DBNull.Value : Convert.ToInt32(linePaidTypeId) },
+                        { "@PaidTypeName", string.IsNullOrEmpty(linePaidTypeName) ? (object)DBNull.Value : linePaidTypeName },
+                        { "@NexaaccAccountId", string.IsNullOrEmpty(lineNexaaccId) ? (object)DBNull.Value : lineNexaaccId }
                     };
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount]) " +
-                        "VALUES (@PaymentID,@Number,@Detail,@Amount)",
+                        "INSERT INTO [dbo].[Account_Payment_Detail]([Payment_ID],[Number],[Detail],[Amount],[Paid_Type_ID],[Paid_Type_Name],[Nexaacc_AccountId]) " +
+                        "VALUES (@PaymentID,@Number,@Detail,@Amount,@PaidTypeId,@PaidTypeName,@NexaaccAccountId)",
                         detailInsertParams);
                 }
                 string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
@@ -737,7 +773,7 @@ namespace Take_Time_BangPhra.Account.Report
                     CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
                 }
 
-                // Auto-sync voucher to accounting
+                // Auto-sync voucher to accounting (with per-line expense categories)
                 try
                 {
                     var config = new Integration.AccountingConfig(conn);
@@ -748,22 +784,35 @@ namespace Take_Time_BangPhra.Account.Report
                         string expenseCategory = DropDownList3.SelectedItem?.Text ?? "OTHER";
                         string vendorName = DropDownList1.SelectedItem?.Text ?? "";
                         string description = "";
-                        if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0][1]?.ToString() ?? "";
+                        if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0]["Detail"]?.ToString() ?? "";
 
                         var sync = new Integration.AccountingSyncService(conn);
                         string payAccId = sync.LookupPaidHowAccountId(paymentMethod);
+
+                        // Build per-line expense data
+                        var expenseLines = new List<Dictionary<string, object>>();
+                        bool hasPerLineCategories = dtDetail.Columns.Contains("PaidTypeName");
+                        for (int i = 0; i < dtDetail.Rows.Count; i++)
+                        {
+                            string lineCat = hasPerLineCategories ? dtDetail.Rows[i]["PaidTypeName"]?.ToString() : expenseCategory;
+                            string lineAccId = hasPerLineCategories ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : null;
+                            if (string.IsNullOrEmpty(lineAccId))
+                                lineAccId = sync.LookupPaidTypeAccountId(lineCat);
+
+                            expenseLines.Add(new Dictionary<string, object>
+                            {
+                                { "category", lineCat ?? expenseCategory },
+                                { "description", dtDetail.Rows[i]["Detail"]?.ToString() ?? "" },
+                                { "amount", Convert.ToDecimal(dtDetail.Rows[i]["Amount"]) },
+                                { "accountId", lineAccId ?? "" }
+                            });
+                        }
+
                         string expAccId = sync.LookupPaidTypeAccountId(expenseCategory);
 
-                        if (config.IsDocumentMode)
-                        {
-                            sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                                documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId);
-                        }
-                        else if (!string.IsNullOrEmpty(docNum) && docNum != "0")
-                        {
-                            sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                                documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId);
-                        }
+                        sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                            documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
+                            expenseLines: expenseLines);
                     }
                 }
                 catch (Exception accEx)

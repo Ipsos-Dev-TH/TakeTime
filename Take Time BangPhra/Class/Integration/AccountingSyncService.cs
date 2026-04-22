@@ -59,7 +59,8 @@ namespace Take_Time_BangPhra.Integration
             string paymentMethod, DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string documentNumber = null,
-            string paymentAccountId = null, string expenseAccountId = null)
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<Dictionary<string, object>> expenseLines = null)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -89,6 +90,8 @@ namespace Take_Time_BangPhra.Integration
                 payload["paymentAccountId"] = paymentAccountId;
             if (!string.IsNullOrEmpty(expenseAccountId))
                 payload["expenseAccountId"] = expenseAccountId;
+            if (expenseLines != null && expenseLines.Count > 0)
+                payload["expenseLines"] = expenseLines;
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
         }
@@ -506,15 +509,49 @@ namespace Take_Time_BangPhra.Integration
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
             string expenseAccountId = p.ContainsKey("expenseAccountId") ? p["expenseAccountId"]?.ToString() : null;
 
+            // Parse per-line expense data (if present)
+            List<ExpenseLine> expenseLines = null;
+            if (p.ContainsKey("expenseLines") && p["expenseLines"] != null)
+            {
+                try
+                {
+                    var rawLines = p["expenseLines"] as System.Collections.ArrayList;
+                    if (rawLines != null && rawLines.Count > 0)
+                    {
+                        expenseLines = new List<ExpenseLine>();
+                        foreach (var rawLine in rawLines)
+                        {
+                            var lineDict = rawLine as Dictionary<string, object>;
+                            if (lineDict != null)
+                            {
+                                expenseLines.Add(new ExpenseLine
+                                {
+                                    Category = lineDict.ContainsKey("category") ? lineDict["category"]?.ToString() : expenseCategory,
+                                    Description = lineDict.ContainsKey("description") ? lineDict["description"]?.ToString() : "",
+                                    Amount = lineDict.ContainsKey("amount") ? Convert.ToDecimal(lineDict["amount"]) : 0,
+                                    AccountId = lineDict.ContainsKey("accountId") ? lineDict["accountId"]?.ToString() : null
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync", $"ProcessVoucherJournal: failed to parse expenseLines: {ex.Message}", "SYSTEM");
+                }
+            }
+
+            int lineCount = expenseLines?.Count ?? 0;
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} lines={lineCount} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
                 "SYSTEM");
 
             if (_config.IsDocumentMode)
             {
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
-                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId);
+                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
+                    expenseLines: expenseLines);
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 return result.data.Id.ToString();
             }
@@ -522,7 +559,8 @@ namespace Take_Time_BangPhra.Integration
             {
                 var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
-                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId);
+                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
+                    expenseLines: expenseLines);
                 var result = await _apiClient.CreateJournalAsync(journal);
                 await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();

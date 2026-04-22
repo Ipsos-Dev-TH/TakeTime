@@ -503,4 +503,16 @@ namespace Take_Time_BangPhra.Integration
         public string Status { get; set; }
         public DateTime CreatedAt { get; set; }
     }
+
+    /// <summary>
+    /// Per-line expense category for multi-category payment vouchers.
+    /// e.g. Makro invoice with both supplies and raw materials.
+    /// </summary>
+    public class ExpenseLine
+    {
+        public string Category { get; set; }
+        public string Description { get; set; }
+        public decimal Amount { get; set; }
+        public string AccountId { get; set; }
+    }
 }
