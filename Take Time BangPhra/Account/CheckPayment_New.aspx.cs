@@ -854,9 +854,22 @@ namespace Take_Time_BangPhra.Account
                 DateTime docDate = Convert.ToDateTime(row["Created_Date"]);
 
                 string description = "";
-                var detailDt = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID",
-                    docParams);
+                DataTable detailDt = null;
+                try
+                {
+                    detailDt = codeInstance.DatabaseQuerySafe(conn,
+                        @"SELECT Number, Detail, Amount,
+                                 ISNULL(Paid_Type_Name, N'') AS PaidTypeName,
+                                 ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), N'') AS NexaaccAccountId
+                          FROM Account_Payment_Detail WHERE Payment_ID = @ID ORDER BY Number",
+                        docParams);
+                }
+                catch
+                {
+                    detailDt = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT Number, Detail, Amount FROM Account_Payment_Detail WHERE Payment_ID = @ID ORDER BY Number",
+                        docParams);
+                }
                 if (detailDt?.Rows.Count > 0)
                     description = detailDt.Rows[0]["Detail"]?.ToString() ?? "";
 
@@ -865,10 +878,34 @@ namespace Take_Time_BangPhra.Account
                 var sync = new AccountingSyncService(conn);
                 // Cancel existing pending/failed entries so we always create fresh
                 sync.PrepareResync(docId);
+
+                var expenseLines = new List<Dictionary<string, object>>();
+                if (detailDt != null && detailDt.Rows.Count > 0)
+                {
+                    bool hasPerLine = detailDt.Columns.Contains("PaidTypeName");
+                    for (int i = 0; i < detailDt.Rows.Count; i++)
+                    {
+                        string lineCat = hasPerLine ? detailDt.Rows[i]["PaidTypeName"]?.ToString() : expenseCategory;
+                        if (string.IsNullOrEmpty(lineCat)) lineCat = expenseCategory;
+                        string lineAccId = hasPerLine ? detailDt.Rows[i]["NexaaccAccountId"]?.ToString() : null;
+                        if (string.IsNullOrEmpty(lineAccId))
+                            lineAccId = sync.LookupPaidTypeAccountId(lineCat);
+
+                        expenseLines.Add(new Dictionary<string, object>
+                        {
+                            { "category", lineCat },
+                            { "description", detailDt.Rows[i]["Detail"]?.ToString() ?? "" },
+                            { "amount", Convert.ToDecimal(detailDt.Rows[i]["Amount"]) },
+                            { "accountId", lineAccId ?? "" }
+                        });
+                    }
+                }
+
                 long queueId = sync.EnqueuePaymentVoucher(0, expenseCategory, amount, paymentMethod,
                     docDate, description, vendorName, hasInputVat: hasVat, documentNumber: docId,
                     paymentAccountId: sync.LookupPaidHowAccountId(paymentMethod),
-                    expenseAccountId: sync.LookupPaidTypeAccountId(expenseCategory));
+                    expenseAccountId: sync.LookupPaidTypeAccountId(expenseCategory),
+                    expenseLines: expenseLines.Count > 0 ? expenseLines : null);
 
                 if (queueId > 0)
                 {

@@ -31,6 +31,8 @@ namespace Take_Time_BangPhra.Integration
         public int JournalType { get; set; }  // 0=General, 1=Sales, 2=Purchase, 3=CashReceipts, 4=CashPayments
         public string Description { get; set; }
         public string Reference { get; set; }
+        public string SourceDocumentNumber { get; set; }
+        public bool ReplaceExistingForSource { get; set; }
         public List<JournalEntryLineRequest> Lines { get; set; }
     }
 
@@ -440,6 +442,8 @@ namespace Take_Time_BangPhra.Integration
         public DateTime DocumentDate { get; set; }
         public string CustomerName { get; set; }
         public string Reference { get; set; }
+        public string ExternalRef { get; set; }
+        public bool ReplaceExistingForSource { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
@@ -451,6 +455,8 @@ namespace Take_Time_BangPhra.Integration
         public DateTime DocumentDate { get; set; }
         public string SupplierName { get; set; }
         public string Reference { get; set; }
+        public string ExternalRef { get; set; }
+        public bool ReplaceExistingForSource { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }

@@ -592,7 +592,12 @@ namespace Take_Time_BangPhra.Integration
                 if (_config.IsDocumentMode)
                 {
                     var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
-                    if (!string.IsNullOrEmpty(receiptNumber)) invoice.Reference = receiptNumber;
+                    if (!string.IsNullOrEmpty(receiptNumber))
+                    {
+                        invoice.Reference = receiptNumber;
+                        invoice.ExternalRef = receiptNumber;
+                        invoice.ReplaceExistingForSource = true;
+                    }
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
@@ -611,6 +616,11 @@ namespace Take_Time_BangPhra.Integration
                     bool hasVat = vatAmount > 0;
                     var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
                     invoice.Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}";
+                    if (!string.IsNullOrEmpty(receiptNumber))
+                    {
+                        invoice.ExternalRef = receiptNumber;
+                        invoice.ReplaceExistingForSource = true;
+                    }
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
@@ -637,13 +647,19 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
 
-            if (_config.IsDocumentMode)
+            try
             {
-                await _apiClient.VoidDocumentAsync(docId);
+                if (_config.IsDocumentMode)
+                    await _apiClient.VoidDocumentAsync(docId);
+                else
+                    await _apiClient.VoidJournalAsync(docId);
             }
-            else
+            catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
-                await _apiClient.VoidJournalAsync(docId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    "SYSTEM");
+                return $"VOIDED:{nexaaccId} (already voided)";
             }
 
             return $"VOIDED:{nexaaccId}";
@@ -657,16 +673,31 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
 
-            if (_config.IsDocumentMode)
+            try
             {
-                await _apiClient.VoidDocumentAsync(docId);
+                if (_config.IsDocumentMode)
+                    await _apiClient.VoidDocumentAsync(docId);
+                else
+                    await _apiClient.VoidJournalAsync(docId);
             }
-            else
+            catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
-                await _apiClient.VoidJournalAsync(docId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    "SYSTEM");
+                return $"VOIDED:{nexaaccId} (already voided)";
             }
 
             return $"VOIDED:{nexaaccId}";
+        }
+
+        private static bool IsAlreadyVoided(AccountingApiException ex)
+        {
+            if (ex.StatusCode != 400) return false;
+            string body = ex.ResponseBody ?? "";
+            return body.Contains("ถูกยกเลิกไปแล้ว")
+                || body.Contains("already cancelled")
+                || body.Contains("already voided");
         }
 
         // ──────────────────────────────────────────────
@@ -874,15 +905,18 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// Prepare for re-sync by cancelling any existing PENDING/PROCESSING entries
-        /// for a document. This allows EnqueuePaymentVoucher/EnqueueReceipt to create
-        /// a fresh entry with current data. Returns count of cancelled entries.
+        /// Prepare for re-sync:
+        ///   - Cancel any PENDING/PROCESSING/FAILED queue entries for this document.
+        ///   - Mark old COMPLETED entries as SUPERSEDED so future lookups skip them.
+        /// The actual void+create of the Nexaacc document is handled atomically by
+        /// Nexaacc itself via ReplaceExistingForSource=true on the new request — so we
+        /// no longer need to enqueue a separate VOID job.
         /// </summary>
         public int PrepareResync(string documentNumber)
         {
             if (string.IsNullOrEmpty(documentNumber)) return 0;
 
-            var parameters = new Dictionary<string, object>
+            var lookupParams = new Dictionary<string, object>
             {
                 { "@pattern", $"%\"documentNumber\":\"{documentNumber}\"%" },
                 { "@patternReceipt", $"%\"receiptNumber\":\"{documentNumber}\"%" }
@@ -890,17 +924,24 @@ namespace Take_Time_BangPhra.Integration
 
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"UPDATE Accounting_Sync_Queue
+                  SET Status = 'SUPERSEDED', Error_Message = 'Superseded by re-sync'
+                  WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
+                    AND Status = 'COMPLETED'
+                    AND (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT');
+
+                  UPDATE Accounting_Sync_Queue
                   SET Status = 'CANCELLED', Error_Message = 'Superseded by re-sync'
                   WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
                     AND Status IN ('PENDING', 'PROCESSING', 'FAILED');
+
                   SELECT @@ROWCOUNT AS Affected",
-                parameters);
+                lookupParams);
 
             int affected = dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["Affected"]) : 0;
             if (affected > 0)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"PrepareResync: doc={documentNumber} cancelled {affected} existing entries",
+                    $"PrepareResync: doc={documentNumber} cleaned {affected} existing entries — Nexaacc will void+create atomically via ReplaceExistingForSource",
                     "SYSTEM");
             }
             return affected;

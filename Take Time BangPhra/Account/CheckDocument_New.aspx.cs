@@ -1760,14 +1760,51 @@ namespace Take_Time_BangPhra.Account
                     {
                         var r = dt.Rows[0];
                         string desc = "";
-                        var detDt = codeInstance.DatabaseQuerySafe(conn,
-                            "SELECT TOP 1 Detail FROM Account_Payment_Detail WHERE Payment_ID = @ID", docParams);
+                        // Read all detail rows to rebuild per-line expense data
+                        DataTable detDt = null;
+                        try
+                        {
+                            detDt = codeInstance.DatabaseQuerySafe(conn,
+                                @"SELECT Number, Detail, Amount,
+                                         ISNULL(Paid_Type_Name, N'') AS PaidTypeName,
+                                         ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), N'') AS NexaaccAccountId
+                                  FROM Account_Payment_Detail WHERE Payment_ID = @ID ORDER BY Number", docParams);
+                        }
+                        catch
+                        {
+                            detDt = codeInstance.DatabaseQuerySafe(conn,
+                                "SELECT Number, Detail, Amount FROM Account_Payment_Detail WHERE Payment_ID = @ID ORDER BY Number", docParams);
+                        }
                         if (detDt?.Rows.Count > 0) desc = detDt.Rows[0]["Detail"]?.ToString() ?? "";
 
                         string paidHow = r["Paid_How"]?.ToString() ?? "CASH";
                         string paidTypeV = r["Paid_Type"]?.ToString() ?? "OTHER";
                         string payVAccId = sync.LookupPaidHowAccountId(paidHow);
                         string expVAccId = sync.LookupPaidTypeAccountId(paidTypeV);
+
+                        // Rebuild expenseLines from detail rows (preserve per-line categories)
+                        var expenseLines = new List<Dictionary<string, object>>();
+                        if (detDt != null && detDt.Rows.Count > 0)
+                        {
+                            bool hasPerLine = detDt.Columns.Contains("PaidTypeName");
+                            for (int i = 0; i < detDt.Rows.Count; i++)
+                            {
+                                string lineCat = hasPerLine ? detDt.Rows[i]["PaidTypeName"]?.ToString() : paidTypeV;
+                                if (string.IsNullOrEmpty(lineCat)) lineCat = paidTypeV;
+                                string lineAccId = hasPerLine ? detDt.Rows[i]["NexaaccAccountId"]?.ToString() : null;
+                                if (string.IsNullOrEmpty(lineAccId))
+                                    lineAccId = sync.LookupPaidTypeAccountId(lineCat);
+
+                                expenseLines.Add(new Dictionary<string, object>
+                                {
+                                    { "category", lineCat },
+                                    { "description", detDt.Rows[i]["Detail"]?.ToString() ?? "" },
+                                    { "amount", Convert.ToDecimal(detDt.Rows[i]["Amount"]) },
+                                    { "accountId", lineAccId ?? "" }
+                                });
+                            }
+                        }
+
                         queueId = sync.EnqueuePaymentVoucher(0,
                             paidTypeV,
                             Convert.ToDecimal(r["Total_Amount"]),
@@ -1777,7 +1814,8 @@ namespace Take_Time_BangPhra.Account
                             r["Vendor_Name"]?.ToString() ?? "",
                             hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
                             documentNumber: docId,
-                            paymentAccountId: payVAccId, expenseAccountId: expVAccId);
+                            paymentAccountId: payVAccId, expenseAccountId: expVAccId,
+                            expenseLines: expenseLines.Count > 0 ? expenseLines : null);
                     }
                 }
 
