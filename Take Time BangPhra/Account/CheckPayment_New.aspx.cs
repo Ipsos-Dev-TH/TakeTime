@@ -863,6 +863,8 @@ namespace Take_Time_BangPhra.Account
                 bool hasVat = Convert.ToDecimal(row["Vat"]) > 0;
 
                 var sync = new AccountingSyncService(conn);
+                // Cancel existing pending/failed entries so we always create fresh
+                sync.PrepareResync(docId);
                 long queueId = sync.EnqueuePaymentVoucher(0, expenseCategory, amount, paymentMethod,
                     docDate, description, vendorName, hasInputVat: hasVat, documentNumber: docId,
                     paymentAccountId: sync.LookupPaidHowAccountId(paymentMethod),

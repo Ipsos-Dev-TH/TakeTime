@@ -551,7 +551,7 @@ namespace Take_Time_BangPhra.Integration
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                    expenseLines: expenseLines);
+                    expenseLines: expenseLines, documentNumber: docNumber);
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 return result.data.Id.ToString();
             }
@@ -560,7 +560,7 @@ namespace Take_Time_BangPhra.Integration
                 var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                    expenseLines: expenseLines);
+                    expenseLines: expenseLines, documentNumber: docNumber);
                 var result = await _apiClient.CreateJournalAsync(journal);
                 await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();
@@ -592,12 +592,13 @@ namespace Take_Time_BangPhra.Integration
                 if (_config.IsDocumentMode)
                 {
                     var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
+                    if (!string.IsNullOrEmpty(receiptNumber)) invoice.Reference = receiptNumber;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
                 else
                 {
-                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
@@ -609,14 +610,14 @@ namespace Take_Time_BangPhra.Integration
                 {
                     bool hasVat = vatAmount > 0;
                     var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
-                    invoice.Reference = $"RES-{reservationId}-{receiptNumber}";
+                    invoice.Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}";
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
                 else
                 {
                     bool hasVat = vatAmount > 0;
-                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
+                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
@@ -870,6 +871,39 @@ namespace Take_Time_BangPhra.Integration
                   SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
                   WHERE ID = @id",
                 parameters);
+        }
+
+        /// <summary>
+        /// Prepare for re-sync by cancelling any existing PENDING/PROCESSING entries
+        /// for a document. This allows EnqueuePaymentVoucher/EnqueueReceipt to create
+        /// a fresh entry with current data. Returns count of cancelled entries.
+        /// </summary>
+        public int PrepareResync(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return 0;
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@pattern", $"%\"documentNumber\":\"{documentNumber}\"%" },
+                { "@patternReceipt", $"%\"receiptNumber\":\"{documentNumber}\"%" }
+            };
+
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"UPDATE Accounting_Sync_Queue
+                  SET Status = 'CANCELLED', Error_Message = 'Superseded by re-sync'
+                  WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
+                    AND Status IN ('PENDING', 'PROCESSING', 'FAILED');
+                  SELECT @@ROWCOUNT AS Affected",
+                parameters);
+
+            int affected = dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["Affected"]) : 0;
+            if (affected > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"PrepareResync: doc={documentNumber} cancelled {affected} existing entries",
+                    "SYSTEM");
+            }
+            return affected;
         }
 
         /// <summary>
