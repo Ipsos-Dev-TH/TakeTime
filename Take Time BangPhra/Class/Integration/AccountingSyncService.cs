@@ -895,33 +895,79 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// Prepare for re-sync by cancelling any existing PENDING/PROCESSING entries
-        /// for a document. This allows EnqueuePaymentVoucher/EnqueueReceipt to create
-        /// a fresh entry with current data. Returns count of cancelled entries.
+        /// Prepare for re-sync:
+        ///   1. Find existing COMPLETED entry with a Nexaacc_Response_Id and enqueue a VOID
+        ///      so the old Nexaacc document is removed (avoids duplicates).
+        ///   2. Mark old COMPLETED entries as SUPERSEDED (so future LookupNexaaccId skips them).
+        ///   3. Cancel any PENDING/PROCESSING/FAILED entries.
+        /// After this, EnqueuePaymentVoucher/EnqueueReceipt creates a fresh CREATE entry
+        /// with current data and correct Reference.
         /// </summary>
         public int PrepareResync(string documentNumber)
         {
             if (string.IsNullOrEmpty(documentNumber)) return 0;
 
-            var parameters = new Dictionary<string, object>
+            var lookupParams = new Dictionary<string, object>
             {
                 { "@pattern", $"%\"documentNumber\":\"{documentNumber}\"%" },
                 { "@patternReceipt", $"%\"receiptNumber\":\"{documentNumber}\"%" }
             };
 
+            // Step 1: Find latest COMPLETED entry with Nexaacc_Response_Id
+            var completedDt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1 ID, Entity_Type, Nexaacc_Response_Id
+                  FROM Accounting_Sync_Queue
+                  WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
+                    AND Status = 'COMPLETED'
+                    AND Nexaacc_Response_Id IS NOT NULL
+                    AND (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT')
+                  ORDER BY ID DESC",
+                lookupParams);
+
+            if (completedDt?.Rows.Count > 0)
+            {
+                string entityType = completedDt.Rows[0]["Entity_Type"]?.ToString();
+                string oldNexaaccId = completedDt.Rows[0]["Nexaacc_Response_Id"]?.ToString();
+
+                // Enqueue VOID for old Nexaacc document
+                if (!string.IsNullOrEmpty(oldNexaaccId))
+                {
+                    var voidPayload = new Dictionary<string, object>
+                    {
+                        { "documentNumber", documentNumber },
+                        { "nexaaccId", oldNexaaccId },
+                        { "reason", "Superseded by re-sync" }
+                    };
+                    string voidAction = entityType == "RECEIPT" ? "VOID_RECEIPT" : "VOID_VOUCHER";
+                    InsertQueue(entityType, 0, voidAction, voidPayload);
+
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"PrepareResync: doc={documentNumber} enqueued {voidAction} for old nexaaccId={oldNexaaccId}",
+                        "SYSTEM");
+                }
+            }
+
+            // Step 2 & 3: Mark COMPLETED as SUPERSEDED, cancel PENDING/PROCESSING/FAILED
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"UPDATE Accounting_Sync_Queue
+                  SET Status = 'SUPERSEDED', Error_Message = 'Superseded by re-sync'
+                  WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
+                    AND Status = 'COMPLETED'
+                    AND (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT');
+
+                  UPDATE Accounting_Sync_Queue
                   SET Status = 'CANCELLED', Error_Message = 'Superseded by re-sync'
                   WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
                     AND Status IN ('PENDING', 'PROCESSING', 'FAILED');
+
                   SELECT @@ROWCOUNT AS Affected",
-                parameters);
+                lookupParams);
 
             int affected = dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["Affected"]) : 0;
             if (affected > 0)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"PrepareResync: doc={documentNumber} cancelled {affected} existing entries",
+                    $"PrepareResync: doc={documentNumber} cleaned {affected} existing entries",
                     "SYSTEM");
             }
             return affected;
