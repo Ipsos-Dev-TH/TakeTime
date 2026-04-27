@@ -695,9 +695,16 @@ namespace Take_Time_BangPhra.Integration
         {
             if (ex.StatusCode != 400) return false;
             string body = ex.ResponseBody ?? "";
+            // Check both literal Thai and JSON-escaped unicode forms
+            // "ถูกยกเลิกไปแล้ว" = U+0E16 U+0E39 U+0E01 U+0E22 U+0E01 U+0E40 U+0E25 U+0E34 U+0E01 U+0E44 U+0E1B U+0E41 U+0E25 U+0E49 U+0E27
+            const string escapedThai = "\\u0E16\\u0E39\\u0E01\\u0E22\\u0E01\\u0E40\\u0E25\\u0E34\\u0E01\\u0E44\\u0E1B\\u0E41\\u0E25\\u0E49\\u0E27";
             return body.Contains("ถูกยกเลิกไปแล้ว")
+                || body.IndexOf(escapedThai, StringComparison.OrdinalIgnoreCase) >= 0
                 || body.Contains("already cancelled")
-                || body.Contains("already voided");
+                || body.Contains("already voided")
+                || body.Contains("already cancelled.")
+                || body.Contains("AlreadyVoided")
+                || body.Contains("AlreadyCancelled");
         }
 
         // ──────────────────────────────────────────────
