@@ -695,9 +695,16 @@ namespace Take_Time_BangPhra.Integration
         {
             if (ex.StatusCode != 400) return false;
             string body = ex.ResponseBody ?? "";
+            // Check both literal Thai and JSON-escaped unicode forms
+            // "ถูกยกเลิกไปแล้ว" = U+0E16 U+0E39 U+0E01 U+0E22 U+0E01 U+0E40 U+0E25 U+0E34 U+0E01 U+0E44 U+0E1B U+0E41 U+0E25 U+0E49 U+0E27
+            const string escapedThai = "\\u0E16\\u0E39\\u0E01\\u0E22\\u0E01\\u0E40\\u0E25\\u0E34\\u0E01\\u0E44\\u0E1B\\u0E41\\u0E25\\u0E49\\u0E27";
             return body.Contains("ถูกยกเลิกไปแล้ว")
+                || body.IndexOf(escapedThai, StringComparison.OrdinalIgnoreCase) >= 0
                 || body.Contains("already cancelled")
-                || body.Contains("already voided");
+                || body.Contains("already voided")
+                || body.Contains("already cancelled.")
+                || body.Contains("AlreadyVoided")
+                || body.Contains("AlreadyCancelled");
         }
 
         // ──────────────────────────────────────────────
@@ -906,11 +913,12 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Prepare for re-sync:
-        ///   - Cancel any PENDING/PROCESSING/FAILED queue entries for this document.
-        ///   - Mark old COMPLETED entries as SUPERSEDED so future lookups skip them.
-        /// The actual void+create of the Nexaacc document is handled atomically by
-        /// Nexaacc itself via ReplaceExistingForSource=true on the new request — so we
-        /// no longer need to enqueue a separate VOID job.
+        ///   1. Find existing COMPLETED entry with Nexaacc_Response_Id and enqueue a VOID
+        ///      so the old Nexaacc journal/document is reversed (avoids duplicates).
+        ///      This is only needed for Journal mode — Document mode handles void+create
+        ///      atomically via ReplaceExistingForSource on the request body.
+        ///   2. Mark old COMPLETED entries as SUPERSEDED.
+        ///   3. Cancel any PENDING/PROCESSING/FAILED entries.
         /// </summary>
         public int PrepareResync(string documentNumber)
         {
@@ -922,6 +930,44 @@ namespace Take_Time_BangPhra.Integration
                 { "@patternReceipt", $"%\"receiptNumber\":\"{documentNumber}\"%" }
             };
 
+            // Step 1: For journal mode, enqueue VOID for old Nexaacc journal.
+            // (Document mode uses ReplaceExistingForSource so no separate VOID needed.)
+            if (!_config.IsDocumentMode)
+            {
+                var completedDt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Entity_Type, Nexaacc_Response_Id
+                      FROM Accounting_Sync_Queue
+                      WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
+                        AND Status = 'COMPLETED'
+                        AND Nexaacc_Response_Id IS NOT NULL
+                        AND (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT')
+                      ORDER BY ID DESC",
+                    lookupParams);
+
+                if (completedDt?.Rows.Count > 0)
+                {
+                    string entityType = completedDt.Rows[0]["Entity_Type"]?.ToString();
+                    string oldNexaaccId = completedDt.Rows[0]["Nexaacc_Response_Id"]?.ToString();
+
+                    if (!string.IsNullOrEmpty(oldNexaaccId))
+                    {
+                        var voidPayload = new Dictionary<string, object>
+                        {
+                            { "documentNumber", documentNumber },
+                            { "nexaaccId", oldNexaaccId },
+                            { "reason", "Superseded by re-sync" }
+                        };
+                        string voidAction = entityType == "RECEIPT" ? "VOID_RECEIPT" : "VOID_VOUCHER";
+                        InsertQueue(entityType, 0, voidAction, voidPayload);
+
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"PrepareResync: doc={documentNumber} enqueued {voidAction} for old nexaaccId={oldNexaaccId}",
+                            "SYSTEM");
+                    }
+                }
+            }
+
+            // Step 2 & 3: Mark COMPLETED as SUPERSEDED, cancel PENDING/PROCESSING/FAILED
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"UPDATE Accounting_Sync_Queue
                   SET Status = 'SUPERSEDED', Error_Message = 'Superseded by re-sync'
@@ -941,7 +987,7 @@ namespace Take_Time_BangPhra.Integration
             if (affected > 0)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"PrepareResync: doc={documentNumber} cleaned {affected} existing entries — Nexaacc will void+create atomically via ReplaceExistingForSource",
+                    $"PrepareResync: doc={documentNumber} cleaned {affected} existing entries",
                     "SYSTEM");
             }
             return affected;
