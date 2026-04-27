@@ -1715,6 +1715,9 @@ namespace Take_Time_BangPhra.Account
                 var sync = new AccountingSyncService(conn);
                 long queueId = -1;
 
+                // Cancel existing pending/failed entries so we always create fresh
+                sync.PrepareResync(docId);
+
                 if (docType == "REC")
                 {
                     var docParams = new Dictionary<string, object> { { "@ID", docId } };

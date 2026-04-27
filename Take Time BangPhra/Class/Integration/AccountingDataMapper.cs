@@ -88,17 +88,18 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapDepositToJournal(
             int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName,
-            string paymentAccountId = null)
+            string paymentAccountId = null, string documentNumber = null)
         {
             var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
 
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"RES-{reservationId}-DEP";
             return new CreateJournalEntryRequest
             {
                 EntryDate = paymentDate,
                 JournalType = NexaaccJournalType.CashReceipts,
-                Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
-                Reference = $"RES-{reservationId}-DEP",
+                Description = $"รับมัดจำ {refStr} - การจอง #{reservationId} ({customerName})",
+                Reference = refStr,
                 Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
@@ -126,7 +127,7 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapPaymentToJournal(
             int reservationId, decimal amount, string paymentMethod, DateTime paymentDate,
             string customerName, bool hasVat = false,
-            string revenueType = null, string paymentAccountId = null)
+            string revenueType = null, string paymentAccountId = null, string documentNumber = null)
         {
             var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
             var revenueAccountId = !string.IsNullOrEmpty(revenueType) ? GetAccountId(revenueType) : GetAccountId("ROOM_REVENUE");
@@ -174,12 +175,13 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"RES-{reservationId}-PAY";
             return new CreateJournalEntryRequest
             {
                 EntryDate = paymentDate,
                 JournalType = NexaaccJournalType.CashReceipts,
-                Description = $"รับชำระค่าห้องพัก - การจอง #{reservationId} ({customerName})",
-                Reference = $"RES-{reservationId}-PAY",
+                Description = $"รับชำระค่าห้องพัก {refStr} - การจอง #{reservationId} ({customerName})",
+                Reference = refStr,
                 Lines = lines
             };
         }
@@ -278,7 +280,7 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null)
         {
             var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
             var lines = new List<JournalEntryLineRequest>();
@@ -381,12 +383,13 @@ namespace Take_Time_BangPhra.Integration
                 Description = $"จ่ายเงิน - {paymentMethod}",
             });
 
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
             return new CreateJournalEntryRequest
             {
                 EntryDate = voucherDate,
                 JournalType = NexaaccJournalType.CashPayments,
-                Description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
-                Reference = $"PV-{voucherId}",
+                Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
+                Reference = refStr,
                 Lines = lines
             };
         }
@@ -1280,7 +1283,7 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null)
         {
             var lines = new List<IntegrationLineRequest>();
             bool hasMultipleLines = expenseLines != null && expenseLines.Count > 0;
@@ -1335,12 +1338,13 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
             return new CreateIntegrationExpenseRequest
             {
                 DocumentDate = voucherDate,
                 SupplierName = payeeName,
-                Reference = $"PV-{voucherId}",
-                Description = $"ใบสำคัญจ่าย #{voucherId} - {description} ({payeeName})",
+                Reference = refStr,
+                Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
