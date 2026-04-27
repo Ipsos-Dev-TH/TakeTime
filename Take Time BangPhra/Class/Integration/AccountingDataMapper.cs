@@ -100,6 +100,8 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.CashReceipts,
                 Description = $"รับมัดจำ {refStr} - การจอง #{reservationId} ({customerName})",
                 Reference = refStr,
+                SourceDocumentNumber = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
@@ -182,6 +184,8 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.CashReceipts,
                 Description = $"รับชำระค่าห้องพัก {refStr} - การจอง #{reservationId} ({customerName})",
                 Reference = refStr,
+                SourceDocumentNumber = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Lines = lines
             };
         }
@@ -390,6 +394,8 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.CashPayments,
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
                 Reference = refStr,
+                SourceDocumentNumber = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Lines = lines
             };
         }
@@ -1344,6 +1350,8 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = voucherDate,
                 SupplierName = payeeName,
                 Reference = refStr,
+                ExternalRef = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
