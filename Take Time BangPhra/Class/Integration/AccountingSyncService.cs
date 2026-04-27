@@ -69,6 +69,17 @@ namespace Take_Time_BangPhra.Integration
             {
                 long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
                 if (existing > 0) return existing;
+
+                // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+                // (prevents form resubmission / browser refresh from creating duplicates)
+                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 60);
+                if (recent > 0)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                        "SYSTEM");
+                    return recent;
+                }
             }
 
             var payload = new Dictionary<string, object>
@@ -108,6 +119,17 @@ namespace Take_Time_BangPhra.Integration
 
             long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
+
+            // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+            // (prevents form resubmission / browser refresh from creating duplicates)
+            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 60);
+            if (recent > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                    "SYSTEM");
+                return recent;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -785,6 +807,34 @@ namespace Take_Time_BangPhra.Integration
                         { "@entityType", entityType },
                         { "@actionType", actionType },
                         { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// Find a recently COMPLETED entry within the given time window (seconds).
+        /// Used as anti-duplicate guard against form resubmission / browser refresh.
+        /// </summary>
+        private long FindRecentCompletedEntry(string entityType, string actionType, string payloadKey, string payloadValue, int withinSeconds)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND Status = 'COMPLETED'
+                        AND Payload LIKE @pattern
+                        AND Processed_Date >= DATEADD(SECOND, -@withinSeconds, GETDATE())
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", actionType },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"},
+                        { "@withinSeconds", withinSeconds }
                     });
                 return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
             }

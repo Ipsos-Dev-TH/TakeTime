@@ -493,7 +493,8 @@
                             <asp:Label ID="lblSyncStatus" runat="server"></asp:Label>
                             <asp:Button ID="btnSync" runat="server" Text="📤 Sync" CommandName="sync"
                                 CommandArgument='<%# Eval("ID") %>' CssClass="btn-sync-action"
-                                OnClientClick="return confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?');"
+                                OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลัง Sync...';"
+                                UseSubmitBehavior="false"
                                 Visible="false" />
                         </ItemTemplate>
                     </asp:TemplateField>

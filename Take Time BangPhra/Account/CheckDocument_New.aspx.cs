@@ -31,6 +31,14 @@ namespace Take_Time_BangPhra.Account
                     if (!IsPostBack)
                     {
                         InitializePage();
+
+                        // Show success alert from Post-Redirect-Get sync
+                        string syncedQ = Request.QueryString["synced"];
+                        if (!string.IsNullOrEmpty(syncedQ))
+                        {
+                            ScriptManager.RegisterStartupScript(this, GetType(), "syncOk",
+                                $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{syncedQ})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
+                        }
                     }
                 }
                 else
@@ -1711,6 +1719,16 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
+                // Anti-duplicate: in-session lock prevents re-POST/refresh from re-triggering
+                string sessionKey = "SyncLock_" + docId;
+                if (Session[sessionKey] is DateTime lockTime && (DateTime.Now - lockTime).TotalSeconds < 60)
+                {
+                    Response.Redirect(Request.RawUrl, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                Session[sessionKey] = DateTime.Now;
+
                 string docType = docId.Length >= 3 ? docId.Substring(0, 3) : "";
                 var sync = new AccountingSyncService(conn);
                 long queueId = -1;
@@ -1822,8 +1840,11 @@ namespace Take_Time_BangPhra.Account
                 if (queueId > 0)
                 {
                     _syncStatusCache = null;
-                    ScriptManager.RegisterStartupScript(this, GetType(), "syncOk",
-                        $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{queueId})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
+                    // Post-Redirect-Get: redirect with success flag so F5 doesn't re-POST
+                    string sep = Request.RawUrl.Contains("?") ? "&" : "?";
+                    Response.Redirect(Request.RawUrl + sep + "synced=" + queueId, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
                 }
                 else
                 {
