@@ -637,13 +637,19 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
 
-            if (_config.IsDocumentMode)
+            try
             {
-                await _apiClient.VoidDocumentAsync(docId);
+                if (_config.IsDocumentMode)
+                    await _apiClient.VoidDocumentAsync(docId);
+                else
+                    await _apiClient.VoidJournalAsync(docId);
             }
-            else
+            catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
-                await _apiClient.VoidJournalAsync(docId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    "SYSTEM");
+                return $"VOIDED:{nexaaccId} (already voided)";
             }
 
             return $"VOIDED:{nexaaccId}";
@@ -657,16 +663,31 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
 
-            if (_config.IsDocumentMode)
+            try
             {
-                await _apiClient.VoidDocumentAsync(docId);
+                if (_config.IsDocumentMode)
+                    await _apiClient.VoidDocumentAsync(docId);
+                else
+                    await _apiClient.VoidJournalAsync(docId);
             }
-            else
+            catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
-                await _apiClient.VoidJournalAsync(docId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    "SYSTEM");
+                return $"VOIDED:{nexaaccId} (already voided)";
             }
 
             return $"VOIDED:{nexaaccId}";
+        }
+
+        private static bool IsAlreadyVoided(AccountingApiException ex)
+        {
+            if (ex.StatusCode != 400) return false;
+            string body = ex.ResponseBody ?? "";
+            return body.Contains("ถูกยกเลิกไปแล้ว")
+                || body.Contains("already cancelled")
+                || body.Contains("already voided");
         }
 
         // ──────────────────────────────────────────────
