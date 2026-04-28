@@ -474,6 +474,9 @@
                 <a href="Default.aspx" class="btn btn-primary">
                     <i class="fas fa-plus"></i> ขาย Voucher ใหม่
                 </a>
+                <a href="MatchTaxInvoice.aspx" class="btn btn-primary" style="background:#16a085;">
+                    <i class="fas fa-clipboard-check"></i> ตรวจใบกำกับภาษี
+                </a>
                 <asp:Button ID="btnExport" runat="server" Text="Export CSV" CssClass="btn btn-export" OnClick="btnExport_Click" />
             </div>
         </div>
