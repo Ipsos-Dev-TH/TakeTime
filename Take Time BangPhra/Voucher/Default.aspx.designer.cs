@@ -159,6 +159,11 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.CheckBox CheckBox4;
 
         /// <summary>
+        /// lblTaxInvoiceRequired control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTaxInvoiceRequired;
+
+        /// <summary>
         /// CheckBox3 control.
         /// </summary>
         /// <remarks>

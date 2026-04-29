@@ -421,12 +421,18 @@ namespace Take_Time_BangPhra.Integration
         // Journal Entries (AccountingController)
         public async Task<ApiResponse<JournalEntryResponse>> CreateJournalAsync(CreateJournalEntryRequest journal)
         {
-            // Validate lines before sending to avoid cryptic API errors
             if (journal.Lines == null || journal.Lines.Count == 0)
                 throw new ArgumentException("Journal entry must have at least 1 debit/credit line.");
 
             if (!journal.Lines.Any(l => l.DebitAmount > 0) || !journal.Lines.Any(l => l.CreditAmount > 0))
                 throw new ArgumentException("Journal entry must have at least 1 debit line and 1 credit line.");
+
+            decimal totalDr = journal.Lines.Sum(l => l.DebitAmount);
+            decimal totalCr = journal.Lines.Sum(l => l.CreditAmount);
+            if (totalDr != totalCr)
+                throw new ArgumentException(
+                    $"ยอดเดบิต ({totalDr:#,##0.00}) ไม่เท่ากับยอดเครดิต ({totalCr:#,##0.00}). " +
+                    $"Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
 
             return await PostAsync<CreateJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
                 $"{CompanyPath}/accounting/journals", journal);
@@ -441,6 +447,29 @@ namespace Take_Time_BangPhra.Integration
         public async Task VoidJournalAsync(Guid entryId)
         {
             await PostActionAsync($"{CompanyPath}/accounting/journals/{entryId}/void");
+        }
+
+        public async Task<ApiResponse<JournalEntryResponse>> ReverseJournalAsync(Guid entryId, ReverseJournalEntryRequest request = null)
+        {
+            return await PostAsync<ReverseJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
+                $"{CompanyPath}/accounting/journals/{entryId}/reverse", request);
+        }
+
+        public async Task DeleteJournalAsync(Guid entryId)
+        {
+            await ExecuteWithRetryAsync<object>(HttpMethod.Delete, $"{CompanyPath}/accounting/journals/{entryId}", null);
+        }
+
+        public async Task<ApiResponse<string>> BatchVoidJournalsAsync(BatchVoidRequest request)
+        {
+            return await PostAsync<BatchVoidRequest, ApiResponse<string>>(
+                $"{CompanyPath}/accounting/journals/batch-void", request);
+        }
+
+        public async Task<ApiResponse<string>> BatchPostJournalsAsync()
+        {
+            return await PostAsync<object, ApiResponse<string>>(
+                $"{CompanyPath}/accounting/journals/batch-post", null);
         }
 
         // Documents (DocumentController)
@@ -512,6 +541,40 @@ namespace Take_Time_BangPhra.Integration
 
             return await PostAsync<CreateIntegrationPaymentRequest, ApiResponse<IntegrationPaymentResponse>>(
                 "/api/integration/payments", payment);
+        }
+
+        // Integration Journals (/api/integration/journals) — ใช้ AccountCode แทน AccountId
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationJournalAsync(CreateIntegrationJournalRequest journal)
+        {
+            if (journal.Lines == null || journal.Lines.Count == 0)
+                throw new ArgumentException("Integration journal must have at least 1 line.");
+
+            return await PostAsync<CreateIntegrationJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/journals", journal);
+        }
+
+        // Integration Reverse Journal
+        public async Task<ApiResponse<IntegrationDocumentResponse>> ReverseIntegrationJournalAsync(CreateIntegrationReverseJournalRequest request)
+        {
+            return await PostAsync<CreateIntegrationReverseJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/journals/reverse", request);
+        }
+
+        // Integration Daily Summary
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateDailySummaryAsync(CreateDailySummaryRequest request)
+        {
+            if (request.Lines == null || request.Lines.Count == 0)
+                throw new ArgumentException("Daily summary must have at least 1 line.");
+
+            return await PostAsync<CreateDailySummaryRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/daily-summary", request);
+        }
+
+        // Integration Batch
+        public async Task<ApiResponse<object>> CreateIntegrationBatchAsync(CreateIntegrationBatchRequest request)
+        {
+            return await PostAsync<CreateIntegrationBatchRequest, ApiResponse<object>>(
+                "/api/integration/batch", request);
         }
 
         // Products (ProductController)

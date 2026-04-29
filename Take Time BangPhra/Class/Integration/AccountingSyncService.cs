@@ -69,6 +69,17 @@ namespace Take_Time_BangPhra.Integration
             {
                 long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
                 if (existing > 0) return existing;
+
+                // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+                // (prevents form resubmission / browser refresh from creating duplicates)
+                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 60);
+                if (recent > 0)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                        "SYSTEM");
+                    return recent;
+                }
             }
 
             var payload = new Dictionary<string, object>
@@ -108,6 +119,17 @@ namespace Take_Time_BangPhra.Integration
 
             long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
+
+            // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+            // (prevents form resubmission / browser refresh from creating duplicates)
+            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 60);
+            if (recent > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                    "SYSTEM");
+                return recent;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -646,18 +668,43 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Cannot void receipt: nexaaccId is missing");
 
             Guid docId = Guid.Parse(nexaaccId);
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
 
             try
             {
                 if (_config.IsDocumentMode)
+                {
                     await _apiClient.VoidDocumentAsync(docId);
+                }
                 else
-                    await _apiClient.VoidJournalAsync(docId);
+                {
+                    // Prefer reverse (กลับรายการ) over void for better accounting trail
+                    try
+                    {
+                        var reverseReq = new ReverseJournalEntryRequest
+                        {
+                            ReversalDate = DateTime.Now,
+                            Description = reason ?? "กลับรายการ — re-sync"
+                        };
+                        var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            "SYSTEM");
+                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                    }
+                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            "SYSTEM");
+                        await _apiClient.VoidJournalAsync(docId);
+                    }
+                }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -672,18 +719,42 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Cannot void voucher: nexaaccId is missing");
 
             Guid docId = Guid.Parse(nexaaccId);
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
 
             try
             {
                 if (_config.IsDocumentMode)
+                {
                     await _apiClient.VoidDocumentAsync(docId);
+                }
                 else
-                    await _apiClient.VoidJournalAsync(docId);
+                {
+                    try
+                    {
+                        var reverseReq = new ReverseJournalEntryRequest
+                        {
+                            ReversalDate = DateTime.Now,
+                            Description = reason ?? "กลับรายการใบสำคัญจ่าย — re-sync"
+                        };
+                        var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            "SYSTEM");
+                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                    }
+                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            "SYSTEM");
+                        await _apiClient.VoidJournalAsync(docId);
+                    }
+                }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -695,16 +766,16 @@ namespace Take_Time_BangPhra.Integration
         {
             if (ex.StatusCode != 400) return false;
             string body = ex.ResponseBody ?? "";
-            // Check both literal Thai and JSON-escaped unicode forms
-            // "ถูกยกเลิกไปแล้ว" = U+0E16 U+0E39 U+0E01 U+0E22 U+0E01 U+0E40 U+0E25 U+0E34 U+0E01 U+0E44 U+0E1B U+0E41 U+0E25 U+0E49 U+0E27
             const string escapedThai = "\\u0E16\\u0E39\\u0E01\\u0E22\\u0E01\\u0E40\\u0E25\\u0E34\\u0E01\\u0E44\\u0E1B\\u0E41\\u0E25\\u0E49\\u0E27";
             return body.Contains("ถูกยกเลิกไปแล้ว")
                 || body.IndexOf(escapedThai, StringComparison.OrdinalIgnoreCase) >= 0
+                || body.Contains("ถูกกลับรายการไปแล้ว")
                 || body.Contains("already cancelled")
                 || body.Contains("already voided")
-                || body.Contains("already cancelled.")
+                || body.Contains("already reversed")
                 || body.Contains("AlreadyVoided")
-                || body.Contains("AlreadyCancelled");
+                || body.Contains("AlreadyCancelled")
+                || body.Contains("AlreadyReversed");
         }
 
         // ──────────────────────────────────────────────
@@ -785,6 +856,34 @@ namespace Take_Time_BangPhra.Integration
                         { "@entityType", entityType },
                         { "@actionType", actionType },
                         { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// Find a recently COMPLETED entry within the given time window (seconds).
+        /// Used as anti-duplicate guard against form resubmission / browser refresh.
+        /// </summary>
+        private long FindRecentCompletedEntry(string entityType, string actionType, string payloadKey, string payloadValue, int withinSeconds)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND Status = 'COMPLETED'
+                        AND Payload LIKE @pattern
+                        AND Processed_Date >= DATEADD(SECOND, -@withinSeconds, GETDATE())
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", actionType },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"},
+                        { "@withinSeconds", withinSeconds }
                     });
                 return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
             }

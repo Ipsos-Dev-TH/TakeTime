@@ -451,6 +451,18 @@ namespace Take_Time_BangPhra.Voucher
             }
             DataTable dtDetailValidate = Session["dtDetail"] as DataTable;
             bool hasRatePlanRows = dtDetailValidate != null && dtDetailValidate.Rows.Count > 0;
+
+            // Enforce tax invoice for payment methods that require it (e.g. bank transfer)
+            if (DropDownList2.SelectedIndex > 0
+                && PaymentMethodRequiresTaxInvoice(DropDownList2.SelectedValue)
+                && CheckBox4.Checked)
+            {
+                CheckBox4.Checked = false;
+                ClientScript.RegisterStartupScript(this.GetType(), "taxRequired",
+                    "alert('วิธีชำระเงิน \"" + DropDownList2.SelectedItem.Text.Replace("'", "") + "\" ต้องออกใบกำกับภาษีในระบบ — ยกเลิกการบันทึก กรุณาตรวจสอบ');", true);
+                return;
+            }
+
             if (TextBox6.Text.Length > 0 && DropDownList2.SelectedIndex > 0 && DropDownList4.SelectedIndex > 0 && imgupload && hasRatePlanRows)
             {
                 // ✨ Use DocumentHelper to generate receipt number
@@ -1804,6 +1816,68 @@ namespace Take_Time_BangPhra.Voucher
                 CheckBox5.Checked = false;
                 CheckBox5.DataBind();
             }
+
+            // If payment method requires tax invoice, force CheckBox4 unchecked
+            if (PaymentMethodRequiresTaxInvoice(DropDownList2.SelectedValue) && CheckBox4.Checked)
+            {
+                CheckBox4.Checked = false;
+                ClientScript.RegisterStartupScript(this.GetType(), "taxRequired",
+                    "alert('วิธีชำระเงินนี้ (โอนเข้าบัญชีบริษัท) ต้องออกใบกำกับภาษีในระบบ — ไม่สามารถยกเลิกได้');", true);
+            }
+        }
+
+        protected void DropDownList2_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool requires = PaymentMethodRequiresTaxInvoice(DropDownList2.SelectedValue);
+            if (requires)
+            {
+                CheckBox4.Checked = false;
+                CheckBox4.Enabled = false;
+                lblTaxInvoiceRequired.Visible = true;
+            }
+            else
+            {
+                CheckBox4.Enabled = true;
+                lblTaxInvoiceRequired.Visible = false;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if the selected Account_Paid_How.ID requires a tax invoice
+        /// (e.g. bank transfer to company account). Falls back to name-pattern match
+        /// if the RequiresTaxInvoice column doesn't exist yet.
+        /// </summary>
+        private bool PaymentMethodRequiresTaxInvoice(string paidHowId)
+        {
+            if (string.IsNullOrEmpty(paidHowId)) return false;
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 Name, RequiresTaxInvoice FROM Account_Paid_How WHERE ID = @ID",
+                    new Dictionary<string, object> { { "@ID", paidHowId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["RequiresTaxInvoice"] != DBNull.Value)
+                    return Convert.ToBoolean(dt.Rows[0]["RequiresTaxInvoice"]);
+            }
+            catch
+            {
+                // RequiresTaxInvoice column not yet added — fall back to name match
+                try
+                {
+                    var dt = code.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 Name FROM Account_Paid_How WHERE ID = @ID",
+                        new Dictionary<string, object> { { "@ID", paidHowId } });
+                    if (dt?.Rows.Count > 0)
+                    {
+                        string name = dt.Rows[0]["Name"]?.ToString() ?? "";
+                        return name.Contains("โอน") || name.Contains("ธนาคาร")
+                            || name.Contains("บัญชี") || name.Contains("บริษัท")
+                            || name.IndexOf("Bank", StringComparison.OrdinalIgnoreCase) >= 0
+                            || name.IndexOf("Transfer", StringComparison.OrdinalIgnoreCase) >= 0;
+                    }
+                }
+                catch { }
+            }
+            return false;
         }
 
         protected void TextBox19_TextChanged(object sender, EventArgs e)

@@ -498,6 +498,7 @@
                 <div class="form-label"></div>
                 <div class="form-input checkbox-group">
                     <asp:CheckBox ID="CheckBox4" runat="server" Text=" ไม่ออกใบกำกับภาษีในระบบ" OnCheckedChanged="CheckBox4_CheckedChanged" AutoPostBack="True" CssClass="mycheckbox"/>
+                    <asp:Label ID="lblTaxInvoiceRequired" runat="server" Visible="false" CssClass="warning-text" Text=" ⚠ วิธีชำระเงินนี้ต้องออกใบกำกับภาษีในระบบ" Style="color:#c0392b; font-weight:bold;"></asp:Label>
                 </div>
             </div>
 
@@ -563,7 +564,8 @@
             <div class="form-row alt">
                 <div class="form-label">วิธีชำระเงิน<span class="required-mark">*</span></div>
                 <div class="form-input">
-                    <asp:DropDownList ID="DropDownList2" runat="server" Width="300px" AppendDataBoundItems="true">
+                    <asp:DropDownList ID="DropDownList2" runat="server" Width="300px" AppendDataBoundItems="true"
+                        AutoPostBack="True" OnSelectedIndexChanged="DropDownList2_SelectedIndexChanged">
                         <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                     </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource2" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = 'True')">
