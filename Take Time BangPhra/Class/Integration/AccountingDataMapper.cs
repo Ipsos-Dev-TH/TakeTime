@@ -383,6 +383,17 @@ namespace Take_Time_BangPhra.Integration
                 Description = $"จ่ายเงิน - {paymentMethod}",
             });
 
+            // DR=CR validation before returning
+            decimal totalDr = 0, totalCr = 0;
+            foreach (var l in lines) { totalDr += l.DebitAmount; totalCr += l.CreditAmount; }
+            if (totalDr != totalCr)
+            {
+                throw new ArgumentException(
+                    $"MapVoucherToJournal DR ({totalDr:#,##0.00}) ≠ CR ({totalCr:#,##0.00}). " +
+                    $"Voucher #{voucherId}, amount={amount}, whtAmount={whtAmount}, " +
+                    $"hasInputVat={hasInputVat}, lines={expenseLines?.Count ?? 0}");
+            }
+
             string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
             return new CreateJournalEntryRequest
             {
@@ -1091,6 +1102,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-DEP",
+                IncludeVat = true,
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
@@ -1117,34 +1129,22 @@ namespace Take_Time_BangPhra.Integration
             var revenueAccountId = !string.IsNullOrEmpty(revenueType) ? GetAccountId(revenueType) : GetAccountId("ROOM_REVENUE");
             string revenueLabel = !string.IsNullOrEmpty(revenueType) ? revenueType : "ค่าห้องพัก";
 
-            if (hasVat)
+            lines.Add(new IntegrationLineRequest
             {
-                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
-                decimal netAmount = amount - vatAmount;
-                lines.Add(new IntegrationLineRequest
-                {
-                    ItemName = revenueLabel,
-                    Description = $"รายได้ - การจอง #{reservationId}",
-                    Quantity = 1, UnitPrice = netAmount, VatRate = 7,
-                    AccountId = revenueAccountId,
-                });
-            }
-            else
-            {
-                lines.Add(new IntegrationLineRequest
-                {
-                    ItemName = revenueLabel,
-                    Description = $"รายได้ - การจอง #{reservationId}",
-                    Quantity = 1, UnitPrice = amount,
-                    AccountId = revenueAccountId,
-                });
-            }
+                ItemName = revenueLabel,
+                Description = $"รายได้ - การจอง #{reservationId}",
+                Quantity = 1,
+                UnitPrice = amount,
+                VatRate = hasVat ? 7 : 0,
+                AccountId = revenueAccountId,
+            });
 
             return new CreateIntegrationInvoiceRequest
             {
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-PAY",
+                IncludeVat = true,
                 Description = $"รับชำระ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
@@ -1290,7 +1290,6 @@ namespace Take_Time_BangPhra.Integration
 
             if (hasMultipleLines)
             {
-                // Line amounts are already pre-VAT (user enters "จำนวนเงิน ไม่รวมภาษี")
                 foreach (var el in expenseLines)
                 {
                     var lineAccId = ResolveAccountId(el.AccountId) ?? GetExpenseCategoryAccountId(el.Category);
@@ -1300,7 +1299,9 @@ namespace Take_Time_BangPhra.Integration
                     {
                         ItemName = lineItemName,
                         Description = el.Description,
-                        Quantity = 1, UnitPrice = el.Amount, VatRate = hasInputVat ? 7 : 0,
+                        Quantity = 1,
+                        UnitPrice = el.Amount,
+                        VatRate = hasInputVat ? 7 : 0,
                         WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
                         AccountId = lineAccId,
                     });
@@ -1312,30 +1313,16 @@ namespace Take_Time_BangPhra.Integration
                 string itemName = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory
                     : !string.IsNullOrEmpty(description) ? description : "ค่าใช้จ่าย";
 
-                if (hasInputVat)
+                lines.Add(new IntegrationLineRequest
                 {
-                    decimal vatAmount = Math.Round(amount * 7 / 107, 2);
-                    decimal netAmount = amount - vatAmount;
-                    lines.Add(new IntegrationLineRequest
-                    {
-                        ItemName = itemName,
-                        Description = description,
-                        Quantity = 1, UnitPrice = netAmount, VatRate = 7,
-                        WithholdingTaxRate = whtRate,
-                        AccountId = expAccId,
-                    });
-                }
-                else
-                {
-                    lines.Add(new IntegrationLineRequest
-                    {
-                        ItemName = itemName,
-                        Description = description,
-                        Quantity = 1, UnitPrice = amount,
-                        WithholdingTaxRate = whtRate,
-                        AccountId = expAccId,
-                    });
-                }
+                    ItemName = itemName,
+                    Description = description,
+                    Quantity = 1,
+                    UnitPrice = amount,
+                    VatRate = hasInputVat ? 7 : 0,
+                    WithholdingTaxRate = whtRate,
+                    AccountId = expAccId,
+                });
             }
 
             string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
@@ -1347,6 +1334,7 @@ namespace Take_Time_BangPhra.Integration
                 ExternalRef = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
                 ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
+                IncludeVat = hasMultipleLines ? false : hasInputVat,
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
@@ -1355,7 +1343,7 @@ namespace Take_Time_BangPhra.Integration
 
         public CreateIntegrationExpenseRequest MapStockInToExpense(
             int productId, string productName, decimal totalCost, string paymentMethod,
-            DateTime purchaseDate, string supplierName)
+            DateTime purchaseDate, string supplierName, bool hasInputVat = false)
         {
             return new CreateIntegrationExpenseRequest
             {
@@ -1363,6 +1351,7 @@ namespace Take_Time_BangPhra.Integration
                 SupplierName = supplierName ?? "ซัพพลายเออร์",
                 Reference = $"STOCK-IN-{productId}",
                 Description = $"ซื้อสินค้า - {productName}",
+                IncludeVat = hasInputVat,
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
                 Lines = new List<IntegrationLineRequest>
@@ -1372,6 +1361,7 @@ namespace Take_Time_BangPhra.Integration
                         ItemName = !string.IsNullOrEmpty(productName) ? productName : "สินค้า",
                         Description = $"สินค้า - {productName}",
                         Quantity = 1, UnitPrice = totalCost,
+                        VatRate = hasInputVat ? 7 : 0,
                         AccountId = GetAccountId("INVENTORY"),
                     }
                 }
@@ -1412,6 +1402,7 @@ namespace Take_Time_BangPhra.Integration
                 SupplierName = "เงินเดือนพนักงาน",
                 Reference = $"PAYROLL-{period}",
                 Description = description ?? $"เงินเดือน - {period}",
+                IncludeVat = false,
                 PaymentMethod = "CASH",
                 PaymentAccountId = GetAccountId("CASH"),
                 Lines = lines

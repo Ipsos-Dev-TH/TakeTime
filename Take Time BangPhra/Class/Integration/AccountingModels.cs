@@ -31,6 +31,12 @@ namespace Take_Time_BangPhra.Integration
         public int JournalType { get; set; }  // 0=General, 1=Sales, 2=Purchase, 3=CashReceipts, 4=CashPayments
         public string Description { get; set; }
         public string Reference { get; set; }
+        public string Note { get; set; }
+        public string Tags { get; set; }
+        public Guid? ProjectId { get; set; }
+        public Guid? BranchId { get; set; }
+        public Guid? DimensionId { get; set; }
+        public Guid? SourceDocumentId { get; set; }
         public string SourceDocumentNumber { get; set; }
         public bool ReplaceExistingForSource { get; set; }
         public List<JournalEntryLineRequest> Lines { get; set; }
@@ -42,6 +48,10 @@ namespace Take_Time_BangPhra.Integration
         public decimal DebitAmount { get; set; }
         public decimal CreditAmount { get; set; }
         public string Description { get; set; }
+        public Guid? ProjectId { get; set; }
+        public Guid? BranchId { get; set; }
+        public Guid? DimensionId { get; set; }
+        public string Tags { get; set; }
     }
 
     public class JournalEntryResponse
@@ -60,6 +70,17 @@ namespace Take_Time_BangPhra.Integration
         public decimal TotalCredit { get; set; }
         public List<JournalEntryLineResponse> Lines { get; set; }
         public DateTime CreatedAt { get; set; }
+        public Guid? ReversedByEntryId { get; set; }
+        public Guid? OriginalEntryId { get; set; }
+        public Guid? ProjectId { get; set; }
+        public string ProjectName { get; set; }
+        public Guid? BranchId { get; set; }
+        public Guid? DimensionId { get; set; }
+        public string Note { get; set; }
+        public string Tags { get; set; }
+        public Guid? SourceDocumentId { get; set; }
+        public string SourceDocumentNumber { get; set; }
+        public string SourceDocumentType { get; set; }
     }
 
     public class JournalEntryLineResponse
@@ -72,6 +93,22 @@ namespace Take_Time_BangPhra.Integration
         public decimal CreditAmount { get; set; }
         public string Description { get; set; }
         public int LineOrder { get; set; }
+        public Guid? ProjectId { get; set; }
+        public string ProjectName { get; set; }
+        public Guid? BranchId { get; set; }
+        public Guid? DimensionId { get; set; }
+        public string Tags { get; set; }
+    }
+
+    public class ReverseJournalEntryRequest
+    {
+        public DateTime? ReversalDate { get; set; }
+        public string Description { get; set; }
+    }
+
+    public class BatchVoidRequest
+    {
+        public List<Guid> EntryIds { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -439,38 +476,58 @@ namespace Take_Time_BangPhra.Integration
 
     public class CreateIntegrationInvoiceRequest
     {
-        public DateTime DocumentDate { get; set; }
-        public string CustomerName { get; set; }
-        public string Reference { get; set; }
+        public string ExternalId { get; set; }
         public string ExternalRef { get; set; }
+        public string CustomerExternalId { get; set; }
+        public string CustomerName { get; set; }
+        public string CustomerTaxId { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string DocumentType { get; set; }
+        public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
         public Guid? PaymentAccountId { get; set; }
+        public decimal? VatRate { get; set; }
+        public string Currency { get; set; }
+        public string Notes { get; set; }
+        public bool IncludeVat { get; set; }
     }
 
     public class CreateIntegrationExpenseRequest
     {
-        public DateTime DocumentDate { get; set; }
-        public string SupplierName { get; set; }
-        public string Reference { get; set; }
+        public string ExternalId { get; set; }
         public string ExternalRef { get; set; }
+        public string SupplierExternalId { get; set; }
+        public string SupplierName { get; set; }
+        public string SupplierTaxId { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
         public Guid? PaymentAccountId { get; set; }
+        public decimal? VatRate { get; set; }
+        public string Notes { get; set; }
+        public bool IncludeVat { get; set; }
     }
 
     public class IntegrationLineRequest
     {
+        public string ItemCode { get; set; }
         public string ItemName { get; set; }
         public string Description { get; set; }
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+        public decimal? DiscountAmount { get; set; }
         public string Unit { get; set; }
         public Guid? AccountId { get; set; }
+        public string AccountCode { get; set; }
+        public string Category { get; set; }
         public decimal VatRate { get; set; }
         public decimal WithholdingTaxRate { get; set; }
     }
@@ -492,12 +549,18 @@ namespace Take_Time_BangPhra.Integration
 
     public class CreateIntegrationPaymentRequest
     {
+        public string ExternalId { get; set; }
         public string ExternalRef { get; set; }
         public string InvoiceExternalRef { get; set; }
+        public Guid? DocumentId { get; set; }
+        public string CustomerExternalId { get; set; }
+        public string CustomerName { get; set; }
         public DateTime PaymentDate { get; set; }
         public decimal Amount { get; set; }
         public string PaymentMethod { get; set; }
+        public string BankAccountName { get; set; }
         public string ReferenceNo { get; set; }
+        public string SlipUrl { get; set; }
         public string Notes { get; set; }
     }
 
@@ -508,6 +571,74 @@ namespace Take_Time_BangPhra.Integration
         public decimal Amount { get; set; }
         public string Status { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration Journal (ใช้ /api/integration/journals)
+    // ส่ง AccountCode (string) แทน AccountId (Guid) — สะดวกกว่า
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationJournalRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public DateTime EntryDate { get; set; }
+        public string JournalType { get; set; }
+        public string Description { get; set; }
+        public List<IntegrationJournalLineRequest> Lines { get; set; }
+        public bool AutoBalanceVat { get; set; }
+    }
+
+    public class IntegrationJournalLineRequest
+    {
+        public string AccountCode { get; set; }
+        public decimal DebitAmount { get; set; }
+        public decimal CreditAmount { get; set; }
+        public string Description { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration Reverse Journal
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationReverseJournalRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public Guid OriginalJournalEntryId { get; set; }
+        public DateTime? ReversalDate { get; set; }
+        public string Description { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration Daily Summary
+    // ──────────────────────────────────────────────
+
+    public class CreateDailySummaryRequest
+    {
+        public DateTime SummaryDate { get; set; }
+        public string Description { get; set; }
+        public List<DailySummaryLineRequest> Lines { get; set; }
+    }
+
+    public class DailySummaryLineRequest
+    {
+        public string Category { get; set; }
+        public string Description { get; set; }
+        public decimal Amount { get; set; }
+        public string PaymentMethod { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration Batch Request
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationBatchRequest
+    {
+        public List<CreateIntegrationInvoiceRequest> Invoices { get; set; }
+        public List<CreateIntegrationPaymentRequest> Payments { get; set; }
+        public List<CreateIntegrationExpenseRequest> Expenses { get; set; }
+        public List<CreateIntegrationJournalRequest> Journals { get; set; }
     }
 
     /// <summary>

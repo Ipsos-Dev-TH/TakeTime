@@ -668,18 +668,43 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Cannot void receipt: nexaaccId is missing");
 
             Guid docId = Guid.Parse(nexaaccId);
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
 
             try
             {
                 if (_config.IsDocumentMode)
+                {
                     await _apiClient.VoidDocumentAsync(docId);
+                }
                 else
-                    await _apiClient.VoidJournalAsync(docId);
+                {
+                    // Prefer reverse (กลับรายการ) over void for better accounting trail
+                    try
+                    {
+                        var reverseReq = new ReverseJournalEntryRequest
+                        {
+                            ReversalDate = DateTime.Now,
+                            Description = reason ?? "กลับรายการ — re-sync"
+                        };
+                        var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            "SYSTEM");
+                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                    }
+                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            "SYSTEM");
+                        await _apiClient.VoidJournalAsync(docId);
+                    }
+                }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -694,18 +719,42 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Cannot void voucher: nexaaccId is missing");
 
             Guid docId = Guid.Parse(nexaaccId);
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
 
             try
             {
                 if (_config.IsDocumentMode)
+                {
                     await _apiClient.VoidDocumentAsync(docId);
+                }
                 else
-                    await _apiClient.VoidJournalAsync(docId);
+                {
+                    try
+                    {
+                        var reverseReq = new ReverseJournalEntryRequest
+                        {
+                            ReversalDate = DateTime.Now,
+                            Description = reason ?? "กลับรายการใบสำคัญจ่าย — re-sync"
+                        };
+                        var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            "SYSTEM");
+                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                    }
+                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            "SYSTEM");
+                        await _apiClient.VoidJournalAsync(docId);
+                    }
+                }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided in Nexaacc — treating as success",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -717,16 +766,16 @@ namespace Take_Time_BangPhra.Integration
         {
             if (ex.StatusCode != 400) return false;
             string body = ex.ResponseBody ?? "";
-            // Check both literal Thai and JSON-escaped unicode forms
-            // "ถูกยกเลิกไปแล้ว" = U+0E16 U+0E39 U+0E01 U+0E22 U+0E01 U+0E40 U+0E25 U+0E34 U+0E01 U+0E44 U+0E1B U+0E41 U+0E25 U+0E49 U+0E27
             const string escapedThai = "\\u0E16\\u0E39\\u0E01\\u0E22\\u0E01\\u0E40\\u0E25\\u0E34\\u0E01\\u0E44\\u0E1B\\u0E41\\u0E25\\u0E49\\u0E27";
             return body.Contains("ถูกยกเลิกไปแล้ว")
                 || body.IndexOf(escapedThai, StringComparison.OrdinalIgnoreCase) >= 0
+                || body.Contains("ถูกกลับรายการไปแล้ว")
                 || body.Contains("already cancelled")
                 || body.Contains("already voided")
-                || body.Contains("already cancelled.")
+                || body.Contains("already reversed")
                 || body.Contains("AlreadyVoided")
-                || body.Contains("AlreadyCancelled");
+                || body.Contains("AlreadyCancelled")
+                || body.Contains("AlreadyReversed");
         }
 
         // ──────────────────────────────────────────────
