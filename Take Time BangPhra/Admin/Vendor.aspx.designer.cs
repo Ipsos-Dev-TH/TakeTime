@@ -92,6 +92,16 @@ namespace Take_Time_BangPhra.Admin
         protected global::System.Web.UI.WebControls.TextBox txtPhone;
 
         /// <summary>
+        /// txtEmail control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEmail;
+
+        /// <summary>
+        /// txtContactPerson control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtContactPerson;
+
+        /// <summary>
         /// ddlVendorGroup control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlVendorGroup;
@@ -135,6 +145,11 @@ namespace Take_Time_BangPhra.Admin
         /// ddlSubDistrict control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlSubDistrict;
+
+        /// <summary>
+        /// txtRemark control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtRemark;
 
         /// <summary>
         /// btnSave control.

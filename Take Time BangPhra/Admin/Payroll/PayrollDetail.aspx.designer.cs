@@ -111,6 +111,26 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected global::System.Web.UI.WebControls.GridView gvOTDetails;
 
         /// <summary>
+        /// pnlVoucherStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlVoucherStatus;
+
+        /// <summary>
+        /// lblVoucherNumber control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblVoucherNumber;
+
+        /// <summary>
+        /// lblVoucherDate control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblVoucherDate;
+
+        /// <summary>
+        /// btnPrintVoucherFromStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnPrintVoucherFromStatus;
+
+        /// <summary>
         /// btnPrint control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnPrint;

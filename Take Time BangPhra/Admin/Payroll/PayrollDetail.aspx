@@ -353,11 +353,30 @@
                 </asp:GridView>
             </asp:Panel>
 
+            <!-- Voucher Status -->
+            <asp:Panel ID="pnlVoucherStatus" runat="server" Visible="false">
+                <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 15px 20px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <div style="font-weight: 600; color: #2e7d32; font-size: 14px;">ใบสำคัญจ่ายถูกสร้างแล้ว</div>
+                            <div style="color: #555; font-size: 13px; margin-top: 4px;">
+                                เลขที่: <strong><asp:Label ID="lblVoucherNumber" runat="server" /></strong>
+                                &nbsp;&middot;&nbsp;
+                                วันที่สร้าง: <asp:Label ID="lblVoucherDate" runat="server" />
+                            </div>
+                        </div>
+                        <asp:Button ID="btnPrintVoucherFromStatus" runat="server" Text="พิมพ์ใบสำคัญจ่าย (PDF)" CssClass="btn-print" OnClick="btnPrintVoucher_Click" style="margin: 0;" />
+                    </div>
+                </div>
+            </asp:Panel>
+
             <!-- Action Buttons -->
             <div class="action-buttons">
                 <asp:Button ID="btnPrint" runat="server" Text="พิมพ์สลิป" CssClass="btn-print" OnClientClick="window.print(); return false;" />
                 <asp:Button ID="btnPrintVoucher" runat="server" Text="พิมพ์ใบสำคัญจ่าย (PDF)" CssClass="btn-print" OnClick="btnPrintVoucher_Click" />
-                <asp:Button ID="btnGenerateVoucher" runat="server" Text="สร้าง Payment Voucher" CssClass="btn-voucher" OnClick="btnGenerateVoucher_Click" />
+                <asp:Button ID="btnGenerateVoucher" runat="server" Text="สร้าง Payment Voucher" CssClass="btn-voucher"
+                    OnClick="btnGenerateVoucher_Click"
+                    OnClientClick="return confirm('ยืนยันการสร้างใบสำคัญจ่าย?');" />
             </div>
         </div>
     </div>

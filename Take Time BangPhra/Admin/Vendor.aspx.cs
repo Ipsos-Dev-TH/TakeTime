@@ -228,12 +228,11 @@ namespace Take_Time_BangPhra.Admin
 
         protected void txtTaxID_TextChanged(object sender, EventArgs e)
         {
-            // Auto-fill if vendor exists
-            if (txtTaxID.Text.Length == 13)
+            if (txtTaxID.Text.Trim().Length == 13)
             {
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@IDNumber", txtTaxID.Text }
+                    { "@IDNumber", txtTaxID.Text.Trim() }
                 };
 
                 DataTable dt = code.DatabaseQuerySafe(conn,
@@ -464,17 +463,24 @@ namespace Take_Time_BangPhra.Admin
                 string vendorId = hfVendorID.Value;
                 bool isUpdate = !string.IsNullOrEmpty(vendorId);
 
+                string email = txtEmail.Text.Trim();
+                string contactPerson = txtContactPerson.Text.Trim();
+                string remark = txtRemark.Text.Trim();
+
                 var parameters = new Dictionary<string, object>
                 {
                     { "@IDNumber", string.IsNullOrEmpty(taxId) ? (object)DBNull.Value : taxId },
                     { "@VendorTypeID", vendorTypeId },
                     { "@Name", txtVendorName.Text.Trim() },
-                    { "@BranchNumber", branchNumber }, // 🔧 FIX: Use processed branchNumber variable
+                    { "@BranchNumber", branchNumber },
                     { "@PhoneNumber", string.IsNullOrEmpty(txtPhone.Text.Trim()) ? (object)DBNull.Value : txtPhone.Text.Trim() },
                     { "@Address", txtAddress.Text.Trim() },
                     { "@Address1", txtAddress1.Text.Trim() },
                     { "@AddressID", string.IsNullOrEmpty(addressId) ? (object)DBNull.Value : addressId },
-                    { "@VendorGroup", string.IsNullOrEmpty(ddlVendorGroup.SelectedValue) ? (object)DBNull.Value : ddlVendorGroup.SelectedValue }
+                    { "@VendorGroup", string.IsNullOrEmpty(ddlVendorGroup.SelectedValue) ? (object)DBNull.Value : ddlVendorGroup.SelectedValue },
+                    { "@Email", string.IsNullOrEmpty(email) ? (object)DBNull.Value : email },
+                    { "@ContactPerson", string.IsNullOrEmpty(contactPerson) ? (object)DBNull.Value : contactPerson },
+                    { "@Remark", string.IsNullOrEmpty(remark) ? (object)DBNull.Value : remark }
                 };
 
                 if (isUpdate)
@@ -490,7 +496,10 @@ namespace Take_Time_BangPhra.Admin
                             [Address] = @Address,
                             [Address1] = @Address1,
                             [Address_ID] = @AddressID,
-                            [Vendor_Group] = @VendorGroup
+                            [Vendor_Group] = @VendorGroup,
+                            [Email] = @Email,
+                            [Contact_Person] = @ContactPerson,
+                            [Remark] = @Remark
                           WHERE ID = @VendorID",
                         parameters);
 
@@ -502,9 +511,11 @@ namespace Take_Time_BangPhra.Admin
                     code.DatabaseInsertSafe(conn,
                         @"INSERT INTO [dbo].[Vendor]
                             (IDNumber, Vendor_Type_ID, Name, Branch_Number, Phone_Number,
-                             Address, Address1, Address_ID, Vendor_Group, Status)
+                             Address, Address1, Address_ID, Vendor_Group, Status,
+                             Email, Contact_Person, Remark)
                           VALUES (@IDNumber, @VendorTypeID, @Name, @BranchNumber, @PhoneNumber,
-                                  @Address, @Address1, @AddressID, @VendorGroup, @Status)",
+                                  @Address, @Address1, @AddressID, @VendorGroup, @Status,
+                                  @Email, @ContactPerson, @Remark)",
                         parameters);
 
                     ShowMessage("บันทึกข้อมูล Vendor สำเร็จ", "success");
@@ -531,9 +542,12 @@ namespace Take_Time_BangPhra.Admin
             txtVendorName.Text = "";
             txtBranchNumber.Text = "00000";
             txtPhone.Text = "";
+            txtEmail.Text = "";
+            txtContactPerson.Text = "";
             txtAddress.Text = "";
             txtAddress1.Text = "";
             txtPostalCode.Text = "";
+            txtRemark.Text = "";
 
             if (ddlVendorType.Items.Count > 0)
                 ddlVendorType.SelectedIndex = 0;
@@ -557,6 +571,13 @@ namespace Take_Time_BangPhra.Admin
             txtPhone.Text = row["Phone_Number"] != DBNull.Value ? row["Phone_Number"].ToString() : "";
             txtAddress.Text = row["Address"] != DBNull.Value ? row["Address"].ToString() : "";
             txtAddress1.Text = row["Address1"] != DBNull.Value ? row["Address1"].ToString() : "";
+
+            if (row.Table.Columns.Contains("Email"))
+                txtEmail.Text = row["Email"] != DBNull.Value ? row["Email"].ToString() : "";
+            if (row.Table.Columns.Contains("Contact_Person"))
+                txtContactPerson.Text = row["Contact_Person"] != DBNull.Value ? row["Contact_Person"].ToString() : "";
+            if (row.Table.Columns.Contains("Remark"))
+                txtRemark.Text = row["Remark"] != DBNull.Value ? row["Remark"].ToString() : "";
 
             if (ddlVendorType.Items.FindByValue(row["Vendor_Type_ID"].ToString()) != null)
             {
