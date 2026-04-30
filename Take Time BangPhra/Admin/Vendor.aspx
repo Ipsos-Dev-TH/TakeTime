@@ -350,13 +350,16 @@
                 <asp:Label ID="lblFormTitle" runat="server" Text="เพิ่ม Vendor ใหม่"></asp:Label>
             </h3>
 
-            <div class="section-title">📋 ข้อมูลทั่วไป</div>
+            <div class="section-title">ข้อมูลผู้เสียภาษี</div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>เลขประจำตัวผู้เสียภาษี (13 หลัก)</label>
-                    <asp:TextBox ID="txtTaxID" runat="server" CssClass="form-control" TextMode="Number" MaxLength="13" AutoPostBack="true" OnTextChanged="txtTaxID_TextChanged"></asp:TextBox>
-                    <div class="hint success">✓ เว้นว่างได้ถ้าไม่มีเลขผู้เสียภาษี</div>
+                    <div style="position: relative;">
+                        <asp:TextBox ID="txtTaxID" runat="server" CssClass="form-control" MaxLength="13" placeholder="กรอกเลข 13 หลัก ระบบจะค้นหาอัตโนมัติ"></asp:TextBox>
+                        <span id="taxIdSpinner" style="display:none; position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:14px;">กำลังค้นหา...</span>
+                    </div>
+                    <div id="taxIdStatus" class="hint success">เว้นว่างได้ถ้าไม่มีเลขผู้เสียภาษี</div>
                 </div>
 
                 <div class="form-group">
@@ -368,22 +371,34 @@
             <div class="form-row">
                 <div class="form-group">
                     <label class="required">ชื่อผู้เสียภาษี / ชื่อบริษัท</label>
-                    <asp:TextBox ID="txtVendorName" runat="server" CssClass="form-control" required></asp:TextBox>
-                    <div class="hint warning">* บังคับ - ใช้เป็น unique key หลัก</div>
+                    <asp:TextBox ID="txtVendorName" runat="server" CssClass="form-control" required placeholder="ชื่อบริษัท หรือ ชื่อ-นามสกุล"></asp:TextBox>
                 </div>
 
                 <div class="form-group" id="branchNumberGroup">
                     <label id="lblBranch">เลขสาขา (00000 = สำนักงานใหญ่)</label>
-                    <asp:TextBox ID="txtBranchNumber" runat="server" CssClass="form-control" TextMode="Number" MaxLength="5" Text="00000"></asp:TextBox>
-                    <div class="hint success" id="hintBranch">✓ กรอก 00000 สำหรับสำนักงานใหญ่</div>
+                    <asp:TextBox ID="txtBranchNumber" runat="server" CssClass="form-control" MaxLength="5" Text="00000" placeholder="00000"></asp:TextBox>
+                    <div class="hint success" id="hintBranch">กรอก 00000 สำหรับสำนักงานใหญ่</div>
+                </div>
+            </div>
+
+            <div class="section-title">ข้อมูลติดต่อ</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>เบอร์โทรศัพท์</label>
+                    <asp:TextBox ID="txtPhone" runat="server" CssClass="form-control" placeholder="0xx-xxx-xxxx"></asp:TextBox>
+                </div>
+
+                <div class="form-group">
+                    <label>อีเมล</label>
+                    <asp:TextBox ID="txtEmail" runat="server" CssClass="form-control" TextMode="Email" placeholder="email@company.com"></asp:TextBox>
                 </div>
             </div>
 
             <div class="form-row">
                 <div class="form-group">
-                    <label>เบอร์โทรศัพท์</label>
-                    <asp:TextBox ID="txtPhone" runat="server" CssClass="form-control"></asp:TextBox>
-                    <div class="hint success">✓ เว้นว่างได้</div>
+                    <label>ผู้ติดต่อ</label>
+                    <asp:TextBox ID="txtContactPerson" runat="server" CssClass="form-control" placeholder="ชื่อผู้ติดต่อ"></asp:TextBox>
                 </div>
 
                 <div class="form-group">
@@ -392,17 +407,17 @@
                 </div>
             </div>
 
-            <div class="section-title">📍 ที่อยู่</div>
+            <div class="section-title">ที่อยู่</div>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>บ้านเลขที่</label>
-                    <asp:TextBox ID="txtAddress" runat="server" CssClass="form-control"></asp:TextBox>
+                    <asp:TextBox ID="txtAddress" runat="server" CssClass="form-control" placeholder="เลขที่ อาคาร ชั้น ห้อง หมู่บ้าน"></asp:TextBox>
                 </div>
 
                 <div class="form-group">
                     <label>อาคาร หมู่ที่ ซอย ถนน</label>
-                    <asp:TextBox ID="txtAddress1" runat="server" CssClass="form-control"></asp:TextBox>
+                    <asp:TextBox ID="txtAddress1" runat="server" CssClass="form-control" placeholder="หมู่ ซอย ถนน"></asp:TextBox>
                 </div>
             </div>
 
@@ -434,8 +449,13 @@
                 </div>
             </div>
 
+            <div class="section-title">หมายเหตุ</div>
+            <div class="form-group">
+                <asp:TextBox ID="txtRemark" runat="server" CssClass="form-control" TextMode="MultiLine" Rows="3" placeholder="หมายเหตุเพิ่มเติม (เงื่อนไขการชำระ, เลขบัญชีธนาคาร ฯลฯ)"></asp:TextBox>
+            </div>
+
             <div class="button-group">
-                <asp:Button ID="btnSave" runat="server" Text="💾 บันทึก" CssClass="btn-success" OnClick="btnSave_Click" />
+                <asp:Button ID="btnSave" runat="server" Text="บันทึก" CssClass="btn-success" OnClick="btnSave_Click" />
                 <asp:Button ID="btnCancel" runat="server" Text="ยกเลิก" CssClass="btn-warning" OnClick="btnCancel_Click" />
             </div>
 
@@ -444,32 +464,29 @@
     </div>
 
     <script type="text/javascript">
-        // Toggle branch number field based on vendor type
+        var taxIdTimer = null;
+
         function toggleBranchNumber() {
             var ddl = document.getElementById('<%= ddlVendorType.ClientID %>');
             var txtBranch = document.getElementById('<%= txtBranchNumber.ClientID %>');
-            var branchGroup = document.getElementById('branchNumberGroup');
             var lblBranch = document.getElementById('lblBranch');
             var hintBranch = document.getElementById('hintBranch');
 
             if (ddl && txtBranch) {
-                // Type ID 1 = นิติบุคคล (Corporate), Type ID 2 = บุคคลธรรมดา (Individual)
                 var isCorporate = ddl.value === '1';
                 var isIndividual = ddl.value === '2';
 
                 if (isIndividual) {
-                    // บุคคลธรรมดา - disable and clear value
                     txtBranch.disabled = true;
                     txtBranch.value = '';
                     txtBranch.style.backgroundColor = '#f0f0f0';
                     lblBranch.innerHTML = 'เลขสาขา <small style="color:#888;">(ไม่จำเป็นสำหรับบุคคลธรรมดา)</small>';
                     hintBranch.innerHTML = '<span style="color:#888;">ไม่ต้องกรอกสำหรับบุคคลธรรมดา</span>';
                 } else {
-                    // นิติบุคคล หรือ ยังไม่เลือก - enable
                     txtBranch.disabled = false;
                     txtBranch.style.backgroundColor = '';
                     lblBranch.innerHTML = 'เลขสาขา (00000 = สำนักงานใหญ่)';
-                    hintBranch.innerHTML = '✓ กรอก 00000 สำหรับสำนักงานใหญ่';
+                    hintBranch.innerHTML = 'กรอก 00000 สำหรับสำนักงานใหญ่';
                     if (isCorporate) {
                         lblBranch.className = 'required';
                     } else {
@@ -479,19 +496,116 @@
             }
         }
 
-        // Run on page load
+        function onTaxIdInput() {
+            var txt = document.getElementById('<%= txtTaxID.ClientID %>');
+            var val = txt.value.replace(/\D/g, '');
+            txt.value = val;
+
+            if (taxIdTimer) clearTimeout(taxIdTimer);
+
+            var statusEl = document.getElementById('taxIdStatus');
+            if (val.length === 13) {
+                statusEl.className = 'hint';
+                statusEl.style.color = '#1976d2';
+                statusEl.innerHTML = 'กำลังค้นหาข้อมูล...';
+                document.getElementById('taxIdSpinner').style.display = 'inline';
+                taxIdTimer = setTimeout(function() { lookupTaxId(val); }, 300);
+            } else if (val.length > 0 && val.length < 13) {
+                statusEl.className = 'hint';
+                statusEl.style.color = '#666';
+                statusEl.innerHTML = 'กรอกให้ครบ 13 หลัก (' + val.length + '/13)';
+            } else {
+                statusEl.className = 'hint success';
+                statusEl.style.color = '';
+                statusEl.innerHTML = 'เว้นว่างได้ถ้าไม่มีเลขผู้เสียภาษี';
+            }
+        }
+
+        function lookupTaxId(taxId) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/API/VendorAPI.ashx?action=lookup&taxId=' + encodeURIComponent(taxId), true);
+            xhr.onload = function() {
+                document.getElementById('taxIdSpinner').style.display = 'none';
+                var statusEl = document.getElementById('taxIdStatus');
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp.success && resp.data && resp.data.found) {
+                        var d = resp.data;
+                        fillFormFromLookup(d);
+                        if (d.existsInDb) {
+                            statusEl.style.color = '#388e3c';
+                            statusEl.innerHTML = 'พบข้อมูลในระบบ: ' + d.name + (d.source === 'local' ? '' : '');
+                        } else {
+                            statusEl.style.color = '#1976d2';
+                            statusEl.innerHTML = 'พบข้อมูลจากกรมสรรพากร: ' + d.name + ' (ยังไม่มีในระบบ)';
+                        }
+                    } else {
+                        statusEl.style.color = '#f57c00';
+                        statusEl.innerHTML = 'ไม่พบข้อมูลเลขผู้เสียภาษีนี้ — กรุณากรอกข้อมูลด้วยตนเอง';
+                    }
+                } catch(e) {
+                    statusEl.style.color = '#d32f2f';
+                    statusEl.innerHTML = 'เกิดข้อผิดพลาดในการค้นหา';
+                }
+            };
+            xhr.onerror = function() {
+                document.getElementById('taxIdSpinner').style.display = 'none';
+                var statusEl = document.getElementById('taxIdStatus');
+                statusEl.style.color = '#d32f2f';
+                statusEl.innerHTML = 'ไม่สามารถเชื่อมต่อได้ — กรุณากรอกข้อมูลด้วยตนเอง';
+            };
+            xhr.send();
+        }
+
+        function fillFormFromLookup(d) {
+            var setVal = function(id, val) {
+                var el = document.getElementById(id);
+                if (el && val) el.value = val;
+            };
+            var setDdl = function(id, val) {
+                var el = document.getElementById(id);
+                if (!el || !val) return;
+                for (var i = 0; i < el.options.length; i++) {
+                    if (el.options[i].value === val) { el.selectedIndex = i; return; }
+                }
+            };
+
+            setVal('<%= txtVendorName.ClientID %>', d.name);
+            setVal('<%= txtBranchNumber.ClientID %>', d.branchNumber);
+            setVal('<%= txtPhone.ClientID %>', d.phone);
+            setVal('<%= txtEmail.ClientID %>', d.email);
+            setVal('<%= txtContactPerson.ClientID %>', d.contactPerson);
+            setVal('<%= txtAddress.ClientID %>', d.address);
+            setVal('<%= txtAddress1.ClientID %>', d.address1);
+            setVal('<%= txtPostalCode.ClientID %>', d.postalCode);
+            setVal('<%= txtRemark.ClientID %>', d.remark);
+
+            if (d.vendorTypeId) setDdl('<%= ddlVendorType.ClientID %>', d.vendorTypeId);
+            if (d.vendorGroup) setDdl('<%= ddlVendorGroup.ClientID %>', d.vendorGroup);
+
+            toggleBranchNumber();
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             toggleBranchNumber();
             var ddl = document.getElementById('<%= ddlVendorType.ClientID %>');
-            if (ddl) {
-                ddl.addEventListener('change', toggleBranchNumber);
+            if (ddl) ddl.addEventListener('change', toggleBranchNumber);
+
+            var txtTax = document.getElementById('<%= txtTaxID.ClientID %>');
+            if (txtTax) {
+                txtTax.addEventListener('input', onTaxIdInput);
+                txtTax.addEventListener('paste', function() { setTimeout(onTaxIdInput, 50); });
             }
         });
 
-        // Also run after postback
         if (typeof Sys !== 'undefined') {
             Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function() {
                 toggleBranchNumber();
+                var txtTax = document.getElementById('<%= txtTaxID.ClientID %>');
+                if (txtTax) {
+                    txtTax.removeEventListener('input', onTaxIdInput);
+                    txtTax.addEventListener('input', onTaxIdInput);
+                }
             });
         }
     </script>

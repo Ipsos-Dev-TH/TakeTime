@@ -550,7 +550,7 @@ public class PayrollService
                         ISNULL(PR.TotalDeductions, 0) AS TotalDeductions,
                         ISNULL(PR.NetSalary, 0) AS NetSalary,
                         ISNULL(PR.VoucherGenerated, 0) AS VoucherGenerated,
-                        PR.VoucherNumber,
+                        PR.VoucherNumber, PR.VoucherGeneratedDate,
                         PP.Year, PP.Month, PP.PeriodName,
                         A.Username AS NickName, ES.Position,
                         ES.MonthlySalary AS CurrentSalary

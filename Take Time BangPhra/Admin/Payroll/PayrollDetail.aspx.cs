@@ -15,10 +15,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected void Page_Load(object sender, EventArgs e)
         {
             payrollService = new PayrollService();
+            CheckAdminLogin();
 
             if (!IsPostBack)
             {
-                CheckAdminLogin();
                 LoadPayrollRecord();
             }
         }
@@ -40,7 +40,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 return;
             }
 
-            // Get record ID from query string
             if (!string.IsNullOrEmpty(Request.QueryString["id"]))
             {
                 long.TryParse(Request.QueryString["id"], out payrollRecordId);
@@ -105,9 +104,25 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     lblLeaveDays.Text = record["LeaveDays"]?.ToString() ?? "0";
                     lblNetSalary.Text = FormatCurrency(record["NetSalary"]);
 
-                    // Check if voucher already generated
                     bool voucherGenerated = record["VoucherGenerated"] != DBNull.Value && Convert.ToBoolean(record["VoucherGenerated"]);
                     btnGenerateVoucher.Visible = !voucherGenerated;
+
+                    if (voucherGenerated)
+                    {
+                        pnlVoucherStatus.Visible = true;
+                        lblVoucherNumber.Text = record["VoucherNumber"]?.ToString() ?? "-";
+                        btnPrintVoucher.Visible = false;
+
+                        if (record.Table.Columns.Contains("VoucherGeneratedDate") && record["VoucherGeneratedDate"] != DBNull.Value)
+                            lblVoucherDate.Text = Convert.ToDateTime(record["VoucherGeneratedDate"]).ToString("dd/MM/yyyy HH:mm");
+                        else
+                            lblVoucherDate.Text = "-";
+                    }
+                    else
+                    {
+                        pnlVoucherStatus.Visible = false;
+                        btnPrintVoucher.Visible = true;
+                    }
 
                     // Load OT details
                     LoadOTDetails();
@@ -358,8 +373,17 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         private void ShowMessage(string message, string type)
         {
-            string script = $"alert('{message.Replace("'", "\\'")}');";
-            ClientScript.RegisterStartupScript(this.GetType(), "alert", script, true);
+            string safeMsg = message.Replace("'", "\\'").Replace("\r", "").Replace("\n", "\\n");
+            string bgColor = type == "success" ? "#4caf50" : type == "error" ? "#d32f2f" : "#1976d2";
+            string script = $@"
+                (function() {{
+                    var d = document.createElement('div');
+                    d.style.cssText = 'position:fixed;top:20px;right:20px;padding:15px 25px;background:{bgColor};color:#fff;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:400px;animation:fadeIn 0.3s;';
+                    d.textContent = '{safeMsg}';
+                    document.body.appendChild(d);
+                    setTimeout(function() {{ d.style.opacity = '0'; d.style.transition = 'opacity 0.5s'; setTimeout(function(){{ d.remove(); }}, 500); }}, 3000);
+                }})();";
+            ClientScript.RegisterStartupScript(this.GetType(), "toast", script, true);
         }
 
         #endregion
