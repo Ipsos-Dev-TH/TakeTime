@@ -31,6 +31,9 @@ namespace Take_Time_BangPhra.API
                 return;
             }
 
+            // Security: decode and normalize to catch URL-encoded traversal attempts
+            filePath = Uri.UnescapeDataString(filePath);
+
             // Security: only allow files under Documents folder
             if (!filePath.StartsWith("~/Documents/", StringComparison.OrdinalIgnoreCase) &&
                 !filePath.StartsWith("Documents/", StringComparison.OrdinalIgnoreCase))
@@ -41,7 +44,7 @@ namespace Take_Time_BangPhra.API
             }
 
             // Security: prevent directory traversal
-            if (filePath.Contains(".."))
+            if (filePath.Contains("..") || filePath.Contains("\0"))
             {
                 context.Response.StatusCode = 403;
                 context.Response.Write("Invalid path");
@@ -49,6 +52,16 @@ namespace Take_Time_BangPhra.API
             }
 
             string physicalPath = context.Server.MapPath(filePath);
+
+            // Security: verify resolved path is within the Documents directory
+            string documentsRoot = context.Server.MapPath("~/Documents/");
+            string resolvedFull = Path.GetFullPath(physicalPath);
+            if (!resolvedFull.StartsWith(Path.GetFullPath(documentsRoot), StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Write("Access denied");
+                return;
+            }
 
             if (!File.Exists(physicalPath))
             {

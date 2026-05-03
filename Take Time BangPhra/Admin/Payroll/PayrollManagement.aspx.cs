@@ -281,7 +281,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     return;
                 }
 
-                if (currentPayrollPeriodId > 0 || int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId))
+                if (currentPayrollPeriodId <= 0)
+                    int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId);
+
+                if (currentPayrollPeriodId > 0)
                 {
                     bool success = payrollService.ApprovePayrollPeriod(currentPayrollPeriodId, adminId.Value);
 
@@ -294,6 +297,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     {
                         ShowMessage("ไม่สามารถอนุมัติได้", "error");
                     }
+                }
+                else
+                {
+                    ShowMessage("กรุณาเลือกรอบเงินเดือนก่อน", "error");
                 }
             }
             catch (Exception ex)

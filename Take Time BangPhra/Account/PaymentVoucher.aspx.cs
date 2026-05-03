@@ -992,11 +992,12 @@ namespace Take_Time_BangPhra.Account.Report
         {
             try
             {
-                SqlDataSource1.SelectCommand = "SELECT * FROM [Vendor] WHERE ([Status] = 'True') AND Vendor_Group like N'" + DropDownList5.SelectedValue + "' order by Vendor_Group,Name ASC";
+                string query = "SELECT * FROM [Vendor] WHERE ([Status] = 'True') AND Vendor_Group LIKE @VendorGroup ORDER BY Vendor_Group, Name ASC";
+                var parameters = new Dictionary<string, object> { { "@VendorGroup", DropDownList5.SelectedValue } };
                 DropDownList1.Items.Clear();
                 DropDownList1.Dispose();
 
-                DataTable dtVendor = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+                DataTable dtVendor = code.DatabaseQuerySafe(conn, query, parameters);
                 for (int i = 0; i < dtVendor.Rows.Count; i++)
                 {
                     DropDownList1.Items.Add(new ListItem(dtVendor.Rows[i]["Name"].ToString(), dtVendor.Rows[i]["ID"].ToString()));

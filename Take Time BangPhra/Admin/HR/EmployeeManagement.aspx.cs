@@ -569,7 +569,7 @@ namespace Take_Time_BangPhra.Admin.HR
                     SELECT SCOPE_IDENTITY();", conn))
                 {
                     cmd.Parameters.AddWithValue("@Username", txtUsername.Text.Trim().ToLower());
-                    cmd.Parameters.AddWithValue("@Password", txtPassword.Text);
+                    cmd.Parameters.AddWithValue("@Password", SecurityHelper.HashPassword(txtPassword.Text));
                     cmd.Parameters.AddWithValue("@Title", string.IsNullOrWhiteSpace(ddlTitle.SelectedValue) ? (object)DBNull.Value : ddlTitle.SelectedValue);
                     cmd.Parameters.AddWithValue("@FirstName", txtFirstName.Text.Trim());
                     cmd.Parameters.AddWithValue("@LastName", txtLastName.Text.Trim());

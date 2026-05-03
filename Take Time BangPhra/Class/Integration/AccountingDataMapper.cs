@@ -145,7 +145,7 @@ namespace Take_Time_BangPhra.Integration
 
             if (hasVat)
             {
-                decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                decimal vatAmount = Math.Round(amount * 7m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal netAmount = amount - vatAmount;
                 var outputVatAccountId = GetAccountId("OUTPUT_VAT");
 
@@ -329,7 +329,7 @@ namespace Take_Time_BangPhra.Integration
 
                 if (hasInputVat)
                 {
-                    decimal vatAmount = Math.Round(amount * 7 / 107, 2);
+                    decimal vatAmount = Math.Round(amount * 7m / 107m, 2, MidpointRounding.AwayFromZero);
                     decimal netAmount = amount - vatAmount;
                     var inputVatAccountId = GetAccountId("INPUT_VAT");
 
@@ -495,7 +495,7 @@ namespace Take_Time_BangPhra.Integration
 
             if (hasInputVat)
             {
-                decimal vatAmount = Math.Round(totalCost * 7 / 107, 2);
+                decimal vatAmount = Math.Round(totalCost * 7m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal netCost = totalCost - vatAmount;
                 var inputVatAccountId = GetAccountId("INPUT_VAT");
 
