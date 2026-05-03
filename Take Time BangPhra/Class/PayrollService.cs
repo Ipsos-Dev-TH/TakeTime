@@ -618,7 +618,7 @@ public class PayrollService
     /// <summary>
     /// Mark voucher as generated for payroll record and store voucher number
     /// </summary>
-    public bool MarkVoucherGenerated(long payrollRecordId, string voucherNumber)
+    public bool MarkVoucherGenerated(long payrollRecordId, string voucherNumber, short? generatedBy = null)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -628,10 +628,13 @@ public class PayrollService
                 cmd.CommandText = @"
                     UPDATE Payroll_Records
                     SET VoucherGenerated = 1,
-                        VoucherNumber = @VoucherNumber
+                        VoucherNumber = @VoucherNumber,
+                        VoucherGeneratedDate = GETDATE(),
+                        VoucherGeneratedBy = @GeneratedBy
                     WHERE ID = @RecordID";
                 cmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
                 cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@GeneratedBy", generatedBy.HasValue ? (object)generatedBy.Value : DBNull.Value);
 
                 conn.Open();
                 return cmd.ExecuteNonQuery() > 0;
