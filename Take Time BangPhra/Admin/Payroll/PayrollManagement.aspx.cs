@@ -507,8 +507,12 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     string firstName = row["FirstName"]?.ToString() ?? "";
                     string lastName = row["LastName"]?.ToString() ?? "";
 
-                    // Use TotalEarnings from database (actual total earnings, not capped)
+                    // Calculate ssBase = TotalEarnings - (LeaveDeduction + Tax + OtherDeductions)
+                    // This matches the actual wage base used to calculate social security
                     decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
+                    decimal leaveDeduction = row["LeaveDeduction"] != DBNull.Value ? Convert.ToDecimal(row["LeaveDeduction"]) : 0;
+                    decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
+                    decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
                     // If TotalEarnings is 0 or null, calculate from individual columns
                     if (totalEarnings <= 0)
@@ -520,9 +524,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
                     }
 
-                    // Use actual TotalEarnings for ค่าจ้าง column (not capped at SS ceiling)
-                    // Add row to export table
-                    dtExport.Rows.Add(idCard, title, firstName, lastName, totalEarnings, socialSecurity);
+                    decimal ssBase = totalEarnings - leaveDeduction - tax - otherDeductions;
+                    if (ssBase < 0) ssBase = 0;
+
+                    // ค่าจ้าง = ssBase (รายได้หลังหักค่าใช้จ่าย ก่อนหักประกันสังคม)
+                    dtExport.Rows.Add(idCard, title, firstName, lastName, ssBase, socialSecurity);
                 }
 
                 if (dtExport.Rows.Count == 0)
@@ -961,7 +967,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         sql = @"
                             SELECT PR.ID, PR.Admin_ID, PR.EmployeeName,
                                    PR.BaseSalary, PR.OTAmount, PR.BonusAmount, PR.AllowanceAmount,
-                                   PR.TotalEarnings, PR.SocialSecurity, PR.NetSalary,
+                                   PR.TotalEarnings, ISNULL(PR.LeaveDeduction, 0) AS LeaveDeduction,
+                                   ISNULL(PR.Tax, 0) AS Tax, ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
+                                   PR.SocialSecurity, PR.NetSalary,
                                    A.IDCard, ISNULL(A.Title, '') AS Title, A.FirstName, A.LastName
                             FROM Payroll_Records PR
                             INNER JOIN Admin A ON A.ID = PR.Admin_ID
@@ -973,7 +981,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         sql = @"
                             SELECT PR.ID, PR.Admin_ID, PR.EmployeeName,
                                    PR.BaseSalary, PR.OTAmount, PR.BonusAmount, PR.AllowanceAmount,
-                                   PR.TotalEarnings, PR.SocialSecurity, PR.NetSalary,
+                                   PR.TotalEarnings, ISNULL(PR.LeaveDeduction, 0) AS LeaveDeduction,
+                                   ISNULL(PR.Tax, 0) AS Tax, ISNULL(PR.OtherDeductions, 0) AS OtherDeductions,
+                                   PR.SocialSecurity, PR.NetSalary,
                                    A.IDCard, '' AS Title, A.FirstName, A.LastName
                             FROM Payroll_Records PR
                             INNER JOIN Admin A ON A.ID = PR.Admin_ID
