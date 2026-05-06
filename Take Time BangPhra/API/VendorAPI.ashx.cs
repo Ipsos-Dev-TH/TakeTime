@@ -1,17 +1,16 @@
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Net;
 using System.Net.Http;
-using System.Threading.Tasks;
 using System.Web;
 using System.Web.Script.Serialization;
+using System.Web.SessionState;
 using Take_Time_BangPhra.Helpers;
 
 namespace Take_Time_BangPhra.API
 {
-    public class VendorAPI : IHttpHandler
+    public class VendorAPI : IHttpHandler, IRequiresSessionState
     {
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
         private readonly code _code = new code();
@@ -21,8 +20,11 @@ namespace Take_Time_BangPhra.API
 
         static VendorAPI()
         {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
+                | SecurityProtocolType.Tls11
+                | SecurityProtocolType.Tls;
+
             var handler = new HttpClientHandler();
-            handler.ServerCertificateCustomValidationCallback = (msg, cert, chain, errors) => true;
             _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
         }
 
@@ -35,25 +37,32 @@ namespace Take_Time_BangPhra.API
         {
             context.Response.ContentType = "application/json; charset=utf-8";
 
-            if (context.Session["permission"]?.ToString() != "True")
+            try
             {
-                WriteJson(context, new { success = false, message = "Unauthorized" }, 401);
-                return;
+                if (context.Session == null || context.Session["permission"]?.ToString() != "True")
+                {
+                    WriteJson(context, new { success = false, message = "Unauthorized" }, 401);
+                    return;
+                }
+
+                string action = context.Request.QueryString["action"] ?? context.Request.Form["action"] ?? "";
+
+                switch (action.ToLower())
+                {
+                    case "lookup":
+                        HandleTaxIdLookup(context);
+                        break;
+                    case "search":
+                        HandleSearch(context);
+                        break;
+                    default:
+                        WriteJson(context, new { success = false, message = "Unknown action" }, 400);
+                        break;
+                }
             }
-
-            string action = context.Request.QueryString["action"] ?? context.Request.Form["action"] ?? "";
-
-            switch (action.ToLower())
+            catch (Exception ex)
             {
-                case "lookup":
-                    HandleTaxIdLookup(context);
-                    break;
-                case "search":
-                    HandleSearch(context);
-                    break;
-                default:
-                    WriteJson(context, new { success = false, message = "Unknown action" }, 400);
-                    break;
+                WriteJson(context, new { success = false, message = "Server error: " + ex.Message }, 500);
             }
         }
 
@@ -70,59 +79,75 @@ namespace Take_Time_BangPhra.API
             var result = new Dictionary<string, object> { { "taxId", taxId } };
             string source = "";
 
-            var localParams = new Dictionary<string, object> { { "@IDNumber", taxId } };
-            DataTable dtLocal = _code.DatabaseQuerySafe(_connectionString,
-                @"SELECT V.*, A.Province, A.District, A.SubDistrict, A.PostalCode,
-                         CT.Customer_Type AS TypeName
-                  FROM Vendor V
-                  LEFT JOIN Address A ON A.ID = V.Address_ID
-                  LEFT JOIN Customer_Type CT ON CT.ID = V.Vendor_Type_ID
-                  WHERE V.IDNumber = @IDNumber AND V.Status = 'True'",
-                localParams);
+            try
+            {
+                var localParams = new Dictionary<string, object> { { "@IDNumber", taxId } };
+                DataTable dtLocal = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT V.*, A.Province, A.District, A.SubDistrict, A.PostalCode,
+                             CT.Customer_Type AS TypeName
+                      FROM Vendor V
+                      LEFT JOIN Address A ON A.ID = V.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = V.Vendor_Type_ID
+                      WHERE V.IDNumber = @IDNumber AND V.Status = 'True'",
+                    localParams);
 
-            if (dtLocal != null && dtLocal.Rows.Count > 0)
-            {
-                DataRow row = dtLocal.Rows[0];
-                result["found"] = true;
-                result["existsInDb"] = true;
-                result["vendorId"] = row["ID"]?.ToString();
-                result["name"] = row["Name"]?.ToString() ?? "";
-                result["branchNumber"] = row["Branch_Number"]?.ToString() ?? "00000";
-                result["vendorTypeId"] = row["Vendor_Type_ID"]?.ToString() ?? "";
-                result["vendorTypeName"] = row["TypeName"]?.ToString() ?? "";
-                result["vendorGroup"] = row["Vendor_Group"]?.ToString() ?? "";
-                result["phone"] = row["Phone_Number"]?.ToString() ?? "";
-                result["address"] = row["Address"]?.ToString() ?? "";
-                result["address1"] = row["Address1"]?.ToString() ?? "";
-                result["province"] = row["Province"]?.ToString() ?? "";
-                result["district"] = row["District"]?.ToString() ?? "";
-                result["subDistrict"] = row["SubDistrict"]?.ToString() ?? "";
-                result["postalCode"] = row["PostalCode"]?.ToString() ?? "";
-                result["email"] = row.Table.Columns.Contains("Email") && row["Email"] != DBNull.Value ? row["Email"].ToString() : "";
-                result["contactPerson"] = row.Table.Columns.Contains("Contact_Person") && row["Contact_Person"] != DBNull.Value ? row["Contact_Person"].ToString() : "";
-                result["remark"] = row.Table.Columns.Contains("Remark") && row["Remark"] != DBNull.Value ? row["Remark"].ToString() : "";
-                source = "local";
-            }
-            else
-            {
-                var rdResult = LookupFromRevenueService(taxId);
-                if (rdResult != null && rdResult.ContainsKey("found") && (bool)rdResult["found"])
+                if (dtLocal != null && dtLocal.Rows.Count > 0)
                 {
-                    foreach (var kv in rdResult)
-                        result[kv.Key] = kv.Value;
-                    result["existsInDb"] = false;
-                    source = "rd";
+                    DataRow row = dtLocal.Rows[0];
+                    result["found"] = true;
+                    result["existsInDb"] = true;
+                    result["vendorId"] = row["ID"]?.ToString();
+                    result["name"] = row["Name"]?.ToString() ?? "";
+                    result["branchNumber"] = row["Branch_Number"]?.ToString() ?? "00000";
+                    result["vendorTypeId"] = row["Vendor_Type_ID"]?.ToString() ?? "";
+                    result["vendorTypeName"] = row["TypeName"]?.ToString() ?? "";
+                    result["vendorGroup"] = row["Vendor_Group"]?.ToString() ?? "";
+                    result["phone"] = row["Phone_Number"]?.ToString() ?? "";
+                    result["address"] = row["Address"]?.ToString() ?? "";
+                    result["address1"] = row["Address1"]?.ToString() ?? "";
+                    result["province"] = row["Province"]?.ToString() ?? "";
+                    result["district"] = row["District"]?.ToString() ?? "";
+                    result["subDistrict"] = row["SubDistrict"]?.ToString() ?? "";
+                    result["postalCode"] = row["PostalCode"]?.ToString() ?? "";
+                    result["email"] = SafeGetColumn(row, "Email");
+                    result["contactPerson"] = SafeGetColumn(row, "Contact_Person");
+                    result["remark"] = SafeGetColumn(row, "Remark");
+                    source = "local";
                 }
                 else
                 {
-                    result["found"] = false;
-                    result["existsInDb"] = false;
-                    source = "none";
+                    var rdResult = LookupFromRevenueService(taxId);
+                    if (rdResult != null && rdResult.ContainsKey("found") && (bool)rdResult["found"])
+                    {
+                        foreach (var kv in rdResult)
+                            result[kv.Key] = kv.Value;
+                        result["existsInDb"] = false;
+                        source = "rd";
+                    }
+                    else
+                    {
+                        result["found"] = false;
+                        result["existsInDb"] = false;
+                        source = "none";
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                result["found"] = false;
+                result["existsInDb"] = false;
+                result["error"] = ex.Message;
+                source = "error";
             }
 
             result["source"] = source;
             WriteJson(context, new { success = true, data = result });
+        }
+
+        private static string SafeGetColumn(DataRow row, string columnName)
+        {
+            if (!row.Table.Columns.Contains(columnName)) return "";
+            return row[columnName] != DBNull.Value ? row[columnName].ToString() : "";
         }
 
         private Dictionary<string, object> LookupFromRevenueService(string taxId)
@@ -131,16 +156,16 @@ namespace Take_Time_BangPhra.API
             {
                 string soapBody = string.Format(
                     @"<?xml version=""1.0"" encoding=""utf-8""?>
-                    <soap:Envelope xmlns:soap=""http://schemas.xmlsoap.org/soap/envelope/""
-                                   xmlns:tns=""https://rdws.rd.go.th/serviceRD3/checktinpinservice"">
-                        <soap:Body>
-                            <tns:ServiceTIN>
-                                <tns:username>anonymous</tns:username>
-                                <tns:password>anonymous</tns:password>
-                                <tns:TIN>{0}</tns:TIN>
-                            </tns:ServiceTIN>
-                        </soap:Body>
-                    </soap:Envelope>", taxId);
+<soap:Envelope xmlns:soap=""http://schemas.xmlsoap.org/soap/envelope/""
+               xmlns:tns=""https://rdws.rd.go.th/serviceRD3/checktinpinservice"">
+  <soap:Body>
+    <tns:ServiceTIN>
+      <tns:username>anonymous</tns:username>
+      <tns:password>anonymous</tns:password>
+      <tns:TIN>{0}</tns:TIN>
+    </tns:ServiceTIN>
+  </soap:Body>
+</soap:Envelope>", taxId);
 
                 var request = new HttpRequestMessage(HttpMethod.Post,
                     "https://rdws.rd.go.th/serviceRD3/checktinpinservice.asmx");
@@ -153,16 +178,14 @@ namespace Take_Time_BangPhra.API
 
                 string xml = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
-                var result = new Dictionary<string, object>();
-
                 string titleName = ExtractXmlValue(xml, "vTitleName");
                 string name = ExtractXmlValue(xml, "vName");
                 string surName = ExtractXmlValue(xml, "vSurName");
+                string houseNumber = ExtractXmlValue(xml, "vHouseNumber");
                 string buildingName = ExtractXmlValue(xml, "vBuildingName");
                 string floorNumber = ExtractXmlValue(xml, "vFloorNumber");
-                string villageName = ExtractXmlValue(xml, "vVillageName");
                 string roomNumber = ExtractXmlValue(xml, "vRoomNumber");
-                string houseNumber = ExtractXmlValue(xml, "vHouseNumber");
+                string villageName = ExtractXmlValue(xml, "vVillageName");
                 string mooNumber = ExtractXmlValue(xml, "vMooNumber");
                 string soiName = ExtractXmlValue(xml, "vSoiName");
                 string streetName = ExtractXmlValue(xml, "vStreetName");
@@ -170,7 +193,6 @@ namespace Take_Time_BangPhra.API
                 string amphurName = ExtractXmlValue(xml, "vAmphurName");
                 string provinceName = ExtractXmlValue(xml, "vProvinceName");
                 string postCode = ExtractXmlValue(xml, "vPostCode");
-                string msgerr = ExtractXmlValue(xml, "vmsgerr");
 
                 string fullName = (titleName + name + " " + surName).Trim();
                 if (string.IsNullOrWhiteSpace(fullName) || fullName == " ")
@@ -179,17 +201,17 @@ namespace Take_Time_BangPhra.API
                 string addressLine = BuildAddressLine(houseNumber, buildingName, floorNumber,
                     roomNumber, villageName, mooNumber, soiName, streetName);
 
-                result["found"] = true;
-                result["name"] = fullName;
-                result["branchNumber"] = "00000";
-                result["address"] = addressLine;
-                result["province"] = provinceName ?? "";
-                result["district"] = amphurName ?? "";
-                result["subDistrict"] = thambolName ?? "";
-                result["postalCode"] = postCode ?? "";
-                result["rdMessage"] = msgerr ?? "";
-
-                return result;
+                return new Dictionary<string, object>
+                {
+                    { "found", true },
+                    { "name", fullName },
+                    { "branchNumber", "00000" },
+                    { "address", addressLine },
+                    { "province", provinceName ?? "" },
+                    { "district", amphurName ?? "" },
+                    { "subDistrict", thambolName ?? "" },
+                    { "postalCode", postCode ?? "" }
+                };
             }
             catch
             {

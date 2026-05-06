@@ -618,7 +618,7 @@ public class PayrollService
     /// <summary>
     /// Mark voucher as generated for payroll record and store voucher number
     /// </summary>
-    public bool MarkVoucherGenerated(long payrollRecordId, string voucherNumber)
+    public bool MarkVoucherGenerated(long payrollRecordId, string voucherNumber, short? generatedBy = null)
     {
         using (SqlConnection conn = new SqlConnection(connectionString))
         {
@@ -628,10 +628,13 @@ public class PayrollService
                 cmd.CommandText = @"
                     UPDATE Payroll_Records
                     SET VoucherGenerated = 1,
-                        VoucherNumber = @VoucherNumber
+                        VoucherNumber = @VoucherNumber,
+                        VoucherGeneratedDate = GETDATE(),
+                        VoucherGeneratedBy = @GeneratedBy
                     WHERE ID = @RecordID";
                 cmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
                 cmd.Parameters.AddWithValue("@VoucherNumber", voucherNumber ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@GeneratedBy", generatedBy.HasValue ? (object)generatedBy.Value : DBNull.Value);
 
                 conn.Open();
                 return cmd.ExecuteNonQuery() > 0;
@@ -871,7 +874,7 @@ public class PayrollService
 
                     transaction.Commit();
 
-                    // Auto-sync voucher to accounting
+                    // Auto-sync voucher to accounting (using payroll-specific journal with SSF/WHT breakdown)
                     try
                     {
                         var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
@@ -880,10 +883,15 @@ public class PayrollService
                             if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0"))
                             {
                                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                                sync.EnqueuePaymentVoucher(0, "PAYROLL", netSalary, paidHow,
-                                    DateTime.Now, $"เงินเดือน {periodName} - {employeeName}", employeeName,
+                                sync.EnqueuePayrollJournal(
+                                    totalSalary: totalEarnings,
+                                    payDate: DateTime.Now,
+                                    period: $"{periodName} - {employeeName}",
+                                    socialSecurityEmployee: socialSecurity,
+                                    socialSecurityEmployer: socialSecurity,
+                                    whtAmount: tax,
                                     documentNumber: voucherNumber,
-                                    paymentAccountId: sync.LookupPaidHowAccountId(paidHow));
+                                    paymentMethod: paidHow);
                             }
                         }
                     }

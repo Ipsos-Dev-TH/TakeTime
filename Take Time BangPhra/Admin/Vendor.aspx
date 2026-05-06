@@ -524,9 +524,17 @@
         function lookupTaxId(taxId) {
             var xhr = new XMLHttpRequest();
             xhr.open('GET', '/API/VendorAPI.ashx?action=lookup&taxId=' + encodeURIComponent(taxId), true);
+            xhr.timeout = 15000;
             xhr.onload = function() {
                 document.getElementById('taxIdSpinner').style.display = 'none';
                 var statusEl = document.getElementById('taxIdStatus');
+
+                if (xhr.status === 401) {
+                    statusEl.style.color = '#d32f2f';
+                    statusEl.innerHTML = 'กรุณาเข้าสู่ระบบใหม่';
+                    return;
+                }
+
                 try {
                     var resp = JSON.parse(xhr.responseText);
                     if (resp.success && resp.data && resp.data.found) {
@@ -534,25 +542,34 @@
                         fillFormFromLookup(d);
                         if (d.existsInDb) {
                             statusEl.style.color = '#388e3c';
-                            statusEl.innerHTML = 'พบข้อมูลในระบบ: ' + d.name + (d.source === 'local' ? '' : '');
+                            statusEl.innerHTML = 'พบข้อมูลในระบบ: ' + d.name;
                         } else {
                             statusEl.style.color = '#1976d2';
                             statusEl.innerHTML = 'พบข้อมูลจากกรมสรรพากร: ' + d.name + ' (ยังไม่มีในระบบ)';
                         }
-                    } else {
+                    } else if (resp.success && resp.data && !resp.data.found) {
                         statusEl.style.color = '#f57c00';
                         statusEl.innerHTML = 'ไม่พบข้อมูลเลขผู้เสียภาษีนี้ — กรุณากรอกข้อมูลด้วยตนเอง';
+                    } else {
+                        statusEl.style.color = '#f57c00';
+                        statusEl.innerHTML = resp.message || 'ไม่สามารถค้นหาได้ — กรุณากรอกข้อมูลด้วยตนเอง';
                     }
                 } catch(e) {
                     statusEl.style.color = '#d32f2f';
-                    statusEl.innerHTML = 'เกิดข้อผิดพลาดในการค้นหา';
+                    statusEl.innerHTML = 'ไม่สามารถค้นหาได้ — กรุณากรอกข้อมูลด้วยตนเอง';
                 }
             };
             xhr.onerror = function() {
                 document.getElementById('taxIdSpinner').style.display = 'none';
                 var statusEl = document.getElementById('taxIdStatus');
-                statusEl.style.color = '#d32f2f';
+                statusEl.style.color = '#f57c00';
                 statusEl.innerHTML = 'ไม่สามารถเชื่อมต่อได้ — กรุณากรอกข้อมูลด้วยตนเอง';
+            };
+            xhr.ontimeout = function() {
+                document.getElementById('taxIdSpinner').style.display = 'none';
+                var statusEl = document.getElementById('taxIdStatus');
+                statusEl.style.color = '#f57c00';
+                statusEl.innerHTML = 'หมดเวลาค้นหา — กรุณากรอกข้อมูลด้วยตนเอง';
             };
             xhr.send();
         }

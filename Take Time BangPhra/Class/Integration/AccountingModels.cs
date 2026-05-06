@@ -652,4 +652,283 @@ namespace Take_Time_BangPhra.Integration
         public decimal Amount { get; set; }
         public string AccountId { get; set; }
     }
+
+    // ──────────────────────────────────────────────
+    // Integration: Inbound Customer (POST /api/integration/customers)
+    // ──────────────────────────────────────────────
+
+    public class InboundCustomerRequest
+    {
+        public string ExternalId { get; set; }
+        public string Name { get; set; }
+        public string NameEn { get; set; }
+        public string TaxId { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string Address { get; set; }
+        public string SubDistrict { get; set; }
+        public string District { get; set; }
+        public string Province { get; set; }
+        public string PostalCode { get; set; }
+        public string ContactType { get; set; }
+        public string BranchCode { get; set; }
+        public bool? IsCustomer { get; set; }
+        public bool? IsSupplier { get; set; }
+        public string Notes { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Credit Note (POST /api/integration/credit-notes)
+    // ──────────────────────────────────────────────
+
+    public class InboundCreditNoteRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public string OriginalInvoiceRef { get; set; }
+        public Guid? OriginalDocumentId { get; set; }
+        public string CustomerExternalId { get; set; }
+        public string CustomerName { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public string Reason { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public string Notes { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Debit Note (POST /api/integration/debit-notes)
+    // ──────────────────────────────────────────────
+
+    public class InboundDebitNoteRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public string OriginalInvoiceRef { get; set; }
+        public Guid? OriginalDocumentId { get; set; }
+        public string CustomerExternalId { get; set; }
+        public string CustomerName { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public string Reason { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public string Notes { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Outbound Query (GET endpoints)
+    // ──────────────────────────────────────────────
+
+    public class OutboundQueryParams
+    {
+        public DateTime? FromDate { get; set; }
+        public DateTime? ToDate { get; set; }
+        public string Status { get; set; }
+        public string Type { get; set; }
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 50;
+
+        public string ToQueryString()
+        {
+            var parts = new List<string>();
+            if (FromDate.HasValue) parts.Add($"fromDate={FromDate.Value:yyyy-MM-dd}");
+            if (ToDate.HasValue) parts.Add($"toDate={ToDate.Value:yyyy-MM-dd}");
+            if (!string.IsNullOrEmpty(Status)) parts.Add($"status={Uri.EscapeDataString(Status)}");
+            if (!string.IsNullOrEmpty(Type)) parts.Add($"type={Uri.EscapeDataString(Type)}");
+            parts.Add($"page={Page}");
+            parts.Add($"pageSize={PageSize}");
+            return string.Join("&", parts);
+        }
+    }
+
+    public class OutboundDocumentResponse
+    {
+        public Guid Id { get; set; }
+        public string DocumentNumber { get; set; }
+        public string DocumentType { get; set; }
+        public string Status { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string ContactName { get; set; }
+        public string ContactTaxId { get; set; }
+        public decimal SubTotal { get; set; }
+        public decimal VatAmount { get; set; }
+        public decimal TotalAmount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal BalanceDue { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class OutboundContactResponse
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; }
+        public string TaxId { get; set; }
+        public string BranchCode { get; set; }
+        public string ContactType { get; set; }
+        public bool IsCustomer { get; set; }
+        public bool IsSupplier { get; set; }
+        public string Address { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string SubDistrict { get; set; }
+        public string District { get; set; }
+        public string Province { get; set; }
+        public string PostalCode { get; set; }
+        public string ContactPerson { get; set; }
+        public bool IsActive { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class OutboundPaymentResponse
+    {
+        public Guid Id { get; set; }
+        public string PaymentNumber { get; set; }
+        public Guid DocumentId { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime PaymentDate { get; set; }
+        public decimal Amount { get; set; }
+        public string PaymentMethod { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class OutboundAccountBalanceResponse
+    {
+        public string AccountCode { get; set; }
+        public string AccountName { get; set; }
+        public string AccountType { get; set; }
+        public decimal DebitBalance { get; set; }
+        public decimal CreditBalance { get; set; }
+        public decimal NetBalance { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // WHT Certificate (หนังสือรับรองหัก ณ ที่จ่าย)
+    // POST /api/companies/{companyId}/withholding-tax-certs/auto-generate
+    // POST /api/companies/{companyId}/withholding-tax-certs/bulk-generate
+    // ──────────────────────────────────────────────
+
+    public class AutoGenerateWhtRequest
+    {
+        public Guid DocumentId { get; set; }
+        public bool AutoIssue { get; set; }
+    }
+
+    public class BulkGenerateWhtRequest
+    {
+        public List<Guid> DocumentIds { get; set; }
+        public bool AutoIssue { get; set; }
+    }
+
+    public class WithholdingTaxCertResponse
+    {
+        public Guid Id { get; set; }
+        public string CertificateNumber { get; set; }
+        public Guid DocumentId { get; set; }
+        public string DocumentNumber { get; set; }
+        public string PayeeName { get; set; }
+        public string PayeeTaxId { get; set; }
+        public decimal TotalAmount { get; set; }
+        public decimal TaxAmount { get; set; }
+        public decimal TaxRate { get; set; }
+        public string IncomeType { get; set; }
+        public string FormType { get; set; }
+        public string Status { get; set; }
+        public DateTime IssuedDate { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class BulkGenerateWhtResponse
+    {
+        public int Generated { get; set; }
+        public int Skipped { get; set; }
+    }
+
+    public class IncomeTypeInfo
+    {
+        public string Code { get; set; }
+        public string Name { get; set; }
+        public string TaxSection { get; set; }
+        public decimal DefaultRate { get; set; }
+        public string[] ApplicableForms { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // E-Tax Invoice (ใบกำกับภาษีอิเล็กทรอนิกส์)
+    // POST /api/companies/{companyId}/etax/quick-submit
+    // POST /api/companies/{companyId}/etax/generate
+    // ──────────────────────────────────────────────
+
+    public class GenerateEtaxRequest
+    {
+        public Guid DocumentId { get; set; }
+        public string DocumentType { get; set; }
+        public bool AutoSign { get; set; }
+        public bool AutoSubmit { get; set; }
+    }
+
+    public class EtaxInvoiceResponse
+    {
+        public Guid Id { get; set; }
+        public Guid DocumentId { get; set; }
+        public string DocumentNumber { get; set; }
+        public string EtaxRefNumber { get; set; }
+        public string Status { get; set; }
+        public string XmlUrl { get; set; }
+        public string PdfUrl { get; set; }
+        public DateTime? SignedAt { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class EtaxConfigResponse
+    {
+        public bool IsEnabled { get; set; }
+        public bool HasCertificate { get; set; }
+        public string CertificateExpiry { get; set; }
+        public string SellerName { get; set; }
+        public string SellerTaxId { get; set; }
+        public string SellerBranch { get; set; }
+        public string ServiceProvider { get; set; }
+    }
+
+    public class UpdateEtaxConfigRequest
+    {
+        public bool IsEnabled { get; set; }
+        public string SellerName { get; set; }
+        public string SellerTaxId { get; set; }
+        public string SellerBranch { get; set; }
+        public string SellerAddress { get; set; }
+        public string SellerPhone { get; set; }
+        public string SellerEmail { get; set; }
+    }
+
+    public class SendEtaxByEmailRequest
+    {
+        public string RecipientEmail { get; set; }
+        public string Subject { get; set; }
+        public string Body { get; set; }
+        public bool AttachPdf { get; set; } = true;
+        public bool AttachXml { get; set; }
+    }
+
+    public class DocumentEmailLogResponse
+    {
+        public Guid Id { get; set; }
+        public string RecipientEmail { get; set; }
+        public string Subject { get; set; }
+        public string Status { get; set; }
+        public DateTime SentAt { get; set; }
+    }
+
+    public class PagedResponse<T>
+    {
+        public List<T> Items { get; set; }
+        public int TotalCount { get; set; }
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public int TotalPages { get; set; }
+    }
 }

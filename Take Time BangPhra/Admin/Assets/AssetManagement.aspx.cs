@@ -114,7 +114,7 @@ namespace Take_Time_BangPhra.Admin.Assets
                 // Filter by search text if provided
                 if (!string.IsNullOrEmpty(txtSearch.Text))
                 {
-                    string search = txtSearch.Text.ToLower();
+                    string search = txtSearch.Text.ToLower().Replace("'", "''").Replace("[", "[[]").Replace("*", "[*]").Replace("%", "[%]");
                     DataView dv = dt.DefaultView;
                     dv.RowFilter = $"AssetCode LIKE '%{search}%' OR AssetName LIKE '%{search}%' OR SerialNumber LIKE '%{search}%'";
                     dt = dv.ToTable();

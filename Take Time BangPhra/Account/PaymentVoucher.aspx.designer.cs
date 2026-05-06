@@ -231,6 +231,24 @@ namespace Take_Time_BangPhra.Account.Report
         protected global::System.Web.UI.WebControls.TextBox TextBox6;
 
         /// <summary>
+        /// ddlWHTRate control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.DropDownList ddlWHTRate;
+
+        /// <summary>
+        /// txtWHTAmount control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtWHTAmount;
+
+        /// <summary>
         /// FileUpload1 control.
         /// </summary>
         /// <remarks>
