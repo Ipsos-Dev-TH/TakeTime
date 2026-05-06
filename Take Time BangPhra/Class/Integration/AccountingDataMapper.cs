@@ -1341,6 +1341,107 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        // ══════════════════════════════════════════════
+        // Integration Credit Note (ใบลดหนี้)
+        // ใช้กับ /api/integration/credit-notes
+        // ══════════════════════════════════════════════
+
+        public InboundCreditNoteRequest MapRefundToCreditNote(
+            int reservationId, decimal refundAmount, string customerName,
+            DateTime refundDate, string reason, string originalReceiptRef = null)
+        {
+            return new InboundCreditNoteRequest
+            {
+                ExternalRef = $"CN-RES-{reservationId}",
+                OriginalInvoiceRef = originalReceiptRef,
+                CustomerName = customerName,
+                DocumentDate = refundDate,
+                Reason = reason ?? "คืนเงิน",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = "คืนเงิน",
+                        Description = $"คืนเงิน - การจอง #{reservationId} - {reason}",
+                        Quantity = 1,
+                        UnitPrice = refundAmount,
+                    }
+                }
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // Integration Debit Note (ใบเพิ่มหนี้)
+        // ใช้กับ /api/integration/debit-notes
+        // ══════════════════════════════════════════════
+
+        public InboundDebitNoteRequest MapDamageChargeToDebitNote(
+            int reservationId, decimal damageAmount, decimal missingItemsAmount,
+            string customerName, DateTime chargeDate, string description,
+            string originalReceiptRef = null)
+        {
+            decimal totalCharge = damageAmount + missingItemsAmount;
+            return new InboundDebitNoteRequest
+            {
+                ExternalRef = $"DN-DMG-{reservationId}",
+                OriginalInvoiceRef = originalReceiptRef,
+                CustomerName = customerName,
+                DocumentDate = chargeDate,
+                Reason = description ?? "ค่าเสียหาย/ของหาย",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = "ค่าเสียหาย/ของหาย",
+                        Description = $"ค่าเสียหาย/ของหาย - การจอง #{reservationId} - {description}",
+                        Quantity = 1,
+                        UnitPrice = totalCharge,
+                    }
+                }
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // Integration Customer (ลูกค้า/ผู้ติดต่อ)
+        // ใช้กับ /api/integration/customers
+        // ══════════════════════════════════════════════
+
+        public InboundCustomerRequest MapCustomerToIntegration(
+            string name, string phone, string email, string address,
+            string taxId = null, string externalId = null)
+        {
+            return new InboundCustomerRequest
+            {
+                ExternalId = externalId,
+                Name = name ?? "ลูกค้าทั่วไป",
+                Phone = phone,
+                Email = email,
+                Address = address,
+                TaxId = taxId,
+                IsCustomer = true,
+                IsSupplier = false,
+                ContactType = "Individual"
+            };
+        }
+
+        public InboundCustomerRequest MapSupplierToIntegration(
+            string name, string phone, string email, string address,
+            string taxId = null, string externalId = null)
+        {
+            return new InboundCustomerRequest
+            {
+                ExternalId = externalId,
+                Name = name,
+                Phone = phone,
+                Email = email,
+                Address = address,
+                TaxId = taxId,
+                IsCustomer = false,
+                IsSupplier = true,
+                ContactType = "JuristicPerson"
+            };
+        }
+
         public CreateIntegrationExpenseRequest MapStockInToExpense(
             int productId, string productName, decimal totalCost, string paymentMethod,
             DateTime purchaseDate, string supplierName, bool hasInputVat = false)

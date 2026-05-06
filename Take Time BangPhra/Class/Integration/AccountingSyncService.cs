@@ -615,7 +615,13 @@ namespace Take_Time_BangPhra.Integration
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
                 var result = await _apiClient.CreateExpenseAsync(expense);
-                return result.data.Id.ToString();
+                string nexaaccId = result.data.Id.ToString();
+
+                // Auto-generate WHT certificate if WHT was applied
+                if (whtAmount > 0)
+                    await TryAutoGenerateWhtCertAsync(result.data.Id, docNumber);
+
+                return nexaaccId;
             }
             else
             {
@@ -842,6 +848,41 @@ namespace Take_Time_BangPhra.Integration
             }
 
             return $"VOIDED:{nexaaccId}";
+        }
+
+        /// <summary>
+        /// Auto-generate WHT certificate in NextAcc after creating an expense document with WHT.
+        /// Non-critical — logs error and continues if NextAcc doesn't support or fails.
+        /// </summary>
+        private async Task TryAutoGenerateWhtCertAsync(Guid documentId, string documentNumber)
+        {
+            try
+            {
+                var whtResult = await _apiClient.AutoGenerateWhtCertAsync(new AutoGenerateWhtRequest
+                {
+                    DocumentId = documentId,
+                    AutoIssue = true
+                });
+
+                if (whtResult?.data != null)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"WHT cert auto-generated: doc={documentNumber} certNo={whtResult.data.CertificateNumber} taxAmount={whtResult.data.TaxAmount:N2}",
+                        "SYSTEM");
+                }
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 404 || ex.StatusCode == 400)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"WHT cert auto-generate skipped for doc={documentNumber}: {ex.StatusCode} — {ex.ResponseBody}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"WHT cert auto-generate failed for doc={documentNumber}: {ex.Message}",
+                    "SYSTEM");
+            }
         }
 
         private static bool IsAlreadyVoided(AccountingApiException ex)

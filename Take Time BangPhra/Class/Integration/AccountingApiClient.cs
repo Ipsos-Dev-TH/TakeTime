@@ -139,6 +139,11 @@ namespace Take_Time_BangPhra.Integration
             await ExecuteWithRetryAsync<object>(HttpMethod.Post, path, null);
         }
 
+        public async Task DeleteAsync(string path)
+        {
+            await ExecuteWithRetryAsync<object>(HttpMethod.Delete, path, null);
+        }
+
         /// <summary>
         /// Pre-flight DNS check — resolves the API hostname once before retry loop.
         /// Prevents wasting all retry attempts on an unresolvable domain.
@@ -575,6 +580,148 @@ namespace Take_Time_BangPhra.Integration
         {
             return await PostAsync<CreateIntegrationBatchRequest, ApiResponse<object>>(
                 "/api/integration/batch", request);
+        }
+
+        // Integration Customers (/api/integration/customers)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationCustomerAsync(InboundCustomerRequest customer)
+        {
+            return await PostAsync<InboundCustomerRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/customers", customer);
+        }
+
+        // Integration Credit Notes (/api/integration/credit-notes)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationCreditNoteAsync(InboundCreditNoteRequest creditNote)
+        {
+            if (creditNote.Lines == null || creditNote.Lines.Count == 0)
+                throw new ArgumentException("Credit note must have at least 1 line item.");
+
+            return await PostAsync<InboundCreditNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/credit-notes", creditNote);
+        }
+
+        // Integration Debit Notes (/api/integration/debit-notes)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationDebitNoteAsync(InboundDebitNoteRequest debitNote)
+        {
+            if (debitNote.Lines == null || debitNote.Lines.Count == 0)
+                throw new ArgumentException("Debit note must have at least 1 line item.");
+
+            return await PostAsync<InboundDebitNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/debit-notes", debitNote);
+        }
+
+        // Integration Outbound Queries (/api/integration/documents, contacts, payments-list, account-balances)
+        public async Task<ApiResponse<PagedResponse<OutboundDocumentResponse>>> GetIntegrationDocumentsAsync(OutboundQueryParams query = null)
+        {
+            string qs = query != null ? $"?{query.ToQueryString()}" : "";
+            return await GetAsync<ApiResponse<PagedResponse<OutboundDocumentResponse>>>($"/api/integration/documents{qs}");
+        }
+
+        public async Task<ApiResponse<PagedResponse<OutboundContactResponse>>> GetIntegrationContactsAsync(OutboundQueryParams query = null)
+        {
+            string qs = query != null ? $"?{query.ToQueryString()}" : "";
+            return await GetAsync<ApiResponse<PagedResponse<OutboundContactResponse>>>($"/api/integration/contacts{qs}");
+        }
+
+        public async Task<ApiResponse<PagedResponse<OutboundPaymentResponse>>> GetIntegrationPaymentsAsync(OutboundQueryParams query = null)
+        {
+            string qs = query != null ? $"?{query.ToQueryString()}" : "";
+            return await GetAsync<ApiResponse<PagedResponse<OutboundPaymentResponse>>>($"/api/integration/payments-list{qs}");
+        }
+
+        public async Task<ApiResponse<List<OutboundAccountBalanceResponse>>> GetIntegrationAccountBalancesAsync()
+        {
+            return await GetAsync<ApiResponse<List<OutboundAccountBalanceResponse>>>("/api/integration/account-balances");
+        }
+
+        // WHT Certificate (หนังสือรับรองหัก ณ ที่จ่าย)
+        public async Task<ApiResponse<WithholdingTaxCertResponse>> AutoGenerateWhtCertAsync(AutoGenerateWhtRequest request)
+        {
+            return await PostAsync<AutoGenerateWhtRequest, ApiResponse<WithholdingTaxCertResponse>>(
+                $"{CompanyPath}/withholding-tax-certs/auto-generate", request);
+        }
+
+        public async Task<ApiResponse<BulkGenerateWhtResponse>> BulkGenerateWhtCertsAsync(BulkGenerateWhtRequest request)
+        {
+            return await PostAsync<BulkGenerateWhtRequest, ApiResponse<BulkGenerateWhtResponse>>(
+                $"{CompanyPath}/withholding-tax-certs/bulk-generate", request);
+        }
+
+        public async Task<ApiResponse<List<IncomeTypeInfo>>> GetIncomeTypesAsync()
+        {
+            return await GetAsync<ApiResponse<List<IncomeTypeInfo>>>("/api/reference/income-types");
+        }
+
+        // E-Tax Invoice (ใบกำกับภาษีอิเล็กทรอนิกส์)
+        public async Task<ApiResponse<EtaxInvoiceResponse>> GenerateEtaxAsync(GenerateEtaxRequest request)
+        {
+            return await PostAsync<GenerateEtaxRequest, ApiResponse<EtaxInvoiceResponse>>(
+                $"{CompanyPath}/etax/generate", request);
+        }
+
+        public async Task<ApiResponse<EtaxInvoiceResponse>> QuickSubmitEtaxAsync(GenerateEtaxRequest request)
+        {
+            return await PostAsync<GenerateEtaxRequest, ApiResponse<EtaxInvoiceResponse>>(
+                $"{CompanyPath}/etax/quick-submit", request);
+        }
+
+        public async Task<ApiResponse<EtaxInvoiceResponse>> SignAndSubmitEtaxAsync(Guid etaxId)
+        {
+            return await PostAsync<object, ApiResponse<EtaxInvoiceResponse>>(
+                $"{CompanyPath}/etax/{etaxId}/sign-and-submit", null);
+        }
+
+        public async Task VoidEtaxAsync(Guid etaxId)
+        {
+            await PostActionAsync($"{CompanyPath}/etax/{etaxId}/void");
+        }
+
+        public async Task<ApiResponse<EtaxConfigResponse>> GetEtaxConfigAsync()
+        {
+            return await GetAsync<ApiResponse<EtaxConfigResponse>>($"{CompanyPath}/etax/config");
+        }
+
+        public async Task<ApiResponse<EtaxConfigResponse>> UpdateEtaxConfigAsync(UpdateEtaxConfigRequest request)
+        {
+            return await PutAsync<UpdateEtaxConfigRequest, ApiResponse<EtaxConfigResponse>>(
+                $"{CompanyPath}/etax/config", request);
+        }
+
+        public async Task<ApiResponse<object>> GetEtaxConfigStatusAsync()
+        {
+            return await GetAsync<ApiResponse<object>>($"{CompanyPath}/etax/config-status");
+        }
+
+        public async Task<ApiResponse<DocumentEmailLogResponse>> SendEtaxByEmailAsync(Guid etaxId, SendEtaxByEmailRequest request)
+        {
+            return await PostAsync<SendEtaxByEmailRequest, ApiResponse<DocumentEmailLogResponse>>(
+                $"{CompanyPath}/etax/{etaxId}/send-email", request);
+        }
+
+        // Document: Convert Type, Write-off Bad Debt, Void Payment
+        public async Task<ApiResponse<DocumentResponse>> ConvertDocumentTypeAsync(Guid documentId, int newDocumentType)
+        {
+            var body = new { DocumentType = newDocumentType };
+            return await PostAsync<object, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/convert", body);
+        }
+
+        public async Task VoidPaymentAsync(Guid paymentId)
+        {
+            await PostActionAsync($"{CompanyPath}/document/payments/{paymentId}/void");
+        }
+
+        // Contact: Smart Defaults & Parse Address
+        public async Task<ApiResponse<ContactResponse>> GetContactSmartDefaultsAsync(string name)
+        {
+            string qs = !string.IsNullOrEmpty(name) ? $"?name={Uri.EscapeDataString(name)}" : "";
+            return await GetAsync<ApiResponse<ContactResponse>>($"{CompanyPath}/document/contacts/smart-defaults{qs}");
+        }
+
+        public async Task<ApiResponse<ContactResponse>> ParseContactAddressAsync(string rawAddress)
+        {
+            var body = new { Address = rawAddress };
+            return await PostAsync<object, ApiResponse<ContactResponse>>(
+                $"{CompanyPath}/document/contacts/parse-address", body);
         }
 
         // Products (ProductController)
