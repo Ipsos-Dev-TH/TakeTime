@@ -778,6 +778,7 @@ namespace Take_Time_BangPhra.Account
                     var docParams = new Dictionary<string, object> { { "@ID", docId } };
                     var dt = code.DatabaseQuerySafe(conn,
                         @"SELECT ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type, ap.Created_Date,
+                                 ISNULL(ap.WHT_Rate, 0) AS WHT_Rate, ISNULL(ap.WHT_Amount, 0) AS WHT_Amount,
                                  ISNULL(v.Name, '-') AS Vendor_Name
                           FROM Account_Payment ap LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
                           WHERE ap.ID = @ID", docParams);
@@ -827,6 +828,9 @@ namespace Take_Time_BangPhra.Account
                             }
                         }
 
+                        decimal cdWhtRate = r.Table.Columns.Contains("WHT_Rate") && r["WHT_Rate"] != DBNull.Value ? Convert.ToDecimal(r["WHT_Rate"]) : 0;
+                        decimal cdWhtAmount = r.Table.Columns.Contains("WHT_Amount") && r["WHT_Amount"] != DBNull.Value ? Convert.ToDecimal(r["WHT_Amount"]) : 0;
+
                         queueId = sync.EnqueuePaymentVoucher(0,
                             cdPaidType,
                             Convert.ToDecimal(r["Total_Amount"]),
@@ -835,6 +839,7 @@ namespace Take_Time_BangPhra.Account
                             desc,
                             r["Vendor_Name"]?.ToString() ?? "",
                             hasInputVat: Convert.ToDecimal(r["Vat"]) > 0,
+                            whtRate: cdWhtRate, whtAmount: cdWhtAmount,
                             documentNumber: docId,
                             paymentAccountId: sync.LookupPaidHowAccountId(cdPaidHow),
                             expenseAccountId: sync.LookupPaidTypeAccountId(cdPaidType),

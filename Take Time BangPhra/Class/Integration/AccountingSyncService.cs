@@ -108,6 +108,43 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Enqueue payroll journal entry with proper SSF/WHT breakdown.
+        /// Uses MapPayrollToJournal / MapPayrollToExpense for correct accounting.
+        /// </summary>
+        public long EnqueuePayrollJournal(decimal totalSalary, DateTime payDate, string period,
+            decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
+            decimal whtAmount = 0, string documentNumber = null, string paymentMethod = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (totalSalary <= 0) return -1;
+
+            if (!string.IsNullOrEmpty(documentNumber))
+            {
+                long existing = FindPendingEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber);
+                if (existing > 0) return existing;
+
+                long recent = FindRecentCompletedEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber, 60);
+                if (recent > 0) return recent;
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "totalSalary", totalSalary },
+                { "payDate", payDate.ToString("yyyy-MM-dd") },
+                { "period", period },
+                { "socialSecurityEmployee", socialSecurityEmployee },
+                { "socialSecurityEmployer", socialSecurityEmployer },
+                { "whtAmount", whtAmount }
+            };
+            if (!string.IsNullOrEmpty(documentNumber))
+                payload["documentNumber"] = documentNumber;
+            if (!string.IsNullOrEmpty(paymentMethod))
+                payload["paymentMethod"] = paymentMethod;
+
+            return InsertQueue("PAYROLL", 0, "CREATE_PAYROLL_ENTRY", payload);
+        }
+
+        /// <summary>
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
@@ -428,6 +465,9 @@ namespace Take_Time_BangPhra.Integration
                 case "CREATE_VOUCHER_JOURNAL":
                     return await ProcessVoucherJournal(payload);
 
+                case "CREATE_PAYROLL_ENTRY":
+                    return await ProcessPayrollEntry(payload);
+
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);
 
@@ -583,6 +623,48 @@ namespace Take_Time_BangPhra.Integration
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
+                var result = await _apiClient.CreateJournalAsync(journal);
+                await SafePostJournalAsync(result.data.Id);
+                return result.data.Id.ToString();
+            }
+        }
+
+        private async Task<string> ProcessPayrollEntry(Dictionary<string, object> p)
+        {
+            decimal totalSalary = Convert.ToDecimal(p["totalSalary"]);
+            if (totalSalary <= 0)
+                throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary}");
+
+            DateTime payDate = DateTime.Parse(p["payDate"]?.ToString());
+            string period = p.ContainsKey("period") ? p["period"]?.ToString() : "";
+            decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
+            decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
+            decimal whtAmount = p.ContainsKey("whtAmount") ? Convert.ToDecimal(p["whtAmount"]) : 0;
+            string docNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : "";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollEntry: period={period} gross={totalSalary} ssfEmp={ssfEmployee} ssfEr={ssfEmployer} wht={whtAmount} doc={docNumber} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                "SYSTEM");
+
+            if (_config.IsDocumentMode)
+            {
+                var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate,
+                    $"เงินเดือน {period}");
+                if (!string.IsNullOrEmpty(docNumber))
+                {
+                    expense.Reference = docNumber;
+                    expense.ExternalRef = docNumber;
+                    expense.ReplaceExistingForSource = true;
+                }
+                var result = await _apiClient.CreateExpenseAsync(expense);
+                return result.data.Id.ToString();
+            }
+            else
+            {
+                var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period,
+                    ssfEmployee, ssfEmployer, whtAmount);
+                if (!string.IsNullOrEmpty(docNumber))
+                    journal.Reference = docNumber;
                 var result = await _apiClient.CreateJournalAsync(journal);
                 await SafePostJournalAsync(result.data.Id);
                 return result.data.Id.ToString();

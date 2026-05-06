@@ -874,7 +874,7 @@ public class PayrollService
 
                     transaction.Commit();
 
-                    // Auto-sync voucher to accounting
+                    // Auto-sync voucher to accounting (using payroll-specific journal with SSF/WHT breakdown)
                     try
                     {
                         var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
@@ -883,10 +883,15 @@ public class PayrollService
                             if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0"))
                             {
                                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                                sync.EnqueuePaymentVoucher(0, "PAYROLL", netSalary, paidHow,
-                                    DateTime.Now, $"เงินเดือน {periodName} - {employeeName}", employeeName,
+                                sync.EnqueuePayrollJournal(
+                                    totalSalary: totalEarnings,
+                                    payDate: DateTime.Now,
+                                    period: $"{periodName} - {employeeName}",
+                                    socialSecurityEmployee: socialSecurity,
+                                    socialSecurityEmployer: socialSecurity,
+                                    whtAmount: tax,
                                     documentNumber: voucherNumber,
-                                    paymentAccountId: sync.LookupPaidHowAccountId(paidHow));
+                                    paymentMethod: paidHow);
                             }
                         }
                     }

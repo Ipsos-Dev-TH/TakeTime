@@ -154,6 +154,18 @@ namespace Take_Time_BangPhra.Account.Report
                     TextBox4.Text = dtPayment.Rows[0]["Vat"].ToString();
                     TextBox6.Text = dtPayment.Rows[0]["Total_Amount"].ToString();
 
+                    // Load WHT data if columns exist
+                    if (dtPayment.Columns.Contains("WHT_Rate") && dtPayment.Rows[0]["WHT_Rate"] != DBNull.Value)
+                    {
+                        decimal savedWhtRate = Convert.ToDecimal(dtPayment.Rows[0]["WHT_Rate"]);
+                        var whtItem = ddlWHTRate.Items.FindByValue(savedWhtRate.ToString("G"));
+                        if (whtItem != null) ddlWHTRate.SelectedValue = whtItem.Value;
+                    }
+                    if (dtPayment.Columns.Contains("WHT_Amount") && dtPayment.Rows[0]["WHT_Amount"] != DBNull.Value)
+                    {
+                        txtWHTAmount.Text = Convert.ToDecimal(dtPayment.Rows[0]["WHT_Amount"]).ToString("N2");
+                    }
+
                     DropDownList2.SelectedIndex = DropDownList2.Items.IndexOf(DropDownList2.Items.FindByText(dtPayment.Rows[0]["Paid_How"].ToString()));
                     DropDownList2.DataBind();
                     DropDownList3.SelectedIndex = DropDownList3.Items.IndexOf(DropDownList3.Items.FindByText(dtPayment.Rows[0]["Paid_Type"].ToString()));
@@ -373,7 +385,7 @@ namespace Take_Time_BangPhra.Account.Report
             TextBox3.Text = (NumberHelper.TwoDecimalPoints(totalAmount)).ToString();
             TextBox4.Text = (NumberHelper.TwoDecimalPoints(vat)).ToString();
             TextBox6.Text = (NumberHelper.TwoDecimalPoints(AmountIncludeVat)).ToString();
-
+            RecalcWHTAmount();
         }
 
         protected void GridView1_RowDeleting(object sender, GridViewDeleteEventArgs e)
@@ -404,6 +416,21 @@ namespace Take_Time_BangPhra.Account.Report
                 if (item != null)
                     ddlLineCategory.SelectedValue = DropDownList3.SelectedValue;
             }
+        }
+
+        protected void ddlWHTRate_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            RecalcWHTAmount();
+        }
+
+        private void RecalcWHTAmount()
+        {
+            decimal whtRate = 0;
+            decimal.TryParse(ddlWHTRate.SelectedValue, out whtRate);
+            decimal amountExVat = 0;
+            decimal.TryParse(TextBox3.Text, out amountExVat);
+            decimal whtAmount = Math.Round(amountExVat * whtRate / 100, 2);
+            txtWHTAmount.Text = whtAmount.ToString("N2");
         }
 
         protected void Button3_Click(object sender, EventArgs e)
@@ -527,6 +554,11 @@ namespace Take_Time_BangPhra.Account.Report
 
                 // SECURE: Insert payment record with parameterized query
                 // In edit mode, preserve the original UID to keep file attachments working
+                decimal whtRate = 0;
+                decimal.TryParse(ddlWHTRate.SelectedValue, out whtRate);
+                decimal whtAmount = 0;
+                decimal.TryParse(txtWHTAmount.Text, out whtAmount);
+
                 var paymentInsertParams = new Dictionary<string, object>
                 {
                     { "@ID", docNum },
@@ -538,7 +570,9 @@ namespace Take_Time_BangPhra.Account.Report
                     { "@TotalAmountExcludeVat", TextBox3.Text },
                     { "@PaidHow", DropDownList2.SelectedItem.Text },
                     { "@PaidType", DropDownList3.SelectedItem.Text },
-                    { "@CreatedByID", Session["UserID"].ToString() }
+                    { "@CreatedByID", Session["UserID"].ToString() },
+                    { "@WHTRate", whtRate },
+                    { "@WHTAmount", whtAmount }
                 };
 
                 // If editing, preserve the original UID; otherwise let database generate new one
@@ -546,15 +580,15 @@ namespace Take_Time_BangPhra.Account.Report
                 {
                     paymentInsertParams.Add("@UID", originalUid);
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment] ([ID],[UID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
-                        "VALUES (@ID,@UID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[UID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount]) " +
+                        "VALUES (@ID,@UID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount)",
                         paymentInsertParams);
                 }
                 else
                 {
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID]) " +
-                        "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID)",
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount]) " +
+                        "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount)",
                         paymentInsertParams);
                 }
 
@@ -907,8 +941,13 @@ namespace Take_Time_BangPhra.Account.Report
                         bool hasVat = false;
                         try { hasVat = Convert.ToDecimal(TextBox4.Text) > 0; } catch { }
 
+                        decimal syncWhtRate = 0;
+                        decimal.TryParse(ddlWHTRate.SelectedValue, out syncWhtRate);
+                        decimal syncWhtAmount = 0;
+                        decimal.TryParse(txtWHTAmount.Text, out syncWhtAmount);
+
                         sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
-                            hasInputVat: hasVat,
+                            hasInputVat: hasVat, whtRate: syncWhtRate, whtAmount: syncWhtAmount,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines);
                     }

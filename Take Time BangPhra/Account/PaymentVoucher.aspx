@@ -493,6 +493,23 @@
                  </td>
             </tr>
 
+            <tr>
+                 <td class="modal-sm" style="width: 20%; text-align: right">ภาษีหัก ณ ที่จ่าย: </td>
+                <td>
+                    &nbsp;<asp:DropDownList ID="ddlWHTRate" runat="server" Width="20%" AutoPostBack="True" OnSelectedIndexChanged="ddlWHTRate_SelectedIndexChanged">
+                        <asp:ListItem Text="ไม่หัก" Value="0" />
+                        <asp:ListItem Text="1%" Value="1" />
+                        <asp:ListItem Text="1.5%" Value="1.5" />
+                        <asp:ListItem Text="2%" Value="2" />
+                        <asp:ListItem Text="3%" Value="3" />
+                        <asp:ListItem Text="5%" Value="5" />
+                        <asp:ListItem Text="10%" Value="10" />
+                    </asp:DropDownList>
+                    &nbsp;= <asp:TextBox ID="txtWHTAmount" runat="server" Width="20%" Enabled="False" Text="0.00"></asp:TextBox>
+                    &nbsp;บาท
+                </td>
+            </tr>
+
             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">จำนวนสุทธิ: </td>
                 <td>
