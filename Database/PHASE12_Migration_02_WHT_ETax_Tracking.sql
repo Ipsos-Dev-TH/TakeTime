@@ -56,15 +56,15 @@ END
 GO
 
 -- Add E-Tax and WHT config keys to integration config
-IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE Config_Key = 'Etax_AutoGenerate')
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Etax_AutoGenerate')
 BEGIN
-    INSERT INTO Accounting_Integration_Config (Config_Key, Config_Value, Description, Created_Date)
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description, Updated_Date)
     VALUES ('Etax_AutoGenerate', '0', N'สร้าง E-Tax Invoice อัตโนมัติเมื่อออกใบเสร็จ (0=ปิด, 1=เปิด)', GETDATE());
 END
 
-IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE Config_Key = 'WHT_AutoGenerateCert')
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'WHT_AutoGenerateCert')
 BEGIN
-    INSERT INTO Accounting_Integration_Config (Config_Key, Config_Value, Description, Created_Date)
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description, Updated_Date)
     VALUES ('WHT_AutoGenerateCert', '1', N'สร้างหนังสือรับรองหัก ณ ที่จ่ายอัตโนมัติเมื่อบันทึกใบสำคัญจ่ายที่มี WHT (0=ปิด, 1=เปิด)', GETDATE());
 END
 GO
