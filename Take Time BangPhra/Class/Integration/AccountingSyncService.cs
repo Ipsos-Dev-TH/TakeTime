@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
+using System.IO;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -361,6 +362,10 @@ namespace Take_Time_BangPhra.Integration
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", $"Skipped: deprecated action type '{actionType}' — ไม่มีเอกสารผูก", nexaaccId);
                     }
+                    else if (nexaaccId == "SKIPPED_LOCAL_MODE")
+                    {
+                        UpdateQueueStatus(queueId, "COMPLETED", $"Skipped: SyncMode=LOCAL — ใช้เอกสารจากระบบ TakeTime", nexaaccId);
+                    }
                     else
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
@@ -554,6 +559,14 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessVoucherJournal(Dictionary<string, object> p)
         {
+            // Per-type mode: skip if voucher sync is LOCAL
+            if (_config.IsVoucherLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoucherJournal: SKIPPED — VoucherSyncMode=LOCAL", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
             var amount = Convert.ToDecimal(p["amount"]);
             if (amount <= 0)
                 throw new ArgumentException($"Cannot create voucher journal: amount is {amount} (must be > 0). Voucher #{p["voucherId"]}");
@@ -605,15 +618,21 @@ namespace Take_Time_BangPhra.Integration
 
             int lineCount = expenseLines?.Count ?? 0;
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} lines={lineCount} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} lines={lineCount} mode={_config.VoucherSyncMode}",
                 "SYSTEM");
 
-            if (_config.IsDocumentMode)
+            // Lookup voucher attachment files
+            List<IntegrationAttachment> attachments = null;
+            if (_config.AttachFiles)
+                attachments = LookupVoucherAttachments(voucherId, docNumber, voucherDate);
+
+            if (_config.IsVoucherDocumentMode)
             {
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
+                expense.Attachments = attachments;
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 string nexaaccId = result.data.Id.ToString();
 
@@ -637,6 +656,14 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPayrollEntry(Dictionary<string, object> p)
         {
+            // Per-type mode: skip if payroll sync is LOCAL
+            if (_config.IsPayrollLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPayrollEntry: SKIPPED — PayrollSyncMode=LOCAL", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
             decimal totalSalary = Convert.ToDecimal(p["totalSalary"]);
             if (totalSalary <= 0)
                 throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary}");
@@ -649,10 +676,10 @@ namespace Take_Time_BangPhra.Integration
             string docNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : "";
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessPayrollEntry: period={period} gross={totalSalary} ssfEmp={ssfEmployee} ssfEr={ssfEmployer} wht={whtAmount} doc={docNumber} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                $"ProcessPayrollEntry: period={period} gross={totalSalary} ssfEmp={ssfEmployee} ssfEr={ssfEmployer} wht={whtAmount} doc={docNumber} mode={_config.PayrollSyncMode}",
                 "SYSTEM");
 
-            if (_config.IsDocumentMode)
+            if (_config.IsPayrollDocumentMode)
             {
                 var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate,
                     $"เงินเดือน {period}");
@@ -679,6 +706,14 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessReceiptDocument(Dictionary<string, object> p)
         {
+            // Per-type mode: skip if receipt sync is LOCAL
+            if (_config.IsReceiptLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessReceiptDocument: SKIPPED — ReceiptSyncMode=LOCAL (ใช้ใบกำกับภาษีจากระบบ TakeTime)", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
             var totalAmount = Convert.ToDecimal(p["totalAmount"]);
             if (totalAmount <= 0)
                 throw new ArgumentException($"Cannot create receipt document: totalAmount is {totalAmount} (must be > 0). Reservation #{p["reservationId"]}");
@@ -694,12 +729,17 @@ namespace Take_Time_BangPhra.Integration
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessReceiptDocument: receipt={receiptNumber} resId={reservationId} amount={totalAmount} isDeposit={isDeposit} paymentMethod={paymentMethod} revenueType={revenueType ?? "auto"} mode={(_config.IsDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY")}",
+                $"ProcessReceiptDocument: receipt={receiptNumber} resId={reservationId} amount={totalAmount} isDeposit={isDeposit} paymentMethod={paymentMethod} revenueType={revenueType ?? "auto"} mode={_config.ReceiptSyncMode}",
                 "SYSTEM");
+
+            // Lookup receipt PDF for attachment
+            List<IntegrationAttachment> attachments = null;
+            if (_config.AttachFiles)
+                attachments = LookupReceiptAttachments(receiptNumber, reservationId);
 
             if (isDeposit)
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsReceiptDocumentMode)
                 {
                     var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
                     if (!string.IsNullOrEmpty(receiptNumber))
@@ -708,6 +748,7 @@ namespace Take_Time_BangPhra.Integration
                         invoice.ExternalRef = receiptNumber;
                         invoice.ReplaceExistingForSource = true;
                     }
+                    invoice.Attachments = attachments;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
@@ -721,7 +762,7 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsReceiptDocumentMode)
                 {
                     bool hasVat = vatAmount > 0;
                     var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
@@ -731,6 +772,7 @@ namespace Take_Time_BangPhra.Integration
                         invoice.ExternalRef = receiptNumber;
                         invoice.ReplaceExistingForSource = true;
                     }
+                    invoice.Attachments = attachments;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     return result.data.Id.ToString();
                 }
@@ -1246,6 +1288,211 @@ namespace Take_Time_BangPhra.Integration
                   GROUP BY Status, Action_Type
                   ORDER BY Status, Action_Type",
                 null);
+        }
+
+        // ──────────────────────────────────────────────
+        // File Attachment Helpers
+        // ──────────────────────────────────────────────
+
+        private static readonly long MaxAttachmentSize = 5 * 1024 * 1024; // 5MB base64 limit
+
+        private List<IntegrationAttachment> LookupVoucherAttachments(int voucherId, string docNumber, DateTime voucherDate)
+        {
+            var attachments = new List<IntegrationAttachment>();
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"]
+                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return null;
+
+                // Pattern 1: Documents/Payment/{Year}/{Month}/ — PaymentVoucher.aspx uploads
+                string yearMonth = $"{voucherDate.Year}/{voucherDate.Month}";
+                string paymentDir = Path.Combine(basePath, "Documents", "Payment", yearMonth);
+                if (Directory.Exists(paymentDir))
+                {
+                    foreach (var file in Directory.GetFiles(paymentDir))
+                    {
+                        var fi = new FileInfo(file);
+                        if (fi.Length > 0 && fi.Length <= MaxAttachmentSize && IsImageOrPdf(fi.Extension))
+                        {
+                            attachments.Add(FileToAttachment(fi));
+                            if (attachments.Count >= 5) break;
+                        }
+                    }
+                }
+
+                // Pattern 2: Upload/Slip/{VoucherNumber}_*.jpg — Voucher/Default.aspx uploads
+                if (attachments.Count == 0 && !string.IsNullOrEmpty(docNumber))
+                {
+                    string slipDir = Path.Combine(basePath, "Upload", "Slip");
+                    if (Directory.Exists(slipDir))
+                    {
+                        string searchPattern = $"{docNumber}_*";
+                        foreach (var file in Directory.GetFiles(slipDir, searchPattern))
+                        {
+                            var fi = new FileInfo(file);
+                            if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
+                            {
+                                attachments.Add(FileToAttachment(fi));
+                                if (attachments.Count >= 5) break;
+                            }
+                        }
+                    }
+                }
+
+                // Pattern 3: Payment_Slips table — SlipFileURL
+                if (attachments.Count == 0 && voucherId > 0)
+                {
+                    try
+                    {
+                        var dt = _code.DatabaseQuerySafe(_connectionString,
+                            "SELECT TOP 3 SlipFileURL, FileName, FileType FROM Payment_Slips WHERE Voucher_ID = @id AND VerificationStatus != 'REJECTED'",
+                            new Dictionary<string, object> { { "@id", voucherId } });
+                        if (dt?.Rows.Count > 0)
+                        {
+                            foreach (DataRow row in dt.Rows)
+                            {
+                                string slipUrl = row["SlipFileURL"]?.ToString();
+                                if (string.IsNullOrEmpty(slipUrl)) continue;
+                                string slipPath = Path.Combine(basePath, slipUrl.TrimStart('/', '\\'));
+                                if (File.Exists(slipPath))
+                                {
+                                    var fi = new FileInfo(slipPath);
+                                    if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
+                                        attachments.Add(FileToAttachment(fi));
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVoucherAttachments: error for voucher #{voucherId}: {ex.Message}", "SYSTEM");
+            }
+
+            if (attachments.Count > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVoucherAttachments: found {attachments.Count} file(s) for voucher #{voucherId}", "SYSTEM");
+            }
+            return attachments.Count > 0 ? attachments : null;
+        }
+
+        private List<IntegrationAttachment> LookupReceiptAttachments(string receiptNumber, int reservationId)
+        {
+            var attachments = new List<IntegrationAttachment>();
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"]
+                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return null;
+
+                // Search in Documents/Receipt/{Year}/{Month}/ for receipt PDFs
+                string receiptBaseDir = Path.Combine(basePath, "Documents", "Receipt");
+                if (!Directory.Exists(receiptBaseDir))
+                    receiptBaseDir = basePath;
+
+                if (Directory.Exists(receiptBaseDir))
+                {
+                    // Search recent year/month directories
+                    var now = DateTime.Now;
+                    for (int monthOffset = 0; monthOffset <= 2; monthOffset++)
+                    {
+                        var dt = now.AddMonths(-monthOffset);
+                        string dir = Path.Combine(receiptBaseDir, dt.Year.ToString(), dt.Month.ToString());
+                        if (!Directory.Exists(dir)) continue;
+
+                        foreach (var file in Directory.GetFiles(dir, "*.pdf"))
+                        {
+                            string fn = Path.GetFileNameWithoutExtension(file);
+                            // Skip cancelled receipts
+                            if (fn.EndsWith("_Cancel", StringComparison.OrdinalIgnoreCase)) continue;
+                            // Skip e-tax duplicates
+                            if (fn.EndsWith("_etax", StringComparison.OrdinalIgnoreCase)) continue;
+
+                            var fi = new FileInfo(file);
+                            if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
+                            {
+                                attachments.Add(FileToAttachment(fi));
+                                break;
+                            }
+                        }
+                        if (attachments.Count > 0) break;
+                    }
+                }
+
+                // Also look for payment slips linked to this reservation
+                if (reservationId > 0)
+                {
+                    try
+                    {
+                        string slipBasePath = ConfigurationManager.AppSettings["BaseFolderPath"] ?? basePath;
+                        var dt = _code.DatabaseQuerySafe(_connectionString,
+                            "SELECT TOP 2 SlipFileURL, FileName, FileType FROM Payment_Slips WHERE Reservation_ID = @id AND VerificationStatus != 'REJECTED'",
+                            new Dictionary<string, object> { { "@id", reservationId } });
+                        if (dt?.Rows.Count > 0)
+                        {
+                            foreach (DataRow row in dt.Rows)
+                            {
+                                string slipUrl = row["SlipFileURL"]?.ToString();
+                                if (string.IsNullOrEmpty(slipUrl)) continue;
+                                string slipPath = Path.Combine(slipBasePath, slipUrl.TrimStart('/', '\\'));
+                                if (File.Exists(slipPath))
+                                {
+                                    var fi = new FileInfo(slipPath);
+                                    if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
+                                        attachments.Add(FileToAttachment(fi));
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptAttachments: error for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+            }
+
+            if (attachments.Count > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptAttachments: found {attachments.Count} file(s) for receipt={receiptNumber}", "SYSTEM");
+            }
+            return attachments.Count > 0 ? attachments : null;
+        }
+
+        private static IntegrationAttachment FileToAttachment(FileInfo fi)
+        {
+            byte[] bytes = File.ReadAllBytes(fi.FullName);
+            string ext = (fi.Extension ?? "").ToLower();
+            string contentType;
+            switch (ext)
+            {
+                case ".pdf": contentType = "application/pdf"; break;
+                case ".jpg": case ".jpeg": contentType = "image/jpeg"; break;
+                case ".png": contentType = "image/png"; break;
+                case ".gif": contentType = "image/gif"; break;
+                case ".bmp": contentType = "image/bmp"; break;
+                default: contentType = "application/octet-stream"; break;
+            }
+
+            return new IntegrationAttachment
+            {
+                FileName = fi.Name,
+                ContentType = contentType,
+                Base64Content = Convert.ToBase64String(bytes)
+            };
+        }
+
+        private static bool IsImageOrPdf(string extension)
+        {
+            string ext = (extension ?? "").ToLower();
+            return ext == ".pdf" || ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".bmp";
         }
     }
 }

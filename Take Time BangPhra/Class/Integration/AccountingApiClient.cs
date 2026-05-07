@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 // X-Api-Key authentication - no Bearer token needed
 using System.Text;
@@ -722,6 +724,131 @@ namespace Take_Time_BangPhra.Integration
             var body = new { Address = rawAddress };
             return await PostAsync<object, ApiResponse<ContactResponse>>(
                 $"{CompanyPath}/document/contacts/parse-address", body);
+        }
+
+        // ──────────────────────────────────────────────
+        // File Attachments (FileAttachmentController)
+        // POST /api/companies/{companyId}/attachments/{entityType}/{entityId}
+        // ──────────────────────────────────────────────
+
+        public async Task<ApiResponse<FileAttachmentResponse>> UploadAttachmentAsync(
+            string entityType, Guid entityId, string filePath)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException($"Attachment file not found: {filePath}");
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{CompanyPath}/attachments/{entityType}/{entityId}";
+            string fileName = Path.GetFileName(filePath);
+            string contentType = GetContentType(fileName);
+
+            using (var form = new MultipartFormDataContent())
+            {
+                var fileBytes = File.ReadAllBytes(filePath);
+                var fileContent = new ByteArrayContent(fileBytes);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+                form.Add(fileContent, "file", fileName);
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                request.Content = form;
+
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                    throw new AccountingApiException(
+                        $"Upload attachment failed: {response.StatusCode} {responseBody}",
+                        (int)response.StatusCode, responseBody);
+
+                return JsonConvert.DeserializeObject<ApiResponse<FileAttachmentResponse>>(responseBody, _jsonSettings);
+            }
+        }
+
+        public async Task<ApiResponse<List<FileAttachmentResponse>>> GetAttachmentsAsync(string entityType, Guid entityId)
+        {
+            return await GetAsync<ApiResponse<List<FileAttachmentResponse>>>(
+                $"{CompanyPath}/attachments/{entityType}/{entityId}");
+        }
+
+        public async Task DeleteAttachmentAsync(Guid attachmentId)
+        {
+            await DeleteAsync($"{CompanyPath}/attachments/{attachmentId}");
+        }
+
+        // Multipart Invoice Upload (/api/integration/invoices/multipart)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceMultipartAsync(
+            CreateIntegrationInvoiceRequest invoice, List<string> filePaths)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            string url = $"{_config.BaseUrl.TrimEnd('/')}/api/integration/invoices/multipart";
+
+            using (var form = new MultipartFormDataContent())
+            {
+                var json = JsonConvert.SerializeObject(invoice, _jsonSettings);
+                form.Add(new StringContent(json, Encoding.UTF8, "application/json"), "data");
+
+                if (filePaths != null)
+                {
+                    foreach (var fp in filePaths)
+                    {
+                        if (!File.Exists(fp)) continue;
+                        var fileBytes = File.ReadAllBytes(fp);
+                        var fileContent = new ByteArrayContent(fileBytes);
+                        fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetContentType(fp));
+                        form.Add(fileContent, "files", Path.GetFileName(fp));
+                    }
+                }
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                request.Content = form;
+
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                LogApiCall("POST", "/api/integration/invoices/multipart", "[multipart]", responseBody,
+                    (int)response.StatusCode, response.IsSuccessStatusCode, 0);
+
+                if (!response.IsSuccessStatusCode)
+                    throw new AccountingApiException(
+                        $"Multipart invoice upload failed: {response.StatusCode} {responseBody}",
+                        (int)response.StatusCode, responseBody);
+
+                return JsonConvert.DeserializeObject<ApiResponse<IntegrationDocumentResponse>>(responseBody, _jsonSettings);
+            }
+        }
+
+        private static string GetContentType(string fileName)
+        {
+            string ext = (Path.GetExtension(fileName) ?? "").ToLower();
+            switch (ext)
+            {
+                case ".pdf": return "application/pdf";
+                case ".jpg": case ".jpeg": return "image/jpeg";
+                case ".png": return "image/png";
+                case ".gif": return "image/gif";
+                case ".bmp": return "image/bmp";
+                case ".webp": return "image/webp";
+                case ".xml": return "application/xml";
+                case ".doc": return "application/msword";
+                case ".docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                case ".xls": return "application/vnd.ms-excel";
+                case ".xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                default: return "application/octet-stream";
+            }
         }
 
         // Products (ProductController)

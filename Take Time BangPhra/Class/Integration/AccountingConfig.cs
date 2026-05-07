@@ -44,6 +44,26 @@ namespace Take_Time_BangPhra.Integration
         public string SyncMode => GetConfig("Nexaacc_SyncMode", "DOCUMENT");
         public bool IsDocumentMode => SyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
 
+        // ──────────────────────────────────────────────
+        // Per-document-type sync mode
+        // LOCAL = ไม่ส่ง NextAcc (ใช้ระบบของ TakeTime)
+        // JOURNAL_ONLY = สร้าง journal entry ใน NextAcc
+        // DOCUMENT = สร้างเอกสารเต็มรูปแบบใน NextAcc
+        // ──────────────────────────────────────────────
+
+        public string ReceiptSyncMode => GetConfig("Nexaacc_SyncMode_Receipt", SyncMode);
+        public string VoucherSyncMode => GetConfig("Nexaacc_SyncMode_Voucher", SyncMode);
+        public string PayrollSyncMode => GetConfig("Nexaacc_SyncMode_Payroll", SyncMode);
+
+        public bool IsReceiptLocal => ReceiptSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+        public bool IsReceiptDocumentMode => ReceiptSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsVoucherDocumentMode => VoucherSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsVoucherLocal => VoucherSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+        public bool IsPayrollDocumentMode => PayrollSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsPayrollLocal => PayrollSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+
+        public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง

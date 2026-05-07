@@ -494,6 +494,7 @@ namespace Take_Time_BangPhra.Integration
         public string Currency { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
     }
 
     public class CreateIntegrationExpenseRequest
@@ -514,6 +515,7 @@ namespace Take_Time_BangPhra.Integration
         public decimal? VatRate { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
     }
 
     public class IntegrationLineRequest
@@ -693,6 +695,7 @@ namespace Take_Time_BangPhra.Integration
         public string Reason { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -711,6 +714,7 @@ namespace Take_Time_BangPhra.Integration
         public string Reason { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -930,5 +934,48 @@ namespace Take_Time_BangPhra.Integration
         public int Page { get; set; }
         public int PageSize { get; set; }
         public int TotalPages { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // File Attachments (base64 embedded in integration requests)
+    // NextAcc รองรับ 2 แบบ: base64 ใน JSON หรือ multipart upload
+    // ──────────────────────────────────────────────
+
+    public class IntegrationAttachment
+    {
+        public string FileName { get; set; }
+        public string ContentType { get; set; }
+        public string Base64Content { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Generic File Attachment (FileAttachmentController)
+    // POST /api/companies/{companyId}/attachments/{entityType}/{entityId}
+    // ──────────────────────────────────────────────
+
+    public class FileAttachmentResponse
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; }
+        public string OriginalFileName { get; set; }
+        public string ContentType { get; set; }
+        public long FileSize { get; set; }
+        public string StoragePath { get; set; }
+        public string ThumbnailPath { get; set; }
+        public string EntityType { get; set; }
+        public Guid EntityId { get; set; }
+        public string UploadedByName { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Sync Mode Constants
+    // ──────────────────────────────────────────────
+
+    public static class SyncModeType
+    {
+        public const string Local = "LOCAL";
+        public const string JournalOnly = "JOURNAL_ONLY";
+        public const string Document = "DOCUMENT";
     }
 }

@@ -134,12 +134,47 @@
                     </select>
                 </div>
                 <div class="config-item">
-                    <label>โหมดการ Sync</label>
+                    <label>โหมดการ Sync (ค่าเริ่มต้น)</label>
                     <select id="cfgSyncMode">
                         <option value="DOCUMENT">สร้างเอกสาร + บันทึกบัญชีอัตโนมัติ</option>
                         <option value="JOURNAL_ONLY">บันทึกสมุดบัญชีอย่างเดียว</option>
                     </select>
-                    <div class="help-text">DOCUMENT = สร้างใบกำกับภาษี/ใบสำคัญจ่ายในระบบบัญชี แล้วระบบจะบันทึก Journal ให้อัตโนมัติ<br/>JOURNAL_ONLY = บันทึกเฉพาะ Journal Entry (เดบิต/เครดิต) โดยไม่สร้างเอกสาร</div>
+                    <div class="help-text">ค่าเริ่มต้นสำหรับเอกสารที่ไม่ได้ตั้งค่าเฉพาะด้านล่าง</div>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>ใบเสร็จ / ใบกำกับภาษี</label>
+                    <select id="cfgReceiptSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ใช้เอกสารจากระบบ TakeTime (ไม่ส่ง NextAcc)</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>ใบสำคัญจ่าย</label>
+                    <select id="cfgVoucherSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>เงินเดือน (Payroll)</label>
+                    <select id="cfgPayrollSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>แนบไฟล์เอกสาร</label>
+                    <select id="cfgAttachFiles">
+                        <option value="true">เปิด — ส่งไฟล์ใบเสร็จ/สลิปไปพร้อมเอกสาร</option>
+                        <option value="false">ปิด</option>
+                    </select>
+                    <div class="help-text">ส่งไฟล์แนบ (ใบเสร็จ PDF, สลิปจ่ายเงิน, ใบสำคัญจ่าย) ไปพร้อมเอกสารใน NextAcc</div>
                 </div>
                 <div class="config-item">
                     <label>Sync Interval (วินาที)</label>
@@ -412,6 +447,9 @@
             loadQueueData();
             preloadNexaaccAccounts();
             document.getElementById('cfgSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgReceiptSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgVoucherSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgPayrollSyncMode').addEventListener('change', updateJourneyMap);
         });
 
         function preloadNexaaccAccounts() {
@@ -428,21 +466,34 @@
         }
 
         function updateJourneyMap() {
-            var mode = document.getElementById('cfgSyncMode').value;
-            var isDoc = mode === 'DOCUMENT';
+            var globalMode = document.getElementById('cfgSyncMode').value;
+            var receiptMode = document.getElementById('cfgReceiptSyncMode').value || globalMode;
+            var voucherMode = document.getElementById('cfgVoucherSyncMode').value || globalMode;
+            var isReceiptDoc = receiptMode === 'DOCUMENT';
+            var isReceiptLocal = receiptMode === 'LOCAL';
+            var isVoucherDoc = voucherMode === 'DOCUMENT';
+            var isVoucherLocal = voucherMode === 'LOCAL';
             var jn = {
-                jnDeposit: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับมัดจำ) + Journal'
-                    : 'DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า',
-                jnPayment: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับชำระ) + Journal'
-                    : 'DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก',
-                jnCheckout: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับรู้รายได้) + Journal'
-                    : 'DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก',
-                jnVoucher: isDoc
-                    ? 'สร้างใบสำคัญจ่าย<br/>(ค่าใช้จ่าย) + Journal'
-                    : 'DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร'
+                jnDeposit: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับมัดจำ) + Journal'
+                        : 'DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า',
+                jnPayment: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับชำระ) + Journal'
+                        : 'DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก',
+                jnCheckout: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับรู้รายได้) + Journal'
+                        : 'DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก',
+                jnVoucher: isVoucherLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isVoucherDoc
+                        ? 'สร้างใบสำคัญจ่าย<br/>(ค่าใช้จ่าย) + Journal'
+                        : 'DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร'
             };
             for (var id in jn) {
                 var el = document.getElementById(id);
@@ -462,6 +513,10 @@
                 document.getElementById('cfgSyncInterval').value = cfg.syncInterval || 30;
                 document.getElementById('cfgMaxRetries').value = cfg.maxRetries || 5;
                 document.getElementById('cfgTimeout').value = cfg.timeout || 30;
+                if (cfg.receiptSyncMode) document.getElementById('cfgReceiptSyncMode').value = cfg.receiptSyncMode;
+                if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
+                if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
+                document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
@@ -486,7 +541,11 @@
                 syncMode: document.getElementById('cfgSyncMode').value,
                 syncInterval: document.getElementById('cfgSyncInterval').value,
                 maxRetries: document.getElementById('cfgMaxRetries').value,
-                timeout: document.getElementById('cfgTimeout').value
+                timeout: document.getElementById('cfgTimeout').value,
+                receiptSyncMode: document.getElementById('cfgReceiptSyncMode').value,
+                voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
+                payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
+                attachFiles: document.getElementById('cfgAttachFiles').value
             };
             postAction(data, 'syncTestResult');
         }
