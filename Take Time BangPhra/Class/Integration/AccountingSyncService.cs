@@ -895,6 +895,11 @@ namespace Take_Time_BangPhra.Integration
             if (_config.AttachFiles)
                 attachments = LookupVoucherAttachments(voucherId, docNumber, voucherDate);
 
+            // Ensure supplier exists as Contact in NextAcc (DOCUMENT mode)
+            ContactInfo supplierContact = null;
+            if (_config.IsVoucherDocumentMode)
+                supplierContact = await EnsureSupplierContactAsync(voucherId, payeeName);
+
             if (_config.IsVoucherDocumentMode)
             {
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
@@ -902,6 +907,7 @@ namespace Take_Time_BangPhra.Integration
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
                 expense.Attachments = attachments;
+                ApplyContactToExpense(expense, supplierContact);
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 string nexaaccId = result.data.Id.ToString();
 
@@ -1006,6 +1012,13 @@ namespace Take_Time_BangPhra.Integration
             if (_config.AttachFiles)
                 attachments = LookupReceiptAttachments(receiptNumber, reservationId);
 
+            // Ensure customer exists as Contact in NextAcc (เฉพาะ DOCUMENT mode ที่สร้าง invoice)
+            ContactInfo customerContact = null;
+            if (_config.IsReceiptDocumentMode)
+            {
+                customerContact = await EnsureCustomerContactAsync(reservationId);
+            }
+
             if (isDeposit)
             {
                 if (_config.IsReceiptDocumentMode)
@@ -1018,6 +1031,7 @@ namespace Take_Time_BangPhra.Integration
                         invoice.ReplaceExistingForSource = true;
                     }
                     invoice.Attachments = attachments;
+                    ApplyContactToInvoice(invoice, customerContact);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
                     return result.data.Id.ToString();
@@ -1066,6 +1080,7 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
                     invoice.Attachments = attachments;
+                    ApplyContactToInvoice(invoice, customerContact);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
 
                     // Adjustment journal: ถ้ามี deposit applied ให้ตัด ADVANCE_DEPOSIT + ลด Cash
@@ -1720,6 +1735,294 @@ namespace Take_Time_BangPhra.Integration
             {
                 return (false, "FAILED", "SMTP fallback failed: " + ex.Message);
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // Contact / Customer upsert ใน NextAcc
+        // ──────────────────────────────────────────────
+
+        /// <summary>ข้อมูลลูกค้าสำหรับ map เข้า NextAcc invoice (CustomerExternalId, Name, TaxId, ฯลฯ)</summary>
+        public class ContactInfo
+        {
+            public string ExternalId { get; set; }
+            public string Name { get; set; }
+            public string TaxId { get; set; }
+            public string Email { get; set; }
+            public string Phone { get; set; }
+            public string Address { get; set; }
+            public Guid? NexaaccContactId { get; set; }
+        }
+
+        /// <summary>
+        /// ดึงข้อมูลลูกค้าจาก Reservation → Customer table.
+        /// ใช้ MobilePhone เป็น External ID (natural key) ของ NextAcc contact.
+        /// </summary>
+        private ContactInfo LookupCustomerFromReservation(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1
+                         C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
+                         C.TaxID, C.Email, C.Address
+                      FROM Reservation R
+                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      WHERE R.ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt?.Rows.Count > 0)
+                {
+                    var row = dt.Rows[0];
+                    string phone = row["MobilePhone"]?.ToString();
+                    if (string.IsNullOrEmpty(phone)) return null;
+                    return new ContactInfo
+                    {
+                        ExternalId = phone,
+                        Name = row["Name"]?.ToString() ?? phone,
+                        TaxId = row["TaxID"]?.ToString(),
+                        Email = row["Email"]?.ToString(),
+                        Phone = phone,
+                        Address = row["Address"]?.ToString()
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupCustomerFromReservation failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// ตรวจ cache ใน Accounting_Contact_Map ก่อน — ถ้ามี Nexaacc_Contact_Id อยู่แล้ว ส่งคืน
+        /// ถ้าไม่มี/Sync เก่ากว่า 30 วัน → upsert ผ่าน CreateIntegrationCustomerAsync
+        /// (NextAcc ใช้ ExternalId เป็น natural key — ส่งซ้ำได้โดย idempotent)
+        /// </summary>
+        private async Task<ContactInfo> EnsureCustomerContactAsync(int reservationId)
+        {
+            var info = LookupCustomerFromReservation(reservationId);
+            if (info == null || string.IsNullOrEmpty(info.ExternalId)) return null;
+
+            // Try cache
+            try
+            {
+                var cached = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Contact_Id, Last_Synced FROM Accounting_Contact_Map
+                      WHERE External_Id = @ext AND Contact_Type = 'CUSTOMER' AND Sync_Status = 'SYNCED'",
+                    new Dictionary<string, object> { { "@ext", info.ExternalId } });
+                if (cached?.Rows.Count > 0)
+                {
+                    DateTime lastSync = cached.Rows[0]["Last_Synced"] != DBNull.Value
+                        ? Convert.ToDateTime(cached.Rows[0]["Last_Synced"]) : DateTime.MinValue;
+                    if (cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
+                        && (DateTime.Now - lastSync).TotalDays < 30)
+                    {
+                        info.NexaaccContactId = (Guid)cached.Rows[0]["Nexaacc_Contact_Id"];
+                        return info;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureCustomerContactAsync cache lookup failed: {ex.Message}", "SYSTEM");
+            }
+
+            // Upsert via NextAcc API
+            try
+            {
+                var req = new InboundCustomerRequest
+                {
+                    ExternalId = info.ExternalId,
+                    Name = info.Name,
+                    TaxId = info.TaxId,
+                    Email = info.Email,
+                    Phone = info.Phone,
+                    Address = info.Address,
+                    IsCustomer = true,
+                    IsSupplier = false,
+                    ContactType = "INDIVIDUAL"
+                };
+                var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
+                if (resp?.data != null)
+                {
+                    info.NexaaccContactId = resp.data.Id;
+                    UpsertContactMap(info, "CUSTOMER", "SYNCED", null);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnsureCustomerContactAsync: upserted {info.Name} ({info.ExternalId}) → {info.NexaaccContactId}",
+                        "SYSTEM");
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureCustomerContactAsync upsert failed for {info.ExternalId}: {ex.Message}", "SYSTEM");
+                UpsertContactMap(info, "CUSTOMER", "FAILED", ex.Message);
+                // ไม่ throw — invoice ยังส่งได้โดยใช้ ExternalId+Name+TaxId
+            }
+
+            return info;
+        }
+
+        /// <summary>Upsert/Insert Accounting_Contact_Map entry (cache table)</summary>
+        private void UpsertContactMap(ContactInfo info, string contactType, string status, string error)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"IF EXISTS (SELECT 1 FROM Accounting_Contact_Map WHERE External_Id = @ext AND Contact_Type = @type)
+                        UPDATE Accounting_Contact_Map
+                        SET Nexaacc_Contact_Id = @cid, Name = @name, Tax_Id = @taxId,
+                            Email = @email, Phone = @phone, Address = @addr,
+                            Last_Synced = GETDATE(), Sync_Status = @status, Sync_Error = @err,
+                            Updated_Date = GETDATE()
+                        WHERE External_Id = @ext AND Contact_Type = @type
+                      ELSE
+                        INSERT INTO Accounting_Contact_Map
+                        (External_Id, Contact_Type, Nexaacc_Contact_Id, Name, Tax_Id, Email, Phone, Address,
+                         Last_Synced, Sync_Status, Sync_Error)
+                        VALUES (@ext, @type, @cid, @name, @taxId, @email, @phone, @addr,
+                                GETDATE(), @status, @err)",
+                    new Dictionary<string, object>
+                    {
+                        { "@ext", info.ExternalId },
+                        { "@type", contactType },
+                        { "@cid", (object)info.NexaaccContactId ?? DBNull.Value },
+                        { "@name", (object)info.Name ?? DBNull.Value },
+                        { "@taxId", (object)info.TaxId ?? DBNull.Value },
+                        { "@email", (object)info.Email ?? DBNull.Value },
+                        { "@phone", (object)info.Phone ?? DBNull.Value },
+                        { "@addr", (object)info.Address ?? DBNull.Value },
+                        { "@status", status },
+                        { "@err", (object)error ?? DBNull.Value }
+                    });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"UpsertContactMap failed: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        /// <summary>Apply ContactInfo to invoice: populate CustomerExternalId/Name/TaxId fields</summary>
+        private static void ApplyContactToInvoice(CreateIntegrationInvoiceRequest invoice, ContactInfo info)
+        {
+            if (invoice == null || info == null) return;
+            invoice.CustomerExternalId = info.ExternalId;
+            if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = info.Name;
+            if (!string.IsNullOrEmpty(info.TaxId)) invoice.CustomerTaxId = info.TaxId;
+        }
+
+        /// <summary>Apply ContactInfo to expense (supplier): populate SupplierExternalId/Name/TaxId fields</summary>
+        private static void ApplyContactToExpense(CreateIntegrationExpenseRequest expense, ContactInfo info)
+        {
+            if (expense == null || info == null) return;
+            expense.SupplierExternalId = info.ExternalId;
+            if (string.IsNullOrEmpty(expense.SupplierName)) expense.SupplierName = info.Name;
+            if (!string.IsNullOrEmpty(info.TaxId)) expense.SupplierTaxId = info.TaxId;
+        }
+
+        /// <summary>
+        /// Lookup supplier (Vendor) จาก Payment_Voucher.Vendor_ID — ใช้ Vendor.ID เป็น External ID
+        /// </summary>
+        private ContactInfo LookupSupplierFromVoucher(int voucherId, string fallbackName)
+        {
+            try
+            {
+                // Vendor schema: ID, Name, IDNumber (Tax), Address, Vendor_Group, Status (no MobilePhone/Email columns)
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 V.ID, V.Name, V.IDNumber AS TaxId, V.Address
+                      FROM Payment_Voucher PV
+                      LEFT JOIN Vendor V ON V.ID = PV.Vendor_ID
+                      WHERE PV.ID = @id",
+                    new Dictionary<string, object> { { "@id", voucherId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["ID"] != DBNull.Value)
+                {
+                    var row = dt.Rows[0];
+                    return new ContactInfo
+                    {
+                        ExternalId = "VENDOR-" + row["ID"].ToString(),
+                        Name = row["Name"]?.ToString() ?? fallbackName,
+                        TaxId = row["TaxId"]?.ToString(),
+                        Address = row["Address"]?.ToString()
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupSupplierFromVoucher failed for voucherId={voucherId}: {ex.Message}", "SYSTEM");
+            }
+            // Fallback: ใช้ payeeName เป็น ExternalId เพื่อ idempotency
+            if (!string.IsNullOrEmpty(fallbackName))
+            {
+                return new ContactInfo
+                {
+                    ExternalId = "PAYEE-" + fallbackName.GetHashCode().ToString("X"),
+                    Name = fallbackName
+                };
+            }
+            return null;
+        }
+
+        /// <summary>Cache + upsert supplier ใน NextAcc (เหมือน customer แต่ IsSupplier=true)</summary>
+        private async Task<ContactInfo> EnsureSupplierContactAsync(int voucherId, string payeeName)
+        {
+            var info = LookupSupplierFromVoucher(voucherId, payeeName);
+            if (info == null || string.IsNullOrEmpty(info.ExternalId)) return null;
+
+            try
+            {
+                var cached = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Contact_Id, Last_Synced FROM Accounting_Contact_Map
+                      WHERE External_Id = @ext AND Contact_Type = 'SUPPLIER' AND Sync_Status = 'SYNCED'",
+                    new Dictionary<string, object> { { "@ext", info.ExternalId } });
+                if (cached?.Rows.Count > 0)
+                {
+                    DateTime lastSync = cached.Rows[0]["Last_Synced"] != DBNull.Value
+                        ? Convert.ToDateTime(cached.Rows[0]["Last_Synced"]) : DateTime.MinValue;
+                    if (cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
+                        && (DateTime.Now - lastSync).TotalDays < 30)
+                    {
+                        info.NexaaccContactId = (Guid)cached.Rows[0]["Nexaacc_Contact_Id"];
+                        return info;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                var req = new InboundCustomerRequest
+                {
+                    ExternalId = info.ExternalId,
+                    Name = info.Name,
+                    TaxId = info.TaxId,
+                    Email = info.Email,
+                    Phone = info.Phone,
+                    Address = info.Address,
+                    IsCustomer = false,
+                    IsSupplier = true,
+                    ContactType = !string.IsNullOrEmpty(info.TaxId) && info.TaxId.Length == 13 ? "INDIVIDUAL" : "COMPANY"
+                };
+                var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
+                if (resp?.data != null)
+                {
+                    info.NexaaccContactId = resp.data.Id;
+                    UpsertContactMap(info, "SUPPLIER", "SYNCED", null);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnsureSupplierContactAsync: upserted {info.Name} ({info.ExternalId}) → {info.NexaaccContactId}",
+                        "SYSTEM");
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureSupplierContactAsync upsert failed: {ex.Message}", "SYSTEM");
+                UpsertContactMap(info, "SUPPLIER", "FAILED", ex.Message);
+            }
+
+            return info;
         }
 
         /// <summary>หาอีเมลลูกค้าจากการจอง — JOIN Reservation → Customer ผ่าน MobilePhone</summary>
