@@ -771,6 +771,18 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessQueueAsync orphan cleanup failed: {ex.Message}", "SYSTEM");
             }
 
+            // Cleanup deprecated/skipped entries เก่ากว่า 7 วัน — ลด queue ขยะ
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"DELETE FROM Accounting_Sync_Queue
+                      WHERE (Nexaacc_Response_Id = 'SKIPPED_DEPRECATED' OR Nexaacc_Response_Id = 'SKIPPED_LOCAL_MODE')
+                        AND Status = 'COMPLETED'
+                        AND Processed_Date < DATEADD(DAY, -7, GETDATE())",
+                    null);
+            }
+            catch { /* best effort */ }
+
             DataTable pending = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT TOP (@batchSize) * FROM Accounting_Sync_Queue
                   WHERE Status IN ('PENDING', 'FAILED')

@@ -369,10 +369,53 @@ namespace Take_Time_BangPhra.Product
                     };
 
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Remark]) " +
-                        "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,'0',@Remark)",
+                        "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Remark],[OutType],[Reason]) " +
+                        "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,'0',@Remark,'WRITEOFF',@Remark)",
                         productOutParams);
                     successCount++;
+
+                    // Sync write-off journal to NextAcc — DR Stock_Loss_Expense, CR Inventory
+                    // ใช้ Cost_Price จาก Product (ถ้าไม่มี → fallback Sell_Price)
+                    try
+                    {
+                        var config = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                        if (config.IsConfigured && config.Enabled)
+                        {
+                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                            // Insert Stock_Adjustment_Log → ได้ logId สำหรับ idempotent ref
+                            decimal costPerUnit = LookupCostPriceForWriteOff(productId, pricePerUnit);
+                            decimal totalCost = Math.Round(amount * costPerUnit, 2);
+                            string productName = LookupProductName(productId);
+
+                            code.DatabaseInsertSafe(conn,
+                                @"INSERT INTO Stock_Adjustment_Log
+                                  (Adjustment_Date, Adjustment_Type, Product_ID, Difference_Qty, Cost_PerUnit, Total_Cost, Reason, Created_Date, Sync_Status)
+                                  VALUES (GETDATE(), 'WRITEOFF', @prodId, @diff, @cost, @total, @reason, GETDATE(), 'PENDING')",
+                                new Dictionary<string, object>
+                                {
+                                    { "@prodId", productId },
+                                    { "@diff", -(decimal)amount },
+                                    { "@cost", costPerUnit },
+                                    { "@total", totalCost },
+                                    { "@reason", remark ?? "manual stock deduction" }
+                                });
+
+                            var idDt = code.DatabaseQuerySafe(conn,
+                                "SELECT TOP 1 ID FROM Stock_Adjustment_Log WHERE Product_ID = @id ORDER BY ID DESC",
+                                new Dictionary<string, object> { { "@id", productId } });
+                            long logId = idDt?.Rows.Count > 0 ? Convert.ToInt64(idDt.Rows[0]["ID"]) : 0;
+
+                            if (costPerUnit > 0 && logId > 0)
+                            {
+                                sync.EnqueueStockWriteOff(logId, productId, productName, amount, costPerUnit,
+                                    DateTime.Now, remark ?? "manual stock-out");
+                            }
+                        }
+                    }
+                    catch (Exception accEx)
+                    {
+                        System.Diagnostics.Trace.TraceWarning($"⚠️ Stock-out write-off sync failed product={productId}: {accEx.Message}");
+                    }
                 }
 
                 if (successCount > 0)
@@ -582,6 +625,38 @@ namespace Take_Time_BangPhra.Product
                 System.Diagnostics.Debug.WriteLine($"LoadPredictedLowStock Error: {ex.Message}");
                 pnlPredictedLowStock.Visible = false;
             }
+        }
+
+        private decimal LookupCostPriceForWriteOff(int productId, decimal fallbackSellPrice)
+        {
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 ISNULL(Cost_Price, 0) AS Cost_Price FROM Product WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Cost_Price"] != DBNull.Value)
+                {
+                    decimal cost = Convert.ToDecimal(dt.Rows[0]["Cost_Price"]);
+                    if (cost > 0) return cost;
+                }
+            }
+            catch { }
+            // Fallback: ใช้ Sell_Price (เผื่อ Cost_Price ไม่ได้ตั้งค่า)
+            return fallbackSellPrice > 0 ? fallbackSellPrice : 0m;
+        }
+
+        private string LookupProductName(int productId)
+        {
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 Product_Name FROM Product WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0)
+                    return dt.Rows[0]["Product_Name"]?.ToString() ?? "";
+            }
+            catch { }
+            return "";
         }
     }
 }
