@@ -81,7 +81,9 @@ namespace Take_Time_BangPhra
 
                     if (string.IsNullOrEmpty(errorMsg))
                     {
-                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                        // ตัดมัดจำออกจากเจ้าหนี้ (ADVANCE_DEPOSIT) → รับรู้รายได้ห้องพัก (ROOM_REVENUE)
+                        // ถ้ามีค่าเสียหาย/ของหาย ระบบจะแบ่ง credit ระหว่าง Room Revenue และ Other Income
+                        TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge);
 
                         return new CheckoutResult
                         {
@@ -202,6 +204,33 @@ namespace Take_Time_BangPhra
                     $"GetReservationData failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
             }
             return null;
+        }
+
+        /// <summary>
+        /// Enqueue deposit clearing journal entry (DR ADVANCE_DEPOSIT, CR ROOM_REVENUE).
+        /// ความล้มเหลวจะ log แต่ไม่ throw — เช็คเอาท์ต้องผ่านได้ถึงแม้ accounting sync มีปัญหา
+        /// </summary>
+        private void TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt)
+        {
+            if (depositAmt <= 0)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing: skipped — Reservation #{reservationId} ไม่มีมัดจำ", "SYSTEM");
+                return;
+            }
+            try
+            {
+                var sync = new AccountingSyncService(_connectionString);
+                long queueId = sync.EnqueueDepositClearingOnCheckout(reservationId, depositAmt, customerName, DateTime.Now, damageAmt);
+                _code.Logs(_connectionString, "Checkout",
+                    $"Deposit clearing enqueued: resId={reservationId} deposit={depositAmt:N2} damage={damageAmt:N2} queueId={queueId}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+            }
         }
 
         /// <summary>

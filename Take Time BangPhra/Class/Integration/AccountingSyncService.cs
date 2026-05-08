@@ -189,6 +189,97 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Deposit Lifecycle Enqueue Methods (ตัดมัดจำ)
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// ตัดมัดจำ (เจ้าหนี้ ADVANCE_DEPOSIT) ออกตอนลูกค้าเช็คเอาท์ — รับรู้รายได้ห้องพัก
+        /// ถ้ามี damageAmount > 0 จะแบ่ง credit ระหว่าง Room Revenue และ Other Income (ค่าเสียหาย)
+        /// อ้างอิงด้วย Reservation_ID + ref `RES-{id}-CHK`
+        /// </summary>
+        public long EnqueueDepositClearingOnCheckout(int reservationId, decimal depositAmount, string customerName,
+            DateTime checkoutDate, decimal damageAmount = 0)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (depositAmount <= 0) return -1;
+
+            string reservationRef = $"RES-{reservationId}-CHK";
+
+            long existing = FindPendingEntry("RESERVATION", "CLEAR_DEPOSIT_AT_CHECKOUT", "reservationRef", reservationRef);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("RESERVATION", "CLEAR_DEPOSIT_AT_CHECKOUT", "reservationRef", reservationRef, 86400);
+            if (completed > 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueDepositClearingOnCheckout: ref={reservationRef} ตัดไปแล้ว — skip (queueId={completed})", "SYSTEM");
+                return completed;
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "reservationRef", reservationRef },
+                { "depositAmount", depositAmount },
+                { "damageAmount", damageAmount },
+                { "customerName", customerName ?? "" },
+                { "checkoutDate", checkoutDate.ToString("yyyy-MM-dd") }
+            };
+            return InsertQueue("RESERVATION", reservationId, "CLEAR_DEPOSIT_AT_CHECKOUT", payload);
+        }
+
+        /// <summary>คืนเงินมัดจำ (DR ADVANCE_DEPOSIT, CR Cash/Bank) — กรณียกเลิกแล้วคืนเงิน</summary>
+        public long EnqueueDepositRefund(int reservationId, decimal refundAmount, string paymentMethod,
+            string customerName, DateTime refundDate)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (refundAmount <= 0) return -1;
+
+            string reservationRef = $"RES-{reservationId}-REF";
+
+            long existing = FindPendingEntry("RESERVATION", "REFUND_DEPOSIT", "reservationRef", reservationRef);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("RESERVATION", "REFUND_DEPOSIT", "reservationRef", reservationRef, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "reservationRef", reservationRef },
+                { "refundAmount", refundAmount },
+                { "paymentMethod", paymentMethod ?? "CASH" },
+                { "customerName", customerName ?? "" },
+                { "refundDate", refundDate.ToString("yyyy-MM-dd") }
+            };
+            return InsertQueue("RESERVATION", reservationId, "REFUND_DEPOSIT", payload);
+        }
+
+        /// <summary>ริบมัดจำ (ลูกค้าไม่มา/ยกเลิกผิดเงื่อนไข) — DR ADVANCE_DEPOSIT, CR Forfeit Income</summary>
+        public long EnqueueDepositForfeit(int reservationId, decimal forfeitAmount, string customerName,
+            DateTime forfeitDate, string reason = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (forfeitAmount <= 0) return -1;
+
+            string reservationRef = $"RES-{reservationId}-FORFEIT";
+
+            long existing = FindPendingEntry("RESERVATION", "FORFEIT_DEPOSIT", "reservationRef", reservationRef);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("RESERVATION", "FORFEIT_DEPOSIT", "reservationRef", reservationRef, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "reservationRef", reservationRef },
+                { "forfeitAmount", forfeitAmount },
+                { "customerName", customerName ?? "" },
+                { "forfeitDate", forfeitDate.ToString("yyyy-MM-dd") },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("RESERVATION", reservationId, "FORFEIT_DEPOSIT", payload);
+        }
+
+        // ──────────────────────────────────────────────
         // Void/Cancel Enqueue Methods
         // ──────────────────────────────────────────────
 
@@ -646,6 +737,14 @@ namespace Take_Time_BangPhra.Integration
                 case "VOID_VOUCHER":
                     return await ProcessVoidVoucher(payload);
 
+                // ── Deposit Lifecycle (มัดจำการจอง) ──
+                case "CLEAR_DEPOSIT_AT_CHECKOUT":
+                    return await ProcessDepositClearing(payload);
+                case "REFUND_DEPOSIT":
+                    return await ProcessDepositRefund(payload);
+                case "FORFEIT_DEPOSIT":
+                    return await ProcessDepositForfeit(payload);
+
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
                 case "CREATE_PAYMENT_JOURNAL":
@@ -1094,6 +1193,133 @@ namespace Take_Time_BangPhra.Integration
                     $"WHT cert auto-generate failed for doc={documentNumber}: {ex.Message}",
                     "SYSTEM");
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // Deposit Lifecycle Processors (ตัดมัดจำการจอง)
+        // หลักบัญชี:
+        //   ตอนรับมัดจำ:    DR Cash/Bank | CR Advance Deposit (Liability)
+        //   ตอน checkout:   DR Advance Deposit | CR Room Revenue
+        //   ตอนหักเสียหาย:   DR Advance Deposit | CR Room Revenue + CR Other Income (ค่าเสียหาย)
+        //   ตอนคืนเงิน:      DR Advance Deposit | CR Cash/Bank
+        //   ตอนริบ no-show:  DR Advance Deposit | CR Forfeit Income
+        // อ้างอิงทุกรายการด้วย reservationRef (RES-{id}-CHK / -REF / -FORFEIT)
+        // ──────────────────────────────────────────────
+
+        private async Task<string> ProcessDepositClearing(Dictionary<string, object> p)
+        {
+            if (_config.IsReceiptLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    "ProcessDepositClearing: SKIPPED — ReceiptSyncMode=LOCAL", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            decimal depositAmount = Convert.ToDecimal(p["depositAmount"]);
+            decimal damageAmount = p.ContainsKey("damageAmount") ? Convert.ToDecimal(p["damageAmount"]) : 0m;
+            string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
+            DateTime checkoutDate = DateTime.Parse(p["checkoutDate"]?.ToString());
+            string reservationRef = p.ContainsKey("reservationRef") ? p["reservationRef"]?.ToString() : $"RES-{reservationId}-CHK";
+
+            if (depositAmount <= 0)
+                throw new ArgumentException($"ProcessDepositClearing: depositAmount ต้อง > 0 (ได้ {depositAmount}) reservation #{reservationId}");
+
+            decimal actualDeposit = LookupActualDepositPaid(reservationId);
+            if (actualDeposit > 0 && Math.Abs(actualDeposit - depositAmount) > 0.01m)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositClearing: payload depositAmount={depositAmount} ≠ actual paid={actualDeposit} — ใช้ actual", "SYSTEM");
+                depositAmount = actualDeposit;
+            }
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount}", "SYSTEM");
+
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await SafePostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
+        }
+
+        private async Task<string> ProcessDepositRefund(Dictionary<string, object> p)
+        {
+            if (_config.IsReceiptLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    "ProcessDepositRefund: SKIPPED — ReceiptSyncMode=LOCAL", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            decimal refundAmount = Convert.ToDecimal(p["refundAmount"]);
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
+            string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
+            DateTime refundDate = DateTime.Parse(p["refundDate"]?.ToString());
+
+            if (refundAmount <= 0)
+                throw new ArgumentException($"ProcessDepositRefund: refundAmount ต้อง > 0 (ได้ {refundAmount}) reservation #{reservationId}");
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessDepositRefund: resId={reservationId} amount={refundAmount} method={paymentMethod}", "SYSTEM");
+
+            var journal = _mapper.MapRefundToJournal(reservationId, refundAmount, paymentMethod, refundDate, customerName);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await SafePostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
+        }
+
+        private async Task<string> ProcessDepositForfeit(Dictionary<string, object> p)
+        {
+            if (_config.IsReceiptLocal)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    "ProcessDepositForfeit: SKIPPED — ReceiptSyncMode=LOCAL", "SYSTEM");
+                return "SKIPPED_LOCAL_MODE";
+            }
+
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            decimal forfeitAmount = Convert.ToDecimal(p["forfeitAmount"]);
+            string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
+            DateTime forfeitDate = DateTime.Parse(p["forfeitDate"]?.ToString());
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
+
+            if (forfeitAmount <= 0)
+                throw new ArgumentException($"ProcessDepositForfeit: forfeitAmount ต้อง > 0 (ได้ {forfeitAmount}) reservation #{reservationId}");
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessDepositForfeit: resId={reservationId} amount={forfeitAmount} reason={reason}", "SYSTEM");
+
+            var journal = _mapper.MapForfeitDepositToJournal(reservationId, forfeitAmount, customerName, forfeitDate, reason);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            await SafePostJournalAsync(result.data.Id);
+            return result.data.Id.ToString();
+        }
+
+        /// <summary>
+        /// หาจำนวนมัดจำที่ลูกค้าจ่ายไปทั้งหมด — JOIN Account_Receipt (IsDeposit=1, Status='Normal') กับ Payment_History
+        /// ใช้เป็น truth source ของยอดมัดจำ (กันการบันทึกผิด)
+        /// </summary>
+        private decimal LookupActualDepositPaid(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ISNULL(SUM(Total_Amount), 0) AS TotalDeposit
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @resId
+                        AND IsDeposit = 1
+                        AND (Status = 'Normal' OR Status IS NULL OR Status = '1' OR Status = 'COMPLETED')",
+                    new Dictionary<string, object> { { "@resId", reservationId } });
+                if (dt?.Rows.Count > 0)
+                    return Convert.ToDecimal(dt.Rows[0]["TotalDeposit"]);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupActualDepositPaid failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return 0m;
         }
 
         // ──────────────────────────────────────────────

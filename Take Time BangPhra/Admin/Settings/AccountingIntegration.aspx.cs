@@ -146,6 +146,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "lookupDocSource":
                     result = LookupDocumentSource();
                     break;
+                case "depositStatus":
+                    result = LookupDepositStatus();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -180,6 +183,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "etaxSendEmail":
                     result = ManualEtaxSendEmail(data);
+                    break;
+                case "depositManual":
+                    result = ManualDepositOperation(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -1155,6 +1161,132 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "message", message },
                     { "etaxRefNumber", etaxRef ?? "" }
                 };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Deposit Lifecycle handlers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> LookupDepositStatus()
+        {
+            try
+            {
+                string q = (Request.QueryString["q"] ?? "").Trim();
+                string statusFilter = (Request.QueryString["status"] ?? "").Trim();
+
+                var sb = new System.Text.StringBuilder("SELECT TOP 100 * FROM vw_Reservation_Deposit_Status WHERE DepositPaid > 0");
+                var parameters = new Dictionary<string, object>();
+
+                if (!string.IsNullOrEmpty(q))
+                {
+                    if (int.TryParse(q, out int resId))
+                    {
+                        sb.Append(" AND Reservation_ID = @resId");
+                        parameters.Add("@resId", resId);
+                    }
+                    else
+                    {
+                        sb.Append(" AND (Customer_Name LIKE @q OR Customer_MobilePhone LIKE @q)");
+                        parameters.Add("@q", "%" + q + "%");
+                    }
+                }
+                if (!string.IsNullOrEmpty(statusFilter))
+                {
+                    sb.Append(" AND Deposit_Status = @status");
+                    parameters.Add("@status", statusFilter);
+                }
+                sb.Append(" ORDER BY CheckoutDate DESC, Reservation_ID DESC");
+
+                var dt = _code.DatabaseQuerySafe(ConnStr, sb.ToString(), parameters);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                {
+                    foreach (System.Data.DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "reservationId", Convert.ToInt32(row["Reservation_ID"]) },
+                            { "reservationStatus", row["Reservation_Status"]?.ToString() },
+                            { "checkinDate", row["CheckinDate"] != DBNull.Value ? Convert.ToDateTime(row["CheckinDate"]).ToString("yyyy-MM-dd") : null },
+                            { "checkoutDate", row["CheckoutDate"] != DBNull.Value ? Convert.ToDateTime(row["CheckoutDate"]).ToString("yyyy-MM-dd") : null },
+                            { "customerMobilePhone", row["Customer_MobilePhone"]?.ToString() },
+                            { "customerName", row["Customer_Name"]?.ToString() },
+                            { "customerEmail", row["Customer_Email"]?.ToString() },
+                            { "depositPaid", row["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(row["DepositPaid"]) : 0m },
+                            { "depositCleared", row["DepositCleared"] != DBNull.Value ? Convert.ToDecimal(row["DepositCleared"]) : 0m },
+                            { "depositOutstanding", row["DepositOutstanding"] != DBNull.Value ? Convert.ToDecimal(row["DepositOutstanding"]) : 0m },
+                            { "depositStatus", row["Deposit_Status"]?.ToString() ?? "OPEN" },
+                            { "lastClearDate", row["LastClearDate"] != DBNull.Value ? Convert.ToDateTime(row["LastClearDate"]).ToString("yyyy-MM-ddTHH:mm:ss") : null },
+                            { "lastClearAction", row["LastClearAction"]?.ToString() },
+                            { "lastClearJournalId", row["LastClearJournalId"]?.ToString() }
+                        });
+                    }
+                }
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "count", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualDepositOperation(Dictionary<string, object> data)
+        {
+            try
+            {
+                string operation = data.ContainsKey("operation") ? data["operation"]?.ToString() : "";
+                string resIdStr = data.ContainsKey("reservationId") ? data["reservationId"]?.ToString() : "";
+                string amountStr = data.ContainsKey("amount") ? data["amount"]?.ToString() : "";
+                string reason = data.ContainsKey("reason") ? data["reason"]?.ToString() : "";
+
+                if (!int.TryParse(resIdStr, out int resId) || resId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Reservation ID ไม่ถูกต้อง" } };
+                if (!decimal.TryParse(amountStr, out decimal amount) || amount <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "จำนวนเงินไม่ถูกต้อง" } };
+
+                // ดึงชื่อลูกค้า + paid type
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 1 ISNULL(C.FullName, C.Name) AS Name,
+                             (SELECT TOP 1 Paid_Type FROM Account_Receipt WHERE Reservation_ID = @id AND IsDeposit = 1 ORDER BY Created_Date DESC) AS PaidType
+                      FROM Reservation R
+                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      WHERE R.ID = @id",
+                    new Dictionary<string, object> { { "@id", resId } });
+                string customerName = dt?.Rows.Count > 0 ? dt.Rows[0]["Name"]?.ToString() ?? "" : "";
+                string paymentMethod = dt?.Rows.Count > 0 ? dt.Rows[0]["PaidType"]?.ToString() ?? "CASH" : "CASH";
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId;
+                string actionLabel;
+
+                switch (operation.ToLower())
+                {
+                    case "checkout":
+                        queueId = sync.EnqueueDepositClearingOnCheckout(resId, amount, customerName, DateTime.Now, 0);
+                        actionLabel = "ตัดมัดจำ checkout";
+                        break;
+                    case "refund":
+                        queueId = sync.EnqueueDepositRefund(resId, amount, paymentMethod, customerName, DateTime.Now);
+                        actionLabel = "คืนเงินมัดจำ";
+                        break;
+                    case "forfeit":
+                        queueId = sync.EnqueueDepositForfeit(resId, amount, customerName,
+                            DateTime.Now, !string.IsNullOrEmpty(reason) ? reason : "manual forfeit");
+                        actionLabel = "ริบมัดจำ";
+                        break;
+                    default:
+                        return new Dictionary<string, object> { { "success", false }, { "message", "operation ไม่ถูกต้อง (checkout/refund/forfeit)" } };
+                }
+
+                if (queueId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่สามารถ enqueue ได้ (อาจมีรายการเดิมแล้ว หรือ config ไม่พร้อม)" } };
+
+                return new Dictionary<string, object> { { "success", true }, { "message", $"{actionLabel}: ส่งเข้าคิวเรียบร้อย (queueId={queueId}). กดปุ่ม Process Queue เพื่อดำเนินการ" } };
             }
             catch (Exception ex)
             {

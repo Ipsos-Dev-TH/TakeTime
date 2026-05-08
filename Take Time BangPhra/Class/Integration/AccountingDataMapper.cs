@@ -188,20 +188,101 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Maps checkout to a revenue recognition journal entry.
-        /// DR: Advance Deposits  CR: Room Revenue (recognize earned revenue)
+        /// ปกติ: DR Advance Deposits, CR Room Revenue (รับรู้รายได้)
+        /// ถ้ามี damageAmount > 0: CR แยกระหว่าง Room Revenue (depositAmount-damageAmount)
+        ///                         และ Other Income (damageAmount)
         /// </summary>
         public CreateJournalEntryRequest MapCheckoutToJournal(
-            int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
+            int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate,
+            decimal damageAmount = 0, string reservationRef = null)
         {
+            if (depositAmount <= 0)
+                throw new ArgumentException($"MapCheckoutToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
+            if (damageAmount < 0)
+                damageAmount = 0;
+            if (damageAmount > depositAmount)
+                damageAmount = depositAmount; // ค่าเสียหายเกินมัดจำ ต้องไปลงในใบสำคัญจ่าย/ใบแจ้งหนี้แยก
+
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
+            decimal revenuePortion = depositAmount - damageAmount;
+
+            string refStr = !string.IsNullOrEmpty(reservationRef) ? reservationRef : $"RES-{reservationId}-CHK";
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = depositAmount,
+                    CreditAmount = 0,
+                    Description = $"ตัดเงินรับล่วงหน้า - การจอง #{reservationId}"
+                }
+            };
+
+            if (revenuePortion > 0)
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = revenueAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = revenuePortion,
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                });
+            }
+
+            if (damageAmount > 0)
+            {
+                Guid otherIncomeAccountId;
+                try { otherIncomeAccountId = GetAccountId("DAMAGE_INCOME"); }
+                catch { otherIncomeAccountId = GetAccountId("OTHER_INCOME"); }
+
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = otherIncomeAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = damageAmount,
+                    Description = $"ค่าเสียหาย/หักจากมัดจำ - การจอง #{reservationId}"
+                });
+            }
 
             return new CreateJournalEntryRequest
             {
                 EntryDate = checkoutDate,
                 JournalType = NexaaccJournalType.Sales,
-                Description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
-                Reference = $"RES-{reservationId}-CHK",
+                Description = damageAmount > 0
+                    ? $"รับรู้รายได้ Checkout (หักค่าเสียหาย {damageAmount:N2}) - การจอง #{reservationId} ({customerName})"
+                    : $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
+                Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// Forfeit deposit (ลูกค้า no-show หรือ cancel ไม่คืนเงิน):
+        /// DR Advance Deposits, CR Forfeit/Other Income
+        /// </summary>
+        public CreateJournalEntryRequest MapForfeitDepositToJournal(
+            int reservationId, decimal depositAmount, string customerName, DateTime forfeitDate, string reason = null)
+        {
+            if (depositAmount <= 0)
+                throw new ArgumentException($"MapForfeitDepositToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            Guid forfeitIncomeAccountId;
+            try { forfeitIncomeAccountId = GetAccountId("FORFEIT_INCOME"); }
+            catch
+            {
+                try { forfeitIncomeAccountId = GetAccountId("OTHER_INCOME"); }
+                catch { forfeitIncomeAccountId = GetAccountId("ROOM_REVENUE"); }
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = forfeitDate,
+                JournalType = NexaaccJournalType.Sales,
+                Description = $"ริบมัดจำ ({reason ?? "ไม่มาเข้าพัก/ยกเลิกผิดเงื่อนไข"}) - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-FORFEIT",
                 Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
@@ -209,14 +290,14 @@ namespace Take_Time_BangPhra.Integration
                         AccountId = advanceDepositAccountId,
                         DebitAmount = depositAmount,
                         CreditAmount = 0,
-                        Description = $"โอนเงินรับล่วงหน้าเป็นรายได้",
+                        Description = "ตัดเงินรับล่วงหน้า"
                     },
                     new JournalEntryLineRequest
                     {
-                        AccountId = revenueAccountId,
+                        AccountId = forfeitIncomeAccountId,
                         DebitAmount = 0,
                         CreditAmount = depositAmount,
-                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                        Description = $"รายได้จากการริบมัดจำ - การจอง #{reservationId}"
                     }
                 }
             };

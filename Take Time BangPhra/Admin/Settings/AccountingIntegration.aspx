@@ -270,6 +270,57 @@
             </div>
         </div>
 
+        <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
+        <div class="journey-card">
+            <h3><i class="fas fa-piggy-bank"></i> สถานะเจ้าหนี้ค่ามัดจำ (Advance Deposit Liability)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                ติดตามมัดจำที่ลูกค้าจ่าย vs มัดจำที่ตัดออกจากเจ้าหนี้แล้ว (ตอน checkout / คืนเงิน / ริบ)<br/>
+                สถานะ: <b>OPEN</b> = ยังคาเจ้าหนี้, <b>PARTIAL</b> = ตัดบางส่วน, <b>CLEARED</b> = ตัดครบ, <b>OVER_CLEARED</b> = ตัดเกิน (ตรวจสอบ)
+            </p>
+            <div style="display:flex; gap:10px; align-items:end; margin-bottom:15px;">
+                <div style="flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Reservation ID หรือชื่อ/เบอร์ลูกค้า</label>
+                    <input type="text" id="depositLookup" placeholder="เลขจอง / ชื่อลูกค้า / เบอร์โทร" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="depositStatusFilter" style="padding:8px;">
+                        <option value="">ทุกสถานะ</option>
+                        <option value="OPEN">OPEN — ยังไม่ตัด</option>
+                        <option value="PARTIAL">PARTIAL — ตัดบางส่วน</option>
+                        <option value="CLEARED">CLEARED — ตัดครบ</option>
+                        <option value="OVER_CLEARED">OVER_CLEARED — ตัดเกิน</option>
+                    </select>
+                </div>
+                <button type="button" class="btn-primary" onclick="lookupDepositStatus()"><i class="fas fa-search"></i> ค้นหา</button>
+            </div>
+            <div id="depositStatusResult"></div>
+
+            <div style="border-top:1px solid #ddd; margin-top:20px; padding-top:15px;">
+                <h4 style="margin:0 0 10px 0; font-size:14px;"><i class="fas fa-bolt"></i> Manual Operations (ใช้กรณีระบบ auto ไม่ได้ทำงาน)</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div>
+                        <label style="font-weight:600;">Reservation ID</label>
+                        <input type="number" id="depositManualResId" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <label style="font-weight:600;">จำนวนเงิน (บาท)</label>
+                        <input type="number" id="depositManualAmount" step="0.01" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <label style="font-weight:600;">เหตุผล (สำหรับ Forfeit)</label>
+                        <input type="text" id="depositManualReason" placeholder="ลูกค้าไม่มาเข้าพัก" style="width:100%; padding:8px;" />
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="btn-success" onclick="manualDepositAction('checkout')"><i class="fas fa-sign-out-alt"></i> ตัดมัดจำ (checkout)</button>
+                    <button type="button" class="btn-warning" onclick="manualDepositAction('refund')"><i class="fas fa-undo"></i> คืนเงินมัดจำ</button>
+                    <button type="button" class="btn-danger" onclick="manualDepositAction('forfeit')"><i class="fas fa-ban"></i> ริบมัดจำ</button>
+                </div>
+                <div class="test-result" id="depositManualResult" style="margin-top:10px;"></div>
+            </div>
+        </div>
+
         <!-- Document Source Lookup (เชื่อมระหว่าง TakeTime ↔ NextAcc ↔ E-Tax) -->
         <div class="journey-card">
             <h3><i class="fas fa-link"></i> Document Source — ตรวจสอบที่มาของเอกสาร</h3>
@@ -716,6 +767,80 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        // ── Deposit Lifecycle ──
+
+        function lookupDepositStatus() {
+            var q = (document.getElementById('depositLookup').value || '').trim();
+            var status = document.getElementById('depositStatusFilter').value;
+            var el = document.getElementById('depositStatusResult');
+            el.innerHTML = '<div class="test-result loading">กำลังค้นหา...</div>';
+            var url = pageUrl + '?action=depositStatus&q=' + encodeURIComponent(q) + '&status=' + encodeURIComponent(status) + '&_=' + Date.now();
+            fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-info-circle"></i> ไม่พบข้อมูล</div>';
+                        return;
+                    }
+                    var html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+                    html += '<thead><tr style="background:#f5f5f5;">'
+                          + '<th style="padding:8px; text-align:left;">Reservation</th>'
+                          + '<th style="padding:8px;">ลูกค้า</th>'
+                          + '<th style="padding:8px;">เช็คเอาท์</th>'
+                          + '<th style="padding:8px;">มัดจำจ่าย</th>'
+                          + '<th style="padding:8px;">ตัดแล้ว</th>'
+                          + '<th style="padding:8px;">คงเหลือ</th>'
+                          + '<th style="padding:8px;">สถานะ</th>'
+                          + '<th style="padding:8px;">การกระทำล่าสุด</th>'
+                          + '</tr></thead><tbody>';
+                    data.items.forEach(function(it) {
+                        var color = it.depositStatus === 'CLEARED' ? '#28a745'
+                                  : it.depositStatus === 'OPEN' ? '#dc3545'
+                                  : it.depositStatus === 'PARTIAL' ? '#ffc107'
+                                  : it.depositStatus === 'OVER_CLEARED' ? '#dc3545'
+                                  : '#6c757d';
+                        html += '<tr style="border-bottom:1px solid #eee;">'
+                              + '<td style="padding:8px; font-family:monospace;">#' + it.reservationId + '<br/><small>' + (it.reservationStatus || '-') + '</small></td>'
+                              + '<td style="padding:8px;">' + (it.customerName || '-') + '<br/><small style="color:#999;">' + (it.customerMobilePhone || '') + '</small></td>'
+                              + '<td style="padding:8px;">' + (it.checkoutDate ? new Date(it.checkoutDate).toLocaleDateString('th-TH') : '-') + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + Number(it.depositPaid).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + Number(it.depositCleared).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px; text-align:right; font-weight:600;">' + Number(it.depositOutstanding).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + color + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.depositStatus + '</span></td>'
+                              + '<td style="padding:8px;">' + (it.lastClearAction || '-') + (it.lastClearDate ? '<br/><small>' + new Date(it.lastClearDate).toLocaleString('th-TH') + '</small>' : '') + '</td>'
+                              + '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
+        }
+
+        function manualDepositAction(action) {
+            var resId = document.getElementById('depositManualResId').value;
+            var amount = document.getElementById('depositManualAmount').value;
+            var reason = document.getElementById('depositManualReason').value;
+            if (!resId || !amount) {
+                var el = document.getElementById('depositManualResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาใส่ Reservation ID และจำนวนเงิน';
+                return;
+            }
+            postAction({
+                action: 'depositManual',
+                operation: action,
+                reservationId: resId,
+                amount: amount,
+                reason: reason
+            }, 'depositManualResult');
         }
 
         // ── Document Source Lookup ──
