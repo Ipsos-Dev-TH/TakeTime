@@ -1414,7 +1414,16 @@ namespace Take_Time_BangPhra.Integration
             }
 
             // CR Revenue lines (แยกตาม ProductType)
+            // VAT proration ใช้ "สัดส่วน lineGross / totalGross" เพื่อให้ผลรวม VAT พอดีและ lineNet ไม่ติดลบ
+            // (แทนการใช้สูตร 7/107 ต่อบรรทัดที่อาจ drift จนบรรทัดสุดท้ายต้องดูดส่วนเกิน)
             decimal vatProrationRunning = 0m;
+            int lastNonZeroIdx = -1;
+            for (int k = lines.Count - 1; k >= 0; k--)
+            {
+                decimal g = (lines[k].Amount > 0 ? lines[k].Amount : lines[k].Quantity * lines[k].UnitPrice) - lines[k].Discount;
+                if (g != 0) { lastNonZeroIdx = k; break; }
+            }
+
             for (int i = 0; i < lines.Count; i++)
             {
                 var l = lines[i];
@@ -1426,12 +1435,22 @@ namespace Take_Time_BangPhra.Integration
                     : GetProductTypeRevenueCode(l.ProductTypeId);
 
                 decimal lineNet = lineGross;
-                if (hasVat)
+                if (hasVat && totalGross > 0)
                 {
-                    // โปรเรท VAT ตามสัดส่วน — บรรทัดสุดท้ายเอาส่วนต่างเพื่อกัน rounding
-                    decimal lineVat = (i == lines.Count - 1)
-                        ? vatAmount - vatProrationRunning
-                        : Math.Round(lineGross * 7m / 107m, 2, MidpointRounding.AwayFromZero);
+                    decimal lineVat;
+                    if (i == lastNonZeroIdx)
+                    {
+                        // บรรทัดสุดท้ายดูดส่วนต่างเพื่อให้ผลรวม VAT พอดี
+                        lineVat = vatAmount - vatProrationRunning;
+                    }
+                    else
+                    {
+                        // โปรเรทตามสัดส่วน lineGross / totalGross
+                        lineVat = Math.Round(vatAmount * lineGross / totalGross, 2, MidpointRounding.AwayFromZero);
+                    }
+                    // กัน lineNet ติดลบจาก rounding drift
+                    if (lineVat < 0) lineVat = 0;
+                    if (lineVat > lineGross) lineVat = lineGross;
                     vatProrationRunning += lineVat;
                     lineNet = lineGross - lineVat;
                 }

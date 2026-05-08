@@ -338,6 +338,9 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // Escape LIKE wildcards (% _ [) ใช้ bracket convention ของ SQL Server
+                // กัน wildcard ใน document number match รายการอื่นโดยไม่ตั้งใจ
+                string esc = (documentNumber ?? "").Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1 Nexaacc_Response_Id
                       FROM Accounting_Sync_Queue
@@ -349,8 +352,8 @@ namespace Take_Time_BangPhra.Integration
                     new Dictionary<string, object>
                     {
                         { "@entityType", entityType },
-                        { "@pattern1", $"%\"receiptNumber\":\"{documentNumber}\"%"},
-                        { "@pattern2", $"%\"documentNumber\":\"{documentNumber}\"%"}
+                        { "@pattern1", $"%\"receiptNumber\":\"{esc}\"%"},
+                        { "@pattern2", $"%\"documentNumber\":\"{esc}\"%"}
                     });
 
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Response_Id"] != DBNull.Value)
@@ -586,6 +589,24 @@ namespace Take_Time_BangPhra.Integration
                 return 0;
             }
 
+            // Cleanup orphaned PROCESSING items — ถ้าค้างเกิน 10 นาที (process crash หรือ timeout)
+            // ให้กลับไปเป็น PENDING เพื่อให้ retry ในรอบถัดไป
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'PENDING',
+                          Error_Message = ISNULL(Error_Message, '') + N' | recovered from orphaned PROCESSING'
+                      WHERE Status = 'PROCESSING'
+                        AND Created_Date < DATEADD(MINUTE, -10, GETDATE())",
+                    null);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessQueueAsync orphan cleanup failed: {ex.Message}", "SYSTEM");
+            }
+
             DataTable pending = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT TOP (@batchSize) * FROM Accounting_Sync_Queue
                   WHERE Status IN ('PENDING', 'FAILED')
@@ -802,11 +823,29 @@ namespace Take_Time_BangPhra.Integration
             {
                 await _apiClient.PostJournalAsync(journalId);
             }
-            catch (AccountingApiException ex) when (ex.StatusCode == 400 && ex.ResponseBody != null && ex.ResponseBody.Contains("Draft"))
+            catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"Journal {journalId} already posted (not Draft) - treating as success", "SYSTEM");
+                    $"Journal {journalId} already posted/voided/non-draft - treating as success ({ex.StatusCode})", "SYSTEM");
             }
+        }
+
+        /// <summary>
+        /// Journal post calls อาจ fail เพราะเอกสารอยู่ในสถานะที่ post ไปแล้ว/voided/reversed
+        /// — ทุก state ถือเป็น "ไม่ต้องทำอะไรต่อ" ไม่ใช่ error
+        /// </summary>
+        private static bool IsAlreadyPostedOrTerminal(AccountingApiException ex)
+        {
+            if (ex.StatusCode == 404) return true;  // เอกสารไม่อยู่แล้ว = แล้วแต่ caller จัดการ
+            if (ex.StatusCode != 400) return false;
+            string body = ex.ResponseBody ?? "";
+            return body.Contains("Draft")
+                || body.Contains("Posted")
+                || body.Contains("Voided")
+                || body.Contains("Reversed")
+                || body.Contains("Cancelled")
+                || body.Contains("ลงรายการแล้ว")
+                || body.Contains("ยกเลิกไปแล้ว");
         }
 
         private async Task SafeApproveDocumentAsync(Guid documentId)
@@ -815,10 +854,10 @@ namespace Take_Time_BangPhra.Integration
             {
                 await _apiClient.ApproveDocumentAsync(documentId);
             }
-            catch (AccountingApiException ex) when (ex.StatusCode == 400 && ex.ResponseBody != null && ex.ResponseBody.Contains("Draft"))
+            catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"Document {documentId} already approved (not Draft) - treating as success", "SYSTEM");
+                    $"Document {documentId} already approved/non-draft - treating as success ({ex.StatusCode})", "SYSTEM");
             }
         }
 
@@ -1033,15 +1072,17 @@ namespace Take_Time_BangPhra.Integration
                     invoice.Attachments = attachments;
                     ApplyContactToInvoice(invoice, customerContact);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
-                    await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
-                    return result.data.Id.ToString();
+                    Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (deposit) receipt={receiptNumber}");
+                    await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
+                    return invDocId.ToString();
                 }
                 else
                 {
                     var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
                     var result = await _apiClient.CreateJournalAsync(journal);
-                    await SafePostJournalAsync(result.data.Id);
-                    return result.data.Id.ToString();
+                    Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
+                    await SafePostJournalAsync(jrnlDocId);
+                    return jrnlDocId.ToString();
                 }
             }
             else
@@ -1082,6 +1123,7 @@ namespace Take_Time_BangPhra.Integration
                     invoice.Attachments = attachments;
                     ApplyContactToInvoice(invoice, customerContact);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
+                    Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (payment) receipt={receiptNumber}");
 
                     // Adjustment journal: ถ้ามี deposit applied ให้ตัด ADVANCE_DEPOSIT + ลด Cash
                     if (depositApplied > 0)
@@ -1091,9 +1133,10 @@ namespace Take_Time_BangPhra.Integration
                             var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
                                 receiptDate, customerName, paymentAccountId, receiptNumber);
                             var adjResult = await _apiClient.CreateJournalAsync(adj);
-                            await SafePostJournalAsync(adjResult.data.Id);
+                            Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
+                            await SafePostJournalAsync(adjId);
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"Deposit-applied adjustment posted: receipt={receiptNumber} amount={depositApplied} journalId={adjResult.data.Id}",
+                                $"Deposit-applied adjustment posted: receipt={receiptNumber} amount={depositApplied} journalId={adjId}",
                                 "SYSTEM");
                         }
                         catch (Exception adjEx)
@@ -1103,8 +1146,8 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
 
-                    await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
-                    return result.data.Id.ToString();
+                    await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
+                    return invDocId.ToString();
                 }
                 else
                 {
@@ -1121,8 +1164,9 @@ namespace Take_Time_BangPhra.Integration
                             documentNumber: receiptNumber);
                     }
                     var result = await _apiClient.CreateJournalAsync(journal);
-                    await SafePostJournalAsync(result.data.Id);
-                    return result.data.Id.ToString();
+                    Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payment) receipt={receiptNumber}");
+                    await SafePostJournalAsync(jrnlDocId);
+                    return jrnlDocId.ToString();
                 }
             }
         }
@@ -1221,6 +1265,14 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupReceiptHeaderInfo failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
             }
             return null;
+        }
+
+        /// <summary>กันไม่ให้ Nexaacc_Response_Id เป็น empty Guid — บังคับ retry ถ้า API คืน null/empty</summary>
+        private static Guid RequireValidDocId(Guid? id, string operation)
+        {
+            if (id == null || id == Guid.Empty)
+                throw new Exception($"{operation}: NextAcc API returned empty document Id — sync will be retried");
+            return id.Value;
         }
 
         /// <summary>หาจำนวนมัดจำที่หักในใบเสร็จ — จาก Account_Receipt.Deposit_Applied_Amount</summary>
@@ -1801,7 +1853,21 @@ namespace Take_Time_BangPhra.Integration
         private async Task<ContactInfo> EnsureCustomerContactAsync(int reservationId)
         {
             var info = LookupCustomerFromReservation(reservationId);
-            if (info == null || string.IsNullOrEmpty(info.ExternalId)) return null;
+            if (info == null || string.IsNullOrEmpty(info.ExternalId))
+            {
+                // Walk-in / no phone — สร้าง synthetic ExternalId จาก Reservation_ID
+                // เพื่อให้ NextAcc มี contact entity ทุก invoice (อย่างน้อยผูกกับการจอง)
+                info = new ContactInfo
+                {
+                    ExternalId = $"RES-{reservationId}",
+                    Name = LookupGuestName(reservationId)
+                };
+                if (string.IsNullOrEmpty(info.Name))
+                    info.Name = $"Walk-in #{reservationId}";
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureCustomerContactAsync: walk-in fallback for resId={reservationId} → ExternalId={info.ExternalId}",
+                    "SYSTEM");
+            }
 
             // Try cache
             try
@@ -1844,12 +1910,18 @@ namespace Take_Time_BangPhra.Integration
                     ContactType = "INDIVIDUAL"
                 };
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
-                if (resp?.data != null)
+                if (resp?.data != null && resp.data.Id != Guid.Empty)
                 {
                     info.NexaaccContactId = resp.data.Id;
                     UpsertContactMap(info, "CUSTOMER", "SYNCED", null);
                     _code.Logs(_connectionString, "AccountingSync",
                         $"EnsureCustomerContactAsync: upserted {info.Name} ({info.ExternalId}) → {info.NexaaccContactId}",
+                        "SYSTEM");
+                }
+                else
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnsureCustomerContactAsync: API returned empty Id for {info.ExternalId} — invoice will fall back to ExternalId+Name",
                         "SYSTEM");
                 }
             }
@@ -2006,7 +2078,7 @@ namespace Take_Time_BangPhra.Integration
                     ContactType = !string.IsNullOrEmpty(info.TaxId) && info.TaxId.Length == 13 ? "INDIVIDUAL" : "COMPANY"
                 };
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
-                if (resp?.data != null)
+                if (resp?.data != null && resp.data.Id != Guid.Empty)
                 {
                     info.NexaaccContactId = resp.data.Id;
                     UpsertContactMap(info, "SUPPLIER", "SYNCED", null);
