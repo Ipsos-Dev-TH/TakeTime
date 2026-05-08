@@ -283,6 +283,170 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Stock / Inventory Enqueue Methods
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// รับสินค้าเข้าสต็อก (vendor purchase) → DR Inventory, CR Cash/AP
+        /// อ้างอิงด้วย stockRef เพื่อ idempotency (เช่น "PIN-{productId}-{ts}")
+        /// </summary>
+        public long EnqueueStockIn(int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime receiveDate, string supplierName, string paymentMethod = null, bool hasInputVat = false,
+            string stockRef = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (quantity <= 0 || costPerUnit <= 0) return -1;
+
+            string refStr = !string.IsNullOrEmpty(stockRef) ? stockRef : $"PIN-{productId}-{receiveDate:yyyyMMddHHmmss}";
+
+            long existing = FindPendingEntry("STOCK", "STOCK_IN", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_IN", "stockRef", refStr, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "totalCost", Math.Round(quantity * costPerUnit, 2) },
+                { "receiveDate", receiveDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "supplierName", supplierName ?? "" },
+                { "paymentMethod", paymentMethod ?? "" },
+                { "hasInputVat", hasInputVat }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_IN", payload);
+        }
+
+        /// <summary>
+        /// ตัดสต็อก (ขาย / room charge) → DR COGS, CR Inventory (cost price)
+        /// </summary>
+        public long EnqueueStockOutCogs(int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime outDate, string reason, string stockRef = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (quantity <= 0 || costPerUnit <= 0) return -1;
+
+            string refStr = !string.IsNullOrEmpty(stockRef) ? stockRef : $"POUT-{productId}-{outDate:yyyyMMddHHmmss}";
+
+            long existing = FindPendingEntry("STOCK", "STOCK_OUT_COGS", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_OUT_COGS", "stockRef", refStr, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "outDate", outDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_OUT_COGS", payload);
+        }
+
+        /// <summary>Reverse COGS journal เมื่อ cancel room charge (คืนสต็อก) — DR Inventory, CR COGS</summary>
+        public long EnqueueStockOutCogsReversal(int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime reverseDate, string reason, string stockRef)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (quantity <= 0 || costPerUnit <= 0) return -1;
+            if (string.IsNullOrEmpty(stockRef)) return -1;
+
+            long existing = FindPendingEntry("STOCK", "STOCK_OUT_COGS_REVERSE", "stockRef", stockRef);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_OUT_COGS_REVERSE", "stockRef", stockRef, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", stockRef },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "reverseDate", reverseDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_OUT_COGS_REVERSE", payload);
+        }
+
+        /// <summary>Stock adjustment จากการนับ — quantityDiff +/- (gain or loss)</summary>
+        public long EnqueueStockAdjustment(long adjustmentLogId, int productId, string productName,
+            decimal quantityDiff, decimal costPerUnit, DateTime adjustDate, string reason)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (quantityDiff == 0 || costPerUnit <= 0) return -1;
+
+            string refStr = $"SADJ-{adjustmentLogId}";
+            long existing = FindPendingEntry("STOCK", "STOCK_ADJUSTMENT", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_ADJUSTMENT", "stockRef", refStr, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "adjustmentLogId", adjustmentLogId },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantityDiff", quantityDiff },
+                { "costPerUnit", costPerUnit },
+                { "adjustDate", adjustDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_ADJUSTMENT", payload);
+        }
+
+        /// <summary>Write-off (damage/loss) — DR Stock Loss, CR Inventory</summary>
+        public long EnqueueStockWriteOff(long adjustmentLogId, int productId, string productName,
+            decimal quantity, decimal costPerUnit, DateTime writeOffDate, string reason)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (quantity <= 0 || costPerUnit <= 0) return -1;
+
+            string refStr = $"SWO-{adjustmentLogId}";
+            long existing = FindPendingEntry("STOCK", "STOCK_WRITEOFF", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_WRITEOFF", "stockRef", refStr, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "adjustmentLogId", adjustmentLogId },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "writeOffDate", writeOffDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_WRITEOFF", payload);
+        }
+
+        /// <summary>Sync product master ไป NextAcc — ใช้ตอนสร้าง/แก้ไขสินค้า</summary>
+        public long EnqueueProductSync(int productId)
+        {
+            if (!_config.IsConfigured || productId <= 0) return -1;
+
+            string refStr = $"PRODUCT-{productId}";
+            long existing = FindPendingEntry("PRODUCT", "SYNC_PRODUCT_MASTER", "stockRef", refStr);
+            if (existing > 0) return existing;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productId", productId }
+            };
+            return InsertQueue("PRODUCT", productId, "SYNC_PRODUCT_MASTER", payload);
+        }
+
+        // ──────────────────────────────────────────────
         // Void/Cancel Enqueue Methods
         // ──────────────────────────────────────────────
 
@@ -768,6 +932,20 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessDepositRefund(payload);
                 case "FORFEIT_DEPOSIT":
                     return await ProcessDepositForfeit(payload);
+
+                // ── Stock / Inventory ──
+                case "STOCK_IN":
+                    return await ProcessStockIn(payload);
+                case "STOCK_OUT_COGS":
+                    return await ProcessStockOutCogs(payload);
+                case "STOCK_OUT_COGS_REVERSE":
+                    return await ProcessStockOutCogsReversal(payload);
+                case "STOCK_ADJUSTMENT":
+                    return await ProcessStockAdjustment(payload);
+                case "STOCK_WRITEOFF":
+                    return await ProcessStockWriteOff(payload);
+                case "SYNC_PRODUCT_MASTER":
+                    return await ProcessProductSync(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -1561,6 +1739,250 @@ namespace Take_Time_BangPhra.Integration
             var result = await _apiClient.CreateJournalAsync(journal);
             await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
+        }
+
+        // ──────────────────────────────────────────────
+        // Stock / Inventory Processors
+        // ──────────────────────────────────────────────
+
+        private async Task<string> ProcessStockIn(Dictionary<string, object> p)
+        {
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
+            decimal quantity = Convert.ToDecimal(p["quantity"]);
+            decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
+            decimal totalCost = p.ContainsKey("totalCost") ? Convert.ToDecimal(p["totalCost"]) : Math.Round(quantity * costPerUnit, 2);
+            DateTime receiveDate = DateTime.Parse(p["receiveDate"]?.ToString());
+            string supplierName = p.ContainsKey("supplierName") ? p["supplierName"]?.ToString() : "";
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : null;
+            bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockIn: product={productName} qty={quantity} cost={costPerUnit} total={totalCost} supplier={supplierName}", "SYSTEM");
+
+            var journal = _mapper.MapStockInToJournal(productId, productName, totalCost, receiveDate, supplierName,
+                string.IsNullOrEmpty(paymentMethod) ? null : paymentMethod, hasInputVat);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"StockIn product={productId}");
+            await SafePostJournalAsync(docId);
+            return docId.ToString();
+        }
+
+        private async Task<string> ProcessStockOutCogs(Dictionary<string, object> p)
+        {
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
+            decimal quantity = Convert.ToDecimal(p["quantity"]);
+            decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
+            DateTime outDate = DateTime.Parse(p["outDate"]?.ToString());
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "ขาย";
+            string stockRef = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : null;
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockOutCogs: product={productName} qty={quantity} cost={costPerUnit} reason={reason}", "SYSTEM");
+
+            var journal = _mapper.MapStockOutCogsToJournal(productId, productName, quantity, costPerUnit, outDate, reason, stockRef);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"StockOutCogs product={productId} ref={stockRef}");
+            await SafePostJournalAsync(docId);
+            return docId.ToString();
+        }
+
+        private async Task<string> ProcessStockOutCogsReversal(Dictionary<string, object> p)
+        {
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
+            decimal quantity = Convert.ToDecimal(p["quantity"]);
+            decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
+            DateTime reverseDate = DateTime.Parse(p["reverseDate"]?.ToString());
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "ยกเลิก room charge";
+            string stockRef = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : null;
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockOutCogsReversal: product={productName} qty={quantity} cost={costPerUnit} ref={stockRef}", "SYSTEM");
+
+            var journal = _mapper.MapStockOutCogsReversalToJournal(productId, productName, quantity, costPerUnit, reverseDate, reason, stockRef);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"StockOutCogsReversal ref={stockRef}");
+            await SafePostJournalAsync(docId);
+            return docId.ToString();
+        }
+
+        private async Task<string> ProcessStockAdjustment(Dictionary<string, object> p)
+        {
+            long adjustmentLogId = Convert.ToInt64(p["adjustmentLogId"]);
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
+            decimal quantityDiff = Convert.ToDecimal(p["quantityDiff"]);
+            decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
+            DateTime adjustDate = DateTime.Parse(p["adjustDate"]?.ToString());
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockAdjustment: logId={adjustmentLogId} product={productName} diff={quantityDiff} cost={costPerUnit}", "SYSTEM");
+
+            var journal = _mapper.MapStockAdjustmentToJournal(productId, productName, quantityDiff, costPerUnit, adjustDate, reason, adjustmentLogId);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"StockAdjustment logId={adjustmentLogId}");
+            await SafePostJournalAsync(docId);
+            UpdateStockAdjustmentLog(adjustmentLogId, "SYNCED", docId, null);
+            return docId.ToString();
+        }
+
+        private async Task<string> ProcessStockWriteOff(Dictionary<string, object> p)
+        {
+            long adjustmentLogId = Convert.ToInt64(p["adjustmentLogId"]);
+            int productId = Convert.ToInt32(p["productId"]);
+            string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
+            decimal quantity = Convert.ToDecimal(p["quantity"]);
+            decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
+            DateTime writeOffDate = DateTime.Parse(p["writeOffDate"]?.ToString());
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "เสียหาย";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockWriteOff: logId={adjustmentLogId} product={productName} qty={quantity} reason={reason}", "SYSTEM");
+
+            var journal = _mapper.MapStockWriteOffToJournal(productId, productName, quantity, costPerUnit, writeOffDate, reason, adjustmentLogId);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"StockWriteOff logId={adjustmentLogId}");
+            await SafePostJournalAsync(docId);
+            UpdateStockAdjustmentLog(adjustmentLogId, "SYNCED", docId, null);
+            return docId.ToString();
+        }
+
+        private async Task<string> ProcessProductSync(Dictionary<string, object> p)
+        {
+            int productId = Convert.ToInt32(p["productId"]);
+            var info = LookupProductInfo(productId);
+            if (info == null)
+                throw new ArgumentException($"ProcessProductSync: ไม่พบ product #{productId} ในฐานข้อมูล");
+
+            // ตรวจ cache — ถ้ามี Nexaacc_Product_Id อยู่แล้ว → UPDATE
+            Guid? existingNexaaccId = LookupCachedNexaaccProductId(productId);
+
+            var req = _mapper.MapProductToNexaacc(productId, info.Value.name, info.Value.description,
+                info.Value.sellPrice, info.Value.costPrice, info.Value.unit, info.Value.categoryName);
+
+            Guid productGuid;
+            if (existingNexaaccId.HasValue && existingNexaaccId.Value != Guid.Empty)
+            {
+                var updateReq = new UpdateProductRequest
+                {
+                    Name = req.Name,
+                    Description = req.Description,
+                    SellingPrice = req.SellingPrice,
+                    CostPrice = req.CostPrice,
+                    Unit = req.Unit
+                };
+                await _apiClient.UpdateProductAsync(existingNexaaccId.Value, updateReq);
+                productGuid = existingNexaaccId.Value;
+            }
+            else
+            {
+                var createResult = await _apiClient.CreateProductAsync(req);
+                productGuid = RequireValidDocId(createResult?.data?.Id, $"CreateProduct productId={productId}");
+            }
+
+            UpsertProductMap(productId, productGuid, info.Value.name, $"TT-{productId:D5}", "SYNCED", null);
+            return productGuid.ToString();
+        }
+
+        private (string name, string description, decimal sellPrice, decimal costPrice, string unit, string categoryName)? LookupProductInfo(int productId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 P.Product_Name, ISNULL(P.Detail, '') AS Detail,
+                             ISNULL(P.Sell_Price, 0) AS Sell_Price,
+                             ISNULL(P.Cost_Price, 0) AS Cost_Price,
+                             ISNULL(P.Unit, '') AS Unit,
+                             (SELECT TOP 1 Category_Name FROM Product_Category WHERE ID = P.Category_ID) AS CategoryName
+                      FROM Product P WHERE P.ID = @id",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0)
+                {
+                    var r = dt.Rows[0];
+                    return (
+                        r["Product_Name"]?.ToString() ?? "",
+                        r["Detail"]?.ToString() ?? "",
+                        Convert.ToDecimal(r["Sell_Price"]),
+                        Convert.ToDecimal(r["Cost_Price"]),
+                        r["Unit"]?.ToString() ?? "ชิ้น",
+                        r["CategoryName"]?.ToString() ?? ""
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupProductInfo failed productId={productId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        private Guid? LookupCachedNexaaccProductId(int productId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Product_Id FROM Accounting_Product_Map WHERE TakeTime_Product_ID = @id AND Sync_Status = 'SYNCED'",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Product_Id"] != DBNull.Value)
+                    return (Guid)dt.Rows[0]["Nexaacc_Product_Id"];
+            }
+            catch { }
+            return null;
+        }
+
+        private void UpsertProductMap(int productId, Guid? nexaaccId, string name, string code, string status, string error)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"IF EXISTS (SELECT 1 FROM Accounting_Product_Map WHERE TakeTime_Product_ID = @id)
+                        UPDATE Accounting_Product_Map
+                        SET Nexaacc_Product_Id = @cid, Product_Code = @code, Product_Name = @name,
+                            Last_Synced = GETDATE(), Sync_Status = @status, Sync_Error = @err,
+                            Updated_Date = GETDATE()
+                        WHERE TakeTime_Product_ID = @id
+                      ELSE
+                        INSERT INTO Accounting_Product_Map
+                        (TakeTime_Product_ID, Nexaacc_Product_Id, Product_Code, Product_Name,
+                         Last_Synced, Sync_Status, Sync_Error)
+                        VALUES (@id, @cid, @code, @name, GETDATE(), @status, @err)",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", productId },
+                        { "@cid", (object)nexaaccId ?? DBNull.Value },
+                        { "@code", (object)code ?? DBNull.Value },
+                        { "@name", (object)name ?? DBNull.Value },
+                        { "@status", status },
+                        { "@err", (object)error ?? DBNull.Value }
+                    });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"UpsertProductMap failed productId={productId}: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private void UpdateStockAdjustmentLog(long logId, string status, Guid? journalId, string error)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Stock_Adjustment_Log
+                      SET Sync_Status = @status, Nexaacc_Journal_Id = @jid
+                      WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", logId },
+                        { "@status", status },
+                        { "@jid", (object)journalId ?? DBNull.Value }
+                    });
+            }
+            catch { }
         }
 
         /// <summary>

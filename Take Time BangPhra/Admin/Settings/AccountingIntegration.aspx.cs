@@ -187,6 +187,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "depositManual":
                     result = ManualDepositOperation(data);
                     break;
+                case "stockAdjustment":
+                    result = ManualStockAdjustment(data);
+                    break;
+                case "stockProductSync":
+                    result = ManualProductSync(data);
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -1160,6 +1166,126 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "success", success },
                     { "message", message },
                     { "etaxRefNumber", etaxRef ?? "" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Stock Adjustment / Write-off / Product Sync handlers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> ManualStockAdjustment(Dictionary<string, object> data)
+        {
+            try
+            {
+                string adjustType = data.ContainsKey("adjustType") ? data["adjustType"]?.ToString() : "";
+                string productIdStr = data.ContainsKey("productId") ? data["productId"]?.ToString() : "";
+                string qtyStr = data.ContainsKey("quantity") ? data["quantity"]?.ToString() : "";
+                string costStr = data.ContainsKey("costPerUnit") ? data["costPerUnit"]?.ToString() : "";
+                string reason = data.ContainsKey("reason") ? data["reason"]?.ToString() : "";
+
+                if (!int.TryParse(productIdStr, out int productId) || productId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Product ID ไม่ถูกต้อง" } };
+                if (!decimal.TryParse(qtyStr, out decimal quantity))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "จำนวนไม่ถูกต้อง" } };
+                if (!decimal.TryParse(costStr, out decimal costPerUnit) || costPerUnit <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้นทุน/หน่วยไม่ถูกต้อง" } };
+
+                // Insert Stock_Adjustment_Log first
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Product_Name FROM Product WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt == null || dt.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"ไม่พบ Product ID {productId}" } };
+                string productName = dt.Rows[0]["Product_Name"]?.ToString() ?? "";
+
+                bool isWriteoff = adjustType.Equals("WRITEOFF", StringComparison.OrdinalIgnoreCase);
+                decimal absQty = Math.Abs(quantity);
+                decimal totalCost = Math.Round(absQty * costPerUnit, 2);
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"INSERT INTO Stock_Adjustment_Log
+                      (Adjustment_Date, Adjustment_Type, Product_ID, Difference_Qty, Cost_PerUnit, Total_Cost, Reason, Created_Date, Sync_Status)
+                      VALUES (GETDATE(), @type, @prodId, @diff, @cost, @total, @reason, GETDATE(), 'PENDING')",
+                    new Dictionary<string, object>
+                    {
+                        { "@type", isWriteoff ? "WRITEOFF" : "COUNT_VARIANCE" },
+                        { "@prodId", productId },
+                        { "@diff", isWriteoff ? -absQty : quantity },
+                        { "@cost", costPerUnit },
+                        { "@total", totalCost },
+                        { "@reason", reason ?? "" }
+                    });
+
+                var idDt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 ID FROM Stock_Adjustment_Log WHERE Product_ID = @id ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@id", productId } });
+                long logId = idDt?.Rows.Count > 0 ? Convert.ToInt64(idDt.Rows[0]["ID"]) : 0;
+
+                // Insert Product_In/Product_Out for stock movement
+                if (isWriteoff || quantity < 0)
+                {
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"INSERT INTO Product_Out (DateTime_Out, Product_ID, Amount, PricePerUnit, OutType, Reason)
+                          VALUES (GETDATE(), @id, @qty, @cost, @type, @reason)",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", productId }, { "@qty", absQty }, { "@cost", costPerUnit },
+                            { "@type", isWriteoff ? "WRITEOFF" : "ADJUSTMENT_LOSS" }, { "@reason", reason ?? "" }
+                        });
+                }
+                else if (quantity > 0)
+                {
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"INSERT INTO Product_In (DateTime_In, Product_ID, Amount, PricePerUnit, InType)
+                          VALUES (GETDATE(), @id, @qty, @cost, 'ADJUSTMENT_GAIN')",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", productId }, { "@qty", quantity }, { "@cost", costPerUnit }
+                        });
+                }
+
+                // Enqueue accounting sync
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId;
+                if (isWriteoff)
+                    queueId = sync.EnqueueStockWriteOff(logId, productId, productName, absQty, costPerUnit, DateTime.Now, reason);
+                else
+                    queueId = sync.EnqueueStockAdjustment(logId, productId, productName, quantity, costPerUnit, DateTime.Now, reason);
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"{(isWriteoff ? "Write-off" : "Adjustment")}: ส่งเข้าคิวเรียบร้อย — logId={logId}, queueId={queueId}" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualProductSync(Dictionary<string, object> data)
+        {
+            try
+            {
+                string productIdStr = data.ContainsKey("productId") ? data["productId"]?.ToString() : "";
+                if (!int.TryParse(productIdStr, out int productId) || productId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Product ID ไม่ถูกต้อง" } };
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId = sync.EnqueueProductSync(productId);
+                if (queueId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่สามารถ enqueue ได้ (อาจมีรายการเดิมแล้ว หรือ config ไม่พร้อม)" } };
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Product sync: ส่งเข้าคิวเรียบร้อย (queueId={queueId})" }
                 };
             }
             catch (Exception ex)

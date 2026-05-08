@@ -65,8 +65,9 @@ namespace Take_Time_BangPhra
                         throw new Exception($"สินค้า '{productName}' มีจำนวนไม่เพียงพอ (คงเหลือ {currentStock})");
                     }
 
-                    // Deduct stock
+                    // Deduct stock + sync COGS journal to NextAcc
                     _chargeDA.DeductProductStock(productId, quantity);
+                    TryEnqueueStockCogs(productId, productName, quantity, "ROOM_CHARGE", $"RC-{reservationId}-{productId}-{DateTime.Now:yyyyMMddHHmmss}");
 
                     // Create charge record
                     lastChargeId = _chargeDA.CreateRoomCharge(
@@ -134,8 +135,9 @@ namespace Take_Time_BangPhra
                     throw new Exception($"สินค้า '{productName}' มีจำนวนไม่เพียงพอ");
                 }
 
-                // Deduct stock
+                // Deduct stock + sync COGS journal to NextAcc
                 _chargeDA.DeductProductStock(productId, quantity);
+                TryEnqueueStockCogs(productId, productName, quantity, "IMMEDIATE_SALE", $"IMM-{reservationId}-{productId}-{DateTime.Now:yyyyMMddHHmmss}");
 
                 // Create charge record with IMMEDIATE type and PAID status
                 long chargeId = _chargeDA.CreateRoomCharge(
@@ -207,8 +209,9 @@ namespace Take_Time_BangPhra
                 decimal totalAmount = Convert.ToDecimal(charge["TotalAmount"]);
                 string chargeType = charge["ChargeType"].ToString();
 
-                // Return stock
+                // Return stock + reverse COGS journal in NextAcc
                 _chargeDA.ReturnProductStock(productId, quantity);
+                TryEnqueueStockCogsReversal(productId, quantity, $"REV-{chargeId}-{DateTime.Now:yyyyMMddHHmmss}", reason);
 
                 // Mark as cancelled
                 _chargeDA.CancelCharge(chargeId, adminId, reason);
@@ -369,8 +372,9 @@ namespace Take_Time_BangPhra
                         throw new Exception($"สินค้า '{productName}' มีจำนวนไม่เพียงพอ");
                     }
 
-                    // Deduct stock
+                    // Deduct stock + sync COGS journal to NextAcc
                     _chargeDA.DeductProductStock(productId, quantity);
+                    TryEnqueueStockCogs(productId, productName, quantity, "ROOM_CHARGE", $"RC-{reservationId}-{productId}-{DateTime.Now:yyyyMMddHHmmss}");
 
                     // Create charge record with PRE_BOOKING type
                     lastChargeId = _chargeDA.CreateRoomCharge(
@@ -502,6 +506,92 @@ namespace Take_Time_BangPhra
             }
 
             return $"รายการทั้งหมด: {totalCharges} | รอชำระ: {pendingCount} ({pending:N2} บาท) | ชำระแล้ว: {paidCount}";
+        }
+
+        #endregion
+
+        #region NextAcc Sync Helpers
+
+        /// <summary>
+        /// COGS journal เมื่อตัดสต็อกขายให้ลูกค้า (room charge / immediate sale).
+        /// ใช้ Cost_Price จาก Product (ถ้าไม่มี → fallback Sell_Price * 0.5 หรือ skip)
+        /// ความล้มเหลวจะ log แต่ไม่ throw — stock การจัดการหลักผ่านไปก่อน
+        /// </summary>
+        private void TryEnqueueStockCogs(int productId, string productName, decimal quantity, string reason, string stockRef)
+        {
+            try
+            {
+                var config = new Take_Time_BangPhra.Integration.AccountingConfig(_connectionString);
+                if (!config.IsConfigured || !config.Enabled) return;
+
+                decimal costPrice = LookupProductCostPrice(productId);
+                if (costPrice <= 0)
+                {
+                    System.Diagnostics.Trace.TraceWarning($"⚠️ TryEnqueueStockCogs: product {productId} no Cost_Price — COGS journal skipped");
+                    return;
+                }
+
+                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(_connectionString);
+                sync.EnqueueStockOutCogs(productId, productName, quantity, costPrice, DateTime.Now, reason, stockRef);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"⚠️ TryEnqueueStockCogs failed product={productId}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reverse COGS journal เมื่อยกเลิก charge (return stock):
+        /// DR Inventory (เอาสต็อกกลับ), CR COGS (ยกเลิกต้นทุน)
+        /// ใช้ EnqueueStockIn พิเศษ (InType=RETURN_FROM_CHARGE) — Maps to DR Inventory CR COGS
+        /// </summary>
+        private void TryEnqueueStockCogsReversal(int productId, decimal quantity, string stockRef, string reason)
+        {
+            try
+            {
+                var config = new Take_Time_BangPhra.Integration.AccountingConfig(_connectionString);
+                if (!config.IsConfigured || !config.Enabled) return;
+
+                decimal costPrice = LookupProductCostPrice(productId);
+                if (costPrice <= 0) return;
+
+                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(_connectionString);
+                string productName = LookupProductName(productId);
+                sync.EnqueueStockOutCogsReversal(productId, productName, quantity, costPrice,
+                    DateTime.Now, reason ?? "ยกเลิก room charge", stockRef);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"⚠️ TryEnqueueStockCogsReversal failed product={productId}: {ex.Message}");
+            }
+        }
+
+        private decimal LookupProductCostPrice(int productId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ISNULL(Cost_Price, 0) AS Cost_Price FROM Product WHERE ID = @id",
+                    new System.Collections.Generic.Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Cost_Price"] != DBNull.Value)
+                    return Convert.ToDecimal(dt.Rows[0]["Cost_Price"]);
+            }
+            catch { }
+            return 0m;
+        }
+
+        private string LookupProductName(int productId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Product_Name FROM Product WHERE ID = @id",
+                    new System.Collections.Generic.Dictionary<string, object> { { "@id", productId } });
+                if (dt?.Rows.Count > 0)
+                    return dt.Rows[0]["Product_Name"]?.ToString() ?? "";
+            }
+            catch { }
+            return "";
         }
 
         #endregion

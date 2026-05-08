@@ -337,6 +337,44 @@
             <div id="docSourceResult"></div>
         </div>
 
+        <!-- Stock Adjustment / Write-off -->
+        <div class="journey-card">
+            <h3><i class="fas fa-boxes"></i> Stock Adjustment & Write-off</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                บันทึกการนับสต็อก (count variance) หรือตัดจำหน่ายสินค้าเสียหาย/หมดอายุ — ระบบจะสร้าง journal entry ใน NextAcc อัตโนมัติ
+            </p>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div>
+                    <label style="font-weight:600;">Product ID</label>
+                    <input type="number" id="stockProductId" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">Quantity</label>
+                    <input type="number" id="stockQuantity" step="0.01" placeholder="+/- จำนวน" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">Cost / unit</label>
+                    <input type="number" id="stockCostPerUnit" step="0.01" placeholder="ต้นทุน/หน่วย" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">เหตุผล</label>
+                    <input type="text" id="stockReason" placeholder="เช่น นับสต็อก/หมดอายุ/แตก" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn-primary" onclick="stockAdjustment('COUNT_VARIANCE')">
+                    <i class="fas fa-balance-scale"></i> ปรับยอดจากการนับ (+/- diff)
+                </button>
+                <button type="button" class="btn-danger" onclick="stockAdjustment('WRITEOFF')">
+                    <i class="fas fa-trash-alt"></i> ตัดจำหน่ายสินค้า (Write-off)
+                </button>
+                <button type="button" class="btn-success" onclick="stockProductSync()">
+                    <i class="fas fa-sync"></i> Sync Product Master
+                </button>
+            </div>
+            <div class="test-result" id="stockResult" style="margin-top:10px;"></div>
+        </div>
+
         <!-- E-Tax Manual Operations -->
         <div class="journey-card">
             <h3><i class="fas fa-file-invoice"></i> E-Tax Manual Operations</h3>
@@ -898,6 +936,40 @@
                 .catch(function(err) {
                     el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
                 });
+        }
+
+        // ── Stock Adjustment / Write-off / Product Sync ──
+
+        function stockAdjustment(adjustType) {
+            var productId = document.getElementById('stockProductId').value;
+            var qty = document.getElementById('stockQuantity').value;
+            var cost = document.getElementById('stockCostPerUnit').value;
+            var reason = document.getElementById('stockReason').value;
+            var el = document.getElementById('stockResult');
+            if (!productId || !qty || !cost) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณากรอก Product ID, Quantity, Cost ให้ครบ';
+                return;
+            }
+            postAction({
+                action: 'stockAdjustment',
+                adjustType: adjustType,
+                productId: productId,
+                quantity: qty,
+                costPerUnit: cost,
+                reason: reason
+            }, 'stockResult');
+        }
+
+        function stockProductSync() {
+            var productId = document.getElementById('stockProductId').value;
+            var el = document.getElementById('stockResult');
+            if (!productId) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุ Product ID';
+                return;
+            }
+            postAction({ action: 'stockProductSync', productId: productId }, 'stockResult');
         }
 
         // ── E-Tax Manual Operations ──

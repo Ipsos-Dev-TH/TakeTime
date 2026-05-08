@@ -619,8 +619,152 @@ namespace Take_Time_BangPhra.Integration
                 EntryDate = receiveDate,
                 JournalType = isCashPurchase ? NexaaccJournalType.CashPayments : NexaaccJournalType.Purchase,
                 Description = $"รับสินค้าเข้าสต็อก - {productName} ({supplierName})",
-                Reference = $"SI-{productId}-{receiveDate:yyyyMMdd}",
+                Reference = $"SI-{productId}-{receiveDate:yyyyMMddHHmmss}",
                 Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// COGS journal เมื่อสินค้าออกจากสต็อก (ขาย / room charge):
+        ///   DR COGS                qty * costPrice
+        ///       CR Inventory       qty * costPrice
+        /// ใช้ cost price (ไม่ใช่ sell price) — รายได้รับรู้แยกผ่าน receipt
+        /// </summary>
+        public CreateJournalEntryRequest MapStockOutCogsToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime outDate, string reason, string reference = null)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockOutCogsToJournal: ต้นทุนรวม = {totalCost} (ต้อง > 0). product={productName} qty={quantity} cost={costPerUnit}");
+
+            var cogsAccountId = GetAccountId("COGS");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+            string refStr = !string.IsNullOrEmpty(reference) ? reference : $"SO-{productId}-{outDate:yyyyMMddHHmmss}";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = outDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ตัดต้นทุนสินค้า - {productName} ({reason ?? "ขาย"})",
+                Reference = refStr,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = cogsAccountId,
+                        DebitAmount = totalCost,
+                        CreditAmount = 0,
+                        Description = $"ต้นทุนสินค้าขาย - {productName} qty={quantity:N2}"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = inventoryAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = totalCost,
+                        Description = $"ตัดสต็อก - {productName} qty={quantity:N2}"
+                    }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Reverse COGS journal เมื่อยกเลิก room charge (คืนสินค้ากลับสต็อก):
+        ///   DR Inventory       qty * costPrice    (เอาสต็อกกลับ)
+        ///       CR COGS        qty * costPrice    (ยกเลิกต้นทุน)
+        /// </summary>
+        public CreateJournalEntryRequest MapStockOutCogsReversalToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime reverseDate, string reason, string reference)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockOutCogsReversalToJournal: ต้นทุนรวม = {totalCost} (ต้อง > 0)");
+
+            var cogsAccountId = GetAccountId("COGS");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = reverseDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการต้นทุน - {productName} ({reason ?? "ยกเลิก room charge"})",
+                Reference = reference,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"คืนสต็อก - {productName} qty={quantity:N2}" },
+                    new JournalEntryLineRequest { AccountId = cogsAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"กลับ COGS - {productName}" }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Stock adjustment ตามผลการนับ:
+        ///   gain (actual > expected): DR Inventory, CR Inventory Variance (รายได้)
+        ///   loss (actual < expected): DR Inventory Variance (ค่าใช้จ่าย), CR Inventory
+        /// </summary>
+        public CreateJournalEntryRequest MapStockAdjustmentToJournal(
+            int productId, string productName, decimal quantityDiff, decimal costPerUnit,
+            DateTime adjustDate, string reason, long adjustmentLogId)
+        {
+            decimal absQty = Math.Abs(quantityDiff);
+            decimal totalCost = Math.Round(absQty * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockAdjustmentToJournal: total = {totalCost} (ต้อง > 0)");
+
+            var inventoryAccountId = GetAccountId("INVENTORY");
+            var varianceAccountId = GetAccountId("INVENTORY_VARIANCE");
+            bool isGain = quantityDiff > 0;
+
+            var lines = new List<JournalEntryLineRequest>();
+            if (isGain)
+            {
+                lines.Add(new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ปรับเพิ่มสต็อก - {productName} qty=+{absQty:N2}" });
+                lines.Add(new JournalEntryLineRequest { AccountId = varianceAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ส่วนต่างจากการนับสต็อก (เกิน)" });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest { AccountId = varianceAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ส่วนต่างจากการนับสต็อก (ขาด)" });
+                lines.Add(new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ปรับลดสต็อก - {productName} qty=-{absQty:N2}" });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = adjustDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"นับสต็อก ({(isGain ? "เกิน" : "ขาด")}) - {productName}: {reason ?? "ไม่ระบุ"}",
+                Reference = $"SADJ-{adjustmentLogId}",
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// Stock write-off (สินค้าเสียหาย/หมดอายุ/สูญหาย):
+        ///   DR Stock Loss Expense
+        ///       CR Inventory
+        /// </summary>
+        public CreateJournalEntryRequest MapStockWriteOffToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime writeOffDate, string reason, long adjustmentLogId)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockWriteOffToJournal: total = {totalCost} (ต้อง > 0)");
+
+            var stockLossAccountId = GetAccountId("STOCK_LOSS_EXPENSE");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = writeOffDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ตัดจำหน่ายสินค้า ({reason ?? "เสียหาย"}) - {productName}",
+                Reference = $"SWO-{adjustmentLogId}",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = stockLossAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ค่าใช้จ่ายสินค้าสูญเสีย - {productName} qty={quantity:N2}" },
+                    new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ตัดสต็อก - {productName}" }
+                }
             };
         }
 
