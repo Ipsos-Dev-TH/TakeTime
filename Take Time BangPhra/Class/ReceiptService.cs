@@ -283,7 +283,8 @@ namespace Take_Time_BangPhra.Services
         }
 
         public void CreateReceipt(string reservationId, double totalAmount, DataTable dtReserve, bool isDeposit,
-                                DateTime docDate, bool etax, string paidType, string createdById, string customerId = "0")
+                                DateTime docDate, bool etax, string paidType, string createdById, string customerId = "0",
+                                bool? useDeposit = null)
         {
             try
             {
@@ -309,13 +310,26 @@ namespace Take_Time_BangPhra.Services
                         AdjustReserveDataToMatch(dtReserve, totalAmount, reservationId);
                     }
 
+                    // Auto-detect / explicit: หักมัดจำในใบเสร็จนี้กี่บาท
+                    double depositApplied = 0;
+                    if (!isDeposit)
+                    {
+                        bool shouldApply = useDeposit ?? AutoShouldApplyDeposit(reservationId);
+                        if (shouldApply)
+                        {
+                            double remaining = LookupRemainingDepositToApply(reservationId);
+                            depositApplied = Math.Min(remaining, totalAmount);
+                            if (depositApplied < 0) depositApplied = 0;
+                        }
+                    }
+
                     if (isDeposit)
                     {
                         CreateDepositReceipt(receiptId, reservationId, docDate, totalAmount, vat, priceExcludeVat, paidType, createdById, etax, customerId);
                     }
                     else
                     {
-                        CreateRegularReceipt(receiptId, reservationId, docDate, totalAmount, vat, priceExcludeVat, paidType, createdById, dtReserve, etax, customerId);
+                        CreateRegularReceipt(receiptId, reservationId, docDate, totalAmount, vat, priceExcludeVat, paidType, createdById, dtReserve, etax, customerId, depositApplied);
                     }
 
                     // Generate PDF report
@@ -328,7 +342,7 @@ namespace Take_Time_BangPhra.Services
                     }
 
                     // Enqueue accounting sync to Nexaacc
-                    EnqueueAccountingSync(reservationId, receiptId, totalAmount, vat, isDeposit, paidType, docDate, customerId);
+                    EnqueueAccountingSync(reservationId, receiptId, totalAmount, vat, isDeposit, paidType, docDate, customerId, depositApplied);
                 }
             }
             catch (Exception ex)
@@ -338,12 +352,45 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        /// <summary>หา remaining deposit balance (จ่ายแล้ว - หักไปแล้วในใบเสร็จก่อนหน้า) เพื่อนำมาหักในใบเสร็จใหม่</summary>
+        private double LookupRemainingDepositToApply(string reservationId)
+        {
+            try
+            {
+                var p = new System.Collections.Generic.Dictionary<string, object> { { "@id", reservationId } };
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                WHERE Reservation_ID = @id AND IsDeposit = 1
+                                  AND (Status = 'Normal' OR Status IS NULL)), 0) AS Paid,
+                        ISNULL((SELECT SUM(Deposit_Applied_Amount) FROM Account_Receipt
+                                WHERE Reservation_ID = @id AND IsDeposit = 0
+                                  AND (Status = 'Normal' OR Status IS NULL)), 0) AS Applied",
+                    p);
+                if (dt?.Rows.Count > 0)
+                {
+                    double paid = Convert.ToDouble(dt.Rows[0]["Paid"]);
+                    double applied = Convert.ToDouble(dt.Rows[0]["Applied"]);
+                    double remaining = paid - applied;
+                    return remaining > 0 ? remaining : 0;
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        /// <summary>Auto-apply deposit ในใบเสร็จแรกที่ไม่ใช่ deposit ของการจอง — ลด liability + ป้องกัน double clear</summary>
+        private bool AutoShouldApplyDeposit(string reservationId)
+        {
+            return LookupRemainingDepositToApply(reservationId) > 0;
+        }
+
         /// <summary>
         /// ส่งข้อมูลใบเสร็จไป Nexaacc Accounting System แบบ async ผ่าน queue
         /// ไม่ block การทำงานหลัก - ถ้า accounting sync ล้มเหลวจะ retry อัตโนมัติ
         /// </summary>
         private void EnqueueAccountingSync(string reservationId, string receiptId, double totalAmount,
-            double vat, bool isDeposit, string paidType, DateTime docDate, string customerId)
+            double vat, bool isDeposit, string paidType, DateTime docDate, string customerId, double depositApplied = 0)
         {
             try
             {
@@ -360,7 +407,8 @@ namespace Take_Time_BangPhra.Services
                     {
                         sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
                             isDeposit: isDeposit, paymentMethod: paidType,
-                            revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId);
+                            revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId,
+                            depositApplied: (decimal)depositApplied);
                     }
                     else
                     {
@@ -368,7 +416,8 @@ namespace Take_Time_BangPhra.Services
                         {
                             sync.EnqueueReceipt(resId, receiptId, (decimal)totalAmount, (decimal)vat, docDate, customerName,
                                 isDeposit: isDeposit, paymentMethod: paidType,
-                                revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId);
+                                revenueType: "ROOM_REVENUE", paymentAccountId: rsPayAccId,
+                                depositApplied: (decimal)depositApplied);
                         }
                     }
                 }
@@ -507,7 +556,7 @@ namespace Take_Time_BangPhra.Services
         private void CreateRegularReceipt(string receiptId, string reservationId, DateTime docDate,
                                         double totalAmount, double vat, double priceExcludeVat,
                                         string paidType, string createdById, DataTable dtReserve,
-                                        bool etax, string customerId)
+                                        bool etax, string customerId, double depositApplied = 0)
         {
             string uid = Guid.NewGuid().ToString("N"); // Generate unique identifier for receipt
 
@@ -523,17 +572,19 @@ namespace Take_Time_BangPhra.Services
                 { "@paidType", paidType },
                 { "@createdById", createdById },
                 { "@etax", etax },
-                { "@customerId", customerId }
+                { "@customerId", customerId },
+                { "@useDeposit", depositApplied > 0 ? "True" : "False" },
+                { "@depositApplied", depositApplied }
             };
 
             _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Account_Receipt]
                     (ID, UID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                      [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
-                     Paid_Type, Created_By_ID, Etax, Customer_ID)
+                     Paid_Type, Created_By_ID, Etax, Customer_ID, Deposit_Applied_Amount)
                     VALUES (@receiptId, @uid, @reservationId, @docDate,
-                    @totalAmount, @vat, @priceExcludeVat, 'False', 'False', 'Normal',
-                    @paidType, @createdById, @etax, @customerId)",
+                    @totalAmount, @vat, @priceExcludeVat, 'False', @useDeposit, 'Normal',
+                    @paidType, @createdById, @etax, @customerId, @depositApplied)",
                 parameters);
 
             // Insert receipt details

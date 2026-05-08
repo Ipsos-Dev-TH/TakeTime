@@ -151,7 +151,8 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName,
             bool isDeposit = false, string paymentMethod = null,
-            string revenueType = null, string paymentAccountId = null)
+            string revenueType = null, string paymentAccountId = null,
+            decimal depositApplied = 0)
         {
             if (!_config.IsConfigured) return -1;
 
@@ -184,6 +185,8 @@ namespace Take_Time_BangPhra.Integration
                 payload["revenueType"] = revenueType;
             if (!string.IsNullOrEmpty(paymentAccountId))
                 payload["paymentAccountId"] = paymentAccountId;
+            if (depositApplied > 0)
+                payload["depositApplied"] = depositApplied;
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
         }
@@ -1029,30 +1032,196 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
+                bool hasVat = vatAmount > 0;
+                decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
+                if (depositApplied <= 0)
+                    depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
+
+                // Auto-build line breakdown จาก Account_Receipt_Detail
+                // ถ้าไม่พบ → fallback เป็น single line ตาม revenueType
+                var lines = LookupReceiptLines(receiptNumber, reservationId, totalAmount, revenueType);
+                bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} multiLine={useMultiLine}",
+                    "SYSTEM");
+
                 if (_config.IsReceiptDocumentMode)
                 {
-                    bool hasVat = vatAmount > 0;
-                    var invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
-                    invoice.Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}";
-                    if (!string.IsNullOrEmpty(receiptNumber))
+                    CreateIntegrationInvoiceRequest invoice;
+                    if (useMultiLine)
                     {
-                        invoice.ExternalRef = receiptNumber;
-                        invoice.ReplaceExistingForSource = true;
+                        invoice = _mapper.MapMultiLinePaymentToInvoice(reservationId, lines, paymentMethod, receiptDate,
+                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber);
+                    }
+                    else
+                    {
+                        invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
+                            customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
+                        invoice.Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}";
+                        if (!string.IsNullOrEmpty(receiptNumber))
+                        {
+                            invoice.ExternalRef = receiptNumber;
+                            invoice.ReplaceExistingForSource = true;
+                        }
                     }
                     invoice.Attachments = attachments;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
+
+                    // Adjustment journal: ถ้ามี deposit applied ให้ตัด ADVANCE_DEPOSIT + ลด Cash
+                    if (depositApplied > 0)
+                    {
+                        try
+                        {
+                            var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
+                                receiptDate, customerName, paymentAccountId, receiptNumber);
+                            var adjResult = await _apiClient.CreateJournalAsync(adj);
+                            await SafePostJournalAsync(adjResult.data.Id);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"Deposit-applied adjustment posted: receipt={receiptNumber} amount={depositApplied} journalId={adjResult.data.Id}",
+                                "SYSTEM");
+                        }
+                        catch (Exception adjEx)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"Deposit-applied adjustment FAILED for receipt={receiptNumber}: {adjEx.Message}", "SYSTEM");
+                        }
+                    }
+
                     await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
                     return result.data.Id.ToString();
                 }
                 else
                 {
-                    bool hasVat = vatAmount > 0;
-                    var journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
+                    CreateJournalEntryRequest journal;
+                    if (useMultiLine)
+                    {
+                        journal = _mapper.MapMultiLinePaymentToJournal(reservationId, lines, paymentMethod, receiptDate,
+                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber);
+                    }
+                    else
+                    {
+                        journal = _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate,
+                            customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId,
+                            documentNumber: receiptNumber);
+                    }
                     var result = await _apiClient.CreateJournalAsync(journal);
                     await SafePostJournalAsync(result.data.Id);
                     return result.data.Id.ToString();
                 }
             }
+        }
+
+        /// <summary>
+        /// อ่าน lines จาก Account_Receipt_Detail สำหรับใบเสร็จ — ใช้ build invoice/journal แบบ multi-line
+        /// ถ้าไม่พบ detail (ใบเสร็จเก่า) → return null (caller จะ fallback ไป single-line)
+        /// </summary>
+        private List<AccountingDataMapper.ReceiptLineSpec> LookupReceiptLines(
+            string receiptNumber, int reservationId, decimal totalAmount, string revenueTypeFallback)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(receiptNumber)) return null;
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT D.ProductType_ID, D.Product_ID, D.Product_Data, D.Product_Amount,
+                             D.Price_PerPeice, D.Price_Amount, D.Product_Unit
+                      FROM Account_Receipt_Detail D
+                      INNER JOIN Account_Receipt R ON R.ID = D.Receipt_ID
+                      WHERE R.Receipt_Number = @num OR R.ID = @num
+                      ORDER BY D.Number ASC",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+
+                if (dt == null || dt.Rows.Count == 0) return null;
+
+                var lines = new List<AccountingDataMapper.ReceiptLineSpec>();
+                decimal sum = 0;
+                foreach (DataRow row in dt.Rows)
+                {
+                    decimal qty = row["Product_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Product_Amount"]) : 1m;
+                    decimal unitPrice = row["Price_PerPeice"] != DBNull.Value ? Convert.ToDecimal(row["Price_PerPeice"]) : 0m;
+                    decimal amt = row["Price_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Price_Amount"]) : qty * unitPrice;
+                    if (amt == 0) continue;
+
+                    int? prodTypeId = row["ProductType_ID"] != DBNull.Value ? (int?)Convert.ToInt32(row["ProductType_ID"]) : null;
+                    string desc = row["Product_Data"]?.ToString() ?? "";
+                    string unit = row["Product_Unit"]?.ToString();
+
+                    lines.Add(new AccountingDataMapper.ReceiptLineSpec
+                    {
+                        ProductTypeId = prodTypeId,
+                        Description = desc,
+                        Quantity = qty > 0 ? qty : 1,
+                        UnitPrice = unitPrice,
+                        Amount = amt,
+                        Unit = unit,
+                        RevenueTypeOverride = !string.IsNullOrEmpty(revenueTypeFallback) && !prodTypeId.HasValue ? revenueTypeFallback : null
+                    });
+                    sum += amt;
+                }
+
+                if (lines.Count == 0) return null;
+
+                // Sanity check: line sum ควรใกล้เคียง totalAmount
+                if (Math.Abs(sum - totalAmount) > 0.05m)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"LookupReceiptLines: receipt={receiptNumber} line sum={sum} ≠ totalAmount={totalAmount} (จะใช้ตาม line สำหรับ revenue split)",
+                        "SYSTEM");
+                }
+                return lines;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptLines failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                return null;
+            }
+        }
+
+        /// <summary>ดึงข้อมูล header ของใบเสร็จ (resId, customerName, paymentMethod, paymentAccountId) สำหรับ counter-adjustment</summary>
+        private (int reservationId, string customerName, string paymentMethod, string paymentAccountId)? LookupReceiptHeaderInfo(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 R.Reservation_ID, R.Paid_Type,
+                             ISNULL(C.FullName, C.Name) AS CustName
+                      FROM Account_Receipt R
+                      LEFT JOIN Reservation Res ON Res.ID = R.Reservation_ID
+                      LEFT JOIN Customer C ON C.MobilePhone = Res.Customer_MobilePhone
+                      WHERE R.Receipt_Number = @num OR R.ID = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt?.Rows.Count > 0)
+                {
+                    int rid = dt.Rows[0]["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Reservation_ID"]) : 0;
+                    string name = dt.Rows[0]["CustName"]?.ToString() ?? "";
+                    string method = dt.Rows[0]["Paid_Type"]?.ToString() ?? "CASH";
+                    string accId = LookupPaidHowAccountId(method);
+                    return (rid, name, method, accId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptHeaderInfo failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>หาจำนวนมัดจำที่หักในใบเสร็จ — จาก Account_Receipt.Deposit_Applied_Amount</summary>
+        private decimal LookupDepositAppliedFromReceipt(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return 0m;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Deposit_Applied_Amount FROM Account_Receipt WHERE Receipt_Number = @num OR ID = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Deposit_Applied_Amount"] != DBNull.Value)
+                    return Convert.ToDecimal(dt.Rows[0]["Deposit_Applied_Amount"]);
+            }
+            catch { /* fallback to 0 */ }
+            return 0m;
         }
 
         // ──────────────────────────────────────────────
@@ -1067,6 +1236,37 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
+            string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+
+            // ถ้าใบเสร็จเดิมมี deposit applied — โพสต์ counter-adjustment journal เพื่อกลับ adjustment
+            // ที่เคยตัด ADVANCE_DEPOSIT ไป (เพื่อเอาเจ้าหนี้กลับมา)
+            if (!string.IsNullOrEmpty(receiptNumber))
+            {
+                try
+                {
+                    decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
+                    if (applied > 0)
+                    {
+                        var info = LookupReceiptHeaderInfo(receiptNumber);
+                        if (info != null)
+                        {
+                            var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
+                                info.Value.customerName, info.Value.paymentAccountId, receiptNumber);
+                            var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                            await SafePostJournalAsync(counterResult.data.Id);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidReceipt: posted counter-adjustment for deposit applied {applied} on receipt={receiptNumber} journalId={counterResult.data.Id}",
+                                "SYSTEM");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidReceipt: counter-adjustment failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                }
+            }
 
             try
             {
