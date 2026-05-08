@@ -64,6 +64,40 @@ namespace Take_Time_BangPhra.Integration
 
         public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        // ──────────────────────────────────────────────
+        // E-Tax Invoice automation
+        // ──────────────────────────────────────────────
+
+        /// <summary>สร้าง E-Tax Invoice อัตโนมัติเมื่อสร้างใบเสร็จในระบบ NextAcc สำเร็จ</summary>
+        public bool IsEtaxAutoGenerate => GetConfig("Etax_AutoGenerate", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoGenerate", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ลงนาม E-Tax อัตโนมัติหลังสร้าง</summary>
+        public bool IsEtaxAutoSign => GetConfig("Etax_AutoSign", "1").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSign", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ส่งให้กรมสรรพากรอัตโนมัติหลังลงนาม</summary>
+        public bool IsEtaxAutoSubmit => GetConfig("Etax_AutoSubmit", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSubmit", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ส่งอีเมลใบกำกับภาษีอิเล็กทรอนิกส์ให้ลูกค้าอัตโนมัติเมื่อ E-Tax พร้อมแล้ว</summary>
+        public bool IsEtaxAutoSendEmail => GetConfig("Etax_AutoSendEmail", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSendEmail", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>หัวข้ออีเมล E-Tax (รองรับ {ReceiptNumber}, {GuestName}, {CompanyName})</summary>
+        public string EtaxEmailSubject => GetConfig("Etax_EmailSubject",
+            "ใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}");
+
+        /// <summary>เนื้อหาอีเมล E-Tax (รองรับ {ReceiptNumber}, {GuestName}, {Amount}, {Date})</summary>
+        public string EtaxEmailBody => GetConfig("Etax_EmailBody",
+            "เรียน {GuestName}\n\nกรุณาดาวน์โหลดใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber} จากเอกสารแนบ\n\nขอบคุณที่ใช้บริการ");
+
+        /// <summary>แนบ PDF E-Tax ในอีเมล</summary>
+        public bool EtaxEmailAttachPdf => GetConfig("Etax_EmailAttachPdf", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>แนบ XML E-Tax ในอีเมล (ลูกค้าธุรกิจอาจต้องการ)</summary>
+        public bool EtaxEmailAttachXml => GetConfig("Etax_EmailAttachXml", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง

@@ -58,6 +58,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "voucherSyncMode", config.VoucherSyncMode },
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "attachFiles", config.AttachFiles },
+                    { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
+                    { "etaxAutoSign", config.IsEtaxAutoSign },
+                    { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
+                    { "etaxAutoSendEmail", config.IsEtaxAutoSendEmail },
+                    { "etaxEmailSubject", config.EtaxEmailSubject },
+                    { "etaxEmailBody", config.EtaxEmailBody },
+                    { "etaxEmailAttachPdf", config.EtaxEmailAttachPdf },
+                    { "etaxEmailAttachXml", config.EtaxEmailAttachXml },
                     { "syncInterval", config.SyncIntervalSeconds },
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
@@ -133,6 +141,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "updatePaidTypeAccount":
                     result = UpdatePaidTypeAccount();
                     break;
+                case "lookupDocSource":
+                    result = LookupDocumentSource();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -161,6 +172,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "deleteQueueItems":
                     result = DeleteQueueItems(data);
+                    break;
+                case "etaxGenerate":
+                    result = ManualEtaxGenerate(data);
+                    break;
+                case "etaxSendEmail":
+                    result = ManualEtaxSendEmail(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -199,6 +216,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
+                if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
+                if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
+                if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
+                if (data.ContainsKey("etaxAutoSendEmail")) config.SetConfig("Etax_AutoSendEmail", BoolToFlag(data["etaxAutoSendEmail"]));
+                if (data.ContainsKey("etaxEmailSubject")) config.SetConfig("Etax_EmailSubject", data["etaxEmailSubject"]?.ToString() ?? "");
+                if (data.ContainsKey("etaxEmailBody")) config.SetConfig("Etax_EmailBody", data["etaxEmailBody"]?.ToString() ?? "");
+                if (data.ContainsKey("etaxEmailAttachPdf")) config.SetConfig("Etax_EmailAttachPdf", data["etaxEmailAttachPdf"]?.ToString() ?? "true");
+                if (data.ContainsKey("etaxEmailAttachXml")) config.SetConfig("Etax_EmailAttachXml", data["etaxEmailAttachXml"]?.ToString() ?? "false");
                 if (data.ContainsKey("syncInterval")) config.SetConfig("Nexaacc_SyncInterval_Sec", data["syncInterval"]?.ToString() ?? "30");
                 if (data.ContainsKey("maxRetries")) config.SetConfig("Nexaacc_MaxRetries", data["maxRetries"]?.ToString() ?? "5");
                 if (data.ContainsKey("timeout")) config.SetConfig("Nexaacc_TimeoutSec", data["timeout"]?.ToString() ?? "30");
@@ -1035,6 +1060,121 @@ namespace Take_Time_BangPhra.Admin.Settings
             Response.ContentType = "application/json";
             Response.Write(new JavaScriptSerializer().Serialize(data));
             Response.End();
+        }
+
+        private static string BoolToFlag(object value)
+        {
+            string s = value?.ToString() ?? "";
+            return (s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1") ? "1" : "0";
+        }
+
+        // ──────────────────────────────────────────────
+        // Document Source Lookup — query vw_Receipt_Document_Source
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> LookupDocumentSource()
+        {
+            try
+            {
+                string q = (Request.QueryString["q"] ?? "").Trim();
+                if (string.IsNullOrEmpty(q))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จหรือ Reservation ID" } };
+
+                string sql;
+                var parameters = new Dictionary<string, object>();
+                if (int.TryParse(q, out int resId))
+                {
+                    sql = @"SELECT TOP 50 * FROM vw_Receipt_Document_Source WHERE Reservation_ID = @resId ORDER BY Created_Date DESC";
+                    parameters.Add("@resId", resId);
+                }
+                else
+                {
+                    sql = @"SELECT TOP 50 * FROM vw_Receipt_Document_Source WHERE Receipt_Number LIKE @num ORDER BY Created_Date DESC";
+                    parameters.Add("@num", "%" + q + "%");
+                }
+
+                var dt = _code.DatabaseQuerySafe(ConnStr, sql, parameters);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                {
+                    foreach (System.Data.DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "receiptId", row["Receipt_ID"]?.ToString() },
+                            { "receiptNumber", row["Receipt_Number"]?.ToString() },
+                            { "reservationId", row["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(row["Reservation_ID"]) : 0 },
+                            { "total", row["Total"] != DBNull.Value ? Convert.ToDecimal(row["Total"]) : 0m },
+                            { "isDeposit", row["IsDeposit"] != DBNull.Value && Convert.ToBoolean(row["IsDeposit"]) },
+                            { "documentSource", row["Document_Source"]?.ToString() ?? "LOCAL" },
+                            { "nexaaccDocId", row["Nexaacc_Doc_Id"]?.ToString() },
+                            { "syncStatus", row["Sync_Status"]?.ToString() },
+                            { "syncError", row["Sync_Error"]?.ToString() },
+                            { "etaxStatus", row["Etax_Status"]?.ToString() },
+                            { "etaxRefNumber", row["Etax_Ref_Number"]?.ToString() },
+                            { "etaxPdfUrl", row["Etax_Pdf_Url"]?.ToString() },
+                            { "etaxXmlUrl", row["Etax_Xml_Url"]?.ToString() },
+                            { "etaxEmailSent", row["Etax_Email_Sent"] != DBNull.Value && Convert.ToBoolean(row["Etax_Email_Sent"]) },
+                            { "etaxError", row["Etax_Error"]?.ToString() },
+                            { "customerName", row["Customer_FullName"]?.ToString() },
+                            { "customerEmail", row["Customer_Email"]?.ToString() },
+                            { "customerTaxID", row["Customer_TaxID"]?.ToString() }
+                        });
+                    }
+                }
+
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "count", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // E-Tax manual triggers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> ManualEtaxGenerate(Dictionary<string, object> data)
+        {
+            try
+            {
+                string receiptNumber = data.ContainsKey("receiptNumber") ? data["receiptNumber"]?.ToString() : null;
+                if (string.IsNullOrEmpty(receiptNumber))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จ" } };
+
+                var service = new Integration.AccountingSyncService(ConnStr);
+                var (success, message, etaxRef) = System.Threading.Tasks.Task.Run(() => service.ManualGenerateEtaxAsync(receiptNumber)).Result;
+                return new Dictionary<string, object>
+                {
+                    { "success", success },
+                    { "message", message },
+                    { "etaxRefNumber", etaxRef ?? "" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualEtaxSendEmail(Dictionary<string, object> data)
+        {
+            try
+            {
+                string receiptNumber = data.ContainsKey("receiptNumber") ? data["receiptNumber"]?.ToString() : null;
+                string overrideEmail = data.ContainsKey("email") ? data["email"]?.ToString() : null;
+                if (string.IsNullOrEmpty(receiptNumber))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จ" } };
+
+                var service = new Integration.AccountingSyncService(ConnStr);
+                var (success, message) = System.Threading.Tasks.Task.Run(() => service.ManualSendEtaxEmailAsync(receiptNumber, overrideEmail)).Result;
+                return new Dictionary<string, object> { { "success", success }, { "message", message } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
         }
     }
 }

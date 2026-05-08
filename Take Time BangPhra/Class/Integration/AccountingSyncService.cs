@@ -308,6 +308,185 @@ namespace Take_Time_BangPhra.Integration
         // Queue Processing (called by background timer/scheduler)
         // ──────────────────────────────────────────────
 
+        // ──────────────────────────────────────────────
+        // Public manual triggers (for admin pages)
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// สร้าง E-Tax Invoice ด้วยตัวเอง (manual trigger จากหน้า Receipt).
+        /// Returns: (success, message, etaxRefNumber). หากใบเสร็จยังไม่ถูก sync เข้า NextAcc จะ fail.
+        /// </summary>
+        public async Task<(bool success, string message, string etaxRef)> ManualGenerateEtaxAsync(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber))
+                return (false, "กรุณาระบุเลขที่ใบเสร็จ", null);
+            if (!_config.IsConfigured)
+                return (false, "ยังไม่ได้ตั้งค่าการเชื่อมต่อ NextAcc", null);
+
+            // Find NextAcc Doc ID via Sync_Queue
+            Guid invoiceDocId = LookupNexaaccDocIdByReceipt(receiptNumber);
+            if (invoiceDocId == Guid.Empty)
+                return (false, $"ใบเสร็จ {receiptNumber} ยังไม่ได้ sync เข้า NextAcc — กรุณา sync ก่อน", null);
+
+            int reservationId = LookupReservationIdByReceipt(receiptNumber);
+            decimal amount = LookupReceiptAmount(receiptNumber);
+            string guestName = LookupGuestName(reservationId);
+
+            long logId = InsertEtaxLogPending(invoiceDocId, receiptNumber, reservationId);
+
+            try
+            {
+                var result = await _apiClient.GenerateEtaxAsync(new GenerateEtaxRequest
+                {
+                    DocumentId = invoiceDocId,
+                    DocumentType = "TAX_INVOICE",
+                    AutoSign = _config.IsEtaxAutoSign,
+                    AutoSubmit = _config.IsEtaxAutoSubmit
+                });
+                if (result?.data == null)
+                {
+                    UpdateEtaxLogFailed(logId, "Empty response from /etax/generate");
+                    return (false, "API ตอบกลับว่าง — โปรดตรวจสอบ NextAcc", null);
+                }
+                UpdateEtaxLogSuccess(logId, result.data);
+                return (true, $"สร้าง E-Tax สำเร็จ: {result.data.EtaxRefNumber} (สถานะ: {result.data.Status})", result.data.EtaxRefNumber);
+            }
+            catch (AccountingApiException ex)
+            {
+                UpdateEtaxLogFailed(logId, $"HTTP {ex.StatusCode}: {ex.ResponseBody}");
+                return (false, $"ผิดพลาด ({ex.StatusCode}): {ex.Message}", null);
+            }
+            catch (Exception ex)
+            {
+                UpdateEtaxLogFailed(logId, ex.Message);
+                return (false, $"ผิดพลาด: {ex.Message}", null);
+            }
+        }
+
+        /// <summary>
+        /// ส่งอีเมล E-Tax ให้ลูกค้า (ทั้งกรณีส่งซ้ำและส่งครั้งแรก).
+        /// </summary>
+        public async Task<(bool success, string message)> ManualSendEtaxEmailAsync(string receiptNumber, string overrideEmail = null)
+        {
+            if (string.IsNullOrEmpty(receiptNumber))
+                return (false, "กรุณาระบุเลขที่ใบเสร็จ");
+
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1 ID, Nexaacc_Etax_Id, Reservation_ID FROM Accounting_ETax_Log
+                  WHERE Receipt_Number = @num AND Nexaacc_Etax_Id IS NOT NULL
+                  ORDER BY ID DESC",
+                new Dictionary<string, object> { { "@num", receiptNumber } });
+
+            if (dt == null || dt.Rows.Count == 0)
+                return (false, "ยังไม่ได้สร้าง E-Tax สำหรับใบเสร็จนี้");
+
+            long logId = Convert.ToInt64(dt.Rows[0]["ID"]);
+            Guid etaxId = (Guid)dt.Rows[0]["Nexaacc_Etax_Id"];
+            int resId = dt.Rows[0]["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Reservation_ID"]) : 0;
+
+            string email = !string.IsNullOrWhiteSpace(overrideEmail) ? overrideEmail.Trim() : LookupCustomerEmail(resId);
+            if (string.IsNullOrWhiteSpace(email) || !email.Contains("@"))
+                return (false, "ไม่พบอีเมลลูกค้า — โปรดระบุอีเมลปลายทาง");
+
+            decimal amount = LookupReceiptAmount(receiptNumber);
+            string guestName = LookupGuestName(resId);
+            string subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, guestName, amount);
+            string body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, guestName, amount);
+
+            try
+            {
+                await _apiClient.SendEtaxByEmailAsync(etaxId, new SendEtaxByEmailRequest
+                {
+                    RecipientEmail = email,
+                    Subject = subject,
+                    Body = body,
+                    AttachPdf = _config.EtaxEmailAttachPdf,
+                    AttachXml = _config.EtaxEmailAttachXml
+                });
+                MarkEtaxEmailSent(logId, email);
+                return (true, $"ส่งอีเมลไปยัง {email} สำเร็จ");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"ส่งอีเมลไม่สำเร็จ: {ex.Message}");
+            }
+        }
+
+        private Guid LookupNexaaccDocIdByReceipt(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 q.Nexaacc_Response_Id
+                      FROM Accounting_Sync_Queue q
+                      WHERE q.Status = 'COMPLETED'
+                        AND q.Nexaacc_Response_Id IS NOT NULL
+                        AND q.Nexaacc_Response_Id <> 'SKIPPED_LOCAL_MODE'
+                        AND (q.Action_Type LIKE 'CREATE_RECEIPT%' OR q.Action_Type LIKE 'CREATE_DEPOSIT%' OR q.Action_Type LIKE 'CREATE_PAYMENT%')
+                        AND ISNULL(JSON_VALUE(q.Payload, '$.receiptNumber'), '') = @num
+                      ORDER BY q.ID DESC",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+
+                if (dt?.Rows.Count > 0)
+                {
+                    string idStr = dt.Rows[0]["Nexaacc_Response_Id"]?.ToString();
+                    if (Guid.TryParse(idStr, out Guid id)) return id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupNexaaccDocIdByReceipt failed: {ex.Message}", "SYSTEM");
+            }
+            return Guid.Empty;
+        }
+
+        private int LookupReservationIdByReceipt(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Reservation_ID FROM Account_Receipt WHERE Receipt_Number = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Reservation_ID"] != DBNull.Value)
+                    return Convert.ToInt32(dt.Rows[0]["Reservation_ID"]);
+            }
+            catch { }
+            return 0;
+        }
+
+        private decimal LookupReceiptAmount(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Total_Amount FROM Account_Receipt WHERE Receipt_Number = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Total_Amount"] != DBNull.Value)
+                    return Convert.ToDecimal(dt.Rows[0]["Total_Amount"]);
+            }
+            catch { }
+            return 0m;
+        }
+
+        private string LookupGuestName(int reservationId)
+        {
+            if (reservationId <= 0) return "";
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ISNULL(C.FullName, C.Name) AS Name
+                      FROM Reservation R
+                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      WHERE R.ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt?.Rows.Count > 0)
+                    return dt.Rows[0]["Name"]?.ToString() ?? "";
+            }
+            catch { }
+            return "";
+        }
+
         /// <summary>
         /// Process pending items in the sync queue.
         /// Should be called periodically by a timer or scheduled task.
@@ -750,6 +929,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     invoice.Attachments = attachments;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
+                    await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
                     return result.data.Id.ToString();
                 }
                 else
@@ -774,6 +954,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     invoice.Attachments = attachments;
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
+                    await TryAutoGenerateEtaxAsync(result.data.Id, receiptNumber, reservationId, totalAmount, customerName);
                     return result.data.Id.ToString();
                 }
                 else
@@ -925,6 +1106,244 @@ namespace Take_Time_BangPhra.Integration
                     $"WHT cert auto-generate failed for doc={documentNumber}: {ex.Message}",
                     "SYSTEM");
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // E-Tax Invoice Auto-Generation + Email
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// หลังสร้างใบกำกับภาษีใน NextAcc สำเร็จ:
+        ///   1. ถ้าเปิด Etax_AutoGenerate → เรียก /etax/generate (auto-sign/submit ตาม config)
+        ///   2. บันทึก Accounting_ETax_Log
+        ///   3. ถ้าเปิด Etax_AutoSendEmail และมีอีเมลลูกค้า → ส่งให้อัตโนมัติ
+        /// ไม่โยน exception ออก — ความล้มเหลวจะ log แต่ไม่กระทบ flow หลัก
+        /// </summary>
+        private async Task TryAutoGenerateEtaxAsync(Guid invoiceDocId, string receiptNumber, int reservationId, decimal amount, string guestName)
+        {
+            if (!_config.IsEtaxAutoGenerate) return;
+
+            long logId = InsertEtaxLogPending(invoiceDocId, receiptNumber, reservationId);
+
+            try
+            {
+                var etaxResult = await _apiClient.GenerateEtaxAsync(new GenerateEtaxRequest
+                {
+                    DocumentId = invoiceDocId,
+                    DocumentType = "TAX_INVOICE",
+                    AutoSign = _config.IsEtaxAutoSign,
+                    AutoSubmit = _config.IsEtaxAutoSubmit
+                });
+
+                if (etaxResult?.data == null)
+                {
+                    UpdateEtaxLogFailed(logId, "Empty response from /etax/generate");
+                    return;
+                }
+
+                Guid etaxId = etaxResult.data.Id;
+                UpdateEtaxLogSuccess(logId, etaxResult.data);
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax generated: receipt={receiptNumber} etaxId={etaxId} ref={etaxResult.data.EtaxRefNumber} status={etaxResult.data.Status}",
+                    "SYSTEM");
+
+                if (_config.IsEtaxAutoSendEmail)
+                {
+                    await TrySendEtaxEmailAsync(etaxId, logId, receiptNumber, reservationId, amount, guestName);
+                }
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 404 || ex.StatusCode == 400)
+            {
+                UpdateEtaxLogFailed(logId, $"HTTP {ex.StatusCode}: {ex.ResponseBody}");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax auto-generate skipped for receipt={receiptNumber}: {ex.StatusCode} — {ex.ResponseBody}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                UpdateEtaxLogFailed(logId, ex.Message);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax auto-generate failed for receipt={receiptNumber}: {ex.Message}",
+                    "SYSTEM");
+            }
+        }
+
+        private async Task TrySendEtaxEmailAsync(Guid etaxId, long logId, string receiptNumber, int reservationId, decimal amount, string guestName)
+        {
+            try
+            {
+                string email = LookupCustomerEmail(reservationId);
+                if (string.IsNullOrWhiteSpace(email))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"E-Tax email skipped for receipt={receiptNumber}: ไม่พบอีเมลลูกค้าสำหรับ Reservation_ID={reservationId}",
+                        "SYSTEM");
+                    return;
+                }
+
+                string subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, guestName, amount);
+                string body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, guestName, amount);
+
+                var emailResult = await _apiClient.SendEtaxByEmailAsync(etaxId, new SendEtaxByEmailRequest
+                {
+                    RecipientEmail = email,
+                    Subject = subject,
+                    Body = body,
+                    AttachPdf = _config.EtaxEmailAttachPdf,
+                    AttachXml = _config.EtaxEmailAttachXml
+                });
+
+                MarkEtaxEmailSent(logId, email);
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax email sent: receipt={receiptNumber} to={email} status={emailResult?.data?.Status ?? "OK"}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax email failed for receipt={receiptNumber}: {ex.Message}",
+                    "SYSTEM");
+            }
+        }
+
+        /// <summary>หาอีเมลลูกค้าจากการจอง — JOIN Reservation → Customer ผ่าน MobilePhone</summary>
+        private string LookupCustomerEmail(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 C.Email
+                      FROM Reservation R
+                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      WHERE R.ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+
+                if (dt?.Rows.Count > 0)
+                {
+                    string email = dt.Rows[0]["Email"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(email) && email.Contains("@"))
+                        return email.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupCustomerEmail failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        private static string FormatEmailTemplate(string template, string receiptNumber, string guestName, decimal amount)
+        {
+            if (string.IsNullOrEmpty(template)) return "";
+            return template
+                .Replace("{ReceiptNumber}", receiptNumber ?? "")
+                .Replace("{GuestName}", guestName ?? "")
+                .Replace("{Amount}", amount.ToString("N2"))
+                .Replace("{Date}", DateTime.Now.ToString("dd/MM/yyyy"))
+                .Replace("\\n", "\n");
+        }
+
+        private long InsertEtaxLogPending(Guid invoiceDocId, string receiptNumber, int reservationId)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO Accounting_ETax_Log (Document_Number, Receipt_Number, Reservation_ID, Nexaacc_Doc_Id, Status, Created_Date)
+                      VALUES (@docNum, @receiptNum, @resId, @docId, 'PENDING', GETDATE())",
+                    new Dictionary<string, object>
+                    {
+                        { "@docNum", receiptNumber ?? (object)DBNull.Value },
+                        { "@receiptNum", receiptNumber ?? (object)DBNull.Value },
+                        { "@resId", reservationId },
+                        { "@docId", invoiceDocId }
+                    });
+
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ID FROM Accounting_ETax_Log WHERE Nexaacc_Doc_Id = @docId ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@docId", invoiceDocId } });
+                if (dt?.Rows.Count > 0)
+                    return Convert.ToInt64(dt.Rows[0]["ID"]);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"InsertEtaxLogPending failed: {ex.Message}", "SYSTEM");
+            }
+            return 0;
+        }
+
+        private void UpdateEtaxLogSuccess(long logId, EtaxInvoiceResponse data)
+        {
+            if (logId <= 0) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Accounting_ETax_Log
+                      SET Nexaacc_Etax_Id = @etaxId,
+                          Etax_Ref_Number = @refNum,
+                          Status = @status,
+                          Signed_Date = @signedAt,
+                          Submitted_Date = @submittedAt,
+                          Xml_Url = @xmlUrl,
+                          Pdf_Url = @pdfUrl,
+                          Processed_Date = GETDATE()
+                      WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@etaxId", data.Id },
+                        { "@refNum", (object)data.EtaxRefNumber ?? DBNull.Value },
+                        { "@status", data.Status ?? "GENERATED" },
+                        { "@signedAt", (object)data.SignedAt ?? DBNull.Value },
+                        { "@submittedAt", (object)data.SubmittedAt ?? DBNull.Value },
+                        { "@xmlUrl", (object)data.XmlUrl ?? DBNull.Value },
+                        { "@pdfUrl", (object)data.PdfUrl ?? DBNull.Value },
+                        { "@id", logId }
+                    });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"UpdateEtaxLogSuccess failed for logId={logId}: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private void UpdateEtaxLogFailed(long logId, string errorMessage)
+        {
+            if (logId <= 0) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Accounting_ETax_Log
+                      SET Status = 'FAILED', Error_Message = @err, Processed_Date = GETDATE()
+                      WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@err", errorMessage ?? "" },
+                        { "@id", logId }
+                    });
+            }
+            catch { /* swallow — error logging is best effort */ }
+        }
+
+        private void MarkEtaxEmailSent(long logId, string email)
+        {
+            if (logId <= 0) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Accounting_ETax_Log
+                      SET Email_Sent = 1, Error_Message = ISNULL(Error_Message, '') + N' | email→' + @em
+                      WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@em", email ?? "" },
+                        { "@id", logId }
+                    });
+            }
+            catch { /* swallow */ }
         }
 
         private static bool IsAlreadyVoided(AccountingApiException ex)

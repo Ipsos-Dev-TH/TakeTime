@@ -176,7 +176,63 @@
                     </select>
                     <div class="help-text">ส่งไฟล์แนบ (ใบเสร็จ PDF, สลิปจ่ายเงิน, ใบสำคัญจ่าย) ไปพร้อมเอกสารใน NextAcc</div>
                 </div>
+                <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
+                    <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
+                    <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
+                        เมื่อระบบสร้างใบเสร็จใน NextAcc สำเร็จ จะสร้าง E-Tax Invoice ตามใบนั้น และส่งให้กรมสรรพากร/อีเมลลูกค้าได้อัตโนมัติ
+                    </div>
+                </div>
                 <div class="config-item">
+                    <label>สร้าง E-Tax อัตโนมัติ</label>
+                    <select id="cfgEtaxAutoGenerate">
+                        <option value="false">ปิด — สร้าง E-Tax ด้วยตัวเองในหน้า Receipt</option>
+                        <option value="true">เปิด — สร้างทันทีเมื่อสร้างใบเสร็จในระบบ NextAcc สำเร็จ</option>
+                    </select>
+                    <div class="help-text">ใช้ได้เฉพาะเมื่อโหมด Receipt = DOCUMENT (สร้างเอกสารใน NextAcc)</div>
+                </div>
+                <div class="config-item">
+                    <label>ลงนาม E-Tax อัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSign">
+                        <option value="true">เปิด — ลงนามด้วย Certificate ใน NextAcc</option>
+                        <option value="false">ปิด — สร้างเป็น draft</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>ส่งกรมสรรพากรอัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSubmit">
+                        <option value="false">ปิด — ส่งด้วยตนเอง</option>
+                        <option value="true">เปิด — submit ทันทีหลังลงนาม</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>ส่งอีเมลให้ลูกค้าอัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSendEmail">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ส่งอีเมลพร้อม PDF/XML แนบ</option>
+                    </select>
+                    <div class="help-text">ดึงอีเมลลูกค้าจาก Customer.Email ตามการจอง — ถ้าไม่พบจะข้ามอย่างเงียบ ๆ</div>
+                </div>
+                <div class="config-item">
+                    <label>หัวข้ออีเมล E-Tax</label>
+                    <input type="text" id="cfgEtaxEmailSubject" placeholder="ใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}" />
+                    <div class="help-text">ตัวแปร: {ReceiptNumber}, {GuestName}, {Amount}, {Date}</div>
+                </div>
+                <div class="config-item">
+                    <label>เนื้อหาอีเมล E-Tax</label>
+                    <textarea id="cfgEtaxEmailBody" rows="4" style="width:100%;" placeholder="เรียน {GuestName}&#10;&#10;กรุณาดาวน์โหลดใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}..."></textarea>
+                </div>
+                <div class="config-item">
+                    <label>แนบ PDF / XML</label>
+                    <select id="cfgEtaxEmailAttachPdf" style="width:48%;">
+                        <option value="true">PDF: แนบ</option>
+                        <option value="false">PDF: ไม่แนบ</option>
+                    </select>
+                    <select id="cfgEtaxEmailAttachXml" style="width:48%;">
+                        <option value="false">XML: ไม่แนบ</option>
+                        <option value="true">XML: แนบ (สำหรับลูกค้าธุรกิจ)</option>
+                    </select>
+                </div>
+                <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label>Sync Interval (วินาที)</label>
                     <input type="number" id="cfgSyncInterval" value="30" min="10" max="3600" />
                     <div class="help-text">ระยะเวลาระหว่าง queue processing cycles (10-3600 วินาที)</div>
@@ -196,6 +252,48 @@
                 </div>
                 <div class="test-result" id="syncTestResult"></div>
             </div>
+        </div>
+
+        <!-- Document Source Lookup (เชื่อมระหว่าง TakeTime ↔ NextAcc ↔ E-Tax) -->
+        <div class="journey-card">
+            <h3><i class="fas fa-link"></i> Document Source — ตรวจสอบที่มาของเอกสาร</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                ค้นหาด้วยเลขที่ใบเสร็จหรือเลขจอง — ระบบจะแสดง: ที่มาของเอกสาร (LOCAL/NEXAACC), เลขเอกสาร NextAcc, สถานะ E-Tax, ลูกค้า, ลิงก์ PDF/XML
+            </p>
+            <div style="display:flex; gap:10px; align-items:end; margin-bottom:15px;">
+                <div style="flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เลขที่ใบเสร็จ หรือ Reservation ID</label>
+                    <input type="text" id="docSourceLookup" placeholder="เช่น REC25050800001 หรือ 12345" style="width:100%; padding:8px;" />
+                </div>
+                <button type="button" class="btn-primary" onclick="lookupDocumentSource()"><i class="fas fa-search"></i> ค้นหา</button>
+            </div>
+            <div id="docSourceResult"></div>
+        </div>
+
+        <!-- E-Tax Manual Operations -->
+        <div class="journey-card">
+            <h3><i class="fas fa-file-invoice"></i> E-Tax Manual Operations</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                สร้าง E-Tax ด้วยมือ หรือส่งอีเมล E-Tax ให้ลูกค้าซ้ำ — ใช้เมื่อต้องการดำเนินการเฉพาะใบเสร็จ หรือกรณี auto-generate ปิดอยู่
+            </p>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เลขที่ใบเสร็จ</label>
+                    <input type="text" id="etaxReceiptNumber" placeholder="เช่น REC25050800001" style="width:100%; padding:8px;" />
+                    <div style="margin-top:10px;">
+                        <button type="button" class="btn-primary" onclick="manualEtaxGenerate()"><i class="fas fa-bolt"></i> สร้าง E-Tax</button>
+                        <button type="button" class="btn-success" onclick="manualEtaxSendEmail()"><i class="fas fa-envelope"></i> ส่งอีเมล E-Tax</button>
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">อีเมลปลายทาง (ทางเลือก)</label>
+                    <input type="email" id="etaxOverrideEmail" placeholder="ปล่อยว่างเพื่อใช้อีเมลที่บันทึกใน Customer" style="width:100%; padding:8px;" />
+                    <div style="font-size:12px; color:#666; margin-top:6px;">
+                        ถ้าไม่ระบุ ระบบจะดึงอีเมลจาก Customer.Email ตามการจองอัตโนมัติ
+                    </div>
+                </div>
+            </div>
+            <div class="test-result" id="etaxTestResult" style="margin-top:15px;"></div>
         </div>
 
         <!-- Guest Journey Accounting Map -->
@@ -517,6 +615,14 @@
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSendEmail').value = cfg.etaxAutoSendEmail ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailSubject').value = cfg.etaxEmailSubject || '';
+                document.getElementById('cfgEtaxEmailBody').value = cfg.etaxEmailBody || '';
+                document.getElementById('cfgEtaxEmailAttachPdf').value = cfg.etaxEmailAttachPdf ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
@@ -545,7 +651,15 @@
                 receiptSyncMode: document.getElementById('cfgReceiptSyncMode').value,
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
-                attachFiles: document.getElementById('cfgAttachFiles').value
+                attachFiles: document.getElementById('cfgAttachFiles').value,
+                etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
+                etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
+                etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
+                etaxAutoSendEmail: document.getElementById('cfgEtaxAutoSendEmail').value,
+                etaxEmailSubject: document.getElementById('cfgEtaxEmailSubject').value,
+                etaxEmailBody: document.getElementById('cfgEtaxEmailBody').value,
+                etaxEmailAttachPdf: document.getElementById('cfgEtaxEmailAttachPdf').value,
+                etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value
             };
             postAction(data, 'syncTestResult');
         }
@@ -582,6 +696,88 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        // ── Document Source Lookup ──
+
+        function lookupDocumentSource() {
+            var key = (document.getElementById('docSourceLookup').value || '').trim();
+            var el = document.getElementById('docSourceResult');
+            if (!key) {
+                el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จหรือ Reservation ID</div>';
+                return;
+            }
+            el.innerHTML = '<div class="test-result loading">กำลังค้นหา...</div>';
+            fetch(pageUrl + '?action=lookupDocSource&q=' + encodeURIComponent(key) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-info-circle"></i> ไม่พบข้อมูล</div>';
+                        return;
+                    }
+                    var html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+                    html += '<thead><tr style="background:#f5f5f5;">'
+                          + '<th style="padding:8px; text-align:left;">เลขใบเสร็จ</th>'
+                          + '<th style="padding:8px;">Reservation</th>'
+                          + '<th style="padding:8px;">ยอด</th>'
+                          + '<th style="padding:8px;">Source</th>'
+                          + '<th style="padding:8px;">NextAcc Doc</th>'
+                          + '<th style="padding:8px;">Sync</th>'
+                          + '<th style="padding:8px;">E-Tax</th>'
+                          + '<th style="padding:8px;">ลูกค้า</th>'
+                          + '<th style="padding:8px;">PDF</th>'
+                          + '</tr></thead><tbody>';
+                    data.items.forEach(function(it) {
+                        var sourceColor = it.documentSource === 'NEXAACC' ? '#28a745' : '#6c757d';
+                        var syncColor = it.syncStatus === 'COMPLETED' ? '#28a745' : (it.syncStatus === 'FAILED' ? '#dc3545' : '#ffc107');
+                        var etaxColor = it.etaxStatus ? (it.etaxStatus === 'FAILED' ? '#dc3545' : '#28a745') : '#999';
+                        html += '<tr style="border-bottom:1px solid #eee;">'
+                              + '<td style="padding:8px; font-family:monospace;">' + (it.receiptNumber || '-') + '</td>'
+                              + '<td style="padding:8px;">' + (it.reservationId || '-') + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + (it.total ? Number(it.total).toLocaleString('th-TH', {minimumFractionDigits:2}) : '-') + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + sourceColor + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.documentSource + '</span></td>'
+                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId || '-') + '</td>'
+                              + '<td style="padding:8px;"><span style="color:' + syncColor + ';">' + (it.syncStatus || '-') + '</span></td>'
+                              + '<td style="padding:8px;">' + (it.etaxStatus ? '<span style="color:' + etaxColor + ';">' + it.etaxStatus + (it.etaxRefNumber ? ' (' + it.etaxRefNumber + ')' : '') + '</span>' : '-') + (it.etaxEmailSent ? ' ✉' : '') + '</td>'
+                              + '<td style="padding:8px;">' + (it.customerName || '-') + (it.customerEmail ? '<br/><small style="color:#999;">' + it.customerEmail + '</small>' : '') + '</td>'
+                              + '<td style="padding:8px;">' + (it.etaxPdfUrl ? '<a href="' + it.etaxPdfUrl + '" target="_blank">PDF</a>' : '-') + (it.etaxXmlUrl ? ' / <a href="' + it.etaxXmlUrl + '" target="_blank">XML</a>' : '') + '</td>'
+                              + '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
+        }
+
+        // ── E-Tax Manual Operations ──
+
+        function manualEtaxGenerate() {
+            var receiptNumber = (document.getElementById('etaxReceiptNumber').value || '').trim();
+            if (!receiptNumber) {
+                var el = document.getElementById('etaxTestResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จ';
+                return;
+            }
+            postAction({ action: 'etaxGenerate', receiptNumber: receiptNumber }, 'etaxTestResult');
+        }
+
+        function manualEtaxSendEmail() {
+            var receiptNumber = (document.getElementById('etaxReceiptNumber').value || '').trim();
+            var email = (document.getElementById('etaxOverrideEmail').value || '').trim();
+            if (!receiptNumber) {
+                var el = document.getElementById('etaxTestResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จ';
+                return;
+            }
+            postAction({ action: 'etaxSendEmail', receiptNumber: receiptNumber, email: email }, 'etaxTestResult');
         }
 
         // ── Queue Pagination & Filter ──
