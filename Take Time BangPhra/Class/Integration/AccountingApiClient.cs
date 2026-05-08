@@ -699,6 +699,42 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/etax/{etaxId}/send-email", request);
         }
 
+        /// <summary>ดึง E-Tax ตาม ID — ใช้ refresh URL PDF/XML สำหรับ fallback download</summary>
+        public async Task<ApiResponse<EtaxInvoiceResponse>> GetEtaxAsync(Guid etaxId)
+        {
+            return await GetAsync<ApiResponse<EtaxInvoiceResponse>>($"{CompanyPath}/etax/{etaxId}");
+        }
+
+        /// <summary>
+        /// ดาวน์โหลดไฟล์จาก URL (เช่น PDF/XML ของ E-Tax) — ใช้สำหรับ fallback ส่งอีเมลผ่าน SMTP ของ TakeTime เอง.
+        /// แนบ X-Api-Key ในกรณีที่ URL อยู่บน NextAcc และต้องการ auth.
+        /// Returns: byte[] — content; null ถ้าโหลดไม่สำเร็จ.
+        /// </summary>
+        public async Task<byte[]> DownloadFileAsync(string url, int timeoutSeconds = 30)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+
+            using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSeconds) })
+            {
+                if (!string.IsNullOrEmpty(_config.ApiKey))
+                {
+                    client.DefaultRequestHeaders.Add("X-Api-Key", _config.ApiKey);
+                }
+                try
+                {
+                    using (var resp = await client.GetAsync(url))
+                    {
+                        if (!resp.IsSuccessStatusCode) return null;
+                        return await resp.Content.ReadAsByteArrayAsync();
+                    }
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+        }
+
         // Document: Convert Type, Write-off Bad Debt, Void Payment
         public async Task<ApiResponse<DocumentResponse>> ConvertDocumentTypeAsync(Guid documentId, int newDocumentType)
         {

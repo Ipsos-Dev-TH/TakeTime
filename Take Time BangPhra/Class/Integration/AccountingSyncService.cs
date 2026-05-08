@@ -390,26 +390,14 @@ namespace Take_Time_BangPhra.Integration
 
             decimal amount = LookupReceiptAmount(receiptNumber);
             string guestName = LookupGuestName(resId);
-            string subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, guestName, amount);
-            string body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, guestName, amount);
 
-            try
+            var (success, channel, msg) = await SendEtaxEmailWithFallbackAsync(etaxId, email, receiptNumber, amount, guestName);
+            if (success)
             {
-                await _apiClient.SendEtaxByEmailAsync(etaxId, new SendEtaxByEmailRequest
-                {
-                    RecipientEmail = email,
-                    Subject = subject,
-                    Body = body,
-                    AttachPdf = _config.EtaxEmailAttachPdf,
-                    AttachXml = _config.EtaxEmailAttachXml
-                });
-                MarkEtaxEmailSent(logId, email);
-                return (true, $"ส่งอีเมลไปยัง {email} สำเร็จ");
+                MarkEtaxEmailSent(logId, $"{email} via {channel}");
+                return (true, $"ส่งอีเมลไปยัง {email} สำเร็จ (ช่องทาง: {channel})");
             }
-            catch (Exception ex)
-            {
-                return (false, $"ส่งอีเมลไม่สำเร็จ: {ex.Message}");
-            }
+            return (false, $"ส่งอีเมลไม่สำเร็จ: {msg}");
         }
 
         private Guid LookupNexaaccDocIdByReceipt(string receiptNumber)
@@ -1171,21 +1159,53 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task TrySendEtaxEmailAsync(Guid etaxId, long logId, string receiptNumber, int reservationId, decimal amount, string guestName)
         {
+            string email = LookupCustomerEmail(reservationId);
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax email skipped for receipt={receiptNumber}: ไม่พบอีเมลลูกค้าสำหรับ Reservation_ID={reservationId}",
+                    "SYSTEM");
+                return;
+            }
+
+            var (success, channel, message) = await SendEtaxEmailWithFallbackAsync(etaxId, email, receiptNumber, amount, guestName);
+            if (success)
+            {
+                MarkEtaxEmailSent(logId, $"{email} via {channel}");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax email sent: receipt={receiptNumber} to={email} channel={channel}", "SYSTEM");
+            }
+            else
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax email failed for receipt={receiptNumber}: {message}", "SYSTEM");
+            }
+        }
+
+        /// <summary>
+        /// ส่งอีเมล E-Tax โดย:
+        ///   1. ถ้า EtaxEmailLocalOnly=true → ส่งผ่าน SMTP ของ TakeTime ทันที (ข้าม NextAcc)
+        ///   2. ปกติ → ลอง NextAcc API ก่อน
+        ///   3. ถ้า NextAcc ล้มเหลว และ EtaxEmailFallback=true → fallback ส่งผ่าน TakeTime SMTP
+        ///        ดาวน์โหลด PDF/XML จาก URL ของ NextAcc แล้วแนบ
+        /// Returns: (success, channel, message) — channel = "NEXAACC" | "LOCAL_SMTP" | "FAILED"
+        /// </summary>
+        private async Task<(bool success, string channel, string message)> SendEtaxEmailWithFallbackAsync(
+            Guid etaxId, string email, string receiptNumber, decimal amount, string guestName)
+        {
+            string subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, guestName, amount);
+            string body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, guestName, amount);
+
+            // Path 1: บังคับ local SMTP เท่านั้น (ข้าม NextAcc)
+            if (_config.EtaxEmailLocalOnly)
+            {
+                return await SendEtaxViaLocalSmtpAsync(etaxId, email, subject, body, receiptNumber);
+            }
+
+            // Path 2: ลอง NextAcc API ก่อน
             try
             {
-                string email = LookupCustomerEmail(reservationId);
-                if (string.IsNullOrWhiteSpace(email))
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"E-Tax email skipped for receipt={receiptNumber}: ไม่พบอีเมลลูกค้าสำหรับ Reservation_ID={reservationId}",
-                        "SYSTEM");
-                    return;
-                }
-
-                string subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, guestName, amount);
-                string body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, guestName, amount);
-
-                var emailResult = await _apiClient.SendEtaxByEmailAsync(etaxId, new SendEtaxByEmailRequest
+                await _apiClient.SendEtaxByEmailAsync(etaxId, new SendEtaxByEmailRequest
                 {
                     RecipientEmail = email,
                     Subject = subject,
@@ -1193,18 +1213,86 @@ namespace Take_Time_BangPhra.Integration
                     AttachPdf = _config.EtaxEmailAttachPdf,
                     AttachXml = _config.EtaxEmailAttachXml
                 });
-
-                MarkEtaxEmailSent(logId, email);
-
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"E-Tax email sent: receipt={receiptNumber} to={email} status={emailResult?.data?.Status ?? "OK"}",
-                    "SYSTEM");
+                return (true, "NEXAACC", "OK");
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"E-Tax email failed for receipt={receiptNumber}: {ex.Message}",
+                    $"NextAcc email failed for receipt={receiptNumber}: {ex.Message}" +
+                    (_config.EtaxEmailFallback ? " — fallback ไป SMTP ของ TakeTime" : ""),
                     "SYSTEM");
+
+                // Path 3: fallback to local SMTP
+                if (_config.EtaxEmailFallback)
+                {
+                    return await SendEtaxViaLocalSmtpAsync(etaxId, email, subject, body, receiptNumber);
+                }
+                return (false, "FAILED", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// ส่ง E-Tax email ผ่าน SMTP ของ TakeTime —
+        ///   1. เรียก GetEtaxAsync ดึง URL PDF/XML ล่าสุด
+        ///   2. ดาวน์โหลดไฟล์
+        ///   3. ส่งผ่าน Take_Time_BangPhra.Services.EmailService
+        /// </summary>
+        private async Task<(bool success, string channel, string message)> SendEtaxViaLocalSmtpAsync(
+            Guid etaxId, string email, string subject, string body, string receiptNumber)
+        {
+            try
+            {
+                var attachments = new List<System.Net.Mail.Attachment>();
+                var memoryStreams = new List<MemoryStream>();
+
+                // ดึง URL ล่าสุด (เผื่อ DB log ค่าเก่า)
+                EtaxInvoiceResponse etax = null;
+                try
+                {
+                    var resp = await _apiClient.GetEtaxAsync(etaxId);
+                    etax = resp?.data;
+                }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"GetEtaxAsync failed during fallback for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                }
+
+                if (etax != null && _config.EtaxEmailAttachPdf && !string.IsNullOrEmpty(etax.PdfUrl))
+                {
+                    byte[] pdf = await _apiClient.DownloadFileAsync(etax.PdfUrl);
+                    if (pdf != null && pdf.Length > 0)
+                    {
+                        var ms = new MemoryStream(pdf);
+                        memoryStreams.Add(ms);
+                        attachments.Add(new System.Net.Mail.Attachment(ms, $"{receiptNumber}_etax.pdf", "application/pdf"));
+                    }
+                }
+
+                if (etax != null && _config.EtaxEmailAttachXml && !string.IsNullOrEmpty(etax.XmlUrl))
+                {
+                    byte[] xml = await _apiClient.DownloadFileAsync(etax.XmlUrl);
+                    if (xml != null && xml.Length > 0)
+                    {
+                        var ms = new MemoryStream(xml);
+                        memoryStreams.Add(ms);
+                        attachments.Add(new System.Net.Mail.Attachment(ms, $"{receiptNumber}_etax.xml", "application/xml"));
+                    }
+                }
+
+                // ส่งผ่าน TakeTime SMTP — convert plain-text body to HTML (preserve newlines)
+                string htmlBody = body?.Replace("\r\n", "\n").Replace("\n", "<br/>") ?? "";
+                var smtp = new Take_Time_BangPhra.Services.EmailService();
+                smtp.SendEmail(email, subject, htmlBody, attachments.Count > 0 ? attachments.ToArray() : null);
+
+                // Cleanup memory streams after send
+                foreach (var ms in memoryStreams) ms.Dispose();
+
+                return (true, "LOCAL_SMTP", $"sent via TakeTime SMTP ({attachments.Count} attachments)");
+            }
+            catch (Exception ex)
+            {
+                return (false, "FAILED", "SMTP fallback failed: " + ex.Message);
             }
         }
 

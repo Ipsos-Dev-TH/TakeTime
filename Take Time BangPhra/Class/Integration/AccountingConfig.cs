@@ -99,6 +99,16 @@ namespace Take_Time_BangPhra.Integration
         public bool EtaxEmailAttachXml => GetConfig("Etax_EmailAttachXml", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// ถ้าส่งอีเมลผ่าน NextAcc ไม่สำเร็จ → ดาวน์โหลด PDF/XML จาก URL ของ NextAcc แล้วส่งผ่าน SMTP ของ TakeTime
+        /// </summary>
+        public bool EtaxEmailFallback => GetConfig("Etax_EmailFallback", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// บังคับให้ใช้ SMTP ของ TakeTime เท่านั้น ข้าม NextAcc — สำหรับกรณี NextAcc email service ปิดอยู่
+        /// </summary>
+        public bool EtaxEmailLocalOnly => GetConfig("Etax_EmailLocalOnly", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง
         /// </summary>

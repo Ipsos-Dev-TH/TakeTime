@@ -232,6 +232,22 @@
                         <option value="true">XML: แนบ (สำหรับลูกค้าธุรกิจ)</option>
                     </select>
                 </div>
+                <div class="config-item">
+                    <label>ช่องทางส่งอีเมล</label>
+                    <select id="cfgEtaxEmailLocalOnly">
+                        <option value="false">NextAcc API (ค่าเริ่มต้น)</option>
+                        <option value="true">SMTP ของ TakeTime เท่านั้น (ข้าม NextAcc)</option>
+                    </select>
+                    <div class="help-text">เลือก SMTP เฉพาะกรณี NextAcc email service ปิดอยู่ — ระบบจะดึง PDF/XML มาแนบเอง</div>
+                </div>
+                <div class="config-item">
+                    <label>Fallback ผ่าน TakeTime SMTP</label>
+                    <select id="cfgEtaxEmailFallback">
+                        <option value="true">เปิด — ถ้า NextAcc ส่งไม่สำเร็จ ให้ส่งผ่าน SMTP ของ TakeTime</option>
+                        <option value="false">ปิด — รายงาน error อย่างเดียว</option>
+                    </select>
+                    <div class="help-text">SMTP จะดึง PDF/XML จาก URL ของ NextAcc มาแนบในอีเมล (ตั้ง SMTP ใน Web.config)</div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label>Sync Interval (วินาที)</label>
                     <input type="number" id="cfgSyncInterval" value="30" min="10" max="3600" />
@@ -623,6 +639,8 @@
                 document.getElementById('cfgEtaxEmailBody').value = cfg.etaxEmailBody || '';
                 document.getElementById('cfgEtaxEmailAttachPdf').value = cfg.etaxEmailAttachPdf ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailLocalOnly').value = cfg.etaxEmailLocalOnly ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailFallback').value = cfg.etaxEmailFallback ? 'true' : 'false';
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
@@ -659,7 +677,9 @@
                 etaxEmailSubject: document.getElementById('cfgEtaxEmailSubject').value,
                 etaxEmailBody: document.getElementById('cfgEtaxEmailBody').value,
                 etaxEmailAttachPdf: document.getElementById('cfgEtaxEmailAttachPdf').value,
-                etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value
+                etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value,
+                etaxEmailLocalOnly: document.getElementById('cfgEtaxEmailLocalOnly').value,
+                etaxEmailFallback: document.getElementById('cfgEtaxEmailFallback').value
             };
             postAction(data, 'syncTestResult');
         }

@@ -66,6 +66,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "etaxEmailBody", config.EtaxEmailBody },
                     { "etaxEmailAttachPdf", config.EtaxEmailAttachPdf },
                     { "etaxEmailAttachXml", config.EtaxEmailAttachXml },
+                    { "etaxEmailLocalOnly", config.EtaxEmailLocalOnly },
+                    { "etaxEmailFallback", config.EtaxEmailFallback },
                     { "syncInterval", config.SyncIntervalSeconds },
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
@@ -224,6 +226,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("etaxEmailBody")) config.SetConfig("Etax_EmailBody", data["etaxEmailBody"]?.ToString() ?? "");
                 if (data.ContainsKey("etaxEmailAttachPdf")) config.SetConfig("Etax_EmailAttachPdf", data["etaxEmailAttachPdf"]?.ToString() ?? "true");
                 if (data.ContainsKey("etaxEmailAttachXml")) config.SetConfig("Etax_EmailAttachXml", data["etaxEmailAttachXml"]?.ToString() ?? "false");
+                if (data.ContainsKey("etaxEmailLocalOnly")) config.SetConfig("Etax_EmailLocalOnly", data["etaxEmailLocalOnly"]?.ToString() ?? "false");
+                if (data.ContainsKey("etaxEmailFallback")) config.SetConfig("Etax_EmailFallback", data["etaxEmailFallback"]?.ToString() ?? "true");
                 if (data.ContainsKey("syncInterval")) config.SetConfig("Nexaacc_SyncInterval_Sec", data["syncInterval"]?.ToString() ?? "30");
                 if (data.ContainsKey("maxRetries")) config.SetConfig("Nexaacc_MaxRetries", data["maxRetries"]?.ToString() ?? "5");
                 if (data.ContainsKey("timeout")) config.SetConfig("Nexaacc_TimeoutSec", data["timeout"]?.ToString() ?? "30");
