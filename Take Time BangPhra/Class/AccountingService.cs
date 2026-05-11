@@ -348,7 +348,7 @@ namespace Take_Time_BangPhra.Services
                     SELECT
                         AR.TransactionDate,
                         AR.Created_Date AS TransactionTime,
-                        AR.Receipt_Number,
+                        AR.ID AS Receipt_Number,
                         R.ID AS ReservationID,
                         C.Name AS CustomerName,
                         C.MobilePhone AS CustomerPhone,

@@ -695,7 +695,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 Reservation_ID FROM Account_Receipt WHERE Receipt_Number = @num",
+                    "SELECT TOP 1 Reservation_ID FROM Account_Receipt WHERE ID = @num",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Reservation_ID"] != DBNull.Value)
                     return Convert.ToInt32(dt.Rows[0]["Reservation_ID"]);
@@ -709,7 +709,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 Total_Amount FROM Account_Receipt WHERE Receipt_Number = @num",
+                    "SELECT TOP 1 Total_Amount FROM Account_Receipt WHERE ID = @num",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Total_Amount"] != DBNull.Value)
                     return Convert.ToDecimal(dt.Rows[0]["Total_Amount"]);
@@ -1376,7 +1376,7 @@ namespace Take_Time_BangPhra.Integration
                              D.Price_PerPeice, D.Price_Amount, D.Product_Unit
                       FROM Account_Receipt_Detail D
                       INNER JOIN Account_Receipt R ON R.ID = D.Receipt_ID
-                      WHERE R.Receipt_Number = @num OR R.ID = @num
+                      WHERE R.ID = @num
                       ORDER BY D.Number ASC",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
 
@@ -1438,7 +1438,7 @@ namespace Take_Time_BangPhra.Integration
                       FROM Account_Receipt R
                       LEFT JOIN Reservation Res ON Res.ID = R.Reservation_ID
                       LEFT JOIN Customer C ON C.MobilePhone = Res.Customer_MobilePhone
-                      WHERE R.Receipt_Number = @num OR R.ID = @num",
+                      WHERE R.ID = @num",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
                 if (dt?.Rows.Count > 0)
                 {
@@ -1472,7 +1472,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 Deposit_Applied_Amount FROM Account_Receipt WHERE Receipt_Number = @num OR ID = @num",
+                    "SELECT TOP 1 Deposit_Applied_Amount FROM Account_Receipt WHERE ID = @num",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Deposit_Applied_Amount"] != DBNull.Value)
                     return Convert.ToDecimal(dt.Rows[0]["Deposit_Applied_Amount"]);

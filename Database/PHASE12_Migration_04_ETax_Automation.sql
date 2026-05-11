@@ -78,7 +78,7 @@ GO
 CREATE VIEW vw_Receipt_Document_Source AS
 SELECT
     R.ID AS Receipt_ID,
-    R.Receipt_Number,
+    R.ID AS Receipt_Number,
     R.Reservation_ID,
     R.Total_Amount AS Total,
     R.IsDeposit,
@@ -130,7 +130,7 @@ OUTER APPLY (
     SELECT TOP 1 ID, Nexaacc_Etax_Id, Etax_Ref_Number, Status, Signed_Date, Submitted_Date,
                  Pdf_Url, Xml_Url, Email_Sent, Error_Message
     FROM Accounting_ETax_Log
-    WHERE Receipt_Number = R.Receipt_Number
+    WHERE Receipt_Number = R.ID
     ORDER BY ID DESC
 ) E;
 GO
