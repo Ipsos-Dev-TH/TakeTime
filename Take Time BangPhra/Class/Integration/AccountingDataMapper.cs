@@ -188,20 +188,101 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Maps checkout to a revenue recognition journal entry.
-        /// DR: Advance Deposits  CR: Room Revenue (recognize earned revenue)
+        /// ปกติ: DR Advance Deposits, CR Room Revenue (รับรู้รายได้)
+        /// ถ้ามี damageAmount > 0: CR แยกระหว่าง Room Revenue (depositAmount-damageAmount)
+        ///                         และ Other Income (damageAmount)
         /// </summary>
         public CreateJournalEntryRequest MapCheckoutToJournal(
-            int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate)
+            int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate,
+            decimal damageAmount = 0, string reservationRef = null)
         {
+            if (depositAmount <= 0)
+                throw new ArgumentException($"MapCheckoutToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
+            if (damageAmount < 0)
+                damageAmount = 0;
+            if (damageAmount > depositAmount)
+                damageAmount = depositAmount; // ค่าเสียหายเกินมัดจำ ต้องไปลงในใบสำคัญจ่าย/ใบแจ้งหนี้แยก
+
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
+            decimal revenuePortion = depositAmount - damageAmount;
+
+            string refStr = !string.IsNullOrEmpty(reservationRef) ? reservationRef : $"RES-{reservationId}-CHK";
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = depositAmount,
+                    CreditAmount = 0,
+                    Description = $"ตัดเงินรับล่วงหน้า - การจอง #{reservationId}"
+                }
+            };
+
+            if (revenuePortion > 0)
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = revenueAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = revenuePortion,
+                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                });
+            }
+
+            if (damageAmount > 0)
+            {
+                Guid otherIncomeAccountId;
+                try { otherIncomeAccountId = GetAccountId("DAMAGE_INCOME"); }
+                catch { otherIncomeAccountId = GetAccountId("OTHER_INCOME"); }
+
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = otherIncomeAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = damageAmount,
+                    Description = $"ค่าเสียหาย/หักจากมัดจำ - การจอง #{reservationId}"
+                });
+            }
 
             return new CreateJournalEntryRequest
             {
                 EntryDate = checkoutDate,
                 JournalType = NexaaccJournalType.Sales,
-                Description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
-                Reference = $"RES-{reservationId}-CHK",
+                Description = damageAmount > 0
+                    ? $"รับรู้รายได้ Checkout (หักค่าเสียหาย {damageAmount:N2}) - การจอง #{reservationId} ({customerName})"
+                    : $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
+                Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// Forfeit deposit (ลูกค้า no-show หรือ cancel ไม่คืนเงิน):
+        /// DR Advance Deposits, CR Forfeit/Other Income
+        /// </summary>
+        public CreateJournalEntryRequest MapForfeitDepositToJournal(
+            int reservationId, decimal depositAmount, string customerName, DateTime forfeitDate, string reason = null)
+        {
+            if (depositAmount <= 0)
+                throw new ArgumentException($"MapForfeitDepositToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            Guid forfeitIncomeAccountId;
+            try { forfeitIncomeAccountId = GetAccountId("FORFEIT_INCOME"); }
+            catch
+            {
+                try { forfeitIncomeAccountId = GetAccountId("OTHER_INCOME"); }
+                catch { forfeitIncomeAccountId = GetAccountId("ROOM_REVENUE"); }
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = forfeitDate,
+                JournalType = NexaaccJournalType.Sales,
+                Description = $"ริบมัดจำ ({reason ?? "ไม่มาเข้าพัก/ยกเลิกผิดเงื่อนไข"}) - การจอง #{reservationId} ({customerName})",
+                Reference = $"RES-{reservationId}-FORFEIT",
                 Lines = new List<JournalEntryLineRequest>
                 {
                     new JournalEntryLineRequest
@@ -209,14 +290,14 @@ namespace Take_Time_BangPhra.Integration
                         AccountId = advanceDepositAccountId,
                         DebitAmount = depositAmount,
                         CreditAmount = 0,
-                        Description = $"โอนเงินรับล่วงหน้าเป็นรายได้",
+                        Description = "ตัดเงินรับล่วงหน้า"
                     },
                     new JournalEntryLineRequest
                     {
-                        AccountId = revenueAccountId,
+                        AccountId = forfeitIncomeAccountId,
                         DebitAmount = 0,
                         CreditAmount = depositAmount,
-                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}",
+                        Description = $"รายได้จากการริบมัดจำ - การจอง #{reservationId}"
                     }
                 }
             };
@@ -538,8 +619,152 @@ namespace Take_Time_BangPhra.Integration
                 EntryDate = receiveDate,
                 JournalType = isCashPurchase ? NexaaccJournalType.CashPayments : NexaaccJournalType.Purchase,
                 Description = $"รับสินค้าเข้าสต็อก - {productName} ({supplierName})",
-                Reference = $"SI-{productId}-{receiveDate:yyyyMMdd}",
+                Reference = $"SI-{productId}-{receiveDate:yyyyMMddHHmmss}",
                 Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// COGS journal เมื่อสินค้าออกจากสต็อก (ขาย / room charge):
+        ///   DR COGS                qty * costPrice
+        ///       CR Inventory       qty * costPrice
+        /// ใช้ cost price (ไม่ใช่ sell price) — รายได้รับรู้แยกผ่าน receipt
+        /// </summary>
+        public CreateJournalEntryRequest MapStockOutCogsToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime outDate, string reason, string reference = null)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockOutCogsToJournal: ต้นทุนรวม = {totalCost} (ต้อง > 0). product={productName} qty={quantity} cost={costPerUnit}");
+
+            var cogsAccountId = GetAccountId("COGS");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+            string refStr = !string.IsNullOrEmpty(reference) ? reference : $"SO-{productId}-{outDate:yyyyMMddHHmmss}";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = outDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ตัดต้นทุนสินค้า - {productName} ({reason ?? "ขาย"})",
+                Reference = refStr,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = cogsAccountId,
+                        DebitAmount = totalCost,
+                        CreditAmount = 0,
+                        Description = $"ต้นทุนสินค้าขาย - {productName} qty={quantity:N2}"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = inventoryAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = totalCost,
+                        Description = $"ตัดสต็อก - {productName} qty={quantity:N2}"
+                    }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Reverse COGS journal เมื่อยกเลิก room charge (คืนสินค้ากลับสต็อก):
+        ///   DR Inventory       qty * costPrice    (เอาสต็อกกลับ)
+        ///       CR COGS        qty * costPrice    (ยกเลิกต้นทุน)
+        /// </summary>
+        public CreateJournalEntryRequest MapStockOutCogsReversalToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime reverseDate, string reason, string reference)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockOutCogsReversalToJournal: ต้นทุนรวม = {totalCost} (ต้อง > 0)");
+
+            var cogsAccountId = GetAccountId("COGS");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = reverseDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการต้นทุน - {productName} ({reason ?? "ยกเลิก room charge"})",
+                Reference = reference,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"คืนสต็อก - {productName} qty={quantity:N2}" },
+                    new JournalEntryLineRequest { AccountId = cogsAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"กลับ COGS - {productName}" }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Stock adjustment ตามผลการนับ:
+        ///   gain (actual > expected): DR Inventory, CR Inventory Variance (รายได้)
+        ///   loss (actual < expected): DR Inventory Variance (ค่าใช้จ่าย), CR Inventory
+        /// </summary>
+        public CreateJournalEntryRequest MapStockAdjustmentToJournal(
+            int productId, string productName, decimal quantityDiff, decimal costPerUnit,
+            DateTime adjustDate, string reason, long adjustmentLogId)
+        {
+            decimal absQty = Math.Abs(quantityDiff);
+            decimal totalCost = Math.Round(absQty * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockAdjustmentToJournal: total = {totalCost} (ต้อง > 0)");
+
+            var inventoryAccountId = GetAccountId("INVENTORY");
+            var varianceAccountId = GetAccountId("INVENTORY_VARIANCE");
+            bool isGain = quantityDiff > 0;
+
+            var lines = new List<JournalEntryLineRequest>();
+            if (isGain)
+            {
+                lines.Add(new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ปรับเพิ่มสต็อก - {productName} qty=+{absQty:N2}" });
+                lines.Add(new JournalEntryLineRequest { AccountId = varianceAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ส่วนต่างจากการนับสต็อก (เกิน)" });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest { AccountId = varianceAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ส่วนต่างจากการนับสต็อก (ขาด)" });
+                lines.Add(new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ปรับลดสต็อก - {productName} qty=-{absQty:N2}" });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = adjustDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"นับสต็อก ({(isGain ? "เกิน" : "ขาด")}) - {productName}: {reason ?? "ไม่ระบุ"}",
+                Reference = $"SADJ-{adjustmentLogId}",
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// Stock write-off (สินค้าเสียหาย/หมดอายุ/สูญหาย):
+        ///   DR Stock Loss Expense
+        ///       CR Inventory
+        /// </summary>
+        public CreateJournalEntryRequest MapStockWriteOffToJournal(
+            int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime writeOffDate, string reason, long adjustmentLogId)
+        {
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2);
+            if (totalCost <= 0)
+                throw new ArgumentException($"MapStockWriteOffToJournal: total = {totalCost} (ต้อง > 0)");
+
+            var stockLossAccountId = GetAccountId("STOCK_LOSS_EXPENSE");
+            var inventoryAccountId = GetAccountId("INVENTORY");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = writeOffDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ตัดจำหน่ายสินค้า ({reason ?? "เสียหาย"}) - {productName}",
+                Reference = $"SWO-{adjustmentLogId}",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = stockLossAccountId, DebitAmount = totalCost, CreditAmount = 0, Description = $"ค่าใช้จ่ายสินค้าสูญเสีย - {productName} qty={quantity:N2}" },
+                    new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = 0, CreditAmount = totalCost, Description = $"ตัดสต็อก - {productName}" }
+                }
             };
         }
 
@@ -1149,6 +1374,365 @@ namespace Take_Time_BangPhra.Integration
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
+            };
+        }
+
+        // ──────────────────────────────────────────────
+        // Multi-Line Receipt Mappers
+        // รองรับใบเสร็จที่มีหลายรายการ (ห้องพัก + อาหาร + สินค้า + ส่วนลด) →
+        // แยกบัญชีรายได้ใน NextAcc พร้อม support การหักมัดจำในใบเสร็จเดียว
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// 1 line ของใบเสร็จ — ใช้ส่งจาก TakeTime เข้า payload
+        /// </summary>
+        public class ReceiptLineSpec
+        {
+            public int? ProductTypeId { get; set; }
+            public int? ProductId { get; set; }
+            public string Description { get; set; }
+            public decimal Quantity { get; set; } = 1;
+            public decimal UnitPrice { get; set; }
+            public decimal Amount { get; set; }       // = Quantity * UnitPrice (อาจ override)
+            public decimal Discount { get; set; }     // ส่วนลด (จะลงเป็นบรรทัดติดลบ/contra)
+            public string Unit { get; set; }
+            public string RevenueTypeOverride { get; set; }   // ถ้าระบุจะใช้แทนการ lookup จาก ProductTypeId
+        }
+
+        /// <summary>
+        /// หา revenue mapping code จาก ProductType_ID (Account_ProductType.Revenue_Mapping_Code)
+        /// fallback: ROOM_REVENUE
+        /// </summary>
+        public string GetProductTypeRevenueCode(int? productTypeId)
+        {
+            if (!productTypeId.HasValue || productTypeId.Value <= 0) return "ROOM_REVENUE";
+            try
+            {
+                var dt = _Code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Revenue_Mapping_Code FROM Account_ProductType WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productTypeId.Value } });
+                if (dt?.Rows.Count > 0)
+                {
+                    string code = dt.Rows[0]["Revenue_Mapping_Code"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(code)) return code.Trim();
+                }
+            }
+            catch { /* fallback */ }
+            return "ROOM_REVENUE";
+        }
+
+        /// <summary>
+        /// แปลง ReceiptLineSpec list เป็น IntegrationLineRequest list
+        /// (ใช้ใน DOCUMENT mode — สร้าง invoice ใน NextAcc)
+        /// แต่ละ line ผูกกับ revenue account ที่เหมาะสมกับ ProductTypeId
+        /// </summary>
+        private List<IntegrationLineRequest> BuildIntegrationLines(List<ReceiptLineSpec> lines, bool hasVat)
+        {
+            var result = new List<IntegrationLineRequest>();
+            foreach (var line in lines)
+            {
+                if (line == null) continue;
+                decimal amount = line.Amount > 0 ? line.Amount : line.Quantity * line.UnitPrice;
+                if (amount == 0) continue;
+
+                string revCode = !string.IsNullOrEmpty(line.RevenueTypeOverride)
+                    ? line.RevenueTypeOverride
+                    : GetProductTypeRevenueCode(line.ProductTypeId);
+
+                result.Add(new IntegrationLineRequest
+                {
+                    ItemName = !string.IsNullOrEmpty(line.Description) ? line.Description : revCode,
+                    Description = line.Description,
+                    Quantity = line.Quantity > 0 ? line.Quantity : 1,
+                    UnitPrice = line.Quantity > 0 ? amount / line.Quantity : amount,
+                    DiscountAmount = line.Discount > 0 ? line.Discount : (decimal?)null,
+                    Unit = line.Unit,
+                    VatRate = hasVat ? 7 : 0,
+                    AccountId = GetAccountId(revCode)
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// ใบกำกับภาษีที่มีหลายบรรทัดรายได้ + รองรับ "หักมัดจำ" (depositApplied):
+        ///   Total revenue ของ invoice = ผลรวม lines (เช่น 3700)
+        ///   ลูกค้าจ่ายเงินสดจริง = Total - depositApplied (เช่น 2700)
+        ///   ระบบจะสร้าง adjustment journal เพิ่มเติม:
+        ///     DR Advance Deposit (depositApplied)  ← ตัดเจ้าหนี้
+        ///     CR Cash/Bank (depositApplied)        ← หักเงินสดที่ invoice บันทึกไว้
+        ///   ผลสุทธิ: Cash net = 2700, Advance Deposit cleared, Revenue = 3700 ✓
+        /// </summary>
+        public CreateIntegrationInvoiceRequest MapMultiLinePaymentToInvoice(
+            int reservationId, List<ReceiptLineSpec> lines, string paymentMethod, DateTime paymentDate,
+            string customerName, bool hasVat = false, string paymentAccountId = null,
+            decimal depositApplied = 0, string receiptNumber = null)
+        {
+            if (lines == null || lines.Count == 0)
+                throw new ArgumentException("MapMultiLinePaymentToInvoice: lines ห้ามว่าง");
+
+            var integrationLines = BuildIntegrationLines(lines, hasVat);
+            if (integrationLines.Count == 0)
+                throw new ArgumentException("MapMultiLinePaymentToInvoice: ไม่มี line ที่มียอด > 0");
+
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}-PAY";
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentDate = paymentDate,
+                CustomerName = customerName,
+                Reference = refStr,
+                ExternalRef = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(receiptNumber),
+                IncludeVat = hasVat,
+                Description = depositApplied > 0
+                    ? $"ใบเสร็จ {refStr} — การจอง #{reservationId} ({customerName}) | หักมัดจำ {depositApplied:N2}"
+                    : $"ใบเสร็จ {refStr} — การจอง #{reservationId} ({customerName})",
+                PaymentMethod = paymentMethod,
+                PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
+                Lines = integrationLines
+            };
+        }
+
+        /// <summary>
+        /// Compound journal สำหรับใบเสร็จที่มี:
+        ///   - หลาย revenue lines (รายได้แยกบัญชี)
+        ///   - หักมัดจำ (DR Advance Deposit)
+        ///   - เงินสดส่วนเพิ่ม (DR Cash/Bank)
+        ///   - VAT (ถ้ามี)
+        /// </summary>
+        public CreateJournalEntryRequest MapMultiLinePaymentToJournal(
+            int reservationId, List<ReceiptLineSpec> lines, string paymentMethod, DateTime paymentDate,
+            string customerName, bool hasVat = false, string paymentAccountId = null,
+            decimal depositApplied = 0, string documentNumber = null)
+        {
+            if (lines == null || lines.Count == 0)
+                throw new ArgumentException("MapMultiLinePaymentToJournal: lines ห้ามว่าง");
+
+            decimal totalGross = 0m;
+            foreach (var l in lines)
+            {
+                decimal amt = l.Amount > 0 ? l.Amount : l.Quantity * l.UnitPrice;
+                totalGross += amt - l.Discount;
+            }
+            if (totalGross <= 0)
+                throw new ArgumentException($"MapMultiLinePaymentToJournal: totalGross = {totalGross} (ต้อง > 0)");
+
+            if (depositApplied < 0) depositApplied = 0;
+            if (depositApplied > totalGross) depositApplied = totalGross; // กัน inconsistency
+
+            decimal cashPortion = totalGross - depositApplied;
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+
+            decimal vatAmount = 0m, totalNet = totalGross;
+            if (hasVat)
+            {
+                vatAmount = Math.Round(totalGross * 7m / 107m, 2, MidpointRounding.AwayFromZero);
+                totalNet = totalGross - vatAmount;
+            }
+
+            var journalLines = new List<JournalEntryLineRequest>();
+
+            // DR Cash (จำนวนเงินสดที่รับจริง)
+            if (cashPortion > 0)
+            {
+                journalLines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = cashAccountId,
+                    DebitAmount = cashPortion,
+                    CreditAmount = 0,
+                    Description = $"รับชำระเงินสด - {paymentMethod}"
+                });
+            }
+            // DR Advance Deposit (หักมัดจำ — ตัดเจ้าหนี้)
+            if (depositApplied > 0)
+            {
+                journalLines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = depositApplied,
+                    CreditAmount = 0,
+                    Description = $"หักจากเงินรับล่วงหน้า — การจอง #{reservationId}"
+                });
+            }
+
+            // CR Revenue lines (แยกตาม ProductType)
+            // VAT proration ใช้ "สัดส่วน lineGross / totalGross" เพื่อให้ผลรวม VAT พอดีและ lineNet ไม่ติดลบ
+            // (แทนการใช้สูตร 7/107 ต่อบรรทัดที่อาจ drift จนบรรทัดสุดท้ายต้องดูดส่วนเกิน)
+            decimal vatProrationRunning = 0m;
+            int lastNonZeroIdx = -1;
+            for (int k = lines.Count - 1; k >= 0; k--)
+            {
+                decimal g = (lines[k].Amount > 0 ? lines[k].Amount : lines[k].Quantity * lines[k].UnitPrice) - lines[k].Discount;
+                if (g != 0) { lastNonZeroIdx = k; break; }
+            }
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var l = lines[i];
+                decimal lineGross = (l.Amount > 0 ? l.Amount : l.Quantity * l.UnitPrice) - l.Discount;
+                if (lineGross == 0) continue;
+
+                string revCode = !string.IsNullOrEmpty(l.RevenueTypeOverride)
+                    ? l.RevenueTypeOverride
+                    : GetProductTypeRevenueCode(l.ProductTypeId);
+
+                decimal lineNet = lineGross;
+                if (hasVat && totalGross > 0)
+                {
+                    decimal lineVat;
+                    if (i == lastNonZeroIdx)
+                    {
+                        // บรรทัดสุดท้ายดูดส่วนต่างเพื่อให้ผลรวม VAT พอดี
+                        lineVat = vatAmount - vatProrationRunning;
+                    }
+                    else
+                    {
+                        // โปรเรทตามสัดส่วน lineGross / totalGross
+                        lineVat = Math.Round(vatAmount * lineGross / totalGross, 2, MidpointRounding.AwayFromZero);
+                    }
+                    // กัน lineNet ติดลบจาก rounding drift
+                    if (lineVat < 0) lineVat = 0;
+                    if (lineVat > lineGross) lineVat = lineGross;
+                    vatProrationRunning += lineVat;
+                    lineNet = lineGross - lineVat;
+                }
+
+                if (lineNet > 0)
+                {
+                    journalLines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = GetAccountId(revCode),
+                        DebitAmount = 0,
+                        CreditAmount = lineNet,
+                        Description = !string.IsNullOrEmpty(l.Description)
+                            ? $"{l.Description} ({revCode})"
+                            : $"รายได้ {revCode} - การจอง #{reservationId}"
+                    });
+                }
+                else if (lineNet < 0)
+                {
+                    // ส่วนลด/contra revenue → DR เข้า revenue account หรือ DISCOUNT_EXPENSE
+                    Guid discAcc;
+                    try { discAcc = GetAccountId("DISCOUNT_EXPENSE"); }
+                    catch { discAcc = GetAccountId(revCode); }
+                    journalLines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = discAcc,
+                        DebitAmount = -lineNet, // กลับเครื่องหมาย
+                        CreditAmount = 0,
+                        Description = $"ส่วนลด - {l.Description}"
+                    });
+                }
+            }
+
+            // CR Output VAT
+            if (hasVat && vatAmount > 0)
+            {
+                journalLines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = GetAccountId("OUTPUT_VAT"),
+                    DebitAmount = 0,
+                    CreditAmount = vatAmount,
+                    Description = "ภาษีขาย 7%"
+                });
+            }
+
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"RES-{reservationId}-PAY";
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = paymentDate,
+                JournalType = NexaaccJournalType.CashReceipts,
+                Description = depositApplied > 0
+                    ? $"รับชำระ {refStr} (หักมัดจำ {depositApplied:N2}) — การจอง #{reservationId} ({customerName})"
+                    : $"รับชำระ {refStr} — การจอง #{reservationId} ({customerName})",
+                Reference = refStr,
+                Lines = journalLines
+            };
+        }
+
+        /// <summary>
+        /// Adjustment journal สำหรับ DOCUMENT mode เมื่อมีการหักมัดจำ:
+        ///   หลังจากสร้าง invoice เต็มจำนวน (3700) — invoice บันทึก DR Cash 3700, CR Revenue 3700
+        ///   adjustment นี้: DR Advance Deposit (depositApplied), CR Cash/Bank (depositApplied)
+        ///   ผลสุทธิ: Cash จริง = 3700 - 1000 = 2700, Advance Deposit ลด 1000, Revenue 3700 ✓
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositAppliedAdjustment(
+            int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
+            string customerName, string paymentAccountId = null, string receiptNumber = null)
+        {
+            if (depositApplied <= 0)
+                throw new ArgumentException("MapDepositAppliedAdjustment: depositApplied ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ" : $"RES-{reservationId}-DEPADJ";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ปรับปรุง — หักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
+                Reference = refStr,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = advanceDepositAccountId,
+                        DebitAmount = depositApplied,
+                        CreditAmount = 0,
+                        Description = "ตัดเงินรับล่วงหน้า (ใช้ในใบเสร็จ)"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = cashAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = depositApplied,
+                        Description = "ลดเงินสดที่ invoice บันทึกเกินจริง"
+                    }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Counter-adjustment สำหรับการ void ใบเสร็จที่เคยหักมัดจำ:
+        ///   DR Cash/Bank, CR Advance Deposit (กลับ adjustment เดิมเพื่อเอาเจ้าหนี้กลับมา)
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositAppliedAdjustmentReverse(
+            int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
+            string customerName, string paymentAccountId = null, string receiptNumber = null)
+        {
+            if (depositApplied <= 0)
+                throw new ArgumentException("MapDepositAppliedAdjustmentReverse: depositApplied ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ-REV" : $"RES-{reservationId}-DEPADJ-REV";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการ adjustment — ยกเลิกการหักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
+                Reference = refStr,
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = cashAccountId,
+                        DebitAmount = depositApplied,
+                        CreditAmount = 0,
+                        Description = "กลับลด cash"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = advanceDepositAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = depositApplied,
+                        Description = "เอาเงินรับล่วงหน้ากลับมา (เจ้าหนี้)"
+                    }
+                }
             };
         }
 

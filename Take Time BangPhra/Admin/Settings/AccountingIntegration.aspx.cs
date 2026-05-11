@@ -54,6 +54,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "companyId", config.CompanyId != Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
                     { "syncMode", config.SyncMode },
+                    { "receiptSyncMode", config.ReceiptSyncMode },
+                    { "voucherSyncMode", config.VoucherSyncMode },
+                    { "payrollSyncMode", config.PayrollSyncMode },
+                    { "attachFiles", config.AttachFiles },
+                    { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
+                    { "etaxAutoSign", config.IsEtaxAutoSign },
+                    { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
+                    { "etaxAutoSendEmail", config.IsEtaxAutoSendEmail },
+                    { "etaxEmailSubject", config.EtaxEmailSubject },
+                    { "etaxEmailBody", config.EtaxEmailBody },
+                    { "etaxEmailAttachPdf", config.EtaxEmailAttachPdf },
+                    { "etaxEmailAttachXml", config.EtaxEmailAttachXml },
+                    { "etaxEmailLocalOnly", config.EtaxEmailLocalOnly },
+                    { "etaxEmailFallback", config.EtaxEmailFallback },
                     { "syncInterval", config.SyncIntervalSeconds },
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
@@ -129,6 +143,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "updatePaidTypeAccount":
                     result = UpdatePaidTypeAccount();
                     break;
+                case "lookupDocSource":
+                    result = LookupDocumentSource();
+                    break;
+                case "depositStatus":
+                    result = LookupDepositStatus();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -157,6 +177,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "deleteQueueItems":
                     result = DeleteQueueItems(data);
+                    break;
+                case "etaxGenerate":
+                    result = ManualEtaxGenerate(data);
+                    break;
+                case "etaxSendEmail":
+                    result = ManualEtaxSendEmail(data);
+                    break;
+                case "depositManual":
+                    result = ManualDepositOperation(data);
+                    break;
+                case "stockAdjustment":
+                    result = ManualStockAdjustment(data);
+                    break;
+                case "stockProductSync":
+                    result = ManualProductSync(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -191,6 +226,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var config = new Integration.AccountingConfig(ConnStr);
                 if (data.ContainsKey("enabled")) config.SetConfig("Nexaacc_Enabled", data["enabled"]?.ToString() ?? "false");
                 if (data.ContainsKey("syncMode")) config.SetConfig("Nexaacc_SyncMode", data["syncMode"]?.ToString() ?? "DOCUMENT");
+                if (data.ContainsKey("receiptSyncMode")) config.SetConfig("Nexaacc_SyncMode_Receipt", data["receiptSyncMode"]?.ToString() ?? "");
+                if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
+                if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
+                if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
+                if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
+                if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
+                if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
+                if (data.ContainsKey("etaxAutoSendEmail")) config.SetConfig("Etax_AutoSendEmail", BoolToFlag(data["etaxAutoSendEmail"]));
+                if (data.ContainsKey("etaxEmailSubject")) config.SetConfig("Etax_EmailSubject", data["etaxEmailSubject"]?.ToString() ?? "");
+                if (data.ContainsKey("etaxEmailBody")) config.SetConfig("Etax_EmailBody", data["etaxEmailBody"]?.ToString() ?? "");
+                if (data.ContainsKey("etaxEmailAttachPdf")) config.SetConfig("Etax_EmailAttachPdf", data["etaxEmailAttachPdf"]?.ToString() ?? "true");
+                if (data.ContainsKey("etaxEmailAttachXml")) config.SetConfig("Etax_EmailAttachXml", data["etaxEmailAttachXml"]?.ToString() ?? "false");
+                if (data.ContainsKey("etaxEmailLocalOnly")) config.SetConfig("Etax_EmailLocalOnly", data["etaxEmailLocalOnly"]?.ToString() ?? "false");
+                if (data.ContainsKey("etaxEmailFallback")) config.SetConfig("Etax_EmailFallback", data["etaxEmailFallback"]?.ToString() ?? "true");
                 if (data.ContainsKey("syncInterval")) config.SetConfig("Nexaacc_SyncInterval_Sec", data["syncInterval"]?.ToString() ?? "30");
                 if (data.ContainsKey("maxRetries")) config.SetConfig("Nexaacc_MaxRetries", data["maxRetries"]?.ToString() ?? "5");
                 if (data.ContainsKey("timeout")) config.SetConfig("Nexaacc_TimeoutSec", data["timeout"]?.ToString() ?? "30");
@@ -1027,6 +1076,367 @@ namespace Take_Time_BangPhra.Admin.Settings
             Response.ContentType = "application/json";
             Response.Write(new JavaScriptSerializer().Serialize(data));
             Response.End();
+        }
+
+        private static string BoolToFlag(object value)
+        {
+            string s = value?.ToString() ?? "";
+            return (s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1") ? "1" : "0";
+        }
+
+        // ──────────────────────────────────────────────
+        // Document Source Lookup — query vw_Receipt_Document_Source
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> LookupDocumentSource()
+        {
+            try
+            {
+                string q = (Request.QueryString["q"] ?? "").Trim();
+                if (string.IsNullOrEmpty(q))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จหรือ Reservation ID" } };
+
+                string sql;
+                var parameters = new Dictionary<string, object>();
+                if (int.TryParse(q, out int resId))
+                {
+                    sql = @"SELECT TOP 50 * FROM vw_Receipt_Document_Source WHERE Reservation_ID = @resId ORDER BY Created_Date DESC";
+                    parameters.Add("@resId", resId);
+                }
+                else
+                {
+                    sql = @"SELECT TOP 50 * FROM vw_Receipt_Document_Source WHERE Receipt_Number LIKE @num ORDER BY Created_Date DESC";
+                    parameters.Add("@num", "%" + q + "%");
+                }
+
+                var dt = _code.DatabaseQuerySafe(ConnStr, sql, parameters);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                {
+                    foreach (System.Data.DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "receiptId", row["Receipt_ID"]?.ToString() },
+                            { "receiptNumber", row["Receipt_Number"]?.ToString() },
+                            { "reservationId", row["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(row["Reservation_ID"]) : 0 },
+                            { "total", row["Total"] != DBNull.Value ? Convert.ToDecimal(row["Total"]) : 0m },
+                            { "isDeposit", row["IsDeposit"] != DBNull.Value && Convert.ToBoolean(row["IsDeposit"]) },
+                            { "documentSource", row["Document_Source"]?.ToString() ?? "LOCAL" },
+                            { "nexaaccDocId", row["Nexaacc_Doc_Id"]?.ToString() },
+                            { "syncStatus", row["Sync_Status"]?.ToString() },
+                            { "syncError", row["Sync_Error"]?.ToString() },
+                            { "etaxStatus", row["Etax_Status"]?.ToString() },
+                            { "etaxRefNumber", row["Etax_Ref_Number"]?.ToString() },
+                            { "etaxPdfUrl", row["Etax_Pdf_Url"]?.ToString() },
+                            { "etaxXmlUrl", row["Etax_Xml_Url"]?.ToString() },
+                            { "etaxEmailSent", row["Etax_Email_Sent"] != DBNull.Value && Convert.ToBoolean(row["Etax_Email_Sent"]) },
+                            { "etaxError", row["Etax_Error"]?.ToString() },
+                            { "customerName", row["Customer_FullName"]?.ToString() },
+                            { "customerEmail", row["Customer_Email"]?.ToString() },
+                            { "customerTaxID", row["Customer_TaxID"]?.ToString() }
+                        });
+                    }
+                }
+
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "count", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // E-Tax manual triggers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> ManualEtaxGenerate(Dictionary<string, object> data)
+        {
+            try
+            {
+                string receiptNumber = data.ContainsKey("receiptNumber") ? data["receiptNumber"]?.ToString() : null;
+                if (string.IsNullOrEmpty(receiptNumber))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จ" } };
+
+                var service = new Integration.AccountingSyncService(ConnStr);
+                var (success, message, etaxRef) = System.Threading.Tasks.Task.Run(() => service.ManualGenerateEtaxAsync(receiptNumber)).Result;
+                return new Dictionary<string, object>
+                {
+                    { "success", success },
+                    { "message", message },
+                    { "etaxRefNumber", etaxRef ?? "" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Stock Adjustment / Write-off / Product Sync handlers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> ManualStockAdjustment(Dictionary<string, object> data)
+        {
+            try
+            {
+                string adjustType = data.ContainsKey("adjustType") ? data["adjustType"]?.ToString() : "";
+                string productIdStr = data.ContainsKey("productId") ? data["productId"]?.ToString() : "";
+                string qtyStr = data.ContainsKey("quantity") ? data["quantity"]?.ToString() : "";
+                string costStr = data.ContainsKey("costPerUnit") ? data["costPerUnit"]?.ToString() : "";
+                string reason = data.ContainsKey("reason") ? data["reason"]?.ToString() : "";
+
+                if (!int.TryParse(productIdStr, out int productId) || productId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Product ID ไม่ถูกต้อง" } };
+                if (!decimal.TryParse(qtyStr, out decimal quantity))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "จำนวนไม่ถูกต้อง" } };
+                if (!decimal.TryParse(costStr, out decimal costPerUnit) || costPerUnit <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้นทุน/หน่วยไม่ถูกต้อง" } };
+
+                // Insert Stock_Adjustment_Log first
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Product_Name FROM Product WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productId } });
+                if (dt == null || dt.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"ไม่พบ Product ID {productId}" } };
+                string productName = dt.Rows[0]["Product_Name"]?.ToString() ?? "";
+
+                bool isWriteoff = adjustType.Equals("WRITEOFF", StringComparison.OrdinalIgnoreCase);
+                decimal absQty = Math.Abs(quantity);
+                decimal totalCost = Math.Round(absQty * costPerUnit, 2);
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"INSERT INTO Stock_Adjustment_Log
+                      (Adjustment_Date, Adjustment_Type, Product_ID, Difference_Qty, Cost_PerUnit, Total_Cost, Reason, Created_Date, Sync_Status)
+                      VALUES (GETDATE(), @type, @prodId, @diff, @cost, @total, @reason, GETDATE(), 'PENDING')",
+                    new Dictionary<string, object>
+                    {
+                        { "@type", isWriteoff ? "WRITEOFF" : "COUNT_VARIANCE" },
+                        { "@prodId", productId },
+                        { "@diff", isWriteoff ? -absQty : quantity },
+                        { "@cost", costPerUnit },
+                        { "@total", totalCost },
+                        { "@reason", reason ?? "" }
+                    });
+
+                var idDt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 ID FROM Stock_Adjustment_Log WHERE Product_ID = @id ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@id", productId } });
+                long logId = idDt?.Rows.Count > 0 ? Convert.ToInt64(idDt.Rows[0]["ID"]) : 0;
+
+                // Insert Product_In/Product_Out for stock movement
+                if (isWriteoff || quantity < 0)
+                {
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"INSERT INTO Product_Out (DateTime_Out, Product_ID, Amount, PricePerUnit, OutType, Reason)
+                          VALUES (GETDATE(), @id, @qty, @cost, @type, @reason)",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", productId }, { "@qty", absQty }, { "@cost", costPerUnit },
+                            { "@type", isWriteoff ? "WRITEOFF" : "ADJUSTMENT_LOSS" }, { "@reason", reason ?? "" }
+                        });
+                }
+                else if (quantity > 0)
+                {
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"INSERT INTO Product_In (DateTime_In, Product_ID, Amount, PricePerUnit, InType)
+                          VALUES (GETDATE(), @id, @qty, @cost, 'ADJUSTMENT_GAIN')",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", productId }, { "@qty", quantity }, { "@cost", costPerUnit }
+                        });
+                }
+
+                // Enqueue accounting sync
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId;
+                if (isWriteoff)
+                    queueId = sync.EnqueueStockWriteOff(logId, productId, productName, absQty, costPerUnit, DateTime.Now, reason);
+                else
+                    queueId = sync.EnqueueStockAdjustment(logId, productId, productName, quantity, costPerUnit, DateTime.Now, reason);
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"{(isWriteoff ? "Write-off" : "Adjustment")}: ส่งเข้าคิวเรียบร้อย — logId={logId}, queueId={queueId}" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualProductSync(Dictionary<string, object> data)
+        {
+            try
+            {
+                string productIdStr = data.ContainsKey("productId") ? data["productId"]?.ToString() : "";
+                if (!int.TryParse(productIdStr, out int productId) || productId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Product ID ไม่ถูกต้อง" } };
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId = sync.EnqueueProductSync(productId);
+                if (queueId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่สามารถ enqueue ได้ (อาจมีรายการเดิมแล้ว หรือ config ไม่พร้อม)" } };
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Product sync: ส่งเข้าคิวเรียบร้อย (queueId={queueId})" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Deposit Lifecycle handlers
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> LookupDepositStatus()
+        {
+            try
+            {
+                string q = (Request.QueryString["q"] ?? "").Trim();
+                string statusFilter = (Request.QueryString["status"] ?? "").Trim();
+
+                var sb = new System.Text.StringBuilder("SELECT TOP 100 * FROM vw_Reservation_Deposit_Status WHERE DepositPaid > 0");
+                var parameters = new Dictionary<string, object>();
+
+                if (!string.IsNullOrEmpty(q))
+                {
+                    if (int.TryParse(q, out int resId))
+                    {
+                        sb.Append(" AND Reservation_ID = @resId");
+                        parameters.Add("@resId", resId);
+                    }
+                    else
+                    {
+                        sb.Append(" AND (Customer_Name LIKE @q OR Customer_MobilePhone LIKE @q)");
+                        parameters.Add("@q", "%" + q + "%");
+                    }
+                }
+                if (!string.IsNullOrEmpty(statusFilter))
+                {
+                    sb.Append(" AND Deposit_Status = @status");
+                    parameters.Add("@status", statusFilter);
+                }
+                sb.Append(" ORDER BY CheckoutDate DESC, Reservation_ID DESC");
+
+                var dt = _code.DatabaseQuerySafe(ConnStr, sb.ToString(), parameters);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                {
+                    foreach (System.Data.DataRow row in dt.Rows)
+                    {
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "reservationId", Convert.ToInt32(row["Reservation_ID"]) },
+                            { "reservationStatus", row["Reservation_Status"]?.ToString() },
+                            { "checkinDate", row["CheckinDate"] != DBNull.Value ? Convert.ToDateTime(row["CheckinDate"]).ToString("yyyy-MM-dd") : null },
+                            { "checkoutDate", row["CheckoutDate"] != DBNull.Value ? Convert.ToDateTime(row["CheckoutDate"]).ToString("yyyy-MM-dd") : null },
+                            { "customerMobilePhone", row["Customer_MobilePhone"]?.ToString() },
+                            { "customerName", row["Customer_Name"]?.ToString() },
+                            { "customerEmail", row["Customer_Email"]?.ToString() },
+                            { "depositPaid", row["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(row["DepositPaid"]) : 0m },
+                            { "depositCleared", row["DepositCleared"] != DBNull.Value ? Convert.ToDecimal(row["DepositCleared"]) : 0m },
+                            { "depositOutstanding", row["DepositOutstanding"] != DBNull.Value ? Convert.ToDecimal(row["DepositOutstanding"]) : 0m },
+                            { "depositStatus", row["Deposit_Status"]?.ToString() ?? "OPEN" },
+                            { "lastClearDate", row["LastClearDate"] != DBNull.Value ? Convert.ToDateTime(row["LastClearDate"]).ToString("yyyy-MM-ddTHH:mm:ss") : null },
+                            { "lastClearAction", row["LastClearAction"]?.ToString() },
+                            { "lastClearJournalId", row["LastClearJournalId"]?.ToString() }
+                        });
+                    }
+                }
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "count", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualDepositOperation(Dictionary<string, object> data)
+        {
+            try
+            {
+                string operation = data.ContainsKey("operation") ? data["operation"]?.ToString() : "";
+                string resIdStr = data.ContainsKey("reservationId") ? data["reservationId"]?.ToString() : "";
+                string amountStr = data.ContainsKey("amount") ? data["amount"]?.ToString() : "";
+                string reason = data.ContainsKey("reason") ? data["reason"]?.ToString() : "";
+
+                if (!int.TryParse(resIdStr, out int resId) || resId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "Reservation ID ไม่ถูกต้อง" } };
+                if (!decimal.TryParse(amountStr, out decimal amount) || amount <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "จำนวนเงินไม่ถูกต้อง" } };
+
+                // ดึงชื่อลูกค้า + paid type
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 1 ISNULL(C.FullName, C.Name) AS Name,
+                             (SELECT TOP 1 Paid_Type FROM Account_Receipt WHERE Reservation_ID = @id AND IsDeposit = 1 ORDER BY Created_Date DESC) AS PaidType
+                      FROM Reservation R
+                      LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      WHERE R.ID = @id",
+                    new Dictionary<string, object> { { "@id", resId } });
+                string customerName = dt?.Rows.Count > 0 ? dt.Rows[0]["Name"]?.ToString() ?? "" : "";
+                string paymentMethod = dt?.Rows.Count > 0 ? dt.Rows[0]["PaidType"]?.ToString() ?? "CASH" : "CASH";
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                long queueId;
+                string actionLabel;
+
+                switch (operation.ToLower())
+                {
+                    case "checkout":
+                        queueId = sync.EnqueueDepositClearingOnCheckout(resId, amount, customerName, DateTime.Now, 0);
+                        actionLabel = "ตัดมัดจำ checkout";
+                        break;
+                    case "refund":
+                        queueId = sync.EnqueueDepositRefund(resId, amount, paymentMethod, customerName, DateTime.Now);
+                        actionLabel = "คืนเงินมัดจำ";
+                        break;
+                    case "forfeit":
+                        queueId = sync.EnqueueDepositForfeit(resId, amount, customerName,
+                            DateTime.Now, !string.IsNullOrEmpty(reason) ? reason : "manual forfeit");
+                        actionLabel = "ริบมัดจำ";
+                        break;
+                    default:
+                        return new Dictionary<string, object> { { "success", false }, { "message", "operation ไม่ถูกต้อง (checkout/refund/forfeit)" } };
+                }
+
+                if (queueId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่สามารถ enqueue ได้ (อาจมีรายการเดิมแล้ว หรือ config ไม่พร้อม)" } };
+
+                return new Dictionary<string, object> { { "success", true }, { "message", $"{actionLabel}: ส่งเข้าคิวเรียบร้อย (queueId={queueId}). กดปุ่ม Process Queue เพื่อดำเนินการ" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ManualEtaxSendEmail(Dictionary<string, object> data)
+        {
+            try
+            {
+                string receiptNumber = data.ContainsKey("receiptNumber") ? data["receiptNumber"]?.ToString() : null;
+                string overrideEmail = data.ContainsKey("email") ? data["email"]?.ToString() : null;
+                if (string.IsNullOrEmpty(receiptNumber))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาระบุเลขที่ใบเสร็จ" } };
+
+                var service = new Integration.AccountingSyncService(ConnStr);
+                var (success, message) = System.Threading.Tasks.Task.Run(() => service.ManualSendEtaxEmailAsync(receiptNumber, overrideEmail)).Result;
+                return new Dictionary<string, object> { { "success", success }, { "message", message } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
         }
     }
 }

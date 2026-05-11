@@ -44,6 +44,70 @@ namespace Take_Time_BangPhra.Integration
         public string SyncMode => GetConfig("Nexaacc_SyncMode", "DOCUMENT");
         public bool IsDocumentMode => SyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
 
+        // ──────────────────────────────────────────────
+        // Per-document-type sync mode
+        // LOCAL = ไม่ส่ง NextAcc (ใช้ระบบของ TakeTime)
+        // JOURNAL_ONLY = สร้าง journal entry ใน NextAcc
+        // DOCUMENT = สร้างเอกสารเต็มรูปแบบใน NextAcc
+        // ──────────────────────────────────────────────
+
+        public string ReceiptSyncMode => GetConfig("Nexaacc_SyncMode_Receipt", SyncMode);
+        public string VoucherSyncMode => GetConfig("Nexaacc_SyncMode_Voucher", SyncMode);
+        public string PayrollSyncMode => GetConfig("Nexaacc_SyncMode_Payroll", SyncMode);
+
+        public bool IsReceiptLocal => ReceiptSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+        public bool IsReceiptDocumentMode => ReceiptSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsVoucherDocumentMode => VoucherSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsVoucherLocal => VoucherSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+        public bool IsPayrollDocumentMode => PayrollSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
+        public bool IsPayrollLocal => PayrollSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+
+        public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        // ──────────────────────────────────────────────
+        // E-Tax Invoice automation
+        // ──────────────────────────────────────────────
+
+        /// <summary>สร้าง E-Tax Invoice อัตโนมัติเมื่อสร้างใบเสร็จในระบบ NextAcc สำเร็จ</summary>
+        public bool IsEtaxAutoGenerate => GetConfig("Etax_AutoGenerate", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoGenerate", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ลงนาม E-Tax อัตโนมัติหลังสร้าง</summary>
+        public bool IsEtaxAutoSign => GetConfig("Etax_AutoSign", "1").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSign", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ส่งให้กรมสรรพากรอัตโนมัติหลังลงนาม</summary>
+        public bool IsEtaxAutoSubmit => GetConfig("Etax_AutoSubmit", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSubmit", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>ส่งอีเมลใบกำกับภาษีอิเล็กทรอนิกส์ให้ลูกค้าอัตโนมัติเมื่อ E-Tax พร้อมแล้ว</summary>
+        public bool IsEtaxAutoSendEmail => GetConfig("Etax_AutoSendEmail", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Etax_AutoSendEmail", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>หัวข้ออีเมล E-Tax (รองรับ {ReceiptNumber}, {GuestName}, {CompanyName})</summary>
+        public string EtaxEmailSubject => GetConfig("Etax_EmailSubject",
+            "ใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}");
+
+        /// <summary>เนื้อหาอีเมล E-Tax (รองรับ {ReceiptNumber}, {GuestName}, {Amount}, {Date})</summary>
+        public string EtaxEmailBody => GetConfig("Etax_EmailBody",
+            "เรียน {GuestName}\n\nกรุณาดาวน์โหลดใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber} จากเอกสารแนบ\n\nขอบคุณที่ใช้บริการ");
+
+        /// <summary>แนบ PDF E-Tax ในอีเมล</summary>
+        public bool EtaxEmailAttachPdf => GetConfig("Etax_EmailAttachPdf", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>แนบ XML E-Tax ในอีเมล (ลูกค้าธุรกิจอาจต้องการ)</summary>
+        public bool EtaxEmailAttachXml => GetConfig("Etax_EmailAttachXml", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// ถ้าส่งอีเมลผ่าน NextAcc ไม่สำเร็จ → ดาวน์โหลด PDF/XML จาก URL ของ NextAcc แล้วส่งผ่าน SMTP ของ TakeTime
+        /// </summary>
+        public bool EtaxEmailFallback => GetConfig("Etax_EmailFallback", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// บังคับให้ใช้ SMTP ของ TakeTime เท่านั้น ข้าม NextAcc — สำหรับกรณี NextAcc email service ปิดอยู่
+        /// </summary>
+        public bool EtaxEmailLocalOnly => GetConfig("Etax_EmailLocalOnly", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง

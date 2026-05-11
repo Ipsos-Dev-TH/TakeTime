@@ -81,7 +81,9 @@ namespace Take_Time_BangPhra
 
                     if (string.IsNullOrEmpty(errorMsg))
                     {
-                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                        // ตัดมัดจำออกจากเจ้าหนี้ (ADVANCE_DEPOSIT) → รับรู้รายได้ห้องพัก (ROOM_REVENUE)
+                        // ถ้ามีค่าเสียหาย/ของหาย ระบบจะแบ่ง credit ระหว่าง Room Revenue และ Other Income
+                        TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge);
 
                         return new CheckoutResult
                         {
@@ -202,6 +204,64 @@ namespace Take_Time_BangPhra
                     $"GetReservationData failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
             }
             return null;
+        }
+
+        /// <summary>
+        /// Enqueue deposit clearing journal entry (DR ADVANCE_DEPOSIT, CR ROOM_REVENUE).
+        /// ความล้มเหลวจะ log แต่ไม่ throw — เช็คเอาท์ต้องผ่านได้ถึงแม้ accounting sync มีปัญหา
+        /// </summary>
+        private void TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt)
+        {
+            if (depositAmt <= 0)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing: skipped — Reservation #{reservationId} ไม่มีมัดจำ", "SYSTEM");
+                return;
+            }
+
+            // ป้องกัน double-clear: ถ้าใบเสร็จได้หักมัดจำไปแล้ว (Deposit_Applied_Amount > 0) ระบบ
+            // จะสร้าง adjustment journal ตอนสร้างใบเสร็จเอง — ไม่ต้องคลิยร์ซ้ำ
+            decimal alreadyApplied = LookupDepositAlreadyAppliedInReceipts(reservationId);
+            decimal toClear = depositAmt - alreadyApplied;
+            if (toClear <= 0.01m)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing: skipped — มัดจำ {depositAmt:N2} ถูกหักในใบเสร็จไปแล้วทั้งหมด ({alreadyApplied:N2})",
+                    "SYSTEM");
+                return;
+            }
+
+            try
+            {
+                var sync = new AccountingSyncService(_connectionString);
+                long queueId = sync.EnqueueDepositClearingOnCheckout(reservationId, toClear, customerName, DateTime.Now, damageAmt);
+                _code.Logs(_connectionString, "Checkout",
+                    $"Deposit clearing enqueued: resId={reservationId} deposit={depositAmt:N2} alreadyApplied={alreadyApplied:N2} clearing={toClear:N2} damage={damageAmt:N2} queueId={queueId}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private decimal LookupDepositAlreadyAppliedInReceipts(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ISNULL(SUM(Deposit_Applied_Amount), 0) AS Applied
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @id
+                        AND IsDeposit = 0
+                        AND (Status = 'Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt?.Rows.Count > 0)
+                    return Convert.ToDecimal(dt.Rows[0]["Applied"]);
+            }
+            catch { }
+            return 0m;
         }
 
         /// <summary>

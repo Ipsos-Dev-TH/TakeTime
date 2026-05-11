@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using System.Threading.Tasks;
 using Take_Time_BangPhra.Helpers;
+using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Services
 {
@@ -214,6 +215,9 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
+                // จับ deposit + customer name + payment method ก่อนล้าง — ใช้ส่งเข้า accounting sync
+                var (depositAmt, customerName, paymentMethod) = LookupDepositForCancel(reservationId);
+
                 // 🔧 FIX: Cancel Payment_History records first
                 try
                 {
@@ -248,6 +252,9 @@ namespace Take_Time_BangPhra.Services
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
 
+                // ตัดเจ้าหนี้ ADVANCE_DEPOSIT → CR Cash/Bank (คืนเงินสด)
+                TryEnqueueDepositRefund(reservationId, depositAmt, customerName, paymentMethod);
+
                 return true;
             }
             catch (Exception ex)
@@ -261,6 +268,8 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
+                var (depositAmt, customerName, _) = LookupDepositForCancel(reservationId);
+
                 // 🔧 FIX: Cancel Payment_History records first
                 try
                 {
@@ -295,12 +304,80 @@ namespace Take_Time_BangPhra.Services
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
 
+                // ริบมัดจำ → DR ADVANCE_DEPOSIT, CR Forfeit Income
+                TryEnqueueDepositForfeit(reservationId, depositAmt, customerName, "ยกเลิกไม่คืนเงิน");
+
                 return true;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceError($"Error canceling reservation without refund {reservationId}: {ex.Message}");
                 return false;
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Helpers สำหรับตัดมัดจำตอนยกเลิกการจอง
+        // ──────────────────────────────────────────────
+
+        private (decimal deposit, string customerName, string paymentMethod) LookupDepositForCancel(string reservationId)
+        {
+            try
+            {
+                if (!int.TryParse(reservationId, out int resId)) return (0, "", "CASH");
+
+                string sql = @"SELECT R.Deposit, R.Customer_MobilePhone,
+                                      ISNULL(C.FullName, C.Name) AS Name,
+                                      (SELECT TOP 1 Paid_Type FROM Account_Receipt
+                                       WHERE Reservation_ID = R.ID AND IsDeposit = 1
+                                       ORDER BY Created_Date DESC) AS PaidType
+                               FROM Reservation R
+                               LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                               WHERE R.ID = @id";
+                var dt = _dbHelper.ExecuteQueryWithParams(sql, new Dictionary<string, object> { { "@id", resId } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    var row = dt.Rows[0];
+                    decimal dep = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    string name = row["Name"]?.ToString() ?? "";
+                    string method = row["PaidType"]?.ToString() ?? "CASH";
+                    return (dep, name, method);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"LookupDepositForCancel failed: {ex.Message}");
+            }
+            return (0, "", "CASH");
+        }
+
+        private void TryEnqueueDepositRefund(string reservationId, decimal depositAmt, string customerName, string paymentMethod)
+        {
+            if (depositAmt <= 0) return;
+            try
+            {
+                if (!int.TryParse(reservationId, out int resId)) return;
+                var sync = new AccountingSyncService(_dbHelper.ConnectionString);
+                sync.EnqueueDepositRefund(resId, depositAmt, paymentMethod, customerName, DateTime.Now);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"TryEnqueueDepositRefund failed for {reservationId}: {ex.Message}");
+            }
+        }
+
+        private void TryEnqueueDepositForfeit(string reservationId, decimal depositAmt, string customerName, string reason)
+        {
+            if (depositAmt <= 0) return;
+            try
+            {
+                if (!int.TryParse(reservationId, out int resId)) return;
+                var sync = new AccountingSyncService(_dbHelper.ConnectionString);
+                sync.EnqueueDepositForfeit(resId, depositAmt, customerName, DateTime.Now, reason);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"TryEnqueueDepositForfeit failed for {reservationId}: {ex.Message}");
             }
         }
 

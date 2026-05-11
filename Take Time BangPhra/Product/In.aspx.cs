@@ -279,23 +279,30 @@ namespace Take_Time_BangPhra.Product
                         insertParams);
                 }
 
-                // Sync stock-in to accounting
+                // Sync stock-in to NextAcc (per-product journal: DR Inventory, CR Cash/AP)
                 try
                 {
-                    DataTable dtOrderSync = (DataTable)Session["dtOrder"];
-                    if (dtOrderSync != null)
+                    var config = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (config.IsConfigured && config.Enabled && !config.IsVoucherLocal)
                     {
-                        decimal totalCost = 0;
-                        foreach (DataRow row in dtOrderSync.Rows)
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                        DateTime receiveDate = DateTime.Now;
+                        foreach (DataRow row in dtOrder.Rows)
                         {
-                            decimal amount = Convert.ToDecimal(row["Amount"]);
-                            decimal price = Convert.ToDecimal(row["PricePerUnit"]);
-                            totalCost += amount * price;
+                            int productId = Convert.ToInt32(row["ID"]);
+                            string productName = row["Product_Name"]?.ToString() ?? "";
+                            decimal qty = Convert.ToDecimal(row["Amount"]);
+                            decimal cost = Convert.ToDecimal(row["PricePerUnit"]);
+                            sync.EnqueueStockIn(productId, productName, qty, cost, receiveDate, "ระบบจัดซื้อ TakeTime", null, false,
+                                $"PIN-{productId}-{receiveDate:yyyyMMddHHmmss}");
                         }
-                        // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
                     }
                 }
-                catch { }
+                catch (Exception accEx)
+                {
+                    System.Diagnostics.Trace.TraceWarning($"⚠️ Stock-in accounting sync failed: {accEx.Message}");
+                    // Stock_In already saved — ไม่ throw เพื่อไม่กระทบ UX
+                }
 
                 // Show success message then redirect
                 ClientScript.RegisterStartupScript(this.GetType(), "success",

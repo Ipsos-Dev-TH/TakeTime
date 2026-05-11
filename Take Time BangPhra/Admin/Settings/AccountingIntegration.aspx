@@ -134,14 +134,121 @@
                     </select>
                 </div>
                 <div class="config-item">
-                    <label>โหมดการ Sync</label>
+                    <label>โหมดการ Sync (ค่าเริ่มต้น)</label>
                     <select id="cfgSyncMode">
                         <option value="DOCUMENT">สร้างเอกสาร + บันทึกบัญชีอัตโนมัติ</option>
                         <option value="JOURNAL_ONLY">บันทึกสมุดบัญชีอย่างเดียว</option>
                     </select>
-                    <div class="help-text">DOCUMENT = สร้างใบกำกับภาษี/ใบสำคัญจ่ายในระบบบัญชี แล้วระบบจะบันทึก Journal ให้อัตโนมัติ<br/>JOURNAL_ONLY = บันทึกเฉพาะ Journal Entry (เดบิต/เครดิต) โดยไม่สร้างเอกสาร</div>
+                    <div class="help-text">ค่าเริ่มต้นสำหรับเอกสารที่ไม่ได้ตั้งค่าเฉพาะด้านล่าง</div>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>ใบเสร็จ / ใบกำกับภาษี</label>
+                    <select id="cfgReceiptSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ใช้เอกสารจากระบบ TakeTime (ไม่ส่ง NextAcc)</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>ใบสำคัญจ่าย</label>
+                    <select id="cfgVoucherSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
+                </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>เงินเดือน (Payroll)</label>
+                    <select id="cfgPayrollSyncMode">
+                        <option value="">ใช้ค่าเริ่มต้น</option>
+                        <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
+                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                    </select>
                 </div>
                 <div class="config-item">
+                    <label>แนบไฟล์เอกสาร</label>
+                    <select id="cfgAttachFiles">
+                        <option value="true">เปิด — ส่งไฟล์ใบเสร็จ/สลิปไปพร้อมเอกสาร</option>
+                        <option value="false">ปิด</option>
+                    </select>
+                    <div class="help-text">ส่งไฟล์แนบ (ใบเสร็จ PDF, สลิปจ่ายเงิน, ใบสำคัญจ่าย) ไปพร้อมเอกสารใน NextAcc</div>
+                </div>
+                <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
+                    <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
+                    <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
+                        เมื่อระบบสร้างใบเสร็จใน NextAcc สำเร็จ จะสร้าง E-Tax Invoice ตามใบนั้น และส่งให้กรมสรรพากร/อีเมลลูกค้าได้อัตโนมัติ
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>สร้าง E-Tax อัตโนมัติ</label>
+                    <select id="cfgEtaxAutoGenerate">
+                        <option value="false">ปิด — สร้าง E-Tax ด้วยตัวเองในหน้า Receipt</option>
+                        <option value="true">เปิด — สร้างทันทีเมื่อสร้างใบเสร็จในระบบ NextAcc สำเร็จ</option>
+                    </select>
+                    <div class="help-text">ใช้ได้เฉพาะเมื่อโหมด Receipt = DOCUMENT (สร้างเอกสารใน NextAcc)</div>
+                </div>
+                <div class="config-item">
+                    <label>ลงนาม E-Tax อัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSign">
+                        <option value="true">เปิด — ลงนามด้วย Certificate ใน NextAcc</option>
+                        <option value="false">ปิด — สร้างเป็น draft</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>ส่งกรมสรรพากรอัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSubmit">
+                        <option value="false">ปิด — ส่งด้วยตนเอง</option>
+                        <option value="true">เปิด — submit ทันทีหลังลงนาม</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>ส่งอีเมลให้ลูกค้าอัตโนมัติ</label>
+                    <select id="cfgEtaxAutoSendEmail">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ส่งอีเมลพร้อม PDF/XML แนบ</option>
+                    </select>
+                    <div class="help-text">ดึงอีเมลลูกค้าจาก Customer.Email ตามการจอง — ถ้าไม่พบจะข้ามอย่างเงียบ ๆ</div>
+                </div>
+                <div class="config-item">
+                    <label>หัวข้ออีเมล E-Tax</label>
+                    <input type="text" id="cfgEtaxEmailSubject" placeholder="ใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}" />
+                    <div class="help-text">ตัวแปร: {ReceiptNumber}, {GuestName}, {Amount}, {Date}</div>
+                </div>
+                <div class="config-item">
+                    <label>เนื้อหาอีเมล E-Tax</label>
+                    <textarea id="cfgEtaxEmailBody" rows="4" style="width:100%;" placeholder="เรียน {GuestName}&#10;&#10;กรุณาดาวน์โหลดใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}..."></textarea>
+                </div>
+                <div class="config-item">
+                    <label>แนบ PDF / XML</label>
+                    <select id="cfgEtaxEmailAttachPdf" style="width:48%;">
+                        <option value="true">PDF: แนบ</option>
+                        <option value="false">PDF: ไม่แนบ</option>
+                    </select>
+                    <select id="cfgEtaxEmailAttachXml" style="width:48%;">
+                        <option value="false">XML: ไม่แนบ</option>
+                        <option value="true">XML: แนบ (สำหรับลูกค้าธุรกิจ)</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>ช่องทางส่งอีเมล</label>
+                    <select id="cfgEtaxEmailLocalOnly">
+                        <option value="false">NextAcc API (ค่าเริ่มต้น)</option>
+                        <option value="true">SMTP ของ TakeTime เท่านั้น (ข้าม NextAcc)</option>
+                    </select>
+                    <div class="help-text">เลือก SMTP เฉพาะกรณี NextAcc email service ปิดอยู่ — ระบบจะดึง PDF/XML มาแนบเอง</div>
+                </div>
+                <div class="config-item">
+                    <label>Fallback ผ่าน TakeTime SMTP</label>
+                    <select id="cfgEtaxEmailFallback">
+                        <option value="true">เปิด — ถ้า NextAcc ส่งไม่สำเร็จ ให้ส่งผ่าน SMTP ของ TakeTime</option>
+                        <option value="false">ปิด — รายงาน error อย่างเดียว</option>
+                    </select>
+                    <div class="help-text">SMTP จะดึง PDF/XML จาก URL ของ NextAcc มาแนบในอีเมล (ตั้ง SMTP ใน Web.config)</div>
+                </div>
+                <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label>Sync Interval (วินาที)</label>
                     <input type="number" id="cfgSyncInterval" value="30" min="10" max="3600" />
                     <div class="help-text">ระยะเวลาระหว่าง queue processing cycles (10-3600 วินาที)</div>
@@ -161,6 +268,137 @@
                 </div>
                 <div class="test-result" id="syncTestResult"></div>
             </div>
+        </div>
+
+        <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
+        <div class="journey-card">
+            <h3><i class="fas fa-piggy-bank"></i> สถานะเจ้าหนี้ค่ามัดจำ (Advance Deposit Liability)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                ติดตามมัดจำที่ลูกค้าจ่าย vs มัดจำที่ตัดออกจากเจ้าหนี้แล้ว (ตอน checkout / คืนเงิน / ริบ)<br/>
+                สถานะ: <b>OPEN</b> = ยังคาเจ้าหนี้, <b>PARTIAL</b> = ตัดบางส่วน, <b>CLEARED</b> = ตัดครบ, <b>OVER_CLEARED</b> = ตัดเกิน (ตรวจสอบ)
+            </p>
+            <div style="display:flex; gap:10px; align-items:end; margin-bottom:15px;">
+                <div style="flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Reservation ID หรือชื่อ/เบอร์ลูกค้า</label>
+                    <input type="text" id="depositLookup" placeholder="เลขจอง / ชื่อลูกค้า / เบอร์โทร" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="depositStatusFilter" style="padding:8px;">
+                        <option value="">ทุกสถานะ</option>
+                        <option value="OPEN">OPEN — ยังไม่ตัด</option>
+                        <option value="PARTIAL">PARTIAL — ตัดบางส่วน</option>
+                        <option value="CLEARED">CLEARED — ตัดครบ</option>
+                        <option value="OVER_CLEARED">OVER_CLEARED — ตัดเกิน</option>
+                    </select>
+                </div>
+                <button type="button" class="btn-primary" onclick="lookupDepositStatus()"><i class="fas fa-search"></i> ค้นหา</button>
+            </div>
+            <div id="depositStatusResult"></div>
+
+            <div style="border-top:1px solid #ddd; margin-top:20px; padding-top:15px;">
+                <h4 style="margin:0 0 10px 0; font-size:14px;"><i class="fas fa-bolt"></i> Manual Operations (ใช้กรณีระบบ auto ไม่ได้ทำงาน)</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div>
+                        <label style="font-weight:600;">Reservation ID</label>
+                        <input type="number" id="depositManualResId" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <label style="font-weight:600;">จำนวนเงิน (บาท)</label>
+                        <input type="number" id="depositManualAmount" step="0.01" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <label style="font-weight:600;">เหตุผล (สำหรับ Forfeit)</label>
+                        <input type="text" id="depositManualReason" placeholder="ลูกค้าไม่มาเข้าพัก" style="width:100%; padding:8px;" />
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="btn-success" onclick="manualDepositAction('checkout')"><i class="fas fa-sign-out-alt"></i> ตัดมัดจำ (checkout)</button>
+                    <button type="button" class="btn-warning" onclick="manualDepositAction('refund')"><i class="fas fa-undo"></i> คืนเงินมัดจำ</button>
+                    <button type="button" class="btn-danger" onclick="manualDepositAction('forfeit')"><i class="fas fa-ban"></i> ริบมัดจำ</button>
+                </div>
+                <div class="test-result" id="depositManualResult" style="margin-top:10px;"></div>
+            </div>
+        </div>
+
+        <!-- Document Source Lookup (เชื่อมระหว่าง TakeTime ↔ NextAcc ↔ E-Tax) -->
+        <div class="journey-card">
+            <h3><i class="fas fa-link"></i> Document Source — ตรวจสอบที่มาของเอกสาร</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                ค้นหาด้วยเลขที่ใบเสร็จหรือเลขจอง — ระบบจะแสดง: ที่มาของเอกสาร (LOCAL/NEXAACC), เลขเอกสาร NextAcc, สถานะ E-Tax, ลูกค้า, ลิงก์ PDF/XML
+            </p>
+            <div style="display:flex; gap:10px; align-items:end; margin-bottom:15px;">
+                <div style="flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เลขที่ใบเสร็จ หรือ Reservation ID</label>
+                    <input type="text" id="docSourceLookup" placeholder="เช่น REC25050800001 หรือ 12345" style="width:100%; padding:8px;" />
+                </div>
+                <button type="button" class="btn-primary" onclick="lookupDocumentSource()"><i class="fas fa-search"></i> ค้นหา</button>
+            </div>
+            <div id="docSourceResult"></div>
+        </div>
+
+        <!-- Stock Adjustment / Write-off -->
+        <div class="journey-card">
+            <h3><i class="fas fa-boxes"></i> Stock Adjustment & Write-off</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                บันทึกการนับสต็อก (count variance) หรือตัดจำหน่ายสินค้าเสียหาย/หมดอายุ — ระบบจะสร้าง journal entry ใน NextAcc อัตโนมัติ
+            </p>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div>
+                    <label style="font-weight:600;">Product ID</label>
+                    <input type="number" id="stockProductId" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">Quantity</label>
+                    <input type="number" id="stockQuantity" step="0.01" placeholder="+/- จำนวน" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">Cost / unit</label>
+                    <input type="number" id="stockCostPerUnit" step="0.01" placeholder="ต้นทุน/หน่วย" style="width:100%; padding:8px;" />
+                </div>
+                <div>
+                    <label style="font-weight:600;">เหตุผล</label>
+                    <input type="text" id="stockReason" placeholder="เช่น นับสต็อก/หมดอายุ/แตก" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn-primary" onclick="stockAdjustment('COUNT_VARIANCE')">
+                    <i class="fas fa-balance-scale"></i> ปรับยอดจากการนับ (+/- diff)
+                </button>
+                <button type="button" class="btn-danger" onclick="stockAdjustment('WRITEOFF')">
+                    <i class="fas fa-trash-alt"></i> ตัดจำหน่ายสินค้า (Write-off)
+                </button>
+                <button type="button" class="btn-success" onclick="stockProductSync()">
+                    <i class="fas fa-sync"></i> Sync Product Master
+                </button>
+            </div>
+            <div class="test-result" id="stockResult" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- E-Tax Manual Operations -->
+        <div class="journey-card">
+            <h3><i class="fas fa-file-invoice"></i> E-Tax Manual Operations</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                สร้าง E-Tax ด้วยมือ หรือส่งอีเมล E-Tax ให้ลูกค้าซ้ำ — ใช้เมื่อต้องการดำเนินการเฉพาะใบเสร็จ หรือกรณี auto-generate ปิดอยู่
+            </p>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เลขที่ใบเสร็จ</label>
+                    <input type="text" id="etaxReceiptNumber" placeholder="เช่น REC25050800001" style="width:100%; padding:8px;" />
+                    <div style="margin-top:10px;">
+                        <button type="button" class="btn-primary" onclick="manualEtaxGenerate()"><i class="fas fa-bolt"></i> สร้าง E-Tax</button>
+                        <button type="button" class="btn-success" onclick="manualEtaxSendEmail()"><i class="fas fa-envelope"></i> ส่งอีเมล E-Tax</button>
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">อีเมลปลายทาง (ทางเลือก)</label>
+                    <input type="email" id="etaxOverrideEmail" placeholder="ปล่อยว่างเพื่อใช้อีเมลที่บันทึกใน Customer" style="width:100%; padding:8px;" />
+                    <div style="font-size:12px; color:#666; margin-top:6px;">
+                        ถ้าไม่ระบุ ระบบจะดึงอีเมลจาก Customer.Email ตามการจองอัตโนมัติ
+                    </div>
+                </div>
+            </div>
+            <div class="test-result" id="etaxTestResult" style="margin-top:15px;"></div>
         </div>
 
         <!-- Guest Journey Accounting Map -->
@@ -412,6 +650,9 @@
             loadQueueData();
             preloadNexaaccAccounts();
             document.getElementById('cfgSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgReceiptSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgVoucherSyncMode').addEventListener('change', updateJourneyMap);
+            document.getElementById('cfgPayrollSyncMode').addEventListener('change', updateJourneyMap);
         });
 
         function preloadNexaaccAccounts() {
@@ -428,21 +669,34 @@
         }
 
         function updateJourneyMap() {
-            var mode = document.getElementById('cfgSyncMode').value;
-            var isDoc = mode === 'DOCUMENT';
+            var globalMode = document.getElementById('cfgSyncMode').value;
+            var receiptMode = document.getElementById('cfgReceiptSyncMode').value || globalMode;
+            var voucherMode = document.getElementById('cfgVoucherSyncMode').value || globalMode;
+            var isReceiptDoc = receiptMode === 'DOCUMENT';
+            var isReceiptLocal = receiptMode === 'LOCAL';
+            var isVoucherDoc = voucherMode === 'DOCUMENT';
+            var isVoucherLocal = voucherMode === 'LOCAL';
             var jn = {
-                jnDeposit: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับมัดจำ) + Journal'
-                    : 'DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า',
-                jnPayment: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับชำระ) + Journal'
-                    : 'DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก',
-                jnCheckout: isDoc
-                    ? 'สร้างใบกำกับภาษี<br/>(รับรู้รายได้) + Journal'
-                    : 'DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก',
-                jnVoucher: isDoc
-                    ? 'สร้างใบสำคัญจ่าย<br/>(ค่าใช้จ่าย) + Journal'
-                    : 'DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร'
+                jnDeposit: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับมัดจำ) + Journal'
+                        : 'DR เงินสด/ธนาคาร<br/>CR เงินรับล่วงหน้า',
+                jnPayment: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับชำระ) + Journal'
+                        : 'DR เงินสด/ธนาคาร<br/>CR รายได้ห้องพัก',
+                jnCheckout: isReceiptLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isReceiptDoc
+                        ? 'สร้างใบกำกับภาษี<br/>(รับรู้รายได้) + Journal'
+                        : 'DR เงินรับล่วงหน้า<br/>CR รายได้ห้องพัก',
+                jnVoucher: isVoucherLocal
+                    ? 'จัดการโดย TakeTime<br/>(ไม่ส่ง NextAcc)'
+                    : isVoucherDoc
+                        ? 'สร้างใบสำคัญจ่าย<br/>(ค่าใช้จ่าย) + Journal'
+                        : 'DR ค่าใช้จ่าย<br/>CR เงินสด/ธนาคาร'
             };
             for (var id in jn) {
                 var el = document.getElementById(id);
@@ -462,6 +716,20 @@
                 document.getElementById('cfgSyncInterval').value = cfg.syncInterval || 30;
                 document.getElementById('cfgMaxRetries').value = cfg.maxRetries || 5;
                 document.getElementById('cfgTimeout').value = cfg.timeout || 30;
+                if (cfg.receiptSyncMode) document.getElementById('cfgReceiptSyncMode').value = cfg.receiptSyncMode;
+                if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
+                if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
+                document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
+                document.getElementById('cfgEtaxAutoSendEmail').value = cfg.etaxAutoSendEmail ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailSubject').value = cfg.etaxEmailSubject || '';
+                document.getElementById('cfgEtaxEmailBody').value = cfg.etaxEmailBody || '';
+                document.getElementById('cfgEtaxEmailAttachPdf').value = cfg.etaxEmailAttachPdf ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailLocalOnly').value = cfg.etaxEmailLocalOnly ? 'true' : 'false';
+                document.getElementById('cfgEtaxEmailFallback').value = cfg.etaxEmailFallback ? 'true' : 'false';
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
                 }
@@ -486,7 +754,21 @@
                 syncMode: document.getElementById('cfgSyncMode').value,
                 syncInterval: document.getElementById('cfgSyncInterval').value,
                 maxRetries: document.getElementById('cfgMaxRetries').value,
-                timeout: document.getElementById('cfgTimeout').value
+                timeout: document.getElementById('cfgTimeout').value,
+                receiptSyncMode: document.getElementById('cfgReceiptSyncMode').value,
+                voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
+                payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
+                attachFiles: document.getElementById('cfgAttachFiles').value,
+                etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
+                etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
+                etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
+                etaxAutoSendEmail: document.getElementById('cfgEtaxAutoSendEmail').value,
+                etaxEmailSubject: document.getElementById('cfgEtaxEmailSubject').value,
+                etaxEmailBody: document.getElementById('cfgEtaxEmailBody').value,
+                etaxEmailAttachPdf: document.getElementById('cfgEtaxEmailAttachPdf').value,
+                etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value,
+                etaxEmailLocalOnly: document.getElementById('cfgEtaxEmailLocalOnly').value,
+                etaxEmailFallback: document.getElementById('cfgEtaxEmailFallback').value
             };
             postAction(data, 'syncTestResult');
         }
@@ -523,6 +805,196 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        // ── Deposit Lifecycle ──
+
+        function lookupDepositStatus() {
+            var q = (document.getElementById('depositLookup').value || '').trim();
+            var status = document.getElementById('depositStatusFilter').value;
+            var el = document.getElementById('depositStatusResult');
+            el.innerHTML = '<div class="test-result loading">กำลังค้นหา...</div>';
+            var url = pageUrl + '?action=depositStatus&q=' + encodeURIComponent(q) + '&status=' + encodeURIComponent(status) + '&_=' + Date.now();
+            fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-info-circle"></i> ไม่พบข้อมูล</div>';
+                        return;
+                    }
+                    var html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+                    html += '<thead><tr style="background:#f5f5f5;">'
+                          + '<th style="padding:8px; text-align:left;">Reservation</th>'
+                          + '<th style="padding:8px;">ลูกค้า</th>'
+                          + '<th style="padding:8px;">เช็คเอาท์</th>'
+                          + '<th style="padding:8px;">มัดจำจ่าย</th>'
+                          + '<th style="padding:8px;">ตัดแล้ว</th>'
+                          + '<th style="padding:8px;">คงเหลือ</th>'
+                          + '<th style="padding:8px;">สถานะ</th>'
+                          + '<th style="padding:8px;">การกระทำล่าสุด</th>'
+                          + '</tr></thead><tbody>';
+                    data.items.forEach(function(it) {
+                        var color = it.depositStatus === 'CLEARED' ? '#28a745'
+                                  : it.depositStatus === 'OPEN' ? '#dc3545'
+                                  : it.depositStatus === 'PARTIAL' ? '#ffc107'
+                                  : it.depositStatus === 'OVER_CLEARED' ? '#dc3545'
+                                  : '#6c757d';
+                        html += '<tr style="border-bottom:1px solid #eee;">'
+                              + '<td style="padding:8px; font-family:monospace;">#' + it.reservationId + '<br/><small>' + (it.reservationStatus || '-') + '</small></td>'
+                              + '<td style="padding:8px;">' + (it.customerName || '-') + '<br/><small style="color:#999;">' + (it.customerMobilePhone || '') + '</small></td>'
+                              + '<td style="padding:8px;">' + (it.checkoutDate ? new Date(it.checkoutDate).toLocaleDateString('th-TH') : '-') + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + Number(it.depositPaid).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + Number(it.depositCleared).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px; text-align:right; font-weight:600;">' + Number(it.depositOutstanding).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + color + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.depositStatus + '</span></td>'
+                              + '<td style="padding:8px;">' + (it.lastClearAction || '-') + (it.lastClearDate ? '<br/><small>' + new Date(it.lastClearDate).toLocaleString('th-TH') + '</small>' : '') + '</td>'
+                              + '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
+        }
+
+        function manualDepositAction(action) {
+            var resId = document.getElementById('depositManualResId').value;
+            var amount = document.getElementById('depositManualAmount').value;
+            var reason = document.getElementById('depositManualReason').value;
+            if (!resId || !amount) {
+                var el = document.getElementById('depositManualResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาใส่ Reservation ID และจำนวนเงิน';
+                return;
+            }
+            postAction({
+                action: 'depositManual',
+                operation: action,
+                reservationId: resId,
+                amount: amount,
+                reason: reason
+            }, 'depositManualResult');
+        }
+
+        // ── Document Source Lookup ──
+
+        function lookupDocumentSource() {
+            var key = (document.getElementById('docSourceLookup').value || '').trim();
+            var el = document.getElementById('docSourceResult');
+            if (!key) {
+                el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จหรือ Reservation ID</div>';
+                return;
+            }
+            el.innerHTML = '<div class="test-result loading">กำลังค้นหา...</div>';
+            fetch(pageUrl + '?action=lookupDocSource&q=' + encodeURIComponent(key) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-info-circle"></i> ไม่พบข้อมูล</div>';
+                        return;
+                    }
+                    var html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+                    html += '<thead><tr style="background:#f5f5f5;">'
+                          + '<th style="padding:8px; text-align:left;">เลขใบเสร็จ</th>'
+                          + '<th style="padding:8px;">Reservation</th>'
+                          + '<th style="padding:8px;">ยอด</th>'
+                          + '<th style="padding:8px;">Source</th>'
+                          + '<th style="padding:8px;">NextAcc Doc</th>'
+                          + '<th style="padding:8px;">Sync</th>'
+                          + '<th style="padding:8px;">E-Tax</th>'
+                          + '<th style="padding:8px;">ลูกค้า</th>'
+                          + '<th style="padding:8px;">PDF</th>'
+                          + '</tr></thead><tbody>';
+                    data.items.forEach(function(it) {
+                        var sourceColor = it.documentSource === 'NEXAACC' ? '#28a745' : '#6c757d';
+                        var syncColor = it.syncStatus === 'COMPLETED' ? '#28a745' : (it.syncStatus === 'FAILED' ? '#dc3545' : '#ffc107');
+                        var etaxColor = it.etaxStatus ? (it.etaxStatus === 'FAILED' ? '#dc3545' : '#28a745') : '#999';
+                        html += '<tr style="border-bottom:1px solid #eee;">'
+                              + '<td style="padding:8px; font-family:monospace;">' + (it.receiptNumber || '-') + '</td>'
+                              + '<td style="padding:8px;">' + (it.reservationId || '-') + '</td>'
+                              + '<td style="padding:8px; text-align:right;">' + (it.total ? Number(it.total).toLocaleString('th-TH', {minimumFractionDigits:2}) : '-') + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + sourceColor + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.documentSource + '</span></td>'
+                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId || '-') + '</td>'
+                              + '<td style="padding:8px;"><span style="color:' + syncColor + ';">' + (it.syncStatus || '-') + '</span></td>'
+                              + '<td style="padding:8px;">' + (it.etaxStatus ? '<span style="color:' + etaxColor + ';">' + it.etaxStatus + (it.etaxRefNumber ? ' (' + it.etaxRefNumber + ')' : '') + '</span>' : '-') + (it.etaxEmailSent ? ' ✉' : '') + '</td>'
+                              + '<td style="padding:8px;">' + (it.customerName || '-') + (it.customerEmail ? '<br/><small style="color:#999;">' + it.customerEmail + '</small>' : '') + '</td>'
+                              + '<td style="padding:8px;">' + (it.etaxPdfUrl ? '<a href="' + it.etaxPdfUrl + '" target="_blank">PDF</a>' : '-') + (it.etaxXmlUrl ? ' / <a href="' + it.etaxXmlUrl + '" target="_blank">XML</a>' : '') + '</td>'
+                              + '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
+        }
+
+        // ── Stock Adjustment / Write-off / Product Sync ──
+
+        function stockAdjustment(adjustType) {
+            var productId = document.getElementById('stockProductId').value;
+            var qty = document.getElementById('stockQuantity').value;
+            var cost = document.getElementById('stockCostPerUnit').value;
+            var reason = document.getElementById('stockReason').value;
+            var el = document.getElementById('stockResult');
+            if (!productId || !qty || !cost) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณากรอก Product ID, Quantity, Cost ให้ครบ';
+                return;
+            }
+            postAction({
+                action: 'stockAdjustment',
+                adjustType: adjustType,
+                productId: productId,
+                quantity: qty,
+                costPerUnit: cost,
+                reason: reason
+            }, 'stockResult');
+        }
+
+        function stockProductSync() {
+            var productId = document.getElementById('stockProductId').value;
+            var el = document.getElementById('stockResult');
+            if (!productId) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุ Product ID';
+                return;
+            }
+            postAction({ action: 'stockProductSync', productId: productId }, 'stockResult');
+        }
+
+        // ── E-Tax Manual Operations ──
+
+        function manualEtaxGenerate() {
+            var receiptNumber = (document.getElementById('etaxReceiptNumber').value || '').trim();
+            if (!receiptNumber) {
+                var el = document.getElementById('etaxTestResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จ';
+                return;
+            }
+            postAction({ action: 'etaxGenerate', receiptNumber: receiptNumber }, 'etaxTestResult');
+        }
+
+        function manualEtaxSendEmail() {
+            var receiptNumber = (document.getElementById('etaxReceiptNumber').value || '').trim();
+            var email = (document.getElementById('etaxOverrideEmail').value || '').trim();
+            if (!receiptNumber) {
+                var el = document.getElementById('etaxTestResult');
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณาระบุเลขที่ใบเสร็จ';
+                return;
+            }
+            postAction({ action: 'etaxSendEmail', receiptNumber: receiptNumber, email: email }, 'etaxTestResult');
         }
 
         // ── Queue Pagination & Filter ──
