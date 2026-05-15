@@ -683,6 +683,8 @@ namespace Take_Time_BangPhra.Integration
             if (creditNote.Lines == null || creditNote.Lines.Count == 0)
                 throw new ArgumentException("Credit note must have at least 1 line item.");
 
+            EnsureLinesHaveAccountCode(creditNote.Lines);
+
             return await PostAsync<InboundCreditNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/credit-notes", creditNote);
         }
@@ -692,6 +694,8 @@ namespace Take_Time_BangPhra.Integration
         {
             if (debitNote.Lines == null || debitNote.Lines.Count == 0)
                 throw new ArgumentException("Debit note must have at least 1 line item.");
+
+            EnsureLinesHaveAccountCode(debitNote.Lines);
 
             return await PostAsync<InboundDebitNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/debit-notes", debitNote);

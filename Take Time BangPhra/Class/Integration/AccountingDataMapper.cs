@@ -2061,6 +2061,39 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// Build credit note ที่กลับใบเสร็จเต็มจำนวน — ใช้แทน VoidDocumentAsync (JWT-only)
+        /// NextAcc auto-creates journal: DR Revenue + DR VAT / CR A/R และลด BalanceDue ของ original
+        /// </summary>
+        public InboundCreditNoteRequest MapReceiptVoidToCreditNote(
+            int reservationId, string receiptNumber, decimal totalAmount, bool hasVat,
+            string customerName, DateTime voidDate, string reason)
+        {
+            decimal vatAmount = hasVat ? Math.Round(totalAmount * 7m / 107m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal netAmount = totalAmount - vatAmount;
+
+            return new InboundCreditNoteRequest
+            {
+                ExternalRef = $"CN-{receiptNumber}",
+                OriginalInvoiceRef = receiptNumber,
+                CustomerName = customerName,
+                DocumentDate = voidDate,
+                Reason = reason ?? $"ยกเลิกใบเสร็จ {receiptNumber}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = $"ยกเลิกใบเสร็จ {receiptNumber}",
+                        Description = $"ยกเลิกใบเสร็จ {receiptNumber} - การจอง #{reservationId}",
+                        Quantity = 1,
+                        UnitPrice = netAmount,
+                        AccountId = GetAccountId("ROOM_REVENUE"),
+                        VatRate = hasVat ? 7m : 0m
+                    }
+                }
+            };
+        }
+
         // ══════════════════════════════════════════════
         // Integration Debit Note (ใบเพิ่มหนี้)
         // ใช้กับ /api/integration/debit-notes

@@ -1536,71 +1536,91 @@ namespace Take_Time_BangPhra.Integration
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
 
-            // ถ้าใบเสร็จเดิมมี deposit applied — โพสต์ counter-adjustment journal เพื่อกลับ adjustment
-            // ที่เคยตัด ADVANCE_DEPOSIT ไป (เพื่อเอาเจ้าหนี้กลับมา)
-            if (!string.IsNullOrEmpty(receiptNumber))
-            {
-                try
-                {
-                    decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
-                    if (applied > 0)
-                    {
-                        var info = LookupReceiptHeaderInfo(receiptNumber);
-                        if (info != null)
-                        {
-                            var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
-                                info.Value.customerName, info.Value.paymentAccountId, receiptNumber);
-                            var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                            await SafePostJournalAsync(counterResult.data.Id);
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessVoidReceipt: posted counter-adjustment for deposit applied {applied} on receipt={receiptNumber} journalId={counterResult.data.Id}",
-                                "SYSTEM");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessVoidReceipt: counter-adjustment failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
-                }
-            }
-
             try
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsReceiptDocumentMode)
                 {
-                    await _apiClient.VoidDocumentAsync(docId);
+                    // DOCUMENT mode: ใบเสร็จถูกออกผ่าน /api/integration/invoices ซึ่ง auto-creates journal
+                    // VoidDocumentAsync เรียก /document/{id}/void → ต้อง JWT auth (ไม่มีใน Integration Key)
+                    // → ใช้ credit note (/api/integration/credit-notes) แทน — ออกใบลดหนี้ที่กลับ Revenue + VAT
+                    if (!string.IsNullOrEmpty(receiptNumber))
+                    {
+                        var info = LookupReceiptHeaderInfo(receiptNumber);
+                        decimal totalAmount = LookupReceiptAmount(receiptNumber);
+                        bool hasVat = LookupBusinessHasVat();
+                        int resId = info?.reservationId ?? LookupReservationIdByReceipt(receiptNumber);
+                        string custName = info?.customerName ?? "";
+
+                        if (totalAmount > 0)
+                        {
+                            var creditNote = _mapper.MapReceiptVoidToCreditNote(
+                                resId, receiptNumber, totalAmount, hasVat, custName, DateTime.Now, reason);
+                            var cnResult = await _apiClient.CreateIntegrationCreditNoteAsync(creditNote);
+
+                            // ถ้าใบเสร็จเดิมมี deposit applied → ต้อง restore ADVANCE_DEPOSIT
+                            // (DOCUMENT mode flow มี separate adjustment journal ที่ต้อง undo)
+                            decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
+                            if (applied > 0 && info != null)
+                            {
+                                try
+                                {
+                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                        "SYSTEM");
+                                }
+                                catch (Exception adjEx)
+                                {
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj FAILED for receipt={receiptNumber}: {adjEx.Message}",
+                                        "SYSTEM");
+                                }
+                            }
+
+                            return $"CREDIT_NOTE:{cnResult?.data?.Id}";
+                        }
+                    }
+
+                    // ไม่มี receiptNumber/totalAmount → log warning, ไม่ throw (caller ลบในระบบไปแล้ว)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidReceipt(DOCUMENT): missing receiptNumber/total for nexaaccId={nexaaccId} — manual review required",
+                        "SYSTEM");
+                    return $"VOID_SKIPPED:{nexaaccId} (manual review needed)";
                 }
                 else
                 {
-                    // Prefer reverse (กลับรายการ) over void for better accounting trail
+                    // JOURNAL mode: ใบเสร็จเป็น compound journal ที่รวม deposit-debit อยู่แล้ว
+                    // → reverse เพียงพอ (NextAcc auto-flip DR↔CR ทุก line รวมทั้ง Advance Deposit)
+                    // ห้ามโพสต์ counter-adjustment เพิ่ม เพราะจะทำให้เกิด phantom liability
                     try
                     {
                         var reverseReq = new ReverseJournalEntryRequest
                         {
                             ReversalDate = DateTime.Now,
-                            Description = reason ?? "กลับรายการ — re-sync"
+                            Description = reason ?? $"กลับรายการใบเสร็จ {receiptNumber}"
                         };
                         var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            $"ProcessVoidReceipt(JOURNAL): reversed {nexaaccId} → {reverseResult.data?.Id}",
                             "SYSTEM");
                         return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
                     }
-                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    catch (AccountingApiException reverseEx) when (IsAlreadyVoided(reverseEx))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            $"ProcessVoidReceipt(JOURNAL): {nexaaccId} already reversed in NextAcc — treating as success",
                             "SYSTEM");
-                        await _apiClient.VoidJournalAsync(docId);
+                        return $"REVERSED:{nexaaccId} (already)";
                     }
                 }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -1619,9 +1639,14 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsVoucherDocumentMode)
                 {
-                    await _apiClient.VoidDocumentAsync(docId);
+                    // DOCUMENT mode: voucher = expense doc + journal. ใช้ debit note หรือ reverse journal
+                    // VoidDocumentAsync (JWT-only) ใช้ไม่ได้กับ Integration Key → log warning
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidVoucher(DOCUMENT): cannot void document {nexaaccId} via Integration API — manual review required in NextAcc",
+                        "SYSTEM");
+                    return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual void in NextAcc)";
                 }
                 else
                 {
@@ -1630,27 +1655,27 @@ namespace Take_Time_BangPhra.Integration
                         var reverseReq = new ReverseJournalEntryRequest
                         {
                             ReversalDate = DateTime.Now,
-                            Description = reason ?? "กลับรายการใบสำคัญจ่าย — re-sync"
+                            Description = reason ?? "กลับรายการใบสำคัญจ่าย"
                         };
                         var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidVoucher: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            $"ProcessVoidVoucher(JOURNAL): reversed {nexaaccId} → {reverseResult.data?.Id}",
                             "SYSTEM");
                         return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
                     }
-                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    catch (AccountingApiException reverseEx) when (IsAlreadyVoided(reverseEx))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidVoucher: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            $"ProcessVoidVoucher(JOURNAL): {nexaaccId} already reversed — treating as success",
                             "SYSTEM");
-                        await _apiClient.VoidJournalAsync(docId);
+                        return $"REVERSED:{nexaaccId} (already)";
                     }
                 }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
