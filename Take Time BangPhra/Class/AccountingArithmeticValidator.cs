@@ -172,14 +172,18 @@ namespace Take_Time_BangPhra
             int count = 0;
             foreach (var amt in lineAmounts ?? new List<decimal>())
             {
-                if (amt < 0)
-                    return ValidationResult.Fail("NEGATIVE_LINE", $"พบรายการที่มียอดติดลบ: {amt:N2}", 0, amt);
+                // อนุญาต line ติดลบเช่น "ส่วนลด" หรือ "หักมัดจำ" — ตรวจแค่ผลรวม
                 sum += amt;
                 count++;
             }
 
             if (count == 0)
                 return ValidationResult.Fail("NO_LINES", "ไม่มีรายการสินค้า/บริการในเอกสาร", 1, 0);
+
+            if (sum < 0)
+                return ValidationResult.Fail("NEGATIVE_NET_SUM",
+                    $"ยอดรวมรายการสุทธิติดลบ: {sum:N2} — กรุณาตรวจส่วนลดหรือหักมัดจำที่เกินยอด",
+                    0, sum);
 
             decimal diff = Math.Abs(sum - declaredSubtotal);
             if (diff > tolerance)

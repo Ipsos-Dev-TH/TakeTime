@@ -1284,11 +1284,28 @@ namespace Take_Time_BangPhra.Integration
 
                 // Auto-build line breakdown จาก Account_Receipt_Detail
                 // ถ้าไม่พบ → fallback เป็น single line ตาม revenueType
-                var lines = LookupReceiptLines(receiptNumber, reservationId, totalAmount, revenueType);
+                decimal depositFromLines;
+                var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+
+                // Reserve.aspx check-in สร้าง "ส่วนลด" line ติดลบเพื่อชดเชยมัดจำ → แปลงเป็น depositApplied แทน
+                // เพื่อให้ MapMultiLinePaymentToJournal คิด VAT ถูกและ checkout clearing ไม่ double-debit
+                if (depositFromLines > 0)
+                {
+                    depositApplied += depositFromLines;
+                    // Persist depositApplied ลง Account_Receipt เพื่อให้ TryEnqueueDepositClearing เห็น (anti-double-clear)
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Account_Receipt SET Deposit_Applied_Amount = @amt WHERE ID = @num AND ISNULL(Deposit_Applied_Amount, 0) < @amt",
+                            new Dictionary<string, object> { { "@amt", depositApplied }, { "@num", receiptNumber } });
+                    }
+                    catch { }
+                }
+
                 bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
 
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} multiLine={useMultiLine}",
+                    $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
                     "SYSTEM");
 
                 if (_config.IsReceiptDocumentMode)
@@ -1368,6 +1385,21 @@ namespace Take_Time_BangPhra.Integration
         private List<AccountingDataMapper.ReceiptLineSpec> LookupReceiptLines(
             string receiptNumber, int reservationId, decimal totalAmount, string revenueTypeFallback)
         {
+            decimal _;
+            return LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueTypeFallback, out _);
+        }
+
+        /// <summary>
+        /// อ่าน lines + แยก negative lines (deposit applied via UI workaround) ออกเป็น depositFromLines
+        /// Reserve.aspx check-in ใส่ "ส่วนลด" line ติดลบเพื่อชดเชยมัดจำ — ถ้าเราเอาเข้า journal ตรงๆ
+        /// VAT proration จะผิดเพราะ totalGross ลดลง แต่ positive lines ได้ proportional VAT inflate
+        /// → แยกออกเป็น depositApplied แทน แล้ว mapper ใช้ MapMultiLinePaymentToJournal pattern ปกติ
+        /// </summary>
+        private List<AccountingDataMapper.ReceiptLineSpec> LookupReceiptLinesEx(
+            string receiptNumber, int reservationId, decimal totalAmount, string revenueTypeFallback,
+            out decimal depositFromNegativeLines)
+        {
+            depositFromNegativeLines = 0m;
             try
             {
                 if (string.IsNullOrEmpty(receiptNumber)) return null;
@@ -1391,6 +1423,16 @@ namespace Take_Time_BangPhra.Integration
                     decimal amt = row["Price_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Price_Amount"]) : qty * unitPrice;
                     if (amt == 0) continue;
 
+                    sum += amt;
+
+                    // Negative line = deposit application (UI workaround). อย่าส่งเข้า lines ของ mapper
+                    // เพราะจะทำให้ VAT proration ผิด — แยกออกเป็น depositApplied แทน
+                    if (amt < 0)
+                    {
+                        depositFromNegativeLines += -amt;
+                        continue;
+                    }
+
                     int? prodTypeId = row["ProductType_ID"] != DBNull.Value ? (int?)Convert.ToInt32(row["ProductType_ID"]) : null;
                     string desc = row["Product_Data"]?.ToString() ?? "";
                     string unit = row["Product_Unit"]?.ToString();
@@ -1405,16 +1447,15 @@ namespace Take_Time_BangPhra.Integration
                         Unit = unit,
                         RevenueTypeOverride = !string.IsNullOrEmpty(revenueTypeFallback) && !prodTypeId.HasValue ? revenueTypeFallback : null
                     });
-                    sum += amt;
                 }
 
                 if (lines.Count == 0) return null;
 
-                // Sanity check: line sum ควรใกล้เคียง totalAmount
+                // Sanity check: line sum (รวม negatives) ควรใกล้เคียง totalAmount
                 if (Math.Abs(sum - totalAmount) > 0.05m)
                 {
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"LookupReceiptLines: receipt={receiptNumber} line sum={sum} ≠ totalAmount={totalAmount} (จะใช้ตาม line สำหรับ revenue split)",
+                        $"LookupReceiptLines: receipt={receiptNumber} line sum={sum} ≠ totalAmount={totalAmount} (depositFromLines={depositFromNegativeLines})",
                         "SYSTEM");
                 }
                 return lines;
