@@ -418,9 +418,23 @@ namespace Take_Time_BangPhra.Services
         }
 
         /// <summary>Auto-apply deposit ในใบเสร็จแรกที่ไม่ใช่ deposit ของการจอง — ลด liability + ป้องกัน double clear</summary>
+        /// <summary>
+        /// ห้าม auto-apply deposit ในใบเสร็จเพิ่มเติม เพราะ caller ส่ง totalAmount = "เงินสดที่จ่ายในรายการนี้"
+        /// (ไม่ใช่ "ยอดบิลทั้งหมดที่หักมัดจำแล้ว"). ถ้า apply อัตโนมัติจะทำให้:
+        ///   1. cashPortion ใน journal ผิด (น้อยกว่าเงินสดที่รับจริง)
+        ///   2. รายได้ที่บันทึกในใบเสร็จนี้ต่ำกว่าจริง
+        ///   3. CheckoutService.TryEnqueueDepositClearing เห็นว่ามัดจำถูกตัดไปแล้ว → skip
+        /// → deposit เลย "หาย" ในงบบัญชี
+        ///
+        /// แทนที่จะ auto-apply ให้ TryEnqueueDepositClearing ที่ checkout จัดการมัดจำเป็นรายการแยก
+        /// (DR Advance Deposit / CR Revenue) — แยกชัดเจน ตรวจสอบง่าย ไม่มี double-counting
+        ///
+        /// Caller ที่ต้องการ apply deposit ใน receipt อย่างชัดเจน ต้องส่ง useDeposit=true
+        /// AND ส่ง totalAmount = ยอดบิลเต็ม (รวม deposit) ไม่ใช่แค่เงินสด
+        /// </summary>
         private bool AutoShouldApplyDeposit(string reservationId)
         {
-            return LookupRemainingDepositToApply(reservationId) > 0;
+            return false;
         }
 
         /// <summary>

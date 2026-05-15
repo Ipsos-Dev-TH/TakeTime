@@ -1682,12 +1682,22 @@ namespace Take_Time_BangPhra.Integration
             if (depositAmount <= 0)
                 throw new ArgumentException($"ProcessDepositClearing: depositAmount ต้อง > 0 (ได้ {depositAmount}) reservation #{reservationId}");
 
+            // Sanity check: payload depositAmount = caller-computed "to clear" (มัดจำที่ยังไม่ได้ตัด).
+            // ห้าม override ด้วย LookupActualDepositPaid (ยอดมัดจำทั้งหมดที่จ่าย) เพราะจะทำลายการ netting
+            // ที่ CheckoutService ทำไว้แล้ว (depositPaid - alreadyAppliedInReceipts).
+            // เช็คได้เพียงว่า toClear ≤ actualDepositPaid เพื่อกัน over-clear
             decimal actualDeposit = LookupActualDepositPaid(reservationId);
-            if (actualDeposit > 0 && Math.Abs(actualDeposit - depositAmount) > 0.01m)
+            if (actualDeposit > 0 && depositAmount > actualDeposit + 0.01m)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositClearing: payload depositAmount={depositAmount} ≠ actual paid={actualDeposit} — ใช้ actual", "SYSTEM");
+                    $"ProcessDepositClearing: payload depositAmount={depositAmount} > มัดจำจริง={actualDeposit} — clamp ลงเป็น {actualDeposit}", "SYSTEM");
                 depositAmount = actualDeposit;
+            }
+            if (depositAmount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositClearing: ไม่มียอดที่ต้อง clear (อาจถูกตัดในใบเสร็จไปแล้ว) — skip reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_NO_BALANCE";
             }
 
             bool hasVat = LookupBusinessHasVat();
