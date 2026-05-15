@@ -11,6 +11,7 @@ using Microsoft.Reporting.WebForms;
 using System.Globalization;
 using iTextSharp.text.pdf.parser;
 using Take_Time_BangPhra.Class;
+using Take_Time_BangPhra;
 
 namespace Take_Time_BangPhra.Account.Report
 {
@@ -519,6 +520,41 @@ namespace Take_Time_BangPhra.Account.Report
                     ClientScript.RegisterStartupScript(this.GetType(), "summismatch",
                         $"alert('ยอดรวมรายการ ({lineSum:N2}) ไม่ตรงกับยอดรวมก่อนภาษี ({displayedTotal:N2}) กรุณาตรวจสอบ');", true);
                     return;
+                }
+
+                // Centralized accounting validation: Subtotal + VAT - WHT = Net Payable
+                {
+                    decimal vSubtotal = decimal.TryParse(TextBox3.Text, out var s) ? s : 0;
+                    decimal vVat = decimal.TryParse(TextBox4.Text, out var v) ? v : 0;
+                    decimal vWht = decimal.TryParse(txtWHTAmount.Text, out var w) ? w : 0;
+                    decimal vNet = decimal.TryParse(TextBox6.Text, out var n) ? n : 0;
+                    decimal vWhtRate = decimal.TryParse(ddlWHTRate.SelectedValue, out var wr) ? wr : 0;
+
+                    var validationResults = new System.Collections.Generic.List<AccountingArithmeticValidator.ValidationResult>();
+
+                    if (vWhtRate > 0)
+                    {
+                        var whtCheck = AccountingArithmeticValidator.ValidateWhtCalculation(vSubtotal, vWhtRate, vWht);
+                        if (!whtCheck.IsValid) validationResults.Add(whtCheck);
+                    }
+
+                    var totalCheck = AccountingArithmeticValidator.ValidateInvoiceTotal(vSubtotal, vVat, vWht, vNet);
+                    if (!totalCheck.IsValid) validationResults.Add(totalCheck);
+
+                    if (validationResults.Count > 0)
+                    {
+                        string user = Session["User"]?.ToString() ?? "ANON";
+                        foreach (var r in validationResults)
+                            AccountingArithmeticValidator.LogValidationFailure("VOUCHER", txtVoucherNo.Text, r, user);
+
+                        if (AccountingArithmeticValidator.HasBlockingError(validationResults) && !CheckBox1.Checked)
+                        {
+                            string errMsg = AccountingArithmeticValidator.FormatErrors(validationResults).Replace("'", "\\'").Replace("\n", "\\n");
+                            ClientScript.RegisterStartupScript(this.GetType(), "acctvalidate",
+                                $"alert('⚠️ ตรวจสอบความถูกต้องทางบัญชีไม่ผ่าน:\\n\\n{errMsg}\\n\\nกรุณาแก้ไขก่อนบันทึก หรือเลือก \"แทนที่ค่าตรวจสอบ\" เพื่อบันทึกแบบ override');", true);
+                            return;
+                        }
+                    }
                 }
 
                 if (!allLinesHaveCategory)

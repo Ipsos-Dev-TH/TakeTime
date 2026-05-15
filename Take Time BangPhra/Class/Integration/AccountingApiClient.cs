@@ -24,6 +24,8 @@ namespace Take_Time_BangPhra.Integration
         private readonly AccountingConfig _config;
         private readonly code _code = new code();
         private readonly string _connectionString;
+        private AccountingDataMapper _lazyMapper;
+        private AccountingDataMapper Mapper => _lazyMapper ?? (_lazyMapper = new AccountingDataMapper(_connectionString));
         private static readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
@@ -425,7 +427,11 @@ namespace Take_Time_BangPhra.Integration
             return await GetAsync<ApiResponse<List<AccountResponse>>>($"{CompanyPath}/accounting/accounts");
         }
 
-        // Journal Entries (AccountingController)
+        /// <summary>
+        /// สร้าง Journal Entry — ใช้ /api/integration/journals (X-Integration-Key auth, auto-Posted)
+        /// แปลง legacy CreateJournalEntryRequest (Guid AccountId) → CreateIntegrationJournalRequest (string AccountCode)
+        /// ภายใน เพื่อรักษา API surface เดิมของ caller
+        /// </summary>
         public async Task<ApiResponse<JournalEntryResponse>> CreateJournalAsync(CreateJournalEntryRequest journal)
         {
             if (journal.Lines == null || journal.Lines.Count == 0)
@@ -436,19 +442,51 @@ namespace Take_Time_BangPhra.Integration
 
             decimal totalDr = journal.Lines.Sum(l => l.DebitAmount);
             decimal totalCr = journal.Lines.Sum(l => l.CreditAmount);
-            if (totalDr != totalCr)
-                throw new ArgumentException(
-                    $"ยอดเดบิต ({totalDr:#,##0.00}) ไม่เท่ากับยอดเครดิต ({totalCr:#,##0.00}). " +
-                    $"Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
 
-            return await PostAsync<CreateJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
-                $"{CompanyPath}/accounting/journals", journal);
+            // Centralized double-entry validation (DR=CR within 0.01 tolerance)
+            var balCheck = AccountingArithmeticValidator.ValidateJournalBalance(totalDr, totalCr);
+            if (!balCheck.IsValid)
+            {
+                AccountingArithmeticValidator.LogValidationFailure("JOURNAL", journal.Reference, balCheck);
+                throw new ArgumentException(
+                    $"{balCheck.ErrorMessage} | Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
+            }
+
+            var integrationReq = Mapper.ConvertJournalToIntegration(journal);
+            var integrationResp = await PostAsync<CreateIntegrationJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/journals", integrationReq);
+
+            return new ApiResponse<JournalEntryResponse>
+            {
+                success = integrationResp?.success ?? false,
+                message = integrationResp?.message,
+                data = integrationResp?.data == null ? null : new JournalEntryResponse
+                {
+                    Id = integrationResp.data.Id,
+                    EntryNumber = integrationResp.data.DocumentNumber,
+                    EntryDate = integrationResp.data.CreatedAt,
+                    JournalType = journal.JournalType,
+                    Description = journal.Description,
+                    Reference = journal.Reference,
+                    Status = 1,
+                    TotalDebit = totalDr,
+                    TotalCredit = totalCr
+                }
+            };
         }
 
-        public async Task<ApiResponse<JournalEntryResponse>> PostJournalAsync(Guid entryId)
+        /// <summary>
+        /// No-op: /api/integration/journals สร้าง journal เป็น Posted อัตโนมัติแล้ว
+        /// ทิ้งไว้เพื่อ backward compatibility กับโค้ดเดิม
+        /// </summary>
+        public Task<ApiResponse<JournalEntryResponse>> PostJournalAsync(Guid entryId)
         {
-            return await PostAsync<object, ApiResponse<JournalEntryResponse>>(
-                $"{CompanyPath}/accounting/journals/{entryId}/post", null);
+            return Task.FromResult(new ApiResponse<JournalEntryResponse>
+            {
+                success = true,
+                message = "Already posted by Integration API",
+                data = new JournalEntryResponse { Id = entryId, Status = 1 }
+            });
         }
 
         public async Task VoidJournalAsync(Guid entryId)
@@ -456,10 +494,32 @@ namespace Take_Time_BangPhra.Integration
             await PostActionAsync($"{CompanyPath}/accounting/journals/{entryId}/void");
         }
 
+        /// <summary>
+        /// กลับรายการ Journal — ใช้ /api/integration/journals/reverse
+        /// </summary>
         public async Task<ApiResponse<JournalEntryResponse>> ReverseJournalAsync(Guid entryId, ReverseJournalEntryRequest request = null)
         {
-            return await PostAsync<ReverseJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
-                $"{CompanyPath}/accounting/journals/{entryId}/reverse", request);
+            var revReq = new CreateIntegrationReverseJournalRequest
+            {
+                OriginalJournalEntryId = entryId,
+                ReversalDate = request?.ReversalDate,
+                Description = request?.Description ?? $"กลับรายการ Journal #{entryId}"
+            };
+            var integrationResp = await PostAsync<CreateIntegrationReverseJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/journals/reverse", revReq);
+
+            return new ApiResponse<JournalEntryResponse>
+            {
+                success = integrationResp?.success ?? false,
+                message = integrationResp?.message,
+                data = integrationResp?.data == null ? null : new JournalEntryResponse
+                {
+                    Id = integrationResp.data.Id,
+                    EntryNumber = integrationResp.data.DocumentNumber,
+                    Status = 1,
+                    OriginalEntryId = entryId
+                }
+            };
         }
 
         public async Task DeleteJournalAsync(Guid entryId)
@@ -527,6 +587,10 @@ namespace Take_Time_BangPhra.Integration
             if (!invoice.Lines.Any(l => l.UnitPrice > 0 && l.Quantity > 0))
                 throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
 
+            EnsureLinesHaveAccountCode(invoice.Lines);
+            if (string.IsNullOrEmpty(invoice.ExternalRef) && !string.IsNullOrEmpty(invoice.Reference))
+                invoice.ExternalRef = invoice.Reference;
+
             return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/invoices", invoice);
         }
@@ -536,8 +600,30 @@ namespace Take_Time_BangPhra.Integration
             if (expense.Lines == null || expense.Lines.Count == 0)
                 throw new ArgumentException("Expense must have at least 1 line item.");
 
+            EnsureLinesHaveAccountCode(expense.Lines);
+            if (string.IsNullOrEmpty(expense.ExternalRef) && !string.IsNullOrEmpty(expense.Reference))
+                expense.ExternalRef = expense.Reference;
+
             return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/expenses", expense);
+        }
+
+        /// <summary>
+        /// NextAcc /api/integration/invoices อ่าน AccountCode (string) ไม่ใช่ AccountId (Guid)
+        /// เติม AccountCode อัตโนมัติจาก reverse lookup mapping ถ้า caller ไม่ได้ตั้งค่า
+        /// </summary>
+        private void EnsureLinesHaveAccountCode(List<IntegrationLineRequest> lines)
+        {
+            if (lines == null || lines.Count == 0) return;
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrEmpty(line.AccountCode) && line.AccountId.HasValue && line.AccountId.Value != Guid.Empty)
+                {
+                    var code = Mapper.GetAccountCodeFromId(line.AccountId.Value);
+                    if (!string.IsNullOrEmpty(code))
+                        line.AccountCode = code;
+                }
+            }
         }
 
         // Integration Payments (/api/integration/payments)
@@ -591,11 +677,23 @@ namespace Take_Time_BangPhra.Integration
                 "/api/integration/customers", customer);
         }
 
+        // Integration Products (/api/integration/products) — upsert by Code
+        public async Task<ApiResponse<IntegrationDocumentResponse>> SyncIntegrationProductAsync(InboundProductRequest product)
+        {
+            if (string.IsNullOrEmpty(product?.Code))
+                throw new ArgumentException("Integration product must have a Code (used as upsert key).");
+
+            return await PostAsync<InboundProductRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/products", product);
+        }
+
         // Integration Credit Notes (/api/integration/credit-notes)
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationCreditNoteAsync(InboundCreditNoteRequest creditNote)
         {
             if (creditNote.Lines == null || creditNote.Lines.Count == 0)
                 throw new ArgumentException("Credit note must have at least 1 line item.");
+
+            EnsureLinesHaveAccountCode(creditNote.Lines);
 
             return await PostAsync<InboundCreditNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/credit-notes", creditNote);
@@ -606,6 +704,8 @@ namespace Take_Time_BangPhra.Integration
         {
             if (debitNote.Lines == null || debitNote.Lines.Count == 0)
                 throw new ArgumentException("Debit note must have at least 1 line item.");
+
+            EnsureLinesHaveAccountCode(debitNote.Lines);
 
             return await PostAsync<InboundDebitNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
                 "/api/integration/debit-notes", debitNote);
@@ -828,6 +928,7 @@ namespace Take_Time_BangPhra.Integration
 
             ValidateDnsResolution(_config.BaseUrl);
             CheckAuthCooldown();
+            EnsureLinesHaveAccountCode(invoice.Lines);
 
             string url = $"{_config.BaseUrl.TrimEnd('/')}/api/integration/invoices/multipart";
 

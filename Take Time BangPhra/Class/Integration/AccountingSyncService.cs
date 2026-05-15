@@ -1284,11 +1284,28 @@ namespace Take_Time_BangPhra.Integration
 
                 // Auto-build line breakdown จาก Account_Receipt_Detail
                 // ถ้าไม่พบ → fallback เป็น single line ตาม revenueType
-                var lines = LookupReceiptLines(receiptNumber, reservationId, totalAmount, revenueType);
+                decimal depositFromLines;
+                var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+
+                // Reserve.aspx check-in สร้าง "ส่วนลด" line ติดลบเพื่อชดเชยมัดจำ → แปลงเป็น depositApplied แทน
+                // เพื่อให้ MapMultiLinePaymentToJournal คิด VAT ถูกและ checkout clearing ไม่ double-debit
+                if (depositFromLines > 0)
+                {
+                    depositApplied += depositFromLines;
+                    // Persist depositApplied ลง Account_Receipt เพื่อให้ TryEnqueueDepositClearing เห็น (anti-double-clear)
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Account_Receipt SET Deposit_Applied_Amount = @amt WHERE ID = @num AND ISNULL(Deposit_Applied_Amount, 0) < @amt",
+                            new Dictionary<string, object> { { "@amt", depositApplied }, { "@num", receiptNumber } });
+                    }
+                    catch { }
+                }
+
                 bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
 
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} multiLine={useMultiLine}",
+                    $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
                     "SYSTEM");
 
                 if (_config.IsReceiptDocumentMode)
@@ -1368,6 +1385,21 @@ namespace Take_Time_BangPhra.Integration
         private List<AccountingDataMapper.ReceiptLineSpec> LookupReceiptLines(
             string receiptNumber, int reservationId, decimal totalAmount, string revenueTypeFallback)
         {
+            decimal _;
+            return LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueTypeFallback, out _);
+        }
+
+        /// <summary>
+        /// อ่าน lines + แยก negative lines (deposit applied via UI workaround) ออกเป็น depositFromLines
+        /// Reserve.aspx check-in ใส่ "ส่วนลด" line ติดลบเพื่อชดเชยมัดจำ — ถ้าเราเอาเข้า journal ตรงๆ
+        /// VAT proration จะผิดเพราะ totalGross ลดลง แต่ positive lines ได้ proportional VAT inflate
+        /// → แยกออกเป็น depositApplied แทน แล้ว mapper ใช้ MapMultiLinePaymentToJournal pattern ปกติ
+        /// </summary>
+        private List<AccountingDataMapper.ReceiptLineSpec> LookupReceiptLinesEx(
+            string receiptNumber, int reservationId, decimal totalAmount, string revenueTypeFallback,
+            out decimal depositFromNegativeLines)
+        {
+            depositFromNegativeLines = 0m;
             try
             {
                 if (string.IsNullOrEmpty(receiptNumber)) return null;
@@ -1391,6 +1423,16 @@ namespace Take_Time_BangPhra.Integration
                     decimal amt = row["Price_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Price_Amount"]) : qty * unitPrice;
                     if (amt == 0) continue;
 
+                    sum += amt;
+
+                    // Negative line = deposit application (UI workaround). อย่าส่งเข้า lines ของ mapper
+                    // เพราะจะทำให้ VAT proration ผิด — แยกออกเป็น depositApplied แทน
+                    if (amt < 0)
+                    {
+                        depositFromNegativeLines += -amt;
+                        continue;
+                    }
+
                     int? prodTypeId = row["ProductType_ID"] != DBNull.Value ? (int?)Convert.ToInt32(row["ProductType_ID"]) : null;
                     string desc = row["Product_Data"]?.ToString() ?? "";
                     string unit = row["Product_Unit"]?.ToString();
@@ -1405,16 +1447,15 @@ namespace Take_Time_BangPhra.Integration
                         Unit = unit,
                         RevenueTypeOverride = !string.IsNullOrEmpty(revenueTypeFallback) && !prodTypeId.HasValue ? revenueTypeFallback : null
                     });
-                    sum += amt;
                 }
 
                 if (lines.Count == 0) return null;
 
-                // Sanity check: line sum ควรใกล้เคียง totalAmount
+                // Sanity check: line sum (รวม negatives) ควรใกล้เคียง totalAmount
                 if (Math.Abs(sum - totalAmount) > 0.05m)
                 {
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"LookupReceiptLines: receipt={receiptNumber} line sum={sum} ≠ totalAmount={totalAmount} (จะใช้ตาม line สำหรับ revenue split)",
+                        $"LookupReceiptLines: receipt={receiptNumber} line sum={sum} ≠ totalAmount={totalAmount} (depositFromLines={depositFromNegativeLines})",
                         "SYSTEM");
                 }
                 return lines;
@@ -1425,6 +1466,49 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupReceiptLines failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
                 return null;
             }
+        }
+
+        /// <summary>ดึง voucherId + supplier name สำหรับ debit note void flow</summary>
+        private (int voucherId, string supplierName)? LookupSupplierFromVoucherDoc(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 P.UID AS VoucherId, ISNULL(V.Name, '') AS SupplierName
+                      FROM Account_Payment P
+                      LEFT JOIN Vendor V ON V.ID = P.Vendor_ID
+                      WHERE P.ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0)
+                {
+                    int vid = dt.Rows[0]["VoucherId"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["VoucherId"]) : 0;
+                    string name = dt.Rows[0]["SupplierName"]?.ToString() ?? "";
+                    return (vid, name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupSupplierFromVoucherDoc failed for doc={documentNumber}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>ดึงยอดรวมของ voucher (Account_Payment.Total_Amount) สำหรับ debit note void</summary>
+        private decimal LookupVoucherAmount(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return 0m;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Total_Amount FROM Account_Payment WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Total_Amount"] != DBNull.Value)
+                    return Convert.ToDecimal(dt.Rows[0]["Total_Amount"]);
+            }
+            catch { }
+            return 0m;
         }
 
         /// <summary>ดึงข้อมูล header ของใบเสร็จ (resId, customerName, paymentMethod, paymentAccountId) สำหรับ counter-adjustment</summary>
@@ -1495,71 +1579,91 @@ namespace Take_Time_BangPhra.Integration
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
 
-            // ถ้าใบเสร็จเดิมมี deposit applied — โพสต์ counter-adjustment journal เพื่อกลับ adjustment
-            // ที่เคยตัด ADVANCE_DEPOSIT ไป (เพื่อเอาเจ้าหนี้กลับมา)
-            if (!string.IsNullOrEmpty(receiptNumber))
-            {
-                try
-                {
-                    decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
-                    if (applied > 0)
-                    {
-                        var info = LookupReceiptHeaderInfo(receiptNumber);
-                        if (info != null)
-                        {
-                            var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
-                                info.Value.customerName, info.Value.paymentAccountId, receiptNumber);
-                            var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                            await SafePostJournalAsync(counterResult.data.Id);
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessVoidReceipt: posted counter-adjustment for deposit applied {applied} on receipt={receiptNumber} journalId={counterResult.data.Id}",
-                                "SYSTEM");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessVoidReceipt: counter-adjustment failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
-                }
-            }
-
             try
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsReceiptDocumentMode)
                 {
-                    await _apiClient.VoidDocumentAsync(docId);
+                    // DOCUMENT mode: ใบเสร็จถูกออกผ่าน /api/integration/invoices ซึ่ง auto-creates journal
+                    // VoidDocumentAsync เรียก /document/{id}/void → ต้อง JWT auth (ไม่มีใน Integration Key)
+                    // → ใช้ credit note (/api/integration/credit-notes) แทน — ออกใบลดหนี้ที่กลับ Revenue + VAT
+                    if (!string.IsNullOrEmpty(receiptNumber))
+                    {
+                        var info = LookupReceiptHeaderInfo(receiptNumber);
+                        decimal totalAmount = LookupReceiptAmount(receiptNumber);
+                        bool hasVat = LookupBusinessHasVat();
+                        int resId = info?.reservationId ?? LookupReservationIdByReceipt(receiptNumber);
+                        string custName = info?.customerName ?? "";
+
+                        if (totalAmount > 0)
+                        {
+                            var creditNote = _mapper.MapReceiptVoidToCreditNote(
+                                resId, receiptNumber, totalAmount, hasVat, custName, DateTime.Now, reason);
+                            var cnResult = await _apiClient.CreateIntegrationCreditNoteAsync(creditNote);
+
+                            // ถ้าใบเสร็จเดิมมี deposit applied → ต้อง restore ADVANCE_DEPOSIT
+                            // (DOCUMENT mode flow มี separate adjustment journal ที่ต้อง undo)
+                            decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
+                            if (applied > 0 && info != null)
+                            {
+                                try
+                                {
+                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                        "SYSTEM");
+                                }
+                                catch (Exception adjEx)
+                                {
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj FAILED for receipt={receiptNumber}: {adjEx.Message}",
+                                        "SYSTEM");
+                                }
+                            }
+
+                            return $"CREDIT_NOTE:{cnResult?.data?.Id}";
+                        }
+                    }
+
+                    // ไม่มี receiptNumber/totalAmount → log warning, ไม่ throw (caller ลบในระบบไปแล้ว)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidReceipt(DOCUMENT): missing receiptNumber/total for nexaaccId={nexaaccId} — manual review required",
+                        "SYSTEM");
+                    return $"VOID_SKIPPED:{nexaaccId} (manual review needed)";
                 }
                 else
                 {
-                    // Prefer reverse (กลับรายการ) over void for better accounting trail
+                    // JOURNAL mode: ใบเสร็จเป็น compound journal ที่รวม deposit-debit อยู่แล้ว
+                    // → reverse เพียงพอ (NextAcc auto-flip DR↔CR ทุก line รวมทั้ง Advance Deposit)
+                    // ห้ามโพสต์ counter-adjustment เพิ่ม เพราะจะทำให้เกิด phantom liability
                     try
                     {
                         var reverseReq = new ReverseJournalEntryRequest
                         {
                             ReversalDate = DateTime.Now,
-                            Description = reason ?? "กลับรายการ — re-sync"
+                            Description = reason ?? $"กลับรายการใบเสร็จ {receiptNumber}"
                         };
                         var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            $"ProcessVoidReceipt(JOURNAL): reversed {nexaaccId} → {reverseResult.data?.Id}",
                             "SYSTEM");
                         return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
                     }
-                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    catch (AccountingApiException reverseEx) when (IsAlreadyVoided(reverseEx))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            $"ProcessVoidReceipt(JOURNAL): {nexaaccId} already reversed in NextAcc — treating as success",
                             "SYSTEM");
-                        await _apiClient.VoidJournalAsync(docId);
+                        return $"REVERSED:{nexaaccId} (already)";
                     }
                 }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
+                    $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -1575,12 +1679,39 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
+            string documentNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : null;
 
             try
             {
-                if (_config.IsDocumentMode)
+                if (_config.IsVoucherDocumentMode)
                 {
-                    await _apiClient.VoidDocumentAsync(docId);
+                    // DOCUMENT mode: voucher = expense doc + journal posted by NextAcc
+                    // VoidDocumentAsync (JWT-only) ไม่ work — ใช้ /api/integration/debit-notes แทน
+                    // (ใบเพิ่มหนี้ฝั่งซื้อ: CR Expense + CR VAT / DR A/P → กลับ expense + ลด BalanceDue)
+                    if (!string.IsNullOrEmpty(documentNumber))
+                    {
+                        var supplier = LookupSupplierFromVoucherDoc(documentNumber);
+                        decimal totalAmount = LookupVoucherAmount(documentNumber);
+                        bool hasVat = LookupBusinessHasVat();
+
+                        if (totalAmount > 0)
+                        {
+                            var debitNote = _mapper.MapVoucherVoidToDebitNote(
+                                supplier?.voucherId ?? 0, documentNumber, totalAmount, hasVat,
+                                supplier?.supplierName ?? "", DateTime.Now, reason);
+                            var dnResult = await _apiClient.CreateIntegrationDebitNoteAsync(debitNote);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnResult?.data?.Id}",
+                                "SYSTEM");
+                            return $"DEBIT_NOTE:{dnResult?.data?.Id}";
+                        }
+                    }
+
+                    // ไม่มี documentNumber/total → log warning
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidVoucher(DOCUMENT): missing documentNumber/total for nexaaccId={nexaaccId} — manual review",
+                        "SYSTEM");
+                    return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual review needed)";
                 }
                 else
                 {
@@ -1589,27 +1720,27 @@ namespace Take_Time_BangPhra.Integration
                         var reverseReq = new ReverseJournalEntryRequest
                         {
                             ReversalDate = DateTime.Now,
-                            Description = reason ?? "กลับรายการใบสำคัญจ่าย — re-sync"
+                            Description = reason ?? "กลับรายการใบสำคัญจ่าย"
                         };
                         var reverseResult = await _apiClient.ReverseJournalAsync(docId, reverseReq);
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidVoucher: reversed journal {nexaaccId} → {reverseResult.data?.Id}",
+                            $"ProcessVoidVoucher(JOURNAL): reversed {nexaaccId} → {reverseResult.data?.Id}",
                             "SYSTEM");
                         return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
                     }
-                    catch (AccountingApiException reverseEx) when (reverseEx.StatusCode == 400 || reverseEx.StatusCode == 404)
+                    catch (AccountingApiException reverseEx) when (IsAlreadyVoided(reverseEx))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidVoucher: reverse failed ({reverseEx.StatusCode}), falling back to void",
+                            $"ProcessVoidVoucher(JOURNAL): {nexaaccId} already reversed — treating as success",
                             "SYSTEM");
-                        await _apiClient.VoidJournalAsync(docId);
+                        return $"REVERSED:{nexaaccId} (already)";
                     }
                 }
             }
             catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided/reversed in Nexaacc — treating as success",
+                    $"ProcessVoidVoucher: nexaaccId={nexaaccId} already voided — treating as success",
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
@@ -1682,18 +1813,30 @@ namespace Take_Time_BangPhra.Integration
             if (depositAmount <= 0)
                 throw new ArgumentException($"ProcessDepositClearing: depositAmount ต้อง > 0 (ได้ {depositAmount}) reservation #{reservationId}");
 
+            // Sanity check: payload depositAmount = caller-computed "to clear" (มัดจำที่ยังไม่ได้ตัด).
+            // ห้าม override ด้วย LookupActualDepositPaid (ยอดมัดจำทั้งหมดที่จ่าย) เพราะจะทำลายการ netting
+            // ที่ CheckoutService ทำไว้แล้ว (depositPaid - alreadyAppliedInReceipts).
+            // เช็คได้เพียงว่า toClear ≤ actualDepositPaid เพื่อกัน over-clear
             decimal actualDeposit = LookupActualDepositPaid(reservationId);
-            if (actualDeposit > 0 && Math.Abs(actualDeposit - depositAmount) > 0.01m)
+            if (actualDeposit > 0 && depositAmount > actualDeposit + 0.01m)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositClearing: payload depositAmount={depositAmount} ≠ actual paid={actualDeposit} — ใช้ actual", "SYSTEM");
+                    $"ProcessDepositClearing: payload depositAmount={depositAmount} > มัดจำจริง={actualDeposit} — clamp ลงเป็น {actualDeposit}", "SYSTEM");
                 depositAmount = actualDeposit;
             }
+            if (depositAmount <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositClearing: ไม่มียอดที่ต้อง clear (อาจถูกตัดในใบเสร็จไปแล้ว) — skip reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_NO_BALANCE";
+            }
+
+            bool hasVat = LookupBusinessHasVat();
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount}", "SYSTEM");
+                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef);
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat);
             var result = await _apiClient.CreateJournalAsync(journal);
             await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
@@ -1869,34 +2012,24 @@ namespace Take_Time_BangPhra.Integration
             if (info == null)
                 throw new ArgumentException($"ProcessProductSync: ไม่พบ product #{productId} ในฐานข้อมูล");
 
-            // ตรวจ cache — ถ้ามี Nexaacc_Product_Id อยู่แล้ว → UPDATE
-            Guid? existingNexaaccId = LookupCachedNexaaccProductId(productId);
-
-            var req = _mapper.MapProductToNexaacc(productId, info.Value.name, info.Value.description,
+            // ใช้ /api/integration/products (X-Integration-Key) — upsert by Code อัตโนมัติ
+            // แทน CreateProductAsync/UpdateProductAsync ที่เป็น JWT-only endpoint
+            var req = _mapper.MapProductToIntegration(productId, info.Value.name, info.Value.description,
                 info.Value.sellPrice, info.Value.costPrice, info.Value.unit, info.Value.categoryName);
 
+            var result = await _apiClient.SyncIntegrationProductAsync(req);
+            // Integration product response อาจไม่ส่ง Guid ID (return Code แทน) — fallback to cached if needed
+            Guid? existingNexaaccId = LookupCachedNexaaccProductId(productId);
             Guid productGuid;
-            if (existingNexaaccId.HasValue && existingNexaaccId.Value != Guid.Empty)
-            {
-                var updateReq = new UpdateProductRequest
-                {
-                    Name = req.Name,
-                    Description = req.Description,
-                    SellingPrice = req.SellingPrice,
-                    CostPrice = req.CostPrice,
-                    Unit = req.Unit
-                };
-                await _apiClient.UpdateProductAsync(existingNexaaccId.Value, updateReq);
+            if (result?.data?.Id != null && result.data.Id != Guid.Empty)
+                productGuid = result.data.Id;
+            else if (existingNexaaccId.HasValue && existingNexaaccId.Value != Guid.Empty)
                 productGuid = existingNexaaccId.Value;
-            }
             else
-            {
-                var createResult = await _apiClient.CreateProductAsync(req);
-                productGuid = RequireValidDocId(createResult?.data?.Id, $"CreateProduct productId={productId}");
-            }
+                productGuid = Guid.Empty; // upsert succeeded but no Guid yet — Code ใช้ lookup ครั้งถัดไป
 
             UpsertProductMap(productId, productGuid, info.Value.name, $"TT-{productId:D5}", "SYNCED", null);
-            return productGuid.ToString();
+            return productGuid == Guid.Empty ? $"SYNCED:{req.Code}" : productGuid.ToString();
         }
 
         private (string name, string description, decimal sellPrice, decimal costPrice, string unit, string categoryName)? LookupProductInfo(int productId)
@@ -2021,6 +2154,19 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupActualDepositPaid failed for resId={reservationId}: {ex.Message}", "SYSTEM");
             }
             return 0m;
+        }
+
+        private bool LookupBusinessHasVat()
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                if (dt?.Rows.Count > 0)
+                    return dt.Rows[0]["Use_Vat"]?.ToString() == "True";
+            }
+            catch { }
+            return false;
         }
 
         // ──────────────────────────────────────────────

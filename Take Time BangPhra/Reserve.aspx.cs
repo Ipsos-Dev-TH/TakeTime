@@ -1414,7 +1414,7 @@ namespace Take_Time_BangPhra
                 DataTable dtAccommodation = (DataTable)Session["dtAccommodation"];
                 DataTable dtItems = (DataTable)Session["dtItems"];
                 decimal deposit = 0;
-                bool IsDeposit = true;
+                bool IsDeposit = false;
                 DataTable dtReserve = new DataTable();
                 try
                 {
@@ -1433,6 +1433,13 @@ namespace Take_Time_BangPhra
                 try
                 {
                     deposit = Convert.ToDecimal(TextBox5.Text);
+                }
+                catch { }
+
+                try
+                {
+                    decimal totalPrice = Convert.ToDecimal(TextBox4.Text);
+                    IsDeposit = deposit > 0 && deposit < totalPrice;
                 }
                 catch { }
                 int checkgrid1 = 0;
@@ -4319,6 +4326,39 @@ namespace Take_Time_BangPhra
 
         public string createReceipt(string Reservation_ID, double Total_Amount,DataTable dtReserve,bool IsDeposit,DateTime docDate,bool etax)
         {
+            // Safety: ตรวจสอบว่าชำระครบแล้ว → ต้องไม่เป็นมัดจำ
+            if (IsDeposit)
+            {
+                try
+                {
+                    var dtRes = code.DatabaseQuerySafe(conn,
+                        "SELECT TotalPrice FROM Reservation WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", Reservation_ID } });
+                    if (dtRes?.Rows.Count > 0)
+                    {
+                        double totalPrice = Convert.ToDouble(dtRes.Rows[0]["TotalPrice"]);
+                        double totalPaid = Total_Amount;
+                        try
+                        {
+                            var dtPaid = code.DatabaseQuerySafe(conn,
+                                "SELECT ISNULL(SUM(Total_Amount), 0) AS Paid FROM Account_Receipt WHERE Reservation_ID = @id AND (Status = 'Normal' OR Status IS NULL) AND IsDeposit = 1",
+                                new Dictionary<string, object> { { "@id", Reservation_ID } });
+                            if (dtPaid?.Rows.Count > 0)
+                                totalPaid += Convert.ToDouble(dtPaid.Rows[0]["Paid"]);
+                        }
+                        catch { }
+                        if (totalPaid >= totalPrice)
+                        {
+                            IsDeposit = false;
+                            code2.Logs(conn, "Receipt IsDeposit Override",
+                                $"Reservation {Reservation_ID}: payment {totalPaid} >= price {totalPrice}, changed IsDeposit to false",
+                                "SYSTEM");
+                        }
+                    }
+                }
+                catch { }
+            }
+
             string status = "Normal";
             string ReceiptID = "";
             if (Total_Amount > 0)
@@ -4333,6 +4373,18 @@ namespace Take_Time_BangPhra
                     Vat = Total_Amount - PriceExcludeVat;
                     PriceExcludeVat = TwoDecimalPoints(PriceExcludeVat);
                     Vat = TwoDecimalPoints(Vat);
+
+                    // Validate: Subtotal + VAT = Total
+                    var rcptCheck = AccountingArithmeticValidator.ValidateReceiptTotal(
+                        (decimal)PriceExcludeVat, (decimal)Vat, (decimal)Total_Amount);
+                    if (!rcptCheck.IsValid)
+                    {
+                        AccountingArithmeticValidator.LogValidationFailure("RECEIPT", Reservation_ID, rcptCheck,
+                            Session["User"]?.ToString() ?? "ANON");
+                        ClientScript.RegisterStartupScript(this.GetType(), "rcptvalidate",
+                            $"alert('⚠️ ตรวจสอบยอดใบเสร็จไม่ผ่าน:\\n{rcptCheck.ErrorMessage.Replace("'", "\\'")}\\n\\nกรุณาตรวจสอบยอด VAT');", true);
+                        return "";
+                    }
                 }
                 else
                 {

@@ -777,6 +777,7 @@
     <Compile Include="Class\AccommodationAvailabilityService.cs" />
     <Compile Include="Class\CodeHelper.cs" />
     <Compile Include="Class\CustomerService.cs" />
+    <Compile Include="Class\AccountingArithmeticValidator.cs" />
     <Compile Include="Class\AccountingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />

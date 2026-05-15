@@ -288,6 +288,9 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
+                if (isDeposit)
+                    isDeposit = ValidateIsDeposit(reservationId, totalAmount);
+
                 if (totalAmount > 0)
                 {
                     string receiptId = CreateReceiptDocumentNumber(docDate);
@@ -302,6 +305,16 @@ namespace Take_Time_BangPhra.Services
                         vat = totalAmount - priceExcludeVat;
                         priceExcludeVat = CalculateTwoDecimalPoints(priceExcludeVat);
                         vat = CalculateTwoDecimalPoints(vat);
+
+                        // Validate: Subtotal + VAT = Total (sales receipt arithmetic)
+                        var rcptCheck = AccountingArithmeticValidator.ValidateReceiptTotal(
+                            (decimal)priceExcludeVat, (decimal)vat, (decimal)totalAmount);
+                        if (!rcptCheck.IsValid)
+                        {
+                            AccountingArithmeticValidator.LogValidationFailure("RECEIPT", reservationId, rcptCheck, createdById);
+                            throw new InvalidOperationException(
+                                $"Receipt arithmetic validation failed for reservation #{reservationId}: {rcptCheck.ErrorMessage}");
+                        }
                     }
 
                     // ปรับสัดส่วนรายละเอียดให้ตรงกับยอดรวมก่อนบันทึก
@@ -352,6 +365,31 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        /// <summary>ตรวจสอบว่าการชำระเงินนี้ควรเป็นมัดจำจริงหรือไม่ — ถ้ายอดรวม (เดิม+ครั้งนี้) >= ราคาห้อง ต้องไม่ใช่มัดจำ</summary>
+        private bool ValidateIsDeposit(string reservationId, double currentAmount)
+        {
+            try
+            {
+                var p = new System.Collections.Generic.Dictionary<string, object> { { "@id", reservationId } };
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        ISNULL(R.TotalPrice, 0) AS TotalPrice,
+                        ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                WHERE Reservation_ID = @id AND IsDeposit = 1
+                                  AND (Status = 'Normal' OR Status IS NULL)), 0) AS PriorDeposits
+                      FROM Reservation R WHERE R.ID = @id", p);
+                if (dt?.Rows.Count > 0)
+                {
+                    double totalPrice = Convert.ToDouble(dt.Rows[0]["TotalPrice"]);
+                    double priorDeposits = Convert.ToDouble(dt.Rows[0]["PriorDeposits"]);
+                    if (totalPrice > 0 && (priorDeposits + currentAmount) >= totalPrice)
+                        return false;
+                }
+            }
+            catch { }
+            return true;
+        }
+
         /// <summary>หา remaining deposit balance (จ่ายแล้ว - หักไปแล้วในใบเสร็จก่อนหน้า) เพื่อนำมาหักในใบเสร็จใหม่</summary>
         private double LookupRemainingDepositToApply(string reservationId)
         {
@@ -380,9 +418,23 @@ namespace Take_Time_BangPhra.Services
         }
 
         /// <summary>Auto-apply deposit ในใบเสร็จแรกที่ไม่ใช่ deposit ของการจอง — ลด liability + ป้องกัน double clear</summary>
+        /// <summary>
+        /// ห้าม auto-apply deposit ในใบเสร็จเพิ่มเติม เพราะ caller ส่ง totalAmount = "เงินสดที่จ่ายในรายการนี้"
+        /// (ไม่ใช่ "ยอดบิลทั้งหมดที่หักมัดจำแล้ว"). ถ้า apply อัตโนมัติจะทำให้:
+        ///   1. cashPortion ใน journal ผิด (น้อยกว่าเงินสดที่รับจริง)
+        ///   2. รายได้ที่บันทึกในใบเสร็จนี้ต่ำกว่าจริง
+        ///   3. CheckoutService.TryEnqueueDepositClearing เห็นว่ามัดจำถูกตัดไปแล้ว → skip
+        /// → deposit เลย "หาย" ในงบบัญชี
+        ///
+        /// แทนที่จะ auto-apply ให้ TryEnqueueDepositClearing ที่ checkout จัดการมัดจำเป็นรายการแยก
+        /// (DR Advance Deposit / CR Revenue) — แยกชัดเจน ตรวจสอบง่าย ไม่มี double-counting
+        ///
+        /// Caller ที่ต้องการ apply deposit ใน receipt อย่างชัดเจน ต้องส่ง useDeposit=true
+        /// AND ส่ง totalAmount = ยอดบิลเต็ม (รวม deposit) ไม่ใช่แค่เงินสด
+        /// </summary>
         private bool AutoShouldApplyDeposit(string reservationId)
         {
-            return LookupRemainingDepositToApply(reservationId) > 0;
+            return false;
         }
 
         /// <summary>

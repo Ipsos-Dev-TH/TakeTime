@@ -252,6 +252,15 @@ namespace Take_Time_BangPhra.Services
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
 
+                // Void deposit receipts so subsequent lookups (LookupActualDepositPaid, LookupRemainingDepositToApply)
+                // do not see a phantom liability for a cancelled reservation
+                _dbHelper.ExecuteNonQueryWithParams(
+                    @"UPDATE [dbo].[Account_Receipt]
+                      SET Status = N'Cancel'
+                      WHERE Reservation_ID = @ReservationId
+                        AND IsDeposit = 1
+                        AND (Status = 'Normal' OR Status IS NULL)", parameters);
+
                 // ตัดเจ้าหนี้ ADVANCE_DEPOSIT → CR Cash/Bank (คืนเงินสด)
                 TryEnqueueDepositRefund(reservationId, depositAmt, customerName, paymentMethod);
 
@@ -303,6 +312,14 @@ namespace Take_Time_BangPhra.Services
                 _dbHelper.ExecuteNonQueryWithParams("UPDATE [dbo].[Reservation] SET TotalPrice = 0, [Status] = N'ยกเลิกไม่คืนเงิน' WHERE ID = @ReservationId", parameters);
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId", parameters);
                 _dbHelper.ExecuteNonQueryWithParams("DELETE FROM [dbo].[Reservation_Items] WHERE Reservation_ID = @ReservationId", parameters);
+
+                // Void deposit receipts (forfeit flow ก็เช่นกัน) — ยอดถูกย้ายไปเป็น Forfeit Income แล้ว
+                _dbHelper.ExecuteNonQueryWithParams(
+                    @"UPDATE [dbo].[Account_Receipt]
+                      SET Status = N'Forfeit'
+                      WHERE Reservation_ID = @ReservationId
+                        AND IsDeposit = 1
+                        AND (Status = 'Normal' OR Status IS NULL)", parameters);
 
                 // ริบมัดจำ → DR ADVANCE_DEPOSIT, CR Forfeit Income
                 TryEnqueueDepositForfeit(reservationId, depositAmt, customerName, "ยกเลิกไม่คืนเงิน");

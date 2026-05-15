@@ -46,6 +46,23 @@ namespace Take_Time_BangPhra
                 var resData = GetReservationData(reservationId);
                 string customerName = resData?["CustomerName"]?.ToString() ?? "ลูกค้า";
                 decimal depositAmt = resData != null ? Convert.ToDecimal(resData["Deposit"]) : 0;
+                decimal totalPaid = resData != null && resData.ContainsKey("TotalPaid") ? Convert.ToDecimal(resData["TotalPaid"]) : 0;
+                decimal totalPrice = resData != null ? Convert.ToDecimal(resData["TotalPrice"]) : 0;
+
+                // Detect under-paid checkout: ลูกค้าจองห้อง 1600 จ่ายมัดจำ 500 แล้วเช็คเอาท์โดยไม่จ่ายเพิ่ม
+                // → รายได้ที่ยังไม่ได้รับ = TotalPrice - TotalPaid → log warning + validation
+                decimal expectedPayable = totalPrice + damageCharge + missingItemsCharge;
+                if (totalPaid + 0.01m < expectedPayable)
+                {
+                    decimal outstanding = expectedPayable - totalPaid;
+                    var validation = AccountingArithmeticValidator.ValidationResult.Fail(
+                        "CHECKOUT_UNDERPAID",
+                        $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท",
+                        expectedPayable, totalPaid, blocking: false);
+                    AccountingArithmeticValidator.LogValidationFailure("CHECKOUT", reservationId.ToString(), validation, adminId.ToString());
+                    _code.Logs(_connectionString, "Checkout",
+                        $"⚠️ Reservation #{reservationId} checkout under-paid: outstanding {outstanding:N2} (expected {expectedPayable:N2}, paid {totalPaid:N2}) — admin must collect or write off", "SYSTEM");
+                }
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -154,46 +171,53 @@ namespace Take_Time_BangPhra
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT r.Deposit, r.TotalPrice,
                              ISNULL(c.Customer_Name, c.NickName) AS CustomerName,
-                             ISNULL(ph.TotalPaid, 0) AS TotalPaid
+                             ISNULL(dep.DepositPaid, 0) AS DepositPaid,
+                             ISNULL(allp.TotalPaid, 0) AS TotalPaid
                       FROM Reservation r
                       LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      LEFT JOIN (
+                          SELECT Reservation_ID, SUM(Total_Amount) AS DepositPaid
+                          FROM Account_Receipt
+                          WHERE IsDeposit = 1 AND (Status = 'Normal' OR Status IS NULL)
+                          GROUP BY Reservation_ID
+                      ) dep ON dep.Reservation_ID = r.ID
                       LEFT JOIN (
                           SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid
                           FROM Payment_History
                           WHERE Status = 'COMPLETED'
                           GROUP BY Reservation_ID
-                      ) ph ON ph.Reservation_ID = r.ID
+                      ) allp ON allp.Reservation_ID = r.ID
                       WHERE r.ID = @id", parameters);
 
                 if (dt?.Rows.Count > 0)
                 {
                     var row = dt.Rows[0];
                     decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    decimal depositPaid = row["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(row["DepositPaid"]) : 0m;
                     decimal totalPaid = row["TotalPaid"] != DBNull.Value ? Convert.ToDecimal(row["TotalPaid"]) : 0m;
                     decimal totalPrice = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
 
-                    // Use TotalPaid from Payment_History as the reliable deposit amount.
-                    // Reservation.Deposit can be zeroed by cancellation flows,
-                    // but Payment_History reflects actual payments received.
-                    // Fallback chain: TotalPaid > Deposit > TotalPrice
+                    // Truth source for "outstanding deposit liability" = Account_Receipt where IsDeposit=1.
+                    // ห้ามใช้ Payment_History.TotalPaid ที่รวม final payment ด้วย (ทำให้ over-clear)
                     decimal effectiveDeposit;
-                    if (totalPaid > 0)
-                        effectiveDeposit = totalPaid;
+                    if (depositPaid > 0)
+                        effectiveDeposit = depositPaid;
                     else if (deposit > 0)
                         effectiveDeposit = deposit;
                     else
-                        effectiveDeposit = totalPrice; // Last resort: use total price for revenue recognition
+                        effectiveDeposit = 0m; // ไม่มีมัดจำในระบบ → ไม่ต้อง clear
 
                     if (effectiveDeposit <= 0)
                     {
                         _code.Logs(_connectionString, "Checkout",
-                            $"GetReservationData: all deposit sources are 0 for Reservation #{reservationId} (TotalPaid={totalPaid:N2}, Deposit={deposit:N2}, TotalPrice={totalPrice:N2})", "SYSTEM");
+                            $"GetReservationData: no outstanding deposit for Reservation #{reservationId} (DepositPaid={depositPaid:N2}, Deposit={deposit:N2}, TotalPaid={totalPaid:N2})", "SYSTEM");
                     }
 
                     return new Dictionary<string, object>
                     {
                         { "Deposit", effectiveDeposit },
                         { "TotalPrice", totalPrice },
+                        { "TotalPaid", totalPaid },
                         { "CustomerName", row["CustomerName"]?.ToString() ?? "ลูกค้า" }
                     };
                 }

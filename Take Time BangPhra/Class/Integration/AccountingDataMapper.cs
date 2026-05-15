@@ -14,6 +14,8 @@ namespace Take_Time_BangPhra.Integration
         private readonly code _Code = new code();
         private readonly string _connectionString;
         private Dictionary<string, Guid> _accountMappingCache;
+        private Dictionary<string, string> _accountCodeCache;
+        private Dictionary<Guid, string> _accountIdToCodeCache;
         private DateTime _mappingCacheExpiry = DateTime.MinValue;
 
         public AccountingDataMapper()
@@ -58,9 +60,11 @@ namespace Take_Time_BangPhra.Integration
                 return;
 
             _accountMappingCache = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            _accountCodeCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _accountIdToCodeCache = new Dictionary<Guid, string>();
 
             DataTable dt = _Code.DatabaseQuerySafe(_connectionString,
-                "SELECT TakeTime_Code, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1 AND Nexaacc_AccountId IS NOT NULL",
+                "SELECT TakeTime_Code, Nexaacc_AccountCode, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1",
                 null);
 
             if (dt != null)
@@ -68,14 +72,93 @@ namespace Take_Time_BangPhra.Integration
                 foreach (DataRow row in dt.Rows)
                 {
                     string ttCode = row["TakeTime_Code"]?.ToString();
-                    if (!string.IsNullOrEmpty(ttCode) && row["Nexaacc_AccountId"] != DBNull.Value)
+                    if (string.IsNullOrEmpty(ttCode)) continue;
+
+                    string nexaaccCode = row["Nexaacc_AccountCode"]?.ToString();
+                    if (!string.IsNullOrEmpty(nexaaccCode))
+                        _accountCodeCache[ttCode] = nexaaccCode;
+
+                    if (row["Nexaacc_AccountId"] != DBNull.Value)
                     {
-                        _accountMappingCache[ttCode] = (Guid)row["Nexaacc_AccountId"];
+                        var id = (Guid)row["Nexaacc_AccountId"];
+                        _accountMappingCache[ttCode] = id;
+                        if (!string.IsNullOrEmpty(nexaaccCode))
+                            _accountIdToCodeCache[id] = nexaaccCode;
                     }
                 }
             }
 
             _mappingCacheExpiry = DateTime.Now.AddMinutes(10);
+        }
+
+        /// <summary>หา NexaAcc AccountCode (string เช่น "1110") จาก TakeTime code (เช่น "CASH")</summary>
+        public string GetAccountCode(string takeTimeCode)
+        {
+            if (string.IsNullOrEmpty(takeTimeCode)) return null;
+            EnsureMappingCache();
+            if (_accountCodeCache.TryGetValue(takeTimeCode.ToUpper(), out var code) && !string.IsNullOrEmpty(code))
+                return code;
+            throw new Exception($"No NexaAcc AccountCode mapping for TakeTime code: {takeTimeCode}. ตรวจสอบ Accounting_Account_Mapping.Nexaacc_AccountCode");
+        }
+
+        /// <summary>Reverse lookup: AccountId Guid → NexaAcc AccountCode string. ใช้แปลง legacy mapper output → integration request</summary>
+        public string GetAccountCodeFromId(Guid accountId)
+        {
+            if (accountId == Guid.Empty) return null;
+            EnsureMappingCache();
+            return _accountIdToCodeCache.TryGetValue(accountId, out var code) ? code : null;
+        }
+
+        /// <summary>แปลง JournalType int → string ที่ NextAcc รับ ("general", "sales", "cashreceipts", ฯลฯ)</summary>
+        public static string MapJournalTypeToString(int journalType)
+        {
+            switch (journalType)
+            {
+                case 1: return "sales";
+                case 2: return "purchase";
+                case 3: return "cashreceipts";
+                case 4: return "cashpayments";
+                default: return "general";
+            }
+        }
+
+        /// <summary>
+        /// แปลง legacy CreateJournalEntryRequest (Guid-based) → CreateIntegrationJournalRequest (string AccountCode)
+        /// เพื่อให้ส่งผ่าน /api/integration/journals ได้ (ใช้ X-Integration-Key auth + auto-Posted)
+        /// </summary>
+        public CreateIntegrationJournalRequest ConvertJournalToIntegration(CreateJournalEntryRequest src)
+        {
+            if (src == null) return null;
+            EnsureMappingCache();
+
+            var lines = new List<IntegrationJournalLineRequest>();
+            if (src.Lines != null)
+            {
+                foreach (var line in src.Lines)
+                {
+                    string code = GetAccountCodeFromId(line.AccountId);
+                    if (string.IsNullOrEmpty(code))
+                        throw new Exception($"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId}. กรุณากด 'ดึง Chart of Accounts' ในหน้า Accounting Integration");
+                    lines.Add(new IntegrationJournalLineRequest
+                    {
+                        AccountCode = code,
+                        DebitAmount = line.DebitAmount,
+                        CreditAmount = line.CreditAmount,
+                        Description = line.Description
+                    });
+                }
+            }
+
+            return new CreateIntegrationJournalRequest
+            {
+                ExternalId = src.SourceDocumentNumber,
+                ExternalRef = src.Reference,
+                EntryDate = src.EntryDate,
+                JournalType = MapJournalTypeToString(src.JournalType),
+                Description = src.Description,
+                Lines = lines,
+                AutoBalanceVat = false
+            };
         }
 
         // ──────────────────────────────────────────────
@@ -194,14 +277,14 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapCheckoutToJournal(
             int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate,
-            decimal damageAmount = 0, string reservationRef = null)
+            decimal damageAmount = 0, string reservationRef = null, bool hasVat = false)
         {
             if (depositAmount <= 0)
                 throw new ArgumentException($"MapCheckoutToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
             if (damageAmount < 0)
                 damageAmount = 0;
             if (damageAmount > depositAmount)
-                damageAmount = depositAmount; // ค่าเสียหายเกินมัดจำ ต้องไปลงในใบสำคัญจ่าย/ใบแจ้งหนี้แยก
+                damageAmount = depositAmount;
 
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
@@ -222,13 +305,37 @@ namespace Take_Time_BangPhra.Integration
 
             if (revenuePortion > 0)
             {
-                lines.Add(new JournalEntryLineRequest
+                if (hasVat)
                 {
-                    AccountId = revenueAccountId,
-                    DebitAmount = 0,
-                    CreditAmount = revenuePortion,
-                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
-                });
+                    decimal vatOnRevenue = Math.Round(revenuePortion * 7m / 107m, 2, MidpointRounding.AwayFromZero);
+                    decimal netRevenue = revenuePortion - vatOnRevenue;
+                    var outputVatAccountId = GetAccountId("OUTPUT_VAT");
+
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = revenueAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = netRevenue,
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                    });
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = outputVatAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = vatOnRevenue,
+                        Description = "ภาษีขาย 7%"
+                    });
+                }
+                else
+                {
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = revenueAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = revenuePortion,
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                    });
+                }
             }
 
             if (damageAmount > 0)
@@ -880,6 +987,65 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// Map TakeTime product → /api/integration/products payload (upsert by Code, X-Integration-Key auth)
+        /// แทน CreateProductAsync/UpdateProductAsync ที่เป็น JWT-only
+        /// </summary>
+        public InboundProductRequest MapProductToIntegration(
+            int productId, string productName, string description, decimal sellingPrice,
+            decimal costPrice, string unit, string categoryName)
+        {
+            string revenueCode = null;
+            try { revenueCode = GetAccountCode("PRODUCT_REVENUE"); } catch { /* optional */ }
+
+            return new InboundProductRequest
+            {
+                ExternalId = $"TT-{productId:D5}",
+                Code = $"TT-{productId:D5}",
+                Name = productName,
+                Price = sellingPrice,
+                CostPrice = costPrice,
+                Unit = unit ?? "ชิ้น",
+                Category = categoryName,
+                AccountCode = revenueCode,
+                ProductType = "Product",
+                IsActive = true,
+                Notes = description
+            };
+        }
+
+        /// <summary>
+        /// Build debit note for voiding an expense voucher — ใช้แทน VoidDocumentAsync (JWT-only)
+        /// NextAcc /api/integration/debit-notes auto-creates journal: CR Expense + CR VAT / DR A/P
+        /// </summary>
+        public InboundDebitNoteRequest MapVoucherVoidToDebitNote(
+            int voucherId, string voucherNumber, decimal totalAmount, bool hasVat,
+            string supplierName, DateTime voidDate, string reason)
+        {
+            decimal vatAmount = hasVat ? Math.Round(totalAmount * 7m / 107m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal netAmount = totalAmount - vatAmount;
+
+            return new InboundDebitNoteRequest
+            {
+                ExternalRef = $"DN-{voucherNumber}",
+                OriginalInvoiceRef = voucherNumber,
+                CustomerName = supplierName,
+                DocumentDate = voidDate,
+                Reason = reason ?? $"ยกเลิกใบสำคัญจ่าย {voucherNumber}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = $"ยกเลิกใบสำคัญจ่าย {voucherNumber}",
+                        Description = $"ยกเลิกใบสำคัญจ่าย {voucherNumber} - voucher #{voucherId}",
+                        Quantity = 1,
+                        UnitPrice = netAmount,
+                        VatRate = hasVat ? 7m : 0m
+                    }
+                }
+            };
+        }
+
         // ──────────────────────────────────────────────
         // Payroll → Journal Entry
         // ──────────────────────────────────────────────
@@ -1327,7 +1493,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-DEP",
-                IncludeVat = true,
+                IncludeVat = false,
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
@@ -1949,6 +2115,39 @@ namespace Take_Time_BangPhra.Integration
                         Description = $"คืนเงิน - การจอง #{reservationId} - {reason}",
                         Quantity = 1,
                         UnitPrice = refundAmount,
+                    }
+                }
+            };
+        }
+
+        /// <summary>
+        /// Build credit note ที่กลับใบเสร็จเต็มจำนวน — ใช้แทน VoidDocumentAsync (JWT-only)
+        /// NextAcc auto-creates journal: DR Revenue + DR VAT / CR A/R และลด BalanceDue ของ original
+        /// </summary>
+        public InboundCreditNoteRequest MapReceiptVoidToCreditNote(
+            int reservationId, string receiptNumber, decimal totalAmount, bool hasVat,
+            string customerName, DateTime voidDate, string reason)
+        {
+            decimal vatAmount = hasVat ? Math.Round(totalAmount * 7m / 107m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal netAmount = totalAmount - vatAmount;
+
+            return new InboundCreditNoteRequest
+            {
+                ExternalRef = $"CN-{receiptNumber}",
+                OriginalInvoiceRef = receiptNumber,
+                CustomerName = customerName,
+                DocumentDate = voidDate,
+                Reason = reason ?? $"ยกเลิกใบเสร็จ {receiptNumber}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = $"ยกเลิกใบเสร็จ {receiptNumber}",
+                        Description = $"ยกเลิกใบเสร็จ {receiptNumber} - การจอง #{reservationId}",
+                        Quantity = 1,
+                        UnitPrice = netAmount,
+                        AccountId = GetAccountId("ROOM_REVENUE"),
+                        VatRate = hasVat ? 7m : 0m
                     }
                 }
             };

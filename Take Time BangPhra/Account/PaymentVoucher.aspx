@@ -330,6 +330,54 @@
               event.preventDefault();
           }
       }
+
+      // Real-time accounting validation: Subtotal + VAT - WHT = Net Payable
+      // ระบบจะแจ้งเตือนทันทีถ้ายอดไม่ตรง — ต้องแก้ก่อนกด "บันทึก"
+      function validateVoucherTotals() {
+          var parseNum = function (id) {
+              var el = document.getElementById(id);
+              if (!el) return 0;
+              var v = parseFloat((el.value || '0').toString().replace(/,/g, ''));
+              return isNaN(v) ? 0 : v;
+          };
+          var subtotal = parseNum('<%= TextBox3.ClientID %>');
+          var vat = parseNum('<%= TextBox4.ClientID %>');
+          var wht = parseNum('<%= txtWHTAmount.ClientID %>');
+          var net = parseNum('<%= TextBox6.ClientID %>');
+          var computed = subtotal + vat - wht;
+          var diff = Math.abs(computed - net);
+          var warnEl = document.getElementById('voucherValidationWarn');
+          if (!warnEl) return;
+          if (diff > 0.01) {
+              warnEl.style.display = 'block';
+              warnEl.style.color = '#d9534f';
+              warnEl.style.fontWeight = 'bold';
+              warnEl.innerHTML = '⚠️ ยอดไม่ตรง: ' + subtotal.toFixed(2) + ' + ' + vat.toFixed(2) +
+                  ' - ' + wht.toFixed(2) + ' = ' + computed.toFixed(2) +
+                  ' แต่ยอดสุทธิ = ' + net.toFixed(2) + ' (ต่างกัน ' + diff.toFixed(2) + ' บาท)';
+          } else if (subtotal > 0) {
+              warnEl.style.display = 'block';
+              warnEl.style.color = '#5cb85c';
+              warnEl.style.fontWeight = 'normal';
+              warnEl.innerHTML = '✓ ยอดถูกต้อง';
+          } else {
+              warnEl.style.display = 'none';
+          }
+      }
+
+      // Hook validation onto field changes after page load
+      document.addEventListener('DOMContentLoaded', function () {
+          var ids = ['<%= TextBox3.ClientID %>', '<%= TextBox4.ClientID %>',
+                     '<%= txtWHTAmount.ClientID %>', '<%= TextBox6.ClientID %>'];
+          ids.forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) {
+                  el.addEventListener('input', validateVoucherTotals);
+                  el.addEventListener('change', validateVoucherTotals);
+              }
+          });
+          validateVoucherTotals();
+      });
       </script>
     
     <div class="form-title">
@@ -515,6 +563,13 @@
                 <td>
                     &nbsp;<asp:TextBox ID="TextBox6" runat="server" Width="30%" Enabled="False"></asp:TextBox>
                     &nbsp;บาท</td>
+            </tr>
+
+            <tr>
+                <td></td>
+                <td>
+                    <span id="voucherValidationWarn" style="display:none; padding:6px 10px; border-radius:4px; background:#fff3cd; border:1px solid #ffc107; font-size:13px;"></span>
+                </td>
             </tr>
 
             <!-- Asset Recording Section -->
