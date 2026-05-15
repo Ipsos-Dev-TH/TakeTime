@@ -4373,6 +4373,18 @@ namespace Take_Time_BangPhra
                     Vat = Total_Amount - PriceExcludeVat;
                     PriceExcludeVat = TwoDecimalPoints(PriceExcludeVat);
                     Vat = TwoDecimalPoints(Vat);
+
+                    // Validate: Subtotal + VAT = Total
+                    var rcptCheck = AccountingArithmeticValidator.ValidateReceiptTotal(
+                        (decimal)PriceExcludeVat, (decimal)Vat, (decimal)Total_Amount);
+                    if (!rcptCheck.IsValid)
+                    {
+                        AccountingArithmeticValidator.LogValidationFailure("RECEIPT", Reservation_ID, rcptCheck,
+                            Session["User"]?.ToString() ?? "ANON");
+                        ClientScript.RegisterStartupScript(this.GetType(), "rcptvalidate",
+                            $"alert('⚠️ ตรวจสอบยอดใบเสร็จไม่ผ่าน:\\n{rcptCheck.ErrorMessage.Replace("'", "\\'")}\\n\\nกรุณาตรวจสอบยอด VAT');", true);
+                        return "";
+                    }
                 }
                 else
                 {

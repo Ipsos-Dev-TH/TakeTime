@@ -442,10 +442,15 @@ namespace Take_Time_BangPhra.Integration
 
             decimal totalDr = journal.Lines.Sum(l => l.DebitAmount);
             decimal totalCr = journal.Lines.Sum(l => l.CreditAmount);
-            if (totalDr != totalCr)
+
+            // Centralized double-entry validation (DR=CR within 0.01 tolerance)
+            var balCheck = AccountingArithmeticValidator.ValidateJournalBalance(totalDr, totalCr);
+            if (!balCheck.IsValid)
+            {
+                AccountingArithmeticValidator.LogValidationFailure("JOURNAL", journal.Reference, balCheck);
                 throw new ArgumentException(
-                    $"ยอดเดบิต ({totalDr:#,##0.00}) ไม่เท่ากับยอดเครดิต ({totalCr:#,##0.00}). " +
-                    $"Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
+                    $"{balCheck.ErrorMessage} | Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
+            }
 
             var integrationReq = Mapper.ConvertJournalToIntegration(journal);
             var integrationResp = await PostAsync<CreateIntegrationJournalRequest, ApiResponse<IntegrationDocumentResponse>>(

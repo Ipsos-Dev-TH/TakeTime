@@ -305,6 +305,16 @@ namespace Take_Time_BangPhra.Services
                         vat = totalAmount - priceExcludeVat;
                         priceExcludeVat = CalculateTwoDecimalPoints(priceExcludeVat);
                         vat = CalculateTwoDecimalPoints(vat);
+
+                        // Validate: Subtotal + VAT = Total (sales receipt arithmetic)
+                        var rcptCheck = AccountingArithmeticValidator.ValidateReceiptTotal(
+                            (decimal)priceExcludeVat, (decimal)vat, (decimal)totalAmount);
+                        if (!rcptCheck.IsValid)
+                        {
+                            AccountingArithmeticValidator.LogValidationFailure("RECEIPT", reservationId, rcptCheck, createdById);
+                            throw new InvalidOperationException(
+                                $"Receipt arithmetic validation failed for reservation #{reservationId}: {rcptCheck.ErrorMessage}");
+                        }
                     }
 
                     // ปรับสัดส่วนรายละเอียดให้ตรงกับยอดรวมก่อนบันทึก
