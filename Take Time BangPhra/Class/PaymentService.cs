@@ -199,30 +199,52 @@ namespace Take_Time_BangPhra
 
                 long slipId = UploadPaymentSlip(reservationId, slipFile, customerPhone, adminId);
 
-                // 3. Create deposit receipt
+                // 3. Determine if this is truly a deposit or a full payment
+                bool isDeposit = true;
+                try
+                {
+                    var dtCheck = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(R.TotalPrice, 0) AS TotalPrice,
+                                 ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                         WHERE Reservation_ID = @id AND IsDeposit = 1
+                                           AND (Status = 'Normal' OR Status IS NULL)), 0) AS PriorDeposits
+                          FROM Reservation R WHERE R.ID = @id",
+                        new Dictionary<string, object> { { "@id", reservationId } });
+                    if (dtCheck?.Rows.Count > 0)
+                    {
+                        decimal totalPrice = Convert.ToDecimal(dtCheck.Rows[0]["TotalPrice"]);
+                        decimal priorDeposits = Convert.ToDecimal(dtCheck.Rows[0]["PriorDeposits"]);
+                        if (totalPrice > 0 && (priorDeposits + depositAmount) >= totalPrice)
+                            isDeposit = false;
+                    }
+                }
+                catch { }
+
+                // 4. Create receipt
                 string receiptId = CreatePaymentReceipt(
                     reservationId,
                     depositAmount,
                     paymentMethod,
-                    isDeposit: true
+                    isDeposit: isDeposit
                 );
 
-                // 4. Record payment
+                // 5. Record payment
+                string paymentType = isDeposit ? "DEPOSIT" : "FULL";
                 long paymentId = _paymentDA.RecordPaymentDirect(
                     reservationId,
                     depositAmount,
-                    "DEPOSIT",
+                    paymentType,
                     paymentMethod,
                     receiptId,
                     slipId,
                     customerPhone,
                     adminId,
-                    "มัดจำการจอง"
+                    isDeposit ? "มัดจำการจอง" : "ชำระเต็มจำนวน"
                 );
 
-                // 5. Update reservation
+                // 6. Update reservation
                 UpdateReservationDeposit(reservationId, depositAmount);
-                UpdateReservationStatus(reservationId, "มัดจำแล้ว");
+                UpdateReservationStatus(reservationId, isDeposit ? "มัดจำแล้ว" : "ชำระแล้ว");
 
                 // 6. Send confirmation
                 try
@@ -240,16 +262,8 @@ namespace Take_Time_BangPhra
                         string custName = GetCustomerName(reservationId);
                         var sync = new AccountingSyncService(_connectionString);
                         string depPayAccId = sync.LookupPaidHowAccountId(paymentMethod);
-                        if (config.IsDocumentMode)
-                        {
-                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
-                                isDeposit: true, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
-                        }
-                        else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
-                        {
-                            sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
-                                isDeposit: true, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
-                        }
+                        sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
+                            isDeposit: isDeposit, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
                     }
                 }
                 catch (Exception accEx)
@@ -260,7 +274,7 @@ namespace Take_Time_BangPhra
                 return new PaymentResult
                 {
                     Success = true,
-                    Message = "ชำระเงินมัดจำสำเร็จ",
+                    Message = isDeposit ? "ชำระเงินมัดจำสำเร็จ" : "ชำระเงินเต็มจำนวนสำเร็จ",
                     PaymentId = paymentId,
                     ReceiptId = receiptId,
                     RemainingBalance = _paymentDA.GetRemainingBalance(reservationId)

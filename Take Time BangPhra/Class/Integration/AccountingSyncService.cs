@@ -1690,10 +1690,12 @@ namespace Take_Time_BangPhra.Integration
                 depositAmount = actualDeposit;
             }
 
-            _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount}", "SYSTEM");
+            bool hasVat = LookupBusinessHasVat();
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
+
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat);
             var result = await _apiClient.CreateJournalAsync(journal);
             await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
@@ -2021,6 +2023,19 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupActualDepositPaid failed for resId={reservationId}: {ex.Message}", "SYSTEM");
             }
             return 0m;
+        }
+
+        private bool LookupBusinessHasVat()
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                if (dt?.Rows.Count > 0)
+                    return dt.Rows[0]["Use_Vat"]?.ToString() == "True";
+            }
+            catch { }
+            return false;
         }
 
         // ──────────────────────────────────────────────

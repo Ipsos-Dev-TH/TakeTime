@@ -288,6 +288,9 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
+                if (isDeposit)
+                    isDeposit = ValidateIsDeposit(reservationId, totalAmount);
+
                 if (totalAmount > 0)
                 {
                     string receiptId = CreateReceiptDocumentNumber(docDate);
@@ -350,6 +353,31 @@ namespace Take_Time_BangPhra.Services
                 System.Diagnostics.Trace.TraceError($"Error creating receipt for reservation {reservationId}: {ex.Message}");
                 throw;
             }
+        }
+
+        /// <summary>ตรวจสอบว่าการชำระเงินนี้ควรเป็นมัดจำจริงหรือไม่ — ถ้ายอดรวม (เดิม+ครั้งนี้) >= ราคาห้อง ต้องไม่ใช่มัดจำ</summary>
+        private bool ValidateIsDeposit(string reservationId, double currentAmount)
+        {
+            try
+            {
+                var p = new System.Collections.Generic.Dictionary<string, object> { { "@id", reservationId } };
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        ISNULL(R.TotalPrice, 0) AS TotalPrice,
+                        ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                WHERE Reservation_ID = @id AND IsDeposit = 1
+                                  AND (Status = 'Normal' OR Status IS NULL)), 0) AS PriorDeposits
+                      FROM Reservation R WHERE R.ID = @id", p);
+                if (dt?.Rows.Count > 0)
+                {
+                    double totalPrice = Convert.ToDouble(dt.Rows[0]["TotalPrice"]);
+                    double priorDeposits = Convert.ToDouble(dt.Rows[0]["PriorDeposits"]);
+                    if (totalPrice > 0 && (priorDeposits + currentAmount) >= totalPrice)
+                        return false;
+                }
+            }
+            catch { }
+            return true;
         }
 
         /// <summary>หา remaining deposit balance (จ่ายแล้ว - หักไปแล้วในใบเสร็จก่อนหน้า) เพื่อนำมาหักในใบเสร็จใหม่</summary>

@@ -194,14 +194,14 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapCheckoutToJournal(
             int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate,
-            decimal damageAmount = 0, string reservationRef = null)
+            decimal damageAmount = 0, string reservationRef = null, bool hasVat = false)
         {
             if (depositAmount <= 0)
                 throw new ArgumentException($"MapCheckoutToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
             if (damageAmount < 0)
                 damageAmount = 0;
             if (damageAmount > depositAmount)
-                damageAmount = depositAmount; // ค่าเสียหายเกินมัดจำ ต้องไปลงในใบสำคัญจ่าย/ใบแจ้งหนี้แยก
+                damageAmount = depositAmount;
 
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
             var revenueAccountId = GetAccountId("ROOM_REVENUE");
@@ -222,13 +222,37 @@ namespace Take_Time_BangPhra.Integration
 
             if (revenuePortion > 0)
             {
-                lines.Add(new JournalEntryLineRequest
+                if (hasVat)
                 {
-                    AccountId = revenueAccountId,
-                    DebitAmount = 0,
-                    CreditAmount = revenuePortion,
-                    Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
-                });
+                    decimal vatOnRevenue = Math.Round(revenuePortion * 7m / 107m, 2, MidpointRounding.AwayFromZero);
+                    decimal netRevenue = revenuePortion - vatOnRevenue;
+                    var outputVatAccountId = GetAccountId("OUTPUT_VAT");
+
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = revenueAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = netRevenue,
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                    });
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = outputVatAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = vatOnRevenue,
+                        Description = "ภาษีขาย 7%"
+                    });
+                }
+                else
+                {
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = revenueAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = revenuePortion,
+                        Description = $"รายได้ค่าห้องพัก - การจอง #{reservationId}"
+                    });
+                }
             }
 
             if (damageAmount > 0)
@@ -1327,7 +1351,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-DEP",
-                IncludeVat = true,
+                IncludeVat = false,
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = paymentMethod,
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
