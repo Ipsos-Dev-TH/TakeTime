@@ -677,6 +677,16 @@ namespace Take_Time_BangPhra.Integration
                 "/api/integration/customers", customer);
         }
 
+        // Integration Products (/api/integration/products) — upsert by Code
+        public async Task<ApiResponse<IntegrationDocumentResponse>> SyncIntegrationProductAsync(InboundProductRequest product)
+        {
+            if (string.IsNullOrEmpty(product?.Code))
+                throw new ArgumentException("Integration product must have a Code (used as upsert key).");
+
+            return await PostAsync<InboundProductRequest, ApiResponse<IntegrationDocumentResponse>>(
+                "/api/integration/products", product);
+        }
+
         // Integration Credit Notes (/api/integration/credit-notes)
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationCreditNoteAsync(InboundCreditNoteRequest creditNote)
         {

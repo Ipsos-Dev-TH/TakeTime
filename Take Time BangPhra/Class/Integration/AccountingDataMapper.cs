@@ -987,6 +987,65 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// Map TakeTime product → /api/integration/products payload (upsert by Code, X-Integration-Key auth)
+        /// แทน CreateProductAsync/UpdateProductAsync ที่เป็น JWT-only
+        /// </summary>
+        public InboundProductRequest MapProductToIntegration(
+            int productId, string productName, string description, decimal sellingPrice,
+            decimal costPrice, string unit, string categoryName)
+        {
+            string revenueCode = null;
+            try { revenueCode = GetAccountCode("PRODUCT_REVENUE"); } catch { /* optional */ }
+
+            return new InboundProductRequest
+            {
+                ExternalId = $"TT-{productId:D5}",
+                Code = $"TT-{productId:D5}",
+                Name = productName,
+                Price = sellingPrice,
+                CostPrice = costPrice,
+                Unit = unit ?? "ชิ้น",
+                Category = categoryName,
+                AccountCode = revenueCode,
+                ProductType = "Product",
+                IsActive = true,
+                Notes = description
+            };
+        }
+
+        /// <summary>
+        /// Build debit note for voiding an expense voucher — ใช้แทน VoidDocumentAsync (JWT-only)
+        /// NextAcc /api/integration/debit-notes auto-creates journal: CR Expense + CR VAT / DR A/P
+        /// </summary>
+        public InboundDebitNoteRequest MapVoucherVoidToDebitNote(
+            int voucherId, string voucherNumber, decimal totalAmount, bool hasVat,
+            string supplierName, DateTime voidDate, string reason)
+        {
+            decimal vatAmount = hasVat ? Math.Round(totalAmount * 7m / 107m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal netAmount = totalAmount - vatAmount;
+
+            return new InboundDebitNoteRequest
+            {
+                ExternalRef = $"DN-{voucherNumber}",
+                OriginalInvoiceRef = voucherNumber,
+                CustomerName = supplierName,
+                DocumentDate = voidDate,
+                Reason = reason ?? $"ยกเลิกใบสำคัญจ่าย {voucherNumber}",
+                Lines = new List<IntegrationLineRequest>
+                {
+                    new IntegrationLineRequest
+                    {
+                        ItemName = $"ยกเลิกใบสำคัญจ่าย {voucherNumber}",
+                        Description = $"ยกเลิกใบสำคัญจ่าย {voucherNumber} - voucher #{voucherId}",
+                        Quantity = 1,
+                        UnitPrice = netAmount,
+                        VatRate = hasVat ? 7m : 0m
+                    }
+                }
+            };
+        }
+
         // ──────────────────────────────────────────────
         // Payroll → Journal Entry
         // ──────────────────────────────────────────────

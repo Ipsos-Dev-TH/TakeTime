@@ -680,6 +680,26 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
+    // Integration: Product (POST /api/integration/products) — upsert by Code
+    // ──────────────────────────────────────────────
+
+    public class InboundProductRequest
+    {
+        public string ExternalId { get; set; }
+        public string Code { get; set; }
+        public string Name { get; set; }
+        public string NameEn { get; set; }
+        public string ProductType { get; set; }     // "Product", "Service", "NonStock"
+        public decimal? Price { get; set; }
+        public decimal? CostPrice { get; set; }
+        public string Unit { get; set; }
+        public string Category { get; set; }
+        public string AccountCode { get; set; }     // Revenue account code
+        public bool? IsActive { get; set; }
+        public string Notes { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
     // Integration: Credit Note (POST /api/integration/credit-notes)
     // ──────────────────────────────────────────────
 

@@ -1468,6 +1468,49 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>ดึง voucherId + supplier name สำหรับ debit note void flow</summary>
+        private (int voucherId, string supplierName)? LookupSupplierFromVoucherDoc(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 P.UID AS VoucherId, ISNULL(V.Name, '') AS SupplierName
+                      FROM Account_Payment P
+                      LEFT JOIN Vendor V ON V.ID = P.Vendor_ID
+                      WHERE P.ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0)
+                {
+                    int vid = dt.Rows[0]["VoucherId"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["VoucherId"]) : 0;
+                    string name = dt.Rows[0]["SupplierName"]?.ToString() ?? "";
+                    return (vid, name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupSupplierFromVoucherDoc failed for doc={documentNumber}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>ดึงยอดรวมของ voucher (Account_Payment.Total_Amount) สำหรับ debit note void</summary>
+        private decimal LookupVoucherAmount(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return 0m;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Total_Amount FROM Account_Payment WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Total_Amount"] != DBNull.Value)
+                    return Convert.ToDecimal(dt.Rows[0]["Total_Amount"]);
+            }
+            catch { }
+            return 0m;
+        }
+
         /// <summary>ดึงข้อมูล header ของใบเสร็จ (resId, customerName, paymentMethod, paymentAccountId) สำหรับ counter-adjustment</summary>
         private (int reservationId, string customerName, string paymentMethod, string paymentAccountId)? LookupReceiptHeaderInfo(string receiptNumber)
         {
@@ -1636,17 +1679,39 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
+            string documentNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : null;
 
             try
             {
                 if (_config.IsVoucherDocumentMode)
                 {
-                    // DOCUMENT mode: voucher = expense doc + journal. ใช้ debit note หรือ reverse journal
-                    // VoidDocumentAsync (JWT-only) ใช้ไม่ได้กับ Integration Key → log warning
+                    // DOCUMENT mode: voucher = expense doc + journal posted by NextAcc
+                    // VoidDocumentAsync (JWT-only) ไม่ work — ใช้ /api/integration/debit-notes แทน
+                    // (ใบเพิ่มหนี้ฝั่งซื้อ: CR Expense + CR VAT / DR A/P → กลับ expense + ลด BalanceDue)
+                    if (!string.IsNullOrEmpty(documentNumber))
+                    {
+                        var supplier = LookupSupplierFromVoucherDoc(documentNumber);
+                        decimal totalAmount = LookupVoucherAmount(documentNumber);
+                        bool hasVat = LookupBusinessHasVat();
+
+                        if (totalAmount > 0)
+                        {
+                            var debitNote = _mapper.MapVoucherVoidToDebitNote(
+                                supplier?.voucherId ?? 0, documentNumber, totalAmount, hasVat,
+                                supplier?.supplierName ?? "", DateTime.Now, reason);
+                            var dnResult = await _apiClient.CreateIntegrationDebitNoteAsync(debitNote);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnResult?.data?.Id}",
+                                "SYSTEM");
+                            return $"DEBIT_NOTE:{dnResult?.data?.Id}";
+                        }
+                    }
+
+                    // ไม่มี documentNumber/total → log warning
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessVoidVoucher(DOCUMENT): cannot void document {nexaaccId} via Integration API — manual review required in NextAcc",
+                        $"ProcessVoidVoucher(DOCUMENT): missing documentNumber/total for nexaaccId={nexaaccId} — manual review",
                         "SYSTEM");
-                    return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual void in NextAcc)";
+                    return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual review needed)";
                 }
                 else
                 {
@@ -1947,34 +2012,24 @@ namespace Take_Time_BangPhra.Integration
             if (info == null)
                 throw new ArgumentException($"ProcessProductSync: ไม่พบ product #{productId} ในฐานข้อมูล");
 
-            // ตรวจ cache — ถ้ามี Nexaacc_Product_Id อยู่แล้ว → UPDATE
-            Guid? existingNexaaccId = LookupCachedNexaaccProductId(productId);
-
-            var req = _mapper.MapProductToNexaacc(productId, info.Value.name, info.Value.description,
+            // ใช้ /api/integration/products (X-Integration-Key) — upsert by Code อัตโนมัติ
+            // แทน CreateProductAsync/UpdateProductAsync ที่เป็น JWT-only endpoint
+            var req = _mapper.MapProductToIntegration(productId, info.Value.name, info.Value.description,
                 info.Value.sellPrice, info.Value.costPrice, info.Value.unit, info.Value.categoryName);
 
+            var result = await _apiClient.SyncIntegrationProductAsync(req);
+            // Integration product response อาจไม่ส่ง Guid ID (return Code แทน) — fallback to cached if needed
+            Guid? existingNexaaccId = LookupCachedNexaaccProductId(productId);
             Guid productGuid;
-            if (existingNexaaccId.HasValue && existingNexaaccId.Value != Guid.Empty)
-            {
-                var updateReq = new UpdateProductRequest
-                {
-                    Name = req.Name,
-                    Description = req.Description,
-                    SellingPrice = req.SellingPrice,
-                    CostPrice = req.CostPrice,
-                    Unit = req.Unit
-                };
-                await _apiClient.UpdateProductAsync(existingNexaaccId.Value, updateReq);
+            if (result?.data?.Id != null && result.data.Id != Guid.Empty)
+                productGuid = result.data.Id;
+            else if (existingNexaaccId.HasValue && existingNexaaccId.Value != Guid.Empty)
                 productGuid = existingNexaaccId.Value;
-            }
             else
-            {
-                var createResult = await _apiClient.CreateProductAsync(req);
-                productGuid = RequireValidDocId(createResult?.data?.Id, $"CreateProduct productId={productId}");
-            }
+                productGuid = Guid.Empty; // upsert succeeded but no Guid yet — Code ใช้ lookup ครั้งถัดไป
 
             UpsertProductMap(productId, productGuid, info.Value.name, $"TT-{productId:D5}", "SYNCED", null);
-            return productGuid.ToString();
+            return productGuid == Guid.Empty ? $"SYNCED:{req.Code}" : productGuid.ToString();
         }
 
         private (string name, string description, decimal sellPrice, decimal costPrice, string unit, string categoryName)? LookupProductInfo(int productId)
