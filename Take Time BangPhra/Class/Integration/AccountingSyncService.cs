@@ -1038,11 +1038,18 @@ namespace Take_Time_BangPhra.Integration
                 || body.Contains("ยกเลิกไปแล้ว");
         }
 
+        /// <summary>
+        /// Approve เอกสาร — JWT-only endpoint. ปัจจุบันไม่มี caller (Integration invoice/expense
+        /// auto-approve อยู่แล้ว) คงไว้สำหรับ flow ในอนาคตที่ใช้ DocumentController แยก
+        /// </summary>
+        [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         private async Task SafeApproveDocumentAsync(Guid documentId)
         {
             try
             {
+                #pragma warning disable CS0618
                 await _apiClient.ApproveDocumentAsync(documentId);
+                #pragma warning restore CS0618
             }
             catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
             {
