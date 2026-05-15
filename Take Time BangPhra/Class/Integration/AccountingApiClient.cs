@@ -489,6 +489,10 @@ namespace Take_Time_BangPhra.Integration
             });
         }
 
+        /// <summary>
+        /// DEPRECATED: JWT-only endpoint. Process* flow ใช้ ReverseJournalAsync (Integration) แทน
+        /// </summary>
+        [Obsolete("Use ReverseJournalAsync. JWT-only endpoint — will 401 with Integration Key.")]
         public async Task VoidJournalAsync(Guid entryId)
         {
             await PostActionAsync($"{CompanyPath}/accounting/journals/{entryId}/void");
@@ -546,12 +550,18 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/document", document);
         }
 
+        [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {
             return await PostAsync<object, ApiResponse<DocumentResponse>>(
                 $"{CompanyPath}/document/{documentId}/approve", null);
         }
 
+        /// <summary>
+        /// DEPRECATED: ใช้ /document/{id}/void (JWT-only). Process* flow ใช้ credit note แทนแล้ว
+        /// คงไว้สำหรับ admin tools ที่อาจมี API Key (JWT) แยก
+        /// </summary>
+        [Obsolete("Use ProcessVoidReceipt's credit-note path. JWT-only endpoint — will 401 with Integration Key.")]
         public async Task VoidDocumentAsync(Guid documentId)
         {
             await PostActionAsync($"{CompanyPath}/document/{documentId}/void");
@@ -988,19 +998,22 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
-        // Products (ProductController)
+        // Products (ProductController — JWT-only). Process* flow ใช้ SyncIntegrationProductAsync แทน
+        [Obsolete("Use SyncIntegrationProductAsync. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<ProductResponse>> CreateProductAsync(CreateProductRequest product)
         {
             return await PostAsync<CreateProductRequest, ApiResponse<ProductResponse>>(
                 $"{CompanyPath}/product", product);
         }
 
+        [Obsolete("Use SyncIntegrationProductAsync. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<ProductResponse>> UpdateProductAsync(Guid productId, UpdateProductRequest product)
         {
             return await PutAsync<UpdateProductRequest, ApiResponse<ProductResponse>>(
                 $"{CompanyPath}/product/{productId}", product);
         }
 
+        [Obsolete("JWT-only — will 401 with Integration Key. NextAcc Integration ไม่มี stock-adjust endpoint โดยตรง; ใช้ ProcessStockAdjustment ส่ง journal แทน")]
         public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest adjustment)
         {
             return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
