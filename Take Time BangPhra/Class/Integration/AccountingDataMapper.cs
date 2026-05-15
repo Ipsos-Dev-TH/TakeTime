@@ -14,6 +14,8 @@ namespace Take_Time_BangPhra.Integration
         private readonly code _Code = new code();
         private readonly string _connectionString;
         private Dictionary<string, Guid> _accountMappingCache;
+        private Dictionary<string, string> _accountCodeCache;
+        private Dictionary<Guid, string> _accountIdToCodeCache;
         private DateTime _mappingCacheExpiry = DateTime.MinValue;
 
         public AccountingDataMapper()
@@ -58,9 +60,11 @@ namespace Take_Time_BangPhra.Integration
                 return;
 
             _accountMappingCache = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            _accountCodeCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _accountIdToCodeCache = new Dictionary<Guid, string>();
 
             DataTable dt = _Code.DatabaseQuerySafe(_connectionString,
-                "SELECT TakeTime_Code, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1 AND Nexaacc_AccountId IS NOT NULL",
+                "SELECT TakeTime_Code, Nexaacc_AccountCode, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1",
                 null);
 
             if (dt != null)
@@ -68,14 +72,93 @@ namespace Take_Time_BangPhra.Integration
                 foreach (DataRow row in dt.Rows)
                 {
                     string ttCode = row["TakeTime_Code"]?.ToString();
-                    if (!string.IsNullOrEmpty(ttCode) && row["Nexaacc_AccountId"] != DBNull.Value)
+                    if (string.IsNullOrEmpty(ttCode)) continue;
+
+                    string nexaaccCode = row["Nexaacc_AccountCode"]?.ToString();
+                    if (!string.IsNullOrEmpty(nexaaccCode))
+                        _accountCodeCache[ttCode] = nexaaccCode;
+
+                    if (row["Nexaacc_AccountId"] != DBNull.Value)
                     {
-                        _accountMappingCache[ttCode] = (Guid)row["Nexaacc_AccountId"];
+                        var id = (Guid)row["Nexaacc_AccountId"];
+                        _accountMappingCache[ttCode] = id;
+                        if (!string.IsNullOrEmpty(nexaaccCode))
+                            _accountIdToCodeCache[id] = nexaaccCode;
                     }
                 }
             }
 
             _mappingCacheExpiry = DateTime.Now.AddMinutes(10);
+        }
+
+        /// <summary>หา NexaAcc AccountCode (string เช่น "1110") จาก TakeTime code (เช่น "CASH")</summary>
+        public string GetAccountCode(string takeTimeCode)
+        {
+            if (string.IsNullOrEmpty(takeTimeCode)) return null;
+            EnsureMappingCache();
+            if (_accountCodeCache.TryGetValue(takeTimeCode.ToUpper(), out var code) && !string.IsNullOrEmpty(code))
+                return code;
+            throw new Exception($"No NexaAcc AccountCode mapping for TakeTime code: {takeTimeCode}. ตรวจสอบ Accounting_Account_Mapping.Nexaacc_AccountCode");
+        }
+
+        /// <summary>Reverse lookup: AccountId Guid → NexaAcc AccountCode string. ใช้แปลง legacy mapper output → integration request</summary>
+        public string GetAccountCodeFromId(Guid accountId)
+        {
+            if (accountId == Guid.Empty) return null;
+            EnsureMappingCache();
+            return _accountIdToCodeCache.TryGetValue(accountId, out var code) ? code : null;
+        }
+
+        /// <summary>แปลง JournalType int → string ที่ NextAcc รับ ("general", "sales", "cashreceipts", ฯลฯ)</summary>
+        public static string MapJournalTypeToString(int journalType)
+        {
+            switch (journalType)
+            {
+                case 1: return "sales";
+                case 2: return "purchase";
+                case 3: return "cashreceipts";
+                case 4: return "cashpayments";
+                default: return "general";
+            }
+        }
+
+        /// <summary>
+        /// แปลง legacy CreateJournalEntryRequest (Guid-based) → CreateIntegrationJournalRequest (string AccountCode)
+        /// เพื่อให้ส่งผ่าน /api/integration/journals ได้ (ใช้ X-Integration-Key auth + auto-Posted)
+        /// </summary>
+        public CreateIntegrationJournalRequest ConvertJournalToIntegration(CreateJournalEntryRequest src)
+        {
+            if (src == null) return null;
+            EnsureMappingCache();
+
+            var lines = new List<IntegrationJournalLineRequest>();
+            if (src.Lines != null)
+            {
+                foreach (var line in src.Lines)
+                {
+                    string code = GetAccountCodeFromId(line.AccountId);
+                    if (string.IsNullOrEmpty(code))
+                        throw new Exception($"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId}. กรุณากด 'ดึง Chart of Accounts' ในหน้า Accounting Integration");
+                    lines.Add(new IntegrationJournalLineRequest
+                    {
+                        AccountCode = code,
+                        DebitAmount = line.DebitAmount,
+                        CreditAmount = line.CreditAmount,
+                        Description = line.Description
+                    });
+                }
+            }
+
+            return new CreateIntegrationJournalRequest
+            {
+                ExternalId = src.SourceDocumentNumber,
+                ExternalRef = src.Reference,
+                EntryDate = src.EntryDate,
+                JournalType = MapJournalTypeToString(src.JournalType),
+                Description = src.Description,
+                Lines = lines,
+                AutoBalanceVat = false
+            };
         }
 
         // ──────────────────────────────────────────────
