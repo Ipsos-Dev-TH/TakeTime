@@ -498,6 +498,12 @@ namespace Take_Time_BangPhra.Admin.HR
                     AddNewEmployee();
                 }
             }
+            catch (SqlException sqlEx) when (sqlEx.Number == 8152 || sqlEx.Number == 2628)
+            {
+                // 8152/2628 = String or binary data would be truncated
+                ShowMessage("ข้อมูลบางช่องยาวเกินกว่าที่ระบบรองรับ — โปรดรัน Database migration " +
+                            "PHASE12_Migration_11 เพื่อขยายคอลัมน์ Admin.Password (เก็บรหัสผ่านแบบเข้ารหัส ~75 ตัวอักษร)", "error");
+            }
             catch (Exception ex)
             {
                 ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
