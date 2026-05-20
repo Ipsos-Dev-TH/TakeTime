@@ -453,25 +453,26 @@ namespace Take_Time_BangPhra.Integration
             }
 
             var integrationReq = Mapper.ConvertJournalToIntegration(journal);
-            var integrationResp = await PostAsync<CreateIntegrationJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationJournalRequest, IntegrationSyncResponse>(
                 "/api/integration/journals", integrationReq);
 
+            Guid journalId = flat?.journalEntryId ?? flat?.documentId ?? Guid.Empty;
             return new ApiResponse<JournalEntryResponse>
             {
-                success = integrationResp?.success ?? false,
-                message = integrationResp?.message,
-                data = integrationResp?.data == null ? null : new JournalEntryResponse
+                success = flat?.success ?? false,
+                message = flat?.message,
+                data = (flat != null && journalId != Guid.Empty) ? new JournalEntryResponse
                 {
-                    Id = integrationResp.data.Id,
-                    EntryNumber = integrationResp.data.DocumentNumber,
-                    EntryDate = integrationResp.data.CreatedAt,
+                    Id = journalId,
+                    EntryNumber = flat.documentNumber,
+                    EntryDate = journal.EntryDate,
                     JournalType = journal.JournalType,
                     Description = journal.Description,
                     Reference = journal.Reference,
                     Status = 1,
                     TotalDebit = totalDr,
                     TotalCredit = totalCr
-                }
+                } : null
             };
         }
 
@@ -509,20 +510,21 @@ namespace Take_Time_BangPhra.Integration
                 ReversalDate = request?.ReversalDate,
                 Description = request?.Description ?? $"กลับรายการ Journal #{entryId}"
             };
-            var integrationResp = await PostAsync<CreateIntegrationReverseJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationReverseJournalRequest, IntegrationSyncResponse>(
                 "/api/integration/journals/reverse", revReq);
 
+            Guid revId = flat?.journalEntryId ?? flat?.documentId ?? Guid.Empty;
             return new ApiResponse<JournalEntryResponse>
             {
-                success = integrationResp?.success ?? false,
-                message = integrationResp?.message,
-                data = integrationResp?.data == null ? null : new JournalEntryResponse
+                success = flat?.success ?? false,
+                message = flat?.message,
+                data = (flat != null && revId != Guid.Empty) ? new JournalEntryResponse
                 {
-                    Id = integrationResp.data.Id,
-                    EntryNumber = integrationResp.data.DocumentNumber,
+                    Id = revId,
+                    EntryNumber = flat.documentNumber,
                     Status = 1,
                     OriginalEntryId = entryId
-                }
+                } : null
             };
         }
 
@@ -588,6 +590,24 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // Integration Endpoints — สร้างเอกสาร+บันทึกบัญชีในคำสั่งเดียว
+        // ──────────────────────────────────────────────
+        // /api/integration/* คืน flat InboundSyncResponse (ไม่มี data wrapper)
+        // helper ด้านล่างแปลง flat → ApiResponse<IntegrationDocumentResponse> ที่ caller เดิมคาดหวัง
+        // ──────────────────────────────────────────────
+
+        /// <summary>แปลง flat IntegrationSyncResponse → ApiResponse&lt;IntegrationDocumentResponse&gt;</summary>
+        private static ApiResponse<IntegrationDocumentResponse> WrapDoc(IntegrationSyncResponse flat, Guid? id)
+        {
+            return new ApiResponse<IntegrationDocumentResponse>
+            {
+                success = flat?.success ?? false,
+                message = flat?.message,
+                data = (flat != null && id.HasValue && id.Value != Guid.Empty)
+                    ? new IntegrationDocumentResponse { Id = id.Value, DocumentNumber = flat.documentNumber }
+                    : null
+            };
+        }
+
         // ใช้ /api/integration/* (ไม่มี company path — API key ระบุ company อยู่แล้ว)
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateInvoiceAsync(CreateIntegrationInvoiceRequest invoice)
         {
@@ -601,8 +621,9 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(invoice.ExternalRef) && !string.IsNullOrEmpty(invoice.Reference))
                 invoice.ExternalRef = invoice.Reference;
 
-            return await PostAsync<CreateIntegrationInvoiceRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationInvoiceRequest, IntegrationSyncResponse>(
                 "/api/integration/invoices", invoice);
+            return WrapDoc(flat, flat?.documentId);
         }
 
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseAsync(CreateIntegrationExpenseRequest expense)
@@ -614,8 +635,9 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(expense.ExternalRef) && !string.IsNullOrEmpty(expense.Reference))
                 expense.ExternalRef = expense.Reference;
 
-            return await PostAsync<CreateIntegrationExpenseRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationExpenseRequest, IntegrationSyncResponse>(
                 "/api/integration/expenses", expense);
+            return WrapDoc(flat, flat?.documentId);
         }
 
         /// <summary>
@@ -642,8 +664,16 @@ namespace Take_Time_BangPhra.Integration
             if (payment.Amount <= 0)
                 throw new ArgumentException("Payment amount must be > 0.");
 
-            return await PostAsync<CreateIntegrationPaymentRequest, ApiResponse<IntegrationPaymentResponse>>(
+            var flat = await PostAsync<CreateIntegrationPaymentRequest, IntegrationSyncResponse>(
                 "/api/integration/payments", payment);
+            return new ApiResponse<IntegrationPaymentResponse>
+            {
+                success = flat?.success ?? false,
+                message = flat?.message,
+                data = (flat != null && flat.paymentId.HasValue && flat.paymentId.Value != Guid.Empty)
+                    ? new IntegrationPaymentResponse { Id = flat.paymentId.Value, PaymentNumber = flat.documentNumber }
+                    : null
+            };
         }
 
         // Integration Journals (/api/integration/journals) — ใช้ AccountCode แทน AccountId
@@ -652,15 +682,17 @@ namespace Take_Time_BangPhra.Integration
             if (journal.Lines == null || journal.Lines.Count == 0)
                 throw new ArgumentException("Integration journal must have at least 1 line.");
 
-            return await PostAsync<CreateIntegrationJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationJournalRequest, IntegrationSyncResponse>(
                 "/api/integration/journals", journal);
+            return WrapDoc(flat, flat?.journalEntryId ?? flat?.documentId);
         }
 
         // Integration Reverse Journal
         public async Task<ApiResponse<IntegrationDocumentResponse>> ReverseIntegrationJournalAsync(CreateIntegrationReverseJournalRequest request)
         {
-            return await PostAsync<CreateIntegrationReverseJournalRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateIntegrationReverseJournalRequest, IntegrationSyncResponse>(
                 "/api/integration/journals/reverse", request);
+            return WrapDoc(flat, flat?.journalEntryId ?? flat?.documentId);
         }
 
         // Integration Daily Summary
@@ -669,22 +701,24 @@ namespace Take_Time_BangPhra.Integration
             if (request.Lines == null || request.Lines.Count == 0)
                 throw new ArgumentException("Daily summary must have at least 1 line.");
 
-            return await PostAsync<CreateDailySummaryRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<CreateDailySummaryRequest, IntegrationSyncResponse>(
                 "/api/integration/daily-summary", request);
+            return WrapDoc(flat, flat?.documentId ?? flat?.journalEntryId);
         }
 
-        // Integration Batch
-        public async Task<ApiResponse<object>> CreateIntegrationBatchAsync(CreateIntegrationBatchRequest request)
+        // Integration Batch — คืน flat InboundBatchResponse {totalProcessed, successCount, errorCount, results[]}
+        public async Task<InboundBatchResponse> CreateIntegrationBatchAsync(CreateIntegrationBatchRequest request)
         {
-            return await PostAsync<CreateIntegrationBatchRequest, ApiResponse<object>>(
+            return await PostAsync<CreateIntegrationBatchRequest, InboundBatchResponse>(
                 "/api/integration/batch", request);
         }
 
         // Integration Customers (/api/integration/customers)
         public async Task<ApiResponse<IntegrationDocumentResponse>> CreateIntegrationCustomerAsync(InboundCustomerRequest customer)
         {
-            return await PostAsync<InboundCustomerRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<InboundCustomerRequest, IntegrationSyncResponse>(
                 "/api/integration/customers", customer);
+            return WrapDoc(flat, flat?.contactId);
         }
 
         // Integration Products (/api/integration/products) — upsert by Code
@@ -693,8 +727,10 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(product?.Code))
                 throw new ArgumentException("Integration product must have a Code (used as upsert key).");
 
-            return await PostAsync<InboundProductRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<InboundProductRequest, IntegrationSyncResponse>(
                 "/api/integration/products", product);
+            // product sync คืน documentNumber = Code, อาจไม่มี Guid → WrapDoc คืน data=null ได้ (caller รองรับ)
+            return WrapDoc(flat, flat?.documentId);
         }
 
         // Integration Credit Notes (/api/integration/credit-notes)
@@ -705,8 +741,9 @@ namespace Take_Time_BangPhra.Integration
 
             EnsureLinesHaveAccountCode(creditNote.Lines);
 
-            return await PostAsync<InboundCreditNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<InboundCreditNoteRequest, IntegrationSyncResponse>(
                 "/api/integration/credit-notes", creditNote);
+            return WrapDoc(flat, flat?.documentId);
         }
 
         // Integration Debit Notes (/api/integration/debit-notes)
@@ -717,32 +754,33 @@ namespace Take_Time_BangPhra.Integration
 
             EnsureLinesHaveAccountCode(debitNote.Lines);
 
-            return await PostAsync<InboundDebitNoteRequest, ApiResponse<IntegrationDocumentResponse>>(
+            var flat = await PostAsync<InboundDebitNoteRequest, IntegrationSyncResponse>(
                 "/api/integration/debit-notes", debitNote);
+            return WrapDoc(flat, flat?.documentId);
         }
 
-        // Integration Outbound Queries (/api/integration/documents, contacts, payments-list, account-balances)
-        public async Task<ApiResponse<PagedResponse<OutboundDocumentResponse>>> GetIntegrationDocumentsAsync(OutboundQueryParams query = null)
+        // Integration Outbound Queries — NextAcc คืน flat (ไม่มี ApiResponse wrapper)
+        public async Task<PagedResponse<OutboundDocumentResponse>> GetIntegrationDocumentsAsync(OutboundQueryParams query = null)
         {
             string qs = query != null ? $"?{query.ToQueryString()}" : "";
-            return await GetAsync<ApiResponse<PagedResponse<OutboundDocumentResponse>>>($"/api/integration/documents{qs}");
+            return await GetAsync<PagedResponse<OutboundDocumentResponse>>($"/api/integration/documents{qs}");
         }
 
-        public async Task<ApiResponse<PagedResponse<OutboundContactResponse>>> GetIntegrationContactsAsync(OutboundQueryParams query = null)
+        public async Task<PagedResponse<OutboundContactResponse>> GetIntegrationContactsAsync(OutboundQueryParams query = null)
         {
             string qs = query != null ? $"?{query.ToQueryString()}" : "";
-            return await GetAsync<ApiResponse<PagedResponse<OutboundContactResponse>>>($"/api/integration/contacts{qs}");
+            return await GetAsync<PagedResponse<OutboundContactResponse>>($"/api/integration/contacts{qs}");
         }
 
-        public async Task<ApiResponse<PagedResponse<OutboundPaymentResponse>>> GetIntegrationPaymentsAsync(OutboundQueryParams query = null)
+        public async Task<PagedResponse<OutboundPaymentResponse>> GetIntegrationPaymentsAsync(OutboundQueryParams query = null)
         {
             string qs = query != null ? $"?{query.ToQueryString()}" : "";
-            return await GetAsync<ApiResponse<PagedResponse<OutboundPaymentResponse>>>($"/api/integration/payments-list{qs}");
+            return await GetAsync<PagedResponse<OutboundPaymentResponse>>($"/api/integration/payments-list{qs}");
         }
 
-        public async Task<ApiResponse<List<OutboundAccountBalanceResponse>>> GetIntegrationAccountBalancesAsync()
+        public async Task<List<OutboundAccountBalanceResponse>> GetIntegrationAccountBalancesAsync()
         {
-            return await GetAsync<ApiResponse<List<OutboundAccountBalanceResponse>>>("/api/integration/account-balances");
+            return await GetAsync<List<OutboundAccountBalanceResponse>>("/api/integration/account-balances");
         }
 
         // WHT Certificate (หนังสือรับรองหัก ณ ที่จ่าย)
@@ -974,7 +1012,9 @@ namespace Take_Time_BangPhra.Integration
                         $"Multipart invoice upload failed: {response.StatusCode} {responseBody}",
                         (int)response.StatusCode, responseBody);
 
-                return JsonConvert.DeserializeObject<ApiResponse<IntegrationDocumentResponse>>(responseBody, _jsonSettings);
+                // /api/integration/invoices/multipart คืน flat InboundSyncResponse เช่นเดียวกับ endpoint อื่น
+                var flat = JsonConvert.DeserializeObject<IntegrationSyncResponse>(responseBody, _jsonSettings);
+                return WrapDoc(flat, flat?.documentId);
             }
         }
 
