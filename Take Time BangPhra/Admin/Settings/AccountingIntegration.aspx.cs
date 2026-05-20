@@ -547,6 +547,22 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (!config.IsConfigured)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Nexaacc ครบถ้วน (Base URL, API Key, Company ID)" } };
 
+                // Chart of Accounts endpoint ({company}/accounting/accounts) ต้องใช้ API Key (acc_)
+                // ใช้กับ Integration Key (int_) ไม่ได้ — แต่ระบบ sync เอกสารไม่ต้องพึ่ง chart sync แล้ว
+                // (journal/invoice ใช้ Nexaacc_AccountCode ที่ seed ไว้ใน Accounting_Account_Mapping โดยตรง)
+                if (config.IsIntegrationKey)
+                {
+                    return new Dictionary<string, object>
+                    {
+                        { "success", false },
+                        { "message", "ℹ️ ไม่จำเป็นต้องดึง Chart of Accounts เมื่อใช้ Integration Key (int_)\n\n" +
+                            "ระบบ sync เอกสาร (journal/invoice/ใบเสร็จ) ใช้รหัสบัญชี (AccountCode) ที่ตั้งค่าไว้แล้วใน " +
+                            "ตาราง Accounting_Account_Mapping โดยตรง — sync ได้เลยโดยไม่ต้องดึง chart\n\n" +
+                            "หมายเหตุ: endpoint ดึง Chart of Accounts ต้องใช้ API Key (acc_) ซึ่งเป็นคนละประเภทกับ " +
+                            "Integration Key — ถ้าต้องการ refresh chart ให้ใช้ API Key (acc_) ชั่วคราว" }
+                    };
+                }
+
                 var client = new Integration.AccountingApiClient(config, ConnStr);
                 var result = System.Threading.Tasks.Task.Run(() => client.GetAccountsAsync()).Result;
                 bool success = result != null && result.data != null;
