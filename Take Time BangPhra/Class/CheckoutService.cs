@@ -170,11 +170,11 @@ namespace Take_Time_BangPhra
                 var parameters = new Dictionary<string, object> { { "@id", reservationId } };
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT r.Deposit, r.TotalPrice,
-                             ISNULL(c.Customer_Name, c.NickName) AS CustomerName,
+                             ISNULL(c.FullName, c.Name) AS CustomerName,
                              ISNULL(dep.DepositPaid, 0) AS DepositPaid,
                              ISNULL(allp.TotalPaid, 0) AS TotalPaid
                       FROM Reservation r
-                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
+                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
                       LEFT JOIN (
                           SELECT Reservation_ID, SUM(Total_Amount) AS DepositPaid
                           FROM Account_Receipt
