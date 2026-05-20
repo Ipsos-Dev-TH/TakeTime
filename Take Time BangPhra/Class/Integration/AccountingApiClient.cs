@@ -1103,14 +1103,19 @@ namespace Take_Time_BangPhra.Integration
             string apiKeyPreview = _config.ApiKey.Length > 8
                 ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
                 : new string('*', _config.ApiKey.Length);
-            string targetUrl = $"{_config.BaseUrl}/api/companies/{_config.CompanyId}/accounting/accounts";
+            // ทดสอบผ่าน /api/integration/account-balances — endpoint เดียวกับ auth ที่ sync ใช้จริง
+            // (X-Integration-Key). ถ้า test ผ่าน = sync ทุก flow ใช้งานได้
+            string targetUrl = $"{_config.BaseUrl}/api/integration/account-balances";
 
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var result = await GetAccountsAsync().ConfigureAwait(false);
+                var balances = await GetIntegrationAccountBalancesAsync().ConfigureAwait(false);
                 sw.Stop();
-                return new ConnectionTestResult(true, $"Nexaacc API เชื่อมต่อสำเร็จ — API Key ใช้งานได้ ({sw.ElapsedMilliseconds}ms)");
+                int accCount = balances?.Count ?? 0;
+                return new ConnectionTestResult(true,
+                    $"NextAcc Integration API เชื่อมต่อสำเร็จ — Integration Key ใช้งานได้ " +
+                    $"(พบ {accCount} บัญชี, {sw.ElapsedMilliseconds}ms)");
             }
             catch (DnsResolutionException ex)
             {
