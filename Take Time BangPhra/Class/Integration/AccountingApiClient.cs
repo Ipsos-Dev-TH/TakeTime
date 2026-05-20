@@ -319,9 +319,16 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // Create a fresh request on each attempt (HttpRequestMessage cannot be reused)
                     var request = new HttpRequestMessage(method, url);
-                    request.Headers.Add("X-Api-Key", _config.ApiKey);
+                    // เลือก auth header ตาม endpoint — ห้ามส่งทั้งคู่:
+                    //   /api/integration/* → X-Integration-Key เท่านั้น
+                    //     (ถ้าส่ง X-Api-Key ไปด้วย ApiKeyMiddleware ของ NextAcc จะหา int_ key
+                    //      ใน ApiKey table ไม่เจอ → reject 401 "Invalid or revoked API key"
+                    //      ก่อน request ถึง ExternalIntegrationController)
+                    //   อื่นๆ ({company}/*) → X-Api-Key เท่านั้น
                     if (path.StartsWith("/api/integration/"))
                         request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                    else
+                        request.Headers.Add("X-Api-Key", _config.ApiKey);
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -983,8 +990,8 @@ namespace Take_Time_BangPhra.Integration
                 form.Add(fileContent, "file", fileName);
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
+                // {company}/attachments/* เป็น JWT endpoint → X-Api-Key
                 request.Headers.Add("X-Api-Key", _config.ApiKey);
-                request.Headers.Add("X-Integration-Key", _config.ApiKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
@@ -1043,7 +1050,7 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                // /api/integration/invoices/multipart → X-Integration-Key เท่านั้น
                 request.Headers.Add("X-Integration-Key", _config.ApiKey);
                 request.Content = form;
 
