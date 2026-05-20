@@ -155,6 +155,7 @@ namespace Take_Time_BangPhra.Integration
             decimal depositApplied = 0)
         {
             if (!_config.IsConfigured) return -1;
+            if (totalAmount <= 0) return -1;  // กันใบเสร็จยอด 0/ติดลบ ไม่ให้เข้า queue (จะ fail ที่ processor)
 
             long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
@@ -1145,11 +1146,12 @@ namespace Take_Time_BangPhra.Integration
                 expense.Attachments = attachments;
                 ApplyContactToExpense(expense, supplierContact);
                 var result = await _apiClient.CreateExpenseAsync(expense);
-                string nexaaccId = result.data.Id.ToString();
+                Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
+                string nexaaccId = expDocId.ToString();
 
                 // Auto-generate WHT certificate if WHT was applied
                 if (whtAmount > 0)
-                    await TryAutoGenerateWhtCertAsync(result.data.Id, docNumber);
+                    await TryAutoGenerateWhtCertAsync(expDocId, docNumber);
 
                 return nexaaccId;
             }
@@ -1160,8 +1162,9 @@ namespace Take_Time_BangPhra.Integration
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
+                Guid jrnlId = RequireValidDocId(result?.data?.Id, $"CreateJournal (voucher) doc={docNumber}");
+                await SafePostJournalAsync(jrnlId);
+                return jrnlId.ToString();
             }
         }
 
@@ -1201,7 +1204,7 @@ namespace Take_Time_BangPhra.Integration
                     expense.ReplaceExistingForSource = true;
                 }
                 var result = await _apiClient.CreateExpenseAsync(expense);
-                return result.data.Id.ToString();
+                return RequireValidDocId(result?.data?.Id, $"CreateExpense (payroll) period={period}").ToString();
             }
             else
             {
@@ -1210,8 +1213,9 @@ namespace Take_Time_BangPhra.Integration
                 if (!string.IsNullOrEmpty(docNumber))
                     journal.Reference = docNumber;
                 var result = await _apiClient.CreateJournalAsync(journal);
-                await SafePostJournalAsync(result.data.Id);
-                return result.data.Id.ToString();
+                Guid payrollId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payroll) period={period}");
+                await SafePostJournalAsync(payrollId);
+                return payrollId.ToString();
             }
         }
 
@@ -1234,7 +1238,6 @@ namespace Take_Time_BangPhra.Integration
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() : "";
             DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
-            decimal vatAmount = Convert.ToDecimal(p["vatAmount"]);
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
             string revenueType = p.ContainsKey("revenueType") ? p["revenueType"]?.ToString() : null;
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
@@ -1257,9 +1260,14 @@ namespace Take_Time_BangPhra.Integration
 
             if (isDeposit)
             {
+                // โหมด RECEIPT: แยก VAT ออกจากมัดจำตั้งแต่ตอนรับเงิน (ม.78/1 — บริการ)
+                bool depositHasVat = LookupBusinessHasVat();
+                bool depositVatAtReceipt = _config.IsDepositVatAtReceipt;
+
                 if (_config.IsReceiptDocumentMode)
                 {
-                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
+                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
+                        paymentAccountId: paymentAccountId, hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     if (!string.IsNullOrEmpty(receiptNumber))
                     {
                         invoice.Reference = receiptNumber;
@@ -1275,7 +1283,9 @@ namespace Take_Time_BangPhra.Integration
                 }
                 else
                 {
-                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
+                        paymentAccountId: paymentAccountId, documentNumber: receiptNumber,
+                        hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
                     await SafePostJournalAsync(jrnlDocId);
@@ -1284,7 +1294,10 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
-                bool hasVat = vatAmount > 0;
+                // ใช้ Business_Info.Use_Vat เป็นแหล่งความจริง (สอดคล้องกับ deposit/checkout/void branches)
+                // ไม่ใช้ vatAmount > 0 จาก receipt — กันกรณี receipt.Vat=0 ทั้งที่กิจการจด VAT
+                // → ถ้า deposit รับรู้ VAT ไปแล้ว แต่ใบเสร็จนี้ไม่ split VAT จะทำให้ VAT รับรู้ไม่ครบ
+                bool hasVat = LookupBusinessHasVat();
                 decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
                 if (depositApplied <= 0)
                     depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
@@ -1345,7 +1358,8 @@ namespace Take_Time_BangPhra.Integration
                         try
                         {
                             var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
-                                receiptDate, customerName, paymentAccountId, receiptNumber);
+                                receiptDate, customerName, paymentAccountId, receiptNumber,
+                                hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
                             var adjResult = await _apiClient.CreateJournalAsync(adj);
                             Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
                             await SafePostJournalAsync(adjId);
@@ -1355,8 +1369,13 @@ namespace Take_Time_BangPhra.Integration
                         }
                         catch (Exception adjEx)
                         {
+                            // ต้อง re-throw — ถ้ากลืน exception ใบเสร็จจะถูกมาร์ค COMPLETED
+                            // แต่ ADVANCE_DEPOSIT ไม่ถูกตัด → มัดจำค้างถาวร ไม่มี retry
+                            // re-throw → queue retry → invoice idempotent (ExternalRef) ไม่สร้างซ้ำ + adjustment retry
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"Deposit-applied adjustment FAILED for receipt={receiptNumber}: {adjEx.Message}", "SYSTEM");
+                                $"Deposit-applied adjustment FAILED for receipt={receiptNumber}: {adjEx.Message} — จะ retry ทั้งรายการ", "SYSTEM");
+                            throw new Exception(
+                                $"Deposit-applied adjustment failed for receipt {receiptNumber} (invoice {invDocId} created OK, will retry): {adjEx.Message}", adjEx);
                         }
                     }
 
@@ -1369,7 +1388,8 @@ namespace Take_Time_BangPhra.Integration
                     if (useMultiLine)
                     {
                         journal = _mapper.MapMultiLinePaymentToJournal(reservationId, lines, paymentMethod, receiptDate,
-                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber);
+                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber,
+                            vatAtReceipt: _config.IsDepositVatAtReceipt);
                     }
                     else
                     {
@@ -1820,21 +1840,26 @@ namespace Take_Time_BangPhra.Integration
             if (depositAmount <= 0)
                 throw new ArgumentException($"ProcessDepositClearing: depositAmount ต้อง > 0 (ได้ {depositAmount}) reservation #{reservationId}");
 
-            // Sanity check: payload depositAmount = caller-computed "to clear" (มัดจำที่ยังไม่ได้ตัด).
-            // ห้าม override ด้วย LookupActualDepositPaid (ยอดมัดจำทั้งหมดที่จ่าย) เพราะจะทำลายการ netting
-            // ที่ CheckoutService ทำไว้แล้ว (depositPaid - alreadyAppliedInReceipts).
-            // เช็คได้เพียงว่า toClear ≤ actualDepositPaid เพื่อกัน over-clear
+            // RE-COMPUTE toClear ณ เวลา process (ไม่ใช้ payload เพียงอย่างเดียว):
+            //   payload depositAmount ถูกคำนวณตอน checkout (sync) — ถ้าใบเสร็จที่หักมัดจำยังไม่ถูก
+            //   queue ประมวลผล Deposit_Applied_Amount จะยังเป็น 0 → payload สูงเกิน → double-clear
+            //   ที่เวลานี้ queue FIFO ได้ประมวลใบเสร็จก่อนหน้าแล้ว → Deposit_Applied_Amount เป็นปัจจุบัน
+            //   toClear = มัดจำที่จ่ายจริง − มัดจำที่ถูกหักในใบเสร็จไปแล้ว
             decimal actualDeposit = LookupActualDepositPaid(reservationId);
-            if (actualDeposit > 0 && depositAmount > actualDeposit + 0.01m)
+            decimal alreadyApplied = LookupDepositAppliedForReservation(reservationId);
+            decimal recomputedToClear = actualDeposit - alreadyApplied;
+
+            if (recomputedToClear < depositAmount)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositClearing: payload depositAmount={depositAmount} > มัดจำจริง={actualDeposit} — clamp ลงเป็น {actualDeposit}", "SYSTEM");
-                depositAmount = actualDeposit;
+                    $"ProcessDepositClearing: payload={depositAmount} แต่ recomputed toClear={recomputedToClear} " +
+                    $"(มัดจำจ่ายจริง {actualDeposit} − หักในใบเสร็จแล้ว {alreadyApplied}) — ใช้ค่า recomputed", "SYSTEM");
+                depositAmount = recomputedToClear;
             }
-            if (depositAmount <= 0)
+            if (depositAmount <= 0.01m)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositClearing: ไม่มียอดที่ต้อง clear (อาจถูกตัดในใบเสร็จไปแล้ว) — skip reservation #{reservationId}", "SYSTEM");
+                    $"ProcessDepositClearing: ไม่มียอดที่ต้อง clear (ถูกตัดในใบเสร็จไปแล้ว) — skip reservation #{reservationId}", "SYSTEM");
                 return "SKIPPED_NO_BALANCE";
             }
 
@@ -1843,10 +1868,11 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat);
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, _config.IsDepositVatAtReceipt);
             var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
+            Guid clearId = RequireValidDocId(result?.data?.Id, $"DepositClearing resId={reservationId}");
+            await SafePostJournalAsync(clearId);
+            return clearId.ToString();
         }
 
         private async Task<string> ProcessDepositRefund(Dictionary<string, object> p)
@@ -1872,8 +1898,9 @@ namespace Take_Time_BangPhra.Integration
 
             var journal = _mapper.MapRefundToJournal(reservationId, refundAmount, paymentMethod, refundDate, customerName);
             var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
+            Guid refundId = RequireValidDocId(result?.data?.Id, $"DepositRefund resId={reservationId}");
+            await SafePostJournalAsync(refundId);
+            return refundId.ToString();
         }
 
         private async Task<string> ProcessDepositForfeit(Dictionary<string, object> p)
@@ -1899,8 +1926,9 @@ namespace Take_Time_BangPhra.Integration
 
             var journal = _mapper.MapForfeitDepositToJournal(reservationId, forfeitAmount, customerName, forfeitDate, reason);
             var result = await _apiClient.CreateJournalAsync(journal);
-            await SafePostJournalAsync(result.data.Id);
-            return result.data.Id.ToString();
+            Guid forfeitId = RequireValidDocId(result?.data?.Id, $"DepositForfeit resId={reservationId}");
+            await SafePostJournalAsync(forfeitId);
+            return forfeitId.ToString();
         }
 
         // ──────────────────────────────────────────────
@@ -2145,12 +2173,14 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // Status filter ใช้ 'Normal'/NULL ให้ตรงกับ query มัดจำอื่นทั้งหมด
+                // (GetReservationData, LookupDepositAppliedForReservation ฯลฯ) — กัน mismatch
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ISNULL(SUM(Total_Amount), 0) AS TotalDeposit
                       FROM Account_Receipt
                       WHERE Reservation_ID = @resId
                         AND IsDeposit = 1
-                        AND (Status = 'Normal' OR Status IS NULL OR Status = '1' OR Status = 'COMPLETED')",
+                        AND (Status = 'Normal' OR Status IS NULL)",
                     new Dictionary<string, object> { { "@resId", reservationId } });
                 if (dt?.Rows.Count > 0)
                     return Convert.ToDecimal(dt.Rows[0]["TotalDeposit"]);
@@ -2159,6 +2189,29 @@ namespace Take_Time_BangPhra.Integration
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"LookupActualDepositPaid failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return 0m;
+        }
+
+        /// <summary>มัดจำที่ถูกหักในใบเสร็จไปแล้ว (sum Deposit_Applied_Amount จากใบเสร็จที่ไม่ใช่มัดจำ)</summary>
+        private decimal LookupDepositAppliedForReservation(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ISNULL(SUM(Deposit_Applied_Amount), 0) AS Applied
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @resId
+                        AND IsDeposit = 0
+                        AND (Status = 'Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@resId", reservationId } });
+                if (dt?.Rows.Count > 0)
+                    return Convert.ToDecimal(dt.Rows[0]["Applied"]);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupDepositAppliedForReservation failed for resId={reservationId}: {ex.Message}", "SYSTEM");
             }
             return 0m;
         }
@@ -2963,23 +3016,18 @@ namespace Take_Time_BangPhra.Integration
                 { "@maxRetries", _config.MaxRetries }
             };
 
-            _code.DatabaseInsertSafe(_connectionString,
+            // INSERT + SELECT SCOPE_IDENTITY() ในคำสั่งเดียว — race-free
+            // (เดิมใช้ MAX(ID) WHERE entity/action ซึ่งคืน ID ผิดถ้า enqueue พร้อมกัน 2 รายการ
+            //  ที่มี Entity_Type/Entity_ID/Action_Type เหมือนกัน — เช่น 2 ใบเสร็จของการจองเดียวกัน)
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
                 @"INSERT INTO Accounting_Sync_Queue
                   (Entity_Type, Entity_ID, Action_Type, Payload, Status, Retry_Count, Max_Retries, Created_Date)
-                  VALUES (@entityType, @entityId, @actionType, @payload, 'PENDING', 0, @maxRetries, GETDATE())",
+                  VALUES (@entityType, @entityId, @actionType, @payload, 'PENDING', 0, @maxRetries, GETDATE());
+                  SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS NewID;",
                 parameters);
 
-            // Get the inserted ID
-            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
-                "SELECT MAX(ID) as LastID FROM Accounting_Sync_Queue WHERE Entity_Type = @entityType AND Entity_ID = @entityId AND Action_Type = @actionType",
-                new Dictionary<string, object>
-                {
-                    { "@entityType", entityType },
-                    { "@entityId", entityId },
-                    { "@actionType", actionType }
-                });
-
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["LastID"]) : -1;
+            return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["NewID"] != DBNull.Value
+                ? Convert.ToInt64(dt.Rows[0]["NewID"]) : -1;
         }
 
         private void UpdateQueueStatus(long queueId, string status, string errorMessage, string nexaaccResponseId)

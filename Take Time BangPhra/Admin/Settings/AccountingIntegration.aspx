@@ -176,6 +176,18 @@
                     </select>
                     <div class="help-text">ส่งไฟล์แนบ (ใบเสร็จ PDF, สลิปจ่ายเงิน, ใบสำคัญจ่าย) ไปพร้อมเอกสารใน NextAcc</div>
                 </div>
+                <div class="config-item">
+                    <label>จุดรับรู้ VAT ของเงินมัดจำ</label>
+                    <select id="cfgDepositVatRecognition">
+                        <option value="CHECKOUT">CHECKOUT — รับรู้ VAT ตอนตัดมัดจำเป็นรายได้ (เช็คเอาท์)</option>
+                        <option value="RECEIPT">RECEIPT — รับรู้ VAT ทันทีที่รับเงินมัดจำ (ม.78/1 บริการ)</option>
+                    </select>
+                    <div class="help-text">
+                        RECEIPT: เมื่อรับมัดจำ ระบบจะแยก VAT ยิงเข้าบัญชีภาษีขาย (OUTPUT_VAT) ทันที —
+                        ถูกต้องตามประมวลรัษฎากร ม.78/1 (ธุรกิจบริการ จุดความรับผิด VAT = วันรับเงิน).
+                        CHECKOUT: เลื่อนรับรู้ VAT ไปตอนตัดมัดจำเป็นรายได้
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -720,6 +732,7 @@
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
+                if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -759,6 +772,7 @@
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
                 attachFiles: document.getElementById('cfgAttachFiles').value,
+                depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

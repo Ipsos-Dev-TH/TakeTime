@@ -65,6 +65,21 @@ namespace Take_Time_BangPhra.Integration
         public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         // ──────────────────────────────────────────────
+        // Deposit VAT recognition timing (จุดความรับผิด VAT ของเงินมัดจำ)
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// เมื่อไหร่ที่ VAT ของเงินมัดจำถูกรับรู้และยิงเข้าบัญชีภาษีขาย (OUTPUT_VAT):
+        ///   CHECKOUT (default) — รับรู้ VAT ตอนตัดมัดจำเป็นรายได้ (เช็คเอาท์)
+        ///   RECEIPT  — รับรู้ VAT ทันทีที่รับเงินมัดจำ (ตาม ป.รัษฎากร ม.78/1:
+        ///              บริการ จุดความรับผิด VAT = วันรับชำระเงิน)
+        /// </summary>
+        public string DepositVatRecognition => GetConfig("Deposit_Vat_Recognition", "CHECKOUT");
+
+        /// <summary>true = แยก VAT ออกจากมัดจำตั้งแต่ตอนรับเงิน (ยิงเข้า OUTPUT_VAT ทันที)</summary>
+        public bool IsDepositVatAtReceipt => DepositVatRecognition.Equals("RECEIPT", StringComparison.OrdinalIgnoreCase);
+
+        // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────
 

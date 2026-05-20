@@ -58,6 +58,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "voucherSyncMode", config.VoucherSyncMode },
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "attachFiles", config.AttachFiles },
+                    { "depositVatRecognition", config.DepositVatRecognition },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -230,6 +231,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
+                if (data.ContainsKey("depositVatRecognition"))
+                {
+                    string dvr = (data["depositVatRecognition"]?.ToString() ?? "CHECKOUT").ToUpper();
+                    if (dvr != "RECEIPT" && dvr != "CHECKOUT") dvr = "CHECKOUT";
+                    config.SetConfig("Deposit_Vat_Recognition", dvr);
+                }
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));

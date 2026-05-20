@@ -544,6 +544,44 @@ namespace Take_Time_BangPhra.Integration
         public DateTime CreatedAt { get; set; }
     }
 
+    /// <summary>
+    /// Flat response จาก /api/integration/* — ตรงกับ NextAcc record InboundSyncResponse
+    /// NextAcc คืน object แบนๆ ไม่มี data wrapper:
+    ///   { success, message, documentId, contactId, journalEntryId, paymentId,
+    ///     documentNumber, attachmentIds, warnings }
+    /// </summary>
+    public class IntegrationSyncResponse
+    {
+        public bool success { get; set; }
+        public string message { get; set; }
+        public Guid? documentId { get; set; }
+        public Guid? contactId { get; set; }
+        public Guid? journalEntryId { get; set; }
+        public Guid? paymentId { get; set; }
+        public string documentNumber { get; set; }
+        public List<Guid> attachmentIds { get; set; }
+        public List<string> warnings { get; set; }
+    }
+
+    /// <summary>Flat response จาก /api/integration/batch — ตรงกับ NextAcc InboundBatchResponse</summary>
+    public class InboundBatchResponse
+    {
+        public int totalProcessed { get; set; }
+        public int successCount { get; set; }
+        public int errorCount { get; set; }
+        public List<BatchResultItem> results { get; set; }
+    }
+
+    public class BatchResultItem
+    {
+        public string type { get; set; }
+        public string externalRef { get; set; }
+        public bool success { get; set; }
+        public string message { get; set; }
+        public Guid? createdId { get; set; }
+        public string createdNumber { get; set; }
+    }
+
     // ──────────────────────────────────────────────
     // Integration Payment (บันทึกรับเงินต่อเอกสาร)
     // ใช้ /api/integration/payments
