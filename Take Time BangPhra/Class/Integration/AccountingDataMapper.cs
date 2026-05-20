@@ -1780,7 +1780,11 @@ namespace Take_Time_BangPhra.Integration
             {
                 decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 depositVatAlready = depositApplied - depositNet;
-                depositAppliedDebit = depositNet;
+                // clamp กันกรณี rounding ทำให้ depositVatAlready > vatAmount (vatToRecognize จะติดลบ
+                // → journal ไม่สมดุล). clamp แล้ว derive depositAppliedDebit ใหม่ให้ DR=CR เสมอ
+                if (depositVatAlready > vatAmount)
+                    depositVatAlready = vatAmount;
+                depositAppliedDebit = depositApplied - depositVatAlready;
             }
 
             var journalLines = new List<JournalEntryLineRequest>();

@@ -348,14 +348,19 @@ namespace Take_Time_BangPhra.Integration
                     {
                         int status = (int)response.StatusCode;
 
-                        // 401/403 = auth failure — set cooldown to stop all queue items from retrying
+                        // 401/403 = auth failure
                         if (status == 401 || status == 403)
                         {
                             string keyPreview = _config.ApiKey.Length > 8
                                 ? _config.ApiKey.Substring(0, 4) + "****" + _config.ApiKey.Substring(_config.ApiKey.Length - 4)
                                 : "****";
                             string authMsg = $"API Key authentication failed ({status}): {responseBody}. Key: {keyPreview} (length={_config.ApiKey.Length}). กรุณาตรวจสอบ API Key ใน Accounting Integration Settings";
-                            SetAuthFailed(authMsg);
+                            // ตั้ง global cooldown เฉพาะ 401 จาก /api/integration/* (auth ของ core sync) เท่านั้น
+                            // {company}/* (E-Tax/WHT) ใช้ API Key คนละประเภทกับ Integration Key —
+                            // 401 ที่นั่นเป็นเรื่องปกติเมื่อ config ใช้ Integration Key และต้อง "ข้าม" ไป
+                            // ไม่ใช่ block การ sync เอกสารหลักทั้งหมด
+                            if (path.StartsWith("/api/integration/"))
+                                SetAuthFailed(authMsg);
                             throw new AuthenticationFailedException(authMsg);
                         }
 

@@ -1626,31 +1626,27 @@ namespace Take_Time_BangPhra.Integration
                             var creditNote = _mapper.MapReceiptVoidToCreditNote(
                                 resId, receiptNumber, totalAmount, hasVat, custName, DateTime.Now, reason);
                             var cnResult = await _apiClient.CreateIntegrationCreditNoteAsync(creditNote);
+                            Guid cnId = RequireValidDocId(cnResult?.data?.Id, $"CreditNote (void receipt) receipt={receiptNumber}");
 
                             // ถ้าใบเสร็จเดิมมี deposit applied → ต้อง restore ADVANCE_DEPOSIT
                             // (DOCUMENT mode flow มี separate adjustment journal ที่ต้อง undo)
                             decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
                             if (applied > 0 && info != null)
                             {
-                                try
-                                {
-                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        custName, info.Value.paymentAccountId, receiptNumber);
-                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
-                                        "SYSTEM");
-                                }
-                                catch (Exception adjEx)
-                                {
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt: counter-adj FAILED for receipt={receiptNumber}: {adjEx.Message}",
-                                        "SYSTEM");
-                                }
+                                // ห้ามกลืน exception — ถ้า counter-adj fail แล้วมาร์ค COMPLETED
+                                // ADVANCE_DEPOSIT จะไม่ถูก restore → phantom liability ค้างถาวร
+                                // re-throw → queue retry (credit note idempotent ด้วย ExternalRef ไม่สร้างซ้ำ)
+                                var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                    resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                    custName, info.Value.paymentAccountId, receiptNumber);
+                                var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                    "SYSTEM");
                             }
 
-                            return $"CREDIT_NOTE:{cnResult?.data?.Id}";
+                            return $"CREDIT_NOTE:{cnId}";
                         }
                     }
 
@@ -1727,10 +1723,11 @@ namespace Take_Time_BangPhra.Integration
                                 supplier?.voucherId ?? 0, documentNumber, totalAmount, hasVat,
                                 supplier?.supplierName ?? "", DateTime.Now, reason);
                             var dnResult = await _apiClient.CreateIntegrationDebitNoteAsync(debitNote);
+                            Guid dnId = RequireValidDocId(dnResult?.data?.Id, $"DebitNote (void voucher) doc={documentNumber}");
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnResult?.data?.Id}",
+                                $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnId}",
                                 "SYSTEM");
-                            return $"DEBIT_NOTE:{dnResult?.data?.Id}";
+                            return $"DEBIT_NOTE:{dnId}";
                         }
                     }
 
@@ -1781,6 +1778,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         private async Task TryAutoGenerateWhtCertAsync(Guid documentId, string documentNumber)
         {
+            // WHT cert endpoint ({company}/withholding-tax-certs/*) ต้องใช้ API Key (acc_)
+            // ข้ามเมื่อใช้ Integration Key (int_) — กัน 401 ซ้ำ
+            if (_config.IsIntegrationKey)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"WHT cert auto-generate ข้าม doc={documentNumber}: ระบบใช้ Integration Key (int_) " +
+                    "ซึ่งใช้กับ WHT endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก", "SYSTEM");
+                return;
+            }
             try
             {
                 var whtResult = await _apiClient.AutoGenerateWhtCertAsync(new AutoGenerateWhtRequest
@@ -2243,6 +2249,16 @@ namespace Take_Time_BangPhra.Integration
         private async Task TryAutoGenerateEtaxAsync(Guid invoiceDocId, string receiptNumber, int reservationId, decimal amount, string guestName)
         {
             if (!_config.IsEtaxAutoGenerate) return;
+
+            // E-Tax endpoint ({company}/etax/*) ต้องใช้ API Key (acc_) — ใช้กับ Integration Key (int_) ไม่ได้
+            // ข้ามไปเพื่อไม่ให้เกิด 401 ซ้ำทุกใบเสร็จ (core sync ไม่กระทบ)
+            if (_config.IsIntegrationKey)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax auto-generate ข้าม receipt={receiptNumber}: ระบบใช้ Integration Key (int_) " +
+                    "ซึ่งใช้กับ E-Tax endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก หรือสร้าง E-Tax เองในหน้าจัดการ", "SYSTEM");
+                return;
+            }
 
             long logId = InsertEtaxLogPending(invoiceDocId, receiptNumber, reservationId);
 
