@@ -1257,9 +1257,14 @@ namespace Take_Time_BangPhra.Integration
 
             if (isDeposit)
             {
+                // โหมด RECEIPT: แยก VAT ออกจากมัดจำตั้งแต่ตอนรับเงิน (ม.78/1 — บริการ)
+                bool depositHasVat = LookupBusinessHasVat();
+                bool depositVatAtReceipt = _config.IsDepositVatAtReceipt;
+
                 if (_config.IsReceiptDocumentMode)
                 {
-                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId);
+                    var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
+                        paymentAccountId: paymentAccountId, hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     if (!string.IsNullOrEmpty(receiptNumber))
                     {
                         invoice.Reference = receiptNumber;
@@ -1275,7 +1280,9 @@ namespace Take_Time_BangPhra.Integration
                 }
                 else
                 {
-                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName, paymentAccountId: paymentAccountId, documentNumber: receiptNumber);
+                    var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
+                        paymentAccountId: paymentAccountId, documentNumber: receiptNumber,
+                        hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
                     await SafePostJournalAsync(jrnlDocId);
@@ -1345,7 +1352,8 @@ namespace Take_Time_BangPhra.Integration
                         try
                         {
                             var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
-                                receiptDate, customerName, paymentAccountId, receiptNumber);
+                                receiptDate, customerName, paymentAccountId, receiptNumber,
+                                hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
                             var adjResult = await _apiClient.CreateJournalAsync(adj);
                             Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
                             await SafePostJournalAsync(adjId);
@@ -1369,7 +1377,8 @@ namespace Take_Time_BangPhra.Integration
                     if (useMultiLine)
                     {
                         journal = _mapper.MapMultiLinePaymentToJournal(reservationId, lines, paymentMethod, receiptDate,
-                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber);
+                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber,
+                            vatAtReceipt: _config.IsDepositVatAtReceipt);
                     }
                     else
                     {
@@ -1843,7 +1852,7 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat);
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, _config.IsDepositVatAtReceipt);
             var result = await _apiClient.CreateJournalAsync(journal);
             await SafePostJournalAsync(result.data.Id);
             return result.data.Id.ToString();
