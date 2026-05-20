@@ -1040,7 +1040,9 @@ namespace Take_Time_BangPhra.Integration
             using (var form = new MultipartFormDataContent())
             {
                 var json = JsonConvert.SerializeObject(invoice, _jsonSettings);
-                form.Add(new StringContent(json, Encoding.UTF8, "application/json"), "data");
+                // NextAcc binds [FromForm] string invoice — ชื่อ field ต้องเป็น "invoice"
+                // (เดิมส่งชื่อ "data" → NextAcc ได้ค่า null → 400 "Empty invoice payload")
+                form.Add(new StringContent(json, Encoding.UTF8, "application/json"), "invoice");
 
                 if (filePaths != null)
                 {

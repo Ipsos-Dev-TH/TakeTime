@@ -78,17 +78,41 @@ namespace Take_Time_BangPhra.Integration
                     if (!string.IsNullOrEmpty(nexaaccCode))
                         _accountCodeCache[ttCode] = nexaaccCode;
 
+                    Guid id;
                     if (row["Nexaacc_AccountId"] != DBNull.Value)
                     {
-                        var id = (Guid)row["Nexaacc_AccountId"];
-                        _accountMappingCache[ttCode] = id;
-                        if (!string.IsNullOrEmpty(nexaaccCode))
-                            _accountIdToCodeCache[id] = nexaaccCode;
+                        id = (Guid)row["Nexaacc_AccountId"];
                     }
+                    else if (!string.IsNullOrEmpty(nexaaccCode))
+                    {
+                        // ไม่มี Nexaacc_AccountId (ยังไม่เคย "ดึง Chart of Accounts" หรือใช้ Integration Key
+                        // ที่ดึง chart ไม่ได้) — สร้าง Guid สังเคราะห์จาก AccountCode ที่ seed ไว้
+                        // Guid นี้ไม่เคยถูกส่งไป NextAcc (ConvertJournalToIntegration แปลงกลับเป็น
+                        // AccountCode ก่อนส่งเสมอ) — ทำให้ journal/invoice sync ไม่ต้องพึ่ง chart sync
+                        id = DeterministicGuidFromCode(nexaaccCode);
+                    }
+                    else
+                    {
+                        continue; // ไม่มีทั้ง Id และ Code — ข้าม
+                    }
+
+                    _accountMappingCache[ttCode] = id;
+                    if (!string.IsNullOrEmpty(nexaaccCode))
+                        _accountIdToCodeCache[id] = nexaaccCode;
                 }
             }
 
             _mappingCacheExpiry = DateTime.Now.AddMinutes(10);
+        }
+
+        /// <summary>สร้าง Guid คงที่จาก AccountCode (MD5) — ใช้เป็น placeholder เมื่อ chart ยังไม่ sync</summary>
+        private static Guid DeterministicGuidFromCode(string code)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                byte[] hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes("TT-ACC:" + code));
+                return new Guid(hash);
+            }
         }
 
         /// <summary>หา NexaAcc AccountCode (string เช่น "1110") จาก TakeTime code (เช่น "CASH")</summary>
