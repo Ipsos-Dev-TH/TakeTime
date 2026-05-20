@@ -106,7 +106,30 @@ namespace Take_Time_BangPhra.Integration
         {
             if (accountId == Guid.Empty) return null;
             EnsureMappingCache();
-            return _accountIdToCodeCache.TryGetValue(accountId, out var code) ? code : null;
+            if (_accountIdToCodeCache.TryGetValue(accountId, out var code) && !string.IsNullOrEmpty(code))
+                return code;
+
+            // Fallback: mapping row อาจมี Nexaacc_AccountId แต่ขาด Nexaacc_AccountCode
+            // → ดูจาก Accounting_Nexaacc_Accounts (chart-of-accounts cache ที่ sync จาก NextAcc โดยตรง
+            //   มี Id↔Code ครบเสมอ). cache ผลลัพธ์ลง _accountIdToCodeCache เพื่อไม่ query ซ้ำ
+            try
+            {
+                var dt = _Code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Account_Code FROM Accounting_Nexaacc_Accounts WHERE Nexaacc_AccountId = @id",
+                    new Dictionary<string, object> { { "@id", accountId } });
+                if (dt?.Rows.Count > 0)
+                {
+                    string resolved = dt.Rows[0]["Account_Code"]?.ToString();
+                    if (!string.IsNullOrEmpty(resolved))
+                    {
+                        _accountIdToCodeCache[accountId] = resolved;
+                        return resolved;
+                    }
+                }
+            }
+            catch { /* fall through to null */ }
+
+            return null;
         }
 
         /// <summary>แปลง JournalType int → string ที่ NextAcc รับ ("general", "sales", "cashreceipts", ฯลฯ)</summary>
@@ -138,7 +161,9 @@ namespace Take_Time_BangPhra.Integration
                 {
                     string code = GetAccountCodeFromId(line.AccountId);
                     if (string.IsNullOrEmpty(code))
-                        throw new Exception($"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId}. กรุณากด 'ดึง Chart of Accounts' ในหน้า Accounting Integration");
+                        throw new Exception($"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId} " +
+                            "ทั้งใน Accounting_Account_Mapping และ Accounting_Nexaacc_Accounts. " +
+                            "กรุณากด 'ดึง Chart of Accounts' ในหน้า Accounting Integration เพื่อ sync ผังบัญชีให้ครบ");
                     lines.Add(new IntegrationJournalLineRequest
                     {
                         AccountCode = code,
