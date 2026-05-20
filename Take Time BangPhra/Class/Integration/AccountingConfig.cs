@@ -31,6 +31,10 @@ namespace Take_Time_BangPhra.Integration
         public string BaseUrl => SanitizeBaseUrl(GetConfig("Nexaacc_BaseUrl", ""));
         public string RawBaseUrl => GetConfig("Nexaacc_BaseUrl", "");
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
+
+        /// <summary>true = key เป็น Integration Key (ขึ้นต้น "int_") — ใช้กับ /api/integration/* ได้
+        /// แต่ใช้กับ {company}/* (E-Tax, WHT, chart) ไม่ได้ (ต้องใช้ API Key "acc_")</summary>
+        public bool IsIntegrationKey => (ApiKey ?? "").StartsWith("int_", StringComparison.OrdinalIgnoreCase);
         public Guid CompanyId => Guid.TryParse(GetConfig("Nexaacc_CompanyId", ""), out var id) ? id : Guid.Empty;
         public bool Enabled => GetConfig("Nexaacc_Enabled", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         public int SyncIntervalSeconds => int.TryParse(GetConfig("Nexaacc_SyncInterval_Sec", "30"), out var v) ? v : 30;

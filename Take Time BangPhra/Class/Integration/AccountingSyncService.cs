@@ -1781,6 +1781,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         private async Task TryAutoGenerateWhtCertAsync(Guid documentId, string documentNumber)
         {
+            // WHT cert endpoint ({company}/withholding-tax-certs/*) ต้องใช้ API Key (acc_)
+            // ข้ามเมื่อใช้ Integration Key (int_) — กัน 401 ซ้ำ
+            if (_config.IsIntegrationKey)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"WHT cert auto-generate ข้าม doc={documentNumber}: ระบบใช้ Integration Key (int_) " +
+                    "ซึ่งใช้กับ WHT endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก", "SYSTEM");
+                return;
+            }
             try
             {
                 var whtResult = await _apiClient.AutoGenerateWhtCertAsync(new AutoGenerateWhtRequest
@@ -2243,6 +2252,16 @@ namespace Take_Time_BangPhra.Integration
         private async Task TryAutoGenerateEtaxAsync(Guid invoiceDocId, string receiptNumber, int reservationId, decimal amount, string guestName)
         {
             if (!_config.IsEtaxAutoGenerate) return;
+
+            // E-Tax endpoint ({company}/etax/*) ต้องใช้ API Key (acc_) — ใช้กับ Integration Key (int_) ไม่ได้
+            // ข้ามไปเพื่อไม่ให้เกิด 401 ซ้ำทุกใบเสร็จ (core sync ไม่กระทบ)
+            if (_config.IsIntegrationKey)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"E-Tax auto-generate ข้าม receipt={receiptNumber}: ระบบใช้ Integration Key (int_) " +
+                    "ซึ่งใช้กับ E-Tax endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก หรือสร้าง E-Tax เองในหน้าจัดการ", "SYSTEM");
+                return;
+            }
 
             long logId = InsertEtaxLogPending(invoiceDocId, receiptNumber, reservationId);
 
