@@ -219,8 +219,10 @@ namespace Take_Time_BangPhra.Integration
             {
                 // ม.78/1 — บริการ: จุดความรับผิด VAT = วันรับเงิน
                 // แยก VAT ออกจากมัดจำตั้งแต่ตอนรับเงิน → CR เงินรับล่วงหน้า (net) + CR ภาษีขาย
-                decimal vatAmount = Math.Round(amount * 7m / 107m, 2, MidpointRounding.AwayFromZero);
-                decimal netAmount = amount - vatAmount;
+                // ⚠ ต้องคำนวณ netAmount = round(amount*100/107) ให้ตรงกับ MapCheckoutToJournal
+                //   (ถ้าใช้ amount - round(amount*7/107) อาจต่างกัน 0.01 → เศษค้างใน ADVANCE_DEPOSIT)
+                decimal netAmount = Math.Round(amount * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+                decimal vatAmount = amount - netAmount;
                 var outputVatAccountId = GetAccountId("OUTPUT_VAT");
 
                 lines.Add(new JournalEntryLineRequest
