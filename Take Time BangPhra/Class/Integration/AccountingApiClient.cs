@@ -437,19 +437,18 @@ namespace Take_Time_BangPhra.Integration
             if (journal.Lines == null || journal.Lines.Count == 0)
                 throw new ArgumentException("Journal entry must have at least 1 debit/credit line.");
 
-            if (!journal.Lines.Any(l => l.DebitAmount > 0) || !journal.Lines.Any(l => l.CreditAmount > 0))
-                throw new ArgumentException("Journal entry must have at least 1 debit line and 1 credit line.");
-
             decimal totalDr = journal.Lines.Sum(l => l.DebitAmount);
             decimal totalCr = journal.Lines.Sum(l => l.CreditAmount);
 
-            // Centralized double-entry validation (DR=CR within 0.01 tolerance)
-            var balCheck = AccountingArithmeticValidator.ValidateJournalBalance(totalDr, totalCr);
-            if (!balCheck.IsValid)
+            // ตรวจ journal ทั้งใบ: ไม่มียอดติดลบ, แต่ละบรรทัดด้านเดียว, ทศนิยม ≤ 2,
+            // มี debit+credit ครบ, และ DR=CR — safety net ก่อนยิง NextAcc ทุกใบ
+            var jrnlCheck = AccountingArithmeticValidator.ValidateJournalLines(
+                journal.Lines.Select(l => (l.DebitAmount, l.CreditAmount)));
+            if (!jrnlCheck.IsValid)
             {
-                AccountingArithmeticValidator.LogValidationFailure("JOURNAL", journal.Reference, balCheck);
+                AccountingArithmeticValidator.LogValidationFailure("JOURNAL", journal.Reference, jrnlCheck);
                 throw new ArgumentException(
-                    $"{balCheck.ErrorMessage} | Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
+                    $"{jrnlCheck.ErrorMessage} | Ref: {journal.Reference ?? "N/A"}, Lines: {journal.Lines.Count}");
             }
 
             var integrationReq = Mapper.ConvertJournalToIntegration(journal);
@@ -618,6 +617,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Invoice must have at least 1 line with UnitPrice > 0 and Quantity > 0.");
 
             EnsureLinesHaveAccountCode(invoice.Lines);
+            ValidateDocumentLines(invoice.Lines, "Invoice");
             if (string.IsNullOrEmpty(invoice.ExternalRef) && !string.IsNullOrEmpty(invoice.Reference))
                 invoice.ExternalRef = invoice.Reference;
 
@@ -632,6 +632,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Expense must have at least 1 line item.");
 
             EnsureLinesHaveAccountCode(expense.Lines);
+            ValidateDocumentLines(expense.Lines, "Expense");
             if (string.IsNullOrEmpty(expense.ExternalRef) && !string.IsNullOrEmpty(expense.Reference))
                 expense.ExternalRef = expense.Reference;
 
@@ -656,6 +657,39 @@ namespace Take_Time_BangPhra.Integration
                         line.AccountCode = code;
                 }
             }
+        }
+
+        /// <summary>
+        /// ตรวจความถูกต้องของบรรทัดเอกสาร (invoice/expense/credit-note/debit-note) ก่อนยิง NextAcc:
+        ///   - Quantity / UnitPrice / line amount ทศนิยมไม่เกิน 2 หลัก
+        ///   - VatRate อยู่ในช่วง 0-100
+        ///   - ผลรวมสุทธิของทุกบรรทัด > 0 (กันเอกสารยอด 0/ติดลบ)
+        /// </summary>
+        private void ValidateDocumentLines(List<IntegrationLineRequest> lines, string docContext)
+        {
+            if (lines == null || lines.Count == 0)
+                throw new ArgumentException($"{docContext}: ต้องมีอย่างน้อย 1 บรรทัดรายการ");
+
+            decimal netSum = 0m;
+            int lineNo = 0;
+            foreach (var line in lines)
+            {
+                lineNo++;
+                decimal amount = line.Quantity * line.UnitPrice - (line.DiscountAmount ?? 0m);
+
+                if (Math.Round(line.Quantity, 4) != line.Quantity)
+                    throw new ArgumentException($"{docContext} บรรทัด {lineNo}: จำนวน ({line.Quantity}) มีทศนิยมเกินกำหนด");
+                if (Math.Round(line.UnitPrice, 2) != line.UnitPrice)
+                    throw new ArgumentException($"{docContext} บรรทัด {lineNo}: ราคาต่อหน่วย ({line.UnitPrice}) มีทศนิยมเกิน 2 หลัก");
+                if (line.VatRate < 0 || line.VatRate > 100)
+                    throw new ArgumentException($"{docContext} บรรทัด {lineNo}: อัตรา VAT ไม่ถูกต้อง ({line.VatRate}%)");
+
+                netSum += amount;
+            }
+
+            if (netSum <= 0)
+                throw new ArgumentException(
+                    $"{docContext}: ยอดรวมสุทธิของเอกสาร = {netSum:N2} — ต้องมากกว่า 0 (ตรวจส่วนลด/บรรทัดติดลบที่เกินยอด)");
         }
 
         // Integration Payments (/api/integration/payments)
@@ -740,6 +774,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Credit note must have at least 1 line item.");
 
             EnsureLinesHaveAccountCode(creditNote.Lines);
+            ValidateDocumentLines(creditNote.Lines, "CreditNote");
 
             var flat = await PostAsync<InboundCreditNoteRequest, IntegrationSyncResponse>(
                 "/api/integration/credit-notes", creditNote);
@@ -753,6 +788,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("Debit note must have at least 1 line item.");
 
             EnsureLinesHaveAccountCode(debitNote.Lines);
+            ValidateDocumentLines(debitNote.Lines, "DebitNote");
 
             var flat = await PostAsync<InboundDebitNoteRequest, IntegrationSyncResponse>(
                 "/api/integration/debit-notes", debitNote);
@@ -977,6 +1013,7 @@ namespace Take_Time_BangPhra.Integration
             ValidateDnsResolution(_config.BaseUrl);
             CheckAuthCooldown();
             EnsureLinesHaveAccountCode(invoice.Lines);
+            ValidateDocumentLines(invoice.Lines, "Invoice (multipart)");
 
             string url = $"{_config.BaseUrl.TrimEnd('/')}/api/integration/invoices/multipart";
 

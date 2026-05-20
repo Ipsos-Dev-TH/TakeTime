@@ -221,6 +221,59 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>
+        /// ตรวจ journal entry ทั้งใบแบบครบถ้วน (ทุกบรรทัด):
+        ///   1. แต่ละบรรทัดไม่มียอดติดลบ
+        ///   2. แต่ละบรรทัดมีด้านเดียว (debit หรือ credit — ห้ามมีทั้งคู่ > 0)
+        ///   3. ทุกยอดทศนิยมไม่เกิน 2 ตำแหน่ง
+        ///   4. มีอย่างน้อย 1 บรรทัด debit และ 1 บรรทัด credit
+        ///   5. Sum(Debit) = Sum(Credit)
+        /// ใช้ก่อนยิง journal ทุกใบไป NextAcc — safety net รวมศูนย์
+        /// </summary>
+        public static ValidationResult ValidateJournalLines(
+            IEnumerable<(decimal debit, decimal credit)> lines, decimal tolerance = DefaultToleranceBaht)
+        {
+            if (lines == null)
+                return ValidationResult.Fail("EMPTY_JOURNAL", "Journal entry ไม่มีบรรทัดรายการ", 1, 0);
+
+            decimal totalDr = 0m, totalCr = 0m;
+            int count = 0, drLines = 0, crLines = 0, lineNo = 0;
+            foreach (var (dr, cr) in lines)
+            {
+                lineNo++;
+                count++;
+
+                if (dr < 0 || cr < 0)
+                    return ValidationResult.Fail("NEGATIVE_LINE_AMOUNT",
+                        $"บรรทัดที่ {lineNo}: ยอด journal ติดลบ (เดบิต {dr:N2}, เครดิต {cr:N2}) — ต้องกลับเครื่องหมายเป็นอีกด้านแทน",
+                        0, Math.Min(dr, cr));
+
+                if (dr > 0 && cr > 0)
+                    return ValidationResult.Fail("LINE_BOTH_SIDES",
+                        $"บรรทัดที่ {lineNo}: มีทั้งเดบิต ({dr:N2}) และเครดิต ({cr:N2}) — 1 บรรทัดต้องมีด้านเดียว",
+                        0, 0);
+
+                if (Math.Round(dr, 2) != dr || Math.Round(cr, 2) != cr)
+                    return ValidationResult.Fail("PRECISION_ERROR",
+                        $"บรรทัดที่ {lineNo}: ยอดเงินมีทศนิยมเกิน 2 หลัก (เดบิต {dr}, เครดิต {cr})",
+                        Math.Round(dr + cr, 2), dr + cr);
+
+                if (dr > 0) drLines++;
+                if (cr > 0) crLines++;
+                totalDr += dr;
+                totalCr += cr;
+            }
+
+            if (count == 0)
+                return ValidationResult.Fail("EMPTY_JOURNAL", "Journal entry ไม่มีบรรทัดรายการ", 1, 0);
+            if (drLines == 0 || crLines == 0)
+                return ValidationResult.Fail("MISSING_SIDE",
+                    $"Journal entry ต้องมีอย่างน้อย 1 บรรทัดเดบิต และ 1 บรรทัดเครดิต (พบเดบิต {drLines}, เครดิต {crLines})",
+                    1, drLines == 0 ? 0 : crLines);
+
+            return ValidateJournalBalance(totalDr, totalCr, tolerance);
+        }
+
+        /// <summary>
         /// ตรวจ Payroll:
         ///   Net Payable = Gross Earnings - Total Deductions
         /// </summary>
