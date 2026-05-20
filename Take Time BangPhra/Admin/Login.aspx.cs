@@ -48,21 +48,42 @@ namespace Take_Time_BangPhra.Admin
                     return;
                 }
 
-                // Query user by username and password (plain text comparison)
+                // Query user by username only — password is verified separately against
+                // the stored hash (SecurityHelper.VerifyPassword handles both PBKDF2 hashes
+                // and legacy plain-text passwords)
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@username", username },
-                    { "@password", password }
+                    { "@username", username }
                 };
 
                 code code2 = new code();
                 DataTable dtAdmin = code2.DatabaseQuerySafe(conn,
-                    "SELECT * FROM Admin WHERE Username = @username AND Password = @password AND Status = 1",
+                    "SELECT * FROM Admin WHERE Username = @username AND Status = 1",
                     parameters);
 
-                if (dtAdmin.Rows.Count >= 1)
+                bool passwordValid = dtAdmin.Rows.Count >= 1
+                    && SecurityHelper.VerifyPassword(password, dtAdmin.Rows[0]["Password"]?.ToString() ?? "");
+
+                if (passwordValid)
                 {
                     string adminId = dtAdmin.Rows[0]["ID"].ToString();
+
+                    // Upgrade legacy plain-text password to a hash on successful login
+                    string storedPwd = dtAdmin.Rows[0]["Password"]?.ToString() ?? "";
+                    if (!storedPwd.Contains("."))
+                    {
+                        try
+                        {
+                            code2.DatabaseInsertSafe(conn,
+                                "UPDATE [dbo].[Admin] SET [Password] = @hash WHERE ID = @id",
+                                new Dictionary<string, object>
+                                {
+                                    { "@hash", SecurityHelper.HashPassword(password) },
+                                    { "@id", adminId }
+                                });
+                        }
+                        catch { /* non-critical — login still succeeds */ }
+                    }
 
                     Session["permission"] = "True";
                     Session["UserName"] = username;
@@ -106,9 +127,10 @@ namespace Take_Time_BangPhra.Admin
                     return;
                 }
 
+                // Store the hashed password (consistent with employee creation/update)
                 var parameters = new Dictionary<string, object>
                 {
-                    { "@password", newPassword },
+                    { "@password", SecurityHelper.HashPassword(newPassword) },
                     { "@userId", Session["UserID"] }
                 };
 
