@@ -319,9 +319,16 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // Create a fresh request on each attempt (HttpRequestMessage cannot be reused)
                     var request = new HttpRequestMessage(method, url);
-                    request.Headers.Add("X-Api-Key", _config.ApiKey);
+                    // เลือก auth header ตาม endpoint — ห้ามส่งทั้งคู่:
+                    //   /api/integration/* → X-Integration-Key เท่านั้น
+                    //     (ถ้าส่ง X-Api-Key ไปด้วย ApiKeyMiddleware ของ NextAcc จะหา int_ key
+                    //      ใน ApiKey table ไม่เจอ → reject 401 "Invalid or revoked API key"
+                    //      ก่อน request ถึง ExternalIntegrationController)
+                    //   อื่นๆ ({company}/*) → X-Api-Key เท่านั้น
                     if (path.StartsWith("/api/integration/"))
                         request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                    else
+                        request.Headers.Add("X-Api-Key", _config.ApiKey);
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -373,6 +380,14 @@ namespace Take_Time_BangPhra.Integration
                 catch (AccountingApiException)
                 {
                     throw; // Don't retry client errors
+                }
+                catch (AuthenticationFailedException)
+                {
+                    throw; // 401/403 — retrying won't fix bad/expired/wrong-type key. Fail fast.
+                }
+                catch (DnsResolutionException)
+                {
+                    throw; // DNS issue — retrying the same unresolvable host is pointless
                 }
                 catch (TaskCanceledException tcEx)
                 {
@@ -975,8 +990,8 @@ namespace Take_Time_BangPhra.Integration
                 form.Add(fileContent, "file", fileName);
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
+                // {company}/attachments/* เป็น JWT endpoint → X-Api-Key
                 request.Headers.Add("X-Api-Key", _config.ApiKey);
-                request.Headers.Add("X-Integration-Key", _config.ApiKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
@@ -1035,7 +1050,7 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                // /api/integration/invoices/multipart → X-Integration-Key เท่านั้น
                 request.Headers.Add("X-Integration-Key", _config.ApiKey);
                 request.Content = form;
 
@@ -1105,6 +1120,43 @@ namespace Take_Time_BangPhra.Integration
         /// Tests the connection to Nexaacc API by fetching the Chart of Accounts.
         /// Returns a structured result with success/failure and a diagnostic message.
         /// </summary>
+        /// <summary>
+        /// สร้างข้อความ 401 ที่ชี้สาเหตุชัดเจน — โดยเฉพาะกรณีใช้ API Key ผิดประเภท
+        /// NextAcc: Integration Key ขึ้นต้น "int_" / API Key ขึ้นต้น "acc_"
+        /// การ sync ทั้งหมดใช้ /api/integration/* ซึ่งต้องใช้ Integration Key เท่านั้น
+        /// </summary>
+        private string BuildAuthFailMessage(string serverDetail, string keyPreview, string targetUrl)
+        {
+            string key = _config.ApiKey ?? "";
+            string prefix = key.Length >= 4 ? key.Substring(0, 4) : key;
+
+            if (prefix.Equals("acc_", StringComparison.OrdinalIgnoreCase))
+            {
+                return "❌ ใช้ API Key ผิดประเภท\n\n" +
+                    $"API Key ที่กรอก: {keyPreview} — ขึ้นต้นด้วย \"acc_\" = เป็น API Key (สำหรับ {{company}}/* endpoints)\n\n" +
+                    "ระบบ sync บัญชีทั้งหมดใช้ /api/integration/* ซึ่งต้องใช้ \"Integration Key\" (ขึ้นต้นด้วย \"int_\")\n\n" +
+                    "วิธีแก้:\n" +
+                    "  1) เข้า NextAcc → เมนู Integrations (ไม่ใช่ API Keys)\n" +
+                    "  2) สร้าง Integration ใหม่ — จะได้ Integration Key ขึ้นต้นด้วย \"int_\"\n" +
+                    "  3) คัดลอก Integration Key มากรอกในหน้านี้แทน\n\n" +
+                    $"URL ทดสอบ: {targetUrl}";
+            }
+
+            string typeNote = prefix.Equals("int_", StringComparison.OrdinalIgnoreCase)
+                ? "Key ขึ้นต้น \"int_\" (เป็น Integration Key ที่ถูกประเภท) — "
+                : $"Key ขึ้นต้น \"{prefix}\" — ";
+
+            return "❌ Integration Key ไม่ผ่านการตรวจสอบ (401 Unauthorized)\n\n" +
+                $"Integration Key: {keyPreview} (ความยาว {key.Length} ตัวอักษร)\n" +
+                typeNote + "ตรวจสอบ:\n" +
+                "  1) คัดลอก Integration Key จาก NextAcc → Integrations ใหม่อีกครั้ง\n" +
+                "  2) Integration ยัง Active อยู่ (ไม่ถูกปิด/ลบ)\n" +
+                "  3) IP ของเซิร์ฟเวอร์อยู่ใน whitelist ของ Integration\n" +
+                "  4) Company ID ตรงกับ Integration\n\n" +
+                $"URL: {targetUrl}\n" +
+                (string.IsNullOrEmpty(serverDetail) ? "" : $"รายละเอียดจากเซิร์ฟเวอร์: {serverDetail}");
+        }
+
         public async Task<ConnectionTestResult> TestConnectionAsync()
         {
             if (string.IsNullOrEmpty(_config.BaseUrl))
@@ -1161,25 +1213,11 @@ namespace Take_Time_BangPhra.Integration
             }
             catch (AuthenticationFailedException ex)
             {
-                return new ConnectionTestResult(false,
-                    $"API Key ไม่ถูกต้องหรือหมดอายุ\n" +
-                    $"URL: {targetUrl}\n" +
-                    $"API Key: {apiKeyPreview} (ความยาว {_config.ApiKey.Length} ตัวอักษร)\n" +
-                    $"กรุณาตรวจสอบ:\n" +
-                    $"  1) API Key ถูกต้อง — copy จาก Nexaacc dashboard ใหม่\n" +
-                    $"  2) Key ยังไม่หมดอายุ\n" +
-                    $"  3) IP ของ server อยู่ใน whitelist\n" +
-                    $"  4) การเข้ารหัส (encrypt) API Key ถูกต้อง\n" +
-                    $"Error: {ex.Message}", 401);
+                return new ConnectionTestResult(false, BuildAuthFailMessage(ex.Message, apiKeyPreview, targetUrl), 401);
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 401)
             {
-                string detail = !string.IsNullOrEmpty(ex.ResponseBody) ? $" | Response: {ex.ResponseBody}" : "";
-                return new ConnectionTestResult(false,
-                    $"API Key ไม่ถูกต้องหรือหมดอายุ (401 Unauthorized)\n" +
-                    $"URL: {targetUrl}\n" +
-                    $"API Key: {apiKeyPreview} (ความยาว {_config.ApiKey.Length} ตัวอักษร)\n" +
-                    $"กรุณาตรวจสอบ: 1) API Key ถูกต้อง 2) Key ยังไม่หมดอายุ 3) IP ของ server อยู่ใน whitelist{detail}",
+                return new ConnectionTestResult(false, BuildAuthFailMessage(ex.ResponseBody, apiKeyPreview, targetUrl),
                     ex.StatusCode, ex.ResponseBody);
             }
             catch (AccountingApiException ex) when (ex.StatusCode == 403)
