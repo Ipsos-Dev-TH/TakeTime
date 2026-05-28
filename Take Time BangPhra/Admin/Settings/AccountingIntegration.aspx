@@ -59,6 +59,10 @@
         .queue-table th { background: #f5f5f5; padding: 10px; text-align: left; font-size: 12px; font-weight: 600; color: #555; border-bottom: 2px solid #e0e0e0; }
         .queue-table td { padding: 10px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
         .queue-table tr:hover { background: #fafafa; }
+        .nexaacc-doc-link { color: #1a73e8; text-decoration: none; font-size: 12px; font-weight: 500; }
+        .nexaacc-doc-link:hover { text-decoration: underline; color: #0d47a1; }
+        .nexaacc-doc-link i { font-size: 10px; margin-left: 3px; }
+        .nexaacc-doc-label { font-size: 12px; color: #555; }
 
         .queue-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 15px; }
         .queue-stat { background: #f9f9f9; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; border: 2px solid transparent; }
@@ -542,6 +546,7 @@
                             <th>Entity</th>
                             <th>Action</th>
                             <th>Status</th>
+                            <th>NextAcc Doc</th>
                             <th>Retry</th>
                             <th>Error</th>
                             <th>Created</th>
@@ -937,7 +942,7 @@
                               + '<td style="padding:8px;">' + (it.reservationId || '-') + '</td>'
                               + '<td style="padding:8px; text-align:right;">' + (it.total ? Number(it.total).toLocaleString('th-TH', {minimumFractionDigits:2}) : '-') + '</td>'
                               + '<td style="padding:8px;"><span style="background:' + sourceColor + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.documentSource + '</span></td>'
-                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId || '-') + '</td>'
+                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId ? (it.nexaaccUrl ? '<a href="' + it.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link">' + it.nexaaccDocId.substring(0,12) + '... <i class="fas fa-external-link-alt"></i></a>' : it.nexaaccDocId.substring(0,12) + '...') : '-') + '</td>'
                               + '<td style="padding:8px;"><span style="color:' + syncColor + ';">' + (it.syncStatus || '-') + '</span></td>'
                               + '<td style="padding:8px;">' + (it.etaxStatus ? '<span style="color:' + etaxColor + ';">' + it.etaxStatus + (it.etaxRefNumber ? ' (' + it.etaxRefNumber + ')' : '') + '</span>' : '-') + (it.etaxEmailSent ? ' ✉' : '') + '</td>'
                               + '<td style="padding:8px;">' + (it.customerName || '-') + (it.customerEmail ? '<br/><small style="color:#999;">' + it.customerEmail + '</small>' : '') + '</td>'
@@ -1077,7 +1082,7 @@
 
             if (!items.length) {
                 var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#999;">' + msg + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#999;">' + msg + '</td></tr>';
                 return;
             }
             var html = '';
@@ -1091,6 +1096,25 @@
                 html += '<td>' + item.entityType + ' #' + item.entityId + '</td>';
                 html += '<td>' + item.actionType + '</td>';
                 html += '<td><span class="status-badge ' + statusClass + '">' + item.status + '</span></td>';
+                // NextAcc Document column
+                html += '<td>';
+                if (item.nexaaccDocNumber) {
+                    if (item.nexaaccUrl) {
+                        html += '<a href="' + item.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link" title="เปิดใน NextAcc">' + item.nexaaccDocNumber + ' <i class="fas fa-external-link-alt"></i></a>';
+                    } else {
+                        html += '<span class="nexaacc-doc-label">' + item.nexaaccDocNumber + '</span>';
+                    }
+                } else if (item.nexaaccId && item.status === 'COMPLETED') {
+                    var shortId = item.nexaaccId.substring(0, 8) + '...';
+                    if (item.nexaaccUrl) {
+                        html += '<a href="' + item.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link" title="' + item.nexaaccId + '">' + shortId + ' <i class="fas fa-external-link-alt"></i></a>';
+                    } else {
+                        html += '<span class="nexaacc-doc-label" title="' + item.nexaaccId + '">' + shortId + '</span>';
+                    }
+                } else {
+                    html += '-';
+                }
+                html += '</td>';
                 html += '<td>' + item.retryCount + '/' + item.maxRetries + '</td>';
                 html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + (item.error || '').replace(/"/g, '&quot;') + '">' + (item.error || '-') + '</td>';
                 html += '<td>' + item.created + '</td>';

@@ -303,6 +303,8 @@
         .sync-badge.pending { background: #fff3cd; color: #856404; }
         .sync-badge.failed { background: #f8d7da; color: #721c24; }
         .sync-badge.none { background: #e2e3e5; color: #383d41; }
+        a.sync-badge.completed { text-decoration: none; cursor: pointer; }
+        a.sync-badge.completed:hover { background: #b7dfb5; text-decoration: underline; }
         .btn-sync-action { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 5px 12px; border: none; border-radius: 5px; font-size: 11px; cursor: pointer; white-space: nowrap; }
         .btn-sync-action:hover { background: linear-gradient(135deg, #2980b9 0%, #2471a3 100%); }
     </style>

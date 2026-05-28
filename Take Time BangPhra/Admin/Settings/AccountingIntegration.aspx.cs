@@ -373,18 +373,42 @@ namespace Take_Time_BangPhra.Admin.Settings
 
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
                     $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
-                              Retry_Count, Max_Retries, Error_Message, Created_Date
+                              Retry_Count, Max_Retries, Error_Message, Created_Date,
+                              Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
                        FROM Accounting_Sync_Queue
                        {whereClause}
                        ORDER BY Created_Date DESC
                        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY",
                     itemParams);
 
+                var config = new Integration.AccountingConfig(ConnStr);
                 var itemList = new List<Dictionary<string, object>>();
                 if (items != null)
                 {
                     foreach (DataRow row in items.Rows)
                     {
+                        string nexaaccId = row.Table.Columns.Contains("Nexaacc_Response_Id")
+                            ? (row["Nexaacc_Response_Id"]?.ToString() ?? "") : "";
+                        string nexaaccDocNum = row.Table.Columns.Contains("Nexaacc_Document_Number")
+                            ? (row["Nexaacc_Document_Number"]?.ToString() ?? "") : "";
+                        string nexaaccDocType = row.Table.Columns.Contains("Nexaacc_Document_Type")
+                            ? (row["Nexaacc_Document_Type"]?.ToString() ?? "") : "";
+                        string nexaaccUrl = "";
+                        if (!string.IsNullOrEmpty(nexaaccId) && !nexaaccId.StartsWith("SKIPPED") && config.IsConfigured)
+                        {
+                            string basePath = config.RawBaseUrl.TrimEnd('/');
+                            string cid = config.CompanyId.ToString();
+                            string typePath = "documents";
+                            switch ((nexaaccDocType ?? "").ToUpper())
+                            {
+                                case "INVOICE": typePath = "invoices"; break;
+                                case "EXPENSE": typePath = "expenses"; break;
+                                case "JOURNAL": typePath = "journals"; break;
+                                case "CREDIT_NOTE": typePath = "credit-notes"; break;
+                                case "DEBIT_NOTE": typePath = "debit-notes"; break;
+                            }
+                            nexaaccUrl = $"{basePath}/{cid}/{typePath}/{nexaaccId}";
+                        }
                         itemList.Add(new Dictionary<string, object>
                         {
                             { "id", Convert.ToInt64(row["ID"]) },
@@ -395,7 +419,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "retryCount", Convert.ToInt32(row["Retry_Count"]) },
                             { "maxRetries", Convert.ToInt32(row["Max_Retries"]) },
                             { "error", row["Error_Message"]?.ToString() ?? "" },
-                            { "created", Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") }
+                            { "created", Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") },
+                            { "nexaaccId", nexaaccId },
+                            { "nexaaccDocNumber", nexaaccDocNum },
+                            { "nexaaccDocType", nexaaccDocType },
+                            { "nexaaccUrl", nexaaccUrl }
                         });
                     }
                 }
@@ -1133,11 +1161,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
 
                 var dt = _code.DatabaseQuerySafe(ConnStr, sql, parameters);
+                var config = new Integration.AccountingConfig(ConnStr);
                 var items = new List<Dictionary<string, object>>();
                 if (dt != null)
                 {
                     foreach (System.Data.DataRow row in dt.Rows)
                     {
+                        string nexaaccDocId = row["Nexaacc_Doc_Id"]?.ToString() ?? "";
+                        string nexaaccUrl = "";
+                        if (!string.IsNullOrEmpty(nexaaccDocId) && config.IsConfigured)
+                        {
+                            string basePath = config.RawBaseUrl.TrimEnd('/');
+                            string cid = config.CompanyId.ToString();
+                            nexaaccUrl = $"{basePath}/{cid}/documents/{nexaaccDocId}";
+                        }
                         items.Add(new Dictionary<string, object>
                         {
                             { "receiptId", row["Receipt_ID"]?.ToString() },
@@ -1146,7 +1183,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "total", row["Total"] != DBNull.Value ? Convert.ToDecimal(row["Total"]) : 0m },
                             { "isDeposit", row["IsDeposit"] != DBNull.Value && Convert.ToBoolean(row["IsDeposit"]) },
                             { "documentSource", row["Document_Source"]?.ToString() ?? "LOCAL" },
-                            { "nexaaccDocId", row["Nexaacc_Doc_Id"]?.ToString() },
+                            { "nexaaccDocId", nexaaccDocId },
+                            { "nexaaccUrl", nexaaccUrl },
                             { "syncStatus", row["Sync_Status"]?.ToString() },
                             { "syncError", row["Sync_Error"]?.ToString() },
                             { "etaxStatus", row["Etax_Status"]?.ToString() },

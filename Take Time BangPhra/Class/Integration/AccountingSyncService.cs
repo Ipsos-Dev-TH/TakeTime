@@ -26,6 +26,8 @@ namespace Take_Time_BangPhra.Integration
         private readonly AccountingApiClient _apiClient;
         private readonly AccountingDataMapper _mapper;
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
+        private string _lastDocNumber;
+        private string _lastDocType;
 
         public AccountingSyncService()
         {
@@ -811,6 +813,8 @@ namespace Take_Time_BangPhra.Integration
 
                 try
                 {
+                    _lastDocNumber = null;
+                    _lastDocType = null;
                     string nexaaccId = await ProcessSingleItemAsync(actionType, payload);
 
                     if (nexaaccId == "SKIPPED_ZERO_AMOUNT")
@@ -827,7 +831,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     else
                     {
-                        UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId);
+                        UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId, _lastDocNumber, _lastDocType);
                     }
                     processed++;
                 }
@@ -1148,6 +1152,8 @@ namespace Take_Time_BangPhra.Integration
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
                 string nexaaccId = expDocId.ToString();
+                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocType = "EXPENSE";
 
                 // Auto-generate WHT certificate if WHT was applied
                 if (whtAmount > 0)
@@ -1163,6 +1169,8 @@ namespace Take_Time_BangPhra.Integration
                     expenseLines: expenseLines, documentNumber: docNumber);
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid jrnlId = RequireValidDocId(result?.data?.Id, $"CreateJournal (voucher) doc={docNumber}");
+                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocType = "JOURNAL";
                 await SafePostJournalAsync(jrnlId);
                 return jrnlId.ToString();
             }
@@ -1204,7 +1212,10 @@ namespace Take_Time_BangPhra.Integration
                     expense.ReplaceExistingForSource = true;
                 }
                 var result = await _apiClient.CreateExpenseAsync(expense);
-                return RequireValidDocId(result?.data?.Id, $"CreateExpense (payroll) period={period}").ToString();
+                Guid expId = RequireValidDocId(result?.data?.Id, $"CreateExpense (payroll) period={period}");
+                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocType = "EXPENSE";
+                return expId.ToString();
             }
             else
             {
@@ -1214,6 +1225,8 @@ namespace Take_Time_BangPhra.Integration
                     journal.Reference = docNumber;
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid payrollId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payroll) period={period}");
+                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocType = "JOURNAL";
                 await SafePostJournalAsync(payrollId);
                 return payrollId.ToString();
             }
@@ -1278,6 +1291,8 @@ namespace Take_Time_BangPhra.Integration
                     ApplyContactToInvoice(invoice, customerContact);
                     var result = await _apiClient.CreateInvoiceAsync(invoice);
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (deposit) receipt={receiptNumber}");
+                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocType = "INVOICE";
                     await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
                     return invDocId.ToString();
                 }
@@ -1288,6 +1303,8 @@ namespace Take_Time_BangPhra.Integration
                         hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
+                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocType = "JOURNAL";
                     await SafePostJournalAsync(jrnlDocId);
                     return jrnlDocId.ToString();
                 }
@@ -1379,6 +1396,8 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
 
+                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocType = "INVOICE";
                     await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
                     return invDocId.ToString();
                 }
@@ -1399,6 +1418,8 @@ namespace Take_Time_BangPhra.Integration
                     }
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payment) receipt={receiptNumber}");
+                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocType = "JOURNAL";
                     await SafePostJournalAsync(jrnlDocId);
                     return jrnlDocId.ToString();
                 }
@@ -3046,7 +3067,8 @@ namespace Take_Time_BangPhra.Integration
                 ? Convert.ToInt64(dt.Rows[0]["NewID"]) : -1;
         }
 
-        private void UpdateQueueStatus(long queueId, string status, string errorMessage, string nexaaccResponseId)
+        private void UpdateQueueStatus(long queueId, string status, string errorMessage, string nexaaccResponseId,
+            string documentNumber = null, string documentType = null)
         {
             var parameters = new Dictionary<string, object>
             {
@@ -3054,13 +3076,17 @@ namespace Take_Time_BangPhra.Integration
                 { "@status", status },
                 { "@error", (object)errorMessage ?? DBNull.Value },
                 { "@nexaaccId", (object)nexaaccResponseId ?? DBNull.Value },
-                { "@processedDate", status == "COMPLETED" ? (object)DateTime.Now : DBNull.Value }
+                { "@processedDate", status == "COMPLETED" ? (object)DateTime.Now : DBNull.Value },
+                { "@docNumber", (object)documentNumber ?? DBNull.Value },
+                { "@docType", (object)documentType ?? DBNull.Value }
             };
 
             _code.DatabaseInsertSafe(_connectionString,
                 @"UPDATE Accounting_Sync_Queue
                   SET Status = @status, Error_Message = @error,
-                      Nexaacc_Response_Id = @nexaaccId, Processed_Date = @processedDate
+                      Nexaacc_Response_Id = @nexaaccId, Processed_Date = @processedDate,
+                      Nexaacc_Document_Number = COALESCE(@docNumber, Nexaacc_Document_Number),
+                      Nexaacc_Document_Type = COALESCE(@docType, Nexaacc_Document_Type)
                   WHERE ID = @id",
                 parameters);
         }
@@ -3452,6 +3478,71 @@ namespace Take_Time_BangPhra.Integration
         {
             string ext = (extension ?? "").ToLower();
             return ext == ".pdf" || ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".bmp";
+        }
+
+        // ══════════════════════════════════════════════
+        // Document Lookup — for UI display
+        // ══════════════════════════════════════════════
+
+        public DataTable GetSyncDocumentInfo(string takeTimeDocNumber)
+        {
+            return _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1
+                    q.ID AS QueueId, q.Entity_Type, q.Action_Type, q.Status,
+                    q.Nexaacc_Response_Id, q.Nexaacc_Document_Number, q.Nexaacc_Document_Type,
+                    q.Created_Date, q.Processed_Date, q.Error_Message, q.Retry_Count
+                  FROM Accounting_Sync_Queue q
+                  WHERE q.Status = 'COMPLETED'
+                    AND q.Nexaacc_Response_Id IS NOT NULL
+                    AND q.Nexaacc_Response_Id NOT LIKE 'SKIPPED%'
+                    AND (q.Payload LIKE @pattern1 OR q.Payload LIKE @pattern2)
+                  ORDER BY q.Processed_Date DESC",
+                new Dictionary<string, object>
+                {
+                    { "@pattern1", $"%\"documentNumber\":\"{takeTimeDocNumber}\"%"},
+                    { "@pattern2", $"%\"receiptNumber\":\"{takeTimeDocNumber}\"%"}
+                });
+        }
+
+        public DataTable GetSyncQueueForDisplay(string statusFilter = null, int page = 1, int pageSize = 20)
+        {
+            string whereClause = "";
+            var parms = new Dictionary<string, object>
+            {
+                { "@offset", (page - 1) * pageSize },
+                { "@pageSize", pageSize }
+            };
+            if (!string.IsNullOrEmpty(statusFilter))
+            {
+                whereClause = "WHERE Status = @statusFilter";
+                parms["@statusFilter"] = statusFilter;
+            }
+
+            return _code.DatabaseQuerySafe(_connectionString,
+                $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
+                    Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type,
+                    Error_Message, Retry_Count, Max_Retries, Created_Date, Processed_Date
+                   FROM Accounting_Sync_Queue {whereClause}
+                   ORDER BY ID DESC
+                   OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY",
+                parms);
+        }
+
+        public string BuildNexaaccDocumentUrl(string nexaaccResponseId, string documentType)
+        {
+            if (string.IsNullOrEmpty(nexaaccResponseId) || !_config.IsConfigured) return null;
+            string baseUrl = _config.RawBaseUrl.TrimEnd('/');
+            string companyId = _config.CompanyId.ToString();
+            if (string.IsNullOrEmpty(documentType)) documentType = "JOURNAL";
+            switch (documentType.ToUpper())
+            {
+                case "INVOICE": return $"{baseUrl}/{companyId}/invoices/{nexaaccResponseId}";
+                case "EXPENSE": return $"{baseUrl}/{companyId}/expenses/{nexaaccResponseId}";
+                case "JOURNAL": return $"{baseUrl}/{companyId}/journals/{nexaaccResponseId}";
+                case "CREDIT_NOTE": return $"{baseUrl}/{companyId}/credit-notes/{nexaaccResponseId}";
+                case "DEBIT_NOTE": return $"{baseUrl}/{companyId}/debit-notes/{nexaaccResponseId}";
+                default: return $"{baseUrl}/{companyId}/documents/{nexaaccResponseId}";
+            }
         }
     }
 }
