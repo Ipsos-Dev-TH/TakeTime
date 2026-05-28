@@ -1141,6 +1141,9 @@ namespace Take_Time_BangPhra.Integration
             if (_config.IsVoucherDocumentMode)
                 supplierContact = await EnsureSupplierContactAsync(voucherId, payeeName);
 
+            bool isSalaryVoucher = (expenseCategory ?? "").Contains("เงินเดือน")
+                || (expenseCategory ?? "").Equals("salary", StringComparison.OrdinalIgnoreCase);
+
             if (_config.IsVoucherDocumentMode)
             {
                 var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
@@ -1148,6 +1151,8 @@ namespace Take_Time_BangPhra.Integration
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
                 expense.Attachments = attachments;
+                if (isSalaryVoucher)
+                    expense.Sensitivity = "Payroll";
                 ApplyContactToExpense(expense, supplierContact);
                 var result = await _apiClient.CreateExpenseAsync(expense);
                 Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
@@ -1167,6 +1172,8 @@ namespace Take_Time_BangPhra.Integration
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber);
+                if (isSalaryVoucher)
+                    journal.Sensitivity = "Payroll";
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid jrnlId = RequireValidDocId(result?.data?.Id, $"CreateJournal (voucher) doc={docNumber}");
                 _lastDocNumber = result?.data?.DocumentNumber;

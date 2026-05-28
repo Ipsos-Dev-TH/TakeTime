@@ -206,7 +206,8 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = MapJournalTypeToString(src.JournalType),
                 Description = src.Description,
                 Lines = lines,
-                AutoBalanceVat = false
+                AutoBalanceVat = false,
+                Sensitivity = src.Sensitivity
             };
         }
 
@@ -1231,6 +1232,7 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.CashPayments,
                 Description = $"จ่ายเงินเดือนพนักงาน - งวด {period}",
                 Reference = $"PR-{payDate:yyyyMM}",
+                Sensitivity = "Payroll",
                 Lines = lines
             };
         }
@@ -2438,6 +2440,7 @@ namespace Take_Time_BangPhra.Integration
                 IncludeVat = false,
                 PaymentMethod = "CASH",
                 PaymentAccountId = GetAccountId("CASH"),
+                Sensitivity = "Payroll",
                 Lines = lines
             };
         }
