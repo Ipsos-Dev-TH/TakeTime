@@ -640,6 +640,10 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            // Compute total DR from all debit lines built so far
+            decimal totalDebit = 0;
+            foreach (var l in lines) totalDebit += l.DebitAmount;
+
             // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี)
             if (whtAmount > 0)
             {
@@ -653,8 +657,8 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
-            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = amount - WHT)
-            decimal cashPaid = amount - whtAmount;
+            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = DR total - WHT)
+            decimal cashPaid = totalDebit - whtAmount;
             lines.Add(new JournalEntryLineRequest
             {
                 AccountId = cashAccountId,
