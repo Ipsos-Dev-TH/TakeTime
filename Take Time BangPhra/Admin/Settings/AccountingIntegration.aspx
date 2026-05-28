@@ -1090,7 +1090,8 @@
                 var statusClass = item.status === 'COMPLETED' ? 'status-connected' :
                                   item.status === 'FAILED' ? 'status-error' :
                                   item.status === 'PROCESSING' ? 'status-testing' : 'status-not-configured';
-                html += '<tr>';
+                var rowStyle = item.sensitive ? ' style="background:#f9f3ff; opacity:0.85;"' : '';
+                html += '<tr' + rowStyle + '>';
                 html += '<td><input type="checkbox" class="queue-check" value="' + item.id + '" onchange="updateSelectedCount()" /></td>';
                 html += '<td>' + item.id + '</td>';
                 html += '<td>' + item.entityType + ' #' + item.entityId + '</td>';
@@ -1119,11 +1120,15 @@
                 html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + (item.error || '').replace(/"/g, '&quot;') + '">' + (item.error || '-') + '</td>';
                 html += '<td>' + item.created + '</td>';
                 html += '<td>';
-                if (item.status === 'FAILED') {
-                    html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
-                }
-                if (item.status === 'COMPLETED' || item.status === 'FAILED') {
-                    html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
+                if (item.sensitive) {
+                    html += '<span style="font-size:11px; color:#999;">🔒</span>';
+                } else {
+                    if (item.status === 'FAILED') {
+                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
+                    }
+                    if (item.status === 'COMPLETED' || item.status === 'FAILED') {
+                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
+                    }
                 }
                 html += '</td>';
                 html += '</tr>';
