@@ -1008,6 +1008,10 @@ namespace Take_Time_BangPhra.Integration
         public string FileName { get; set; }
         public string ContentType { get; set; }
         public string Base64Content { get; set; }
+
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Web.Script.Serialization.ScriptIgnore]
+        public string FilePath { get; set; }
     }
 
     // ──────────────────────────────────────────────

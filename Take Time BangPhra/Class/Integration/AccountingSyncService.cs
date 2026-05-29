@@ -1154,7 +1154,14 @@ namespace Take_Time_BangPhra.Integration
                 if (isSalaryVoucher)
                     expense.Sensitivity = "Payroll";
                 ApplyContactToExpense(expense, supplierContact);
-                var result = await _apiClient.CreateExpenseAsync(expense);
+
+                ApiResponse<IntegrationDocumentResponse> result;
+                var filePaths = ExtractFilePaths(attachments);
+                if (filePaths != null && filePaths.Count > 0)
+                    result = await _apiClient.CreateExpenseMultipartAsync(expense, filePaths);
+                else
+                    result = await _apiClient.CreateExpenseAsync(expense);
+
                 Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
                 string nexaaccId = expDocId.ToString();
                 _lastDocNumber = result?.data?.DocumentNumber;
@@ -1208,6 +1215,10 @@ namespace Take_Time_BangPhra.Integration
                 $"ProcessPayrollEntry: period={period} gross={totalSalary} ssfEmp={ssfEmployee} ssfEr={ssfEmployer} wht={whtAmount} doc={docNumber} mode={_config.PayrollSyncMode}",
                 "SYSTEM");
 
+            List<IntegrationAttachment> attachments = null;
+            if (_config.AttachFiles)
+                attachments = LookupPayrollAttachments(docNumber, payDate);
+
             if (_config.IsPayrollDocumentMode)
             {
                 var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate,
@@ -1218,7 +1229,15 @@ namespace Take_Time_BangPhra.Integration
                     expense.ExternalRef = docNumber;
                     expense.ReplaceExistingForSource = true;
                 }
-                var result = await _apiClient.CreateExpenseAsync(expense);
+                expense.Attachments = attachments;
+
+                ApiResponse<IntegrationDocumentResponse> result;
+                var filePaths = ExtractFilePaths(attachments);
+                if (filePaths != null && filePaths.Count > 0)
+                    result = await _apiClient.CreateExpenseMultipartAsync(expense, filePaths);
+                else
+                    result = await _apiClient.CreateExpenseAsync(expense);
+
                 Guid expId = RequireValidDocId(result?.data?.Id, $"CreateExpense (payroll) period={period}");
                 _lastDocNumber = result?.data?.DocumentNumber;
                 _lastDocType = "EXPENSE";
@@ -1296,7 +1315,14 @@ namespace Take_Time_BangPhra.Integration
                     }
                     invoice.Attachments = attachments;
                     ApplyContactToInvoice(invoice, customerContact);
-                    var result = await _apiClient.CreateInvoiceAsync(invoice);
+
+                    ApiResponse<IntegrationDocumentResponse> result;
+                    var filePaths = ExtractFilePaths(attachments);
+                    if (filePaths != null && filePaths.Count > 0)
+                        result = await _apiClient.CreateInvoiceMultipartAsync(invoice, filePaths);
+                    else
+                        result = await _apiClient.CreateInvoiceAsync(invoice);
+
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (deposit) receipt={receiptNumber}");
                     _lastDocNumber = result?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";
@@ -1373,7 +1399,14 @@ namespace Take_Time_BangPhra.Integration
                     }
                     invoice.Attachments = attachments;
                     ApplyContactToInvoice(invoice, customerContact);
-                    var result = await _apiClient.CreateInvoiceAsync(invoice);
+
+                    ApiResponse<IntegrationDocumentResponse> result;
+                    var fpay = ExtractFilePaths(attachments);
+                    if (fpay != null && fpay.Count > 0)
+                        result = await _apiClient.CreateInvoiceMultipartAsync(invoice, fpay);
+                    else
+                        result = await _apiClient.CreateInvoiceAsync(invoice);
+
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (payment) receipt={receiptNumber}");
 
                     // Adjustment journal: ถ้ามี deposit applied ให้ตัด ADVANCE_DEPOSIT + ลด Cash
@@ -3477,7 +3510,8 @@ namespace Take_Time_BangPhra.Integration
             {
                 FileName = fi.Name,
                 ContentType = contentType,
-                Base64Content = Convert.ToBase64String(bytes)
+                Base64Content = Convert.ToBase64String(bytes),
+                FilePath = fi.FullName
             };
         }
 
@@ -3485,6 +3519,74 @@ namespace Take_Time_BangPhra.Integration
         {
             string ext = (extension ?? "").ToLower();
             return ext == ".pdf" || ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".bmp";
+        }
+
+        private List<IntegrationAttachment> LookupPayrollAttachments(string docNumber, DateTime payDate)
+        {
+            if (string.IsNullOrEmpty(docNumber)) return null;
+
+            try
+            {
+                // Account_Payment.ID = document number string (e.g. "PAY-2024-0001")
+                // Reuse LookupVoucherAttachments with voucherId=0 (skips Payment_Slips pattern,
+                // uses directory scan + docNumber filename match)
+                var attachments = LookupVoucherAttachments(0, docNumber, payDate);
+                if (attachments != null)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"LookupPayrollAttachments: found {attachments.Count} file(s) via voucher lookup for doc={docNumber}",
+                        "SYSTEM");
+                    return attachments;
+                }
+
+                // Fallback: search Documents/Payment/{Year}/{Month}/ for files matching docNumber
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"]
+                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                if (!string.IsNullOrEmpty(basePath))
+                {
+                    string yearMonth = $"{payDate.Year}/{payDate.Month}";
+                    string paymentDir = Path.Combine(basePath, "Documents", "Payment", yearMonth);
+                    if (Directory.Exists(paymentDir))
+                    {
+                        attachments = new List<IntegrationAttachment>();
+                        foreach (var file in Directory.GetFiles(paymentDir))
+                        {
+                            var fi = new FileInfo(file);
+                            if (fi.Name.Contains(docNumber) && fi.Length > 0
+                                && fi.Length <= MaxAttachmentSize && IsImageOrPdf(fi.Extension))
+                            {
+                                attachments.Add(FileToAttachment(fi));
+                                if (attachments.Count >= 5) break;
+                            }
+                        }
+                        if (attachments.Count > 0)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"LookupPayrollAttachments: found {attachments.Count} file(s) by docNumber match for doc={docNumber}",
+                                "SYSTEM");
+                            return attachments;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupPayrollAttachments: error for doc={docNumber}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        private static List<string> ExtractFilePaths(List<IntegrationAttachment> attachments)
+        {
+            if (attachments == null || attachments.Count == 0) return null;
+            var paths = new List<string>();
+            foreach (var a in attachments)
+            {
+                if (!string.IsNullOrEmpty(a.FilePath) && File.Exists(a.FilePath))
+                    paths.Add(a.FilePath);
+            }
+            return paths.Count > 0 ? paths : null;
         }
 
         // ══════════════════════════════════════════════
