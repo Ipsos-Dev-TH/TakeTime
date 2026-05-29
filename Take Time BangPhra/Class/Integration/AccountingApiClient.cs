@@ -661,6 +661,63 @@ namespace Take_Time_BangPhra.Integration
             return WrapDoc(flat, flat?.documentId);
         }
 
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateExpenseMultipartAsync(
+            CreateIntegrationExpenseRequest expense, List<string> filePaths)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+            EnsureLinesHaveAccountCode(expense.Lines);
+            ValidateDocumentLines(expense.Lines, "Expense (multipart)");
+            if (string.IsNullOrEmpty(expense.ExternalRef) && !string.IsNullOrEmpty(expense.Reference))
+                expense.ExternalRef = expense.Reference;
+
+            string url = $"{_config.BaseUrl.TrimEnd('/')}/api/integration/expenses/multipart";
+
+            var savedAttachments = expense.Attachments;
+            expense.Attachments = null;
+
+            using (var form = new MultipartFormDataContent())
+            {
+                var json = JsonConvert.SerializeObject(expense, _jsonSettings);
+                form.Add(new StringContent(json, Encoding.UTF8, "application/json"), "expense");
+
+                if (filePaths != null)
+                {
+                    foreach (var fp in filePaths)
+                    {
+                        if (!File.Exists(fp)) continue;
+                        var fileBytes = File.ReadAllBytes(fp);
+                        var fileContent = new ByteArrayContent(fileBytes);
+                        fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetContentType(fp));
+                        form.Add(fileContent, "files", Path.GetFileName(fp));
+                    }
+                }
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                request.Content = form;
+
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                LogApiCall("POST", "/api/integration/expenses/multipart", "[multipart]", responseBody,
+                    (int)response.StatusCode, response.IsSuccessStatusCode, 0);
+
+                expense.Attachments = savedAttachments;
+
+                if (!response.IsSuccessStatusCode)
+                    throw new AccountingApiException(
+                        $"Multipart expense upload failed: {response.StatusCode} {responseBody}",
+                        (int)response.StatusCode, responseBody);
+
+                var flat = JsonConvert.DeserializeObject<IntegrationSyncResponse>(responseBody, _jsonSettings);
+                return WrapDoc(flat, flat?.documentId);
+            }
+        }
+
         /// <summary>
         /// NextAcc /api/integration/invoices อ่าน AccountCode (string) ไม่ใช่ AccountId (Guid)
         /// เติม AccountCode อัตโนมัติจาก reverse lookup mapping ถ้า caller ไม่ได้ตั้งค่า

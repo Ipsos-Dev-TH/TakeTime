@@ -39,6 +39,7 @@ namespace Take_Time_BangPhra.Integration
         public Guid? SourceDocumentId { get; set; }
         public string SourceDocumentNumber { get; set; }
         public bool ReplaceExistingForSource { get; set; }
+        public string Sensitivity { get; set; }
         public List<JournalEntryLineRequest> Lines { get; set; }
     }
 
@@ -494,6 +495,7 @@ namespace Take_Time_BangPhra.Integration
         public string Currency { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
     }
 
@@ -515,6 +517,7 @@ namespace Take_Time_BangPhra.Integration
         public decimal? VatRate { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
     }
 
@@ -627,6 +630,7 @@ namespace Take_Time_BangPhra.Integration
         public string Description { get; set; }
         public List<IntegrationJournalLineRequest> Lines { get; set; }
         public bool AutoBalanceVat { get; set; }
+        public string Sensitivity { get; set; }
     }
 
     public class IntegrationJournalLineRequest
@@ -1004,6 +1008,10 @@ namespace Take_Time_BangPhra.Integration
         public string FileName { get; set; }
         public string ContentType { get; set; }
         public string Base64Content { get; set; }
+
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Web.Script.Serialization.ScriptIgnore]
+        public string FilePath { get; set; }
     }
 
     // ──────────────────────────────────────────────

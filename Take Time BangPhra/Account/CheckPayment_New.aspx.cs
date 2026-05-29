@@ -755,7 +755,8 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 var dt = codeInstance.DatabaseQuerySafe(conn,
-                    @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload, Created_Date
+                    @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload, Created_Date,
+                             Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
                       FROM Accounting_Sync_Queue
                       WHERE Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL'
                       ORDER BY ID DESC",
@@ -808,7 +809,18 @@ namespace Take_Time_BangPhra.Account
                 switch (syncStatus)
                 {
                     case "COMPLETED":
-                        lblSync.Text = $"<span class='sync-badge completed'>Synced #{queueId}</span>";
+                        string nexaaccDocNum = queueRow.Table.Columns.Contains("Nexaacc_Document_Number")
+                            ? queueRow["Nexaacc_Document_Number"]?.ToString() : "";
+                        string nexaaccId = queueRow.Table.Columns.Contains("Nexaacc_Response_Id")
+                            ? queueRow["Nexaacc_Response_Id"]?.ToString() : "";
+                        string nexaaccDocType = queueRow.Table.Columns.Contains("Nexaacc_Document_Type")
+                            ? queueRow["Nexaacc_Document_Type"]?.ToString() : "";
+                        string displayLabel = !string.IsNullOrEmpty(nexaaccDocNum) ? nexaaccDocNum : $"#{queueId}";
+                        string deepLink = BuildNexaaccLink(nexaaccId, nexaaccDocType);
+                        if (!string.IsNullOrEmpty(deepLink))
+                            lblSync.Text = $"<a href='{deepLink}' target='_blank' class='sync-badge completed' title='เปิดใน NextAcc'>✓ {Server.HtmlEncode(displayLabel)}</a>";
+                        else
+                            lblSync.Text = $"<span class='sync-badge completed' title='NextAcc ID: {Server.HtmlEncode(nexaaccId)}'>✓ {Server.HtmlEncode(displayLabel)}</span>";
                         btnSync.Visible = false;
                         break;
                     case "PENDING":
@@ -966,6 +978,29 @@ namespace Take_Time_BangPhra.Account
             }
             catch { }
             return null;
+        }
+
+        private string BuildNexaaccLink(string nexaaccId, string docType)
+        {
+            if (string.IsNullOrEmpty(nexaaccId)) return null;
+            try
+            {
+                var config = new Integration.AccountingConfig(conn);
+                if (!config.IsConfigured) return null;
+                string baseUrl = config.RawBaseUrl.TrimEnd('/');
+                string companyId = config.CompanyId.ToString();
+                string path = "documents";
+                switch ((docType ?? "").ToUpper())
+                {
+                    case "INVOICE": path = "invoices"; break;
+                    case "EXPENSE": path = "expenses"; break;
+                    case "JOURNAL": path = "journals"; break;
+                    case "CREDIT_NOTE": path = "credit-notes"; break;
+                    case "DEBIT_NOTE": path = "debit-notes"; break;
+                }
+                return $"{baseUrl}/{companyId}/{path}/{nexaaccId}";
+            }
+            catch { return null; }
         }
     }
 }

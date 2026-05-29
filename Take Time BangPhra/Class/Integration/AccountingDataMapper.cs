@@ -206,7 +206,8 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = MapJournalTypeToString(src.JournalType),
                 Description = src.Description,
                 Lines = lines,
-                AutoBalanceVat = false
+                AutoBalanceVat = false,
+                Sensitivity = src.Sensitivity
             };
         }
 
@@ -640,6 +641,10 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            // Compute total DR from all debit lines built so far
+            decimal totalDebit = 0;
+            foreach (var l in lines) totalDebit += l.DebitAmount;
+
             // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี)
             if (whtAmount > 0)
             {
@@ -653,8 +658,8 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
-            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = amount - WHT)
-            decimal cashPaid = amount - whtAmount;
+            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = DR total - WHT)
+            decimal cashPaid = totalDebit - whtAmount;
             lines.Add(new JournalEntryLineRequest
             {
                 AccountId = cashAccountId,
@@ -1227,6 +1232,7 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.CashPayments,
                 Description = $"จ่ายเงินเดือนพนักงาน - งวด {period}",
                 Reference = $"PR-{payDate:yyyyMM}",
+                Sensitivity = "Payroll",
                 Lines = lines
             };
         }
@@ -2434,6 +2440,7 @@ namespace Take_Time_BangPhra.Integration
                 IncludeVat = false,
                 PaymentMethod = "CASH",
                 PaymentAccountId = GetAccountId("CASH"),
+                Sensitivity = "Payroll",
                 Lines = lines
             };
         }

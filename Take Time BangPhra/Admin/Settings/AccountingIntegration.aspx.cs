@@ -373,29 +373,80 @@ namespace Take_Time_BangPhra.Admin.Settings
 
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
                     $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
-                              Retry_Count, Max_Retries, Error_Message, Created_Date
+                              Retry_Count, Max_Retries, Error_Message, Created_Date, Payload,
+                              Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
                        FROM Accounting_Sync_Queue
                        {whereClause}
                        ORDER BY Created_Date DESC
                        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY",
                     itemParams);
 
+                var config = new Integration.AccountingConfig(ConnStr);
+                bool isOwner = Session["User"]?.ToString() == "Owner";
                 var itemList = new List<Dictionary<string, object>>();
                 if (items != null)
                 {
                     foreach (DataRow row in items.Rows)
                     {
+                        string actionType = row["Action_Type"]?.ToString() ?? "";
+                        string entityType = row["Entity_Type"]?.ToString() ?? "";
+                        bool isPayroll = actionType == "CREATE_PAYROLL_ENTRY"
+                            || entityType == "PAYROLL";
+                        bool isEmployeeVoucher = false;
+                        if (!isPayroll && actionType == "CREATE_VOUCHER_JOURNAL")
+                        {
+                            string payload = row.Table.Columns.Contains("Payload")
+                                ? (row["Payload"]?.ToString() ?? "") : "";
+                            isEmployeeVoucher = payload.Contains("\"expenseCategory\":\"เงินเดือน\"")
+                                || payload.Contains("\"expenseCategory\":\"salary\"")
+                                || payload.Contains("\"description\":\"เงินเดือน");
+                        }
+                        bool isSensitive = isPayroll || isEmployeeVoucher;
+                        bool mask = isSensitive && !isOwner;
+
+                        string nexaaccId = row.Table.Columns.Contains("Nexaacc_Response_Id")
+                            ? (row["Nexaacc_Response_Id"]?.ToString() ?? "") : "";
+                        string nexaaccDocNum = row.Table.Columns.Contains("Nexaacc_Document_Number")
+                            ? (row["Nexaacc_Document_Number"]?.ToString() ?? "") : "";
+                        string nexaaccDocType = row.Table.Columns.Contains("Nexaacc_Document_Type")
+                            ? (row["Nexaacc_Document_Type"]?.ToString() ?? "") : "";
+                        string nexaaccUrl = "";
+                        if (!mask && !string.IsNullOrEmpty(nexaaccId) && !nexaaccId.StartsWith("SKIPPED") && config.IsConfigured)
+                        {
+                            string basePath = config.RawBaseUrl.TrimEnd('/');
+                            string cid = config.CompanyId.ToString();
+                            string typePath = "documents";
+                            switch ((nexaaccDocType ?? "").ToUpper())
+                            {
+                                case "INVOICE": typePath = "invoices"; break;
+                                case "EXPENSE": typePath = "expenses"; break;
+                                case "JOURNAL": typePath = "journals"; break;
+                                case "CREDIT_NOTE": typePath = "credit-notes"; break;
+                                case "DEBIT_NOTE": typePath = "debit-notes"; break;
+                            }
+                            nexaaccUrl = $"{basePath}/{cid}/{typePath}/{nexaaccId}";
+                        }
+
+                        string errorMsg = row["Error_Message"]?.ToString() ?? "";
+                        if (mask && !string.IsNullOrEmpty(errorMsg))
+                            errorMsg = "🔒 ข้อมูลถูกจำกัดการเข้าถึง";
+
                         itemList.Add(new Dictionary<string, object>
                         {
                             { "id", Convert.ToInt64(row["ID"]) },
-                            { "entityType", row["Entity_Type"]?.ToString() },
-                            { "entityId", Convert.ToInt32(row["Entity_ID"]) },
-                            { "actionType", row["Action_Type"]?.ToString() },
+                            { "entityType", mask ? "PAYROLL" : entityType },
+                            { "entityId", mask ? 0 : Convert.ToInt32(row["Entity_ID"]) },
+                            { "actionType", actionType },
                             { "status", row["Status"]?.ToString() },
                             { "retryCount", Convert.ToInt32(row["Retry_Count"]) },
                             { "maxRetries", Convert.ToInt32(row["Max_Retries"]) },
-                            { "error", row["Error_Message"]?.ToString() ?? "" },
-                            { "created", Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") }
+                            { "error", errorMsg },
+                            { "created", Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") },
+                            { "nexaaccId", mask ? "" : nexaaccId },
+                            { "nexaaccDocNumber", mask ? "🔒" : nexaaccDocNum },
+                            { "nexaaccDocType", mask ? "" : nexaaccDocType },
+                            { "nexaaccUrl", mask ? "" : nexaaccUrl },
+                            { "sensitive", isSensitive }
                         });
                     }
                 }
@@ -426,11 +477,24 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
+        private bool IsSensitiveQueueItem(long queueId)
+        {
+            var dt = _code.DatabaseQuerySafe(ConnStr,
+                "SELECT Action_Type, Entity_Type FROM Accounting_Sync_Queue WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", queueId } });
+            if (dt == null || dt.Rows.Count == 0) return false;
+            string action = dt.Rows[0]["Action_Type"]?.ToString() ?? "";
+            string entity = dt.Rows[0]["Entity_Type"]?.ToString() ?? "";
+            return action == "CREATE_PAYROLL_ENTRY" || entity == "PAYROLL";
+        }
+
         private Dictionary<string, object> RetryQueueItem()
         {
             try
             {
                 long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
+                if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
                 var sync = new Integration.AccountingSyncService(ConnStr);
                 sync.RetryItem(queueId);
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
@@ -445,12 +509,19 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                _code.DatabaseInsertSafe(ConnStr,
-                    @"UPDATE Accounting_Sync_Queue
+                bool isOwner = Session["User"]?.ToString() == "Owner";
+                string sql = @"UPDATE Accounting_Sync_Queue
                       SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
-                      WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries", null);
+                      WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries";
+                if (!isOwner)
+                    sql += " AND Action_Type != 'CREATE_PAYROLL_ENTRY' AND ISNULL(Entity_Type,'') != 'PAYROLL'";
 
-                return new Dictionary<string, object> { { "success", true }, { "message", "Reset failed items ทั้งหมดเป็น PENDING แล้ว" } };
+                _code.DatabaseInsertSafe(ConnStr, sql, null);
+
+                string msg = isOwner
+                    ? "Reset failed items ทั้งหมดเป็น PENDING แล้ว"
+                    : "Reset failed items เป็น PENDING แล้ว (ไม่รวมรายการเงินเดือน)";
+                return new Dictionary<string, object> { { "success", true }, { "message", msg } };
             }
             catch (Exception ex)
             {
@@ -463,6 +534,9 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
+                if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
+
                 _code.DatabaseInsertSafe(ConnStr,
                     @"UPDATE Accounting_Sync_Queue
                       SET Status = 'PENDING', Retry_Count = 0, Nexaacc_Response_Id = NULL,
@@ -473,7 +547,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"Queue #{queueId} reset เป็น PENDING — จะยิง API ใหม่รอบถั��ไป" }
+                    { "message", $"Queue #{queueId} reset เป็น PENDING — จะยิง API ใหม่รอบถัดไป" }
                 };
             }
             catch (Exception ex)
@@ -493,18 +567,37 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (rawIds == null || rawIds.Count == 0)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่ได้เลือกรายการ" } };
 
+                bool isOwner = Session["User"]?.ToString() == "Owner";
                 var idList = new List<string>();
+                int blocked = 0;
                 foreach (var id in rawIds)
-                    idList.Add(Convert.ToInt64(id).ToString());
+                {
+                    long qid = Convert.ToInt64(id);
+                    if (!isOwner && IsSensitiveQueueItem(qid))
+                    {
+                        blocked++;
+                        continue;
+                    }
+                    idList.Add(qid.ToString());
+                }
 
-                string idsCsv = string.Join(",", idList);
-                _code.DatabaseInsertSafe(ConnStr,
-                    $"DELETE FROM Accounting_Sync_Queue WHERE ID IN ({idsCsv})", null);
+                if (idList.Count == 0 && blocked > 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ลบรายการเงินเดือน" } };
+
+                if (idList.Count > 0)
+                {
+                    string idsCsv = string.Join(",", idList);
+                    _code.DatabaseInsertSafe(ConnStr,
+                        $"DELETE FROM Accounting_Sync_Queue WHERE ID IN ({idsCsv})", null);
+                }
+
+                string msg = $"ลบ {idList.Count} รายการจาก Queue สำเร็จ";
+                if (blocked > 0) msg += $" (ข้าม {blocked} รายการเงินเดือน — ต้องเป็น Owner)";
 
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"ลบ {idList.Count} รายการจาก Queue สำเร็จ" }
+                    { "message", msg }
                 };
             }
             catch (Exception ex)
@@ -1133,11 +1226,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
 
                 var dt = _code.DatabaseQuerySafe(ConnStr, sql, parameters);
+                var config = new Integration.AccountingConfig(ConnStr);
                 var items = new List<Dictionary<string, object>>();
                 if (dt != null)
                 {
                     foreach (System.Data.DataRow row in dt.Rows)
                     {
+                        string nexaaccDocId = row["Nexaacc_Doc_Id"]?.ToString() ?? "";
+                        string nexaaccUrl = "";
+                        if (!string.IsNullOrEmpty(nexaaccDocId) && config.IsConfigured)
+                        {
+                            string basePath = config.RawBaseUrl.TrimEnd('/');
+                            string cid = config.CompanyId.ToString();
+                            nexaaccUrl = $"{basePath}/{cid}/documents/{nexaaccDocId}";
+                        }
                         items.Add(new Dictionary<string, object>
                         {
                             { "receiptId", row["Receipt_ID"]?.ToString() },
@@ -1146,7 +1248,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "total", row["Total"] != DBNull.Value ? Convert.ToDecimal(row["Total"]) : 0m },
                             { "isDeposit", row["IsDeposit"] != DBNull.Value && Convert.ToBoolean(row["IsDeposit"]) },
                             { "documentSource", row["Document_Source"]?.ToString() ?? "LOCAL" },
-                            { "nexaaccDocId", row["Nexaacc_Doc_Id"]?.ToString() },
+                            { "nexaaccDocId", nexaaccDocId },
+                            { "nexaaccUrl", nexaaccUrl },
                             { "syncStatus", row["Sync_Status"]?.ToString() },
                             { "syncError", row["Sync_Error"]?.ToString() },
                             { "etaxStatus", row["Etax_Status"]?.ToString() },

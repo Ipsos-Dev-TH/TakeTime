@@ -270,6 +270,8 @@
         .sync-badge.processing { background: #cce5ff; color: #004085; }
         .sync-badge.failed { background: #f8d7da; color: #721c24; }
         .sync-badge.none { background: #e2e3e5; color: #383d41; }
+        a.sync-badge.completed { text-decoration: none; cursor: pointer; }
+        a.sync-badge.completed:hover { background: #b7dfb5; text-decoration: underline; }
 
         /* Mobile responsive */
         @media (max-width: 768px) {
