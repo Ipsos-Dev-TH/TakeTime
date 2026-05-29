@@ -1183,7 +1183,7 @@ namespace Take_Time_BangPhra.Integration
                     journal.Sensitivity = "Payroll";
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid jrnlId = RequireValidDocId(result?.data?.Id, $"CreateJournal (voucher) doc={docNumber}");
-                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocNumber = result?.data?.EntryNumber;
                 _lastDocType = "JOURNAL";
                 await SafePostJournalAsync(jrnlId);
                 return jrnlId.ToString();
@@ -1251,7 +1251,7 @@ namespace Take_Time_BangPhra.Integration
                     journal.Reference = docNumber;
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid payrollId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payroll) period={period}");
-                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocNumber = result?.data?.EntryNumber;
                 _lastDocType = "JOURNAL";
                 await SafePostJournalAsync(payrollId);
                 return payrollId.ToString();
@@ -1336,7 +1336,7 @@ namespace Take_Time_BangPhra.Integration
                         hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
-                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocNumber = result?.data?.EntryNumber;
                     _lastDocType = "JOURNAL";
                     await SafePostJournalAsync(jrnlDocId);
                     return jrnlDocId.ToString();
@@ -1458,7 +1458,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payment) receipt={receiptNumber}");
-                    _lastDocNumber = result?.data?.DocumentNumber;
+                    _lastDocNumber = result?.data?.EntryNumber;
                     _lastDocType = "JOURNAL";
                     await SafePostJournalAsync(jrnlDocId);
                     return jrnlDocId.ToString();
