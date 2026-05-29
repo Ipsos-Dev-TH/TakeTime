@@ -371,10 +371,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (queryParams.ContainsKey("@statusFilter"))
                     itemParams["@statusFilter"] = queryParams["@statusFilter"];
 
+                // Detect optional doc-cache columns (PHASE12 Migration 14)
+                DataTable colCheck = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT name FROM sys.columns
+                      WHERE object_id = OBJECT_ID('Accounting_Sync_Queue')
+                        AND name IN ('Nexaacc_Document_Number','Nexaacc_Document_Type')", null);
+                bool hasDocCache = colCheck != null && colCheck.Rows.Count >= 2;
+
+                string docCacheCols = hasDocCache
+                    ? ", Nexaacc_Document_Number, Nexaacc_Document_Type"
+                    : ", CAST(NULL AS NVARCHAR(50)) AS Nexaacc_Document_Number, CAST(NULL AS NVARCHAR(30)) AS Nexaacc_Document_Type";
+
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
                     $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
                               Retry_Count, Max_Retries, Error_Message, Created_Date, Payload,
-                              Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
+                              Nexaacc_Response_Id{docCacheCols}
                        FROM Accounting_Sync_Queue
                        {whereClause}
                        ORDER BY Created_Date DESC
@@ -465,11 +476,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "totalPages", totalPages }
                 };
             }
-            catch
+            catch (Exception ex)
             {
+                try { _code.Logs(ConnStr, "AccountingIntegration", $"GetQueueData error: {ex.Message}", "SYSTEM"); }
+                catch { }
                 return new Dictionary<string, object>
                 {
-                    { "success", true },
+                    { "success", false },
+                    { "message", "Queue query failed: " + ex.Message },
                     { "pending", 0 }, { "processing", 0 }, { "completed", 0 }, { "failed", 0 },
                     { "items", new List<object>() },
                     { "page", 1 }, { "pageSize", 20 }, { "totalItems", 0 }, { "totalPages", 1 }
