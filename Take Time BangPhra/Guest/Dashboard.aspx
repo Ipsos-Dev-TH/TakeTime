@@ -612,6 +612,14 @@
                 <p>กิจกรรมในและนอกที่พัก</p>
             </a>
 
+            <a href="MyPoints.aspx" class="service-card">
+                <div class="service-icon payment">
+                    <i class="fas fa-coins"></i>
+                </div>
+                <h3>คะแนน & รางวัล</h3>
+                <p>ดูแต้มสะสมและแลกของรางวัล</p>
+            </a>
+
             <a href="Review.aspx" class="service-card">
                 <div class="service-icon review">
                     <i class="fas fa-star"></i>

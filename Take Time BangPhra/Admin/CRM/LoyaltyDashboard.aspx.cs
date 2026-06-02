@@ -307,23 +307,14 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         private void LoadRewardCategories()
         {
-            try
-            {
-                DataTable dtCategories = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ID, Category_Name FROM Loyalty_Reward_Categories WHERE IsActive = 1 ORDER BY Display_Order", null);
-
-                ddlRewardCategory.DataSource = dtCategories;
-                ddlRewardCategory.DataTextField = "Category_Name";
-                ddlRewardCategory.DataValueField = "ID";
-                ddlRewardCategory.DataBind();
-                ddlRewardCategory.Items.Insert(0, new ListItem("-- Select Category --", "0"));
-            }
-            catch
-            {
-                // If table doesn't exist, add default option
-                ddlRewardCategory.Items.Clear();
-                ddlRewardCategory.Items.Add(new ListItem("General", "1"));
-            }
+            // Loyalty_Rewards.Category is a free VARCHAR code, not an FK.
+            ddlRewardCategory.Items.Clear();
+            ddlRewardCategory.Items.Add(new ListItem("ส่วนลด (Discount)", "DISCOUNT"));
+            ddlRewardCategory.Items.Add(new ListItem("พักฟรี (Free Night)", "FREE_NIGHT"));
+            ddlRewardCategory.Items.Add(new ListItem("อัพเกรดห้อง (Upgrade)", "UPGRADE"));
+            ddlRewardCategory.Items.Add(new ListItem("บริการ (Service)", "SERVICE"));
+            ddlRewardCategory.Items.Add(new ListItem("บัตรกำนัล (Voucher)", "VOUCHER"));
+            ddlRewardCategory.Items.Add(new ListItem("ของขวัญ (Gift)", "GIFT"));
         }
 
         protected void btnAddReward_Click(object sender, EventArgs e)
@@ -345,43 +336,48 @@ namespace Take_Time_BangPhra.Admin.CRM
                 }
 
                 int rewardId = Convert.ToInt32(hfEditingRewardId.Value);
+
+                // Derive validity (days) from the date range if provided
+                int validityDays = 365;
+                if (!string.IsNullOrEmpty(txtValidFrom.Text) && !string.IsNullOrEmpty(txtValidTo.Text))
+                {
+                    int diff = (Convert.ToDateTime(txtValidTo.Text) - Convert.ToDateTime(txtValidFrom.Text)).Days;
+                    if (diff > 0) validityDays = diff;
+                }
+
                 var parameters = new Dictionary<string, object>
                 {
                     { "@RewardName", txtRewardName.Text },
                     { "@RewardNameEN", txtRewardNameEN.Text },
                     { "@Description", txtRewardDescription.Text },
-                    { "@CategoryID", ddlRewardCategory.SelectedValue != "0" ? (object)Convert.ToInt32(ddlRewardCategory.SelectedValue) : DBNull.Value },
-                    { "@PointsRequired", Convert.ToInt32(txtPointsRequired.Text) },
-                    { "@AvailableQuantity", string.IsNullOrEmpty(txtAvailableQuantity.Text) ? DBNull.Value : (object)Convert.ToInt32(txtAvailableQuantity.Text) },
-                    { "@ValidFrom", Convert.ToDateTime(txtValidFrom.Text) },
-                    { "@ValidTo", Convert.ToDateTime(txtValidTo.Text) }
+                    { "@Category", ddlRewardCategory.SelectedValue },
+                    { "@PointsCost", Convert.ToInt32(txtPointsRequired.Text) },
+                    { "@StockQuantity", string.IsNullOrEmpty(txtAvailableQuantity.Text) ? DBNull.Value : (object)Convert.ToInt32(txtAvailableQuantity.Text) },
+                    { "@ValidityDays", validityDays }
                 };
 
                 if (rewardId == 0)
                 {
-                    // Insert
                     _code.DatabaseInsertSafe(_connectionString,
                         @"INSERT INTO Loyalty_Rewards
-                          (Reward_Name, Reward_Name_EN, Description, Category_ID, Points_Required,
-                           Available_Quantity, Valid_From, Valid_To, IsActive, Display_Order, Created_Date)
-                          VALUES (@RewardName, @RewardNameEN, @Description, @CategoryID, @PointsRequired,
-                                  @AvailableQuantity, @ValidFrom, @ValidTo, 1, 999, GETDATE())", parameters);
+                          (RewardName, RewardNameEN, Description, Category, PointsCost,
+                           StockQuantity, MinTierRequired, ValidityDays, IsActive, DisplayOrder, CreatedDate)
+                          VALUES (@RewardName, @RewardNameEN, @Description, @Category, @PointsCost,
+                                  @StockQuantity, 1, @ValidityDays, 1, 999, GETDATE())", parameters);
                     ShowAlert("Reward added successfully!", "success");
                 }
                 else
                 {
-                    // Update
                     parameters["@ID"] = rewardId;
                     _code.DatabaseInsertSafe(_connectionString,
                         @"UPDATE Loyalty_Rewards SET
-                          Reward_Name = @RewardName,
-                          Reward_Name_EN = @RewardNameEN,
+                          RewardName = @RewardName,
+                          RewardNameEN = @RewardNameEN,
                           Description = @Description,
-                          Category_ID = @CategoryID,
-                          Points_Required = @PointsRequired,
-                          Available_Quantity = @AvailableQuantity,
-                          Valid_From = @ValidFrom,
-                          Valid_To = @ValidTo
+                          Category = @Category,
+                          PointsCost = @PointsCost,
+                          StockQuantity = @StockQuantity,
+                          ValidityDays = @ValidityDays
                           WHERE ID = @ID", parameters);
                     ShowAlert("Reward updated successfully!", "success");
                 }
@@ -426,20 +422,25 @@ namespace Take_Time_BangPhra.Admin.CRM
                 {
                     DataRow row = dtReward.Rows[0];
                     lblModalTitle.Text = "Edit Reward";
-                    txtRewardName.Text = row["Reward_Name"].ToString();
-                    txtRewardNameEN.Text = row["Reward_Name_EN"].ToString();
-                    txtRewardDescription.Text = row["Description"].ToString();
+                    txtRewardName.Text = row["RewardName"].ToString();
+                    txtRewardNameEN.Text = row["RewardNameEN"] != DBNull.Value ? row["RewardNameEN"].ToString() : "";
+                    txtRewardDescription.Text = row["Description"] != DBNull.Value ? row["Description"].ToString() : "";
 
-                    if (row["Category_ID"] != DBNull.Value)
-                        ddlRewardCategory.SelectedValue = row["Category_ID"].ToString();
+                    if (row["Category"] != DBNull.Value)
+                    {
+                        ListItem li = ddlRewardCategory.Items.FindByValue(row["Category"].ToString());
+                        if (li != null) ddlRewardCategory.ClearSelection();
+                        if (li != null) li.Selected = true;
+                    }
 
-                    txtPointsRequired.Text = row["Points_Required"].ToString();
+                    txtPointsRequired.Text = row["PointsCost"].ToString();
 
-                    if (row["Available_Quantity"] != DBNull.Value)
-                        txtAvailableQuantity.Text = row["Available_Quantity"].ToString();
+                    if (row["StockQuantity"] != DBNull.Value)
+                        txtAvailableQuantity.Text = row["StockQuantity"].ToString();
 
-                    txtValidFrom.Text = Convert.ToDateTime(row["Valid_From"]).ToString("yyyy-MM-dd");
-                    txtValidTo.Text = Convert.ToDateTime(row["Valid_To"]).ToString("yyyy-MM-dd");
+                    int validityDays = row["ValidityDays"] != DBNull.Value ? Convert.ToInt32(row["ValidityDays"]) : 365;
+                    txtValidFrom.Text = DateTime.Now.ToString("yyyy-MM-dd");
+                    txtValidTo.Text = DateTime.Now.AddDays(validityDays).ToString("yyyy-MM-dd");
 
                     hfEditingRewardId.Value = rewardId.ToString();
                     pnlRewardModal.CssClass = "form-modal show";

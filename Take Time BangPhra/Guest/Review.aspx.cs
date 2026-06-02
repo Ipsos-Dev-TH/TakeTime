@@ -76,54 +76,32 @@ namespace Take_Time_BangPhra.Guest
 
                 if (memberInfo != null)
                 {
-                    int currentPoints = memberInfo.TotalPoints;
-                    string currentTier = memberInfo.TierName ?? "Bronze";
+                    // Headline = redeemable balance (คะแนนที่แลกได้)
+                    lblCurrentPoints.Text = memberInfo.AvailablePoints.ToString("N0");
+                    lblCurrentTier.Text = memberInfo.TierName ?? "Member";
 
-                    lblCurrentPoints.Text = currentPoints.ToString("N0");
-                    lblCurrentTier.Text = currentTier;
-
-                    switch (currentTier.ToLower())
+                    // Tier progress is based on YEARLY (tier-qualifying) points
+                    if (memberInfo.NextTierMinPoints.HasValue)
                     {
-                        case "silver":
-                        case "สมาชิกเงิน":
-                            memberBadge.Attributes["class"] = "member-badge silver";
-                            lblNextTier.Text = "Gold";
-                            lblPointsToNext.Text = Math.Max(0, 5000 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, (currentPoints - 1000) * 100 / 4000)}%";
-                            tierSilver.Attributes["class"] = "tier-card silver current";
-                            break;
-                        case "gold":
-                        case "สมาชิกทอง":
-                            memberBadge.Attributes["class"] = "member-badge gold";
-                            lblNextTier.Text = "Platinum";
-                            lblPointsToNext.Text = Math.Max(0, 15000 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, (currentPoints - 5000) * 100 / 10000)}%";
-                            tierGold.Attributes["class"] = "tier-card gold current";
-                            break;
-                        case "platinum":
-                        case "สมาชิกแพลทินัม":
-                            memberBadge.Attributes["class"] = "member-badge platinum";
-                            lblNextTier.Text = "VIP";
-                            lblPointsToNext.Text = Math.Max(0, 50000 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, (currentPoints - 15000) * 100 / 35000)}%";
-                            tierPlatinum.Attributes["class"] = "tier-card platinum current";
-                            break;
-                        case "vip":
-                        case "สมาชิก vip":
-                            memberBadge.Attributes["class"] = "member-badge platinum";
-                            lblNextTier.Text = "Max Level!";
-                            lblPointsToNext.Text = "0";
-                            progressBar.Style["width"] = "100%";
-                            tierPlatinum.Attributes["class"] = "tier-card platinum current";
-                            break;
-                        default:
-                            memberBadge.Attributes["class"] = "member-badge bronze";
-                            lblNextTier.Text = "Silver";
-                            lblPointsToNext.Text = Math.Max(0, 1000 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, currentPoints * 100 / 1000)}%";
-                            tierBronze.Attributes["class"] = "tier-card bronze current";
-                            break;
+                        lblNextTier.Text = memberInfo.NextTierName ?? "";
+                        lblPointsToNext.Text = memberInfo.PointsToNextTier.ToString("N0");
                     }
+                    else
+                    {
+                        lblNextTier.Text = "Max Level!";
+                        lblPointsToNext.Text = "0";
+                    }
+                    progressBar.Style["width"] = $"{memberInfo.TierProgressPercent}%";
+
+                    // Badge + highlight the customer's current tier card
+                    string tierEn = (memberInfo.TierNameEN ?? "").ToLower();
+                    string badgeClass;
+                    if (tierEn.Contains("silver")) { badgeClass = "silver"; tierSilver.Attributes["class"] = "tier-card silver current"; }
+                    else if (tierEn.Contains("gold")) { badgeClass = "gold"; tierGold.Attributes["class"] = "tier-card gold current"; }
+                    else if (tierEn.Contains("platinum")) { badgeClass = "platinum"; tierPlatinum.Attributes["class"] = "tier-card platinum current"; }
+                    else if (tierEn.Contains("vip")) { badgeClass = "platinum"; tierPlatinum.Attributes["class"] = "tier-card platinum current"; }
+                    else { badgeClass = "bronze"; tierBronze.Attributes["class"] = "tier-card bronze current"; }
+                    memberBadge.Attributes["class"] = "member-badge " + badgeClass;
                 }
                 else
                 {
@@ -202,39 +180,10 @@ namespace Take_Time_BangPhra.Guest
                     return;
                 }
 
-                // Check if already reviewed today
-                DataTable dtExisting = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT COUNT(*) AS ReviewCount
-                      FROM Loyalty_Transactions
-                      WHERE Customer_MobilePhone = @Phone
-                        AND TransactionType = 'EARN'
-                        AND Description LIKE '%Review%'
-                        AND CAST(TransactionDate AS DATE) = CAST(GETDATE() AS DATE)",
-                    new System.Collections.Generic.Dictionary<string, object> { { "@Phone", _guestMobilePhone } });
-
-                if (dtExisting.Rows.Count > 0 && Convert.ToInt32(dtExisting.Rows[0]["ReviewCount"]) > 0)
+                // Review reward is limited to ONCE PER CALENDAR YEAR
+                if (_loyaltyService.HasReviewedThisYear(_guestMobilePhone))
                 {
-                    lblReviewStatus.Text = "<div class='alert alert-warning'><i class='fas fa-exclamation-triangle'></i> คุณได้รับแต้มจากการรีวิววันนี้แล้ว กรุณารอวันถัดไป</div>";
-                    return;
-                }
-
-                // Check if already reviewed this reservation
-                DataTable dtReservationReview = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT COUNT(*) AS ReviewCount
-                      FROM Loyalty_Transactions
-                      WHERE Customer_MobilePhone = @Phone
-                        AND TransactionType = 'EARN'
-                        AND Description LIKE '%Review%'
-                        AND Reservation_ID = @ReservationId",
-                    new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "@Phone", _guestMobilePhone },
-                        { "@ReservationId", _reservationId }
-                    });
-
-                if (dtReservationReview.Rows.Count > 0 && Convert.ToInt32(dtReservationReview.Rows[0]["ReviewCount"]) > 0)
-                {
-                    lblReviewStatus.Text = "<div class='alert alert-info'><i class='fas fa-info-circle'></i> คุณได้รีวิวการเข้าพักครั้งนี้แล้ว ขอบคุณสำหรับความคิดเห็นของคุณ!</div>";
+                    lblReviewStatus.Text = $"<div class='alert alert-info'><i class='fas fa-info-circle'></i> คุณได้รับแต้มจากการรีวิวในปี {DateTime.Now.Year + 543} แล้ว สามารถรีวิวรับแต้มได้อีกครั้งในปีถัดไป ขอบคุณที่แบ่งปันประสบการณ์ของคุณ!</div>";
                     return;
                 }
 
@@ -281,6 +230,9 @@ namespace Take_Time_BangPhra.Guest
                             });
                     }
                     catch { }
+
+                    // Mark review timestamp (best-effort)
+                    _loyaltyService.MarkReviewed(_guestMobilePhone);
 
                     lblReviewStatus.Text = $"<div class='alert alert-success'><i class='fas fa-check-circle'></i> ยินดีด้วย! คุณได้รับ <strong>{pointsToAward} Points</strong> จากการรีวิว ขอบคุณที่แบ่งปันประสบการณ์ของคุณ!</div>";
 

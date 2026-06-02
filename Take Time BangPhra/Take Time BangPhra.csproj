@@ -376,6 +376,7 @@
     <Content Include="Admin\CustomerManagement.aspx" />
     <Content Include="Admin\CRM\GuestProfile.aspx" />
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
+    <Content Include="Admin\CRM\MembershipManagement.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
@@ -414,6 +415,7 @@
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
     <Content Include="Guest\Activities.aspx" />
+    <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -931,6 +933,13 @@
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.designer.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\CRM\MembershipManagement.aspx.cs">
+      <DependentUpon>MembershipManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MembershipManagement.aspx.designer.cs">
+      <DependentUpon>MembershipManagement.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1098,6 +1107,13 @@
     </Compile>
     <Compile Include="Guest\Activities.aspx.designer.cs">
       <DependentUpon>Activities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\MyPoints.aspx.cs">
+      <DependentUpon>MyPoints.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\MyPoints.aspx.designer.cs">
+      <DependentUpon>MyPoints.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Class\Services\ChannelManagerService.cs" />

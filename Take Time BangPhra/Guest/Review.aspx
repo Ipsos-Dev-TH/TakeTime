@@ -574,7 +574,7 @@
         <!-- Reward Hero -->
         <div class="reward-hero">
             <h1><i class="fas fa-gift"></i> รีวิวและรับรางวัล!</h1>
-            <p>แบ่งปันประสบการณ์การพักของคุณบน Google และรับแต้มสะสมทันที</p>
+            <p>แบ่งปันประสบการณ์การพักของคุณบน Google และรับแต้มสะสมทันที (รับแต้มได้ปีละ 1 ครั้ง)</p>
             <div class="points-highlight">
                 <i class="fas fa-coins"></i>
                 <span>+<asp:Label ID="lblReviewPoints" runat="server">100</asp:Label> Points</span>
@@ -592,13 +592,16 @@
                     <span class="tier-name">(<asp:Label ID="lblCurrentTier" runat="server">Bronze</asp:Label> Member)</span>
                 </h3>
                 <p class="points-balance">
-                    คะแนนสะสมปัจจุบัน: <strong><asp:Label ID="lblCurrentPoints" runat="server">0</asp:Label> Points</strong>
+                    คะแนนที่แลกได้: <strong><asp:Label ID="lblCurrentPoints" runat="server">0</asp:Label> Points</strong>
+                    <a href="MyPoints.aspx" style="margin-left:10px; font-size:13px; color:#667eea; text-decoration:none;">
+                        <i class="fas fa-gift"></i> แลกของรางวัล
+                    </a>
                 </p>
             </div>
             <div class="progress-to-next">
                 <div class="progress-label">
-                    <span>Progress to <asp:Label ID="lblNextTier" runat="server">Silver</asp:Label></span>
-                    <span><asp:Label ID="lblPointsToNext" runat="server">500</asp:Label> pts more</span>
+                    <span>คะแนนรายปีสู่ <asp:Label ID="lblNextTier" runat="server">Silver</asp:Label></span>
+                    <span>อีก <asp:Label ID="lblPointsToNext" runat="server">500</asp:Label> แต้ม</span>
                 </div>
                 <div class="progress-bar-container">
                     <div class="progress-bar-fill" style="width: 30%;" id="progressBar" runat="server"></div>
