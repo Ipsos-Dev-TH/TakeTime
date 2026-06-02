@@ -604,6 +604,14 @@
                 <p>ตรวจสอบยอดและชำระเงิน</p>
             </a>
 
+            <a href="Activities.aspx" class="service-card">
+                <div class="service-icon info">
+                    <i class="fas fa-hiking"></i>
+                </div>
+                <h3>Activities</h3>
+                <p>กิจกรรมในและนอกที่พัก</p>
+            </a>
+
             <a href="Review.aspx" class="service-card">
                 <div class="service-icon review">
                     <i class="fas fa-star"></i>
@@ -663,9 +671,9 @@
             <i class="fas fa-utensils"></i>
             <span>สั่งอาหาร</span>
         </a>
-        <a href="Housekeeping.aspx">
-            <i class="fas fa-broom"></i>
-            <span>แม่บ้าน</span>
+        <a href="Activities.aspx">
+            <i class="fas fa-hiking"></i>
+            <span>กิจกรรม</span>
         </a>
         <a href="Balance.aspx">
             <i class="fas fa-wallet"></i>

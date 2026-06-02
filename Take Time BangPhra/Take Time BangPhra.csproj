@@ -413,6 +413,7 @@
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
+    <Content Include="Guest\Activities.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -1090,6 +1091,13 @@
     </Compile>
     <Compile Include="Guest\Chat.aspx.designer.cs">
       <DependentUpon>Chat.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Activities.aspx.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Activities.aspx.designer.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Class\Services\ChannelManagerService.cs" />

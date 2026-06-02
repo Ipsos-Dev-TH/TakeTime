@@ -139,7 +139,7 @@ namespace Take_Time_BangPhra.Guest
 
                 // 2. Loyalty Points
                 DataTable dtLoyalty = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT Points_Balance FROM Customer_Loyalty
+                    @"SELECT AvailablePoints FROM Customer_Loyalty
                       WHERE Customer_MobilePhone = @Phone",
                     new System.Collections.Generic.Dictionary<string, object>
                     {
@@ -148,8 +148,8 @@ namespace Take_Time_BangPhra.Guest
 
                 if (dtLoyalty.Rows.Count > 0)
                 {
-                    int points = dtLoyalty.Rows[0]["Points_Balance"] != DBNull.Value
-                        ? Convert.ToInt32(dtLoyalty.Rows[0]["Points_Balance"]) : 0;
+                    int points = dtLoyalty.Rows[0]["AvailablePoints"] != DBNull.Value
+                        ? Convert.ToInt32(dtLoyalty.Rows[0]["AvailablePoints"]) : 0;
                     lblLoyaltyPoints.Text = points.ToString("N0");
                 }
                 else

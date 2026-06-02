@@ -87,12 +87,13 @@ namespace Take_Time_BangPhra.Guest
         protected global::System.Web.UI.HtmlControls.HtmlGenericControl progressBar;
 
         /// <summary>
+        /// fuReviewScreenshot control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.FileUpload fuReviewScreenshot;
+
+        /// <summary>
         /// btnConfirmReview control.
         /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move the field declaration from designer file to code-behind file.
-        /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnConfirmReview;
 
         /// <summary>
