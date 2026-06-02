@@ -122,6 +122,33 @@
         .empty-state { text-align: center; padding: 40px 20px; color: #999; }
         .empty-state i { font-size: 48px; opacity: .4; margin-bottom: 12px; display: block; }
 
+        /* Use points button */
+        .btn-use-points {
+            width: 100%; border: none; padding: 16px; border-radius: 14px; font-size: 16px;
+            font-weight: 800; cursor: pointer; margin-bottom: 20px; color: white;
+            background: linear-gradient(135deg, #f7971e, #ffd200); box-shadow: 0 4px 16px rgba(247,151,30,.35);
+        }
+        .btn-use-points:hover { transform: translateY(-2px); }
+
+        /* QR modal */
+        .qr-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 1100; }
+        .qr-modal.show { display: flex; }
+        .qr-card { background: white; border-radius: 20px; padding: 28px; width: 90%; max-width: 380px; text-align: center; }
+        .qr-card h3 { margin: 0 0 6px; font-size: 19px; color: #333; }
+        .qr-card p { margin: 0 0 18px; font-size: 13px; color: #888; }
+        .qr-img-wrap { position: relative; display: inline-block; padding: 14px; background: #fafafa; border-radius: 16px; border: 2px solid #eee; }
+        .qr-img { width: 240px; height: 240px; display: block; }
+        .qr-expired { position: absolute; inset: 14px; background: rgba(255,255,255,.95); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; color: #c62828; font-weight: 700; font-size: 16px; border-radius: 12px; }
+        .qr-expired i { font-size: 38px; margin-bottom: 8px; }
+        .qr-code-text { margin-top: 14px; font-family: monospace; font-size: 15px; font-weight: 700; letter-spacing: 1px; color: #555; }
+        .qr-countdown { margin-top: 6px; font-size: 14px; color: #f57f17; font-weight: 700; }
+        .qr-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-qr-refresh { flex: 1; border: none; padding: 12px; border-radius: 12px; font-weight: 700; cursor: pointer;
+            background: linear-gradient(135deg,#667eea,#764ba2); color: white; }
+        .btn-qr-close { flex: 1; border: none; padding: 12px; border-radius: 12px; font-weight: 700; cursor: pointer;
+            background: #eef0f4; color: #555; }
+
         .alert { padding: 14px 18px; border-radius: 12px; margin-bottom: 18px; font-size: 14px; }
         .alert-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
         .alert-warning { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
@@ -168,6 +195,30 @@
                 <i class="fas fa-chart-line bg"></i>
             </div>
         </div>
+
+        <!-- Use points at counter (QR) -->
+        <asp:Button ID="btnUsePoints" runat="server" Text="ใช้คะแนนที่เคาน์เตอร์ (แสดง QR ให้พนักงาน)"
+            CssClass="btn-use-points" OnClick="btnUsePoints_Click" />
+
+        <!-- QR modal -->
+        <asp:Panel ID="pnlQrModal" runat="server" CssClass="qr-modal">
+            <div class="qr-card">
+                <h3><i class="fas fa-qrcode"></i> แสดง QR นี้ให้พนักงาน</h3>
+                <p>พนักงานจะสแกนเพื่อยืนยันตัวตนและช่วยแลกของรางวัลให้คุณ</p>
+                <div class="qr-img-wrap">
+                    <asp:Image ID="imgQr" runat="server" CssClass="qr-img" />
+                    <div class="qr-expired" id="qrExpired" style="display:none;">
+                        <i class="fas fa-clock"></i><br/>QR หมดอายุแล้ว
+                    </div>
+                </div>
+                <div class="qr-code-text">รหัส: <asp:Label ID="lblTokenText" runat="server"></asp:Label></div>
+                <div class="qr-countdown">หมดอายุใน <span id="qrTimer">05:00</span></div>
+                <div class="qr-actions">
+                    <asp:Button ID="btnRefreshQr" runat="server" Text="สร้าง QR ใหม่" CssClass="btn-qr-refresh" OnClick="btnUsePoints_Click" />
+                    <asp:Button ID="btnCloseQr" runat="server" Text="ปิด" CssClass="btn-qr-close" OnClick="btnCloseQr_Click" />
+                </div>
+            </div>
+        </asp:Panel>
 
         <!-- Tier progress -->
         <div class="tier-progress-card">
@@ -269,6 +320,30 @@
             <div class="empty-state"><i class="fas fa-history"></i><p>ยังไม่มีประวัติคะแนน</p></div>
         </asp:Label>
     </div>
+
+    <script>
+        (function () {
+            var modal = document.getElementById('<%= pnlQrModal.ClientID %>');
+            if (!modal || modal.className.indexOf('show') < 0) return;
+
+            var remaining = 300; // 5 minutes
+            var timerEl = document.getElementById('qrTimer');
+            var expiredEl = document.getElementById('qrExpired');
+
+            function tick() {
+                if (remaining <= 0) {
+                    if (timerEl) timerEl.textContent = '00:00';
+                    if (expiredEl) expiredEl.style.display = 'flex';
+                    return;
+                }
+                var m = Math.floor(remaining / 60), s = remaining % 60;
+                if (timerEl) timerEl.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+                remaining--;
+                setTimeout(tick, 1000);
+            }
+            tick();
+        })();
+    </script>
 
     <div class="bottom-nav">
         <a href="Dashboard.aspx"><i class="fas fa-home"></i><span>หน้าหลัก</span></a>

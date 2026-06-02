@@ -594,6 +594,9 @@
                                                 <li><a runat="server" href="~/Admin/CRM/MembershipManagement">
                                                     <i class="fas fa-users-cog"></i> จัดการสมาชิก
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
+                                                    <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
+                                                </a></li>
                                                 <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
                                                     <i class="fas fa-star"></i> Review Management
                                                 </a></li>

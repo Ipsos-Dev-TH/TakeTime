@@ -11,6 +11,12 @@ namespace Take_Time_BangPhra.Guest
         protected global::System.Web.UI.WebControls.Panel pnlAlert;
         protected global::System.Web.UI.HtmlControls.HtmlGenericControl alertBox;
         protected global::System.Web.UI.WebControls.Label lblAlert;
+        protected global::System.Web.UI.WebControls.Button btnUsePoints;
+        protected global::System.Web.UI.WebControls.Panel pnlQrModal;
+        protected global::System.Web.UI.WebControls.Image imgQr;
+        protected global::System.Web.UI.WebControls.Label lblTokenText;
+        protected global::System.Web.UI.WebControls.Button btnRefreshQr;
+        protected global::System.Web.UI.WebControls.Button btnCloseQr;
         protected global::System.Web.UI.WebControls.Label lblRedeemable;
         protected global::System.Web.UI.WebControls.Label lblYearly;
         protected global::System.Web.UI.WebControls.Label lblYear;

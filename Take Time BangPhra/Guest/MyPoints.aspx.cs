@@ -180,6 +180,27 @@ namespace Take_Time_BangPhra.Guest
             }
         }
 
+        protected void btnUsePoints_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string token = _loyaltyService.GenerateRedemptionToken(_guestMobilePhone, 5);
+                lblTokenText.Text = token;
+                imgQr.ImageUrl = "https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=0&data=" +
+                                 Server.UrlEncode(token);
+                pnlQrModal.CssClass = "qr-modal show";
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("ไม่สามารถสร้าง QR ได้: " + ex.Message, "danger");
+            }
+        }
+
+        protected void btnCloseQr_Click(object sender, EventArgs e)
+        {
+            pnlQrModal.CssClass = "qr-modal";
+        }
+
         protected void rptRewards_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             if (e.CommandName != "Redeem") return;

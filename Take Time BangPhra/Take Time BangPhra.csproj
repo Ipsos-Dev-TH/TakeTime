@@ -377,6 +377,7 @@
     <Content Include="Admin\CRM\GuestProfile.aspx" />
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
     <Content Include="Admin\CRM\MembershipManagement.aspx" />
+    <Content Include="Admin\CRM\RedemptionTerminal.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
@@ -939,6 +940,13 @@
     </Compile>
     <Compile Include="Admin\CRM\MembershipManagement.aspx.designer.cs">
       <DependentUpon>MembershipManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\RedemptionTerminal.aspx.cs">
+      <DependentUpon>RedemptionTerminal.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\RedemptionTerminal.aspx.designer.cs">
+      <DependentUpon>RedemptionTerminal.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>

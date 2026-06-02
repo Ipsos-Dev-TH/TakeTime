@@ -644,6 +644,123 @@ namespace Take_Time_BangPhra.Services
 
         #endregion
 
+        #region Redemption QR Tokens
+
+        /// <summary>
+        /// Create a short-lived single-use token for the customer to display as a QR.
+        /// Staff scans it to redeem a reward on the customer's behalf.
+        /// </summary>
+        public string GenerateRedemptionToken(string customerPhone, int validMinutes = 5)
+        {
+            string token = "TT" + Guid.NewGuid().ToString("N").Substring(0, 18).ToUpper();
+
+            // Invalidate the customer's previous unused tokens (one active QR at a time)
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Loyalty_Redemption_Tokens SET Used = 1, UsedDate = GETDATE() WHERE Customer_MobilePhone = @Phone AND Used = 0",
+                    new Dictionary<string, object> { { "@Phone", customerPhone } });
+            }
+            catch { }
+
+            _code.DatabaseInsertSafe(_connectionString,
+                @"INSERT INTO Loyalty_Redemption_Tokens (Token, Customer_MobilePhone, CreatedDate, ExpiryDate, Used)
+                  VALUES (@Token, @Phone, GETDATE(), DATEADD(MINUTE, @Min, GETDATE()), 0)",
+                new Dictionary<string, object>
+                {
+                    { "@Token", token },
+                    { "@Phone", customerPhone },
+                    { "@Min", validMinutes }
+                });
+
+            return token;
+        }
+
+        /// <summary>
+        /// Resolve a scanned QR token to the member (without consuming it).
+        /// Returns null with a status code if invalid/expired/used.
+        /// </summary>
+        public RedemptionTokenInfo ResolveRedemptionToken(string token)
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT Customer_MobilePhone, ExpiryDate, Used
+                      FROM Loyalty_Redemption_Tokens WHERE Token = @Token",
+                    new Dictionary<string, object> { { "@Token", token } });
+
+                if (dt.Rows.Count == 0)
+                    return new RedemptionTokenInfo { Valid = false, StatusCode = "NOT_FOUND", Message = "QR ไม่ถูกต้อง" };
+
+                DataRow row = dt.Rows[0];
+                if (Convert.ToBoolean(row["Used"]))
+                    return new RedemptionTokenInfo { Valid = false, StatusCode = "USED", Message = "QR นี้ถูกใช้ไปแล้ว" };
+                if (Convert.ToDateTime(row["ExpiryDate"]) < DateTime.Now)
+                    return new RedemptionTokenInfo { Valid = false, StatusCode = "EXPIRED", Message = "QR หมดอายุแล้ว กรุณาให้ลูกค้าสร้างใหม่" };
+
+                string phone = row["Customer_MobilePhone"].ToString();
+                var info = GetLoyaltyInfo(phone);
+
+                string name = phone;
+                try
+                {
+                    DataTable dtName = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT Name FROM Customer WHERE MobilePhone = @Phone",
+                        new Dictionary<string, object> { { "@Phone", phone } });
+                    if (dtName.Rows.Count > 0) name = dtName.Rows[0]["Name"].ToString();
+                }
+                catch { }
+
+                return new RedemptionTokenInfo
+                {
+                    Valid = true,
+                    StatusCode = "OK",
+                    CustomerPhone = phone,
+                    CustomerName = name,
+                    TierName = info?.TierName ?? "Member",
+                    CurrentTierId = info?.CurrentTierId ?? 1,
+                    AvailablePoints = info?.AvailablePoints ?? 0
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RedemptionTokenInfo { Valid = false, StatusCode = "ERROR", Message = ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Redeem a reward using a scanned QR token. Validates + consumes the token,
+        /// then performs the redemption. Returns the redemption result.
+        /// </summary>
+        public RewardRedemptionResult RedeemRewardByToken(string token, int rewardId, short? adminId = null)
+        {
+            var resolved = ResolveRedemptionToken(token);
+            if (!resolved.Valid)
+                return new RewardRedemptionResult { Success = false, Message = resolved.Message, ResultCode = resolved.StatusCode };
+
+            var result = RedeemReward(resolved.CustomerPhone, rewardId, adminId);
+
+            // Consume the token only on a successful redemption
+            if (result.Success)
+            {
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Loyalty_Redemption_Tokens SET Used = 1, UsedDate = GETDATE(), UsedBy_AdminID = @AdminId WHERE Token = @Token",
+                        new Dictionary<string, object>
+                        {
+                            { "@Token", token },
+                            { "@AdminId", adminId ?? (object)DBNull.Value }
+                        });
+                }
+                catch { }
+            }
+
+            return result;
+        }
+
+        #endregion
+
         #region Helper Methods
 
         /// <summary>
@@ -726,6 +843,21 @@ namespace Take_Time_BangPhra.Services
         public int NewBalance { get; set; }
         public string RedemptionCode { get; set; }
         public string RewardName { get; set; }
+    }
+
+    /// <summary>
+    /// Resolved member info from a scanned redemption QR token
+    /// </summary>
+    public class RedemptionTokenInfo
+    {
+        public bool Valid { get; set; }
+        public string StatusCode { get; set; }
+        public string Message { get; set; }
+        public string CustomerPhone { get; set; }
+        public string CustomerName { get; set; }
+        public string TierName { get; set; }
+        public byte CurrentTierId { get; set; }
+        public int AvailablePoints { get; set; }
     }
 
     /// <summary>
