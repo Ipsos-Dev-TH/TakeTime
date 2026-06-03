@@ -537,6 +537,9 @@
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/Chat/OmniChannelInbox">
+                                                    <i class="fas fa-inbox"></i> Omni-Channel Inbox
+                                                </a></li>
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
                                                     <i class="fas fa-concierge-bell"></i> Room Service
                                                 </a></li>
@@ -634,6 +637,9 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/AISettings">
                                                         <i class="fas fa-robot"></i> AI Settings (DeepSeek)
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Chat/ChannelSettings">
+                                                        <i class="fas fa-plug"></i> Channel Settings
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience

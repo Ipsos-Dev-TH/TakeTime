@@ -354,6 +354,7 @@
     <Content Include="API\FileHandler.ashx" />
     <Content Include="API\TaxInvoiceAPI.ashx" />
     <Content Include="API\VendorAPI.ashx" />
+    <Content Include="API\OmniChannelWebhook.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
@@ -395,6 +396,8 @@
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Admin\Chat\ChatManagement.aspx" />
+    <Content Include="Admin\Chat\OmniChannelInbox.aspx" />
+    <Content Include="Admin\Chat\ChannelSettings.aspx" />
     <Content Include="Admin\Housekeeping\Dashboard.aspx" />
     <Content Include="Admin\Maintenance\Dashboard.aspx" />
     <Content Include="Admin\ChannelManager\Dashboard.aspx" />
@@ -581,6 +584,9 @@
     </Compile>
     <Compile Include="API\VendorAPI.ashx.cs">
       <DependentUpon>VendorAPI.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\OmniChannelWebhook.ashx.cs">
+      <DependentUpon>OmniChannelWebhook.ashx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
@@ -819,6 +825,7 @@
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
+    <Compile Include="Class\Services\OmniChannelService.cs" />
     <Compile Include="Class\Services\ReviewService.cs" />
     <Compile Include="Class\Services\TierBenefitsService.cs" />
     <Compile Include="Account\TierBenefitsManagement.aspx.cs">
@@ -970,6 +977,20 @@
     </Compile>
     <Compile Include="Admin\Chat\ChatManagement.aspx.designer.cs">
       <DependentUpon>ChatManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Chat\OmniChannelInbox.aspx.cs">
+      <DependentUpon>OmniChannelInbox.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Chat\OmniChannelInbox.aspx.designer.cs">
+      <DependentUpon>OmniChannelInbox.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Chat\ChannelSettings.aspx.cs">
+      <DependentUpon>ChannelSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Chat\ChannelSettings.aspx.designer.cs">
+      <DependentUpon>ChannelSettings.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Housekeeping\Dashboard.aspx.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>
