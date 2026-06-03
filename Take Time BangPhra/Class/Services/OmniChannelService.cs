@@ -259,7 +259,8 @@ namespace Take_Time_BangPhra.Services
         }
 
         public SendMessageResult SendMessage(long conversationId, string content, string senderName,
-            string messageType = "TEXT", string mediaUrl = null)
+            string messageType = "TEXT", string mediaUrl = null,
+            bool isAI = false, double aiConfidence = 0, string aiSource = null)
         {
             try
             {
@@ -270,15 +271,18 @@ namespace Take_Time_BangPhra.Services
                 string channelCode = dtConv.Rows[0]["ChannelCode"].ToString();
 
                 _code.DatabaseInsertSafe(_connStr,
-                    @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus, Created_Date)
-                      VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT', GETDATE())",
+                    @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus, IsAIGenerated, AIConfidence, AISource, Created_Date)
+                      VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT', @IsAI, @AICnf, @AISrc, GETDATE())",
                     new Dictionary<string, object>
                     {
                         { "@ConvId", conversationId },
                         { "@Sender", senderName },
                         { "@MType", messageType },
                         { "@Content", content },
-                        { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value }
+                        { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value },
+                        { "@IsAI", isAI },
+                        { "@AICnf", isAI ? (object)aiConfidence : DBNull.Value },
+                        { "@AISrc", aiSource != null ? (object)aiSource : DBNull.Value }
                     });
 
                 _code.DatabaseInsertSafe(_connStr,

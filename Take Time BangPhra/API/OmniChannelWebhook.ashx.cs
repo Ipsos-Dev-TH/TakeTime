@@ -5,6 +5,7 @@ using System.Configuration;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Web;
 using System.Web.Script.Serialization;
 using Take_Time_BangPhra.Services;
@@ -137,8 +138,9 @@ namespace Take_Time_BangPhra.API
 
                 if (msgType == "text")
                 {
-                    svc.ReceiveMessage("LINE", userId, displayName, text,
+                    var inRes = svc.ReceiveMessage("LINE", userId, displayName, text,
                         platformMessageId: msgId, displayName: displayName);
+                    TryAutoReply(svc, inRes, "LINE", text, null);
                 }
                 else if (msgType == "image" || msgType == "video" || msgType == "audio" || msgType == "file")
                 {
@@ -217,7 +219,8 @@ namespace Take_Time_BangPhra.API
 
                     if (string.IsNullOrEmpty(senderId) || string.IsNullOrEmpty(text)) continue;
 
-                    svc.ReceiveMessage("FACEBOOK", senderId, null, text, platformMessageId: msgId);
+                    var fbRes = svc.ReceiveMessage("FACEBOOK", senderId, null, text, platformMessageId: msgId);
+                    TryAutoReply(svc, fbRes, "FACEBOOK", text, null);
 
                     var attachments = messageObj.ContainsKey("attachments") ? messageObj["attachments"] as ArrayList : null;
                     if (attachments != null)
@@ -282,8 +285,9 @@ namespace Take_Time_BangPhra.API
                         {
                             var textObj = msg.ContainsKey("text") ? msg["text"] as Dictionary<string, object> : null;
                             string text = textObj?.ContainsKey("body") == true ? textObj["body"]?.ToString() : "";
-                            svc.ReceiveMessage("WHATSAPP", from, displayName, text,
+                            var waRes = svc.ReceiveMessage("WHATSAPP", from, displayName, text,
                                 platformMessageId: msgId, displayName: displayName);
+                            TryAutoReply(svc, waRes, "WHATSAPP", text, from);
                         }
                         else
                         {
@@ -324,7 +328,8 @@ namespace Take_Time_BangPhra.API
 
             if (!string.IsNullOrEmpty(chatId) && !string.IsNullOrEmpty(text))
             {
-                svc.ReceiveMessage("TELEGRAM", chatId, displayName, text, displayName: displayName);
+                var tgRes = svc.ReceiveMessage("TELEGRAM", chatId, displayName, text, displayName: displayName);
+                TryAutoReply(svc, tgRes, "TELEGRAM", text, null);
             }
 
             context.Response.Write("{\"status\":\"ok\"}");
@@ -364,8 +369,9 @@ namespace Take_Time_BangPhra.API
                 string content = data.ContainsKey("message") ? data["message"]?.ToString() : body;
                 string msgId = data.ContainsKey("messageId") ? data["messageId"]?.ToString() : null;
 
-                svc.ReceiveMessage(channel, senderId, senderName, content,
+                var genRes = svc.ReceiveMessage(channel, senderId, senderName, content,
                     platformMessageId: msgId, displayName: senderName, metadata: body);
+                TryAutoReply(svc, genRes, channel, content, null);
             }
             catch
             {
@@ -373,6 +379,31 @@ namespace Take_Time_BangPhra.API
             }
 
             context.Response.Write("{\"status\":\"ok\"}");
+        }
+
+        #endregion
+
+        #region AI Auto-Reply
+
+        private void TryAutoReply(OmniChannelService omniSvc, IncomingMessageResult inResult, string channelCode, string text, string customerPhone)
+        {
+            if (!inResult.Success || string.IsNullOrEmpty(text) || text.StartsWith("[")) return;
+
+            try
+            {
+                var aiSvc = new AIKnowledgeService(ConnStr);
+                if (!aiSvc.IsFeatureEnabled("AUTO_REPLY")) return;
+
+                var reply = aiSvc.ProcessAutoReply(text, channelCode, customerPhone, inResult.ConversationID);
+                if (!reply.Success || string.IsNullOrEmpty(reply.Reply)) return;
+
+                omniSvc.SendMessage(inResult.ConversationID, reply.Reply, "AI Assistant", isAI: true,
+                    aiConfidence: reply.Confidence, aiSource: reply.Source);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("AI AutoReply error [{0}]: {1}", channelCode, ex.Message);
+            }
         }
 
         #endregion

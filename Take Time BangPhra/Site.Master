@@ -638,6 +638,9 @@
                                                     <li><a runat="server" href="~/Admin/Settings/AISettings">
                                                         <i class="fas fa-robot"></i> AI Settings (DeepSeek)
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AIKnowledgeBase">
+                                                        <i class="fas fa-brain"></i> AI Knowledge Base
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Chat/ChannelSettings">
                                                         <i class="fas fa-plug"></i> Channel Settings
                                                     </a></li>

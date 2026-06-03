@@ -156,9 +156,9 @@
                 <div id="testResult" class="test-result"></div>
             </div>
 
-            <!-- Card 2: Features Toggle -->
+            <!-- Card 2: Core Features Toggle -->
             <div class="ai-card">
-                <h3><i class="fas fa-sliders-h"></i> เปิด/ปิดฟีเจอร์</h3>
+                <h3><i class="fas fa-sliders-h"></i> เปิด/ปิดฟีเจอร์หลัก</h3>
 
                 <div class="toggle-row">
                     <div class="toggle-label">
@@ -191,6 +191,11 @@
                         <input type="checkbox" id="chkAdminSuggest" onchange="saveFeatures()" />
                         <span class="toggle-slider"></span>
                     </label>
+                </div>
+
+                <div style="border-top:2px solid #f0f0f0; margin-top:15px; padding-top:15px;">
+                    <div style="font-size:13px; font-weight:600; color:#555; margin-bottom:12px;"><i class="fas fa-brain" style="color:#7C4DFF;"></i> AI Feature Settings (Granular)</div>
+                    <div id="aiFeatureToggles" style="font-size:13px; color:#999;">กำลังโหลด...</div>
                 </div>
             </div>
 
@@ -266,6 +271,7 @@
             }
             applyConfig();
             loadStats();
+            loadAIFeatures();
         });
 
         function applyConfig() {
@@ -446,6 +452,34 @@
 
         function escapeHtml(text) {
             return $('<div>').text(text).html();
+        }
+
+        function loadAIFeatures() {
+            ajaxGet('aiFeatures', function (r) {
+                if (!r.features || r.features.length === 0) {
+                    $('#aiFeatureToggles').html('<span style="color:#999;">ไม่พบข้อมูล</span>');
+                    return;
+                }
+                var html = '';
+                for (var i = 0; i < r.features.length; i++) {
+                    var f = r.features[i];
+                    html += '<div class="toggle-row">' +
+                        '<div class="toggle-label">' + escapeHtml(f.name) +
+                            '<span>' + escapeHtml(f.description || '') + '</span>' +
+                        '</div>' +
+                        '<label class="toggle-switch">' +
+                            '<input type="checkbox" ' + (f.enabled ? 'checked' : '') + ' onchange="toggleAIFeature(\'' + escapeHtml(f.code) + '\', this.checked)" />' +
+                            '<span class="toggle-slider"></span>' +
+                        '</label></div>';
+                }
+                $('#aiFeatureToggles').html(html);
+            });
+        }
+
+        function toggleAIFeature(code, enabled) {
+            ajaxPost('setAIFeature', { code: code, enabled: enabled }, function (r) {
+                loadAIFeatures();
+            });
         }
     </script>
 </asp:Content>

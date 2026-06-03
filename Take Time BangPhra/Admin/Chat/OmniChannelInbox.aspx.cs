@@ -265,6 +265,30 @@ namespace Take_Time_BangPhra.Admin.Chat
                 var svc = new OmniChannelService(ConnStr);
                 var result = svc.SendMessage(convId, content, senderName);
 
+                if (result.Success)
+                {
+                    try
+                    {
+                        var aiSvc = new AIKnowledgeService(ConnStr);
+                        if (aiSvc.IsFeatureEnabled("LEARN_FROM_STAFF"))
+                        {
+                            DataTable dtMsgs = svc.GetMessages(convId, 5);
+                            string lastCustomerMsg = null;
+                            for (int i = dtMsgs.Rows.Count - 1; i >= 0; i--)
+                            {
+                                if (dtMsgs.Rows[i]["Direction"]?.ToString() == "IN")
+                                {
+                                    lastCustomerMsg = dtMsgs.Rows[i]["Content"]?.ToString();
+                                    break;
+                                }
+                            }
+                            if (!string.IsNullOrEmpty(lastCustomerMsg))
+                                aiSvc.LearnFromStaffReply(lastCustomerMsg, content, null, senderName);
+                        }
+                    }
+                    catch { }
+                }
+
                 return new Dictionary<string, object>
                 {
                     { "success", result.Success },

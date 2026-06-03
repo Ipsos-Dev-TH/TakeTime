@@ -81,6 +81,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "stats":
                     result = GetStats();
                     break;
+                case "aiFeatures":
+                    result = GetAIFeatures();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -116,6 +119,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "chat":
                     result = HandleChat(data);
+                    break;
+                case "setAIFeature":
+                    result = SetAIFeature(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -272,6 +278,46 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch
             {
                 return new Dictionary<string, object>();
+            }
+        }
+
+        private Dictionary<string, object> GetAIFeatures()
+        {
+            try
+            {
+                var svc = new AIKnowledgeService(ConnStr);
+                var dt = svc.GetAllFeatures();
+                var features = new System.Collections.Generic.List<object>();
+                foreach (System.Data.DataRow row in dt.Rows)
+                {
+                    features.Add(new
+                    {
+                        code = row["FeatureCode"]?.ToString(),
+                        name = row["FeatureName"]?.ToString(),
+                        description = row["Description"]?.ToString(),
+                        enabled = Convert.ToBoolean(row["IsEnabled"])
+                    });
+                }
+                return new Dictionary<string, object> { { "features", features } };
+            }
+            catch
+            {
+                return new Dictionary<string, object> { { "features", new System.Collections.Generic.List<object>() } };
+            }
+        }
+
+        private Dictionary<string, object> SetAIFeature(Dictionary<string, object> data)
+        {
+            try
+            {
+                string featureCode = data["code"]?.ToString();
+                bool enabled = Convert.ToBoolean(data["enabled"]);
+                new AIKnowledgeService(ConnStr).SetFeatureEnabled(featureCode, enabled);
+                return new Dictionary<string, object> { { "success", true } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
         }
 
