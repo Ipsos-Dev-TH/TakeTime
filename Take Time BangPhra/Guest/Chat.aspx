@@ -337,6 +337,30 @@
             display: block;
         }
 
+        /* Chat Mode Tabs */
+        .chat-mode-tabs { display: flex; gap: 0; margin-bottom: 15px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .chat-tab { flex: 1; padding: 12px; border: none; background: white; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer; color: #888; transition: all 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .chat-tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .chat-tab:not(.active):hover { background: #f5f5f5; }
+
+        /* AI Chat Area */
+        .ai-chat-messages { background: #f5f5f5; border-radius: 15px; padding: 20px; min-height: 400px; max-height: 500px; overflow-y: auto; margin-bottom: 15px; display: none; }
+        .ai-msg { display: flex; margin-bottom: 12px; animation: fadeIn 0.3s ease; }
+        .ai-msg.user { justify-content: flex-end; }
+        .ai-msg .ai-bubble { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+        .ai-msg.user .ai-bubble { background: linear-gradient(135deg, #7C4DFF, #B388FF); color: white; border-bottom-right-radius: 5px; }
+        .ai-msg.assistant .ai-bubble { background: white; color: #333; border-bottom-left-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .ai-msg .ai-time { font-size: 10px; opacity: 0.6; margin-top: 4px; text-align: right; }
+        .ai-typing { display: none; padding: 10px; color: #7C4DFF; font-size: 13px; font-style: italic; }
+        .ai-typing.show { display: block; }
+        .ai-empty { text-align: center; padding: 60px 20px; color: #888; }
+        .ai-empty i { font-size: 50px; margin-bottom: 15px; opacity: 0.3; color: #7C4DFF; display: block; }
+
+        .ai-input-container { background: white; border-radius: 15px; padding: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); display: none; gap: 10px; align-items: flex-end; position: fixed; bottom: 70px; left: 15px; right: 15px; max-width: 770px; margin: 0 auto; }
+        .ai-input-container input { flex: 1; border: 1px solid #e0e0e0; border-radius: 20px; padding: 12px 18px; font-size: 14px; font-family: inherit; }
+        .ai-input-container input:focus { outline: none; border-color: #7C4DFF; }
+        .ai-send-btn { width: 48px; height: 48px; border: none; border-radius: 50%; background: linear-gradient(135deg, #7C4DFF, #B388FF); color: white; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
         @media (min-width: 768px) {
             .chat-input-container {
                 position: relative;
@@ -362,8 +386,20 @@
             </a>
         </div>
 
+        <!-- Chat Mode Tabs -->
+        <asp:Panel ID="pnlAiTab" runat="server" Visible="false">
+            <div class="chat-mode-tabs">
+                <button type="button" class="chat-tab active" id="tabFrontDesk" onclick="switchChatMode('frontdesk')">
+                    <i class="fas fa-headset"></i> Front Desk
+                </button>
+                <button type="button" class="chat-tab" id="tabAI" onclick="switchChatMode('ai')">
+                    <i class="fas fa-robot"></i> AI ผู้ช่วย
+                </button>
+            </div>
+        </asp:Panel>
+
         <!-- Status Bar -->
-        <div class="status-bar">
+        <div class="status-bar" id="statusFrontDesk">
             <div class="status-avatar">
                 <i class="fas fa-headset"></i>
             </div>
@@ -375,20 +411,43 @@
                 </div>
             </div>
         </div>
+        <div class="status-bar" id="statusAI" style="display:none;">
+            <div class="status-avatar" style="background: linear-gradient(135deg, #7C4DFF, #B388FF);">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="status-info">
+                <h4>AI ผู้ช่วยอัจฉริยะ</h4>
+                <div class="status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">ตอบทันที 24 ชม.</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Notice -->
-        <div class="notice-card">
+        <div class="notice-card" id="noticeFrontDesk">
             <i class="fas fa-bolt"></i>
             ข้อความจะถูกส่งถึงเจ้าหน้าที่ทันที เราจะตอบกลับโดยเร็วที่สุด
         </div>
+        <div class="notice-card" id="noticeAI" style="display:none; background:#ede7f6; border-color:#7C4DFF; color:#4527A0;">
+            <i class="fas fa-robot"></i>
+            สอบถามข้อมูลที่พัก สิ่งอำนวยความสะดวก กิจกรรม และบริการต่างๆ ได้ทันที
+        </div>
 
-        <!-- Quick Replies -->
-        <div class="quick-replies">
+        <!-- Quick Replies (Front Desk) -->
+        <div class="quick-replies" id="quickRepliesFD">
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอผ้าเช็ดตัวเพิ่มครับ/ค่ะ')">ขอผ้าเช็ดตัว</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอทำความสะอาดห้องครับ/ค่ะ')">ทำความสะอาดห้อง</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('ขอ Late check-out ได้ไหมครับ/ค่ะ')">Late Check-out</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('WiFi Password คืออะไรครับ/ค่ะ')">WiFi Password</button>
             <button type="button" class="quick-reply-btn" onclick="setQuickMessage('มีบริการเรียกรถไหมครับ/ค่ะ')">เรียกรถ</button>
+        </div>
+        <!-- Quick Replies (AI) -->
+        <div class="quick-replies" id="quickRepliesAI" style="display:none;">
+            <button type="button" class="quick-reply-btn" onclick="setAiQuickMessage('มีกิจกรรมอะไรทำได้บ้าง?')">กิจกรรม</button>
+            <button type="button" class="quick-reply-btn" onclick="setAiQuickMessage('ร้านอาหารใกล้ๆ แนะนำหน่อย')">ร้านอาหาร</button>
+            <button type="button" class="quick-reply-btn" onclick="setAiQuickMessage('สิ่งอำนวยความสะดวกมีอะไรบ้าง?')">สิ่งอำนวยความสะดวก</button>
+            <button type="button" class="quick-reply-btn" onclick="setAiQuickMessage('เช็คเอาท์กี่โมง?')">เวลาเช็คเอาท์</button>
         </div>
 
         <!-- Chat Messages -->
@@ -417,13 +476,31 @@
             </div>
         </div>
 
-        <!-- Chat Input -->
-        <div class="chat-input-container">
+        <!-- AI Chat Messages -->
+        <div class="ai-chat-messages" id="aiChatMessages">
+            <div class="ai-empty" id="aiEmpty">
+                <i class="fas fa-robot"></i>
+                <h4>AI ผู้ช่วยอัจฉริยะ</h4>
+                <p>สอบถามข้อมูลที่พัก กิจกรรม<br/>และบริการต่างๆ ได้ทันที</p>
+            </div>
+            <div class="ai-typing" id="aiTyping">
+                <i class="fas fa-spinner fa-spin"></i> AI กำลังตอบ...
+            </div>
+        </div>
+
+        <!-- Chat Input (Front Desk) -->
+        <div class="chat-input-container" id="inputFrontDesk">
             <asp:TextBox ID="txtMessage" runat="server" CssClass="chat-input"
                 TextMode="MultiLine" Rows="1" placeholder="พิมพ์ข้อความ..."
                 onkeypress="return handleKeyPress(event)"></asp:TextBox>
             <asp:Button ID="btnSend" runat="server" CssClass="btn-send"
                 Text="" OnClick="btnSend_Click" UseSubmitBehavior="false" />
+        </div>
+
+        <!-- Chat Input (AI) -->
+        <div class="ai-input-container" id="inputAI">
+            <input type="text" id="txtAiMessage" placeholder="ถาม AI ผู้ช่วย..." onkeypress="if(event.key==='Enter')sendAiMessage()" />
+            <button type="button" class="ai-send-btn" onclick="sendAiMessage()"><i class="fas fa-paper-plane"></i></button>
         </div>
     </div>
 
@@ -526,6 +603,81 @@
             }
             startAutoRefresh();
         };
+
+        // AI Chat
+        var currentMode = 'frontdesk';
+        var aiSessionKey = 'guest_' + new Date().getTime();
+
+        function switchChatMode(mode) {
+            currentMode = mode;
+            if (mode === 'ai') {
+                $('#tabFrontDesk').removeClass('active');
+                $('#tabAI').addClass('active');
+                $('#statusFrontDesk, #noticeFrontDesk, #quickRepliesFD').hide();
+                $('#statusAI, #noticeAI, #quickRepliesAI').show();
+                $('#chatMessages, #inputFrontDesk').hide();
+                $('#aiChatMessages, #inputAI').show().css('display', 'flex');
+                $('#aiChatMessages').css('display', 'block');
+                clearInterval(refreshInterval);
+            } else {
+                $('#tabAI').removeClass('active');
+                $('#tabFrontDesk').addClass('active');
+                $('#statusAI, #noticeAI, #quickRepliesAI').hide();
+                $('#statusFrontDesk, #noticeFrontDesk, #quickRepliesFD').show();
+                $('#aiChatMessages, #inputAI').hide();
+                $('#chatMessages, #inputFrontDesk').show();
+                startAutoRefresh();
+            }
+        }
+
+        function setAiQuickMessage(msg) {
+            $('#txtAiMessage').val(msg);
+            sendAiMessage();
+        }
+
+        function sendAiMessage() {
+            var msg = $('#txtAiMessage').val().trim();
+            if (!msg) return;
+            $('#txtAiMessage').val('');
+
+            $('#aiEmpty').hide();
+            appendAiMsg('user', msg);
+            $('#aiTyping').addClass('show');
+            scrollAiBottom();
+
+            $.ajax({
+                url: '<%= ResolveUrl("~/Guest/Chat.aspx/AskAI") %>',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ message: msg, sessionKey: aiSessionKey }),
+                success: function (r) {
+                    $('#aiTyping').removeClass('show');
+                    if (r.d && r.d.success) {
+                        appendAiMsg('assistant', r.d.message);
+                    } else {
+                        appendAiMsg('assistant', (r.d && r.d.message) || 'ขออภัย ไม่สามารถตอบได้ในขณะนี้');
+                    }
+                },
+                error: function () {
+                    $('#aiTyping').removeClass('show');
+                    appendAiMsg('assistant', 'ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่');
+                }
+            });
+        }
+
+        function appendAiMsg(role, text) {
+            var now = new Date();
+            var time = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+            var escaped = $('<div>').text(text).html();
+            var html = '<div class="ai-msg ' + role + '"><div><div class="ai-bubble">' + escaped + '</div><div class="ai-time">' + time + '</div></div></div>';
+            $('#aiTyping').before(html);
+            scrollAiBottom();
+        }
+
+        function scrollAiBottom() {
+            var el = document.getElementById('aiChatMessages');
+            if (el) el.scrollTop = el.scrollHeight;
+        }
 
         // Play notification sound for new messages
         function playNotificationSound() {

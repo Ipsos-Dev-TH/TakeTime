@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using System.Web.Services;
+using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Admin.Chat
 {
@@ -494,6 +496,47 @@ namespace Take_Time_BangPhra.Admin.Chat
             catch
             {
                 return new { success = false, chats = new object[0] };
+            }
+        }
+
+        [WebMethod]
+        public static object GetAISuggestion(long reservationId)
+        {
+            try
+            {
+                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var aiSvc = new DeepSeekService(connStr);
+
+                if (!aiSvc.IsAdminSuggestEnabled)
+                    return new { success = false, message = "AI แนะนำคำตอบยังไม่เปิดใช้งาน" };
+
+                var codeHelper = new code();
+                DataTable dtMsgs = codeHelper.DatabaseQuerySafe(connStr,
+                    @"SELECT TOP 10 Message, IsFromGuest, Created_Date
+                      FROM Guest_Chat WHERE Reservation_ID = @Rid ORDER BY Created_Date DESC",
+                    new Dictionary<string, object> { { "@Rid", reservationId } });
+
+                if (dtMsgs.Rows.Count == 0)
+                    return new { success = false, message = "ไม่มีข้อความ" };
+
+                var history = new List<ChatMessage>();
+                for (int i = dtMsgs.Rows.Count - 1; i >= 0; i--)
+                {
+                    history.Add(new ChatMessage
+                    {
+                        Role = Convert.ToBoolean(dtMsgs.Rows[i]["IsFromGuest"]) ? "user" : "assistant",
+                        Content = dtMsgs.Rows[i]["Message"].ToString()
+                    });
+                }
+
+                string prompt = "จากบทสนทนาด้านบน ช่วยแนะนำข้อความตอบกลับแขกที่เหมาะสม สั้นกระชับ สุภาพ เป็นภาษาไทย ตอบเฉพาะข้อความตอบกลับเท่านั้น ไม่ต้องอธิบายเพิ่ม";
+                var result = aiSvc.SendMessage(prompt, "suggest_" + reservationId + "_" + DateTime.Now.Ticks, history);
+
+                return new { success = result.Success, suggestion = result.Message };
+            }
+            catch (Exception ex)
+            {
+                return new { success = false, message = ex.Message };
             }
         }
     }

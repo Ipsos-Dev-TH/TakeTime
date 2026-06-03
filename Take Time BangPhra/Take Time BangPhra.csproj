@@ -402,6 +402,7 @@
     <Content Include="Admin\Notifications\Settings.aspx" />
     <Content Include="Admin\Settings\ConnectionSettings.aspx" />
     <Content Include="Admin\Settings\AccountingIntegration.aspx" />
+    <Content Include="Admin\Settings\AISettings.aspx" />
     <Content Include="Admin\GuestExperience\Dashboard.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
@@ -817,6 +818,7 @@
     <Compile Include="Class\RoomChargeService.cs" />
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
+    <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\ReviewService.cs" />
     <Compile Include="Class\Services\TierBenefitsService.cs" />
     <Compile Include="Account\TierBenefitsManagement.aspx.cs">
@@ -1017,6 +1019,13 @@
     </Compile>
     <Compile Include="Admin\Settings\AccountingIntegration.aspx.designer.cs">
       <DependentUpon>AccountingIntegration.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\AISettings.aspx.cs">
+      <DependentUpon>AISettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\AISettings.aspx.designer.cs">
+      <DependentUpon>AISettings.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\GuestExperience\Dashboard.aspx.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>

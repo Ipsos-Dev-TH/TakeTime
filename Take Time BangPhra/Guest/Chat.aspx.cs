@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Web.UI;
 using System.Web.Services;
@@ -32,7 +33,18 @@ namespace Take_Time_BangPhra.Guest
             {
                 LoadChatHistory();
                 MarkMessagesAsRead();
+                CheckAiEnabled();
             }
+        }
+
+        private void CheckAiEnabled()
+        {
+            try
+            {
+                var aiSvc = new DeepSeekService(_connectionString);
+                pnlAiTab.Visible = aiSvc.IsGuestChatEnabled;
+            }
+            catch { pnlAiTab.Visible = false; }
         }
 
         /// <summary>
@@ -241,6 +253,28 @@ namespace Take_Time_BangPhra.Guest
             catch
             {
                 return new { hasNewMessages = false, count = 0 };
+            }
+        }
+
+        [WebMethod]
+        public static object AskAI(string message, string sessionKey)
+        {
+            try
+            {
+                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var aiSvc = new DeepSeekService(connStr);
+
+                if (!aiSvc.IsGuestChatEnabled)
+                    return new { success = false, message = "AI ผู้ช่วยยังไม่เปิดให้บริการ" };
+
+                var history = aiSvc.GetHistory(sessionKey);
+                var result = aiSvc.SendMessage(message, sessionKey, history);
+
+                return new { success = result.Success, message = result.Message };
+            }
+            catch (Exception ex)
+            {
+                return new { success = false, message = "เกิดข้อผิดพลาด: " + ex.Message };
             }
         }
     }

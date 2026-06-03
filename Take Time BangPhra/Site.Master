@@ -632,6 +632,9 @@
                                                     <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
                                                         <i class="fas fa-calculator"></i> Accounting Integration
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AISettings">
+                                                        <i class="fas fa-robot"></i> AI Settings (DeepSeek)
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience
                                                     </a></li>
