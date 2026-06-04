@@ -13,6 +13,8 @@ namespace Take_Time_BangPhra.Guest
     public partial class Chat
     {
 
+        protected global::System.Web.UI.WebControls.Panel pnlAiTab;
+
         /// <summary>
         /// rptMessages control.
         /// </summary>

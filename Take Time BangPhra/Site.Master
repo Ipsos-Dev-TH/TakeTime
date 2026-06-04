@@ -537,6 +537,9 @@
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/Chat/OmniChannelInbox">
+                                                    <i class="fas fa-inbox"></i> Omni-Channel Inbox
+                                                </a></li>
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
                                                     <i class="fas fa-concierge-bell"></i> Room Service
                                                 </a></li>
@@ -591,8 +594,17 @@
                                                 <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
                                                     <i class="fas fa-trophy"></i> Loyalty Dashboard
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/MembershipManagement">
+                                                    <i class="fas fa-users-cog"></i> จัดการสมาชิก
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
+                                                    <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
+                                                </a></li>
                                                 <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
                                                     <i class="fas fa-star"></i> Review Management
+                                                </a></li>
+                                                <li><a runat="server" href="~/Admin/CRM/AIReviewDashboard">
+                                                    <i class="fas fa-chart-line"></i> AI Review Analysis
                                                 </a></li>
                                             </ul>
                                         </div>
@@ -625,6 +637,15 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
                                                         <i class="fas fa-calculator"></i> Accounting Integration
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AISettings">
+                                                        <i class="fas fa-robot"></i> AI Settings (DeepSeek)
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AIKnowledgeBase">
+                                                        <i class="fas fa-brain"></i> AI Knowledge Base
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Chat/ChannelSettings">
+                                                        <i class="fas fa-plug"></i> Channel Settings
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience
@@ -662,6 +683,9 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
                                                         <i class="fas fa-chart-pie"></i> Customer Analytics
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Report/AIReportSummary">
+                                                        <i class="fas fa-robot"></i> AI Report Summary
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/DatabaseManagement">
                                                         <i class="fas fa-database"></i> ฐานข้อมูล

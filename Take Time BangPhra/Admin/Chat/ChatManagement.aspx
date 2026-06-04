@@ -338,6 +338,14 @@
             transform: scale(1.05);
         }
 
+        .btn-ai-suggest {
+            width: 40px; height: 40px; border: none; border-radius: 50%;
+            background: linear-gradient(135deg, #7C4DFF, #B388FF); color: white;
+            font-size: 16px; cursor: pointer; transition: all 0.3s; flex-shrink: 0;
+        }
+        .btn-ai-suggest:hover { transform: scale(1.1); box-shadow: 0 2px 8px rgba(124,77,255,0.4); }
+        .btn-ai-suggest.loading { opacity: 0.7; pointer-events: none; }
+
         /* Quick Replies for Staff */
         .quick-replies-staff {
             padding: 10px 20px;
@@ -589,6 +597,9 @@
                     <div class="reply-area">
                         <asp:TextBox ID="txtReply" runat="server" CssClass="reply-input" TextMode="MultiLine"
                             Rows="1" placeholder="พิมพ์ข้อความตอบกลับ..."></asp:TextBox>
+                        <button type="button" class="btn-ai-suggest" id="btnAiSuggest" onclick="getAISuggestion()" title="AI แนะนำคำตอบ" style="display:none;">
+                            <i class="fas fa-robot"></i>
+                        </button>
                         <asp:Button ID="btnSendReply" runat="server" CssClass="btn-send-reply" Text=""
                             OnClick="btnSendReply_Click" OnClientClick="return validateReply();" />
                     </div>
@@ -857,6 +868,42 @@
             // Initial check
             checkNewMessages();
         };
+
+        // AI Suggest
+        function checkAiEnabled() {
+            $.ajax({
+                url: '<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/GetAISuggestion") %>',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ reservationId: 0 }),
+                success: function() { $('#btnAiSuggest').show(); },
+                error: function() {}
+            });
+        }
+        checkAiEnabled();
+
+        function getAISuggestion() {
+            var chatId = document.getElementById('<%= hfSelectedChat.ClientID %>').value;
+            if (!chatId) return;
+            var btn = $('#btnAiSuggest');
+            btn.addClass('loading').html('<i class="fas fa-spinner fa-spin"></i>');
+            $.ajax({
+                url: '<%= ResolveUrl("~/Admin/Chat/ChatManagement.aspx/GetAISuggestion") %>',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ reservationId: parseInt(chatId) }),
+                success: function(r) {
+                    btn.removeClass('loading').html('<i class="fas fa-robot"></i>');
+                    if (r.d && r.d.success && r.d.suggestion) {
+                        document.getElementById('<%= txtReply.ClientID %>').value = r.d.suggestion;
+                        document.getElementById('<%= txtReply.ClientID %>').focus();
+                    } else {
+                        alert(r.d ? r.d.message : 'ไม่สามารถสร้างคำแนะนำได้');
+                    }
+                },
+                error: function() {
+                    btn.removeClass('loading').html('<i class="fas fa-robot"></i>');
+                }
+            });
+        }
 
         // Clean up on page unload
         window.onbeforeunload = function() {

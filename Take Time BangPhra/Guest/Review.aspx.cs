@@ -1,5 +1,7 @@
 using System;
 using System.Data;
+using System.IO;
+using System.Web;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
 
@@ -21,7 +23,6 @@ namespace Take_Time_BangPhra.Guest
             _loyaltyService = new LoyaltyService(_connectionString);
             _code = new code();
 
-            // Check session
             if (!ValidateGuestSession())
             {
                 Response.Redirect("~/Guest/Portal");
@@ -35,102 +36,75 @@ namespace Take_Time_BangPhra.Guest
             }
         }
 
-        /// <summary>
-        /// Validate guest session
-        /// </summary>
         private bool ValidateGuestSession()
         {
             string sessionToken = Request.Cookies["GuestSession"]?.Value ?? Session["GuestSessionToken"]?.ToString();
 
             if (string.IsNullOrEmpty(sessionToken))
-            {
                 return false;
-            }
 
             DataTable dtSession = _guestPortalService.ValidateGuestSession(sessionToken);
 
             if (dtSession.Rows.Count == 0)
-            {
                 return false;
-            }
 
             DataRow session = dtSession.Rows[0];
             _reservationId = Convert.ToInt64(session["Reservation_ID"]);
             _guestMobilePhone = session["Customer_MobilePhone"].ToString();
 
-            // Get customer name
             try
             {
                 DataTable dtCustomer = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT Customer_Name FROM Customer WHERE Customer_MobilePhone = @Phone",
+                    "SELECT Name FROM Customer WHERE MobilePhone = @Phone",
                     new System.Collections.Generic.Dictionary<string, object> { { "@Phone", _guestMobilePhone } });
 
                 if (dtCustomer.Rows.Count > 0)
-                {
-                    _customerName = dtCustomer.Rows[0]["Customer_Name"].ToString();
-                }
+                    _customerName = dtCustomer.Rows[0]["Name"].ToString();
             }
             catch { }
 
             return true;
         }
 
-        /// <summary>
-        /// Load member status and points
-        /// </summary>
         private void LoadMemberStatus()
         {
             try
             {
                 lblGuestName.Text = !string.IsNullOrEmpty(_customerName) ? _customerName : "Guest";
 
-                // Get loyalty points
                 var memberInfo = _loyaltyService.GetLoyaltyInfo(_guestMobilePhone);
 
                 if (memberInfo != null)
                 {
-                    int currentPoints = memberInfo.TotalPoints;
-                    string currentTier = memberInfo.TierName ?? "Bronze";
+                    // Headline = redeemable balance (คะแนนที่แลกได้)
+                    lblCurrentPoints.Text = memberInfo.AvailablePoints.ToString("N0");
+                    lblCurrentTier.Text = memberInfo.TierName ?? "Member";
 
-                    lblCurrentPoints.Text = currentPoints.ToString("N0");
-                    lblCurrentTier.Text = currentTier;
-
-                    // Set badge style based on tier
-                    switch (currentTier.ToLower())
+                    // Tier progress is based on YEARLY (tier-qualifying) points
+                    if (memberInfo.NextTierMinPoints.HasValue)
                     {
-                        case "silver":
-                            memberBadge.Attributes["class"] = "member-badge silver";
-                            lblNextTier.Text = "Gold";
-                            lblPointsToNext.Text = (1000 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, (currentPoints - 500) * 100 / 500)}%";
-                            tierSilver.Attributes["class"] = "tier-card silver current";
-                            break;
-                        case "gold":
-                            memberBadge.Attributes["class"] = "member-badge gold";
-                            lblNextTier.Text = "Platinum";
-                            lblPointsToNext.Text = (2500 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, (currentPoints - 1000) * 100 / 1500)}%";
-                            tierGold.Attributes["class"] = "tier-card gold current";
-                            break;
-                        case "platinum":
-                            memberBadge.Attributes["class"] = "member-badge platinum";
-                            lblNextTier.Text = "Max Level!";
-                            lblPointsToNext.Text = "0";
-                            progressBar.Style["width"] = "100%";
-                            tierPlatinum.Attributes["class"] = "tier-card platinum current";
-                            break;
-                        default: // Bronze
-                            memberBadge.Attributes["class"] = "member-badge bronze";
-                            lblNextTier.Text = "Silver";
-                            lblPointsToNext.Text = (500 - currentPoints).ToString("N0");
-                            progressBar.Style["width"] = $"{Math.Min(100, currentPoints * 100 / 500)}%";
-                            tierBronze.Attributes["class"] = "tier-card bronze current";
-                            break;
+                        lblNextTier.Text = memberInfo.NextTierName ?? "";
+                        lblPointsToNext.Text = memberInfo.PointsToNextTier.ToString("N0");
                     }
+                    else
+                    {
+                        lblNextTier.Text = "Max Level!";
+                        lblPointsToNext.Text = "0";
+                    }
+                    progressBar.Style["width"] = $"{memberInfo.TierProgressPercent}%";
+
+                    // Badge + highlight the customer's current tier card
+                    string tierEn = (memberInfo.TierNameEN ?? "").ToLower();
+                    string badgeClass;
+                    if (tierEn.Contains("silver")) { badgeClass = "silver"; tierSilver.Attributes["class"] = "tier-card silver current"; }
+                    else if (tierEn.Contains("gold")) { badgeClass = "gold"; tierGold.Attributes["class"] = "tier-card gold current"; }
+                    else if (tierEn.Contains("platinum")) { badgeClass = "platinum"; tierPlatinum.Attributes["class"] = "tier-card platinum current"; }
+                    else if (tierEn.Contains("vip")) { badgeClass = "platinum"; tierPlatinum.Attributes["class"] = "tier-card platinum current"; }
+                    else { badgeClass = "bronze"; tierBronze.Attributes["class"] = "tier-card bronze current"; }
+                    memberBadge.Attributes["class"] = "member-badge " + badgeClass;
                 }
                 else
                 {
-                    // New member
                     memberBadge.Attributes["class"] = "member-badge bronze";
                     tierBronze.Attributes["class"] = "tier-card bronze current";
                 }
@@ -141,23 +115,20 @@ namespace Take_Time_BangPhra.Guest
             }
         }
 
-        /// <summary>
-        /// Load review history
-        /// </summary>
         private void LoadReviewHistory()
         {
             try
             {
-                // Check if Guest_Review_Points table exists, if not use a simple query
                 DataTable dtReviews = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 10
                         'Google Review' AS ReviewType,
-                        Created_Date AS ReviewDate,
+                        TransactionDate AS ReviewDate,
                         Points AS PointsEarned
-                      FROM Customer_Loyalty_Points
+                      FROM Loyalty_Transactions
                       WHERE Customer_MobilePhone = @Phone
-                        AND Transaction_Type = 'REVIEW'
-                      ORDER BY Created_Date DESC",
+                        AND TransactionType = 'EARN'
+                        AND Description LIKE '%Review%'
+                      ORDER BY TransactionDate DESC",
                     new System.Collections.Generic.Dictionary<string, object> { { "@Phone", _guestMobilePhone } });
 
                 if (dtReviews.Rows.Count > 0)
@@ -173,154 +144,109 @@ namespace Take_Time_BangPhra.Guest
             }
             catch
             {
-                // Table might not exist yet
                 lblNoReviews.Visible = true;
             }
         }
 
-        /// <summary>
-        /// Confirm review and award points
-        /// </summary>
         protected void btnConfirmReview_Click(object sender, EventArgs e)
         {
             try
             {
-                // Re-validate session
                 if (!ValidateGuestSession())
                 {
                     Response.Redirect("~/Guest/Portal");
                     return;
                 }
 
-                // Check if already reviewed today
-                DataTable dtExisting = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT COUNT(*) AS ReviewCount
-                      FROM Customer_Loyalty_Points
-                      WHERE Customer_MobilePhone = @Phone
-                        AND Transaction_Type = 'REVIEW'
-                        AND CAST(Created_Date AS DATE) = CAST(GETDATE() AS DATE)",
-                    new System.Collections.Generic.Dictionary<string, object> { { "@Phone", _guestMobilePhone } });
-
-                if (dtExisting.Rows.Count > 0 && Convert.ToInt32(dtExisting.Rows[0]["ReviewCount"]) > 0)
+                // Require screenshot proof
+                if (!fuReviewScreenshot.HasFile)
                 {
-                    lblReviewStatus.Text = "<div class='alert alert-warning'><i class='fas fa-exclamation-triangle'></i> คุณได้รับแต้มจากการรีวิววันนี้แล้ว กรุณารอวันถัดไป</div>";
-                    lblReviewStatus.CssClass = "";
+                    lblReviewStatus.Text = "<div class='alert alert-warning'><i class='fas fa-exclamation-triangle'></i> กรุณาแนบภาพหน้าจอรีวิวเพื่อยืนยัน</div>";
                     return;
                 }
 
-                // Check if reviewed this reservation
-                DataTable dtReservationReview = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT COUNT(*) AS ReviewCount
-                      FROM Customer_Loyalty_Points
-                      WHERE Customer_MobilePhone = @Phone
-                        AND Transaction_Type = 'REVIEW'
-                        AND Reference_ID = @ReservationId",
-                    new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "@Phone", _guestMobilePhone },
-                        { "@ReservationId", _reservationId.ToString() }
-                    });
-
-                if (dtReservationReview.Rows.Count > 0 && Convert.ToInt32(dtReservationReview.Rows[0]["ReviewCount"]) > 0)
+                // Validate file type
+                string ext = Path.GetExtension(fuReviewScreenshot.FileName).ToLower();
+                string[] allowedExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+                if (Array.IndexOf(allowedExtensions, ext) < 0)
                 {
-                    lblReviewStatus.Text = "<div class='alert alert-info'><i class='fas fa-info-circle'></i> คุณได้รีวิวการเข้าพักครั้งนี้แล้ว ขอบคุณสำหรับความคิดเห็นของคุณ!</div>";
-                    lblReviewStatus.CssClass = "";
+                    lblReviewStatus.Text = "<div class='alert alert-warning'><i class='fas fa-exclamation-triangle'></i> กรุณาอัพโหลดไฟล์รูปภาพเท่านั้น (JPG, PNG, GIF, WEBP)</div>";
                     return;
                 }
 
-                // Award points for review
+                if (fuReviewScreenshot.PostedFile.ContentLength > 10 * 1024 * 1024)
+                {
+                    lblReviewStatus.Text = "<div class='alert alert-warning'><i class='fas fa-exclamation-triangle'></i> ขนาดไฟล์ต้องไม่เกิน 10 MB</div>";
+                    return;
+                }
+
+                // Review reward is limited to ONCE PER CALENDAR YEAR
+                if (_loyaltyService.HasReviewedThisYear(_guestMobilePhone))
+                {
+                    lblReviewStatus.Text = $"<div class='alert alert-info'><i class='fas fa-info-circle'></i> คุณได้รับแต้มจากการรีวิวในปี {DateTime.Now.Year + 543} แล้ว สามารถรีวิวรับแต้มได้อีกครั้งในปีถัดไป ขอบคุณที่แบ่งปันประสบการณ์ของคุณ!</div>";
+                    return;
+                }
+
+                // Save screenshot
+                string uploadFolder = Server.MapPath("~/Uploads/ReviewScreenshots/");
+                if (!Directory.Exists(uploadFolder))
+                    Directory.CreateDirectory(uploadFolder);
+
+                string fileName = $"review_{_guestMobilePhone}_{_reservationId}_{DateTime.Now:yyyyMMddHHmmss}{ext}";
+                string filePath = Path.Combine(uploadFolder, fileName);
+                fuReviewScreenshot.SaveAs(filePath);
+                string relativePath = $"~/Uploads/ReviewScreenshots/{fileName}";
+
+                // Award points via LoyaltyService
                 int pointsToAward = 100;
+                string description = $"Google Review - Reservation #{_reservationId}";
 
-                var parameters = new System.Collections.Generic.Dictionary<string, object>
+                var result = _loyaltyService.EarnPoints(
+                    _guestMobilePhone,
+                    pointsToAward,
+                    _reservationId,
+                    null,
+                    description,
+                    12,
+                    null
+                );
+
+                if (result.Success)
                 {
-                    { "@CustomerPhone", _guestMobilePhone },
-                    { "@Points", pointsToAward },
-                    { "@TransactionType", "REVIEW" },
-                    { "@Description", "Google Review - Reservation #" + _reservationId },
-                    { "@ReferenceId", _reservationId.ToString() },
-                    { "@CreatedDate", DateTime.Now }
-                };
+                    // Store screenshot reference in Guest_Reviews
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            @"INSERT INTO Guest_Reviews
+                              (Reservation_ID, Customer_MobilePhone, OverallRating, ReviewTitle, ReviewText, Status, Source, SubmittedDate)
+                              VALUES
+                              (@ReservationId, @Phone, 5, @Title, @ScreenshotPath, 'PENDING', 'GOOGLE', GETDATE())",
+                            new System.Collections.Generic.Dictionary<string, object>
+                            {
+                                { "@ReservationId", _reservationId },
+                                { "@Phone", _guestMobilePhone },
+                                { "@Title", "Google Review" },
+                                { "@ScreenshotPath", relativePath }
+                            });
+                    }
+                    catch { }
 
-                int result = _code.DatabaseInsertSafe(_connectionString,
-                    @"INSERT INTO Customer_Loyalty_Points
-                      (Customer_MobilePhone, Points, Transaction_Type, Description, Reference_ID, Created_Date)
-                      VALUES
-                      (@CustomerPhone, @Points, @TransactionType, @Description, @ReferenceId, @CreatedDate)",
-                    parameters);
-
-                if (result > 0)
-                {
-                    // Update total points in Customer table
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"UPDATE Customer
-                          SET Loyalty_Points = ISNULL(Loyalty_Points, 0) + @Points
-                          WHERE Customer_MobilePhone = @Phone",
-                        new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@Points", pointsToAward },
-                            { "@Phone", _guestMobilePhone }
-                        });
-
-                    // Check and update tier
-                    UpdateMemberTier();
+                    // Mark review timestamp (best-effort)
+                    _loyaltyService.MarkReviewed(_guestMobilePhone);
 
                     lblReviewStatus.Text = $"<div class='alert alert-success'><i class='fas fa-check-circle'></i> ยินดีด้วย! คุณได้รับ <strong>{pointsToAward} Points</strong> จากการรีวิว ขอบคุณที่แบ่งปันประสบการณ์ของคุณ!</div>";
-                    lblReviewStatus.CssClass = "";
 
-                    // Reload member status
                     LoadMemberStatus();
                     LoadReviewHistory();
                 }
                 else
                 {
-                    lblReviewStatus.Text = "<div class='alert alert-danger'><i class='fas fa-times-circle'></i> เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง</div>";
-                    lblReviewStatus.CssClass = "";
+                    lblReviewStatus.Text = $"<div class='alert alert-danger'><i class='fas fa-times-circle'></i> เกิดข้อผิดพลาด: {result.Message}</div>";
                 }
             }
             catch (Exception ex)
             {
                 lblReviewStatus.Text = $"<div class='alert alert-danger'><i class='fas fa-times-circle'></i> เกิดข้อผิดพลาด: {ex.Message}</div>";
-                lblReviewStatus.CssClass = "";
-            }
-        }
-
-        /// <summary>
-        /// Update member tier based on total points
-        /// </summary>
-        private void UpdateMemberTier()
-        {
-            try
-            {
-                // Get current total points
-                DataTable dtPoints = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ISNULL(Loyalty_Points, 0) AS TotalPoints FROM Customer WHERE Customer_MobilePhone = @Phone",
-                    new System.Collections.Generic.Dictionary<string, object> { { "@Phone", _guestMobilePhone } });
-
-                if (dtPoints.Rows.Count > 0)
-                {
-                    int totalPoints = Convert.ToInt32(dtPoints.Rows[0]["TotalPoints"]);
-                    string newTier = "BRONZE";
-
-                    if (totalPoints >= 2500)
-                        newTier = "PLATINUM";
-                    else if (totalPoints >= 1000)
-                        newTier = "GOLD";
-                    else if (totalPoints >= 500)
-                        newTier = "SILVER";
-
-                    // Update tier in Customer table
-                    _code.DatabaseInsertSafe(_connectionString,
-                        "UPDATE Customer SET Loyalty_Tier = @Tier WHERE Customer_MobilePhone = @Phone",
-                        new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@Tier", newTier },
-                            { "@Phone", _guestMobilePhone }
-                        });
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error updating tier: {ex.Message}");
             }
         }
     }

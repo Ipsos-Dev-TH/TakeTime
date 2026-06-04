@@ -574,7 +574,7 @@
         <!-- Reward Hero -->
         <div class="reward-hero">
             <h1><i class="fas fa-gift"></i> รีวิวและรับรางวัล!</h1>
-            <p>แบ่งปันประสบการณ์การพักของคุณบน Google และรับแต้มสะสมทันที</p>
+            <p>แบ่งปันประสบการณ์การพักของคุณบน Google และรับแต้มสะสมทันที (รับแต้มได้ปีละ 1 ครั้ง)</p>
             <div class="points-highlight">
                 <i class="fas fa-coins"></i>
                 <span>+<asp:Label ID="lblReviewPoints" runat="server">100</asp:Label> Points</span>
@@ -592,13 +592,16 @@
                     <span class="tier-name">(<asp:Label ID="lblCurrentTier" runat="server">Bronze</asp:Label> Member)</span>
                 </h3>
                 <p class="points-balance">
-                    คะแนนสะสมปัจจุบัน: <strong><asp:Label ID="lblCurrentPoints" runat="server">0</asp:Label> Points</strong>
+                    คะแนนที่แลกได้: <strong><asp:Label ID="lblCurrentPoints" runat="server">0</asp:Label> Points</strong>
+                    <a href="MyPoints.aspx" style="margin-left:10px; font-size:13px; color:#667eea; text-decoration:none;">
+                        <i class="fas fa-gift"></i> แลกของรางวัล
+                    </a>
                 </p>
             </div>
             <div class="progress-to-next">
                 <div class="progress-label">
-                    <span>Progress to <asp:Label ID="lblNextTier" runat="server">Silver</asp:Label></span>
-                    <span><asp:Label ID="lblPointsToNext" runat="server">500</asp:Label> pts more</span>
+                    <span>คะแนนรายปีสู่ <asp:Label ID="lblNextTier" runat="server">Silver</asp:Label></span>
+                    <span>อีก <asp:Label ID="lblPointsToNext" runat="server">500</asp:Label> แต้ม</span>
                 </div>
                 <div class="progress-bar-container">
                     <div class="progress-bar-fill" style="width: 30%;" id="progressBar" runat="server"></div>
@@ -641,12 +644,37 @@
             </p>
         </div>
 
-        <!-- Confirm Review Button -->
-        <div style="text-align: center; margin-bottom: 30px;">
-            <asp:Button ID="btnConfirmReview" runat="server" Text="ยืนยันการรีวิว - รับ 100 Points"
-                CssClass="btn btn-success btn-lg" OnClick="btnConfirmReview_Click"
-                style="background: linear-gradient(135deg, #4CAF50, #388E3C); border: none; padding: 15px 40px; border-radius: 30px; font-size: 18px;" />
-            <asp:Label ID="lblReviewStatus" runat="server" CssClass="d-block mt-3"></asp:Label>
+        <!-- Upload Screenshot & Confirm -->
+        <div class="screenshot-upload-card" style="background: white; border-radius: 20px; padding: 30px; box-shadow: 0 5px 20px rgba(0,0,0,0.08); margin-bottom: 30px; border: 2px dashed #667eea;">
+            <h3 style="text-align: center; color: #333; margin: 0 0 10px 0; font-size: 20px;">
+                <i class="fas fa-camera" style="color: #667eea;"></i> ยืนยันการรีวิว
+            </h3>
+            <p style="text-align: center; color: #666; font-size: 14px; margin: 0 0 20px 0;">
+                แนบภาพหน้าจอรีวิวของคุณเพื่อรับแต้มสะสม
+            </p>
+
+            <div id="uploadArea" style="text-align: center; padding: 25px; border: 2px dashed #ddd; border-radius: 15px; background: #fafafa; margin-bottom: 20px; cursor: pointer; transition: all 0.3s ease;"
+                 onclick="document.getElementById('<%= fuReviewScreenshot.ClientID %>').click();">
+                <div id="previewContainer" style="display: none; margin-bottom: 15px;">
+                    <img id="imgPreview" src="" alt="Preview" style="max-width: 300px; max-height: 200px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.15);" />
+                </div>
+                <div id="uploadPrompt">
+                    <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: #667eea; margin-bottom: 10px; display: block;"></i>
+                    <span style="color: #667eea; font-weight: 600; font-size: 16px;">คลิกเพื่ออัพโหลดภาพหน้าจอรีวิว</span><br>
+                    <span style="color: #999; font-size: 12px;">รองรับไฟล์ JPG, PNG, GIF, WEBP (ไม่เกิน 10 MB)</span>
+                </div>
+                <asp:FileUpload ID="fuReviewScreenshot" runat="server"
+                    style="display: none;"
+                    accept=".jpg,.jpeg,.png,.gif,.webp"
+                    onchange="previewScreenshot(this);" />
+            </div>
+
+            <div style="text-align: center;">
+                <asp:Button ID="btnConfirmReview" runat="server" Text="ยืนยันการรีวิว - รับ 100 Points"
+                    CssClass="btn btn-success btn-lg" OnClick="btnConfirmReview_Click"
+                    style="background: linear-gradient(135deg, #4CAF50, #388E3C); border: none; padding: 15px 40px; border-radius: 30px; font-size: 18px; color: white; cursor: pointer;" />
+                <asp:Label ID="lblReviewStatus" runat="server" CssClass="d-block mt-3"></asp:Label>
+            </div>
         </div>
 
         <!-- Rewards You Can Earn -->
@@ -758,13 +786,13 @@
                 </div>
                 <div class="step-item">
                     <div class="step-number">2</div>
-                    <h4>ยืนยันการรีวิว</h4>
-                    <p>กลับมาที่หน้านี้และกดปุ่ม "ยืนยันการรีวิว"</p>
+                    <h4>แคปหน้าจอ</h4>
+                    <p>ถ่ายภาพหน้าจอรีวิวของคุณเป็นหลักฐาน</p>
                 </div>
                 <div class="step-item">
                     <div class="step-number">3</div>
-                    <h4>รับแต้มสะสม</h4>
-                    <p>แต้มจะถูกเพิ่มเข้าบัญชีของคุณทันทีหลังตรวจสอบ</p>
+                    <h4>อัพโหลดและยืนยัน</h4>
+                    <p>แนบภาพหน้าจอแล้วกด "ยืนยันการรีวิว" เพื่อรับแต้มทันที</p>
                 </div>
                 <div class="step-item">
                     <div class="step-number">4</div>
@@ -828,5 +856,21 @@
 
         // Initialize with 5 stars selected
         selectRating(5);
+
+        function previewScreenshot(input) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    document.getElementById('imgPreview').src = e.target.result;
+                    document.getElementById('previewContainer').style.display = 'block';
+                    document.getElementById('uploadPrompt').innerHTML =
+                        '<span style="color: #4CAF50; font-weight: 600;"><i class="fas fa-check-circle"></i> ' + input.files[0].name + '</span><br>' +
+                        '<span style="color: #999; font-size: 12px;">คลิกเพื่อเปลี่ยนรูป</span>';
+                    document.getElementById('uploadArea').style.borderColor = '#4CAF50';
+                    document.getElementById('uploadArea').style.background = '#f0fff0';
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
     </script>
 </asp:Content>

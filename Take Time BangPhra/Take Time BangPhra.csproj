@@ -354,6 +354,7 @@
     <Content Include="API\FileHandler.ashx" />
     <Content Include="API\TaxInvoiceAPI.ashx" />
     <Content Include="API\VendorAPI.ashx" />
+    <Content Include="API\OmniChannelWebhook.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
@@ -372,11 +373,15 @@
     <Content Include="Admin\Report\Report.aspx" />
     <Content Include="Admin\Report\CustomerAnalytics.aspx" />
     <Content Include="Admin\Report\ProfitLoss.aspx" />
+    <Content Include="Admin\Report\AIReportSummary.aspx" />
     <Content Include="Admin\Vendor.aspx" />
     <Content Include="Admin\CustomerManagement.aspx" />
     <Content Include="Admin\CRM\GuestProfile.aspx" />
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
+    <Content Include="Admin\CRM\MembershipManagement.aspx" />
+    <Content Include="Admin\CRM\RedemptionTerminal.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
+    <Content Include="Admin\CRM\AIReviewDashboard.aspx" />
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
     <Content Include="Admin\Leave\LeaveManagement.aspx" />
@@ -393,6 +398,8 @@
     <Content Include="Account\TierBenefitsManagement.aspx" />
     <Content Include="Admin\RoomQRGenerator.aspx" />
     <Content Include="Admin\Chat\ChatManagement.aspx" />
+    <Content Include="Admin\Chat\OmniChannelInbox.aspx" />
+    <Content Include="Admin\Chat\ChannelSettings.aspx" />
     <Content Include="Admin\Housekeeping\Dashboard.aspx" />
     <Content Include="Admin\Maintenance\Dashboard.aspx" />
     <Content Include="Admin\ChannelManager\Dashboard.aspx" />
@@ -400,6 +407,8 @@
     <Content Include="Admin\Notifications\Settings.aspx" />
     <Content Include="Admin\Settings\ConnectionSettings.aspx" />
     <Content Include="Admin\Settings\AccountingIntegration.aspx" />
+    <Content Include="Admin\Settings\AISettings.aspx" />
+    <Content Include="Admin\Settings\AIKnowledgeBase.aspx" />
     <Content Include="Admin\GuestExperience\Dashboard.aspx" />
     <Content Include="Guest\Portal.aspx" />
     <Content Include="Guest\Dashboard.aspx" />
@@ -413,6 +422,8 @@
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
+    <Content Include="Guest\Activities.aspx" />
+    <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
     <Content Include="Admin\PaymentAffiliate.aspx" />
@@ -576,6 +587,9 @@
     </Compile>
     <Compile Include="API\VendorAPI.ashx.cs">
       <DependentUpon>VendorAPI.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\OmniChannelWebhook.ashx.cs">
+      <DependentUpon>OmniChannelWebhook.ashx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
@@ -813,7 +827,12 @@
     <Compile Include="Class\RoomChargeService.cs" />
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
+    <Compile Include="Class\Services\DeepSeekService.cs" />
+    <Compile Include="Class\Services\OmniChannelService.cs" />
+    <Compile Include="Class\Services\AIKnowledgeService.cs" />
     <Compile Include="Class\Services\ReviewService.cs" />
+    <Compile Include="Class\Services\AIReviewAnalysisService.cs" />
+    <Compile Include="Class\Services\AIReportService.cs" />
     <Compile Include="Class\Services\TierBenefitsService.cs" />
     <Compile Include="Account\TierBenefitsManagement.aspx.cs">
       <DependentUpon>TierBenefitsManagement.aspx</DependentUpon>
@@ -930,12 +949,40 @@
     <Compile Include="Admin\CRM\LoyaltyDashboard.aspx.designer.cs">
       <DependentUpon>LoyaltyDashboard.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\CRM\MembershipManagement.aspx.cs">
+      <DependentUpon>MembershipManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MembershipManagement.aspx.designer.cs">
+      <DependentUpon>MembershipManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\RedemptionTerminal.aspx.cs">
+      <DependentUpon>RedemptionTerminal.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\RedemptionTerminal.aspx.designer.cs">
+      <DependentUpon>RedemptionTerminal.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
     </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.designer.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\AIReviewDashboard.aspx.cs">
+      <DependentUpon>AIReviewDashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\AIReviewDashboard.aspx.designer.cs">
+      <DependentUpon>AIReviewDashboard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Report\AIReportSummary.aspx.cs">
+      <DependentUpon>AIReportSummary.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Report\AIReportSummary.aspx.designer.cs">
+      <DependentUpon>AIReportSummary.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\RoomQRGenerator.aspx.cs">
       <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
@@ -950,6 +997,20 @@
     </Compile>
     <Compile Include="Admin\Chat\ChatManagement.aspx.designer.cs">
       <DependentUpon>ChatManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Chat\OmniChannelInbox.aspx.cs">
+      <DependentUpon>OmniChannelInbox.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Chat\OmniChannelInbox.aspx.designer.cs">
+      <DependentUpon>OmniChannelInbox.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Chat\ChannelSettings.aspx.cs">
+      <DependentUpon>ChannelSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Chat\ChannelSettings.aspx.designer.cs">
+      <DependentUpon>ChannelSettings.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Housekeeping\Dashboard.aspx.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>
@@ -999,6 +1060,20 @@
     </Compile>
     <Compile Include="Admin\Settings\AccountingIntegration.aspx.designer.cs">
       <DependentUpon>AccountingIntegration.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\AISettings.aspx.cs">
+      <DependentUpon>AISettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\AISettings.aspx.designer.cs">
+      <DependentUpon>AISettings.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\AIKnowledgeBase.aspx.cs">
+      <DependentUpon>AIKnowledgeBase.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\AIKnowledgeBase.aspx.designer.cs">
+      <DependentUpon>AIKnowledgeBase.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\GuestExperience\Dashboard.aspx.cs">
       <DependentUpon>Dashboard.aspx</DependentUpon>
@@ -1090,6 +1165,20 @@
     </Compile>
     <Compile Include="Guest\Chat.aspx.designer.cs">
       <DependentUpon>Chat.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\Activities.aspx.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Activities.aspx.designer.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Guest\MyPoints.aspx.cs">
+      <DependentUpon>MyPoints.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\MyPoints.aspx.designer.cs">
+      <DependentUpon>MyPoints.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\GuestPortalService.cs" />
     <Compile Include="Class\Services\ChannelManagerService.cs" />
