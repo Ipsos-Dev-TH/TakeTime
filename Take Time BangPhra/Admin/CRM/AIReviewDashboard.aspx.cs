@@ -72,6 +72,15 @@ namespace Take_Time_BangPhra.Admin.CRM
                 case "importReviews":
                     result = HandleImportReviews(data);
                     break;
+                case "importText":
+                    result = HandleImportText(data);
+                    break;
+                case "fetchOTA":
+                    result = HandleFetchOTA(data);
+                    break;
+                case "fetchAll":
+                    result = HandleFetchAll();
+                    break;
                 case "analyzePending":
                     result = HandleAnalyzePending();
                     break;
@@ -147,8 +156,7 @@ namespace Take_Time_BangPhra.Admin.CRM
             try
             {
                 var svc = new AIReviewAnalysisService(ConnStr);
-                int count = svc.FetchGoogleReviews();
-                return new Dictionary<string, object> { { "success", true }, { "count", count }, { "message", "ดึงรีวิว Google สำเร็จ: " + count + " รีวิวใหม่" } };
+                return svc.FetchGoogleReviews();
             }
             catch (Exception ex)
             {
@@ -161,12 +169,41 @@ namespace Take_Time_BangPhra.Admin.CRM
             try
             {
                 var svc = new AIReviewAnalysisService(ConnStr);
-                int count = svc.FetchFacebookReviews();
-                return new Dictionary<string, object> { { "success", true }, { "count", count }, { "message", "ดึงรีวิว Facebook สำเร็จ: " + count + " รีวิวใหม่" } };
+                return svc.FetchFacebookReviews();
             }
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "ดึงรีวิว Facebook ไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> HandleFetchOTA(Dictionary<string, object> data)
+        {
+            try
+            {
+                var svc = new AIReviewAnalysisService(ConnStr);
+                string sourceCode = GetString(data, "sourceCode", "");
+                if (string.IsNullOrEmpty(sourceCode))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้องระบุ sourceCode" } };
+                return svc.FetchOTAReviews(sourceCode);
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "ดึงรีวิวไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> HandleFetchAll()
+        {
+            try
+            {
+                var svc = new AIReviewAnalysisService(ConnStr);
+                var results = svc.FetchAllEnabledSources();
+                return new Dictionary<string, object> { { "success", true }, { "data", results } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "ดึงรีวิวไม่สำเร็จ: " + ex.Message } };
             }
         }
 
@@ -179,10 +216,28 @@ namespace Take_Time_BangPhra.Admin.CRM
                 string content = GetString(data, "content", "");
 
                 if (string.IsNullOrWhiteSpace(content))
-                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาใส่เนื้อหา JSON" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาใส่เนื้อหา JSON หรือข้อความรีวิว" } };
 
-                int count = svc.ImportReviewsManual(sourceCode, content);
-                return new Dictionary<string, object> { { "success", true }, { "count", count }, { "message", "นำเข้าสำเร็จ: " + count + " รีวิว" } };
+                return svc.ImportReviewsManual(sourceCode, content);
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "นำเข้าไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> HandleImportText(Dictionary<string, object> data)
+        {
+            try
+            {
+                var svc = new AIReviewAnalysisService(ConnStr);
+                string sourceCode = GetString(data, "sourceCode", "INTERNAL");
+                string rawText = GetString(data, "text", "");
+
+                if (string.IsNullOrWhiteSpace(rawText))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรุณาใส่ข้อความรีวิวที่ copy มาจากเว็บ" } };
+
+                return svc.ImportReviewsFromText(sourceCode, rawText);
             }
             catch (Exception ex)
             {

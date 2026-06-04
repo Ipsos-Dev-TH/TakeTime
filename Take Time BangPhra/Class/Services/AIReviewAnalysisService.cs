@@ -36,314 +36,432 @@ namespace Take_Time_BangPhra.Services
 
         #region 1. Online Review Fetching
 
-        /// <summary>
-        /// Get all configured review sources
-        /// </summary>
         public DataTable GetReviewSources()
         {
-            try
-            {
-                return _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT * FROM AI_Review_Sources ORDER BY SourceCode", null);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("Error getting review sources: " + ex.Message);
-            }
+            return _code.DatabaseQuerySafe(_connectionString,
+                "SELECT * FROM AI_Review_Sources ORDER BY SourceCode", null);
         }
 
-        /// <summary>
-        /// Update a review source configuration
-        /// </summary>
         public void UpdateSourceConfig(string sourceCode, bool enabled, string apiConfig)
         {
-            try
-            {
-                if (string.IsNullOrEmpty(sourceCode))
-                    throw new ArgumentNullException(nameof(sourceCode));
-
-                _code.DatabaseInsertSafe(_connectionString,
-                    @"UPDATE AI_Review_Sources
-                      SET IsEnabled = @Enabled, ApiConfig = @Config, Updated_Date = GETDATE()
-                      WHERE SourceCode = @Code",
-                    new Dictionary<string, object>
-                    {
-                        { "@Code", sourceCode },
-                        { "@Enabled", enabled },
-                        { "@Config", apiConfig ?? (object)DBNull.Value }
-                    });
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("Error updating source config: " + ex.Message);
-            }
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE AI_Review_Sources
+                  SET IsEnabled = @Enabled, ApiConfig = @Config, Updated_Date = GETDATE()
+                  WHERE SourceCode = @Code",
+                new Dictionary<string, object>
+                {
+                    { "@Code", sourceCode },
+                    { "@Enabled", enabled },
+                    { "@Config", apiConfig ?? (object)DBNull.Value }
+                });
         }
 
-        /// <summary>
-        /// Fetch reviews from Google Places API
-        /// </summary>
-        public int FetchGoogleReviews()
+        // ── Dedup helper: check if a review already exists ──
+        private bool ReviewExists(string sourceCode, string reviewerName, DateTime reviewDate, double rating)
+        {
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT COUNT(*) AS Cnt FROM AI_Online_Reviews
+                  WHERE SourceCode = @Source
+                    AND ReviewerName = @Name
+                    AND CAST(ReviewDate AS DATE) = CAST(@ReviewDate AS DATE)
+                    AND Rating = @Rating",
+                new Dictionary<string, object>
+                {
+                    { "@Source", sourceCode },
+                    { "@Name", reviewerName },
+                    { "@ReviewDate", reviewDate },
+                    { "@Rating", rating }
+                });
+            return dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["Cnt"]) > 0;
+        }
+
+        private bool ReviewExistsByPlatformId(string platformReviewId)
+        {
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT COUNT(*) AS Cnt FROM AI_Online_Reviews WHERE PlatformReviewId = @PlatformId",
+                new Dictionary<string, object> { { "@PlatformId", platformReviewId } });
+            return dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["Cnt"]) > 0;
+        }
+
+        private int InsertReview(string sourceCode, string platformReviewId, string reviewerName,
+            string reviewerAvatar, double rating, string reviewTitle, string reviewText, DateTime reviewDate)
+        {
+            // Double-check: PlatformReviewId dedup first, then content dedup
+            if (!string.IsNullOrEmpty(platformReviewId) && ReviewExistsByPlatformId(platformReviewId))
+                return 0;
+            if (ReviewExists(sourceCode, reviewerName, reviewDate, rating))
+                return 0;
+
+            _code.DatabaseInsertSafe(_connectionString,
+                @"INSERT INTO AI_Online_Reviews
+                  (SourceCode, PlatformReviewId, ReviewerName, ReviewerAvatar, Rating, ReviewTitle, ReviewText,
+                   ReviewDate, IsAnalyzed, IsFlagged, Created_Date)
+                  VALUES
+                  (@Source, @PlatformId, @Author, @Photo, @Rating, @Title, @Text,
+                   @ReviewDate, 0, 0, GETDATE())",
+                new Dictionary<string, object>
+                {
+                    { "@Source", sourceCode },
+                    { "@PlatformId", platformReviewId ?? (object)DBNull.Value },
+                    { "@Author", reviewerName },
+                    { "@Photo", reviewerAvatar ?? (object)DBNull.Value },
+                    { "@Rating", rating },
+                    { "@Title", reviewTitle ?? (object)DBNull.Value },
+                    { "@Text", reviewText ?? (object)DBNull.Value },
+                    { "@ReviewDate", reviewDate }
+                });
+            return 1;
+        }
+
+        private void UpdateSourceMetadata(string sourceCode)
+        {
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE AI_Review_Sources
+                  SET LastFetchDate = GETDATE(),
+                      TotalReviews = (SELECT COUNT(*) FROM AI_Online_Reviews WHERE SourceCode = @Source),
+                      Updated_Date = GETDATE()
+                  WHERE SourceCode = @Source",
+                new Dictionary<string, object> { { "@Source", sourceCode } });
+        }
+
+        // ── Google Reviews ──
+        public Dictionary<string, object> FetchGoogleReviews()
         {
             int newCount = 0;
+            int skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", "GOOGLE" } };
+
             try
             {
-                // Read config from AI_Review_Sources
                 DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'GOOGLE'",
-                    null);
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'GOOGLE'", null);
 
-                if (dtSource.Rows.Count == 0)
-                    throw new Exception("Google review source not configured");
-
-                if (!Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
-                    return 0;
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = "Google Reviews ไม่ได้เปิดใช้งาน หรือยังไม่ได้ตั้งค่า";
+                    return result;
+                }
 
                 string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
                 if (string.IsNullOrEmpty(apiConfigJson))
-                    throw new Exception("Google API config is empty");
+                {
+                    result["success"] = false;
+                    result["message"] = "ยังไม่ได้ตั้งค่า API Config (ต้องมี placeId, apiKey)";
+                    return result;
+                }
 
                 var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
                 string placeId = apiConfig.ContainsKey("placeId") ? apiConfig["placeId"]?.ToString() : null;
                 string apiKey = apiConfig.ContainsKey("apiKey") ? apiConfig["apiKey"]?.ToString() : null;
 
                 if (string.IsNullOrEmpty(placeId) || string.IsNullOrEmpty(apiKey))
-                    throw new Exception("Google placeId or apiKey is missing");
-
-                // Call Google Places API
-                string url = string.Format(
-                    "https://maps.googleapis.com/maps/api/place/details/json?place_id={0}&fields=reviews&language=th&key={1}",
-                    Uri.EscapeDataString(placeId), Uri.EscapeDataString(apiKey));
-
-                string responseText = MakeHttpGetRequest(url);
-                if (string.IsNullOrEmpty(responseText))
-                    return 0;
-
-                var response = _serializer.Deserialize<Dictionary<string, object>>(responseText);
-                if (response == null || !response.ContainsKey("result"))
-                    return 0;
-
-                var result = response["result"] as Dictionary<string, object>;
-                if (result == null || !result.ContainsKey("reviews"))
-                    return 0;
-
-                var reviews = result["reviews"] as ArrayList;
-                if (reviews == null || reviews.Count == 0)
-                    return 0;
-
-                foreach (var reviewObj in reviews)
                 {
-                    var review = reviewObj as Dictionary<string, object>;
-                    if (review == null) continue;
-
-                    string authorName = review.ContainsKey("author_name") ? review["author_name"]?.ToString() : "Unknown";
-                    int rating = review.ContainsKey("rating") ? Convert.ToInt32(review["rating"]) : 0;
-                    string text = review.ContainsKey("text") ? review["text"]?.ToString() : "";
-                    long timeEpoch = review.ContainsKey("time") ? Convert.ToInt64(review["time"]) : 0;
-                    string profilePhoto = review.ContainsKey("profile_photo_url") ? review["profile_photo_url"]?.ToString() : null;
-
-                    DateTime reviewDate = timeEpoch > 0
-                        ? new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(timeEpoch).ToLocalTime()
-                        : DateTime.Now;
-
-                    // Generate a platform-specific review ID
-                    string platformReviewId = "GOOGLE_" + authorName.GetHashCode() + "_" + timeEpoch;
-
-                    // Check if already exists
-                    DataTable dtExisting = _code.DatabaseQuerySafe(_connectionString,
-                        "SELECT COUNT(*) AS Cnt FROM AI_Online_Reviews WHERE PlatformReviewId = @PlatformId",
-                        new Dictionary<string, object> { { "@PlatformId", platformReviewId } });
-
-                    if (dtExisting.Rows.Count > 0 && Convert.ToInt32(dtExisting.Rows[0]["Cnt"]) > 0)
-                        continue;
-
-                    // Insert new review
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"INSERT INTO AI_Online_Reviews
-                          (SourceCode, PlatformReviewId, ReviewerName, ReviewerAvatar, Rating, ReviewText,
-                           ReviewDate, IsAnalyzed, IsFlagged, Created_Date)
-                          VALUES
-                          ('GOOGLE', @PlatformId, @Author, @Photo, @Rating, @Text,
-                           @ReviewDate, 0, 0, GETDATE())",
-                        new Dictionary<string, object>
-                        {
-                            { "@PlatformId", platformReviewId },
-                            { "@Author", authorName },
-                            { "@Photo", profilePhoto ?? (object)DBNull.Value },
-                            { "@Rating", rating },
-                            { "@Text", text ?? (object)DBNull.Value },
-                            { "@ReviewDate", reviewDate }
-                        });
-
-                    newCount++;
+                    result["success"] = false;
+                    result["message"] = "ต้องระบุทั้ง placeId และ apiKey ในการตั้งค่า";
+                    return result;
                 }
 
-                // Update source metadata
-                _code.DatabaseInsertSafe(_connectionString,
-                    @"UPDATE AI_Review_Sources
-                      SET LastFetchDate = GETDATE(),
-                          TotalReviews = (SELECT COUNT(*) FROM AI_Online_Reviews WHERE SourceCode = 'GOOGLE')
-                      WHERE SourceCode = 'GOOGLE'",
-                    null);
+                // Google Places API (returns max 5 most relevant reviews)
+                // Use reviews_sort=newest to try get newer ones; also request in both TH and EN
+                string[] languages = { "th", "en" };
+                foreach (string lang in languages)
+                {
+                    string url = string.Format(
+                        "https://maps.googleapis.com/maps/api/place/details/json?place_id={0}&fields=reviews&reviews_sort=newest&language={1}&key={2}",
+                        Uri.EscapeDataString(placeId), lang, Uri.EscapeDataString(apiKey));
+
+                    string responseText = MakeHttpGetRequest(url);
+                    if (string.IsNullOrEmpty(responseText)) continue;
+
+                    var response = _serializer.Deserialize<Dictionary<string, object>>(responseText);
+                    if (response == null || !response.ContainsKey("result")) continue;
+
+                    var placeResult = response["result"] as Dictionary<string, object>;
+                    if (placeResult == null || !placeResult.ContainsKey("reviews")) continue;
+
+                    var reviews = placeResult["reviews"] as ArrayList;
+                    if (reviews == null) continue;
+
+                    foreach (var reviewObj in reviews)
+                    {
+                        var review = reviewObj as Dictionary<string, object>;
+                        if (review == null) continue;
+
+                        string authorName = review.ContainsKey("author_name") ? review["author_name"]?.ToString() : "Unknown";
+                        double rating = review.ContainsKey("rating") ? Convert.ToDouble(review["rating"]) : 0;
+                        string text = review.ContainsKey("text") ? review["text"]?.ToString() : "";
+                        long timeEpoch = review.ContainsKey("time") ? Convert.ToInt64(review["time"]) : 0;
+                        string profilePhoto = review.ContainsKey("profile_photo_url") ? review["profile_photo_url"]?.ToString() : null;
+                        string authorUrl = review.ContainsKey("author_url") ? review["author_url"]?.ToString() : null;
+
+                        DateTime reviewDate = timeEpoch > 0
+                            ? new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(timeEpoch).ToLocalTime()
+                            : DateTime.Now;
+
+                        // Stable platform ID using epoch timestamp (unique per review)
+                        string platformReviewId = "GOOGLE_" + timeEpoch + "_" + (authorUrl != null ? authorUrl.GetHashCode().ToString() : authorName.GetHashCode().ToString());
+
+                        int added = InsertReview("GOOGLE", platformReviewId, authorName, profilePhoto,
+                            rating, null, text, reviewDate);
+                        if (added > 0) newCount++; else skipCount++;
+                    }
+                }
+
+                UpdateSourceMetadata("GOOGLE");
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("Google Reviews: เพิ่มใหม่ {0} รายการ, ข้ามซ้ำ {1} รายการ", newCount, skipCount);
             }
             catch (Exception ex)
             {
-                throw new Exception("Error fetching Google reviews: " + ex.Message);
+                result["success"] = false;
+                result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
             }
 
-            return newCount;
+            return result;
         }
 
-        /// <summary>
-        /// Fetch reviews from Facebook Graph API
-        /// </summary>
-        public int FetchFacebookReviews()
+        // ── Facebook Reviews (with pagination) ──
+        public Dictionary<string, object> FetchFacebookReviews()
         {
             int newCount = 0;
+            int skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", "FACEBOOK" } };
+
             try
             {
-                // Read config from AI_Review_Sources
                 DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'FACEBOOK'",
-                    null);
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'FACEBOOK'", null);
 
-                if (dtSource.Rows.Count == 0)
-                    throw new Exception("Facebook review source not configured");
-
-                if (!Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
-                    return 0;
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = "Facebook Reviews ไม่ได้เปิดใช้งาน หรือยังไม่ได้ตั้งค่า";
+                    return result;
+                }
 
                 string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
                 if (string.IsNullOrEmpty(apiConfigJson))
-                    throw new Exception("Facebook API config is empty");
+                {
+                    result["success"] = false;
+                    result["message"] = "ยังไม่ได้ตั้งค่า API Config (ต้องมี pageId, pageAccessToken)";
+                    return result;
+                }
 
                 var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
                 string pageId = apiConfig.ContainsKey("pageId") ? apiConfig["pageId"]?.ToString() : null;
                 string pageAccessToken = apiConfig.ContainsKey("pageAccessToken") ? apiConfig["pageAccessToken"]?.ToString() : null;
 
                 if (string.IsNullOrEmpty(pageId) || string.IsNullOrEmpty(pageAccessToken))
-                    throw new Exception("Facebook pageId or pageAccessToken is missing");
+                {
+                    result["success"] = false;
+                    result["message"] = "ต้องระบุทั้ง pageId และ pageAccessToken ในการตั้งค่า";
+                    return result;
+                }
 
-                // Call Facebook Graph API
+                // Facebook Graph API with pagination (fetch all pages, max 10 pages = ~250 reviews)
                 string url = string.Format(
-                    "https://graph.facebook.com/v18.0/{0}/ratings?fields=reviewer{{name,picture}},rating,review_text,created_time&access_token={1}",
+                    "https://graph.facebook.com/v18.0/{0}/ratings?fields=reviewer{{name,picture}},rating,review_text,created_time&limit=25&access_token={1}",
                     Uri.EscapeDataString(pageId), Uri.EscapeDataString(pageAccessToken));
 
-                string responseText = MakeHttpGetRequest(url);
-                if (string.IsNullOrEmpty(responseText))
-                    return 0;
-
-                var response = _serializer.Deserialize<Dictionary<string, object>>(responseText);
-                if (response == null || !response.ContainsKey("data"))
-                    return 0;
-
-                var dataArray = response["data"] as ArrayList;
-                if (dataArray == null || dataArray.Count == 0)
-                    return 0;
-
-                foreach (var itemObj in dataArray)
+                int pageCount = 0;
+                while (!string.IsNullOrEmpty(url) && pageCount < 10)
                 {
-                    var item = itemObj as Dictionary<string, object>;
-                    if (item == null) continue;
+                    pageCount++;
+                    string responseText = MakeHttpGetRequest(url);
+                    if (string.IsNullOrEmpty(responseText)) break;
 
-                    // Extract reviewer info
-                    string reviewerName = "Unknown";
-                    string reviewerPhoto = null;
-                    if (item.ContainsKey("reviewer"))
+                    var response = _serializer.Deserialize<Dictionary<string, object>>(responseText);
+                    if (response == null || !response.ContainsKey("data")) break;
+
+                    var dataArray = response["data"] as ArrayList;
+                    if (dataArray == null || dataArray.Count == 0) break;
+
+                    foreach (var itemObj in dataArray)
                     {
-                        var reviewer = item["reviewer"] as Dictionary<string, object>;
-                        if (reviewer != null)
+                        var item = itemObj as Dictionary<string, object>;
+                        if (item == null) continue;
+
+                        string reviewerName = "Unknown";
+                        string reviewerPhoto = null;
+                        string reviewerId = null;
+                        if (item.ContainsKey("reviewer"))
                         {
-                            reviewerName = reviewer.ContainsKey("name") ? reviewer["name"]?.ToString() : "Unknown";
-                            if (reviewer.ContainsKey("picture"))
+                            var reviewer = item["reviewer"] as Dictionary<string, object>;
+                            if (reviewer != null)
                             {
-                                var picture = reviewer["picture"] as Dictionary<string, object>;
-                                if (picture != null && picture.ContainsKey("data"))
+                                reviewerName = reviewer.ContainsKey("name") ? reviewer["name"]?.ToString() : "Unknown";
+                                reviewerId = reviewer.ContainsKey("id") ? reviewer["id"]?.ToString() : null;
+                                if (reviewer.ContainsKey("picture"))
                                 {
-                                    var picData = picture["data"] as Dictionary<string, object>;
-                                    if (picData != null && picData.ContainsKey("url"))
-                                        reviewerPhoto = picData["url"]?.ToString();
+                                    var picture = reviewer["picture"] as Dictionary<string, object>;
+                                    if (picture != null && picture.ContainsKey("data"))
+                                    {
+                                        var picData = picture["data"] as Dictionary<string, object>;
+                                        if (picData != null && picData.ContainsKey("url"))
+                                            reviewerPhoto = picData["url"]?.ToString();
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    int rating = item.ContainsKey("rating") ? Convert.ToInt32(item["rating"]) : 0;
-                    string reviewText = item.ContainsKey("review_text") ? item["review_text"]?.ToString() : "";
-                    string createdTime = item.ContainsKey("created_time") ? item["created_time"]?.ToString() : null;
+                        double rating = item.ContainsKey("rating") ? Convert.ToDouble(item["rating"]) : 0;
+                        string reviewText = item.ContainsKey("review_text") ? item["review_text"]?.ToString() : "";
+                        string createdTime = item.ContainsKey("created_time") ? item["created_time"]?.ToString() : null;
 
-                    DateTime reviewDate = DateTime.Now;
-                    if (!string.IsNullOrEmpty(createdTime))
-                    {
-                        DateTime parsed;
-                        if (DateTime.TryParse(createdTime, out parsed))
-                            reviewDate = parsed;
-                    }
-
-                    // Generate a platform-specific review ID
-                    string platformReviewId = "FB_" + reviewerName.GetHashCode() + "_" + reviewDate.Ticks;
-
-                    // Check if already exists
-                    DataTable dtExisting = _code.DatabaseQuerySafe(_connectionString,
-                        "SELECT COUNT(*) AS Cnt FROM AI_Online_Reviews WHERE PlatformReviewId = @PlatformId",
-                        new Dictionary<string, object> { { "@PlatformId", platformReviewId } });
-
-                    if (dtExisting.Rows.Count > 0 && Convert.ToInt32(dtExisting.Rows[0]["Cnt"]) > 0)
-                        continue;
-
-                    // Insert new review
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"INSERT INTO AI_Online_Reviews
-                          (SourceCode, PlatformReviewId, ReviewerName, ReviewerAvatar, Rating, ReviewText,
-                           ReviewDate, IsAnalyzed, IsFlagged, Created_Date)
-                          VALUES
-                          ('FACEBOOK', @PlatformId, @Author, @Photo, @Rating, @Text,
-                           @ReviewDate, 0, 0, GETDATE())",
-                        new Dictionary<string, object>
+                        DateTime reviewDate = DateTime.Now;
+                        if (!string.IsNullOrEmpty(createdTime))
                         {
-                            { "@PlatformId", platformReviewId },
-                            { "@Author", reviewerName },
-                            { "@Photo", reviewerPhoto ?? (object)DBNull.Value },
-                            { "@Rating", rating },
-                            { "@Text", reviewText ?? (object)DBNull.Value },
-                            { "@ReviewDate", reviewDate }
-                        });
+                            DateTime parsed;
+                            if (DateTime.TryParse(createdTime, out parsed))
+                                reviewDate = parsed;
+                        }
 
-                    newCount++;
+                        // Stable platform ID: use reviewer ID + created_time ISO string
+                        string stableKey = (reviewerId ?? reviewerName) + "_" + (createdTime ?? reviewDate.ToString("yyyyMMddHHmmss"));
+                        string platformReviewId = "FB_" + stableKey.GetHashCode();
+
+                        int added = InsertReview("FACEBOOK", platformReviewId, reviewerName, reviewerPhoto,
+                            rating, null, reviewText, reviewDate);
+                        if (added > 0) newCount++; else skipCount++;
+                    }
+
+                    // Check for next page
+                    url = null;
+                    if (response.ContainsKey("paging"))
+                    {
+                        var paging = response["paging"] as Dictionary<string, object>;
+                        if (paging != null && paging.ContainsKey("next"))
+                            url = paging["next"]?.ToString();
+                    }
                 }
 
-                // Update source metadata
-                _code.DatabaseInsertSafe(_connectionString,
-                    @"UPDATE AI_Review_Sources
-                      SET LastFetchDate = GETDATE(),
-                          TotalReviews = (SELECT COUNT(*) FROM AI_Online_Reviews WHERE SourceCode = 'FACEBOOK')
-                      WHERE SourceCode = 'FACEBOOK'",
-                    null);
+                UpdateSourceMetadata("FACEBOOK");
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("Facebook Reviews: เพิ่มใหม่ {0} รายการ, ข้ามซ้ำ {1} รายการ (ดึง {2} หน้า)", newCount, skipCount, pageCount);
             }
             catch (Exception ex)
             {
-                throw new Exception("Error fetching Facebook reviews: " + ex.Message);
+                result["success"] = false;
+                result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
             }
 
-            return newCount;
+            return result;
         }
 
+        // ── Agoda / Booking / TripAdvisor / Expedia / Traveloka ──
+        // OTA platforms don't provide public review APIs
+        // Use web scraping or manual import
+
         /// <summary>
-        /// Import reviews manually from JSON content
+        /// Fetch reviews by scraping a URL (generic HTML scraper for OTA platforms).
+        /// Requires API config with: { "scrapeUrl": "...", "platform": "AGODA|BOOKING|TRIPADVISOR|..." }
+        /// Sends the HTML to DeepSeek to extract structured review data.
         /// </summary>
-        public int ImportReviewsManual(string sourceCode, string csvOrJsonContent)
+        public Dictionary<string, object> FetchOTAReviews(string sourceCode)
         {
-            int count = 0;
+            int newCount = 0;
+            int skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
             try
             {
-                if (string.IsNullOrEmpty(sourceCode))
-                    throw new ArgumentNullException(nameof(sourceCode));
-                if (string.IsNullOrEmpty(csvOrJsonContent))
-                    throw new ArgumentNullException(nameof(csvOrJsonContent));
+                DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = @Source",
+                    new Dictionary<string, object> { { "@Source", sourceCode } });
 
-                // Parse JSON array: [{ reviewerName, rating, reviewText, reviewDate, reviewTitle }]
-                var reviews = _serializer.Deserialize<ArrayList>(csvOrJsonContent);
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = sourceCode + " ไม่ได้เปิดใช้งาน หรือยังไม่ได้ตั้งค่า";
+                    return result;
+                }
+
+                string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
+                if (string.IsNullOrEmpty(apiConfigJson))
+                {
+                    result["success"] = false;
+                    result["message"] = "ยังไม่ได้ตั้งค่า API Config (ต้องมี scrapeUrl)";
+                    return result;
+                }
+
+                var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                string scrapeUrl = apiConfig.ContainsKey("scrapeUrl") ? apiConfig["scrapeUrl"]?.ToString() : null;
+
+                if (string.IsNullOrEmpty(scrapeUrl))
+                {
+                    result["success"] = false;
+                    result["message"] = "ต้องระบุ scrapeUrl ของหน้ารีวิว " + sourceCode + " ในการตั้งค่า";
+                    return result;
+                }
+
+                // Fetch the page HTML
+                string html = MakeHttpGetRequest(scrapeUrl);
+                if (string.IsNullOrEmpty(html) || html.Length < 100)
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่สามารถดึงข้อมูลจาก URL ได้";
+                    return result;
+                }
+
+                // Truncate HTML to fit DeepSeek context (keep first 15000 chars of body content)
+                if (html.Length > 15000)
+                    html = html.Substring(0, 15000);
+
+                // Use DeepSeek to extract structured review data from the HTML
+                string prompt = string.Format(
+                    @"จากเนื้อหา HTML ของหน้ารีวิวโรงแรมจาก {0} ด้านล่าง ให้ดึงข้อมูลรีวิวทั้งหมดที่พบ
+ตอบเป็น JSON array เท่านั้น แต่ละรายการมีรูปแบบ:
+[
+  {{
+    ""reviewerName"": ""ชื่อผู้รีวิว"",
+    ""rating"": 8.5,
+    ""reviewText"": ""เนื้อหารีวิว"",
+    ""reviewDate"": ""2024-01-15"",
+    ""reviewTitle"": ""หัวข้อรีวิว หรือ null""
+  }}
+]
+
+หมายเหตุ:
+- rating ให้แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
+- reviewDate ให้แปลงเป็นรูปแบบ yyyy-MM-dd
+- ถ้าไม่มีวันที่ชัดเจน ให้ประมาณจากข้อความเช่น ""2 เดือนที่แล้ว"" หรือ ""มกราคม 2024""
+- ถ้าไม่พบรีวิวเลย ให้ตอบ []
+
+HTML:
+{1}", sourceCode, html);
+
+                var deepSeek = new DeepSeekService(_connectionString);
+                string sessionKey = "ota_scrape_" + sourceCode + "_" + DateTime.Now.Ticks;
+                var aiResponse = deepSeek.SendMessage(prompt, sessionKey, null);
+
+                if (!aiResponse.Success || string.IsNullOrEmpty(aiResponse.Message))
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่สามารถวิเคราะห์หน้ารีวิวได้: " + (aiResponse.Message ?? "unknown");
+                    return result;
+                }
+
+                // Extract JSON array from AI response
+                string jsonArray = ExtractJsonArrayFromResponse(aiResponse.Message);
+                if (string.IsNullOrEmpty(jsonArray))
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่พบรีวิวในหน้าเว็บ";
+                    return result;
+                }
+
+                var reviews = _serializer.Deserialize<ArrayList>(jsonArray);
                 if (reviews == null || reviews.Count == 0)
-                    return 0;
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่พบรีวิวในข้อมูลที่ AI วิเคราะห์ได้";
+                    return result;
+                }
 
                 foreach (var reviewObj in reviews)
                 {
@@ -351,7 +469,7 @@ namespace Take_Time_BangPhra.Services
                     if (review == null) continue;
 
                     string reviewerName = review.ContainsKey("reviewerName") ? review["reviewerName"]?.ToString() : "Unknown";
-                    int rating = review.ContainsKey("rating") ? Convert.ToInt32(review["rating"]) : 0;
+                    double rating = review.ContainsKey("rating") ? Convert.ToDouble(review["rating"]) : 0;
                     string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
                     string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
 
@@ -363,40 +481,224 @@ namespace Take_Time_BangPhra.Services
                             reviewDate = parsed;
                     }
 
-                    string platformReviewId = "MANUAL_" + sourceCode + "_" + DateTime.Now.Ticks + "_" + count;
+                    if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
+                        continue;
 
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"INSERT INTO AI_Online_Reviews
-                          (SourceCode, PlatformReviewId, ReviewerName, Rating, ReviewText, ReviewTitle,
-                           ReviewDate, IsAnalyzed, IsFlagged, Created_Date)
-                          VALUES
-                          (@Source, @PlatformId, @Author, @Rating, @Text, @Title,
-                           @ReviewDate, 0, 0, GETDATE())",
-                        new Dictionary<string, object>
-                        {
-                            { "@Source", sourceCode },
-                            { "@PlatformId", platformReviewId },
-                            { "@Author", reviewerName },
-                            { "@Rating", rating },
-                            { "@Text", reviewText ?? (object)DBNull.Value },
-                            { "@Title", reviewTitle ?? (object)DBNull.Value },
-                            { "@ReviewDate", reviewDate }
-                        });
+                    string platformReviewId = sourceCode + "_" + reviewerName.GetHashCode() + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)rating);
 
-                    count++;
+                    int added = InsertReview(sourceCode, platformReviewId, reviewerName, null,
+                        rating, reviewTitle, reviewText, reviewDate);
+                    if (added > 0) newCount++; else skipCount++;
                 }
+
+                UpdateSourceMetadata(sourceCode);
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("{0}: เพิ่มใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
             }
             catch (Exception ex)
             {
-                throw new Exception("Error importing reviews: " + ex.Message);
+                result["success"] = false;
+                result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
             }
 
-            return count;
+            return result;
         }
 
         /// <summary>
-        /// Make an HTTP GET request and return the response body
+        /// Fetch reviews from all enabled sources
         /// </summary>
+        public List<Dictionary<string, object>> FetchAllEnabledSources()
+        {
+            var results = new List<Dictionary<string, object>>();
+
+            DataTable dtSources = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT SourceCode FROM AI_Review_Sources WHERE IsEnabled = 1 AND SourceCode != 'INTERNAL'",
+                null);
+
+            foreach (DataRow row in dtSources.Rows)
+            {
+                string sourceCode = row["SourceCode"].ToString();
+                try
+                {
+                    Dictionary<string, object> fetchResult;
+                    switch (sourceCode)
+                    {
+                        case "GOOGLE":
+                            fetchResult = FetchGoogleReviews();
+                            break;
+                        case "FACEBOOK":
+                            fetchResult = FetchFacebookReviews();
+                            break;
+                        default:
+                            fetchResult = FetchOTAReviews(sourceCode);
+                            break;
+                    }
+                    results.Add(fetchResult);
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new Dictionary<string, object>
+                    {
+                        { "source", sourceCode },
+                        { "success", false },
+                        { "message", ex.Message }
+                    });
+                }
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Import reviews manually — with robust dedup by reviewer+date+rating+source
+        /// </summary>
+        public Dictionary<string, object> ImportReviewsManual(string sourceCode, string jsonContent)
+        {
+            int newCount = 0;
+            int skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
+            try
+            {
+                if (string.IsNullOrEmpty(sourceCode))
+                    throw new ArgumentException("ต้องระบุแหล่งที่มา (sourceCode)");
+                if (string.IsNullOrEmpty(jsonContent))
+                    throw new ArgumentException("ต้องมีข้อมูลรีวิว");
+
+                var reviews = _serializer.Deserialize<ArrayList>(jsonContent);
+                if (reviews == null || reviews.Count == 0)
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่พบข้อมูลรีวิวใน JSON";
+                    return result;
+                }
+
+                foreach (var reviewObj in reviews)
+                {
+                    var review = reviewObj as Dictionary<string, object>;
+                    if (review == null) continue;
+
+                    string reviewerName = review.ContainsKey("reviewerName") ? review["reviewerName"]?.ToString() : "Unknown";
+                    double rating = review.ContainsKey("rating") ? Convert.ToDouble(review["rating"]) : 0;
+                    string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
+                    string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
+
+                    // Date is required — if not provided, still import but with today's date
+                    DateTime reviewDate = DateTime.Now;
+                    if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
+                    {
+                        string dateStr = review["reviewDate"].ToString();
+                        DateTime parsed;
+                        // Support multiple formats
+                        if (DateTime.TryParse(dateStr, out parsed))
+                            reviewDate = parsed;
+                        else if (DateTime.TryParseExact(dateStr, "dd/MM/yyyy",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out parsed))
+                            reviewDate = parsed;
+                    }
+
+                    if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
+                        continue;
+
+                    // Stable dedup ID based on source + reviewer + date + rating
+                    string platformReviewId = sourceCode + "_IMPORT_" + reviewerName.GetHashCode()
+                        + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)(rating * 10));
+
+                    int added = InsertReview(sourceCode, platformReviewId, reviewerName, null,
+                        rating, reviewTitle, reviewText, reviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata(sourceCode);
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("นำเข้า {0}: เพิ่มใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Use AI to parse unstructured review text (e.g. copy-paste from OTA website)
+        /// into structured JSON, then import
+        /// </summary>
+        public Dictionary<string, object> ImportReviewsFromText(string sourceCode, string rawText)
+        {
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
+            try
+            {
+                if (string.IsNullOrEmpty(rawText) || rawText.Length < 10)
+                {
+                    result["success"] = false;
+                    result["message"] = "ข้อมูลสั้นเกินไป";
+                    return result;
+                }
+
+                // Truncate if too long
+                if (rawText.Length > 10000)
+                    rawText = rawText.Substring(0, 10000);
+
+                string prompt = string.Format(
+                    @"จากข้อความด้านล่างซึ่ง copy มาจากหน้ารีวิวโรงแรมบน {0} ให้ดึงข้อมูลรีวิวทั้งหมด
+ตอบเป็น JSON array เท่านั้น:
+[
+  {{
+    ""reviewerName"": ""ชื่อผู้รีวิว"",
+    ""rating"": 4.5,
+    ""reviewText"": ""เนื้อหารีวิว"",
+    ""reviewDate"": ""2024-06-15"",
+    ""reviewTitle"": ""หัวข้อ หรือ null""
+  }}
+]
+
+หมายเหตุ:
+- rating แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
+- reviewDate แปลงเป็น yyyy-MM-dd ถ้าเห็น ""2 เดือนที่แล้ว"" ให้คำนวณจากวันที่ {1}
+- ถ้าไม่พบรีวิวให้ตอบ []
+
+ข้อความ:
+{2}", sourceCode, DateTime.Now.ToString("yyyy-MM-dd"), rawText);
+
+                var deepSeek = new DeepSeekService(_connectionString);
+                string sessionKey = "import_text_" + sourceCode + "_" + DateTime.Now.Ticks;
+                var aiResponse = deepSeek.SendMessage(prompt, sessionKey, null);
+
+                if (!aiResponse.Success || string.IsNullOrEmpty(aiResponse.Message))
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่สามารถวิเคราะห์ข้อความได้";
+                    return result;
+                }
+
+                string jsonArray = ExtractJsonArrayFromResponse(aiResponse.Message);
+                if (string.IsNullOrEmpty(jsonArray))
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่พบรีวิวในข้อความ";
+                    return result;
+                }
+
+                // Use the existing manual import with dedup
+                return ImportReviewsManual(sourceCode, jsonArray);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
+                return result;
+            }
+        }
+
         private string MakeHttpGetRequest(string url)
         {
             try
@@ -405,6 +707,7 @@ namespace Take_Time_BangPhra.Services
                 request.Method = "GET";
                 request.ContentType = "application/json";
                 request.Timeout = 30000;
+                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
                 using (var response = (HttpWebResponse)request.GetResponse())
                 using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
@@ -414,13 +717,12 @@ namespace Take_Time_BangPhra.Services
             }
             catch (WebException wex)
             {
-                string errorMsg = "HTTP request failed";
                 if (wex.Response != null)
                 {
                     using (var reader = new StreamReader(wex.Response.GetResponseStream()))
-                        errorMsg = reader.ReadToEnd();
+                        return null;
                 }
-                throw new Exception(errorMsg);
+                return null;
             }
         }
 
@@ -670,14 +972,25 @@ namespace Take_Time_BangPhra.Services
             if (string.IsNullOrEmpty(response))
                 return null;
 
-            // Try to find JSON between curly braces
             int startIdx = response.IndexOf('{');
             int endIdx = response.LastIndexOf('}');
 
             if (startIdx >= 0 && endIdx > startIdx)
-            {
                 return response.Substring(startIdx, endIdx - startIdx + 1);
-            }
+
+            return null;
+        }
+
+        private string ExtractJsonArrayFromResponse(string response)
+        {
+            if (string.IsNullOrEmpty(response))
+                return null;
+
+            int startIdx = response.IndexOf('[');
+            int endIdx = response.LastIndexOf(']');
+
+            if (startIdx >= 0 && endIdx > startIdx)
+                return response.Substring(startIdx, endIdx - startIdx + 1);
 
             return null;
         }

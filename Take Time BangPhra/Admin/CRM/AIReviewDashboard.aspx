@@ -274,30 +274,54 @@
 
     <!-- Tools Section -->
     <div class="card">
-        <h3>&#x1F6E0;&#xFE0F; เครื่องมือ</h3>
+        <h3><i class="fas fa-tools" style="color:#7C4DFF"></i> เครื่องมือดึงรีวิว</h3>
         <div class="tools-grid">
             <div class="tool-card">
-                <h4>&#x1F310; ดึงรีวิว Google</h4>
-                <p>ดึงรีวิวใหม่จาก Google Places</p>
+                <h4><i class="fab fa-google" style="color:#4285F4"></i> Google Reviews</h4>
+                <p>ดึงรีวิวจาก Google Places API (ต้องตั้งค่า placeId + apiKey)</p>
                 <button class="btn btn-primary" onclick="fetchGoogle()">ดึงรีวิว Google</button>
             </div>
             <div class="tool-card">
-                <h4>&#x1F4D8; ดึงรีวิว Facebook</h4>
-                <p>ดึงรีวิวใหม่จาก Facebook</p>
+                <h4><i class="fab fa-facebook" style="color:#1877F2"></i> Facebook Reviews</h4>
+                <p>ดึงรีวิวจาก Facebook Page (รองรับ pagination ดึงทั้งหมด)</p>
                 <button class="btn btn-primary" onclick="fetchFacebook()">ดึงรีวิว Facebook</button>
             </div>
             <div class="tool-card">
-                <h4>&#x1F4E5; นำเข้ารีวิว</h4>
-                <p>นำเข้าจากไฟล์ JSON</p>
-                <button class="btn btn-brown" onclick="openImportModal()">นำเข้ารีวิว</button>
+                <h4><i class="fas fa-globe" style="color:#5542F6"></i> ดึงรีวิว OTA</h4>
+                <p>ดึงจาก Agoda, Booking, TripAdvisor ฯลฯ (AI อ่านหน้าเว็บ)</p>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                    <select id="otaSource" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-family:'Prompt',sans-serif;font-size:13px;">
+                        <option value="AGODA">Agoda</option>
+                        <option value="BOOKING">Booking.com</option>
+                        <option value="TRIPADVISOR">TripAdvisor</option>
+                        <option value="EXPEDIA">Expedia</option>
+                        <option value="TRAVELOKA">Traveloka</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="fetchOTA()">ดึงรีวิว</button>
+                </div>
             </div>
             <div class="tool-card">
-                <h4>&#x1F9E0; วิเคราะห์รอดำเนินการ</h4>
-                <p>วิเคราะห์ sentiment รีวิวที่ยังไม่ได้วิเคราะห์</p>
+                <h4><i class="fas fa-sync-alt" style="color:#4CAF50"></i> ดึงทุกแหล่ง</h4>
+                <p>ดึงรีวิวจากทุกแหล่งที่เปิดใช้งานพร้อมกัน</p>
+                <button class="btn btn-green" onclick="fetchAll()">ดึงรีวิวทั้งหมด</button>
+            </div>
+            <div class="tool-card">
+                <h4><i class="fas fa-file-import" style="color:#FF9800"></i> นำเข้ารีวิว (JSON)</h4>
+                <p>วาง JSON array ที่มี reviewerName, rating, reviewText, reviewDate</p>
+                <button class="btn btn-brown" onclick="openImportModal()">นำเข้า JSON</button>
+            </div>
+            <div class="tool-card">
+                <h4><i class="fas fa-paste" style="color:#9C27B0"></i> นำเข้าจากข้อความ (AI)</h4>
+                <p>Copy ข้อความรีวิวจากเว็บมาวาง AI จะแปลงให้อัตโนมัติ</p>
+                <button class="btn btn-brown" onclick="openImportTextModal()">วาง + นำเข้า</button>
+            </div>
+            <div class="tool-card">
+                <h4><i class="fas fa-brain" style="color:#7C4DFF"></i> วิเคราะห์ Sentiment</h4>
+                <p>วิเคราะห์ sentiment รีวิวที่ยังไม่ได้วิเคราะห์ (สูงสุด 20 รายการ)</p>
                 <button class="btn btn-green" onclick="analyzePending()">วิเคราะห์ทั้งหมด</button>
             </div>
             <div class="tool-card">
-                <h4>&#x1F4CB; สร้างสรุปรีวิว</h4>
+                <h4><i class="fas fa-chart-pie" style="color:#E91E63"></i> สร้างสรุปรีวิว</h4>
                 <p>AI สรุปภาพรวมรีวิวตามช่วงเวลา</p>
                 <div class="period-select">
                     <select id="summaryPeriod">
@@ -307,6 +331,37 @@
                     </select>
                     <button class="btn btn-primary" onclick="generateSummary()">สร้างสรุป</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Text Modal -->
+    <div id="importTextModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:none;justify-content:center;align-items:center;">
+        <div style="background:white;border-radius:12px;padding:30px;max-width:700px;width:95%;max-height:80vh;overflow-y:auto;">
+            <h3 style="margin:0 0 15px;color:#5D4037;"><i class="fas fa-paste"></i> นำเข้ารีวิวจากข้อความ (AI Parse)</h3>
+            <p style="color:#666;font-size:13px;margin-bottom:15px;">
+                Copy ข้อความรีวิวจากเว็บไซต์ OTA มาวางด้านล่าง<br>
+                AI จะอ่านและแปลงเป็นข้อมูลรีวิวพร้อมชื่อ, คะแนน, วันที่ ให้อัตโนมัติ<br>
+                <strong>ระบบจะไม่นำเข้าซ้ำ</strong> ถ้ามีรีวิวจากคนเดิม วันเดียวกัน คะแนนเดียวกันอยู่แล้ว
+            </p>
+            <div style="margin-bottom:12px;">
+                <label style="font-weight:500;font-size:14px;">แหล่งที่มา:</label>
+                <select id="importTextSource" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-family:'Prompt',sans-serif;width:100%;margin-top:4px;">
+                    <option value="AGODA">Agoda</option>
+                    <option value="BOOKING">Booking.com</option>
+                    <option value="TRIPADVISOR">TripAdvisor</option>
+                    <option value="GOOGLE">Google</option>
+                    <option value="FACEBOOK">Facebook</option>
+                    <option value="EXPEDIA">Expedia</option>
+                    <option value="TRAVELOKA">Traveloka</option>
+                </select>
+            </div>
+            <textarea id="importTextContent" rows="12" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-family:'Prompt',sans-serif;font-size:13px;resize:vertical;" placeholder="วางข้อความรีวิวที่ copy มาจากเว็บไซต์ที่นี่...&#10;&#10;ตัวอย่าง:&#10;John D. - 9.2/10 - 15 มกราคม 2024&#10;ห้องสะอาดมาก บริการดี วิวสวย แนะนำเลย&#10;&#10;สมชาย - 8.0/10 - 3 กุมภาพันธ์ 2024&#10;โดยรวมดี แต่ wifi ช้า"></textarea>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:15px;">
+                <button class="btn" onclick="closeImportTextModal()" style="background:#eee;color:#333;">ยกเลิก</button>
+                <button class="btn btn-primary" onclick="importFromText()" id="btnImportText">
+                    <i class="fas fa-robot"></i> AI วิเคราะห์ + นำเข้า
+                </button>
             </div>
         </div>
     </div>
@@ -802,12 +857,8 @@
         showLoading();
         apiCall('fetchGoogle').then(function (res) {
             hideLoading();
-            if (res.success) {
-                showToast('ดึงรีวิว Google สำเร็จ: ' + (res.count || 0) + ' รีวิวใหม่', 'success');
-                loadDashboard();
-            } else {
-                showToast(res.message || 'เกิดข้อผิดพลาด', 'error');
-            }
+            showToast(res.message || 'เสร็จสิ้น', res.success ? 'success' : 'error');
+            if (res.success) loadDashboard();
         }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
     }
 
@@ -815,8 +866,31 @@
         showLoading();
         apiCall('fetchFacebook').then(function (res) {
             hideLoading();
-            if (res.success) {
-                showToast('ดึงรีวิว Facebook สำเร็จ: ' + (res.count || 0) + ' รีวิวใหม่', 'success');
+            showToast(res.message || 'เสร็จสิ้น', res.success ? 'success' : 'error');
+            if (res.success) loadDashboard();
+        }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
+    }
+
+    function fetchOTA() {
+        var sourceCode = document.getElementById('otaSource').value;
+        showLoading();
+        apiCall('fetchOTA', { sourceCode: sourceCode }).then(function (res) {
+            hideLoading();
+            showToast(res.message || 'เสร็จสิ้น', res.success ? 'success' : 'error');
+            if (res.success) loadDashboard();
+        }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
+    }
+
+    function fetchAll() {
+        showLoading();
+        apiCall('fetchAll').then(function (res) {
+            hideLoading();
+            if (res.success && res.data) {
+                var msgs = [];
+                for (var i = 0; i < res.data.length; i++) {
+                    msgs.push(res.data[i].message || res.data[i].source);
+                }
+                showToast(msgs.join('\n'), 'success');
                 loadDashboard();
             } else {
                 showToast(res.message || 'เกิดข้อผิดพลาด', 'error');
@@ -836,14 +910,40 @@
         showLoading();
         apiCall('importReviews', { sourceCode: sourceCode, content: content }).then(function (res) {
             hideLoading();
-            if (res.success) {
-                showToast('นำเข้าสำเร็จ: ' + (res.count || 0) + ' รีวิว', 'success');
-                closeModal('importModal');
-                loadDashboard();
-            } else {
-                showToast(res.message || 'เกิดข้อผิดพลาด', 'error');
-            }
+            showToast(res.message || 'เสร็จสิ้น', res.success ? 'success' : 'error');
+            if (res.success) { closeModal('importModal'); loadDashboard(); }
         }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
+    }
+
+    function openImportTextModal() {
+        document.getElementById('importTextContent').value = '';
+        document.getElementById('importTextModal').style.display = 'flex';
+    }
+
+    function closeImportTextModal() {
+        document.getElementById('importTextModal').style.display = 'none';
+    }
+
+    function importFromText() {
+        var sourceCode = document.getElementById('importTextSource').value;
+        var text = document.getElementById('importTextContent').value.trim();
+        if (!text) { showToast('กรุณาวางข้อความรีวิว', 'error'); return; }
+        var btn = document.getElementById('btnImportText');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> AI กำลังวิเคราะห์...';
+        showLoading();
+        apiCall('importText', { sourceCode: sourceCode, text: text }).then(function (res) {
+            hideLoading();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-robot"></i> AI วิเคราะห์ + นำเข้า';
+            showToast(res.message || 'เสร็จสิ้น', res.success ? 'success' : 'error');
+            if (res.success) { closeImportTextModal(); loadDashboard(); }
+        }).catch(function (err) {
+            hideLoading();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-robot"></i> AI วิเคราะห์ + นำเข้า';
+            showToast('เกิดข้อผิดพลาด: ' + err.message, 'error');
+        });
     }
 
     function analyzePending() {
