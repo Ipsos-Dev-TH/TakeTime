@@ -373,6 +373,7 @@
     <Content Include="Admin\Report\Report.aspx" />
     <Content Include="Admin\Report\CustomerAnalytics.aspx" />
     <Content Include="Admin\Report\ProfitLoss.aspx" />
+    <Content Include="Admin\Report\AIReportSummary.aspx" />
     <Content Include="Admin\Vendor.aspx" />
     <Content Include="Admin\CustomerManagement.aspx" />
     <Content Include="Admin\CRM\GuestProfile.aspx" />
@@ -380,6 +381,7 @@
     <Content Include="Admin\CRM\MembershipManagement.aspx" />
     <Content Include="Admin\CRM\RedemptionTerminal.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
+    <Content Include="Admin\CRM\AIReviewDashboard.aspx" />
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
     <Content Include="Admin\HR\EmployeeProfile.aspx" />
     <Content Include="Admin\Leave\LeaveManagement.aspx" />
@@ -829,6 +831,8 @@
     <Compile Include="Class\Services\OmniChannelService.cs" />
     <Compile Include="Class\Services\AIKnowledgeService.cs" />
     <Compile Include="Class\Services\ReviewService.cs" />
+    <Compile Include="Class\Services\AIReviewAnalysisService.cs" />
+    <Compile Include="Class\Services\AIReportService.cs" />
     <Compile Include="Class\Services\TierBenefitsService.cs" />
     <Compile Include="Account\TierBenefitsManagement.aspx.cs">
       <DependentUpon>TierBenefitsManagement.aspx</DependentUpon>
@@ -965,6 +969,20 @@
     </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.designer.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\AIReviewDashboard.aspx.cs">
+      <DependentUpon>AIReviewDashboard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\AIReviewDashboard.aspx.designer.cs">
+      <DependentUpon>AIReviewDashboard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Report\AIReportSummary.aspx.cs">
+      <DependentUpon>AIReportSummary.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Report\AIReportSummary.aspx.designer.cs">
+      <DependentUpon>AIReportSummary.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\RoomQRGenerator.aspx.cs">
       <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
