@@ -531,6 +531,19 @@ HTML:
                         case "FACEBOOK":
                             fetchResult = FetchFacebookReviews();
                             break;
+                        case "PANTIP":
+                            fetchResult = FetchPantipReviews();
+                            break;
+                        case "WONGNAI":
+                            fetchResult = FetchWongnaiReviews();
+                            break;
+                        case "TIKTOK":
+                        case "LEMON8":
+                        case "TWITTER":
+                        case "INSTAGRAM":
+                        case "YOUTUBE":
+                            fetchResult = FetchSocialMentions(sourceCode);
+                            break;
                         default:
                             fetchResult = FetchOTAReviews(sourceCode);
                             break;
@@ -697,6 +710,513 @@ HTML:
                 result["message"] = "เกิดข้อผิดพลาด: " + ex.Message;
                 return result;
             }
+        }
+
+        // ── Social Media Scraping ──
+
+        /// <summary>
+        /// Get the hotel search keyword from AI_Review_Sources config or default
+        /// ApiConfig: { "searchKeyword": "TakeTime BangPhra", "hotelName": "เทคไทม์ บางพระ" }
+        /// </summary>
+        private string GetSearchKeyword(string sourceCode)
+        {
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT ApiConfig FROM AI_Review_Sources WHERE SourceCode = @Source",
+                new Dictionary<string, object> { { "@Source", sourceCode } });
+
+            if (dt.Rows.Count > 0 && dt.Rows[0]["ApiConfig"] != DBNull.Value)
+            {
+                string json = dt.Rows[0]["ApiConfig"]?.ToString();
+                if (!string.IsNullOrEmpty(json))
+                {
+                    var config = _serializer.Deserialize<Dictionary<string, object>>(json);
+                    if (config != null && config.ContainsKey("searchKeyword"))
+                        return config["searchKeyword"]?.ToString();
+                    if (config != null && config.ContainsKey("hotelName"))
+                        return config["hotelName"]?.ToString();
+                }
+            }
+            return "TakeTime BangPhra";
+        }
+
+        /// <summary>
+        /// Scrape Pantip threads mentioning the hotel.
+        /// Uses Pantip search URL, fetches HTML, AI parses thread content.
+        /// Config: { "searchKeyword": "TakeTime บางพระ", "searchUrl": "https://pantip.com/search?q=..." }
+        /// </summary>
+        public Dictionary<string, object> FetchPantipReviews()
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", "PANTIP" } };
+
+            try
+            {
+                DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'PANTIP'", null);
+
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = "Pantip ไม่ได้เปิดใช้งาน";
+                    return result;
+                }
+
+                string keyword = GetSearchKeyword("PANTIP");
+                string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
+                string searchUrl = null;
+
+                if (!string.IsNullOrEmpty(apiConfigJson))
+                {
+                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    if (config != null && config.ContainsKey("searchUrl"))
+                        searchUrl = config["searchUrl"]?.ToString();
+                }
+
+                // Default Pantip search URL
+                if (string.IsNullOrEmpty(searchUrl))
+                    searchUrl = "https://pantip.com/search?q=" + Uri.EscapeDataString(keyword);
+
+                string html = MakeHttpGetRequest(searchUrl);
+                if (string.IsNullOrEmpty(html) || html.Length < 200)
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่สามารถดึงข้อมูลจาก Pantip ได้ (อาจถูก block)";
+                    return result;
+                }
+
+                string prompt = BuildSocialScrapingPrompt("Pantip", keyword, html,
+                    "แต่ละกระทู้/ความคิดเห็นนับเป็น 1 รีวิว ใช้ชื่อผู้โพสต์เป็น reviewerName " +
+                    "ถ้าไม่มี rating ให้ประเมินจากน้ำเสียง (บวก=4-5, กลาง=3, ลบ=1-2) " +
+                    "reviewDate ใช้วันที่โพสต์");
+
+                var parsed = CallAIAndParseReviews(prompt, "PANTIP");
+                if (parsed == null)
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่พบรีวิวในหน้า Pantip";
+                    return result;
+                }
+
+                foreach (var r in parsed)
+                {
+                    int added = InsertReview("PANTIP", r.PlatformId, r.ReviewerName, null,
+                        r.Rating, r.ReviewTitle, r.ReviewText, r.ReviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata("PANTIP");
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("Pantip: เพิ่มใหม่ {0} รายการ, ข้ามซ้ำ {1} รายการ", newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = "Pantip error: " + ex.Message;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Scrape Wongnai reviews for the hotel.
+        /// Config: { "searchKeyword": "TakeTime", "searchUrl": "https://www.wongnai.com/..." }
+        /// </summary>
+        public Dictionary<string, object> FetchWongnaiReviews()
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", "WONGNAI" } };
+
+            try
+            {
+                DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = 'WONGNAI'", null);
+
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = "Wongnai ไม่ได้เปิดใช้งาน";
+                    return result;
+                }
+
+                string keyword = GetSearchKeyword("WONGNAI");
+                string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
+                string searchUrl = null;
+
+                if (!string.IsNullOrEmpty(apiConfigJson))
+                {
+                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    if (config != null && config.ContainsKey("searchUrl"))
+                        searchUrl = config["searchUrl"]?.ToString();
+                }
+
+                if (string.IsNullOrEmpty(searchUrl))
+                    searchUrl = "https://www.wongnai.com/search?q=" + Uri.EscapeDataString(keyword) + "&type=hotel";
+
+                string html = MakeHttpGetRequest(searchUrl);
+                if (string.IsNullOrEmpty(html) || html.Length < 200)
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่สามารถดึงข้อมูลจาก Wongnai ได้";
+                    return result;
+                }
+
+                string prompt = BuildSocialScrapingPrompt("Wongnai", keyword, html,
+                    "Wongnai ใช้ rating 1-5 ดาว ดึง reviewerName, rating, reviewText, reviewDate");
+
+                var parsed = CallAIAndParseReviews(prompt, "WONGNAI");
+                if (parsed == null)
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่พบรีวิวใน Wongnai";
+                    return result;
+                }
+
+                foreach (var r in parsed)
+                {
+                    int added = InsertReview("WONGNAI", r.PlatformId, r.ReviewerName, null,
+                        r.Rating, r.ReviewTitle, r.ReviewText, r.ReviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata("WONGNAI");
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("Wongnai: เพิ่มใหม่ {0} รายการ, ข้ามซ้ำ {1} รายการ", newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = "Wongnai error: " + ex.Message;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Scrape TikTok, Lemon8, Twitter/X, Instagram, or YouTube mentions.
+        /// These platforms don't have structured reviews, so we extract mentions/comments.
+        /// Config: { "searchKeyword": "TakeTime BangPhra", "searchUrl": "https://..." }
+        /// </summary>
+        public Dictionary<string, object> FetchSocialMentions(string sourceCode)
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
+            try
+            {
+                DataTable dtSource = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ApiConfig, IsEnabled FROM AI_Review_Sources WHERE SourceCode = @Source",
+                    new Dictionary<string, object> { { "@Source", sourceCode } });
+
+                if (dtSource.Rows.Count == 0 || !Convert.ToBoolean(dtSource.Rows[0]["IsEnabled"]))
+                {
+                    result["success"] = false;
+                    result["message"] = sourceCode + " ไม่ได้เปิดใช้งาน";
+                    return result;
+                }
+
+                string keyword = GetSearchKeyword(sourceCode);
+                string apiConfigJson = dtSource.Rows[0]["ApiConfig"]?.ToString();
+                string searchUrl = null;
+                string apiKey = null;
+
+                if (!string.IsNullOrEmpty(apiConfigJson))
+                {
+                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    if (config != null)
+                    {
+                        if (config.ContainsKey("searchUrl"))
+                            searchUrl = config["searchUrl"]?.ToString();
+                        if (config.ContainsKey("apiKey"))
+                            apiKey = config["apiKey"]?.ToString();
+                    }
+                }
+
+                // Platform-specific default search URLs
+                if (string.IsNullOrEmpty(searchUrl))
+                {
+                    string encoded = Uri.EscapeDataString(keyword);
+                    switch (sourceCode)
+                    {
+                        case "TIKTOK":
+                            searchUrl = "https://www.tiktok.com/search?q=" + encoded;
+                            break;
+                        case "LEMON8":
+                            searchUrl = "https://www.lemon8-app.com/search?q=" + encoded;
+                            break;
+                        case "TWITTER":
+                            searchUrl = "https://x.com/search?q=" + encoded + "&f=live";
+                            break;
+                        case "INSTAGRAM":
+                            searchUrl = "https://www.instagram.com/explore/tags/" + keyword.Replace(" ", "").ToLower() + "/";
+                            break;
+                        case "YOUTUBE":
+                            // YouTube Data API if apiKey provided, otherwise search page
+                            if (!string.IsNullOrEmpty(apiKey))
+                                searchUrl = string.Format(
+                                    "https://www.googleapis.com/youtube/v3/search?part=snippet&q={0}&type=video&maxResults=20&key={1}",
+                                    encoded, Uri.EscapeDataString(apiKey));
+                            else
+                                searchUrl = "https://www.youtube.com/results?search_query=" + encoded;
+                            break;
+                        default:
+                            result["success"] = false;
+                            result["message"] = "ไม่รู้จักแพลตฟอร์ม: " + sourceCode;
+                            return result;
+                    }
+                }
+
+                // YouTube Data API has JSON response
+                if (sourceCode == "YOUTUBE" && !string.IsNullOrEmpty(apiKey))
+                {
+                    return FetchYouTubeViaAPI(apiKey, keyword);
+                }
+
+                // For all other social platforms: fetch HTML, AI parses
+                string html = MakeHttpGetRequest(searchUrl);
+                if (string.IsNullOrEmpty(html) || html.Length < 200)
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่สามารถดึงข้อมูลจาก " + sourceCode + " ได้ (อาจถูก block หรือต้องตั้ง searchUrl)";
+                    return result;
+                }
+
+                string platformHint = GetSocialPlatformHint(sourceCode);
+                string prompt = BuildSocialScrapingPrompt(sourceCode, keyword, html, platformHint);
+
+                var parsed = CallAIAndParseReviews(prompt, sourceCode);
+                if (parsed == null)
+                {
+                    result["success"] = false;
+                    result["message"] = "AI ไม่พบโพสต์/รีวิวเกี่ยวกับโรงแรมใน " + sourceCode;
+                    return result;
+                }
+
+                foreach (var r in parsed)
+                {
+                    int added = InsertReview(sourceCode, r.PlatformId, r.ReviewerName, null,
+                        r.Rating, r.ReviewTitle, r.ReviewText, r.ReviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata(sourceCode);
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("{0}: เพิ่มใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = sourceCode + " error: " + ex.Message;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Fetch YouTube video comments mentioning the hotel via YouTube Data API v3
+        /// </summary>
+        private Dictionary<string, object> FetchYouTubeViaAPI(string apiKey, string keyword)
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", "YOUTUBE" } };
+
+            try
+            {
+                // Search for videos about the hotel
+                string searchUrl = string.Format(
+                    "https://www.googleapis.com/youtube/v3/search?part=snippet&q={0}+รีวิว+โรงแรม&type=video&maxResults=10&key={1}",
+                    Uri.EscapeDataString(keyword), Uri.EscapeDataString(apiKey));
+
+                string searchResponse = MakeHttpGetRequest(searchUrl);
+                if (string.IsNullOrEmpty(searchResponse))
+                {
+                    result["success"] = false;
+                    result["message"] = "YouTube API search ไม่สำเร็จ";
+                    return result;
+                }
+
+                var searchData = _serializer.Deserialize<Dictionary<string, object>>(searchResponse);
+                if (searchData == null || !searchData.ContainsKey("items"))
+                {
+                    result["success"] = false;
+                    result["message"] = "YouTube: ไม่พบวิดีโอ";
+                    return result;
+                }
+
+                var items = searchData["items"] as ArrayList;
+                if (items == null || items.Count == 0)
+                {
+                    result["success"] = false;
+                    result["message"] = "YouTube: ไม่พบวิดีโอเกี่ยวกับโรงแรม";
+                    return result;
+                }
+
+                foreach (var itemObj in items)
+                {
+                    var item = itemObj as Dictionary<string, object>;
+                    if (item == null) continue;
+
+                    var idObj = item.ContainsKey("id") ? item["id"] as Dictionary<string, object> : null;
+                    var snippet = item.ContainsKey("snippet") ? item["snippet"] as Dictionary<string, object> : null;
+                    if (idObj == null || snippet == null) continue;
+
+                    string videoId = idObj.ContainsKey("videoId") ? idObj["videoId"]?.ToString() : null;
+                    if (string.IsNullOrEmpty(videoId)) continue;
+
+                    string channelTitle = snippet.ContainsKey("channelTitle") ? snippet["channelTitle"]?.ToString() : "Unknown";
+                    string videoTitle = snippet.ContainsKey("title") ? snippet["title"]?.ToString() : "";
+                    string description = snippet.ContainsKey("description") ? snippet["description"]?.ToString() : "";
+                    string publishedAt = snippet.ContainsKey("publishedAt") ? snippet["publishedAt"]?.ToString() : null;
+
+                    DateTime videoDate = DateTime.Now;
+                    if (!string.IsNullOrEmpty(publishedAt))
+                    {
+                        DateTime parsed;
+                        if (DateTime.TryParse(publishedAt, out parsed))
+                            videoDate = parsed;
+                    }
+
+                    string platformReviewId = "YT_VIDEO_" + videoId;
+                    string reviewText = videoTitle + "\n" + description;
+
+                    int added = InsertReview("YOUTUBE", platformReviewId, channelTitle, null,
+                        0, videoTitle, reviewText, videoDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata("YOUTUBE");
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("YouTube: เพิ่มใหม่ {0} วิดีโอ, ข้ามซ้ำ {1}", newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = "YouTube API error: " + ex.Message;
+            }
+            return result;
+        }
+
+        // ── Social scraping helpers ──
+
+        private string BuildSocialScrapingPrompt(string platform, string keyword, string html, string platformHint)
+        {
+            if (html.Length > 15000)
+                html = html.Substring(0, 15000);
+
+            return string.Format(
+                @"จาก HTML/เนื้อหาของหน้าค้นหา ""{0}"" บนแพลตฟอร์ม {1}
+ให้ดึงโพสต์/ความคิดเห็น/รีวิวทั้งหมดที่เกี่ยวกับโรงแรมนี้
+
+{2}
+
+ตอบเป็น JSON array เท่านั้น:
+[
+  {{
+    ""reviewerName"": ""ชื่อผู้โพสต์/username"",
+    ""rating"": 4.0,
+    ""reviewText"": ""เนื้อหาโพสต์/ความคิดเห็น"",
+    ""reviewDate"": ""2024-06-15"",
+    ""reviewTitle"": ""หัวข้อ หรือ null""
+  }}
+]
+
+กฎ:
+- rating 1-5 (ถ้าไม่มีคะแนน ให้ประเมินจากน้ำเสียง: ชม/แนะนำ=4-5, กลางๆ=3, บ่น/ด่า=1-2, ไม่ระบุ=0)
+- reviewDate ใช้ yyyy-MM-dd ถ้าเห็น ""3 วันที่แล้ว"" ให้คำนวณจาก {3}
+- เฉพาะโพสต์ที่เกี่ยวกับโรงแรม ""{0}"" เท่านั้น ข้ามโพสต์ไม่เกี่ยวข้อง
+- ถ้าไม่พบเลย ตอบ []
+
+HTML:
+{4}", keyword, platform, platformHint, DateTime.Now.ToString("yyyy-MM-dd"), html);
+        }
+
+        private string GetSocialPlatformHint(string sourceCode)
+        {
+            switch (sourceCode)
+            {
+                case "TIKTOK":
+                    return "TikTok: ดึงจาก caption ของวิดีโอ และ comments ถ้ามี ใช้ username เป็น reviewerName";
+                case "LEMON8":
+                    return "Lemon8: ดึงจากโพสต์รีวิว ใช้ username เป็น reviewerName มักมี rating ในเนื้อหา";
+                case "TWITTER":
+                    return "X/Twitter: ดึง tweets ที่กล่าวถึงโรงแรม ใช้ @username เป็น reviewerName tweet text เป็น reviewText";
+                case "INSTAGRAM":
+                    return "Instagram: ดึงจาก caption ของโพสต์ ใช้ username เป็น reviewerName";
+                case "YOUTUBE":
+                    return "YouTube: ดึง title + description ของวิดีโอรีวิว ใช้ชื่อ channel เป็น reviewerName";
+                default:
+                    return "";
+            }
+        }
+
+        private class ParsedReview
+        {
+            public string PlatformId;
+            public string ReviewerName;
+            public double Rating;
+            public string ReviewTitle;
+            public string ReviewText;
+            public DateTime ReviewDate;
+        }
+
+        private List<ParsedReview> CallAIAndParseReviews(string prompt, string sourceCode)
+        {
+            var deepSeek = new DeepSeekService(_connectionString);
+            string sessionKey = "social_scrape_" + sourceCode + "_" + DateTime.Now.Ticks;
+            var aiResponse = deepSeek.SendMessage(prompt, sessionKey, null);
+
+            if (!aiResponse.Success || string.IsNullOrEmpty(aiResponse.Message))
+                return null;
+
+            string jsonArray = ExtractJsonArrayFromResponse(aiResponse.Message);
+            if (string.IsNullOrEmpty(jsonArray))
+                return null;
+
+            var reviews = _serializer.Deserialize<ArrayList>(jsonArray);
+            if (reviews == null || reviews.Count == 0)
+                return null;
+
+            var results = new List<ParsedReview>();
+            foreach (var reviewObj in reviews)
+            {
+                var review = reviewObj as Dictionary<string, object>;
+                if (review == null) continue;
+
+                string reviewerName = review.ContainsKey("reviewerName") ? review["reviewerName"]?.ToString() : "Unknown";
+                double rating = review.ContainsKey("rating") ? Convert.ToDouble(review["rating"]) : 0;
+                string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
+                string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
+
+                DateTime reviewDate = DateTime.Now;
+                if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
+                {
+                    DateTime parsed;
+                    if (DateTime.TryParse(review["reviewDate"].ToString(), out parsed))
+                        reviewDate = parsed;
+                }
+
+                if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
+                    continue;
+
+                string platformId = sourceCode + "_" + reviewerName.GetHashCode()
+                    + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)(rating * 10));
+
+                results.Add(new ParsedReview
+                {
+                    PlatformId = platformId,
+                    ReviewerName = reviewerName,
+                    Rating = rating,
+                    ReviewTitle = reviewTitle,
+                    ReviewText = reviewText,
+                    ReviewDate = reviewDate
+                });
+            }
+
+            return results.Count > 0 ? results : null;
         }
 
         private string MakeHttpGetRequest(string url)

@@ -291,11 +291,22 @@
                 <p>ดึงจาก Agoda, Booking, TripAdvisor ฯลฯ (AI อ่านหน้าเว็บ)</p>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
                     <select id="otaSource" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-family:'Prompt',sans-serif;font-size:13px;">
-                        <option value="AGODA">Agoda</option>
-                        <option value="BOOKING">Booking.com</option>
-                        <option value="TRIPADVISOR">TripAdvisor</option>
-                        <option value="EXPEDIA">Expedia</option>
-                        <option value="TRAVELOKA">Traveloka</option>
+                        <optgroup label="OTA แพลตฟอร์ม">
+                            <option value="AGODA">Agoda</option>
+                            <option value="BOOKING">Booking.com</option>
+                            <option value="TRIPADVISOR">TripAdvisor</option>
+                            <option value="EXPEDIA">Expedia</option>
+                            <option value="TRAVELOKA">Traveloka</option>
+                        </optgroup>
+                        <optgroup label="Social Media">
+                            <option value="PANTIP">Pantip</option>
+                            <option value="TIKTOK">TikTok</option>
+                            <option value="LEMON8">Lemon8</option>
+                            <option value="WONGNAI">Wongnai</option>
+                            <option value="TWITTER">X (Twitter)</option>
+                            <option value="INSTAGRAM">Instagram</option>
+                            <option value="YOUTUBE">YouTube</option>
+                        </optgroup>
                     </select>
                     <button class="btn btn-primary" onclick="fetchOTA()">ดึงรีวิว</button>
                 </div>
@@ -347,13 +358,26 @@
             <div style="margin-bottom:12px;">
                 <label style="font-weight:500;font-size:14px;">แหล่งที่มา:</label>
                 <select id="importTextSource" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-family:'Prompt',sans-serif;width:100%;margin-top:4px;">
-                    <option value="AGODA">Agoda</option>
-                    <option value="BOOKING">Booking.com</option>
-                    <option value="TRIPADVISOR">TripAdvisor</option>
-                    <option value="GOOGLE">Google</option>
-                    <option value="FACEBOOK">Facebook</option>
-                    <option value="EXPEDIA">Expedia</option>
-                    <option value="TRAVELOKA">Traveloka</option>
+                    <optgroup label="OTA">
+                        <option value="AGODA">Agoda</option>
+                        <option value="BOOKING">Booking.com</option>
+                        <option value="TRIPADVISOR">TripAdvisor</option>
+                        <option value="EXPEDIA">Expedia</option>
+                        <option value="TRAVELOKA">Traveloka</option>
+                    </optgroup>
+                    <optgroup label="Reviews">
+                        <option value="GOOGLE">Google</option>
+                        <option value="FACEBOOK">Facebook</option>
+                        <option value="WONGNAI">Wongnai</option>
+                    </optgroup>
+                    <optgroup label="Social">
+                        <option value="PANTIP">Pantip</option>
+                        <option value="TIKTOK">TikTok</option>
+                        <option value="LEMON8">Lemon8</option>
+                        <option value="TWITTER">X (Twitter)</option>
+                        <option value="INSTAGRAM">Instagram</option>
+                        <option value="YOUTUBE">YouTube</option>
+                    </optgroup>
                 </select>
             </div>
             <textarea id="importTextContent" rows="12" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-family:'Prompt',sans-serif;font-size:13px;resize:vertical;" placeholder="วางข้อความรีวิวที่ copy มาจากเว็บไซต์ที่นี่...&#10;&#10;ตัวอย่าง:&#10;John D. - 9.2/10 - 15 มกราคม 2024&#10;ห้องสะอาดมาก บริการดี วิวสวย แนะนำเลย&#10;&#10;สมชาย - 8.0/10 - 3 กุมภาพันธ์ 2024&#10;โดยรวมดี แต่ wifi ช้า"></textarea>

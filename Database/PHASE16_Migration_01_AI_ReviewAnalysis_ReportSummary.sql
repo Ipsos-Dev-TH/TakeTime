@@ -29,9 +29,37 @@ BEGIN
     ('BOOKING',     N'Booking.com',           'fas fa-suitcase',      '#003580', 0),
     ('TRIPADVISOR', N'TripAdvisor',           'fab fa-tripadvisor',   '#34E0A1', 0),
     ('EXPEDIA',     N'Expedia',               'fas fa-globe',         '#FFCC00', 0),
-    ('TRAVELOKA',   N'Traveloka',             'fas fa-plane',         '#0194F3', 0);
+    ('TRAVELOKA',   N'Traveloka',             'fas fa-plane',         '#0194F3', 0),
+    ('PANTIP',      N'Pantip',                'fas fa-comments',      '#7A2D8F', 0),
+    ('TIKTOK',      N'TikTok',                'fab fa-tiktok',        '#000000', 0),
+    ('LEMON8',      N'Lemon8',                'fas fa-lemon',         '#FFE135', 0),
+    ('WONGNAI',     N'Wongnai',               'fas fa-utensils',      '#ED1C24', 0),
+    ('TWITTER',     N'X (Twitter)',            'fab fa-x-twitter',     '#000000', 0),
+    ('INSTAGRAM',   N'Instagram',             'fab fa-instagram',     '#E4405F', 0),
+    ('YOUTUBE',     N'YouTube',               'fab fa-youtube',       '#FF0000', 0);
 
     PRINT 'Created table: AI_Review_Sources with seed data';
+END
+GO
+
+-- 1b. Add social platform sources if table exists but missing new sources
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Review_Sources')
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'PANTIP')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('PANTIP', N'Pantip', 'fas fa-comments', '#7A2D8F', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'TIKTOK')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('TIKTOK', N'TikTok', 'fab fa-tiktok', '#000000', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'LEMON8')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('LEMON8', N'Lemon8', 'fas fa-lemon', '#FFE135', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'WONGNAI')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('WONGNAI', N'Wongnai', 'fas fa-utensils', '#ED1C24', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'TWITTER')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('TWITTER', N'X (Twitter)', 'fab fa-x-twitter', '#000000', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'INSTAGRAM')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('INSTAGRAM', N'Instagram', 'fab fa-instagram', '#E4405F', 0);
+    IF NOT EXISTS (SELECT 1 FROM AI_Review_Sources WHERE SourceCode = 'YOUTUBE')
+        INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES ('YOUTUBE', N'YouTube', 'fab fa-youtube', '#FF0000', 0);
+    PRINT 'Ensured social platform sources exist';
 END
 GO
 

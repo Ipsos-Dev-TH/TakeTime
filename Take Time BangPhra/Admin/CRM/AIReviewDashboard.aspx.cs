@@ -185,7 +185,22 @@ namespace Take_Time_BangPhra.Admin.CRM
                 string sourceCode = GetString(data, "sourceCode", "");
                 if (string.IsNullOrEmpty(sourceCode))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ต้องระบุ sourceCode" } };
-                return svc.FetchOTAReviews(sourceCode);
+
+                switch (sourceCode)
+                {
+                    case "PANTIP":
+                        return svc.FetchPantipReviews();
+                    case "WONGNAI":
+                        return svc.FetchWongnaiReviews();
+                    case "TIKTOK":
+                    case "LEMON8":
+                    case "TWITTER":
+                    case "INSTAGRAM":
+                    case "YOUTUBE":
+                        return svc.FetchSocialMentions(sourceCode);
+                    default:
+                        return svc.FetchOTAReviews(sourceCode);
+                }
             }
             catch (Exception ex)
             {
