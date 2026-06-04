@@ -129,6 +129,12 @@ namespace Take_Time_BangPhra.Admin.Chat
                 case "aiSuggest":
                     result = AiSuggest(data);
                     break;
+                case "confirmBooking":
+                    result = ConfirmBooking(data);
+                    break;
+                case "pendingBookings":
+                    result = GetPendingBookings();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -379,6 +385,68 @@ namespace Take_Time_BangPhra.Admin.Chat
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> ConfirmBooking(Dictionary<string, object> data)
+        {
+            try
+            {
+                int resId = Convert.ToInt32(data["reservationId"]);
+                string staffName = Session["username"]?.ToString() ?? "Staff";
+
+                var aiSvc = new AIKnowledgeService(ConnStr);
+                var result = aiSvc.ConfirmBookingByStaff(resId, staffName);
+
+                if (Convert.ToBoolean(result["success"]))
+                {
+                    long convId = Convert.ToInt64(result["conversationId"]);
+                    if (convId > 0)
+                    {
+                        var omniSvc = new OmniChannelService(ConnStr);
+                        omniSvc.SendBookingStatusUpdate(convId, resId, "ยืนยันแล้ว", staffName);
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> GetPendingBookings()
+        {
+            try
+            {
+                var aiSvc = new AIKnowledgeService(ConnStr);
+                DataTable dt = aiSvc.GetPendingAIBookings();
+                var bookings = new List<object>();
+
+                foreach (DataRow row in dt.Rows)
+                {
+                    bookings.Add(new
+                    {
+                        id = Convert.ToInt32(row["ID"]),
+                        reservationId = Convert.ToInt32(row["ReservationID"]),
+                        conversationId = Convert.ToInt64(row["ConversationID"]),
+                        customerName = row["CustomerName"]?.ToString(),
+                        customerPhone = row["Customer_MobilePhone"]?.ToString(),
+                        roomName = row["RoomNames"]?.ToString(),
+                        checkIn = Convert.ToDateTime(row["CheckinDate"]).ToString("dd/MM/yyyy"),
+                        checkOut = Convert.ToDateTime(row["CheckoutDate"]).ToString("dd/MM/yyyy"),
+                        totalPrice = Convert.ToDecimal(row["TotalPrice"]),
+                        status = row["Status"]?.ToString(),
+                        createdDate = Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM/yyyy HH:mm")
+                    });
+                }
+
+                return new Dictionary<string, object> { { "bookings", bookings } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "bookings", new List<object>() }, { "error", ex.Message } };
             }
         }
 

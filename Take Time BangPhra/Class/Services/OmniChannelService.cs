@@ -462,6 +462,117 @@ namespace Take_Time_BangPhra.Services
 
         #endregion
 
+        #region Booking Confirmation Delivery
+
+        public void SendBookingConfirmation(long conversationId, int reservationId)
+        {
+            try
+            {
+                DataTable dtConv = GetConversationDetail(conversationId);
+                if (dtConv.Rows.Count == 0) return;
+
+                string channelCode = dtConv.Rows[0]["ChannelCode"].ToString();
+                var aiSvc = new AIKnowledgeService(_connStr);
+
+                if (channelCode == "LINE")
+                {
+                    string flexJson = aiSvc.GenerateLineFlexConfirmation(reservationId);
+                    if (!string.IsNullOrEmpty(flexJson))
+                    {
+                        DeliverLineFlexMessage(conversationId, flexJson, "Booking Confirmation #" + reservationId);
+
+                        string textConfirm = aiSvc.GenerateBookingConfirmationText(reservationId);
+                        _code.DatabaseInsertSafe(_connStr,
+                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
+                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_CONFIRM', GETDATE())",
+                            new Dictionary<string, object>
+                            {
+                                { "@ConvId", conversationId },
+                                { "@Content", textConfirm }
+                            });
+
+                        _code.DatabaseInsertSafe(_connStr,
+                            "UPDATE OmniChannel_Conversations SET LastMessageDate = GETDATE(), LastMessagePreview = N'[ยืนยันการจอง #" + reservationId + "]', Updated_Date = GETDATE() WHERE ID = @Id",
+                            new Dictionary<string, object> { { "@Id", conversationId } });
+                        return;
+                    }
+                }
+
+                string confirmation = aiSvc.GenerateBookingConfirmationText(reservationId);
+                if (!string.IsNullOrEmpty(confirmation))
+                    SendMessage(conversationId, confirmation, "AI Assistant", isAI: true, aiSource: "BOOKING_CONFIRM");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("SendBookingConfirmation error: {0}", ex.Message);
+            }
+        }
+
+        public void SendBookingStatusUpdate(long conversationId, int reservationId, string newStatus, string staffName)
+        {
+            try
+            {
+                var aiSvc = new AIKnowledgeService(_connStr);
+                DataTable dtConv = GetConversationDetail(conversationId);
+                if (dtConv.Rows.Count == 0) return;
+
+                string channelCode = dtConv.Rows[0]["ChannelCode"].ToString();
+                string statusEmoji = newStatus == "ยืนยันแล้ว" ? "✅" : "📋";
+                string headerMsg = statusEmoji + " อัพเดทสถานะการจอง #" + reservationId + "\nสถานะ: " + newStatus;
+                if (!string.IsNullOrEmpty(staffName))
+                    headerMsg += "\nโดย: " + staffName;
+
+                if (channelCode == "LINE")
+                {
+                    string flexJson = aiSvc.GenerateLineFlexConfirmation(reservationId);
+                    if (!string.IsNullOrEmpty(flexJson))
+                    {
+                        DeliverLineFlexMessage(conversationId, flexJson, "Booking #" + reservationId + " - " + newStatus);
+
+                        _code.DatabaseInsertSafe(_connStr,
+                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
+                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_STATUS', GETDATE())",
+                            new Dictionary<string, object>
+                            {
+                                { "@ConvId", conversationId },
+                                { "@Content", headerMsg + "\n\n" + aiSvc.GenerateBookingConfirmationText(reservationId) }
+                            });
+
+                        _code.DatabaseInsertSafe(_connStr,
+                            "UPDATE OmniChannel_Conversations SET LastMessageDate = GETDATE(), LastMessagePreview = @Preview, Updated_Date = GETDATE() WHERE ID = @Id",
+                            new Dictionary<string, object> { { "@Id", conversationId }, { "@Preview", "[อัพเดทสถานะจอง #" + reservationId + "]" } });
+                        return;
+                    }
+                }
+
+                string confirmation = aiSvc.GenerateBookingConfirmationText(reservationId);
+                string fullMessage = headerMsg + "\n\n" + confirmation;
+                SendMessage(conversationId, fullMessage, "AI Assistant", isAI: true, aiSource: "BOOKING_STATUS");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("SendBookingStatusUpdate error: {0}", ex.Message);
+            }
+        }
+
+        private void DeliverLineFlexMessage(long conversationId, string flexJson, string altText)
+        {
+            var config = GetChannelConfig("LINE");
+            string token = config.ContainsKey("channelAccessToken") ? config["channelAccessToken"]?.ToString() : "";
+            if (string.IsNullOrEmpty(token)) return;
+
+            string userId = GetPlatformUserId(conversationId);
+            if (string.IsNullOrEmpty(userId)) return;
+
+            string body = "{\"to\":\"" + userId + "\",\"messages\":[{\"type\":\"flex\",\"altText\":\"" +
+                altText.Replace("\"", "\\\"") + "\",\"contents\":" + flexJson + "}]}";
+
+            PostJson("https://api.line.me/v2/bot/message/push", body,
+                new Dictionary<string, string> { { "Authorization", "Bearer " + token } });
+        }
+
+        #endregion
+
         #region Contact Management
 
         public void LinkContactToCustomer(long contactId, string customerPhone)

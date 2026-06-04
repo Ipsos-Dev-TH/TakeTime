@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Take_Time_BangPhra.Services
@@ -530,7 +531,9 @@ namespace Take_Time_BangPhra.Services
                     { "checkOut", checkOut.ToString("dd/MM/yyyy") },
                     { "nights", nights },
                     { "total", total },
-                    { "status", "รอยืนยัน" }
+                    { "status", "รอยืนยัน" },
+                    { "customerName", name },
+                    { "customerPhone", phone }
                 };
             }
             catch (Exception ex)
@@ -582,7 +585,7 @@ namespace Take_Time_BangPhra.Services
 
                 string enhancedPrompt = originalPrompt + systemContext;
                 if (IsFeatureEnabled("BOOKING_CREATE"))
-                    enhancedPrompt += "\nหากลูกค้าต้องการจองห้องพัก ให้สอบถามวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก และเบอร์โทร แล้วสรุปข้อมูลให้";
+                    enhancedPrompt += BOOKING_CREATE_INSTRUCTION;
 
                 deepSeek.SetConfig("AI_SystemPrompt", enhancedPrompt);
 
@@ -594,13 +597,36 @@ namespace Take_Time_BangPhra.Services
 
                 if (result.Success)
                 {
+                    string reply = result.Message;
+                    Dictionary<string, object> bookingResult = null;
+
+                    if (IsFeatureEnabled("BOOKING_CREATE") && reply.Contains("{{BOOK:"))
+                    {
+                        bookingResult = ParseAndExecuteBooking(reply, customerPhone, conversationId);
+                        if (bookingResult != null && Convert.ToBoolean(bookingResult["success"]))
+                        {
+                            string confirmation = GenerateBookingConfirmationText(bookingResult);
+                            reply = Regex.Replace(reply, @"\{\{BOOK:[^}]+\}\}", "").Trim();
+                            if (!string.IsNullOrEmpty(reply))
+                                reply += "\n\n";
+                            reply += confirmation;
+                        }
+                        else
+                        {
+                            reply = Regex.Replace(reply, @"\{\{BOOK:[^}]+\}\}", "").Trim();
+                            if (bookingResult != null)
+                                reply += "\n\n(ขออภัยค่ะ ไม่สามารถทำการจองได้ในขณะนี้: " + (bookingResult.ContainsKey("error") ? bookingResult["error"].ToString() : "กรุณาลองใหม่") + ")";
+                        }
+                    }
+
                     return new AutoReplyResult
                     {
                         Success = true,
-                        Reply = result.Message,
+                        Reply = reply,
                         Confidence = 0.7,
                         Source = "DEEPSEEK_API",
-                        TokensUsed = result.TotalTokens
+                        TokensUsed = result.TotalTokens,
+                        BookingData = bookingResult
                     };
                 }
 
@@ -612,32 +638,329 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        private const string BOOKING_CREATE_INSTRUCTION =
+            "\n\n=== คำสั่งสร้างการจอง ===" +
+            "\nหากลูกค้าต้องการจองห้องพัก ให้สอบถามข้อมูลต่อไปนี้ให้ครบ:" +
+            "\n1. เบอร์โทรศัพท์" +
+            "\n2. ชื่อผู้จอง" +
+            "\n3. ห้องที่ต้องการ (ใช้ room_id จากข้อมูลห้องพัก)" +
+            "\n4. วันเช็คอิน (dd/MM/yyyy)" +
+            "\n5. วันเช็คเอาท์ (dd/MM/yyyy)" +
+            "\n6. จำนวนผู้เข้าพัก" +
+            "\nเมื่อได้ข้อมูลครบทั้งหมดแล้ว ให้ใส่คำสั่งนี้ในข้อความตอบกลับ (ห้ามถามลูกค้าซ้ำถ้าได้ข้อมูลครบแล้ว):" +
+            "\n{{BOOK:เบอร์โทร|ชื่อ|room_id|dd/MM/yyyy|dd/MM/yyyy|จำนวนคน}}" +
+            "\nตัวอย่าง: {{BOOK:0891234567|สมชาย ใจดี|3|15/06/2026|17/06/2026|2}}" +
+            "\nหลังคำสั่ง ให้พิมพ์ข้อความยืนยันสั้นๆ เช่น 'กำลังดำเนินการจองให้ค่ะ'";
+
+        private Dictionary<string, object> ParseAndExecuteBooking(string aiResponse, string fallbackPhone, long conversationId)
+        {
+            try
+            {
+                var match = Regex.Match(aiResponse, @"\{\{BOOK:([^}]+)\}\}");
+                if (!match.Success) return null;
+
+                var parts = match.Groups[1].Value.Split('|');
+                if (parts.Length < 6) return null;
+
+                string phone = parts[0].Trim();
+                string name = parts[1].Trim();
+                int roomId;
+                if (!int.TryParse(parts[2].Trim(), out roomId)) return null;
+
+                DateTime checkIn, checkOut;
+                if (!DateTime.TryParseExact(parts[3].Trim(), new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out checkIn))
+                    return null;
+                if (!DateTime.TryParseExact(parts[4].Trim(), new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out checkOut))
+                    return null;
+
+                int people;
+                if (!int.TryParse(parts[5].Trim(), out people)) people = 1;
+
+                if (string.IsNullOrEmpty(phone) && !string.IsNullOrEmpty(fallbackPhone))
+                    phone = fallbackPhone;
+
+                return CreatePendingBooking(phone, name, roomId, checkIn, checkOut, people, conversationId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        #endregion
+
+        #region Booking Confirmation Generator
+
+        public string GenerateBookingConfirmationText(Dictionary<string, object> bookingData)
+        {
+            if (bookingData == null || !bookingData.ContainsKey("success") || !Convert.ToBoolean(bookingData["success"]))
+                return "";
+
+            string resId = bookingData.ContainsKey("reservationId") ? bookingData["reservationId"].ToString() : "-";
+            string room = bookingData.ContainsKey("roomName") ? bookingData["roomName"].ToString() : "-";
+            string checkIn = bookingData.ContainsKey("checkIn") ? bookingData["checkIn"].ToString() : "-";
+            string checkOut = bookingData.ContainsKey("checkOut") ? bookingData["checkOut"].ToString() : "-";
+            string nights = bookingData.ContainsKey("nights") ? bookingData["nights"].ToString() : "-";
+            string total = bookingData.ContainsKey("total") ? Convert.ToDecimal(bookingData["total"]).ToString("N0") : "-";
+            string status = bookingData.ContainsKey("status") ? bookingData["status"].ToString() : "รอยืนยัน";
+            string name = bookingData.ContainsKey("customerName") ? bookingData["customerName"].ToString() : "";
+            string phone = bookingData.ContainsKey("customerPhone") ? bookingData["customerPhone"].ToString() : "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("  TakeTime BangPhra");
+            sb.AppendLine("  ยืนยันการจองห้องพัก");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"เลขที่จอง : #{resId}");
+            if (!string.IsNullOrEmpty(name))
+                sb.AppendLine($"ชื่อผู้จอง : {name}");
+            if (!string.IsNullOrEmpty(phone))
+                sb.AppendLine($"เบอร์โทร  : {phone}");
+            sb.AppendLine($"ห้องพัก   : {room}");
+            sb.AppendLine($"เช็คอิน   : {checkIn}");
+            sb.AppendLine($"เช็คเอาท์ : {checkOut}");
+            sb.AppendLine($"จำนวนคืน  : {nights} คืน");
+            sb.AppendLine($"ราคารวม   : {total} บาท");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"สถานะ : {status}");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━");
+
+            if (status == "รอยืนยัน")
+                sb.AppendLine("รอพนักงานยืนยันการจอง");
+            else if (status == "ยืนยันแล้ว")
+                sb.AppendLine("การจองได้รับการยืนยันแล้วค่ะ");
+
+            sb.AppendLine("ขอบคุณที่เลือก TakeTime BangPhra");
+
+            return sb.ToString();
+        }
+
+        public string GenerateBookingConfirmationText(int reservationId)
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_connStr,
+                    @"SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.StayDays,
+                             r.TotalPrice, r.Status, c.Name AS CustomerName,
+                             ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'') AS RoomNames
+                      FROM Reservation r
+                      LEFT JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                      WHERE r.ID = @Id",
+                    new Dictionary<string, object> { { "@Id", reservationId } });
+
+                if (dt.Rows.Count == 0) return "";
+
+                var row = dt.Rows[0];
+                var data = new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "reservationId", reservationId },
+                    { "roomName", row["RoomNames"].ToString() },
+                    { "checkIn", Convert.ToDateTime(row["CheckinDate"]).ToString("dd/MM/yyyy") },
+                    { "checkOut", Convert.ToDateTime(row["CheckoutDate"]).ToString("dd/MM/yyyy") },
+                    { "nights", Convert.ToInt32(row["StayDays"]) },
+                    { "total", Convert.ToDecimal(row["TotalPrice"]) },
+                    { "status", row["Status"].ToString() },
+                    { "customerName", row["CustomerName"]?.ToString() ?? "" },
+                    { "customerPhone", row["Customer_MobilePhone"]?.ToString() ?? "" }
+                };
+
+                return GenerateBookingConfirmationText(data);
+            }
+            catch { return ""; }
+        }
+
+        public string GenerateLineFlexConfirmation(Dictionary<string, object> bookingData)
+        {
+            if (bookingData == null || !Convert.ToBoolean(bookingData["success"])) return null;
+
+            string resId = bookingData.ContainsKey("reservationId") ? bookingData["reservationId"].ToString() : "-";
+            string room = bookingData.ContainsKey("roomName") ? bookingData["roomName"].ToString() : "-";
+            string checkIn = bookingData.ContainsKey("checkIn") ? bookingData["checkIn"].ToString() : "-";
+            string checkOut = bookingData.ContainsKey("checkOut") ? bookingData["checkOut"].ToString() : "-";
+            string nights = bookingData.ContainsKey("nights") ? bookingData["nights"].ToString() : "-";
+            string total = bookingData.ContainsKey("total") ? Convert.ToDecimal(bookingData["total"]).ToString("N0") : "-";
+            string status = bookingData.ContainsKey("status") ? bookingData["status"].ToString() : "รอยืนยัน";
+            string name = bookingData.ContainsKey("customerName") ? bookingData["customerName"].ToString() : "";
+            string statusColor = status == "ยืนยันแล้ว" ? "#4CAF50" : "#FF9800";
+
+            return @"{
+  ""type"": ""bubble"",
+  ""size"": ""mega"",
+  ""header"": {
+    ""type"": ""box"", ""layout"": ""vertical"",
+    ""backgroundColor"": ""#5D4037"",
+    ""contents"": [
+      {""type"": ""text"", ""text"": ""TakeTime BangPhra"", ""color"": ""#FFD54F"", ""size"": ""sm"", ""weight"": ""bold""},
+      {""type"": ""text"", ""text"": ""ยืนยันการจองห้องพัก"", ""color"": ""#FFFFFF"", ""size"": ""xl"", ""weight"": ""bold"", ""margin"": ""sm""}
+    ],
+    ""paddingAll"": ""20px""
+  },
+  ""body"": {
+    ""type"": ""box"", ""layout"": ""vertical"", ""spacing"": ""md"",
+    ""contents"": [
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""เลขที่จอง"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": ""#" + resId + @""", ""size"": ""sm"", ""weight"": ""bold"", ""align"": ""end""}
+      ]},
+      {""type"": ""separator""},
+      " + (!string.IsNullOrEmpty(name) ? @"{""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""ผู้จอง"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + EscapeJson(name) + @""", ""size"": ""sm"", ""align"": ""end""}
+      ]}," : "") + @"
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""ห้องพัก"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + EscapeJson(room) + @""", ""size"": ""sm"", ""weight"": ""bold"", ""align"": ""end""}
+      ]},
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""เช็คอิน"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + checkIn + @""", ""size"": ""sm"", ""align"": ""end""}
+      ]},
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""เช็คเอาท์"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + checkOut + @""", ""size"": ""sm"", ""align"": ""end""}
+      ]},
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""จำนวนคืน"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + nights + @" คืน"", ""size"": ""sm"", ""align"": ""end""}
+      ]},
+      {""type"": ""separator""},
+      {""type"": ""box"", ""layout"": ""horizontal"", ""contents"": [
+        {""type"": ""text"", ""text"": ""ราคารวม"", ""size"": ""md"", ""weight"": ""bold"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + total + @" บาท"", ""size"": ""lg"", ""weight"": ""bold"", ""color"": ""#5D4037"", ""align"": ""end""}
+      ]},
+      {""type"": ""separator""},
+      {""type"": ""box"", ""layout"": ""horizontal"", ""margin"": ""md"", ""contents"": [
+        {""type"": ""text"", ""text"": ""สถานะ"", ""size"": ""sm"", ""color"": ""#999999"", ""flex"": 0},
+        {""type"": ""text"", ""text"": """ + EscapeJson(status) + @""", ""size"": ""sm"", ""weight"": ""bold"", ""color"": """ + statusColor + @""", ""align"": ""end""}
+      ]}
+    ]
+  },
+  ""footer"": {
+    ""type"": ""box"", ""layout"": ""vertical"", ""spacing"": ""sm"",
+    ""contents"": [
+      {""type"": ""text"", ""text"": """ + (status == "รอยืนยัน" ? "รอพนักงานยืนยันการจอง" : "การจองได้รับการยืนยันแล้ว") + @""", ""size"": ""xs"", ""color"": ""#999999"", ""align"": ""center""},
+      {""type"": ""text"", ""text"": ""ขอบคุณที่เลือก TakeTime BangPhra"", ""size"": ""xs"", ""color"": ""#5D4037"", ""align"": ""center"", ""weight"": ""bold""}
+    ]
+  }
+}";
+        }
+
+        public string GenerateLineFlexConfirmation(int reservationId)
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_connStr,
+                    @"SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.StayDays,
+                             r.TotalPrice, r.Status, c.Name AS CustomerName,
+                             ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'') AS RoomNames
+                      FROM Reservation r
+                      LEFT JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                      WHERE r.ID = @Id",
+                    new Dictionary<string, object> { { "@Id", reservationId } });
+
+                if (dt.Rows.Count == 0) return null;
+
+                var row = dt.Rows[0];
+                var data = new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "reservationId", reservationId },
+                    { "roomName", row["RoomNames"].ToString() },
+                    { "checkIn", Convert.ToDateTime(row["CheckinDate"]).ToString("dd/MM/yyyy") },
+                    { "checkOut", Convert.ToDateTime(row["CheckoutDate"]).ToString("dd/MM/yyyy") },
+                    { "nights", Convert.ToInt32(row["StayDays"]) },
+                    { "total", Convert.ToDecimal(row["TotalPrice"]) },
+                    { "status", row["Status"].ToString() },
+                    { "customerName", row["CustomerName"]?.ToString() ?? "" },
+                    { "customerPhone", row["Customer_MobilePhone"]?.ToString() ?? "" }
+                };
+
+                return GenerateLineFlexConfirmation(data);
+            }
+            catch { return null; }
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+        }
+
+        #endregion
+
+        #region Staff Booking Confirmation
+
+        public Dictionary<string, object> ConfirmBookingByStaff(int reservationId, string staffName)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connStr,
+                    "UPDATE Reservation SET Status = N'ยืนยันแล้ว', Remark = ISNULL(Remark, '') + N' | ยืนยันโดย ' + @Staff + N' ' + CONVERT(NVARCHAR, GETDATE(), 120) WHERE ID = @Id AND Status = N'รอยืนยัน'",
+                    new Dictionary<string, object> { { "@Id", reservationId }, { "@Staff", staffName } });
+
+                _code.DatabaseInsertSafe(_connStr,
+                    "UPDATE AI_Booking_Actions SET Status = 'CONFIRMED', StaffConfirmedBy = @Staff WHERE ReservationID = @ResId AND Status = 'PENDING'",
+                    new Dictionary<string, object> { { "@ResId", reservationId }, { "@Staff", staffName } });
+
+                DataTable dtAction = _code.DatabaseQuerySafe(_connStr,
+                    "SELECT ConversationID FROM AI_Booking_Actions WHERE ReservationID = @ResId",
+                    new Dictionary<string, object> { { "@ResId", reservationId } });
+
+                long convId = dtAction.Rows.Count > 0 ? Convert.ToInt64(dtAction.Rows[0]["ConversationID"]) : 0;
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "reservationId", reservationId },
+                    { "conversationId", convId }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "error", ex.Message } };
+            }
+        }
+
+        public DataTable GetPendingAIBookings()
+        {
+            return _code.DatabaseQuerySafe(_connStr,
+                @"SELECT ba.ID, ba.ConversationID, ba.ReservationID, ba.RequestData, ba.Created_Date,
+                         r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.TotalPrice, r.Status,
+                         c.Name AS CustomerName,
+                         ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'') AS RoomNames
+                  FROM AI_Booking_Actions ba
+                  JOIN Reservation r ON r.ID = ba.ReservationID
+                  LEFT JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                  WHERE ba.Status = 'PENDING' AND ba.ActionType = 'CREATE'
+                  ORDER BY ba.Created_Date DESC", null);
+        }
+
+        #endregion
+
+        #region Auto Reply Helpers
+
         private string BuildKBContext(string query)
         {
             try
             {
                 string normalized = NormalizeText(query);
                 DataTable dtKB = _code.DatabaseQuerySafe(_connStr,
-                    "SELECT TOP 5 Question, Answer FROM AI_Knowledge_Base WHERE IsActive = 1", null);
+                    "SELECT ID, Question, Answer, Keywords FROM AI_Knowledge_Base WHERE IsActive = 1", null);
 
                 var matches = new List<string>();
                 foreach (DataRow row in dtKB.Rows)
                 {
-                    string keywords = "";
-                    try
-                    {
-                        DataTable dtK = _code.DatabaseQuerySafe(_connStr,
-                            "SELECT Keywords FROM AI_Knowledge_Base WHERE ID = " + row["ID"], null);
-                        if (dtK.Rows.Count > 0) keywords = dtK.Rows[0]["Keywords"]?.ToString() ?? "";
-                    }
-                    catch { }
-
+                    string keywords = row["Keywords"]?.ToString() ?? "";
                     if (!string.IsNullOrEmpty(keywords))
                     {
                         var kwList = keywords.Split(',').Select(k => k.Trim().ToLower());
-                        if (kwList.Any(k => normalized.Contains(k)))
+                        if (kwList.Any(k => !string.IsNullOrEmpty(k) && normalized.Contains(k)))
                             matches.Add($"Q: {row["Question"]}\nA: {row["Answer"]}");
                     }
+                    if (matches.Count >= 5) break;
                 }
 
                 return string.Join("\n\n", matches);
@@ -713,5 +1036,6 @@ namespace Take_Time_BangPhra.Services
         public int TokensUsed { get; set; }
         public string Reason { get; set; }
         public string ErrorMessage { get; set; }
+        public Dictionary<string, object> BookingData { get; set; }
     }
 }

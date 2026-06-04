@@ -115,6 +115,9 @@
                 <span class="stat-pill unread" id="pillUnread">0 ยังไม่อ่าน</span>
                 <span class="stat-pill open" id="pillOpen">0 เปิดอยู่</span>
                 <span class="stat-pill pending" id="pillPending">0 รอดำเนินการ</span>
+                <button id="btnPendingBookings" onclick="openBookings()" style="padding:6px 14px; border-radius:20px; font-size:12px; font-weight:600; background:#FFF3E0; color:#E65100; border:1px solid #FFB74D; cursor:pointer; font-family:'Prompt',sans-serif; display:none;">
+                    <i class="fas fa-concierge-bell"></i> <span id="pendingBookingCount">0</span> จองรอยืนยัน
+                </button>
             </div>
         </div>
 
@@ -173,6 +176,43 @@
         </div>
     </div>
 
+    <!-- Pending AI Bookings Panel -->
+    <div id="bookingsOverlay" class="bookings-overlay" onclick="if(event.target===this)closeBookings()">
+        <div class="bookings-panel">
+            <div class="bookings-header">
+                <h3><i class="fas fa-concierge-bell"></i> การจองจาก AI (รอยืนยัน)</h3>
+                <button onclick="closeBookings()" style="background:none; border:none; font-size:18px; cursor:pointer; color:#999;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="bookingsList" class="bookings-list">
+                <div style="text-align:center; padding:40px; color:#999;"><i class="fas fa-spinner fa-spin"></i> กำลังโหลด...</div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .bookings-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:1000; justify-content:flex-end; }
+        .bookings-overlay.active { display:flex; }
+        .bookings-panel { width:480px; max-width:90vw; background:white; height:100%; overflow-y:auto; box-shadow:-4px 0 20px rgba(0,0,0,0.15); }
+        .bookings-header { display:flex; justify-content:space-between; align-items:center; padding:20px; border-bottom:1px solid #eee; position:sticky; top:0; background:white; z-index:1; }
+        .bookings-header h3 { margin:0; font-size:16px; color:#333; }
+        .bookings-list { padding:15px; }
+        .booking-card { background:#fafafa; border-radius:10px; padding:18px; margin-bottom:12px; border-left:4px solid #FF9800; }
+        .booking-card.confirmed { border-left-color:#4CAF50; background:#f0f9f0; }
+        .booking-card h4 { margin:0 0 10px 0; font-size:14px; color:#333; display:flex; justify-content:space-between; align-items:center; }
+        .booking-card h4 .res-id { color:#7C4DFF; }
+        .booking-card .booking-info { font-size:13px; color:#666; line-height:1.8; }
+        .booking-card .booking-info i { width:18px; color:#999; }
+        .booking-card .booking-total { font-size:16px; font-weight:700; color:#5D4037; margin:10px 0; }
+        .booking-card .booking-actions { display:flex; gap:8px; margin-top:12px; }
+        .booking-card .btn-confirm-booking { padding:8px 16px; background:#4CAF50; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-family:'Prompt',sans-serif; font-weight:500; }
+        .booking-card .btn-confirm-booking:hover { background:#388E3C; }
+        .booking-card .btn-view-conv { padding:8px 16px; background:white; color:#5D4037; border:1px solid #5D4037; border-radius:6px; cursor:pointer; font-size:13px; font-family:'Prompt',sans-serif; }
+        .booking-card .btn-view-conv:hover { background:#EFEBE9; }
+        .booking-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+        .booking-badge.pending { background:#FFF3E0; color:#E65100; }
+        .booking-badge.confirmed { background:#E8F5E9; color:#2E7D32; }
+    </style>
+
     <asp:HiddenField ID="hfChannelsData" runat="server" />
     <asp:HiddenField ID="hfCannedData" runat="server" />
 
@@ -191,7 +231,8 @@
             buildCannedBar();
             loadConversations();
             loadStats();
-            pollTimer = setInterval(function () { loadConversations(true); loadStats(); }, 5000);
+            loadPendingBookings(true);
+            pollTimer = setInterval(function () { loadConversations(true); loadStats(); loadPendingBookings(true); }, 5000);
 
             // Auto-resize reply textarea
             $('#txtReply').on('input', function () {
@@ -422,6 +463,75 @@
                     else alert(r ? r.message : 'ไม่สามารถสร้างคำแนะนำได้');
                 },
                 error: function () { btn.html('<i class="fas fa-robot"></i>').prop('disabled', false); }
+            });
+        }
+
+        // === Pending AI Bookings ===
+        function loadPendingBookings(silent) {
+            $.ajax({
+                url: window.location.pathname + '?action=pendingBookings',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function (r) {
+                    var count = (r && r.bookings) ? r.bookings.length : 0;
+                    $('#pendingBookingCount').text(count);
+                    if (count > 0) $('#btnPendingBookings').show();
+                    else $('#btnPendingBookings').hide();
+
+                    if (!silent && r && r.bookings) renderBookings(r.bookings);
+                }
+            });
+        }
+
+        function openBookings() {
+            $('#bookingsOverlay').addClass('active');
+            loadPendingBookings();
+        }
+
+        function closeBookings() { $('#bookingsOverlay').removeClass('active'); }
+
+        function renderBookings(bookings) {
+            if (!bookings || bookings.length === 0) {
+                $('#bookingsList').html('<div style="text-align:center; padding:40px; color:#999;"><i class="fas fa-check-circle" style="font-size:40px; color:#4CAF50; margin-bottom:10px; display:block;"></i><p>ไม่มีการจองรอยืนยัน</p></div>');
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < bookings.length; i++) {
+                var b = bookings[i];
+                var isConfirmed = b.status !== 'รอยืนยัน';
+                html += '<div class="booking-card' + (isConfirmed ? ' confirmed' : '') + '">';
+                html += '<h4><span class="res-id">#' + b.reservationId + '</span><span class="booking-badge ' + (isConfirmed ? 'confirmed' : 'pending') + '">' + escHtml(b.status) + '</span></h4>';
+                html += '<div class="booking-info">';
+                if (b.customerName) html += '<div><i class="fas fa-user"></i> ' + escHtml(b.customerName) + '</div>';
+                if (b.customerPhone) html += '<div><i class="fas fa-phone"></i> ' + escHtml(b.customerPhone) + '</div>';
+                html += '<div><i class="fas fa-bed"></i> ' + escHtml(b.roomName) + '</div>';
+                html += '<div><i class="fas fa-calendar-check"></i> ' + b.checkIn + ' - ' + b.checkOut + '</div>';
+                html += '<div><i class="fas fa-clock"></i> จองเมื่อ ' + b.createdDate + '</div>';
+                html += '</div>';
+                html += '<div class="booking-total">' + Number(b.totalPrice).toLocaleString() + ' บาท</div>';
+                html += '<div class="booking-actions">';
+                if (!isConfirmed) html += '<button class="btn-confirm-booking" onclick="confirmBooking(' + b.reservationId + ')"><i class="fas fa-check"></i> ยืนยันการจอง</button>';
+                if (b.conversationId) html += '<button class="btn-view-conv" onclick="closeBookings();openConversation(' + b.conversationId + ')"><i class="fas fa-comments"></i> ดูแชท</button>';
+                html += '</div></div>';
+            }
+            $('#bookingsList').html(html);
+        }
+
+        function confirmBooking(resId) {
+            if (!confirm('ยืนยันการจอง #' + resId + ' และส่งยืนยันให้ลูกค้า?')) return;
+            $.ajax({
+                url: window.location.pathname + '?action=confirmBooking',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ reservationId: resId }),
+                success: function (r) {
+                    if (r && r.success) {
+                        alert('ยืนยันการจองสำเร็จ! ส่งยืนยันให้ลูกค้าแล้ว');
+                        loadPendingBookings();
+                        loadConversations(true);
+                    } else {
+                        alert(r ? (r.message || r.error || 'เกิดข้อผิดพลาด') : 'เกิดข้อผิดพลาด');
+                    }
+                }
             });
         }
 

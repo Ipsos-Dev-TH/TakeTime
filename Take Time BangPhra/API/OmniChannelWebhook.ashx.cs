@@ -399,6 +399,12 @@ namespace Take_Time_BangPhra.API
 
                 omniSvc.SendMessage(inResult.ConversationID, reply.Reply, "AI Assistant", isAI: true,
                     aiConfidence: reply.Confidence, aiSource: reply.Source);
+
+                if (reply.BookingData != null && reply.BookingData.ContainsKey("reservationId"))
+                {
+                    int resId = Convert.ToInt32(reply.BookingData["reservationId"]);
+                    omniSvc.SendBookingConfirmation(inResult.ConversationID, resId);
+                }
             }
             catch (Exception ex)
             {
