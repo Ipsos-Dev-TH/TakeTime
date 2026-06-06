@@ -366,5 +366,35 @@ namespace Take_Time_BangPhra.Account.Report
         /// chkEditVoucherNo control.
         /// </summary>
         protected global::System.Web.UI.WebControls.CheckBox chkEditVoucherNo;
+
+        /// <summary>
+        /// chkIsCredit control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkIsCredit;
+
+        /// <summary>
+        /// pnlNextAccRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlNextAccRef;
+
+        /// <summary>
+        /// lblNextAccDocNumber control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblNextAccDocNumber;
+
+        /// <summary>
+        /// lnkNextAccDoc control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HyperLink lnkNextAccDoc;
+
+        /// <summary>
+        /// lblNextAccSyncStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblNextAccSyncStatus;
+
+        /// <summary>
+        /// lblNextAccPaymentStatus control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblNextAccPaymentStatus;
     }
 }

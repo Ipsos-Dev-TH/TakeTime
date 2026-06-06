@@ -167,6 +167,15 @@ namespace Take_Time_BangPhra.Account.Report
                         txtWHTAmount.Text = Convert.ToDecimal(dtPayment.Rows[0]["WHT_Amount"]).ToString("N2");
                     }
 
+                    // Load IsCredit flag
+                    if (dtPayment.Columns.Contains("IsCredit") && dtPayment.Rows[0]["IsCredit"] != DBNull.Value)
+                    {
+                        chkIsCredit.Checked = Convert.ToBoolean(dtPayment.Rows[0]["IsCredit"]);
+                    }
+
+                    // Load NextAcc document reference
+                    LoadNextAccReference(id);
+
                     DropDownList2.SelectedIndex = DropDownList2.Items.IndexOf(DropDownList2.Items.FindByText(dtPayment.Rows[0]["Paid_How"].ToString()));
                     DropDownList2.DataBind();
                     DropDownList3.SelectedIndex = DropDownList3.Items.IndexOf(DropDownList3.Items.FindByText(dtPayment.Rows[0]["Paid_Type"].ToString()));
@@ -595,6 +604,8 @@ namespace Take_Time_BangPhra.Account.Report
                 decimal whtAmount = 0;
                 decimal.TryParse(txtWHTAmount.Text, out whtAmount);
 
+                bool isCredit = chkIsCredit.Checked;
+
                 var paymentInsertParams = new Dictionary<string, object>
                 {
                     { "@ID", docNum },
@@ -608,7 +619,8 @@ namespace Take_Time_BangPhra.Account.Report
                     { "@PaidType", DropDownList3.SelectedItem.Text },
                     { "@CreatedByID", Session["UserID"].ToString() },
                     { "@WHTRate", whtRate },
-                    { "@WHTAmount", whtAmount }
+                    { "@WHTAmount", whtAmount },
+                    { "@IsCredit", isCredit }
                 };
 
                 // If editing, preserve the original UID; otherwise let database generate new one
@@ -616,15 +628,15 @@ namespace Take_Time_BangPhra.Account.Report
                 {
                     paymentInsertParams.Add("@UID", originalUid);
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment] ([ID],[UID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount]) " +
-                        "VALUES (@ID,@UID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount)",
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[UID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount],[IsCredit]) " +
+                        "VALUES (@ID,@UID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount,@IsCredit)",
                         paymentInsertParams);
                 }
                 else
                 {
                     code.DatabaseInsertSafe(conn,
-                        "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount]) " +
-                        "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount)",
+                        "INSERT INTO [dbo].[Account_Payment] ([ID],[Vendor_ID],[Created_Date],[Total_Amount],[Vat_Type_ID],[Vat],[Total_Amount_Exclude_Vat],[Paid_How],[Paid_Type],[Status],[Created_By_ID],[WHT_Rate],[WHT_Amount],[IsCredit]) " +
+                        "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount,@IsCredit)",
                         paymentInsertParams);
                 }
 
@@ -982,10 +994,14 @@ namespace Take_Time_BangPhra.Account.Report
                         decimal syncWhtAmount = 0;
                         decimal.TryParse(txtWHTAmount.Text, out syncWhtAmount);
 
+                        // Check if payment method is Cash or Bank (for auto-payment recording)
+                        bool paidHowIsCashOrBank = sync.IsPaidHowCashOrBank(paymentMethod);
+
                         sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
                             hasInputVat: hasVat, whtRate: syncWhtRate, whtAmount: syncWhtAmount,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
-                            expenseLines: expenseLines);
+                            expenseLines: expenseLines,
+                            isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit);
                     }
                 }
                 catch (Exception accEx)
@@ -1214,6 +1230,149 @@ namespace Take_Time_BangPhra.Account.Report
                     deleteButton.CssClass = "btn-delete-file";
                     deleteButton.OnClientClick = "return confirm('คุณต้องการลบไฟล์นี้หรือไม่?');";
                 }
+            }
+        }
+
+        private void LoadNextAccReference(string paymentId)
+        {
+            try
+            {
+                // First check Account_Payment columns directly
+                var refParams = new Dictionary<string, object> { { "@ID", paymentId } };
+                DataTable dtRef = null;
+                try
+                {
+                    dtRef = code.DatabaseQuerySafe(conn,
+                        "SELECT Nexaacc_Document_Number, Nexaacc_Response_Id, Nexaacc_Payment_Id FROM Account_Payment WHERE ID = @ID",
+                        refParams);
+                }
+                catch { }
+
+                string nexaaccDocNumber = dtRef?.Rows.Count > 0 ? dtRef.Rows[0]["Nexaacc_Document_Number"]?.ToString() : null;
+                string nexaaccResponseId = dtRef?.Rows.Count > 0 ? dtRef.Rows[0]["Nexaacc_Response_Id"]?.ToString() : null;
+                string nexaaccPaymentId = dtRef?.Rows.Count > 0 ? dtRef.Rows[0]["Nexaacc_Payment_Id"]?.ToString() : null;
+
+                // If not stored in Account_Payment yet, look up from sync queue
+                if (string.IsNullOrEmpty(nexaaccDocNumber))
+                {
+                    try
+                    {
+                        var sync = new Integration.AccountingSyncService(conn);
+                        DataTable dtSync = sync.GetSyncDocumentInfo(paymentId);
+                        if (dtSync?.Rows.Count > 0)
+                        {
+                            nexaaccDocNumber = dtSync.Rows[0]["Nexaacc_Document_Number"]?.ToString();
+                            nexaaccResponseId = dtSync.Rows[0]["Nexaacc_Response_Id"]?.ToString();
+                            string syncStatus = dtSync.Rows[0]["Status"]?.ToString();
+                            string docType = dtSync.Rows[0]["Nexaacc_Document_Type"]?.ToString();
+
+                            // Backfill to Account_Payment for future lookups
+                            if (!string.IsNullOrEmpty(nexaaccDocNumber) || !string.IsNullOrEmpty(nexaaccResponseId))
+                            {
+                                try
+                                {
+                                    code.DatabaseInsertSafe(conn,
+                                        "UPDATE Account_Payment SET Nexaacc_Document_Number = @DocNum, Nexaacc_Response_Id = @RespId WHERE ID = @ID",
+                                        new Dictionary<string, object>
+                                        {
+                                            { "@DocNum", (object)nexaaccDocNumber ?? DBNull.Value },
+                                            { "@RespId", (object)nexaaccResponseId ?? DBNull.Value },
+                                            { "@ID", paymentId }
+                                        });
+                                }
+                                catch { }
+                            }
+
+                            if (!string.IsNullOrEmpty(nexaaccDocNumber))
+                            {
+                                lblNextAccDocNumber.Text = nexaaccDocNumber;
+                                lblNextAccSyncStatus.Text = $"(สถานะ: {syncStatus}, ประเภท: {docType ?? "N/A"})";
+                            }
+                            else if (!string.IsNullOrEmpty(nexaaccResponseId) && !nexaaccResponseId.StartsWith("SKIPPED"))
+                            {
+                                lblNextAccDocNumber.Text = nexaaccResponseId;
+                                lblNextAccSyncStatus.Text = $"(สถานะ: {syncStatus})";
+                            }
+
+                            // Build NextAcc link
+                            if (!string.IsNullOrEmpty(nexaaccResponseId) && !nexaaccResponseId.StartsWith("SKIPPED"))
+                            {
+                                string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId, docType);
+                                if (!string.IsNullOrEmpty(url))
+                                {
+                                    lnkNextAccDoc.NavigateUrl = url;
+                                    lnkNextAccDoc.Visible = true;
+                                }
+                            }
+
+                            pnlNextAccRef.Visible = true;
+                        }
+                        else
+                        {
+                            // Check for pending sync
+                            DataTable dtPending = sync.GetSyncQueueForDisplay("PENDING");
+                            bool hasPending = false;
+                            if (dtPending?.Rows.Count > 0)
+                            {
+                                foreach (DataRow row in dtPending.Rows)
+                                {
+                                    string payload = "";
+                                    try
+                                    {
+                                        var payloadDt = code.DatabaseQuerySafe(conn,
+                                            "SELECT Payload FROM Accounting_Sync_Queue WHERE ID = @ID",
+                                            new Dictionary<string, object> { { "@ID", row["ID"] } });
+                                        payload = payloadDt?.Rows[0][0]?.ToString() ?? "";
+                                    }
+                                    catch { }
+                                    if (payload.Contains(paymentId))
+                                    {
+                                        hasPending = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (hasPending)
+                            {
+                                lblNextAccDocNumber.Text = "รอส่ง NextAcc...";
+                                lblNextAccSyncStatus.Text = "(อยู่ในคิว)";
+                                pnlNextAccRef.Visible = true;
+                            }
+                        }
+
+                        return;
+                    }
+                    catch { }
+                }
+
+                // Display from Account_Payment columns
+                if (!string.IsNullOrEmpty(nexaaccDocNumber))
+                {
+                    lblNextAccDocNumber.Text = nexaaccDocNumber;
+                    pnlNextAccRef.Visible = true;
+
+                    if (!string.IsNullOrEmpty(nexaaccPaymentId))
+                        lblNextAccPaymentStatus.Text = "✅ บันทึกชำระเงินแล้ว";
+
+                    if (!string.IsNullOrEmpty(nexaaccResponseId) && !nexaaccResponseId.StartsWith("SKIPPED"))
+                    {
+                        try
+                        {
+                            var sync = new Integration.AccountingSyncService(conn);
+                            string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId, "EXPENSE");
+                            if (!string.IsNullOrEmpty(url))
+                            {
+                                lnkNextAccDoc.NavigateUrl = url;
+                                lnkNextAccDoc.Visible = true;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadNextAccReference Error: {ex.Message}");
             }
         }
 

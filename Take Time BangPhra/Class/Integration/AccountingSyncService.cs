@@ -63,7 +63,8 @@ namespace Take_Time_BangPhra.Integration
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string documentNumber = null,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<Dictionary<string, object>> expenseLines = null)
+            List<Dictionary<string, object>> expenseLines = null,
+            bool isCredit = false, bool autoRecordPayment = false)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -96,7 +97,9 @@ namespace Take_Time_BangPhra.Integration
                 { "payeeName", payeeName },
                 { "hasInputVat", hasInputVat },
                 { "whtRate", whtRate },
-                { "whtAmount", whtAmount }
+                { "whtAmount", whtAmount },
+                { "isCredit", isCredit },
+                { "autoRecordPayment", autoRecordPayment }
             };
             if (!string.IsNullOrEmpty(documentNumber))
                 payload["documentNumber"] = documentNumber;
@@ -566,6 +569,27 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { }
             return null;
+        }
+
+        public bool IsPaidHowCashOrBank(string paidHowText)
+        {
+            if (string.IsNullOrEmpty(paidHowText)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT IsCashOrBank FROM Account_Paid_How WHERE Paid_How = @name AND Status = 1",
+                    new Dictionary<string, object> { { "@name", paidHowText } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["IsCashOrBank"] != DBNull.Value)
+                    return Convert.ToBoolean(dt.Rows[0]["IsCashOrBank"]);
+            }
+            catch
+            {
+                // Fallback: detect by name pattern if IsCashOrBank column doesn't exist yet
+                string pm = paidHowText.ToLower();
+                return pm.Contains("เงินสด") || pm.Contains("ธนาคาร") || pm.Contains("โอน")
+                    || pm.Contains("บัญชี") || pm.Contains("cash") || pm.Contains("bank") || pm.Contains("transfer");
+            }
+            return false;
         }
 
         // ──────────────────────────────────────────────
@@ -1126,9 +1150,12 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            bool isCredit = p.ContainsKey("isCredit") && Convert.ToBoolean(p["isCredit"]);
+            bool autoRecordPayment = p.ContainsKey("autoRecordPayment") && Convert.ToBoolean(p["autoRecordPayment"]);
+
             int lineCount = expenseLines?.Count ?? 0;
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} lines={lineCount} mode={_config.VoucherSyncMode}",
+                $"ProcessVoucherJournal: doc={docNumber} amount={amount} category={expenseCategory} payee={payeeName} lines={lineCount} isCredit={isCredit} autoPayment={autoRecordPayment} mode={_config.VoucherSyncMode}",
                 "SYSTEM");
 
             // Lookup voucher attachment files
@@ -1143,6 +1170,10 @@ namespace Take_Time_BangPhra.Integration
 
             bool isSalaryVoucher = (expenseCategory ?? "").Contains("เงินเดือน")
                 || (expenseCategory ?? "").Equals("salary", StringComparison.OrdinalIgnoreCase);
+
+            string nexaaccId = null;
+            string nexaaccDocNumber = null;
+            string nexaaccDocType = null;
 
             if (_config.IsVoucherDocumentMode)
             {
@@ -1163,15 +1194,22 @@ namespace Take_Time_BangPhra.Integration
                     result = await _apiClient.CreateExpenseAsync(expense);
 
                 Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
-                string nexaaccId = expDocId.ToString();
-                _lastDocNumber = result?.data?.DocumentNumber;
-                _lastDocType = "EXPENSE";
+                nexaaccId = expDocId.ToString();
+                nexaaccDocNumber = result?.data?.DocumentNumber;
+                nexaaccDocType = "EXPENSE";
+                _lastDocNumber = nexaaccDocNumber;
+                _lastDocType = nexaaccDocType;
 
                 // Auto-generate WHT certificate if WHT was applied
                 if (whtAmount > 0)
                     await TryAutoGenerateWhtCertAsync(expDocId, docNumber);
 
-                return nexaaccId;
+                // Auto-record payment in NextAcc: Cash/Bank + no credit
+                if (autoRecordPayment && !isCredit)
+                {
+                    await AutoRecordPaymentForVoucher(expDocId, amount, whtAmount, voucherDate,
+                        paymentMethod, payeeName, docNumber, paymentAccountId);
+                }
             }
             else
             {
@@ -1183,10 +1221,100 @@ namespace Take_Time_BangPhra.Integration
                     journal.Sensitivity = "Payroll";
                 var result = await _apiClient.CreateJournalAsync(journal);
                 Guid jrnlId = RequireValidDocId(result?.data?.Id, $"CreateJournal (voucher) doc={docNumber}");
-                _lastDocNumber = result?.data?.EntryNumber;
-                _lastDocType = "JOURNAL";
+                nexaaccDocNumber = result?.data?.EntryNumber;
+                nexaaccDocType = "JOURNAL";
+                _lastDocNumber = nexaaccDocNumber;
+                _lastDocType = nexaaccDocType;
+                nexaaccId = jrnlId.ToString();
                 await SafePostJournalAsync(jrnlId);
-                return jrnlId.ToString();
+            }
+
+            // Backfill NextAcc reference to Account_Payment table
+            BackfillNextAccRefToPayment(docNumber, nexaaccId, nexaaccDocNumber);
+
+            return nexaaccId;
+        }
+
+        private async System.Threading.Tasks.Task AutoRecordPaymentForVoucher(
+            Guid documentId, decimal totalAmount, decimal whtAmount,
+            DateTime voucherDate, string paymentMethod, string payeeName,
+            string docNumber, string paymentAccountId)
+        {
+            try
+            {
+                decimal payAmount = totalAmount;
+
+                var paymentRequest = new CreateIntegrationPaymentRequest
+                {
+                    ExternalId = $"PAY-{docNumber}",
+                    ExternalRef = docNumber,
+                    DocumentId = documentId,
+                    PaymentDate = voucherDate,
+                    Amount = payAmount,
+                    PaymentMethod = paymentMethod ?? "CASH",
+                    Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
+                };
+
+                if (!string.IsNullOrEmpty(paymentAccountId) && Guid.TryParse(paymentAccountId, out Guid bankAccGuid))
+                    paymentRequest.BankAccountName = paymentAccountId;
+
+                var payResult = await _apiClient.CreateIntegrationPaymentAsync(paymentRequest);
+
+                if (payResult?.success == true && payResult.data != null)
+                {
+                    string paymentId = payResult.data.Id.ToString();
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"AutoRecordPayment: SUCCESS doc={docNumber} paymentId={paymentId} amount={payAmount:N2}",
+                        "SYSTEM");
+
+                    // Store payment ID in Account_Payment
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Account_Payment SET Nexaacc_Payment_Id = @PaymentId WHERE ID = @DocNum",
+                            new Dictionary<string, object>
+                            {
+                                { "@PaymentId", paymentId },
+                                { "@DocNum", docNumber }
+                            });
+                    }
+                    catch { }
+                }
+                else
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"AutoRecordPayment: FAILED doc={docNumber} msg={payResult?.message ?? "null response"}",
+                        "SYSTEM");
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"AutoRecordPayment: ERROR doc={docNumber} {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private void BackfillNextAccRefToPayment(string docNumber, string nexaaccId, string nexaaccDocNumber)
+        {
+            if (string.IsNullOrEmpty(docNumber)) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Account_Payment
+                      SET Nexaacc_Response_Id = COALESCE(@RespId, Nexaacc_Response_Id),
+                          Nexaacc_Document_Number = COALESCE(@DocNum, Nexaacc_Document_Number)
+                      WHERE ID = @ID",
+                    new Dictionary<string, object>
+                    {
+                        { "@RespId", string.IsNullOrEmpty(nexaaccId) ? (object)DBNull.Value : nexaaccId },
+                        { "@DocNum", string.IsNullOrEmpty(nexaaccDocNumber) ? (object)DBNull.Value : nexaaccDocNumber },
+                        { "@ID", docNumber }
+                    });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"BackfillNextAccRefToPayment: ERROR doc={docNumber} {ex.Message}", "SYSTEM");
             }
         }
 
