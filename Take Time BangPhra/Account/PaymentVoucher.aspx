@@ -391,7 +391,7 @@
                     <asp:CheckBox ID="chkEditVoucherNo" Text="Edit" runat="server" AutoPostBack="True" OnCheckedChanged="chkEditVoucherNo_CheckedChanged" />
                  </td>
             </tr>
-            <asp:Panel ID="pnlNextAccRef" runat="server" Visible="false">
+            <asp:PlaceHolder ID="pnlNextAccRef" runat="server" Visible="false">
             <tr style="background-color: #e8f5e9;">
                 <td class="modal-sm" style="width: 20%; text-align: right; color: #2e7d32; font-weight: bold;">เอกสาร NextAcc:</td>
                 <td style="padding: 8px;">
@@ -406,7 +406,7 @@
                         Style="margin-left: 10px; font-size: 12px;" />
                 </td>
             </tr>
-            </asp:Panel>
+            </asp:PlaceHolder>
              <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบสำคัญจ่าย:</td>
                 <td>

@@ -375,7 +375,7 @@ namespace Take_Time_BangPhra.Account.Report
         /// <summary>
         /// pnlNextAccRef control.
         /// </summary>
-        protected global::System.Web.UI.WebControls.Panel pnlNextAccRef;
+        protected global::System.Web.UI.WebControls.PlaceHolder pnlNextAccRef;
 
         /// <summary>
         /// lblNextAccDocNumber control.

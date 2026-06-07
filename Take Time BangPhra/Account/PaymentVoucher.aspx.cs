@@ -1309,38 +1309,22 @@ namespace Take_Time_BangPhra.Account.Report
                         }
                         else
                         {
-                            // Check for pending sync
-                            DataTable dtPending = sync.GetSyncQueueForDisplay("PENDING");
-                            bool hasPending = false;
-                            if (dtPending?.Rows.Count > 0)
+                            // Check for pending sync with single query
+                            try
                             {
-                                foreach (DataRow row in dtPending.Rows)
+                                string pattern = "%" + paymentId + "%";
+                                var dtPendingCheck = code.DatabaseQuerySafe(conn,
+                                    "SELECT TOP 1 ID FROM Accounting_Sync_Queue WHERE Status = 'PENDING' AND Entity_Type = 'VOUCHER' AND Payload LIKE @pattern",
+                                    new Dictionary<string, object> { { "@pattern", pattern } });
+                                if (dtPendingCheck?.Rows.Count > 0)
                                 {
-                                    string payload = "";
-                                    try
-                                    {
-                                        var payloadDt = code.DatabaseQuerySafe(conn,
-                                            "SELECT Payload FROM Accounting_Sync_Queue WHERE ID = @ID",
-                                            new Dictionary<string, object> { { "@ID", row["ID"] } });
-                                        payload = payloadDt?.Rows[0][0]?.ToString() ?? "";
-                                    }
-                                    catch { }
-                                    if (payload.Contains(paymentId))
-                                    {
-                                        hasPending = true;
-                                        break;
-                                    }
+                                    lblNextAccDocNumber.Text = "รอส่ง NextAcc...";
+                                    lblNextAccSyncStatus.Text = "(อยู่ในคิว)";
+                                    pnlNextAccRef.Visible = true;
                                 }
                             }
-                            if (hasPending)
-                            {
-                                lblNextAccDocNumber.Text = "รอส่ง NextAcc...";
-                                lblNextAccSyncStatus.Text = "(อยู่ในคิว)";
-                                pnlNextAccRef.Visible = true;
-                            }
+                            catch { }
                         }
-
-                        return;
                     }
                     catch { }
                 }

@@ -547,7 +547,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT Nexaacc_AccountId FROM Account_Paid_How WHERE Paid_How = @name AND Status = 1",
+                    "SELECT Nexaacc_AccountId FROM Account_Paid_How WHERE Paid_How = @name AND Status = 'True'",
                     new Dictionary<string, object> { { "@name", paidHowText } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountId"] != DBNull.Value)
                     return dt.Rows[0]["Nexaacc_AccountId"].ToString();
@@ -562,7 +562,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT Nexaacc_AccountId FROM Account_Paid_Type WHERE Paid_Type = @name AND Status = 1",
+                    "SELECT Nexaacc_AccountId FROM Account_Paid_Type WHERE Paid_Type = @name AND Status = 'True'",
                     new Dictionary<string, object> { { "@name", paidTypeText } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountId"] != DBNull.Value)
                     return dt.Rows[0]["Nexaacc_AccountId"].ToString();
@@ -577,7 +577,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT IsCashOrBank FROM Account_Paid_How WHERE Paid_How = @name AND Status = 1",
+                    "SELECT IsCashOrBank FROM Account_Paid_How WHERE Paid_How = @name AND Status = 'True'",
                     new Dictionary<string, object> { { "@name", paidHowText } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["IsCashOrBank"] != DBNull.Value)
                     return Convert.ToBoolean(dt.Rows[0]["IsCashOrBank"]);
@@ -1242,7 +1242,8 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
-                decimal payAmount = totalAmount;
+                decimal payAmount = totalAmount - whtAmount;
+                if (payAmount <= 0) return;
 
                 var paymentRequest = new CreateIntegrationPaymentRequest
                 {
@@ -1254,9 +1255,6 @@ namespace Take_Time_BangPhra.Integration
                     PaymentMethod = paymentMethod ?? "CASH",
                     Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
                 };
-
-                if (!string.IsNullOrEmpty(paymentAccountId) && Guid.TryParse(paymentAccountId, out Guid bankAccGuid))
-                    paymentRequest.BankAccountName = paymentAccountId;
 
                 var payResult = await _apiClient.CreateIntegrationPaymentAsync(paymentRequest);
 
@@ -1278,7 +1276,11 @@ namespace Take_Time_BangPhra.Integration
                                 { "@DocNum", docNumber }
                             });
                     }
-                    catch { }
+                    catch (Exception exStore)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecordPayment: WARNING failed to store Nexaacc_Payment_Id for doc={docNumber}: {exStore.Message}", "SYSTEM");
+                    }
                 }
                 else
                 {
