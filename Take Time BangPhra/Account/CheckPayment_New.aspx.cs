@@ -430,9 +430,9 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
-                // ดึงเอกสาร + ไฟล์แนบจาก NextAcc มาเก็บที่ฝั่ง TakeTime อัตโนมัติตามช่วงที่ค้นหา
-                // (cache ลงดิสก์ ใช้ซ้ำได้ — โหลดเฉพาะรายการที่ sync แล้วและยังไม่เคยโหลด)
-                PrefetchNextAccDocuments(dt);
+                // ดึงเอกสาร + ไฟล์แนบที่ออกบน NextAcc ในช่วงที่ค้นหา มาเก็บที่ฝั่ง TakeTime อัตโนมัติ
+                // (cache ลงดิสก์ ใช้ซ้ำได้)
+                PrefetchNextAccDocuments(startDate, endDate);
 
                 // Bind to GridView
                 gvDetails.DataSource = dt;
@@ -779,57 +779,29 @@ namespace Take_Time_BangPhra.Account
         private Dictionary<string, NextAccCachedDocument> _nextAccDocs;
 
         /// <summary>
-        /// ดึงเอกสารฝั่งจ่ายอย่างเป็นทางการ (PDF + ไฟล์แนบ) จาก NextAcc มาเก็บที่ฝั่ง TakeTime
-        /// อัตโนมัติสำหรับทุกใบสำคัญจ่ายในผลการค้นหา. โหลดแบบขนาน (จำกัด 3 พร้อมกัน) และ
-        /// ใช้ cache บนดิสก์ — รายการที่โหลดแล้วจะไม่โหลดซ้ำ. ผลลัพธ์ใช้แสดงคอลัมน์ "เอกสาร NextAcc"
+        /// ดึงเอกสารฝั่งจ่ายที่ออกบน NextAcc ในช่วงวันที่ที่ค้นหา (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
+        /// อัตโนมัติ แล้ว map ด้วย Reference (เลขที่ใบสำคัญจ่าย) เพื่อแสดงคอลัมน์ "เอกสาร NextAcc"
+        /// ใช้ /api/integration/documents เป็นแหล่งข้อมูลหลัก → เจอเอกสารที่ออกบน NextAcc เสมอ
         /// </summary>
-        private void PrefetchNextAccDocuments(DataTable dt)
+        private void PrefetchNextAccDocuments(DateTime fromDate, DateTime toDate)
         {
             _nextAccDocs = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
-            if (dt == null || dt.Rows.Count == 0) return;
-
             try
             {
                 var config = new AccountingConfig(conn);
                 if (!config.IsConfigured || !config.Enabled) return;
 
-                var items = new List<KeyValuePair<string, bool>>();
-                foreach (DataRow row in dt.Rows)
-                {
-                    string docNum = row["ID"]?.ToString() ?? "";
-                    if (docNum.Length < 3 || docNum.Substring(0, 3) != "PAY") continue;
-                    bool cancelled = (row["Status"]?.ToString() ?? "") == "Cancel";
-                    items.Add(new KeyValuePair<string, bool>(docNum, cancelled));
-                }
-                if (items.Count == 0) return;
+                var map = System.Threading.Tasks.Task.Run(() =>
+                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true)).Result;
 
-                var results = System.Threading.Tasks.Task.Run(async () =>
-                {
-                    var sync = new AccountingSyncService(conn);
-                    var bag = new System.Collections.Concurrent.ConcurrentDictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
-                    using (var sem = new System.Threading.SemaphoreSlim(3))
-                    {
-                        var tasks = items.Select(async it =>
-                        {
-                            await sem.WaitAsync().ConfigureAwait(false);
-                            try
-                            {
-                                var r = await sync.DownloadVoucherDocumentFromNextAccAsync(it.Key, false, it.Value).ConfigureAwait(false);
-                                if (r != null) bag[it.Key] = r;
-                            }
-                            catch { /* per-doc failure ไม่ให้ล้มทั้งหน้า */ }
-                            finally { sem.Release(); }
-                        });
-                        await System.Threading.Tasks.Task.WhenAll(tasks).ConfigureAwait(false);
-                    }
-                    return bag;
-                }).Result;
+                if (map != null) _nextAccDocs = map;
 
-                foreach (var kv in results) _nextAccDocs[kv.Key] = kv.Value;
+                lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {_nextAccDocs.Count})</span>";
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("PrefetchNextAccDocuments error: " + ex.Message);
+                lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)})</span>";
             }
         }
 
@@ -875,13 +847,22 @@ namespace Take_Time_BangPhra.Account
             var litNext = (Literal)e.Row.FindControl("litNextAccDoc");
             if (litNext != null)
             {
-                if (_nextAccDocs != null && _nextAccDocs.TryGetValue(docId, out var nd)
-                    && nd != null && nd.Found && !string.IsNullOrEmpty(nd.PdfRelativeUrl))
+                NextAccCachedDocument nd = null;
+                if (_nextAccDocs != null) _nextAccDocs.TryGetValue(docId, out nd);
+
+                // ลิงก์: PDF ที่ cache มาฝั่งนี้ก่อน, ถ้าไม่มี PDF (NextAcc ไม่มี template) ใช้ลิงก์เปิดใน NextAcc
+                string link = nd != null
+                    ? (!string.IsNullOrEmpty(nd.PdfRelativeUrl) ? nd.PdfRelativeUrl : nd.DeepLinkUrl)
+                    : null;
+
+                if (nd != null && !string.IsNullOrEmpty(link))
                 {
+                    bool isLocalPdf = !string.IsNullOrEmpty(nd.PdfRelativeUrl);
+                    string label = isLocalPdf ? "📄 ดูเอกสาร" : "📄 เปิดใน NextAcc ↗";
                     string att = nd.AttachmentCount > 0
                         ? $" <span class='sync-badge none' title='ไฟล์แนบ {nd.AttachmentCount} ไฟล์'>📎{nd.AttachmentCount}</span>"
                         : "";
-                    litNext.Text = $"<a href='{Server.HtmlEncode(nd.PdfRelativeUrl)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>📄 ดูเอกสาร</a>{att}";
+                    litNext.Text = $"<a href='{Server.HtmlEncode(link)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>{label}</a>{att}";
                 }
                 else
                 {
