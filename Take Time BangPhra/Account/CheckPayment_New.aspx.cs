@@ -430,9 +430,9 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
-                // ดึงเอกสาร + ไฟล์แนบที่ออกบน NextAcc ในช่วงที่ค้นหา มาเก็บที่ฝั่ง TakeTime อัตโนมัติ
-                // (cache ลงดิสก์ ใช้ซ้ำได้)
-                PrefetchNextAccDocuments(startDate, endDate);
+                // ดึงเอกสารที่ออกบน NextAcc ในช่วงที่ค้นหา (รวมที่สร้างบน NextAcc โดยตรง) มาเก็บ+merge เข้าตาราง
+                var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
+                if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
 
                 // Bind to GridView
                 gvDetails.DataSource = dt;
@@ -545,7 +545,13 @@ namespace Take_Time_BangPhra.Account
 
             try
             {
-                string docNum = gvDetails.Rows[e.RowIndex].Cells[3].Text;
+                var keys = gvDetails.DataKeys[e.RowIndex];
+                if ((keys.Values["IsNextAccOnly"]?.ToString()) == "1")
+                {
+                    ShowError("เอกสารนี้สร้างบน NextAcc — กรุณาลบ/ยกเลิกที่ระบบ NextAcc");
+                    return;
+                }
+                string docNum = keys.Values["ID"]?.ToString() ?? "";
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
                 string docMonthPadded = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
@@ -619,10 +625,27 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
-                string docStatus = gvDetails.Rows[e.NewSelectedIndex].Cells[11].Text; // Status column (index เพิ่มเพราะเพิ่ม Paid_Type column)
-                string docNum = gvDetails.Rows[e.NewSelectedIndex].Cells[3].Text; // ID column
+                var keys = gvDetails.DataKeys[e.NewSelectedIndex];
+                string docNum = keys.Values["ID"]?.ToString() ?? "";
+                string docStatus = keys.Values["Status"]?.ToString() ?? "";
+                string viewUrl = keys.Values["NextAccViewUrl"]?.ToString() ?? "";
+                bool isNextAccOnly = (keys.Values["IsNextAccOnly"]?.ToString()) == "1";
 
-                System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
+                System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}, NextAccUrl: {viewUrl}");
+
+                // ── เอกสารที่มีบน NextAcc → เปิด PDF/ลิงก์ NextAcc ที่ cache ไว้ (เลขที่/รูปแบบตาม NextAcc) ──
+                if (!string.IsNullOrEmpty(viewUrl))
+                {
+                    Response.Redirect(viewUrl);
+                    return;
+                }
+
+                // เอกสารที่สร้างบน NextAcc แต่ไม่มีลิงก์ — ไม่มี PDF ฝั่งระบบเราให้เปิด
+                if (isNextAccOnly)
+                {
+                    ShowError("เอกสารนี้สร้างบน NextAcc แต่ยังไม่มีไฟล์ให้เปิดดู (ไม่มี template PDF บน NextAcc)");
+                    return;
+                }
 
                 // Parse document info
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
@@ -635,30 +658,6 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "PAY")
                 {
-                    // ── เอกสารอย่างเป็นทางการจาก NextAcc มาก่อน (ทั้งเอกสารปกติและยกเลิก) ──
-                    // ดาวน์โหลด PDF จริงจาก NextAcc (+ ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime แล้วเปิดดู
-                    // แทน PDF ที่ระบบ TakeTime ออกเอง
-                    //   ปกติ → เอกสารใบสำคัญจ่ายต้นฉบับ
-                    //   ยกเลิก → ใบเพิ่มหนี้/เอกสารยกเลิกจาก NextAcc (หรือต้นฉบับ + ลายน้ำ "ยกเลิก")
-                    bool isCancelledDoc = docStatus == "Cancel";
-                    try
-                    {
-                        var syncDoc = new AccountingSyncService(conn);
-                        var cached = System.Threading.Tasks.Task.Run(() =>
-                            syncDoc.DownloadVoucherDocumentFromNextAccAsync(docNum, false, isCancelledDoc)).Result;
-                        if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
-                        {
-                            System.Diagnostics.Debug.WriteLine($"   ✅ NextAcc PDF: {cached.PdfRelativeUrl} (cancelled={isCancelledDoc}, attachments={cached.AttachmentCount})");
-                            Response.Redirect(cached.PdfRelativeUrl);
-                            return;
-                        }
-                        System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF unavailable ({cached?.Message}) — fallback to local PDF");
-                    }
-                    catch (Exception nexEx)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF fetch failed: {nexEx.Message} — fallback to local PDF");
-                    }
-
                     // SECURE: Get payment UID from database with parameterized query
                     string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
                     var uidParams = new Dictionary<string, object>
@@ -744,7 +743,13 @@ namespace Take_Time_BangPhra.Account
                 try
                 {
                     int rowIndex = Convert.ToInt32(e.CommandArgument);
-                    string docNum = gvDetails.Rows[rowIndex].Cells[3].Text;
+                    var keys = gvDetails.DataKeys[rowIndex];
+                    if ((keys.Values["IsNextAccOnly"]?.ToString()) == "1")
+                    {
+                        ShowError("เอกสารนี้สร้างบน NextAcc — กรุณาแก้ไขที่ระบบ NextAcc");
+                        return;
+                    }
+                    string docNum = keys.Values["ID"]?.ToString() ?? "";
                     string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
 
                     if (docType == "PAY")
@@ -776,32 +781,131 @@ namespace Take_Time_BangPhra.Account
         // ──────────────────────────────────────────────
 
         private Dictionary<string, DataRow> _syncStatusCache;
-        private Dictionary<string, NextAccCachedDocument> _nextAccDocs;
+
+        /// <summary>DataBinder.Eval ที่ไม่ throw ถ้าไม่มีคอลัมน์/เป็น DBNull</summary>
+        private static string SafeEval(object dataItem, string field)
+        {
+            try
+            {
+                var v = DataBinder.Eval(dataItem, field);
+                return v == null || v == DBNull.Value ? "" : v.ToString();
+            }
+            catch { return ""; }
+        }
 
         /// <summary>
         /// ดึงเอกสารฝั่งจ่ายที่ออกบน NextAcc ในช่วงวันที่ที่ค้นหา (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
-        /// อัตโนมัติ แล้ว map ด้วย Reference (เลขที่ใบสำคัญจ่าย) เพื่อแสดงคอลัมน์ "เอกสาร NextAcc"
-        /// ใช้ /api/integration/documents เป็นแหล่งข้อมูลหลัก → เจอเอกสารที่ออกบน NextAcc เสมอ
+        /// อัตโนมัติ. ใช้ /api/integration/documents เป็นแหล่งข้อมูลหลัก → เจอเอกสารที่ออกบน NextAcc เสมอ
         /// </summary>
-        private void PrefetchNextAccDocuments(DateTime fromDate, DateTime toDate)
+        private List<NextAccCachedDocument> PrefetchNextAccDocuments(DateTime fromDate, DateTime toDate)
         {
-            _nextAccDocs = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 var config = new AccountingConfig(conn);
-                if (!config.IsConfigured || !config.Enabled) return;
+                if (!config.IsConfigured || !config.Enabled) return new List<NextAccCachedDocument>();
 
-                var map = System.Threading.Tasks.Task.Run(() =>
-                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true)).Result;
+                var list = System.Threading.Tasks.Task.Run(() =>
+                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true)).Result
+                    ?? new List<NextAccCachedDocument>();
 
-                if (map != null) _nextAccDocs = map;
-
-                lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {_nextAccDocs.Count})</span>";
+                lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {list.Count})</span>";
+                return list;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("PrefetchNextAccDocuments error: " + ex.Message);
                 lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)})</span>";
+                return new List<NextAccCachedDocument>();
+            }
+        }
+
+        /// <summary>
+        /// รวมเอกสาร NextAcc เข้ากับตาราง:
+        ///   - แถวที่ sync จาก TakeTime (จับคู่ด้วย Reference == เลขใบสำคัญจ่าย) → แสดงเลขที่เอกสารตาม NextAcc + ลิงก์เปิดดู
+        ///   - เอกสารที่สร้างบน NextAcc โดยตรง (ไม่มีคู่ในระบบ) → เพิ่มเป็นแถวใหม่
+        /// เก็บข้อมูลที่ใช้ตอน postback ลง DataKeys (NextAccViewUrl, IsNextAccOnly)
+        /// </summary>
+        private void MergeNextAccIntoGrid(DataTable dt, List<NextAccCachedDocument> nextAccDocs)
+        {
+            if (!dt.Columns.Contains("DisplayDoc")) dt.Columns.Add("DisplayDoc", typeof(string));
+            if (!dt.Columns.Contains("IsNextAccOnly")) dt.Columns.Add("IsNextAccOnly", typeof(string));
+            if (!dt.Columns.Contains("HasNextAcc")) dt.Columns.Add("HasNextAcc", typeof(string));
+            if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
+            if (!dt.Columns.Contains("NextAccDeepLink")) dt.Columns.Add("NextAccDeepLink", typeof(string));
+            if (!dt.Columns.Contains("NextAccAttCount")) dt.Columns.Add("NextAccAttCount", typeof(int));
+
+            nextAccDocs = nextAccDocs ?? new List<NextAccCachedDocument>();
+
+            // index ตาม Reference (= เลขใบสำคัญจ่ายฝั่ง TakeTime) และตาม NextAcc Id
+            var byRef = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
+            var byId = new Dictionary<Guid, NextAccCachedDocument>();
+            foreach (var d in nextAccDocs)
+            {
+                string r = (d.Reference ?? "").Trim();
+                if (!string.IsNullOrEmpty(r) && !byRef.ContainsKey(r)) byRef[r] = d;
+                if (d.NextAccId != Guid.Empty && !byId.ContainsKey(d.NextAccId)) byId[d.NextAccId] = d;
+            }
+
+            // ใช้ sync queue ช่วยจับคู่: docNum → Nexaacc_Response_Id (Guid) → เอกสาร NextAcc
+            if (_syncStatusCache == null) LoadSyncStatusCache();
+
+            var matched = new HashSet<NextAccCachedDocument>();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                string id = row["ID"]?.ToString() ?? "";
+                row["IsNextAccOnly"] = "0";
+
+                NextAccCachedDocument nd = null;
+                // 1) จับคู่ด้วย Reference
+                byRef.TryGetValue(id, out nd);
+                // 2) ถ้าไม่เจอ ใช้ Nexaacc_Response_Id จาก sync queue
+                if (nd == null && _syncStatusCache != null && _syncStatusCache.TryGetValue(id, out var qrow))
+                {
+                    string respId = qrow.Table.Columns.Contains("Nexaacc_Response_Id") ? qrow["Nexaacc_Response_Id"]?.ToString() : null;
+                    if (Guid.TryParse(respId, out var g)) byId.TryGetValue(g, out nd);
+                }
+
+                if (nd != null)
+                {
+                    matched.Add(nd);
+                    row["DisplayDoc"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : id;
+                    row["HasNextAcc"] = "1";
+                    row["NextAccViewUrl"] = nd.BestViewUrl ?? "";
+                    row["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                    row["NextAccAttCount"] = nd.AttachmentCount;
+                }
+                else
+                {
+                    row["DisplayDoc"] = id;
+                    row["HasNextAcc"] = "0";
+                    row["NextAccViewUrl"] = "";
+                    row["NextAccDeepLink"] = "";
+                    row["NextAccAttCount"] = 0;
+                }
+            }
+
+            // เอกสารที่สร้างบน NextAcc โดยตรง (ไม่มีคู่ในระบบ) → เพิ่มแถวใหม่
+            foreach (var nd in nextAccDocs)
+            {
+                if (matched.Contains(nd)) continue;
+                var nr = dt.NewRow();
+                nr["ID"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : nd.NextAccId.ToString();
+                nr["DisplayDoc"] = nd.DocumentNumber;
+                nr["Created_Date"] = nd.DocumentDate;
+                nr["Vendor_Name"] = string.IsNullOrEmpty(nd.ContactName) ? "-" : nd.ContactName;
+                nr["Paid_How"] = "";
+                nr["Paid_Type"] = nd.DocumentTypeLabel ?? "";
+                nr["Total_Amount"] = nd.TotalAmount;
+                nr["Vat"] = nd.VatAmount;
+                nr["Status"] = "NextAcc";
+                nr["Created_By"] = "NextAcc";
+                nr["IsNextAccOnly"] = "1";
+                nr["HasNextAcc"] = "1";
+                nr["NextAccViewUrl"] = nd.BestViewUrl ?? "";
+                nr["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                nr["NextAccAttCount"] = nd.AttachmentCount;
+                dt.Rows.Add(nr);
             }
         }
 
@@ -842,27 +946,23 @@ namespace Take_Time_BangPhra.Account
 
             string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
             string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
+            string isNextAccOnly = SafeEval(e.Row.DataItem, "IsNextAccOnly");
+            string hasNextAcc = SafeEval(e.Row.DataItem, "HasNextAcc");
+            string viewUrl = SafeEval(e.Row.DataItem, "NextAccViewUrl");
+            int attCount = 0; int.TryParse(SafeEval(e.Row.DataItem, "NextAccAttCount"), out attCount);
 
             // คอลัมน์ "เอกสาร NextAcc" — ลิงก์เปิด PDF จริงจาก NextAcc (cache มาฝั่งนี้แล้ว) + จำนวนไฟล์แนบ
             var litNext = (Literal)e.Row.FindControl("litNextAccDoc");
             if (litNext != null)
             {
-                NextAccCachedDocument nd = null;
-                if (_nextAccDocs != null) _nextAccDocs.TryGetValue(docId, out nd);
-
-                // ลิงก์: PDF ที่ cache มาฝั่งนี้ก่อน, ถ้าไม่มี PDF (NextAcc ไม่มี template) ใช้ลิงก์เปิดใน NextAcc
-                string link = nd != null
-                    ? (!string.IsNullOrEmpty(nd.PdfRelativeUrl) ? nd.PdfRelativeUrl : nd.DeepLinkUrl)
-                    : null;
-
-                if (nd != null && !string.IsNullOrEmpty(link))
+                if (hasNextAcc == "1" && !string.IsNullOrEmpty(viewUrl))
                 {
-                    bool isLocalPdf = !string.IsNullOrEmpty(nd.PdfRelativeUrl);
+                    bool isLocalPdf = viewUrl.StartsWith("/");
                     string label = isLocalPdf ? "📄 ดูเอกสาร" : "📄 เปิดใน NextAcc ↗";
-                    string att = nd.AttachmentCount > 0
-                        ? $" <span class='sync-badge none' title='ไฟล์แนบ {nd.AttachmentCount} ไฟล์'>📎{nd.AttachmentCount}</span>"
+                    string att = attCount > 0
+                        ? $" <span class='sync-badge none' title='ไฟล์แนบ {attCount} ไฟล์'>📎{attCount}</span>"
                         : "";
-                    litNext.Text = $"<a href='{Server.HtmlEncode(link)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>{label}</a>{att}";
+                    litNext.Text = $"<a href='{Server.HtmlEncode(viewUrl)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>{label}</a>{att}";
                 }
                 else
                 {
@@ -873,6 +973,14 @@ namespace Take_Time_BangPhra.Account
             var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
             var btnSync = (Button)e.Row.FindControl("btnSync");
             if (lblSync == null || btnSync == null) return;
+
+            // เอกสารที่สร้างบน NextAcc โดยตรง — ไม่มีสถานะ sync ของ TakeTime
+            if (isNextAccOnly == "1")
+            {
+                lblSync.Text = "<span class='sync-badge completed'>บน NextAcc</span>";
+                btnSync.Visible = false;
+                return;
+            }
 
             if (docStatus == "Cancel")
             {
