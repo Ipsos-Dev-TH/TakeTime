@@ -962,6 +962,24 @@ namespace Take_Time_BangPhra.Account.Report
                         string description = "";
                         if (dtDetail?.Rows.Count > 0) description = dtDetail.Rows[0]["Detail"]?.ToString() ?? "";
 
+                        // Resolve vendor TaxId + stable ExternalId so the supplier contact
+                        // links correctly in NextAcc (deduped by TaxId, then Name).
+                        string vendorExternalId = null, vendorTaxId = null;
+                        try
+                        {
+                            string vendorId = DropDownList1.SelectedValue;
+                            if (!string.IsNullOrEmpty(vendorId) && vendorId != "0")
+                            {
+                                vendorExternalId = "VENDOR-" + vendorId;
+                                var dtVendor = code.DatabaseQuerySafe(conn,
+                                    "SELECT TOP 1 IDNumber FROM Vendor WHERE ID = @id",
+                                    new Dictionary<string, object> { { "@id", vendorId } });
+                                if (dtVendor?.Rows.Count > 0)
+                                    vendorTaxId = dtVendor.Rows[0]["IDNumber"]?.ToString();
+                            }
+                        }
+                        catch { }
+
                         var sync = new Integration.AccountingSyncService(conn);
                         string payAccId = sync.LookupPaidHowAccountId(paymentMethod);
                         string payAccCode = sync.LookupPaidHowAccountCode(paymentMethod);
@@ -1004,7 +1022,8 @@ namespace Take_Time_BangPhra.Account.Report
                             hasInputVat: hasVat, whtRate: syncWhtRate, whtAmount: syncWhtAmount,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines,
-                            isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit);
+                            isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
+                            supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId);
                     }
                 }
                 catch (Exception accEx)

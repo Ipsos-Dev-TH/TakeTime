@@ -64,7 +64,8 @@ namespace Take_Time_BangPhra.Integration
             string documentNumber = null,
             string paymentAccountId = null, string expenseAccountId = null,
             List<Dictionary<string, object>> expenseLines = null,
-            bool isCredit = false, bool autoRecordPayment = false)
+            bool isCredit = false, bool autoRecordPayment = false,
+            string supplierExternalId = null, string supplierTaxId = null)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -109,6 +110,10 @@ namespace Take_Time_BangPhra.Integration
                 payload["expenseAccountId"] = expenseAccountId;
             if (expenseLines != null && expenseLines.Count > 0)
                 payload["expenseLines"] = expenseLines;
+            if (!string.IsNullOrEmpty(supplierExternalId))
+                payload["supplierExternalId"] = supplierExternalId;
+            if (!string.IsNullOrEmpty(supplierTaxId))
+                payload["supplierTaxId"] = supplierTaxId;
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
         }
@@ -1197,7 +1202,24 @@ namespace Take_Time_BangPhra.Integration
             // Ensure supplier exists as Contact in NextAcc (DOCUMENT mode)
             ContactInfo supplierContact = null;
             if (_config.IsVoucherDocumentMode)
-                supplierContact = await EnsureSupplierContactAsync(voucherId, payeeName);
+            {
+                string supplierExternalId = p.ContainsKey("supplierExternalId") ? p["supplierExternalId"]?.ToString() : null;
+                string supplierTaxId = p.ContainsKey("supplierTaxId") ? p["supplierTaxId"]?.ToString() : null;
+                if (!string.IsNullOrEmpty(supplierExternalId))
+                {
+                    // Explicit vendor info from the Account_Payment voucher flow (voucherId == 0)
+                    supplierContact = await EnsureSupplierContactAsync(new ContactInfo
+                    {
+                        ExternalId = supplierExternalId,
+                        Name = payeeName,
+                        TaxId = supplierTaxId
+                    });
+                }
+                else
+                {
+                    supplierContact = await EnsureSupplierContactAsync(voucherId, payeeName);
+                }
+            }
 
             bool isSalaryVoucher = (expenseCategory ?? "").Contains("เงินเดือน")
                 || (expenseCategory ?? "").Equals("salary", StringComparison.OrdinalIgnoreCase);
@@ -2919,6 +2941,17 @@ namespace Take_Time_BangPhra.Integration
         private async Task<ContactInfo> EnsureSupplierContactAsync(int voucherId, string payeeName)
         {
             var info = LookupSupplierFromVoucher(voucherId, payeeName);
+            return await EnsureSupplierContactAsync(info);
+        }
+
+        /// <summary>
+        /// Overload that upserts an explicitly-built supplier ContactInfo. Used by the
+        /// Account_Payment-based PaymentVoucher flow where voucherId is 0 and the vendor's
+        /// ExternalId/TaxId are supplied directly through the queue payload (the voucherId
+        /// lookup queries the legacy Payment_Voucher table and can't resolve this flow).
+        /// </summary>
+        private async Task<ContactInfo> EnsureSupplierContactAsync(ContactInfo info)
+        {
             if (info == null || string.IsNullOrEmpty(info.ExternalId)) return null;
 
             try
