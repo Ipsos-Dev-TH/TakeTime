@@ -60,6 +60,16 @@ namespace Take_Time_BangPhra.Guest
         protected global::System.Web.UI.WebControls.Button btnPlaceOrder;
 
         /// <summary>
+        /// pnlClosed control (แบนเนอร์แจ้งเตือนเมื่อปิดรับออเดอร์).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlClosed;
+
+        /// <summary>
+        /// lblClosedMessage control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblClosedMessage;
+
+        /// <summary>
         /// rptOrders control.
         /// </summary>
         /// <remarks>
