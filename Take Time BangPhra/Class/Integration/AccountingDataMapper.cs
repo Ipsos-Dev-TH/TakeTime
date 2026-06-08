@@ -1160,10 +1160,13 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapPayrollToJournal(
             decimal totalSalary, DateTime payDate, string period,
             decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
-            decimal whtAmount = 0)
+            decimal whtAmount = 0, string paymentMethod = null)
         {
             var salaryAccountId = GetAccountId("SALARY_EXPENSE");
-            var cashAccountId = GetAccountId("CASH");
+            // บัญชีด้านจ่าย: ใช้ช่องทางจ่ายจริง (เงินสด/ธนาคาร) ถ้าระบุมา ไม่งั้น default เงินสด
+            var cashAccountId = string.IsNullOrEmpty(paymentMethod)
+                ? GetAccountId("CASH")
+                : GetPaymentMethodAccountId(paymentMethod);
 
             var lines = new List<JournalEntryLineRequest>();
 
@@ -2451,7 +2454,7 @@ namespace Take_Time_BangPhra.Integration
 
         public CreateIntegrationExpenseRequest MapPayrollToExpense(
             string period, decimal totalSalary, decimal totalSsf, decimal totalWht,
-            DateTime payrollDate, string description)
+            DateTime payrollDate, string description, string paymentMethod = null)
         {
             var lines = new List<IntegrationLineRequest>
             {
@@ -2484,8 +2487,67 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"PAYROLL-{period}",
                 Description = description ?? $"เงินเดือน - {period}",
                 IncludeVat = false,
-                PaymentMethod = "Cash",
-                PaymentAccountId = GetAccountId("CASH"),
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
+                PaymentAccountId = string.IsNullOrEmpty(paymentMethod) ? GetAccountId("CASH") : GetPaymentMethodAccountId(paymentMethod),
+                Sensitivity = "Payroll",
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// กลับรายการจ่ายเงินเดือน — ต้องสะท้อนสิ่งที่บันทึกไว้จริง:
+        ///   DOCUMENT mode: expense บันทึกแค่ DR เงินเดือน + DR ปกส.นายจ้าง / CR เงินสด(เต็มยอด)
+        ///                  → กลับเป็น DR เงินสด / CR เงินเดือน + CR ปกส.นายจ้าง
+        ///   JOURNAL mode:  บันทึกแบบเต็ม (มี ปกส.ค้างจ่าย / ภาษีค้างจ่าย) → กลับด้านทุกบรรทัด
+        /// </summary>
+        public CreateJournalEntryRequest MapPayrollReversalToJournal(
+            decimal totalSalary, DateTime reverseDate, string period,
+            decimal socialSecurityEmployee, decimal socialSecurityEmployer,
+            decimal whtAmount, string paymentMethod, string documentNumber, bool isDocumentMode)
+        {
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PR-{reverseDate:yyyyMM}";
+            var cashAccountId = string.IsNullOrEmpty(paymentMethod) ? GetAccountId("CASH") : GetPaymentMethodAccountId(paymentMethod);
+
+            List<JournalEntryLineRequest> lines;
+
+            if (isDocumentMode)
+            {
+                // ตรงข้ามกับ MapPayrollToExpense (DR เงินเดือน+ปกส.นายจ้าง / CR เงินสดเต็มยอด)
+                decimal totalSsf = socialSecurityEmployee + socialSecurityEmployer;
+                decimal docTotal = totalSalary + totalSsf;
+                var salaryAccountId = GetAccountId("SALARY_EXPENSE");
+
+                lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = cashAccountId, DebitAmount = docTotal, CreditAmount = 0, Description = $"กลับเงินจ่ายเงินเดือน - {period}" },
+                    new JournalEntryLineRequest { AccountId = salaryAccountId, DebitAmount = 0, CreditAmount = totalSalary, Description = $"กลับเงินเดือน - {period}" }
+                };
+                if (totalSsf > 0)
+                {
+                    Guid ssfExpenseId = TryGetAccountId("SSF_EMPLOYER_EXPENSE", out var se) ? se : GetAccountId("SALARY_EXPENSE");
+                    lines.Add(new JournalEntryLineRequest { AccountId = ssfExpenseId, DebitAmount = 0, CreditAmount = totalSsf, Description = $"กลับประกันสังคมส่วนนายจ้าง - {period}" });
+                }
+            }
+            else
+            {
+                // ตรงข้ามกับ MapPayrollToJournal ทุกบรรทัด
+                var original = MapPayrollToJournal(totalSalary, reverseDate, period,
+                    socialSecurityEmployee, socialSecurityEmployer, whtAmount, paymentMethod);
+                lines = original.Lines;
+                foreach (var line in lines)
+                {
+                    decimal dr = line.DebitAmount, cr = line.CreditAmount;
+                    line.DebitAmount = cr;
+                    line.CreditAmount = dr;
+                }
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = reverseDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการจ่ายเงินเดือน {refStr} - งวด {period}",
+                Reference = $"{refStr}-VOID",
                 Sensitivity = "Payroll",
                 Lines = lines
             };
