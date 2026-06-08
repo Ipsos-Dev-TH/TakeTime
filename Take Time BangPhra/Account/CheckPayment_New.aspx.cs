@@ -631,28 +631,28 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "PAY")
                 {
-                    // ── เอกสารอย่างเป็นทางการจาก NextAcc มาก่อน ──
+                    // ── เอกสารอย่างเป็นทางการจาก NextAcc มาก่อน (ทั้งเอกสารปกติและยกเลิก) ──
                     // ดาวน์โหลด PDF จริงจาก NextAcc (+ ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime แล้วเปิดดู
-                    // แทน PDF ที่ระบบ TakeTime ออกเอง. เฉพาะเอกสารปกติ (Cancel ใช้ PDF เดิม)
-                    if (docStatus != "Cancel")
+                    // แทน PDF ที่ระบบ TakeTime ออกเอง
+                    //   ปกติ → เอกสารใบสำคัญจ่ายต้นฉบับ
+                    //   ยกเลิก → ใบเพิ่มหนี้/เอกสารยกเลิกจาก NextAcc (หรือต้นฉบับ + ลายน้ำ "ยกเลิก")
+                    bool isCancelledDoc = docStatus == "Cancel";
+                    try
                     {
-                        try
+                        var syncDoc = new AccountingSyncService(conn);
+                        var cached = System.Threading.Tasks.Task.Run(() =>
+                            syncDoc.DownloadVoucherDocumentFromNextAccAsync(docNum, false, isCancelledDoc)).Result;
+                        if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
                         {
-                            var syncDoc = new AccountingSyncService(conn);
-                            var cached = System.Threading.Tasks.Task.Run(() =>
-                                syncDoc.DownloadVoucherDocumentFromNextAccAsync(docNum, false)).Result;
-                            if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
-                            {
-                                System.Diagnostics.Debug.WriteLine($"   ✅ NextAcc PDF: {cached.PdfRelativeUrl} (attachments={cached.AttachmentCount})");
-                                Response.Redirect(cached.PdfRelativeUrl);
-                                return;
-                            }
-                            System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF unavailable ({cached?.Message}) — fallback to local PDF");
+                            System.Diagnostics.Debug.WriteLine($"   ✅ NextAcc PDF: {cached.PdfRelativeUrl} (cancelled={isCancelledDoc}, attachments={cached.AttachmentCount})");
+                            Response.Redirect(cached.PdfRelativeUrl);
+                            return;
                         }
-                        catch (Exception nexEx)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF fetch failed: {nexEx.Message} — fallback to local PDF");
-                        }
+                        System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF unavailable ({cached?.Message}) — fallback to local PDF");
+                    }
+                    catch (Exception nexEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"   ⚠️ NextAcc PDF fetch failed: {nexEx.Message} — fallback to local PDF");
                     }
 
                     // SECURE: Get payment UID from database with parameterized query
