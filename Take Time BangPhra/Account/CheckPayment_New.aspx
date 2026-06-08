@@ -383,7 +383,7 @@
             </div>
 
             <div class="search-row">
-                <asp:Button ID="btnSearch" runat="server" Text="🔍 ค้นหา" CssClass="btn-search" OnClick="btnSearch_Click" />
+                <asp:Button ID="btnSearch" runat="server" Text="🔍 ค้นหา" CssClass="btn-search" OnClick="btnSearch_Click" OnClientClick="showLoading();" />
                 <asp:Button ID="btnExport" runat="server" Text="📄 Export CSV" CssClass="btn-export" OnClick="btnExport_Click" />
             </div>
         </div>
@@ -489,6 +489,11 @@
                                 OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลัง Sync...';"
                                 UseSubmitBehavior="false"
                                 Visible="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="เอกสาร NextAcc">
+                        <ItemTemplate>
+                            <asp:Literal ID="litNextAccDoc" runat="server"></asp:Literal>
                         </ItemTemplate>
                     </asp:TemplateField>
                 </Columns>

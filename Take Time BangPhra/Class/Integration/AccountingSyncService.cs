@@ -3989,11 +3989,45 @@ namespace Take_Time_BangPhra.Integration
         // เก็บไว้ที่ {PaymentFolderPath}\NextAcc\{docNum}\ → เสิร์ฟผ่าน /Documents/Payment/NextAcc/...
         // ──────────────────────────────────────────────
 
-        /// <summary>หา NextAcc Document Id (Guid) ของใบสำคัญจ่ายจาก Sync Queue; Guid.Empty ถ้ายังไม่ sync</summary>
-        private Guid LookupNexaaccDocIdByVoucher(string voucherDocNumber)
+        /// <summary>
+        /// หา Nexaacc_Response_Id ของ action ที่ระบุ (CREATE_VOUCHER_JOURNAL / VOID_VOUCHER)
+        /// แยกตาม Action_Type เพื่อไม่ให้ entry ยกเลิก (VOID) มาบังตัวเอกสารต้นฉบับ
+        /// </summary>
+        private string LookupVoucherActionResponse(string voucherDocNumber, string actionType)
         {
-            string id = LookupNexaaccId(voucherDocNumber, "VOUCHER");
-            return Guid.TryParse(id, out Guid g) ? g : Guid.Empty;
+            if (string.IsNullOrEmpty(voucherDocNumber)) return null;
+            try
+            {
+                string esc = voucherDocNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Response_Id FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'VOUCHER' AND Action_Type = @action AND Status = 'COMPLETED'
+                        AND Nexaacc_Response_Id IS NOT NULL
+                        AND Payload LIKE @pattern
+                      ORDER BY Processed_Date DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@action", actionType },
+                        { "@pattern", $"%\"documentNumber\":\"{esc}\"%" }
+                    });
+                if (dt?.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return dt.Rows[0][0].ToString();
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVoucherActionResponse({actionType}) doc={voucherDocNumber}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>ดึง Guid ตัวแรกจากสตริง response (รองรับ "DEBIT_NOTE:{guid}", "REVERSED:{guid} → ...", "{guid}")</summary>
+        private static Guid ExtractGuid(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return Guid.Empty;
+            var m = System.Text.RegularExpressions.Regex.Match(s,
+                @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+            return m.Success && Guid.TryParse(m.Value, out Guid g) ? g : Guid.Empty;
         }
 
         private static string MakeSafeFileName(string name)
@@ -4010,7 +4044,7 @@ namespace Take_Time_BangPhra.Integration
         /// ถ้าเอกสารยังไม่ sync / NextAcc ไม่มี template → Found=false (caller fallback ไป PDF ระบบเดิม)
         /// </summary>
         public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadVoucherDocumentFromNextAccAsync(
-            string voucherDocNumber, bool forceRefresh = false)
+            string voucherDocNumber, bool forceRefresh = false, bool isCancelled = false)
         {
             var result = new NextAccCachedDocument();
             if (string.IsNullOrEmpty(voucherDocNumber)) { result.Message = "ไม่มีเลขที่เอกสาร"; return result; }
@@ -4019,12 +4053,76 @@ namespace Take_Time_BangPhra.Integration
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
-            Guid docId = LookupNexaaccDocIdByVoucher(voucherDocNumber);
+            // ── Fast path: ถ้า PDF cache อยู่แล้วบนดิสก์ → คืนทันที ไม่ต้อง query DB/ยิง API ──
+            // (ทำให้การค้นหาซ้ำช่วงเดิมเร็วมาก — โหลดจริงเฉพาะครั้งแรกต่อเอกสาร)
+            {
+                string safeEarly = MakeSafeFileName(voucherDocNumber);
+                string suffixEarly = isCancelled ? "_Cancel" : "";
+                string folderEarly = Path.Combine(basePath, "NextAcc", safeEarly);
+                string pdfEarly = Path.Combine(folderEarly, safeEarly + suffixEarly + ".pdf");
+                string relEarly = "/Documents/Payment/NextAcc/" + safeEarly;
+                if (!forceRefresh && File.Exists(pdfEarly) && new FileInfo(pdfEarly).Length > 0)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfEarly;
+                    result.PdfRelativeUrl = relEarly + "/" + safeEarly + suffixEarly + ".pdf";
+                    try
+                    {
+                        string attPrefix = "att" + suffixEarly; // "att" หรือ "att_Cancel"
+                        foreach (var f in Directory.GetFiles(folderEarly, attPrefix + "*"))
+                        {
+                            string fn = Path.GetFileName(f);
+                            if (suffixEarly == "" && fn.StartsWith("att_Cancel")) continue; // กันชนกับชุดยกเลิก
+                            result.AttachmentCount++;
+                            result.AttachmentRelativeUrls.Add(relEarly + "/" + fn);
+                        }
+                    }
+                    catch { }
+                    return result;
+                }
+            }
+
+            // หาเอกสารปลายทางใน NextAcc:
+            //   ปกติ → เอกสารใบสำคัญจ่ายต้นฉบับ (CREATE_VOUCHER_JOURNAL)
+            //   ยกเลิก → ใบเพิ่มหนี้/เอกสารยกเลิกจาก NextAcc (VOID_VOUCHER → "DEBIT_NOTE:{id}")
+            //            ถ้าไม่มีใบเพิ่มหนี้ (เช่น void แบบ JOURNAL reverse) → ใช้เอกสารต้นฉบับ + ลายน้ำ "ยกเลิก"
+            Guid docId;
+            string watermark = null;
+            string fileSuffix = "";
+            Guid attachmentDocId;
+
+            Guid originalDocId = ExtractGuid(LookupVoucherActionResponse(voucherDocNumber, "CREATE_VOUCHER_JOURNAL"));
+
+            if (isCancelled)
+            {
+                fileSuffix = "_Cancel";
+                string voidResp = LookupVoucherActionResponse(voucherDocNumber, "VOID_VOUCHER");
+                Guid debitNoteId = (voidResp ?? "").IndexOf("DEBIT_NOTE", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? ExtractGuid(voidResp) : Guid.Empty;
+
+                if (debitNoteId != Guid.Empty)
+                {
+                    docId = debitNoteId;                 // เอกสารยกเลิกฝั่ง NextAcc (ใบเพิ่มหนี้)
+                    attachmentDocId = debitNoteId;
+                }
+                else
+                {
+                    docId = originalDocId;               // fallback: ต้นฉบับ + ลายน้ำยกเลิก
+                    attachmentDocId = originalDocId;
+                    watermark = "ยกเลิก";
+                }
+            }
+            else
+            {
+                docId = originalDocId;
+                attachmentDocId = originalDocId;
+            }
+
             if (docId == Guid.Empty) { result.Message = "เอกสารนี้ยังไม่ได้ sync เข้า NextAcc"; return result; }
 
             string safeDoc = MakeSafeFileName(voucherDocNumber);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
-            string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+            string pdfPath = Path.Combine(folder, safeDoc + fileSuffix + ".pdf");
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
 
             try
@@ -4034,7 +4132,7 @@ namespace Take_Time_BangPhra.Integration
                 // 1) PDF อย่างเป็นทางการจาก NextAcc
                 if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
                 {
-                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(docId);
+                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(docId, watermark: watermark);
                     if (pdf != null && pdf.Length > 0)
                         File.WriteAllBytes(pdfPath, pdf);
                 }
@@ -4042,7 +4140,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
-                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + fileSuffix + ".pdf";
                 }
                 else
                 {
@@ -4052,7 +4150,7 @@ namespace Take_Time_BangPhra.Integration
                 // 2) ไฟล์แนบ — เก็บชื่อไฟล์เป็น ASCII (att{n}{ext}) กันปัญหา URL ภาษาไทย
                 try
                 {
-                    var attResp = await _apiClient.GetAttachmentsAsync("Document", docId);
+                    var attResp = await _apiClient.GetAttachmentsAsync("Document", attachmentDocId);
                     if (attResp?.data != null && attResp.data.Count > 0)
                     {
                         string baseUrl = _config.RawBaseUrl.TrimEnd('/');
@@ -4066,7 +4164,7 @@ namespace Take_Time_BangPhra.Integration
                             string origName = a.OriginalFileName ?? a.FileName ?? ("att" + idx);
                             string ext = Path.GetExtension(origName);
                             if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
-                            string attName = $"att{idx}{ext}";
+                            string attName = $"att{fileSuffix}{idx}{ext}";
                             string attLocal = Path.Combine(folder, attName);
 
                             if (forceRefresh || !File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
