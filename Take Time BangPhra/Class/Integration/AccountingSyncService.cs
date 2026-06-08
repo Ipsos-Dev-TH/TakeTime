@@ -1252,7 +1252,7 @@ namespace Take_Time_BangPhra.Integration
                     DocumentId = documentId,
                     PaymentDate = voucherDate,
                     Amount = payAmount,
-                    PaymentMethod = paymentMethod ?? "CASH",
+                    PaymentMethod = AccountingDataMapper.NormalizePaymentMethod(paymentMethod),
                     Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
                 };
 

@@ -1253,6 +1253,28 @@ namespace Take_Time_BangPhra.Integration
         // Helper: Payment Method → Account (fallback when no explicit ID)
         // ──────────────────────────────────────────────
 
+        public static string NormalizePaymentMethod(string paymentMethod)
+        {
+            if (string.IsNullOrEmpty(paymentMethod)) return "CASH";
+            string pm = paymentMethod.Trim();
+            string pmUpper = pm.ToUpper();
+
+            if (pmUpper == "CASH" || pm.Contains("เงินสด")) return "CASH";
+            if (pmUpper.Contains("PROMPTPAY") || pm.Contains("พร้อมเพย์") || pmUpper.Contains("QR")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("TRANSFER") || pm.Contains("โอน")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("KBANK") || pm.Contains("กสิกร")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("KTB") || pm.Contains("กรุงไทย")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("BBL") || pm.Contains("กรุงเทพ")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("SCB") || pm.Contains("ไทยพาณิชย์")) return "BANK_TRANSFER";
+            if (pm.Contains("ธนาคาร") || pmUpper.Contains("BANK")) return "BANK_TRANSFER";
+            if (pmUpper.Contains("CHECK") || pmUpper.Contains("CHEQUE") || pm.Contains("เช็ค")) return "CHECK";
+            if (pmUpper.Contains("CARD") || pm.Contains("บัตร") || pm.Contains("เดบิต")) return "CREDIT_CARD";
+            if (pm.Contains("เครดิต")) return "CREDIT_CARD";
+            if (pmUpper.Contains("DIRECTOR") || pm.Contains("กรรมการ") || pm.Contains("ทดรอง")) return "CASH";
+
+            return "CASH";
+        }
+
         private Guid GetPaymentMethodAccountId(string paymentMethod)
         {
             string pm = (paymentMethod ?? "").Trim();
@@ -1597,7 +1619,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"RES-{reservationId}-DEP",
                 IncludeVat = splitVat,
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = new List<IntegrationLineRequest>
                 {
@@ -1640,7 +1662,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"RES-{reservationId}-PAY",
                 IncludeVat = true,
                 Description = $"รับชำระ - การจอง #{reservationId} ({customerName})",
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
             };
@@ -1757,7 +1779,7 @@ namespace Take_Time_BangPhra.Integration
                 Description = depositApplied > 0
                     ? $"ใบเสร็จ {refStr} — การจอง #{reservationId} ({customerName}) | หักมัดจำ {depositApplied:N2}"
                     : $"ใบเสร็จ {refStr} — การจอง #{reservationId} ({customerName})",
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = integrationLines
             };
@@ -2096,7 +2118,7 @@ namespace Take_Time_BangPhra.Integration
                 CustomerName = "ลูกค้าทั่วไป",
                 Reference = $"POS-{receiptId}",
                 Description = $"ขายสินค้า POS - {receiptId}",
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
             };
@@ -2205,6 +2227,7 @@ namespace Take_Time_BangPhra.Integration
                         VatRate = hasInputVat ? 7 : 0,
                         WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
                         AccountId = lineAccId,
+                        Category = !string.IsNullOrEmpty(el.Category) ? el.Category : null,
                     });
                 }
             }
@@ -2223,6 +2246,7 @@ namespace Take_Time_BangPhra.Integration
                     VatRate = hasInputVat ? 7 : 0,
                     WithholdingTaxRate = whtRate,
                     AccountId = expAccId,
+                    Category = !string.IsNullOrEmpty(expenseCategory) ? expenseCategory : null,
                 });
             }
 
@@ -2236,7 +2260,7 @@ namespace Take_Time_BangPhra.Integration
                 ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
                 IncludeVat = hasMultipleLines ? false : hasInputVat,
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
             };
@@ -2387,7 +2411,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"STOCK-IN-{productId}",
                 Description = $"ซื้อสินค้า - {productName}",
                 IncludeVat = hasInputVat,
-                PaymentMethod = paymentMethod,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = GetPaymentMethodAccountId(paymentMethod),
                 Lines = new List<IntegrationLineRequest>
                 {
