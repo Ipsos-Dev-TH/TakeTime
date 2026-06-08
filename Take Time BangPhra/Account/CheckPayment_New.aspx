@@ -337,10 +337,10 @@
             <div class="search-row">
                 <span class="search-label">ระหว่างวันที่:</span>
                 <asp:TextBox ID="txtStartDate" runat="server" CssClass="search-input"
-                    placeholder="2025-01-01" Width="150px"></asp:TextBox>
+                    placeholder="yyyy-mm-dd" Width="150px"></asp:TextBox>
                 <span>ถึง</span>
                 <asp:TextBox ID="txtEndDate" runat="server" CssClass="search-input"
-                    placeholder="2025-01-31" Width="150px"></asp:TextBox>
+                    placeholder="yyyy-mm-dd" Width="150px"></asp:TextBox>
             </div>
 
             <div class="search-row">
@@ -523,7 +523,6 @@
     </div>
 
     <script type="text/javascript">
-        // Date picker initialization
         $(function () {
             $("#<%= txtStartDate.ClientID %>").datepicker({
                 dateFormat: 'yy-mm-dd',
@@ -535,11 +534,15 @@
                 changeMonth: true,
                 changeYear: true
             });
+            // ซ่อน overlay เมื่อ page โหลดเสร็จ (postback กลับมาแล้ว)
+            hideLoading();
         });
 
-        // Show loading on search
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
         }
     </script>
 </asp:Content>

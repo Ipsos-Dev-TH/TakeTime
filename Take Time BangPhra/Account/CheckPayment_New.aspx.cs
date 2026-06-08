@@ -5,6 +5,7 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Class;
@@ -32,12 +33,12 @@ namespace Take_Time_BangPhra.Account
                     {
                         InitializePage();
 
-                        // Show success alert from Post-Redirect-Get sync
                         string syncedQ = Request.QueryString["synced"];
                         if (!string.IsNullOrEmpty(syncedQ))
                         {
+                            string safeSynced = HttpUtility.JavaScriptStringEncode(syncedQ);
                             ScriptManager.RegisterStartupScript(this, GetType(), "syncOk",
-                                $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{syncedQ})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
+                                $"alert('ส่งเข้าคิว sync สำเร็จ (Queue #{safeSynced})\\nดูสถานะได้ที่หน้า Accounting Integration');", true);
                         }
                     }
                 }
@@ -119,11 +120,17 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    // Use date range
-                    startDate = Convert.ToDateTime(txtStartDate.Text);
-                    endDate = Convert.ToDateTime(txtEndDate.Text);
+                    if (!DateTime.TryParse(txtStartDate.Text, out startDate) || !DateTime.TryParse(txtEndDate.Text, out endDate))
+                    {
+                        ShowError("กรุณาระบุวันที่ให้ถูกต้อง (รูปแบบ: yyyy-MM-dd)");
+                        return;
+                    }
+                }
 
-                    System.Diagnostics.Debug.WriteLine($"🔍 Search Mode: Date Range");
+                if (startDate > endDate)
+                {
+                    ShowError("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
+                    return;
                 }
 
                 System.Diagnostics.Debug.WriteLine($"📅 Date Range: {startDate:yyyy-MM-dd HH:mm:ss} to {endDate:yyyy-MM-dd HH:mm:ss}");
@@ -148,21 +155,6 @@ namespace Take_Time_BangPhra.Account
                 decimal minAmount = 0;
                 decimal.TryParse(txtMinAmount.Text.Trim(), out minAmount);
 
-                // Calculate expenses by payment method
-                try
-                {
-                    System.Diagnostics.Debug.WriteLine($"⚙️ Calling CalculateExpenses...");
-                    CalculateExpenses(startDate, endDate, vendorSearch, expenseType, minAmount);
-                    System.Diagnostics.Debug.WriteLine($"✅ CalculateExpenses completed");
-                }
-                catch (Exception calcEx)
-                {
-                    System.Diagnostics.Debug.WriteLine($"❌ CalculateExpenses failed: {calcEx.Message}");
-                    lblDateRange.Text += $" <span style='color: red;'>[CalculateExpenses Error: {calcEx.Message}]</span>";
-                    ShowError($"เกิดข้อผิดพลาดในการคำนวณค่าใช้จ่าย:\\n{calcEx.Message}");
-                }
-
-                // Load details
                 System.Diagnostics.Debug.WriteLine($"⚙️ Calling LoadDetails...");
                 LoadDetails(startDate, endDate, vendorSearch, expenseType, minAmount);
                 System.Diagnostics.Debug.WriteLine($"✅ LoadDetails completed");
@@ -177,142 +169,58 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch { /* Ignore logging errors */ }
 
-                ShowError("เกิดข้อผิดพลาด: " + ex.Message);
+                ShowError("เกิดข้อผิดพลาดในการค้นหา กรุณาลองใหม่");
             }
         }
 
-        private void CalculateExpenses(DateTime startDate, DateTime endDate, string vendorSearch = "", string expenseType = "", decimal minAmount = 0)
+        private void CalculateExpensesFromData(DataTable allPayments)
         {
-            try
+            decimal cashTotal = 0, kbankTotal = 0, ktbTotal = 0, directorTotal = 0, otherTotal = 0;
+            int cashCount = 0, kbankCount = 0, ktbCount = 0, directorCount = 0, otherCount = 0;
+            decimal totalVAT = 0;
+            int docCount = 0;
+            decimal grandTotal = 0;
+
+            foreach (DataRow row in allPayments.Rows)
             {
-                System.Diagnostics.Debug.WriteLine($"💸 CalculateExpenses started");
+                string status = row["Status"]?.ToString() ?? "";
+                if (!status.Equals("Normal", StringComparison.OrdinalIgnoreCase)) continue;
 
-                // Always calculate expenses for Normal status only (exclude Cancel)
-                string status = "Normal";
+                string paidHow = row["Paid_How"]?.ToString() ?? "";
+                decimal amount = row["Total_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Total_Amount"]) : 0;
+                decimal vat = row["Vat"] != DBNull.Value ? Convert.ToDecimal(row["Vat"]) : 0;
 
-                // Initialize totals
-                decimal cashTotal = 0, kbankTotal = 0, ktbTotal = 0, directorTotal = 0, otherTotal = 0;
-                int cashCount = 0, kbankCount = 0, ktbCount = 0, directorCount = 0, otherCount = 0;
-                decimal totalVAT = 0;
-                int docCount = 0;
-                decimal grandTotal = 0;
+                grandTotal += amount;
 
-                // Get all payments (with all filters)
-                var payments = GetAllPayments(startDate, endDate, status, vendorSearch, expenseType, minAmount);
-
-                if (payments != null && payments.Rows.Count > 0)
-                {
-                    System.Diagnostics.Debug.WriteLine($"   📊 Processing {payments.Rows.Count} payment records...");
-
-                    foreach (DataRow row in payments.Rows)
-                    {
-                        string paidHow = row["Paid_How"]?.ToString() ?? ""; // วิธีชำระ
-                        string paidType = row["Paid_Type"]?.ToString() ?? ""; // ประเภทค่าใช้จ่าย
-                        decimal amount = row["Total_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Total_Amount"]) : 0;
-                        decimal vat = row["Vat"] != DBNull.Value ? Convert.ToDecimal(row["Vat"]) : 0;
-
-                        System.Diagnostics.Debug.WriteLine($"   Record: Paid_How='{paidHow}', Paid_Type='{paidType}', Amount={amount:N2}");
-
-                        // Add to grand total regardless
-                        grandTotal += amount;
-
-                        // Count payment methods based on Paid_How (not Paid_Type!)
-                        bool categorized = false;
-
-                        if (paidHow.Contains("เงินสด") || paidHow.Contains("สด"))
-                        {
-                            cashTotal += amount;
-                            cashCount++;
-                            categorized = true;
-                        }
-                        if (paidHow.Contains("กสิกร") || paidHow.Contains("KBANK"))
-                        {
-                            kbankTotal += amount;
-                            kbankCount++;
-                            categorized = true;
-                        }
-                        if (paidHow.Contains("กรุงไทย") || paidHow.Contains("KTB"))
-                        {
-                            ktbTotal += amount;
-                            ktbCount++;
-                            categorized = true;
-                        }
-                        if (paidHow.Contains("กรรมการ") || paidHow.Contains("Director"))
-                        {
-                            directorTotal += amount;
-                            directorCount++;
-                            categorized = true;
-                        }
-
-                        if (!categorized)
-                        {
-                            otherTotal += amount;
-                            otherCount++;
-                            System.Diagnostics.Debug.WriteLine($"   ⚠️ Uncategorized payment method: '{paidHow}'");
-                        }
-
-                        totalVAT += vat;
-                        docCount++;
-                    }
-                }
+                if (paidHow.Contains("เงินสด") || paidHow.Contains("สด"))
+                { cashTotal += amount; cashCount++; }
+                else if (paidHow.Contains("กสิกร") || paidHow.Contains("KBANK"))
+                { kbankTotal += amount; kbankCount++; }
+                else if (paidHow.Contains("กรุงไทย") || paidHow.Contains("KTB"))
+                { ktbTotal += amount; ktbCount++; }
+                else if (paidHow.Contains("กรรมการ") || paidHow.Contains("Director"))
+                { directorTotal += amount; directorCount++; }
                 else
-                {
-                    System.Diagnostics.Debug.WriteLine($"   ⚠️ No payment records found!");
-                }
+                { otherTotal += amount; otherCount++; }
 
-                // Update UI
-                lblCashTotal.Text = cashTotal.ToString("N2");
-                lblCashCount.Text = cashCount.ToString();
-
-                lblKBANKTotal.Text = kbankTotal.ToString("N2");
-                lblKBANKCount.Text = kbankCount.ToString();
-
-                lblKTBTotal.Text = ktbTotal.ToString("N2");
-                lblKTBCount.Text = ktbCount.ToString();
-
-                lblDirectorTotal.Text = directorTotal.ToString("N2");
-                lblDirectorCount.Text = directorCount.ToString();
-
-                int totalCount = cashCount + kbankCount + ktbCount + directorCount + otherCount;
-
-                lblGrandTotal.Text = grandTotal.ToString("N2");
-                lblTotalCount.Text = totalCount.ToString();
-                lblTotalVAT.Text = totalVAT.ToString("N2");
-                lblDocCount.Text = docCount.ToString();
-
-                System.Diagnostics.Debug.WriteLine($"   💵 Cash: {cashTotal:N2} ({cashCount})");
-                System.Diagnostics.Debug.WriteLine($"   🏦 KBANK: {kbankTotal:N2} ({kbankCount})");
-                System.Diagnostics.Debug.WriteLine($"   🏦 KTB: {ktbTotal:N2} ({ktbCount})");
-                System.Diagnostics.Debug.WriteLine($"   👔 Director: {directorTotal:N2} ({directorCount})");
-                System.Diagnostics.Debug.WriteLine($"   ❓ Other: {otherTotal:N2} ({otherCount})");
-                System.Diagnostics.Debug.WriteLine($"   💰 Grand Total: {grandTotal:N2} ({totalCount})");
-
-                // Log expense calculation result
-                try
-                {
-                    string breakdown = $"Cash: {cashTotal:N2} ({cashCount})\n" +
-                                     $"KBANK: {kbankTotal:N2} ({kbankCount})\n" +
-                                     $"KTB: {ktbTotal:N2} ({ktbCount})\n" +
-                                     $"Director: {directorTotal:N2} ({directorCount})\n" +
-                                     $"Other: {otherTotal:N2} ({otherCount})\n" +
-                                     $"Document Count: {docCount}\n" +
-                                     $"Total VAT: {totalVAT:N2}";
-
-                    loggingService.LogAccountingOperation(
-                        "ExpenseCalculationResult",
-                        $"Total: {grandTotal:N2}\n{breakdown}",
-                        true,
-                        GetCurrentUserId());
-                }
-                catch { /* Ignore logging errors */ }
-
-                System.Diagnostics.Debug.WriteLine($"✅ CalculateExpenses completed successfully");
+                totalVAT += vat;
+                docCount++;
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"❌ CalculateExpenses FAILED: {ex.Message}");
-                throw;
-            }
+
+            lblCashTotal.Text = cashTotal.ToString("N2");
+            lblCashCount.Text = cashCount.ToString();
+            lblKBANKTotal.Text = kbankTotal.ToString("N2");
+            lblKBANKCount.Text = kbankCount.ToString();
+            lblKTBTotal.Text = ktbTotal.ToString("N2");
+            lblKTBCount.Text = ktbCount.ToString();
+            lblDirectorTotal.Text = directorTotal.ToString("N2");
+            lblDirectorCount.Text = directorCount.ToString();
+
+            int totalCount = cashCount + kbankCount + ktbCount + directorCount + otherCount;
+            lblGrandTotal.Text = grandTotal.ToString("N2");
+            lblTotalCount.Text = totalCount.ToString();
+            lblTotalVAT.Text = totalVAT.ToString("N2");
+            lblDocCount.Text = docCount.ToString();
         }
 
         private DataTable GetAllPayments(DateTime startDate, DateTime endDate, string status, string vendorSearch = "", string expenseType = "", decimal minAmount = 0)
@@ -320,7 +228,7 @@ namespace Take_Time_BangPhra.Account
             // Get all payment vouchers in the date range
             // For payroll payments (เงินเดือน), show employee name from Payroll_Records via VoucherNumber
             string query = @"
-                SELECT ap.ID, ap.Created_Date, ap.Paid_How, ap.Paid_Type, ap.Total_Amount, ap.Vat,
+                SELECT ap.ID, ap.[UID], ap.Created_Date, ap.Paid_How, ap.Paid_Type, ap.Total_Amount, ap.Vat,
                        ap.Status,
                        CASE
                            WHEN ap.Paid_Type = N'เงินเดือน' AND pr.EmployeeName IS NOT NULL THEN pr.EmployeeName
@@ -331,8 +239,8 @@ namespace Take_Time_BangPhra.Account
                 LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
                 LEFT JOIN Admin a ON ap.Created_By_ID = a.ID
                 LEFT JOIN Payroll_Records pr ON ap.ID = pr.VoucherNumber
-                WHERE CAST(ap.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
-                  AND CAST(ap.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
+                WHERE ap.Created_Date >= @StartDate
+                  AND ap.Created_Date < DATEADD(day, 1, @EndDate)
                   AND ap.Status LIKE @Status";
 
             // Add vendor name filter if provided
@@ -430,11 +338,14 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
-                // ดึงเอกสารที่ออกบน NextAcc ในช่วงที่ค้นหา (รวมที่สร้างบน NextAcc โดยตรง) มาเก็บ+merge เข้าตาราง
+                // คำนวณสรุปค่าใช้จ่ายจาก DataTable ที่ดึงมาแล้ว (ไม่ต้อง query ซ้ำ)
+                if (dt != null) CalculateExpensesFromData(dt);
+
                 var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
                 if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
 
-                // Bind to GridView
+                if (dt != null) BuildUidCacheFromGrid(dt);
+
                 gvDetails.DataSource = dt;
                 gvDetails.DataBind();
                 System.Diagnostics.Debug.WriteLine($"   ✅ GridView.DataBind() completed");
@@ -442,8 +353,9 @@ namespace Take_Time_BangPhra.Account
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"   ❌ Error in LoadDetails: {ex.Message}");
-                lblDateRange.Text += $" <span style='color: red;'>[LoadDetails Error: {ex.Message}]</span>";
-                ShowError($"เกิดข้อผิดพลาดในการโหลดข้อมูล:\\n{ex.Message}");
+                lblDateRange.Text += " <span style='color: red;'>[โหลดข้อมูลล้มเหลว]</span>";
+                ShowError("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+                try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, "LoadDetails failed", GetCurrentUserId()); } catch { }
 
                 // Bind empty DataTable
                 try
@@ -471,9 +383,14 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    startDate = Convert.ToDateTime(txtStartDate.Text);
-                    endDate = Convert.ToDateTime(txtEndDate.Text);
+                    if (!DateTime.TryParse(txtStartDate.Text, out startDate) || !DateTime.TryParse(txtEndDate.Text, out endDate))
+                    {
+                        ShowError("กรุณาระบุวันที่ให้ถูกต้อง");
+                        return;
+                    }
                 }
+
+                if (startDate > endDate) { ShowError("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด"); return; }
 
                 // Create CSV content
                 StringBuilder csv = new StringBuilder();
@@ -510,13 +427,13 @@ namespace Take_Time_BangPhra.Account
                         string docId = row["ID"]?.ToString() ?? "";
                         string date = row["Created_Date"] != DBNull.Value ? Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM/yyyy HH:mm") : "";
                         string vendor = row["Vendor_Name"]?.ToString() ?? "-";
-                        string paidHow = row["Paid_How"]?.ToString() ?? ""; // วิธีชำระ (payment method)
+                        string paidHow = row["Paid_How"]?.ToString() ?? "";
                         string amount = row["Total_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Total_Amount"]).ToString("N2") : "0.00";
                         string vat = row["Vat"] != DBNull.Value ? Convert.ToDecimal(row["Vat"]).ToString("N2") : "0.00";
                         string status = row["Status"]?.ToString() ?? "";
                         string createdBy = row["Created_By"]?.ToString() ?? "";
 
-                        csv.AppendLine($"{docId},{date},{vendor},{paidHow},{amount},{vat},{status},{createdBy}");
+                        csv.AppendLine($"{CsvSafe(docId)},{CsvSafe(date)},{CsvSafe(vendor)},{CsvSafe(paidHow)},{amount},{vat},{CsvSafe(status)},{CsvSafe(createdBy)}");
                     }
                 }
 
@@ -527,11 +444,13 @@ namespace Take_Time_BangPhra.Account
                 Response.Charset = "UTF-8";
                 Response.AddHeader("Content-Disposition", $"attachment;filename=รายงานค่าใช้จ่าย_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.csv");
                 Response.Write(csv.ToString());
-                Response.End();
+                Response.Flush();
+                HttpContext.Current.ApplicationInstance.CompleteRequest();
             }
             catch (Exception ex)
             {
-                ShowError("เกิดข้อผิดพลาดในการ export: " + ex.Message);
+                if (!(ex is System.Threading.ThreadAbortException))
+                    ShowError("เกิดข้อผิดพลาดในการ export กรุณาลองใหม่");
             }
         }
 
@@ -560,12 +479,18 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "PAY")
                 {
+                    string deletedBy = Session["username"]?.ToString() ?? Session["User"]?.ToString() ?? "UNKNOWN";
+                    try
+                    {
+                        loggingService.LogAccountingOperation("PaymentDeleted",
+                            $"DocNum={docNum}, DeletedBy={deletedBy}", true, GetCurrentUserId());
+                    }
+                    catch { }
+
                     string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                    // Check both non-padded and padded paths
                     string path = basePath + "\\" + docYear + "\\" + docMonth;
                     string pathPadded = basePath + "\\" + docYear + "\\" + docMonthPadded;
 
-                    // SECURE: Delete payment details with parameterized query
                     var deleteDetailsParams = new Dictionary<string, object>
                     {
                         { "@PaymentID", docNum }
@@ -617,7 +542,8 @@ namespace Take_Time_BangPhra.Account
             }
             catch (Exception ex)
             {
-                ShowError("ลบเอกสารไม่สำเร็จ: " + ex.Message);
+                try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, "Delete failed", GetCurrentUserId()); } catch { }
+                ShowError("ลบเอกสารไม่สำเร็จ กรุณาลองใหม่");
             }
         }
 
@@ -725,7 +651,8 @@ namespace Take_Time_BangPhra.Account
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"   ❌ Error: {ex.Message}");
-                ShowError("เปิดเอกสารไม่สำเร็จ:\\n" + ex.Message);
+                try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, "View document failed", GetCurrentUserId()); } catch { }
+                ShowError("เปิดเอกสารไม่สำเร็จ กรุณาลองใหม่");
             }
         }
 
@@ -754,14 +681,15 @@ namespace Take_Time_BangPhra.Account
 
                     if (docType == "PAY")
                     {
-                        // SECURE: Get payment UID with parameterized query
-                        var uidParams = new Dictionary<string, object>
+                        var uidParams = new Dictionary<string, object> { { "@ID", docNum } };
+                        var uidResult = codeInstance.DatabaseQuerySafe(conn,
+                            "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = @ID", uidParams);
+                        if (uidResult == null || uidResult.Rows.Count == 0 || uidResult.Rows[0][0] == DBNull.Value)
                         {
-                            { "@ID", docNum }
-                        };
-                        string uid = codeInstance.DatabaseQuerySafe(conn,
-                            "SELECT [UID] FROM [Taketime].[dbo].[Account_Payment] WHERE ID = @ID",
-                            uidParams).Rows[0][0].ToString();
+                            ShowError("ไม่พบเอกสารในระบบ");
+                            return;
+                        }
+                        string uid = uidResult.Rows[0][0].ToString();
                         Response.Redirect("/Account/PaymentVoucher?command=edit&uid=" + uid);
                     }
                     else
@@ -771,7 +699,8 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch (Exception ex)
                 {
-                    ShowError("แก้ไขเอกสารไม่สำเร็จ: " + ex.Message);
+                    try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, "Edit redirect failed", GetCurrentUserId()); } catch { }
+                    ShowError("แก้ไขเอกสารไม่สำเร็จ กรุณาลองใหม่");
                 }
             }
         }
@@ -950,6 +879,16 @@ namespace Take_Time_BangPhra.Account
         {
             if (e.Row.RowType != DataControlRowType.DataRow) return;
 
+            // UX: เพิ่ม confirm dialog ก่อนลบ
+            foreach (var ctrl in e.Row.Cells[0].Controls)
+            {
+                if (ctrl is Button btnDel && btnDel.CommandName == "Delete")
+                {
+                    btnDel.OnClientClick = "return confirm('ยืนยันลบเอกสารนี้? (ลบถาวร ไม่สามารถกู้คืนได้)');";
+                    break;
+                }
+            }
+
             string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
             string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
             string isNextAccOnly = SafeEval(e.Row.DataItem, "IsNextAccOnly");
@@ -1056,19 +995,17 @@ namespace Take_Time_BangPhra.Account
 
         private Dictionary<string, string> _uidCache;
 
-        private void EnsureUidCache()
+        private void BuildUidCacheFromGrid(DataTable gridData)
         {
-            if (_uidCache != null) return;
             _uidCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            try
+            if (gridData == null || !gridData.Columns.Contains("UID")) return;
+            foreach (DataRow r in gridData.Rows)
             {
-                var dt = codeInstance.DatabaseQuerySafe(conn,
-                    "SELECT ID, [UID] FROM [dbo].[Account_Payment] WHERE [UID] IS NOT NULL", null);
-                if (dt != null)
-                    foreach (DataRow r in dt.Rows)
-                        _uidCache[r["ID"].ToString()] = r["UID"].ToString();
+                string id = r["ID"]?.ToString() ?? "";
+                string uid = r["UID"] != DBNull.Value ? r["UID"]?.ToString() : "";
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(uid))
+                    _uidCache[id] = uid;
             }
-            catch { }
         }
 
         private List<string> GetLocalAttachments(string docNum, object createdDateObj)
@@ -1083,7 +1020,7 @@ namespace Take_Time_BangPhra.Account
                 string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
                 if (string.IsNullOrEmpty(basePath)) return urls;
 
-                EnsureUidCache();
+                if (_uidCache == null) return urls;
                 string uid;
                 if (!_uidCache.TryGetValue(docNum, out uid) || string.IsNullOrEmpty(uid)) return urls;
 
@@ -1271,13 +1208,23 @@ namespace Take_Time_BangPhra.Account
             }
             catch (Exception ex)
             {
-                ShowError("Sync error: " + ex.Message);
+                try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, $"Sync error: {docId}", GetCurrentUserId()); } catch { }
+                ShowError("Sync ไม่สำเร็จ กรุณาลองใหม่");
             }
         }
 
         private void ShowError(string message)
         {
-            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{message}');", true);
+            string safe = HttpUtility.JavaScriptStringEncode(message);
+            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{safe}');", true);
+        }
+
+        private static string CsvSafe(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            if (value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0 || value.StartsWith("=") || value.StartsWith("+") || value.StartsWith("-") || value.StartsWith("@"))
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            return value;
         }
 
         private int? GetCurrentUserId()
