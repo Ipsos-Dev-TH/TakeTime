@@ -2484,7 +2484,7 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"PAYROLL-{period}",
                 Description = description ?? $"เงินเดือน - {period}",
                 IncludeVat = false,
-                PaymentMethod = "CASH",
+                PaymentMethod = "Cash",
                 PaymentAccountId = GetAccountId("CASH"),
                 Sensitivity = "Payroll",
                 Lines = lines
