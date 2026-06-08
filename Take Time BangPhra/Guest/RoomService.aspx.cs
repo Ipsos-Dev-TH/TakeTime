@@ -34,8 +34,35 @@ namespace Take_Time_BangPhra.Guest
 
             if (!IsPostBack)
             {
+                ApplyOrderingAvailability();
                 LoadProducts();
                 LoadOrderHistory();
+            }
+        }
+
+        /// <summary>
+        /// เช็คว่าตอนนี้เปิดให้สั่งของหรือไม่ — ถ้าปิด: แสดงแบนเนอร์ + ปิดปุ่มสั่ง
+        /// </summary>
+        private void ApplyOrderingAvailability()
+        {
+            try
+            {
+                string msg;
+                bool open = _guestPortalService.IsRoomServiceOpen(out msg);
+                if (!open)
+                {
+                    pnlClosed.Visible = true;
+                    lblClosedMessage.Text = Server.HtmlEncode(msg ?? "ขณะนี้ปิดรับออเดอร์");
+                    btnPlaceOrder.Enabled = false;
+                    btnPlaceOrder.CssClass = "btn-place-order disabled";
+                    // กัน JS ฝั่ง client เปิดปุ่มสั่งกลับมาเมื่อยอดถึงขั้นต่ำ
+                    ClientScript.RegisterClientScriptBlock(GetType(), "rsClosedFlag",
+                        "window.rsOrderingClosed = true;", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"ApplyOrderingAvailability error: {ex.Message}");
             }
         }
 
@@ -224,6 +251,17 @@ namespace Take_Time_BangPhra.Guest
         {
             try
             {
+                // บังคับใช้สถานะเปิด-ปิดฝั่งเซิร์ฟเวอร์ (กันสั่งนอกเวลา/ตอนปิดรับ)
+                string closedMsg;
+                if (!_guestPortalService.IsRoomServiceOpen(out closedMsg))
+                {
+                    ApplyOrderingAvailability();
+                    string safeMsg = (closedMsg ?? "ขณะนี้ปิดรับออเดอร์").Replace("'", " ").Replace("\n", " ");
+                    ScriptManager.RegisterStartupScript(this, GetType(), "closed",
+                        $"alert('{safeMsg}');", true);
+                    return;
+                }
+
                 // Get cart items from hidden field
                 string cartJson = hfCartItems.Value;
 

@@ -700,5 +700,122 @@ namespace Take_Time_BangPhra.Services
         }
 
         #endregion
+
+        #region Room Service Ordering Schedule (เปิด-ปิด ระบบสั่งของ)
+
+        /// <summary>
+        /// อ่านการตั้งค่าเปิด-ปิดระบบสั่งของ (แถวเดียว ID=1) — คืน null ถ้ายังไม่ได้รันสคริปต์ migration
+        /// </summary>
+        public DataRow GetRoomServiceSettings()
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 * FROM Guest_RoomService_Settings ORDER BY ID", null);
+                return (dt != null && dt.Rows.Count > 0) ? dt.Rows[0] : null;
+            }
+            catch
+            {
+                // ตารางยังไม่ถูกสร้าง — ถือว่ายังไม่ตั้งค่า (เปิดบริการตามเดิม)
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// ตรวจสอบว่าตอนนี้เปิดให้ลูกค้าสั่งของหรือไม่
+        ///   - Is_Enabled = 0      → ปิด (ปิดทั้งระบบ)
+        ///   - Manual_Mode = OPEN  → เปิด (บังคับเปิด)
+        ///   - Manual_Mode = CLOSED→ ปิด (บังคับปิด)
+        ///   - Manual_Mode = AUTO  → เปิดตามช่วงเวลา Open_Time..Close_Time (รองรับข้ามเที่ยงคืน)
+        /// ถ้ายังไม่ได้ตั้งค่า (ไม่มีตาราง/แถว) → เปิดตามเดิม (fail-open) เพื่อไม่ให้กระทบของเดิม
+        /// </summary>
+        public bool IsRoomServiceOpen(out string message)
+        {
+            message = null;
+            DataRow s = GetRoomServiceSettings();
+            if (s == null) return true; // ยังไม่ตั้งค่า → เปิดตามเดิม
+
+            bool enabled = s["Is_Enabled"] != DBNull.Value && Convert.ToBoolean(s["Is_Enabled"]);
+            string mode = (s["Manual_Mode"]?.ToString() ?? "AUTO").Trim().ToUpper();
+            string closedMsg = s["Closed_Message"] == DBNull.Value ? null : s["Closed_Message"].ToString();
+            if (string.IsNullOrWhiteSpace(closedMsg))
+                closedMsg = "ขณะนี้ปิดรับออเดอร์ กรุณาสั่งในเวลาทำการ";
+
+            if (!enabled)
+            {
+                message = closedMsg;
+                return false;
+            }
+
+            if (mode == "OPEN") return true;
+            if (mode == "CLOSED")
+            {
+                message = closedMsg;
+                return false;
+            }
+
+            // AUTO — เทียบช่วงเวลา
+            TimeSpan now = DateTime.Now.TimeOfDay;
+            TimeSpan open = ToTimeSpan(s["Open_Time"], new TimeSpan(8, 0, 0));
+            TimeSpan close = ToTimeSpan(s["Close_Time"], new TimeSpan(20, 0, 0));
+
+            bool isOpen;
+            if (open <= close)
+                isOpen = now >= open && now <= close;            // ช่วงปกติในวันเดียว
+            else
+                isOpen = now >= open || now <= close;             // ช่วงข้ามเที่ยงคืน
+
+            if (!isOpen)
+            {
+                message = $"{closedMsg} (เวลาทำการ {open:hh\\:mm} - {close:hh\\:mm})";
+                return false;
+            }
+            return true;
+        }
+
+        private static TimeSpan ToTimeSpan(object value, TimeSpan fallback)
+        {
+            if (value == null || value == DBNull.Value) return fallback;
+            if (value is TimeSpan ts) return ts;
+            TimeSpan parsed;
+            return TimeSpan.TryParse(value.ToString(), out parsed) ? parsed : fallback;
+        }
+
+        /// <summary>บันทึกการตั้งค่าเปิด-ปิดระบบสั่งของ (upsert แถว ID=1)</summary>
+        public bool SaveRoomServiceSettings(bool isEnabled, string manualMode, string openTime,
+            string closeTime, string closedMessage, string updatedBy)
+        {
+            string mode = (manualMode ?? "AUTO").Trim().ToUpper();
+            if (mode != "OPEN" && mode != "CLOSED") mode = "AUTO";
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Is_Enabled", isEnabled ? 1 : 0 },
+                { "@Manual_Mode", mode },
+                { "@Open_Time", string.IsNullOrWhiteSpace(openTime) ? "08:00:00" : openTime },
+                { "@Close_Time", string.IsNullOrWhiteSpace(closeTime) ? "20:00:00" : closeTime },
+                { "@Closed_Message", (object)closedMessage ?? DBNull.Value },
+                { "@Updated_By", (object)updatedBy ?? DBNull.Value }
+            };
+
+            int rows = _code.DatabaseInsertSafe(_connectionString,
+                @"IF EXISTS (SELECT 1 FROM Guest_RoomService_Settings WHERE ID = 1)
+                      UPDATE Guest_RoomService_Settings
+                         SET Is_Enabled = @Is_Enabled, Manual_Mode = @Manual_Mode,
+                             Open_Time = @Open_Time, Close_Time = @Close_Time,
+                             Closed_Message = @Closed_Message,
+                             Updated_Date = GETDATE(), Updated_By = @Updated_By
+                       WHERE ID = 1;
+                  ELSE
+                      INSERT INTO Guest_RoomService_Settings
+                          (ID, Is_Enabled, Manual_Mode, Open_Time, Close_Time, Closed_Message, Updated_Date, Updated_By)
+                      VALUES
+                          (1, @Is_Enabled, @Manual_Mode, @Open_Time, @Close_Time, @Closed_Message, GETDATE(), @Updated_By);",
+                parameters);
+
+            return rows > 0;
+        }
+
+        #endregion
     }
 }

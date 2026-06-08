@@ -543,6 +543,9 @@
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
                                                     <i class="fas fa-concierge-bell"></i> Room Service
                                                 </a></li>
+                                                <li><a runat="server" href="~/Admin/RoomService/OrderSettings">
+                                                    <i class="fas fa-store-alt"></i> ตั้งค่าเปิด-ปิดสั่งของ
+                                                </a></li>
                                             </ul>
                                         </div>
 

@@ -833,6 +833,11 @@
 
     <!-- Tab: New Order -->
     <div id="order" class="tab-content active">
+        <asp:Panel ID="pnlClosed" runat="server" Visible="false"
+            style="background:#fff3cd;border:1px solid #ffe08a;color:#7a5d00;border-radius:12px;padding:16px 18px;margin:0 0 16px;display:flex;gap:10px;align-items:center;font-weight:600;">
+            <i class="fas fa-clock" style="font-size:20px;"></i>
+            <asp:Label ID="lblClosedMessage" runat="server" Text=""></asp:Label>
+        </asp:Panel>
         <div class="order-layout">
             <!-- Products Section -->
             <div class="products-section">
@@ -1200,9 +1205,9 @@
                 }
             }
 
-            // Place order button - disable if no items or below minimum
+            // Place order button - disable if no items, below minimum, or ordering closed
             var btnOrder = document.getElementById('<%= btnPlaceOrder.ClientID %>');
-            if (btnOrder) btnOrder.disabled = (cart.length === 0 || !meetsMinimum);
+            if (btnOrder) btnOrder.disabled = (cart.length === 0 || !meetsMinimum || window.rsOrderingClosed === true);
 
             // Hidden field
             document.getElementById('<%= hfCartItems.ClientID %>').value = JSON.stringify(cart);
