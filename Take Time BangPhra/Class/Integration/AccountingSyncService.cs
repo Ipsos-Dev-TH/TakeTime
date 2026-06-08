@@ -3981,5 +3981,145 @@ namespace Take_Time_BangPhra.Integration
             }
             return list;
         }
+
+        // ──────────────────────────────────────────────
+        // Outbound: ดาวน์โหลดเอกสารฝั่งจ่าย (PDF อย่างเป็นทางการ + ไฟล์แนบ) จาก NextAcc
+        //           มาเก็บไว้ที่ฝั่ง TakeTime — ใช้ในหน้า CheckPayment เปิดดู PDF จาก NextAcc
+        //           แทน PDF ที่ระบบ TakeTime ออกเอง
+        // เก็บไว้ที่ {PaymentFolderPath}\NextAcc\{docNum}\ → เสิร์ฟผ่าน /Documents/Payment/NextAcc/...
+        // ──────────────────────────────────────────────
+
+        /// <summary>หา NextAcc Document Id (Guid) ของใบสำคัญจ่ายจาก Sync Queue; Guid.Empty ถ้ายังไม่ sync</summary>
+        private Guid LookupNexaaccDocIdByVoucher(string voucherDocNumber)
+        {
+            string id = LookupNexaaccId(voucherDocNumber, "VOUCHER");
+            return Guid.TryParse(id, out Guid g) ? g : Guid.Empty;
+        }
+
+        private static string MakeSafeFileName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "file";
+            foreach (char c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
+        }
+
+        /// <summary>
+        /// ดาวน์โหลดเอกสารใบสำคัญจ่ายอย่างเป็นทางการจาก NextAcc (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
+        /// คืน NextAccCachedDocument พร้อม relative URL ของ PDF (ถ้าสำเร็จ)
+        /// ถ้าเอกสารยังไม่ sync / NextAcc ไม่มี template → Found=false (caller fallback ไป PDF ระบบเดิม)
+        /// </summary>
+        public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadVoucherDocumentFromNextAccAsync(
+            string voucherDocNumber, bool forceRefresh = false)
+        {
+            var result = new NextAccCachedDocument();
+            if (string.IsNullOrEmpty(voucherDocNumber)) { result.Message = "ไม่มีเลขที่เอกสาร"; return result; }
+            if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
+
+            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
+
+            Guid docId = LookupNexaaccDocIdByVoucher(voucherDocNumber);
+            if (docId == Guid.Empty) { result.Message = "เอกสารนี้ยังไม่ได้ sync เข้า NextAcc"; return result; }
+
+            string safeDoc = MakeSafeFileName(voucherDocNumber);
+            string folder = Path.Combine(basePath, "NextAcc", safeDoc);
+            string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+            string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
+
+            try
+            {
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+                // 1) PDF อย่างเป็นทางการจาก NextAcc
+                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                {
+                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(docId);
+                    if (pdf != null && pdf.Length > 0)
+                        File.WriteAllBytes(pdfPath, pdf);
+                }
+                if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfPath;
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                }
+                else
+                {
+                    result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
+                }
+
+                // 2) ไฟล์แนบ — เก็บชื่อไฟล์เป็น ASCII (att{n}{ext}) กันปัญหา URL ภาษาไทย
+                try
+                {
+                    var attResp = await _apiClient.GetAttachmentsAsync("Document", docId);
+                    if (attResp?.data != null && attResp.data.Count > 0)
+                    {
+                        string baseUrl = _config.RawBaseUrl.TrimEnd('/');
+                        int idx = 0;
+                        foreach (var a in attResp.data)
+                        {
+                            idx++;
+                            string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                            if (string.IsNullOrEmpty(storage)) continue;
+
+                            string origName = a.OriginalFileName ?? a.FileName ?? ("att" + idx);
+                            string ext = Path.GetExtension(origName);
+                            if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                            string attName = $"att{idx}{ext}";
+                            string attLocal = Path.Combine(folder, attName);
+
+                            if (forceRefresh || !File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
+                            {
+                                byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
+                                if (bytes != null && bytes.Length > 0)
+                                    File.WriteAllBytes(attLocal, bytes);
+                            }
+                            if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0)
+                            {
+                                result.AttachmentCount++;
+                                result.AttachmentRelativeUrls.Add(relPrefix + "/" + attName);
+                            }
+                        }
+                    }
+                }
+                catch (Exception exAtt)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"DownloadVoucherDocument: attachments doc={voucherDocNumber} ล้มเหลว: {exAtt.Message}", "SYSTEM");
+                }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadVoucherDocument: doc={voucherDocNumber} pdf={result.Found} attachments={result.AttachmentCount}", "SYSTEM");
+            }
+            catch (AuthenticationFailedException exAuth)
+            {
+                result.Message = "NextAcc auth ล้มเหลว: " + exAuth.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadVoucherDocument: doc={voucherDocNumber} {exAuth.Message}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                result.Message = "ดาวน์โหลดเอกสารล้มเหลว: " + ex.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadVoucherDocument: doc={voucherDocNumber} {ex.Message}", "SYSTEM");
+            }
+
+            return result;
+        }
+
+        private static string ExtFromContentType(string contentType)
+        {
+            switch ((contentType ?? "").ToLower())
+            {
+                case "application/pdf": return ".pdf";
+                case "image/jpeg": return ".jpg";
+                case "image/png": return ".png";
+                case "image/gif": return ".gif";
+                case "image/bmp": return ".bmp";
+                case "image/webp": return ".webp";
+                default: return ".bin";
+            }
+        }
     }
 }

@@ -1081,4 +1081,18 @@ namespace Take_Time_BangPhra.Integration
         public string Url { get; set; }
         public bool IsImage { get; set; }
     }
+
+    /// <summary>
+    /// ผลการดาวน์โหลดเอกสารอย่างเป็นทางการ (PDF + ไฟล์แนบ) จาก NextAcc มาเก็บที่ฝั่ง TakeTime
+    /// ใช้ในหน้า CheckPayment เพื่อเปิดดู PDF จาก NextAcc แทน PDF ที่ระบบออกเอง
+    /// </summary>
+    public class NextAccCachedDocument
+    {
+        public bool Found { get; set; }
+        public string PdfRelativeUrl { get; set; }
+        public string PdfLocalPath { get; set; }
+        public int AttachmentCount { get; set; }
+        public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
+        public string Message { get; set; }
+    }
 }
