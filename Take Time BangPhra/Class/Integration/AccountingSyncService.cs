@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -3846,6 +3847,143 @@ namespace Take_Time_BangPhra.Integration
                 case "DEBIT_NOTE": return $"{baseUrl}/{companyId}/debit-notes/{nexaaccResponseId}";
                 default: return $"{baseUrl}/{companyId}/documents/{nexaaccResponseId}";
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // Outbound: ดึงเอกสารฝั่งจ่ายจาก NextAcc + ไฟล์แนบ (ยกเว้นเงินเดือน)
+        // ใช้ X-Api-Key (int_ key) → company endpoints ผ่าน ApiKeyMiddleware fallback
+        // ──────────────────────────────────────────────
+
+        /// <summary>DocumentType ฝั่งจ่ายที่ดึงมาแสดง (ตรงกับ enum ของ NextAcc)</summary>
+        private static readonly Dictionary<string, string> PaymentDocTypeLabels = new Dictionary<string, string>
+        {
+            { "Expense", "ใบบันทึกค่าใช้จ่าย" },
+            { "PaymentVoucher", "ใบสำคัญจ่าย" },
+            { "PurchaseInvoice", "ใบแจ้งหนี้ซื้อ" },
+            { "CertificateInLieu", "ใบรับรองแทนใบเสร็จ" }
+        };
+
+        /// <summary>
+        /// ดึงเอกสารฝั่งจ่ายทั้งหมดที่ออกจาก NextAcc พร้อมไฟล์แนบ มาแสดงในระบบ TakeTime
+        /// ยกเว้นเอกสารเงินเดือน (payroll) ตามที่กำหนด
+        /// </summary>
+        public async System.Threading.Tasks.Task<List<NextAccPaymentDoc>> FetchNextAccPaymentDocumentsAsync(
+            DateTime fromDate, DateTime toDate, bool includeAttachments = true)
+        {
+            var result = new List<NextAccPaymentDoc>();
+            if (!_config.IsConfigured || !_config.Enabled) return result;
+
+            string baseUrl = _config.RawBaseUrl.TrimEnd('/');
+            var seen = new HashSet<Guid>();
+
+            foreach (var typeName in PaymentDocTypeLabels.Keys)
+            {
+                int page = 1;
+                while (true)
+                {
+                    PagedResponse<OutboundDocumentResponse> resp;
+                    try
+                    {
+                        resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
+                        {
+                            FromDate = fromDate,
+                            ToDate = toDate,
+                            Type = typeName,
+                            Page = page,
+                            PageSize = 50
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"FetchNextAccPaymentDocuments: ดึง type={typeName} page={page} ล้มเหลว: {ex.Message}", "SYSTEM");
+                        break;
+                    }
+
+                    if (resp?.Items == null || resp.Items.Count == 0) break;
+
+                    foreach (var d in resp.Items)
+                    {
+                        if (d == null || seen.Contains(d.Id)) continue;
+                        if (IsPayrollDocument(d)) continue; // ยกเว้นเงินเดือน
+                        seen.Add(d.Id);
+
+                        var doc = new NextAccPaymentDoc
+                        {
+                            Id = d.Id,
+                            DocumentNumber = d.DocumentNumber,
+                            DocumentType = d.DocumentType,
+                            DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                            Status = d.Status,
+                            DocumentDate = d.DocumentDate,
+                            DueDate = d.DueDate,
+                            ContactName = d.ContactName,
+                            ContactTaxId = d.ContactTaxId,
+                            SubTotal = d.SubTotal,
+                            VatAmount = d.VatAmount,
+                            TotalAmount = d.TotalAmount,
+                            PaidAmount = d.PaidAmount,
+                            BalanceDue = d.BalanceDue,
+                            Reference = d.Reference,
+                            Notes = d.Notes,
+                            DocumentUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "EXPENSE")
+                        };
+
+                        if (includeAttachments)
+                            doc.Attachments = await FetchDocumentAttachmentsAsync(d.Id, baseUrl);
+
+                        result.Add(doc);
+                    }
+
+                    if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
+                    page++;
+                }
+            }
+
+            return result.OrderByDescending(x => x.DocumentDate).ThenByDescending(x => x.DocumentNumber).ToList();
+        }
+
+        /// <summary>เอกสารเงินเดือน = Reference ขึ้นต้น PAYROLL- หรือชื่อผู้ติดต่อมีคำว่า "เงินเดือน"</summary>
+        private static bool IsPayrollDocument(OutboundDocumentResponse d)
+        {
+            string r = d.Reference ?? "";
+            string c = d.ContactName ?? "";
+            if (r.StartsWith("PAYROLL-", StringComparison.OrdinalIgnoreCase)) return true;
+            if (c.Contains("เงินเดือน")) return true;
+            return false;
+        }
+
+        /// <summary>ดึงรายการไฟล์แนบของเอกสาร (entityType=Document) + สร้าง URL static</summary>
+        private async System.Threading.Tasks.Task<List<NextAccAttachment>> FetchDocumentAttachmentsAsync(Guid documentId, string baseUrl)
+        {
+            var list = new List<NextAccAttachment>();
+            try
+            {
+                var resp = await _apiClient.GetAttachmentsAsync("Document", documentId);
+                if (resp?.data != null)
+                {
+                    foreach (var a in resp.data)
+                    {
+                        string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                        string url = !string.IsNullOrEmpty(storage) ? $"{baseUrl}/{storage}" : null;
+                        list.Add(new NextAccAttachment
+                        {
+                            Id = a.Id,
+                            FileName = a.OriginalFileName ?? a.FileName,
+                            ContentType = a.ContentType,
+                            FileSize = a.FileSize,
+                            Url = url,
+                            IsImage = (a.ContentType ?? "").StartsWith("image", StringComparison.OrdinalIgnoreCase)
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"FetchDocumentAttachments: doc={documentId} ล้มเหลว: {ex.Message}", "SYSTEM");
+            }
+            return list;
         }
     }
 }
