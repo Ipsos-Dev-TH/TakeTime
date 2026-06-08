@@ -996,6 +996,52 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>
+        /// สร้าง/ดึง PDF อย่างเป็นทางการของเอกสารจาก NextAcc (เรนเดอร์ตาม template ใน NextAcc)
+        /// POST /api/companies/{companyId}/document-templates/generate-pdf
+        /// คืน byte[] ของ PDF; null ถ้าเอกสารไม่พบ/ไม่มี template (caller fallback ไปใช้ PDF ระบบเดิม)
+        /// ใช้ X-Api-Key — int_ key ผ่าน [Authorize] ได้ผ่าน ApiKeyMiddleware fallback
+        /// </summary>
+        public async Task<byte[]> GenerateDocumentPdfAsync(Guid documentId, Guid? templateId = null, string watermark = null)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+            if (documentId == Guid.Empty) return null;
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            string path = $"{CompanyPath}/document-templates/generate-pdf";
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+            var bodyObj = new { DocumentId = documentId, TemplateId = templateId, WatermarkOverride = watermark };
+            string jsonBody = JsonConvert.SerializeObject(bodyObj, _jsonSettings);
+
+            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+
+                var startTime = DateTime.Now;
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("POST", path, jsonBody, errBody, (int)response.StatusCode, false, durationMs);
+                    if ((int)response.StatusCode == 401 || (int)response.StatusCode == 403)
+                        throw new AuthenticationFailedException(
+                            $"generate-pdf auth failed ({(int)response.StatusCode}): {errBody}");
+                    // 404 (ไม่มี template/เอกสาร) → คืน null ให้ caller fallback ไปใช้ PDF ระบบเดิม
+                    return null;
+                }
+
+                LogApiCall("POST", path, jsonBody, "[pdf bytes]", (int)response.StatusCode, true, durationMs);
+                return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            }
+        }
+
         // Document: Convert Type, Write-off Bad Debt, Void Payment
         public async Task<ApiResponse<DocumentResponse>> ConvertDocumentTypeAsync(Guid documentId, int newDocumentType)
         {
