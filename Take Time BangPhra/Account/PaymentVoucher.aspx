@@ -391,6 +391,22 @@
                     <asp:CheckBox ID="chkEditVoucherNo" Text="Edit" runat="server" AutoPostBack="True" OnCheckedChanged="chkEditVoucherNo_CheckedChanged" />
                  </td>
             </tr>
+            <asp:PlaceHolder ID="pnlNextAccRef" runat="server" Visible="false">
+            <tr style="background-color: #e8f5e9;">
+                <td class="modal-sm" style="width: 20%; text-align: right; color: #2e7d32; font-weight: bold;">เอกสาร NextAcc:</td>
+                <td style="padding: 8px;">
+                    <span style="font-size: 14px; font-weight: 600; color: #2e7d32;">
+                        <asp:Label ID="lblNextAccDocNumber" runat="server" Text=""></asp:Label>
+                    </span>
+                    <asp:HyperLink ID="lnkNextAccDoc" runat="server" Text="เปิดใน NextAcc" Target="_blank"
+                        Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
+                    <asp:Label ID="lblNextAccSyncStatus" runat="server" Text=""
+                        Style="margin-left: 15px; font-size: 12px; color: #666;" />
+                    <asp:Label ID="lblNextAccPaymentStatus" runat="server" Text=""
+                        Style="margin-left: 10px; font-size: 12px;" />
+                </td>
+            </tr>
+            </asp:PlaceHolder>
              <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบสำคัญจ่าย:</td>
                 <td>
@@ -429,15 +445,18 @@
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">วิธีจ่ายเงิน:</td>
                 <td>&nbsp;<asp:DropDownList ID="DropDownList2" runat="server" Width="60%" AppendDataBoundItems="true">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>    
+                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
                 </asp:DropDownList>
                     <asp:SqlDataSource ID="SqlDataSource2" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = 'True')">
                         <SelectParameters>
                             <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
                         </SelectParameters>
                     </asp:SqlDataSource>
+                    &nbsp;
+                    <asp:CheckBox ID="chkIsCredit" runat="server" Text=" เครดิต (ยังไม่จ่ายเงิน)" Font-Bold="true" />
+                    <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ</span>
                  </td>
-            
+
             </tr>
 
             <tr style="background-color:whitesmoke;">

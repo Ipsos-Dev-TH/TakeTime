@@ -1782,6 +1782,7 @@ namespace Take_Time_BangPhra.Account
                     var dt = codeInstance.DatabaseQuerySafe(conn,
                         @"SELECT ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type, ap.Created_Date,
                                  ISNULL(ap.WHT_Rate, 0) AS WHT_Rate, ISNULL(ap.WHT_Amount, 0) AS WHT_Amount,
+                                 ISNULL(ap.IsCredit, 0) AS IsCredit,
                                  ISNULL(v.Name, '-') AS Vendor_Name
                           FROM Account_Payment ap
                           LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
@@ -1839,6 +1840,11 @@ namespace Take_Time_BangPhra.Account
                         decimal cdnWhtRate = r.Table.Columns.Contains("WHT_Rate") && r["WHT_Rate"] != DBNull.Value ? Convert.ToDecimal(r["WHT_Rate"]) : 0;
                         decimal cdnWhtAmount = r.Table.Columns.Contains("WHT_Amount") && r["WHT_Amount"] != DBNull.Value ? Convert.ToDecimal(r["WHT_Amount"]) : 0;
 
+                        // Check IsCredit and auto-payment flags
+                        bool cdnIsCredit = false;
+                        try { cdnIsCredit = dt.Columns.Contains("IsCredit") && r["IsCredit"] != DBNull.Value && Convert.ToBoolean(r["IsCredit"]); } catch { }
+                        bool cdnIsCashOrBank = sync.IsPaidHowCashOrBank(paidHow);
+
                         queueId = sync.EnqueuePaymentVoucher(0,
                             paidTypeV,
                             Convert.ToDecimal(r["Total_Amount"]),
@@ -1850,7 +1856,9 @@ namespace Take_Time_BangPhra.Account
                             whtRate: cdnWhtRate, whtAmount: cdnWhtAmount,
                             documentNumber: docId,
                             paymentAccountId: payVAccId, expenseAccountId: expVAccId,
-                            expenseLines: expenseLines.Count > 0 ? expenseLines : null);
+                            expenseLines: expenseLines.Count > 0 ? expenseLines : null,
+                            isCredit: cdnIsCredit,
+                            autoRecordPayment: cdnIsCashOrBank && !cdnIsCredit);
                     }
                 }
 

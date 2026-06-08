@@ -30,7 +30,7 @@ namespace Take_Time_BangPhra.Payment
         {
             try
             {
-                string query = @"SELECT ID, Paid_How FROM Account_Paid_How WHERE Status = 1 ORDER BY ID";
+                string query = @"SELECT ID, Paid_How FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID";
                 DataTable dt = codeInstance.DatabaseQuerySafe(connectionString, query, null);
 
                 ddlPaymentMethod.DataSource = dt;

@@ -1066,7 +1066,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                              ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
                              ISNULL(Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
                              Status
-                      FROM Account_Paid_How WHERE Status = 1 ORDER BY ID", null);
+                      FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", null);
 
                 var items = new List<Dictionary<string, object>>();
                 if (dt?.Rows.Count > 0)
@@ -1140,7 +1140,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                              ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
                              ISNULL(Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
                              Status
-                      FROM Account_Paid_Type WHERE Status = 1 ORDER BY ID", null);
+                      FROM Account_Paid_Type WHERE Status = 'True' ORDER BY ID", null);
 
                 var items = new List<Dictionary<string, object>>();
                 if (dt?.Rows.Count > 0)

@@ -695,6 +695,7 @@ namespace Take_Time_BangPhra.Integration
         public string Description { get; set; }
         public decimal Amount { get; set; }
         public string AccountId { get; set; }
+        public string AccountCode { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -1043,5 +1044,41 @@ namespace Take_Time_BangPhra.Integration
         public const string Local = "LOCAL";
         public const string JournalOnly = "JOURNAL_ONLY";
         public const string Document = "DOCUMENT";
+    }
+
+    // ──────────────────────────────────────────────
+    // Outbound: เอกสารฝั่งจ่ายจาก NextAcc + ไฟล์แนบ (แสดงในระบบ TakeTime)
+    // ──────────────────────────────────────────────
+
+    public class NextAccPaymentDoc
+    {
+        public Guid Id { get; set; }
+        public string DocumentNumber { get; set; }
+        public string DocumentType { get; set; }
+        public string DocumentTypeLabel { get; set; }
+        public string Status { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string ContactName { get; set; }
+        public string ContactTaxId { get; set; }
+        public decimal SubTotal { get; set; }
+        public decimal VatAmount { get; set; }
+        public decimal TotalAmount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal BalanceDue { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
+        public string DocumentUrl { get; set; }
+        public List<NextAccAttachment> Attachments { get; set; } = new List<NextAccAttachment>();
+    }
+
+    public class NextAccAttachment
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; }
+        public string ContentType { get; set; }
+        public long FileSize { get; set; }
+        public string Url { get; set; }
+        public bool IsImage { get; set; }
     }
 }
