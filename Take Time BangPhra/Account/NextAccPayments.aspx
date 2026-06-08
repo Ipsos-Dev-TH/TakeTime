@@ -28,7 +28,7 @@
     </style>
 
     <div class="nap-wrap">
-        <h2>📄 เอกสารฝั่งจ่ายจาก NextAcc <small style="font-size:14px;color:#888;">(ไม่รวมเงินเดือน)</small></h2>
+        <h2>📄 เอกสารฝั่งจ่ายจาก NextAcc</h2>
 
         <div class="nap-toolbar">
             <div>
