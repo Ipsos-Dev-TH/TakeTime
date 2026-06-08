@@ -273,6 +273,13 @@
         a.sync-badge.completed { text-decoration: none; cursor: pointer; }
         a.sync-badge.completed:hover { background: #b7dfb5; text-decoration: underline; }
 
+        .att-wrap { display: flex; flex-wrap: wrap; gap: 4px; max-width: 260px; }
+        .att-thumb { width: 48px; height: 48px; object-fit: cover; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; transition: transform .15s; }
+        .att-thumb:hover { transform: scale(1.6); z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+        .att-link { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; background: #ecf0f1; color: #2c3e50; white-space: nowrap; }
+        .att-link:hover { background: #d5dbdb; }
+        .att-src-label { font-size: 10px; color: #888; display: block; margin-bottom: 2px; }
+
         /* Mobile responsive */
         @media (max-width: 768px) {
             .payment-dashboard {
@@ -495,6 +502,11 @@
                     <asp:TemplateField HeaderText="เอกสาร NextAcc">
                         <ItemTemplate>
                             <asp:Literal ID="litNextAccDoc" runat="server"></asp:Literal>
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="ไฟล์แนบ">
+                        <ItemTemplate>
+                            <asp:Literal ID="litAttachments" runat="server"></asp:Literal>
                         </ItemTemplate>
                     </asp:TemplateField>
                 </Columns>

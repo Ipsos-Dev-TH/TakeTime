@@ -833,6 +833,7 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
             if (!dt.Columns.Contains("NextAccDeepLink")) dt.Columns.Add("NextAccDeepLink", typeof(string));
             if (!dt.Columns.Contains("NextAccAttCount")) dt.Columns.Add("NextAccAttCount", typeof(int));
+            if (!dt.Columns.Contains("NextAccAttUrls")) dt.Columns.Add("NextAccAttUrls", typeof(string));
 
             nextAccDocs = nextAccDocs ?? new List<NextAccCachedDocument>();
 
@@ -874,6 +875,8 @@ namespace Take_Time_BangPhra.Account
                     row["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                     row["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
                     row["NextAccAttCount"] = nd.AttachmentCount;
+                    row["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
+                        ? string.Join("|", nd.AttachmentRelativeUrls) : "";
                 }
                 else
                 {
@@ -882,6 +885,7 @@ namespace Take_Time_BangPhra.Account
                     row["NextAccViewUrl"] = "";
                     row["NextAccDeepLink"] = "";
                     row["NextAccAttCount"] = 0;
+                    row["NextAccAttUrls"] = "";
                 }
             }
 
@@ -905,6 +909,8 @@ namespace Take_Time_BangPhra.Account
                 nr["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                 nr["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
                 nr["NextAccAttCount"] = nd.AttachmentCount;
+                nr["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
+                    ? string.Join("|", nd.AttachmentRelativeUrls) : "";
                 dt.Rows.Add(nr);
             }
         }
@@ -959,15 +965,24 @@ namespace Take_Time_BangPhra.Account
                 {
                     bool isLocalPdf = viewUrl.StartsWith("/");
                     string label = isLocalPdf ? "📄 ดูเอกสาร" : "📄 เปิดใน NextAcc ↗";
-                    string att = attCount > 0
-                        ? $" <span class='sync-badge none' title='ไฟล์แนบ {attCount} ไฟล์'>📎{attCount}</span>"
-                        : "";
-                    litNext.Text = $"<a href='{Server.HtmlEncode(viewUrl)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>{label}</a>{att}";
+                    litNext.Text = $"<a href='{Server.HtmlEncode(viewUrl)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>{label}</a>";
                 }
                 else
                 {
                     litNext.Text = "<span class='sync-badge none'>-</span>";
                 }
+            }
+
+            // ── ไฟล์แนบ: รวมไฟล์ของระบบ (local) + ไฟล์จาก NextAcc ──
+            var litAtt = (Literal)e.Row.FindControl("litAttachments");
+            if (litAtt != null)
+            {
+                string nextAccAttUrls = SafeEval(e.Row.DataItem, "NextAccAttUrls");
+                bool isNaOnly = isNextAccOnly == "1";
+                var localFiles = isNaOnly
+                    ? new List<string>()
+                    : GetLocalAttachments(docId, DataBinder.Eval(e.Row.DataItem, "Created_Date"));
+                litAtt.Text = RenderAttachmentHtml(localFiles, nextAccAttUrls);
             }
 
             var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
@@ -1037,6 +1052,113 @@ namespace Take_Time_BangPhra.Account
                 lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
                 btnSync.Visible = true;
             }
+        }
+
+        private Dictionary<string, string> _uidCache;
+
+        private void EnsureUidCache()
+        {
+            if (_uidCache != null) return;
+            _uidCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var dt = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT ID, [UID] FROM [dbo].[Account_Payment] WHERE [UID] IS NOT NULL", null);
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        _uidCache[r["ID"].ToString()] = r["UID"].ToString();
+            }
+            catch { }
+        }
+
+        private List<string> GetLocalAttachments(string docNum, object createdDateObj)
+        {
+            var urls = new List<string>();
+            try
+            {
+                if (string.IsNullOrEmpty(docNum) || !docNum.StartsWith("PAY")) return urls;
+                if (createdDateObj == null || createdDateObj == DBNull.Value) return urls;
+
+                DateTime dt = Convert.ToDateTime(createdDateObj);
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return urls;
+
+                EnsureUidCache();
+                string uid;
+                if (!_uidCache.TryGetValue(docNum, out uid) || string.IsNullOrEmpty(uid)) return urls;
+
+                string year = dt.Year.ToString();
+                string monthUnpadded = dt.Month.ToString();
+                string monthPadded = dt.Month.ToString("00");
+                string mainPdf = docNum + "_" + uid + ".pdf";
+                string cancelPdf = docNum + "_" + uid + "_Cancel.pdf";
+
+                foreach (string month in new[] { monthUnpadded, monthPadded })
+                {
+                    string folder = Path.Combine(basePath, year, month);
+                    if (!Directory.Exists(folder)) continue;
+                    foreach (string f in Directory.GetFiles(folder, docNum + "_" + uid + "*"))
+                    {
+                        string fn = Path.GetFileName(f);
+                        if (fn.Equals(mainPdf, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (fn.Equals(cancelPdf, StringComparison.OrdinalIgnoreCase)) continue;
+                        urls.Add("/Documents/Payment/" + year + "/" + month + "/" + fn);
+                    }
+                    if (urls.Count > 0) break;
+                }
+            }
+            catch { }
+            return urls;
+        }
+
+        private static bool IsImageFile(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            string ext = Path.GetExtension(url).ToLowerInvariant();
+            return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp";
+        }
+
+        private string RenderAttachmentHtml(List<string> localUrls, string nextAccAttUrlsCsv)
+        {
+            var sb = new StringBuilder();
+            var allItems = new List<KeyValuePair<string, string>>(); // url, source label
+
+            foreach (var u in localUrls)
+                allItems.Add(new KeyValuePair<string, string>(u, ""));
+
+            if (!string.IsNullOrEmpty(nextAccAttUrlsCsv))
+            {
+                foreach (var u in nextAccAttUrlsCsv.Split('|'))
+                {
+                    if (!string.IsNullOrEmpty(u))
+                        allItems.Add(new KeyValuePair<string, string>(u, "NextAcc"));
+                }
+            }
+
+            if (allItems.Count == 0) return "<span style='color:#bbb;font-size:11px;'>-</span>";
+
+            sb.Append("<div class='att-wrap'>");
+            foreach (var item in allItems)
+            {
+                string url = item.Key;
+                string src = item.Value;
+                string encUrl = Server.HtmlEncode(url);
+                string fileName = Path.GetFileName(url);
+                string srcTag = !string.IsNullOrEmpty(src)
+                    ? $"<span class='att-src-label'>{Server.HtmlEncode(src)}</span>" : "";
+
+                if (IsImageFile(url))
+                {
+                    sb.Append($"{srcTag}<a href='{encUrl}' target='_blank' title='{Server.HtmlEncode(fileName)}'><img src='{encUrl}' class='att-thumb' alt='{Server.HtmlEncode(fileName)}' loading='lazy'/></a>");
+                }
+                else
+                {
+                    string icon = url.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "📄" : "📎";
+                    sb.Append($"{srcTag}<a href='{encUrl}' target='_blank' class='att-link' title='{Server.HtmlEncode(fileName)}'>{icon} {Server.HtmlEncode(fileName)}</a>");
+                }
+            }
+            sb.Append("</div>");
+            return sb.ToString();
         }
 
         private void HandleSyncVoucher(string docId)
