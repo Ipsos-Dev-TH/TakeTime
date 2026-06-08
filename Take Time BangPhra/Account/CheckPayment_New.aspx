@@ -464,6 +464,7 @@
             </div>
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
+                DataKeyNames="ID,Status,IsNextAccOnly,NextAccViewUrl"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"
@@ -472,7 +473,7 @@
                     <asp:CommandField ButtonType="Button" HeaderText="ลบ" DeleteText="🗑️ ลบ" ShowDeleteButton="True" />
                     <asp:CommandField ButtonType="Button" HeaderText="ดู PDF" SelectText="📄 ดู PDF" ShowSelectButton="True" />
                     <asp:ButtonField ButtonType="Button" CommandName="edit" Text="✏️ แก้ไข" HeaderText="แก้ไข" />
-                    <asp:BoundField DataField="ID" HeaderText="เลขที่เอกสาร" />
+                    <asp:BoundField DataField="DisplayDoc" HeaderText="เลขที่เอกสาร" />
                     <asp:BoundField DataField="Created_Date" HeaderText="วันที่สร้าง" DataFormatString="{0:dd/MM/yyyy HH:mm}" />
                     <asp:BoundField DataField="Vendor_Name" HeaderText="ผู้รับเงิน/ผู้ขาย" />
                     <asp:BoundField DataField="Paid_How" HeaderText="วิธีชำระ" />

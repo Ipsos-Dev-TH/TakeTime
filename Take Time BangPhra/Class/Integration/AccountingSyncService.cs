@@ -4228,18 +4228,17 @@ namespace Take_Time_BangPhra.Integration
         /// วิธีนี้ไม่พึ่ง Nexaacc_Response_Id ใน Sync Queue — จึงเจอเอกสารที่ออกบน NextAcc เสมอ
         /// แม้ generate-pdf จะไม่มี template (จะยังมี DeepLinkUrl + ไฟล์แนบให้เปิดดู)
         /// </summary>
-        public async System.Threading.Tasks.Task<Dictionary<string, NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
+        public async System.Threading.Tasks.Task<List<NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
             DateTime fromDate, DateTime toDate, bool includeAttachments = true)
         {
-            var map = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
-            if (!_config.IsConfigured || !_config.Enabled) return map;
+            var list = new List<NextAccCachedDocument>();
+            if (!_config.IsConfigured || !_config.Enabled) return list;
 
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-            if (string.IsNullOrEmpty(basePath)) return map;
+            if (string.IsNullOrEmpty(basePath)) return list;
             string baseUrl = _config.RawBaseUrl.TrimEnd('/');
 
             var seen = new HashSet<Guid>();
-            int totalDocs = 0;
 
             foreach (var typeName in PaymentDocTypeLabels.Keys)
             {
@@ -4273,12 +4272,8 @@ namespace Take_Time_BangPhra.Integration
                         if (IsPayrollDocument(d)) continue;       // ยกเว้นเงินเดือน
                         seen.Add(d.Id);
 
-                        string key = (d.Reference ?? "").Trim();
-                        if (string.IsNullOrEmpty(key) || map.ContainsKey(key)) continue;
-
                         var cached = await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments);
-                        map[key] = cached;
-                        totalDocs++;
+                        list.Add(cached);
                     }
 
                     if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
@@ -4287,8 +4282,8 @@ namespace Take_Time_BangPhra.Integration
             }
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {totalDocs} เอกสาร", "SYSTEM");
-            return map;
+                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {list.Count} เอกสาร", "SYSTEM");
+            return list;
         }
 
         /// <summary>เก็บ URL ไฟล์แนบที่ cache ไว้บนดิสก์ (ชื่อ att*) เข้า result</summary>
@@ -4316,10 +4311,22 @@ namespace Take_Time_BangPhra.Integration
         {
             var result = new NextAccCachedDocument
             {
-                DeepLinkUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "EXPENSE")
+                DeepLinkUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "EXPENSE"),
+                NextAccId = d.Id,
+                Reference = d.Reference,
+                DocumentNumber = d.DocumentNumber,
+                DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                DocumentDate = d.DocumentDate,
+                ContactName = d.ContactName,
+                ContactTaxId = d.ContactTaxId,
+                TotalAmount = d.TotalAmount,
+                VatAmount = d.VatAmount,
+                Status = d.Status
             };
 
-            string safeDoc = MakeSafeFileName(d.Reference);
+            // โฟลเดอร์ cache: ใช้ Reference (เลขใบสำคัญจ่ายฝั่ง TakeTime) ถ้ามี ไม่งั้นใช้เลขเอกสาร NextAcc
+            // → เอกสารที่ sync จาก TakeTime ใช้โฟลเดอร์เดียวกับปุ่ม "ดู PDF", เอกสารที่สร้างบน NextAcc ใช้เลข NextAcc
+            string safeDoc = MakeSafeFileName(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
             string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
             string noPdfMarker = Path.Combine(folder, "_nopdf.marker");

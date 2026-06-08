@@ -1095,5 +1095,23 @@ namespace Take_Time_BangPhra.Integration
         public int AttachmentCount { get; set; }
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
+
+        // ── Metadata จากเอกสาร NextAcc (ใช้ merge เข้าตารางและแสดงเลขที่เอกสารตาม NextAcc) ──
+        public Guid NextAccId { get; set; }
+        public string Reference { get; set; }          // เลขที่อ้างอิง (= เลขใบสำคัญจ่ายฝั่ง TakeTime ถ้ามาจากการ sync)
+        public string DocumentNumber { get; set; }     // เลขที่เอกสารฝั่ง NextAcc เช่น EXP-202606-0001
+        public string DocumentTypeLabel { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public string ContactName { get; set; }
+        public string ContactTaxId { get; set; }
+        public decimal TotalAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string Status { get; set; }
+
+        /// <summary>ลิงก์ที่ดีที่สุดสำหรับเปิดดู: PDF ที่ cache ไว้ก่อน, ถ้าไม่มีใช้ลิงก์ NextAcc</summary>
+        public string BestViewUrl
+        {
+            get { return !string.IsNullOrEmpty(PdfRelativeUrl) ? PdfRelativeUrl : DeepLinkUrl; }
+        }
     }
 }
