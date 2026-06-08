@@ -1935,8 +1935,6 @@ namespace Take_Time_BangPhra.Integration
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
-
-            return $"VOIDED:{nexaaccId}";
         }
 
         private async Task<string> ProcessVoidVoucher(Dictionary<string, object> p)
@@ -2013,8 +2011,6 @@ namespace Take_Time_BangPhra.Integration
                     "SYSTEM");
                 return $"VOIDED:{nexaaccId} (already voided)";
             }
-
-            return $"VOIDED:{nexaaccId}";
         }
 
         /// <summary>

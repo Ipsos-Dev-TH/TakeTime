@@ -967,15 +967,15 @@ namespace Take_Time_BangPhra.Account.Report
                         string vendorExternalId = null, vendorTaxId = null;
                         try
                         {
-                            string vendorId = DropDownList1.SelectedValue;
-                            if (!string.IsNullOrEmpty(vendorId) && vendorId != "0")
+                            string vendorIdForTax = DropDownList1.SelectedValue;
+                            if (!string.IsNullOrEmpty(vendorIdForTax) && vendorIdForTax != "0")
                             {
-                                vendorExternalId = "VENDOR-" + vendorId;
-                                var dtVendor = code.DatabaseQuerySafe(conn,
+                                vendorExternalId = "VENDOR-" + vendorIdForTax;
+                                var dtVendorTax = code.DatabaseQuerySafe(conn,
                                     "SELECT TOP 1 IDNumber FROM Vendor WHERE ID = @id",
-                                    new Dictionary<string, object> { { "@id", vendorId } });
-                                if (dtVendor?.Rows.Count > 0)
-                                    vendorTaxId = dtVendor.Rows[0]["IDNumber"]?.ToString();
+                                    new Dictionary<string, object> { { "@id", vendorIdForTax } });
+                                if (dtVendorTax?.Rows.Count > 0)
+                                    vendorTaxId = dtVendorTax.Rows[0]["IDNumber"]?.ToString();
                             }
                         }
                         catch { }
