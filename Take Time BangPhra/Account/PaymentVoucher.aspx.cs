@@ -964,6 +964,7 @@ namespace Take_Time_BangPhra.Account.Report
 
                         var sync = new Integration.AccountingSyncService(conn);
                         string payAccId = sync.LookupPaidHowAccountId(paymentMethod);
+                        string payAccCode = sync.LookupPaidHowAccountCode(paymentMethod);
 
                         // Build per-line expense data
                         var expenseLines = new List<Dictionary<string, object>>();
@@ -974,13 +975,15 @@ namespace Take_Time_BangPhra.Account.Report
                             string lineAccId = hasPerLineCategories ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : null;
                             if (string.IsNullOrEmpty(lineAccId))
                                 lineAccId = sync.LookupPaidTypeAccountId(lineCat);
+                            string lineAccCode = sync.LookupPaidTypeAccountCode(lineCat);
 
                             expenseLines.Add(new Dictionary<string, object>
                             {
                                 { "category", lineCat ?? expenseCategory },
                                 { "description", dtDetail.Rows[i]["Detail"]?.ToString() ?? "" },
                                 { "amount", Convert.ToDecimal(dtDetail.Rows[i]["Amount"]) },
-                                { "accountId", lineAccId ?? "" }
+                                { "accountId", lineAccId ?? "" },
+                                { "accountCode", lineAccCode ?? "" }
                             });
                         }
 

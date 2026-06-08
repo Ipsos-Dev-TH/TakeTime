@@ -571,6 +571,36 @@ namespace Take_Time_BangPhra.Integration
             return null;
         }
 
+        public string LookupPaidTypeAccountCode(string paidTypeText)
+        {
+            if (string.IsNullOrEmpty(paidTypeText)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Nexaacc_AccountCode FROM Account_Paid_Type WHERE Paid_Type = @name AND Status = 'True'",
+                    new Dictionary<string, object> { { "@name", paidTypeText } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountCode"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_AccountCode"].ToString();
+            }
+            catch { }
+            return null;
+        }
+
+        public string LookupPaidHowAccountCode(string paidHowText)
+        {
+            if (string.IsNullOrEmpty(paidHowText)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Nexaacc_AccountCode FROM Account_Paid_How WHERE Paid_How = @name AND Status = 'True'",
+                    new Dictionary<string, object> { { "@name", paidHowText } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_AccountCode"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_AccountCode"].ToString();
+            }
+            catch { }
+            return null;
+        }
+
         public bool IsPaidHowCashOrBank(string paidHowText)
         {
             if (string.IsNullOrEmpty(paidHowText)) return false;
@@ -1138,7 +1168,8 @@ namespace Take_Time_BangPhra.Integration
                                     Category = lineDict.ContainsKey("category") ? lineDict["category"]?.ToString() : expenseCategory,
                                     Description = lineDict.ContainsKey("description") ? lineDict["description"]?.ToString() : "",
                                     Amount = lineDict.ContainsKey("amount") ? Convert.ToDecimal(lineDict["amount"]) : 0,
-                                    AccountId = lineDict.ContainsKey("accountId") ? lineDict["accountId"]?.ToString() : null
+                                    AccountId = lineDict.ContainsKey("accountId") ? lineDict["accountId"]?.ToString() : null,
+                                    AccountCode = lineDict.ContainsKey("accountCode") ? lineDict["accountCode"]?.ToString() : null
                                 });
                             }
                         }

@@ -2227,6 +2227,7 @@ namespace Take_Time_BangPhra.Integration
                         VatRate = hasInputVat ? 7 : 0,
                         WithholdingTaxRate = whtRate > 0 ? whtRate : 0,
                         AccountId = lineAccId,
+                        AccountCode = !string.IsNullOrEmpty(el.AccountCode) ? el.AccountCode : null,
                         Category = !string.IsNullOrEmpty(el.Category) ? el.Category : null,
                     });
                 }
