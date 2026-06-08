@@ -4219,5 +4219,204 @@ namespace Take_Time_BangPhra.Integration
                 default: return ".bin";
             }
         }
+
+        /// <summary>
+        /// ดึงเอกสารฝั่งจ่ายที่ "สร้างบน NextAcc" ในช่วงวันที่ที่กำหนด (ผ่าน /api/integration/documents
+        /// ซึ่งใช้ได้แน่นอนกับ Integration Key) แล้วดาวน์โหลด PDF + ไฟล์แนบมาเก็บที่ฝั่ง TakeTime
+        /// คืน map: Reference (เลขที่ใบสำคัญจ่ายฝั่ง TakeTime) → NextAccCachedDocument
+        ///
+        /// วิธีนี้ไม่พึ่ง Nexaacc_Response_Id ใน Sync Queue — จึงเจอเอกสารที่ออกบน NextAcc เสมอ
+        /// แม้ generate-pdf จะไม่มี template (จะยังมี DeepLinkUrl + ไฟล์แนบให้เปิดดู)
+        /// </summary>
+        public async System.Threading.Tasks.Task<Dictionary<string, NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
+            DateTime fromDate, DateTime toDate, bool includeAttachments = true)
+        {
+            var map = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
+            if (!_config.IsConfigured || !_config.Enabled) return map;
+
+            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            if (string.IsNullOrEmpty(basePath)) return map;
+            string baseUrl = _config.RawBaseUrl.TrimEnd('/');
+
+            var seen = new HashSet<Guid>();
+            int totalDocs = 0;
+
+            foreach (var typeName in PaymentDocTypeLabels.Keys)
+            {
+                int page = 1;
+                while (true)
+                {
+                    PagedResponse<OutboundDocumentResponse> resp;
+                    try
+                    {
+                        resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
+                        {
+                            FromDate = fromDate,
+                            ToDate = toDate,
+                            Type = typeName,
+                            Page = page,
+                            PageSize = 50
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"DownloadVoucherDocumentsForRange: type={typeName} page={page} ล้มเหลว: {ex.Message}", "SYSTEM");
+                        break;
+                    }
+
+                    if (resp?.Items == null || resp.Items.Count == 0) break;
+
+                    foreach (var d in resp.Items)
+                    {
+                        if (d == null || seen.Contains(d.Id)) continue;
+                        if (IsPayrollDocument(d)) continue;       // ยกเว้นเงินเดือน
+                        seen.Add(d.Id);
+
+                        string key = (d.Reference ?? "").Trim();
+                        if (string.IsNullOrEmpty(key) || map.ContainsKey(key)) continue;
+
+                        var cached = await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments);
+                        map[key] = cached;
+                        totalDocs++;
+                    }
+
+                    if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
+                    page++;
+                }
+            }
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {totalDocs} เอกสาร", "SYSTEM");
+            return map;
+        }
+
+        /// <summary>เก็บ URL ไฟล์แนบที่ cache ไว้บนดิสก์ (ชื่อ att*) เข้า result</summary>
+        private static void GlobCachedAttachments(string folder, string relPrefix, NextAccCachedDocument result)
+        {
+            try
+            {
+                foreach (var f in Directory.GetFiles(folder, "att*"))
+                {
+                    string fn = Path.GetFileName(f);
+                    result.AttachmentCount++;
+                    result.AttachmentRelativeUrls.Add(relPrefix + "/" + fn);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// เก็บ PDF + ไฟล์แนบของเอกสาร NextAcc 1 ใบลงดิสก์ฝั่ง TakeTime
+        /// ใช้ marker บนดิสก์กัน hit API ซ้ำ: ถ้า PDF cache แล้ว / เคยรู้ว่าไม่มี PDF / เคยโหลดไฟล์แนบแล้ว
+        /// จะไม่เรียก API ในการค้นหาครั้งถัดไป
+        /// </summary>
+        private async System.Threading.Tasks.Task<NextAccCachedDocument> CacheNextAccDocumentAsync(
+            OutboundDocumentResponse d, string basePath, string baseUrl, bool includeAttachments)
+        {
+            var result = new NextAccCachedDocument
+            {
+                DeepLinkUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "EXPENSE")
+            };
+
+            string safeDoc = MakeSafeFileName(d.Reference);
+            string folder = Path.Combine(basePath, "NextAcc", safeDoc);
+            string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+            string noPdfMarker = Path.Combine(folder, "_nopdf.marker");
+            string attDoneMarker = Path.Combine(folder, "_att.done");
+            string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
+
+            try
+            {
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+                bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0;
+
+                // ── Fast path: PDF cache แล้ว → ไม่ต้องยิง API ใดๆ ──
+                if (pdfCached)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfPath;
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                    GlobCachedAttachments(folder, relPrefix, result);
+                    return result;
+                }
+
+                // PDF อย่างเป็นทางการ (ถ้า NextAcc มี template) — ข้ามถ้าเคยรู้ว่าไม่มี
+                if (!File.Exists(noPdfMarker))
+                {
+                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(d.Id);
+                    if (pdf != null && pdf.Length > 0)
+                    {
+                        File.WriteAllBytes(pdfPath, pdf);
+                        result.Found = true;
+                        result.PdfLocalPath = pdfPath;
+                        result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                    }
+                    else
+                    {
+                        // NextAcc ไม่มี template/PDF — เขียน marker กันลองซ้ำทุกครั้ง (เปิดดูผ่าน DeepLink แทน)
+                        try { File.WriteAllText(noPdfMarker, DateTime.Now.ToString("o")); } catch { }
+                    }
+                }
+
+                // ไฟล์แนบ — โหลดครั้งแรกแล้วทำ marker; ครั้งถัดไปอ่านจากดิสก์
+                if (includeAttachments)
+                {
+                    if (File.Exists(attDoneMarker))
+                    {
+                        GlobCachedAttachments(folder, relPrefix, result);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var attResp = await _apiClient.GetAttachmentsAsync("Document", d.Id);
+                            if (attResp?.data != null && attResp.data.Count > 0)
+                            {
+                                int idx = 0;
+                                foreach (var a in attResp.data)
+                                {
+                                    idx++;
+                                    string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                                    if (string.IsNullOrEmpty(storage)) continue;
+
+                                    string ext = Path.GetExtension(a.OriginalFileName ?? a.FileName ?? "");
+                                    if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                                    string attName = $"att{idx}{ext}";
+                                    string attLocal = Path.Combine(folder, attName);
+
+                                    if (!File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
+                                    {
+                                        byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
+                                        if (bytes != null && bytes.Length > 0)
+                                            File.WriteAllBytes(attLocal, bytes);
+                                    }
+                                    if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0)
+                                    {
+                                        result.AttachmentCount++;
+                                        result.AttachmentRelativeUrls.Add(relPrefix + "/" + attName);
+                                    }
+                                }
+                            }
+                            try { File.WriteAllText(attDoneMarker, DateTime.Now.ToString("o")); } catch { }
+                        }
+                        catch (Exception exAtt)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"CacheNextAccDocument: attachments doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exAtt.Message}", "SYSTEM");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Message = ex.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CacheNextAccDocument: doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {ex.Message}", "SYSTEM");
+            }
+
+            return result;
+        }
     }
 }

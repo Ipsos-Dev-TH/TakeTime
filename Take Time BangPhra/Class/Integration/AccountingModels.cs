@@ -1091,6 +1091,7 @@ namespace Take_Time_BangPhra.Integration
         public bool Found { get; set; }
         public string PdfRelativeUrl { get; set; }
         public string PdfLocalPath { get; set; }
+        public string DeepLinkUrl { get; set; }
         public int AttachmentCount { get; set; }
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
