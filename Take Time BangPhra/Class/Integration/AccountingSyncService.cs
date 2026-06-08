@@ -3949,6 +3949,16 @@ namespace Take_Time_BangPhra.Integration
             return false;
         }
 
+        /// <summary>เอกสารที่ยกเลิก/void บน NextAcc แล้ว (NextAcc DocumentStatus: Voided=6, Rejected=8)</summary>
+        private static bool IsVoidedDocument(OutboundDocumentResponse d)
+        {
+            string s = (d?.Status ?? "").Trim();
+            return s.Equals("Voided", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("Cancelled", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("Rejected", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>ดึงรายการไฟล์แนบของเอกสาร (entityType=Document) + สร้าง URL static</summary>
         private async System.Threading.Tasks.Task<List<NextAccAttachment>> FetchDocumentAttachmentsAsync(Guid documentId, string baseUrl)
         {
@@ -4270,6 +4280,7 @@ namespace Take_Time_BangPhra.Integration
                     {
                         if (d == null || seen.Contains(d.Id)) continue;
                         if (IsPayrollDocument(d)) continue;       // ยกเว้นเงินเดือน
+                        if (IsVoidedDocument(d)) continue;        // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
                         seen.Add(d.Id);
 
                         var cached = await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments);
