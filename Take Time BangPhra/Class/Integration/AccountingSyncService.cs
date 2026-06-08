@@ -4053,6 +4053,35 @@ namespace Take_Time_BangPhra.Integration
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
+            // ── Fast path: ถ้า PDF cache อยู่แล้วบนดิสก์ → คืนทันที ไม่ต้อง query DB/ยิง API ──
+            // (ทำให้การค้นหาซ้ำช่วงเดิมเร็วมาก — โหลดจริงเฉพาะครั้งแรกต่อเอกสาร)
+            {
+                string safeEarly = MakeSafeFileName(voucherDocNumber);
+                string suffixEarly = isCancelled ? "_Cancel" : "";
+                string folderEarly = Path.Combine(basePath, "NextAcc", safeEarly);
+                string pdfEarly = Path.Combine(folderEarly, safeEarly + suffixEarly + ".pdf");
+                string relEarly = "/Documents/Payment/NextAcc/" + safeEarly;
+                if (!forceRefresh && File.Exists(pdfEarly) && new FileInfo(pdfEarly).Length > 0)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfEarly;
+                    result.PdfRelativeUrl = relEarly + "/" + safeEarly + suffixEarly + ".pdf";
+                    try
+                    {
+                        string attPrefix = "att" + suffixEarly; // "att" หรือ "att_Cancel"
+                        foreach (var f in Directory.GetFiles(folderEarly, attPrefix + "*"))
+                        {
+                            string fn = Path.GetFileName(f);
+                            if (suffixEarly == "" && fn.StartsWith("att_Cancel")) continue; // กันชนกับชุดยกเลิก
+                            result.AttachmentCount++;
+                            result.AttachmentRelativeUrls.Add(relEarly + "/" + fn);
+                        }
+                    }
+                    catch { }
+                    return result;
+                }
+            }
+
             // หาเอกสารปลายทางใน NextAcc:
             //   ปกติ → เอกสารใบสำคัญจ่ายต้นฉบับ (CREATE_VOUCHER_JOURNAL)
             //   ยกเลิก → ใบเพิ่มหนี้/เอกสารยกเลิกจาก NextAcc (VOID_VOUCHER → "DEBIT_NOTE:{id}")

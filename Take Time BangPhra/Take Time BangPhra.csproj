@@ -361,7 +361,6 @@
     <Content Include="Account\CheckPayment_New.aspx" />
     <Content Include="Account\Receipt.aspx" />
     <Content Include="Account\PaymentVoucher.aspx" />
-    <Content Include="Account\NextAccPayments.aspx" />
     <Content Include="Account\SlipVerification.aspx" />
     <Content Include="Account\Report\Report.aspx" />
     <Content Include="Admin\Dashboard.aspx" />
@@ -639,13 +638,6 @@
     </Compile>
     <Compile Include="Account\PaymentVoucher.aspx.designer.cs">
       <DependentUpon>PaymentVoucher.aspx</DependentUpon>
-    </Compile>
-    <Compile Include="Account\NextAccPayments.aspx.cs">
-      <DependentUpon>NextAccPayments.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Compile>
-    <Compile Include="Account\NextAccPayments.aspx.designer.cs">
-      <DependentUpon>NextAccPayments.aspx</DependentUpon>
     </Compile>
     <Compile Include="Account\SlipVerification.aspx.cs">
       <DependentUpon>SlipVerification.aspx</DependentUpon>

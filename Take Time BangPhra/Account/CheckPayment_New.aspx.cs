@@ -430,6 +430,10 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
+                // ดึงเอกสาร + ไฟล์แนบจาก NextAcc มาเก็บที่ฝั่ง TakeTime อัตโนมัติตามช่วงที่ค้นหา
+                // (cache ลงดิสก์ ใช้ซ้ำได้ — โหลดเฉพาะรายการที่ sync แล้วและยังไม่เคยโหลด)
+                PrefetchNextAccDocuments(dt);
+
                 // Bind to GridView
                 gvDetails.DataSource = dt;
                 gvDetails.DataBind();
@@ -772,6 +776,62 @@ namespace Take_Time_BangPhra.Account
         // ──────────────────────────────────────────────
 
         private Dictionary<string, DataRow> _syncStatusCache;
+        private Dictionary<string, NextAccCachedDocument> _nextAccDocs;
+
+        /// <summary>
+        /// ดึงเอกสารฝั่งจ่ายอย่างเป็นทางการ (PDF + ไฟล์แนบ) จาก NextAcc มาเก็บที่ฝั่ง TakeTime
+        /// อัตโนมัติสำหรับทุกใบสำคัญจ่ายในผลการค้นหา. โหลดแบบขนาน (จำกัด 3 พร้อมกัน) และ
+        /// ใช้ cache บนดิสก์ — รายการที่โหลดแล้วจะไม่โหลดซ้ำ. ผลลัพธ์ใช้แสดงคอลัมน์ "เอกสาร NextAcc"
+        /// </summary>
+        private void PrefetchNextAccDocuments(DataTable dt)
+        {
+            _nextAccDocs = new Dictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
+            if (dt == null || dt.Rows.Count == 0) return;
+
+            try
+            {
+                var config = new AccountingConfig(conn);
+                if (!config.IsConfigured || !config.Enabled) return;
+
+                var items = new List<KeyValuePair<string, bool>>();
+                foreach (DataRow row in dt.Rows)
+                {
+                    string docNum = row["ID"]?.ToString() ?? "";
+                    if (docNum.Length < 3 || docNum.Substring(0, 3) != "PAY") continue;
+                    bool cancelled = (row["Status"]?.ToString() ?? "") == "Cancel";
+                    items.Add(new KeyValuePair<string, bool>(docNum, cancelled));
+                }
+                if (items.Count == 0) return;
+
+                var results = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    var sync = new AccountingSyncService(conn);
+                    var bag = new System.Collections.Concurrent.ConcurrentDictionary<string, NextAccCachedDocument>(StringComparer.OrdinalIgnoreCase);
+                    using (var sem = new System.Threading.SemaphoreSlim(3))
+                    {
+                        var tasks = items.Select(async it =>
+                        {
+                            await sem.WaitAsync().ConfigureAwait(false);
+                            try
+                            {
+                                var r = await sync.DownloadVoucherDocumentFromNextAccAsync(it.Key, false, it.Value).ConfigureAwait(false);
+                                if (r != null) bag[it.Key] = r;
+                            }
+                            catch { /* per-doc failure ไม่ให้ล้มทั้งหน้า */ }
+                            finally { sem.Release(); }
+                        });
+                        await System.Threading.Tasks.Task.WhenAll(tasks).ConfigureAwait(false);
+                    }
+                    return bag;
+                }).Result;
+
+                foreach (var kv in results) _nextAccDocs[kv.Key] = kv.Value;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("PrefetchNextAccDocuments error: " + ex.Message);
+            }
+        }
 
         private void LoadSyncStatusCache()
         {
@@ -808,12 +868,30 @@ namespace Take_Time_BangPhra.Account
         {
             if (e.Row.RowType != DataControlRowType.DataRow) return;
 
+            string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
+            string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
+
+            // คอลัมน์ "เอกสาร NextAcc" — ลิงก์เปิด PDF จริงจาก NextAcc (cache มาฝั่งนี้แล้ว) + จำนวนไฟล์แนบ
+            var litNext = (Literal)e.Row.FindControl("litNextAccDoc");
+            if (litNext != null)
+            {
+                if (_nextAccDocs != null && _nextAccDocs.TryGetValue(docId, out var nd)
+                    && nd != null && nd.Found && !string.IsNullOrEmpty(nd.PdfRelativeUrl))
+                {
+                    string att = nd.AttachmentCount > 0
+                        ? $" <span class='sync-badge none' title='ไฟล์แนบ {nd.AttachmentCount} ไฟล์'>📎{nd.AttachmentCount}</span>"
+                        : "";
+                    litNext.Text = $"<a href='{Server.HtmlEncode(nd.PdfRelativeUrl)}' target='_blank' rel='noopener' class='sync-badge completed' title='เปิดเอกสารจาก NextAcc'>📄 ดูเอกสาร</a>{att}";
+                }
+                else
+                {
+                    litNext.Text = "<span class='sync-badge none'>-</span>";
+                }
+            }
+
             var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
             var btnSync = (Button)e.Row.FindControl("btnSync");
             if (lblSync == null || btnSync == null) return;
-
-            string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
-            string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
 
             if (docStatus == "Cancel")
             {
