@@ -4567,55 +4567,27 @@ namespace Take_Time_BangPhra.Integration
                 // ── 2) ไฟล์แนบ — ดึงรายการใหม่เมื่อ marker หาย/เก่ากว่า TTL (ไฟล์ที่มีบนดิสก์แล้วไม่โหลดซ้ำ) ──
                 if (includeAttachments && IsMarkerStale(attDoneMarker, recheckTtl))
                 {
-                    try
-                    {
-                        var attResp = await _apiClient.GetAttachmentsAsync("Document", d.Id);
-                        if (attResp?.data != null && attResp.data.Count > 0)
-                        {
-                            int idx = 0;
-                            foreach (var a in attResp.data)
-                            {
-                                idx++;
-                                string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
-                                if (string.IsNullOrEmpty(storage)) continue;
-
-                                string ext = Path.GetExtension(a.OriginalFileName ?? a.FileName ?? "");
-                                if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
-                                string attName = $"att{idx}{ext}";
-                                string attLocal = Path.Combine(folder, attName);
-
-                                if (!File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
-                                {
-                                    byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
-                                    if (bytes != null && bytes.Length > 0)
-                                        File.WriteAllBytes(attLocal, bytes);
-                                }
-                            }
-                        }
-                        try { File.WriteAllText(attDoneMarker, DateTime.Now.ToString("o")); } catch { }
-                    }
-                    catch (Exception exAtt)
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"CacheNextAccDocument: attachments doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exAtt.Message}", "SYSTEM");
-                    }
+                    bool definitive = await FetchAndCacheNextAccAttachmentsAsync(d, folder, baseUrl);
+                    // เขียน marker เฉพาะเมื่อได้ผลแน่ชัด (โหลดได้/ยืนยันว่าไม่มีไฟล์) — ถ้าล้มเหลวชั่วคราวจะลองใหม่รอบหน้า
+                    if (definitive) { try { File.WriteAllText(attDoneMarker, DateTime.Now.ToString("o")); } catch { } }
                 }
                 // เก็บ URL ไฟล์แนบที่มีบนดิสก์ (ทั้งที่โหลดใหม่และที่ cache ไว้แล้ว)
                 GlobCachedAttachments(folder, relPrefix, result);
 
-                // ── 3) ใบหัก ณ ที่จ่าย (50 ทวิ) — เฉพาะเมื่อใช้ API Key (acc_) ──
+                // ── 3) ใบหัก ณ ที่จ่าย (50 ทวิ) — ลองดึงเสมอ (int_ key ใช้กับ company endpoint ได้ผ่าน fallback) ──
                 bool whtCached = File.Exists(whtPath) && new FileInfo(whtPath).Length > 0;
                 if (whtCached)
                 {
                     result.WhtCertPdfRelativeUrl = relPrefix + "/wht.pdf";
                 }
-                else if (!_config.IsIntegrationKey && IsMarkerStale(noWhtMarker, recheckTtl))
+                else if (IsMarkerStale(noWhtMarker, recheckTtl))
                 {
                     try
                     {
                         var certs = await _apiClient.GetWhtCertsByDocumentAsync(d.Id);
                         // กรองฝั่ง client ด้วย DocumentId เสมอ เผื่อ endpoint คืนทั้งหมด (ไม่กรองตาม query param)
-                        var cert = certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id);
+                        var cert = certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id)
+                                   ?? certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty);
                         if (cert != null)
                         {
                             byte[] whtPdf = await _apiClient.GetWhtCertPdfAsync(cert.Id);
@@ -4625,6 +4597,8 @@ namespace Take_Time_BangPhra.Integration
                             {
                                 File.WriteAllBytes(whtPath, whtPdf);
                                 result.WhtCertPdfRelativeUrl = relPrefix + "/wht.pdf";
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"CacheNextAccDocument: WHT cert doc={d.DocumentNumber} certId={cert.Id} แนบแล้ว", "SYSTEM");
                             }
                         }
                         else
@@ -4634,6 +4608,8 @@ namespace Take_Time_BangPhra.Integration
                     }
                     catch (Exception exWht)
                     {
+                        // 401/403/404 = ไม่มี WHT / endpoint ใช้ไม่ได้ → ทำ marker กันลองถี่ๆ
+                        try { File.WriteAllText(noWhtMarker, DateTime.Now.ToString("o")); } catch { }
                         _code.Logs(_connectionString, "AccountingSync",
                             $"CacheNextAccDocument: WHT cert doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exWht.Message}", "SYSTEM");
                     }
@@ -4658,6 +4634,101 @@ namespace Take_Time_BangPhra.Integration
                 return (DateTime.Now - File.GetLastWriteTime(markerPath)) > ttl;
             }
             catch { return true; }
+        }
+
+        /// <summary>
+        /// ดึงรายการไฟล์แนบของเอกสาร NextAcc แล้วดาวน์โหลดมาเก็บที่ folder (ชื่อ att{n}{ext}).
+        /// แข็งแรงขึ้น: ลอง entity type "Document" ก่อน ถ้าว่างลองตามชนิดเอกสารจริง (เช่น PaymentVoucher);
+        /// ดาวน์โหลดผ่าน storagePath ตรงๆ ก่อน ถ้าไม่ได้ลองผ่าน attachment Id endpoint.
+        /// บันทึก log วินิจฉัยทุกขั้นเพื่อให้ตรวจสอบได้ว่าติดที่ขั้นไหน.
+        /// </summary>
+        /// <returns>true = ได้ผลแน่ชัด (โหลดไฟล์ได้ หรือยืนยันว่าไม่มีไฟล์); false = ล้มเหลวชั่วคราว ควรลองใหม่</returns>
+        private async System.Threading.Tasks.Task<bool> FetchAndCacheNextAccAttachmentsAsync(
+            OutboundDocumentResponse d, string folder, string baseUrl)
+        {
+            try
+            {
+                // ลองหลาย entity type — NextAcc อาจผูกไฟล์แนบกับ "Document" หรือชนิดเอกสารจริง
+                var entityTypes = new List<string> { "Document" };
+                if (!string.IsNullOrEmpty(d.DocumentType) && d.DocumentType != "Document")
+                    entityTypes.Add(d.DocumentType);
+
+                List<FileAttachmentResponse> atts = null;
+                string usedType = null;
+                bool anyCallSucceeded = false;
+                foreach (var et in entityTypes)
+                {
+                    try
+                    {
+                        var resp = await _apiClient.GetAttachmentsAsync(et, d.Id);
+                        anyCallSucceeded = true;
+                        if (resp?.data != null && resp.data.Count > 0)
+                        {
+                            atts = resp.data;
+                            usedType = et;
+                            break;
+                        }
+                    }
+                    catch (Exception exType)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"FetchAttachments: doc={d.DocumentNumber} entityType={et} error: {exType.Message}", "SYSTEM");
+                    }
+                }
+
+                if (atts == null || atts.Count == 0)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"FetchAttachments: doc={d.DocumentNumber} ({d.Reference}) ไม่พบไฟล์แนบจาก NextAcc (ลอง entityType: {string.Join(",", entityTypes)})", "SYSTEM");
+                    // ถ้า call สำเร็จแต่ไม่มีไฟล์ = แน่ชัด; ถ้าทุก call ล้มเหลว = ชั่วคราว
+                    return anyCallSucceeded;
+                }
+
+                int idx = 0, ok = 0, fail = 0;
+                foreach (var a in atts)
+                {
+                    idx++;
+                    string ext = Path.GetExtension(a.OriginalFileName ?? a.FileName ?? "");
+                    if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                    string attName = $"att{idx}{ext}";
+                    string attLocal = Path.Combine(folder, attName);
+
+                    if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0) { ok++; continue; }
+
+                    byte[] bytes = null;
+                    // 1) ลองผ่าน storage path ตรงๆ (ถ้า NextAcc serve static)
+                    string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                    if (!string.IsNullOrEmpty(storage))
+                        bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
+                    // 2) ถ้าไม่ได้ ลองผ่าน attachment Id endpoint
+                    if ((bytes == null || bytes.Length == 0) && a.Id != Guid.Empty)
+                        bytes = await _apiClient.DownloadAttachmentByIdAsync(a.Id);
+
+                    if (bytes != null && bytes.Length > 0)
+                    {
+                        File.WriteAllBytes(attLocal, bytes);
+                        ok++;
+                    }
+                    else
+                    {
+                        fail++;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"FetchAttachments: doc={d.DocumentNumber} ไฟล์ '{a.OriginalFileName ?? a.FileName}' โหลดไม่สำเร็จ (storage='{storage}', id={a.Id})", "SYSTEM");
+                    }
+                }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"FetchAttachments: doc={d.DocumentNumber} entityType={usedType} พบ {atts.Count} ไฟล์ โหลดสำเร็จ {ok} ล้มเหลว {fail}", "SYSTEM");
+
+                // แน่ชัดเมื่อโหลดได้ครบ; ถ้ามีไฟล์โหลดไม่ได้เลย = ชั่วคราว (ลองใหม่รอบหน้า)
+                return fail == 0;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"FetchAttachments: doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {ex.Message}", "SYSTEM");
+                return false;
+            }
         }
     }
 }
