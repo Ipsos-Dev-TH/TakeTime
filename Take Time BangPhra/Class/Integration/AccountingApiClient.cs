@@ -910,10 +910,11 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>ดึงรายการใบหัก ณ ที่จ่าย (50 ทวิ) ที่ออกให้กับเอกสารต้นทาง (read-only).
-        /// ต้องใช้ API Key (acc_) — Integration Key ใช้ไม่ได้.</summary>
-        public async Task<ApiResponse<List<WithholdingTaxCertResponse>>> GetWhtCertsByDocumentAsync(Guid documentId)
+        /// ต้องใช้ API Key (acc_) — Integration Key ใช้ไม่ได้.
+        /// NextAcc คืนเป็น paged: { data: { items: [...] } }</summary>
+        public async Task<ApiResponse<PagedResponse<WithholdingTaxCertResponse>>> GetWhtCertsByDocumentAsync(Guid documentId)
         {
-            return await GetAsync<ApiResponse<List<WithholdingTaxCertResponse>>>(
+            return await GetAsync<ApiResponse<PagedResponse<WithholdingTaxCertResponse>>>(
                 $"{CompanyPath}/withholding-tax-certs?documentId={documentId}");
         }
 

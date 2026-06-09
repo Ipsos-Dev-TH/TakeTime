@@ -4585,9 +4585,10 @@ namespace Take_Time_BangPhra.Integration
                     try
                     {
                         var certs = await _apiClient.GetWhtCertsByDocumentAsync(d.Id);
+                        var certItems = certs?.data?.Items;
                         // กรองฝั่ง client ด้วย DocumentId เสมอ เผื่อ endpoint คืนทั้งหมด (ไม่กรองตาม query param)
-                        var cert = certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id)
-                                   ?? certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty);
+                        var cert = certItems?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id)
+                                   ?? certItems?.FirstOrDefault(c => c != null && c.Id != Guid.Empty);
                         if (cert != null)
                         {
                             byte[] whtPdf = await _apiClient.GetWhtCertPdfAsync(cert.Id);
