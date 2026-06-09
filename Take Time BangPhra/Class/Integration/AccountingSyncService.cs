@@ -4426,7 +4426,7 @@ namespace Take_Time_BangPhra.Integration
         /// แม้ generate-pdf จะไม่มี template (จะยังมี DeepLinkUrl + ไฟล์แนบให้เปิดดู)
         /// </summary>
         public async System.Threading.Tasks.Task<List<NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
-            DateTime fromDate, DateTime toDate, bool includeAttachments = true)
+            DateTime fromDate, DateTime toDate, bool includeAttachments = true, bool cacheFiles = true)
         {
             var list = new List<NextAccCachedDocument>();
             if (!_config.IsConfigured || !_config.Enabled) return list;
@@ -4470,7 +4470,11 @@ namespace Take_Time_BangPhra.Integration
                         if (IsVoidedDocument(d)) continue;        // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
                         seen.Add(d.Id);
 
-                        var cached = await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments);
+                        // cacheFiles=false → แสดงผลเร็ว (metadata + อ่านไฟล์จากดิสก์ที่เคย cache ไว้ ไม่ยิง API ต่อเอกสาร)
+                        // cacheFiles=true  → โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บ (ใช้รันเบื้องหลัง)
+                        var cached = cacheFiles
+                            ? await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments)
+                            : BuildDiskOnlyCachedDoc(d, basePath);
                         list.Add(cached);
                     }
 
@@ -4480,8 +4484,53 @@ namespace Take_Time_BangPhra.Integration
             }
 
             _code.Logs(_connectionString, "AccountingSync",
-                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {list.Count} เอกสาร", "SYSTEM");
+                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {list.Count} เอกสาร (cacheFiles={cacheFiles})", "SYSTEM");
             return list;
+        }
+
+        /// <summary>
+        /// สร้าง NextAccCachedDocument จาก metadata + ไฟล์ที่ cache ไว้บนดิสก์เท่านั้น (ไม่ยิง API ต่อเอกสาร)
+        /// ใช้สำหรับแสดงผลเร็ว — เอกสารที่สร้างบน NextAcc โดยตรงจะโผล่ในตารางทันทีพร้อมลิงก์เปิดดู
+        /// </summary>
+        private NextAccCachedDocument BuildDiskOnlyCachedDoc(OutboundDocumentResponse d, string basePath)
+        {
+            var result = new NextAccCachedDocument
+            {
+                DeepLinkUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "EXPENSE"),
+                NextAccId = d.Id,
+                Reference = d.Reference,
+                DocumentNumber = d.DocumentNumber,
+                DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                DocumentDate = d.DocumentDate,
+                ContactName = d.ContactName,
+                ContactTaxId = d.ContactTaxId,
+                TotalAmount = d.TotalAmount,
+                VatAmount = d.VatAmount,
+                Status = d.Status
+            };
+            try
+            {
+                string safeDoc = MakeSafeFileName(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber);
+                string folder = Path.Combine(basePath, "NextAcc", safeDoc);
+                string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
+
+                string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+                if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfPath;
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                }
+
+                string whtPath = Path.Combine(folder, "wht.pdf");
+                if (File.Exists(whtPath) && new FileInfo(whtPath).Length > 0)
+                    result.WhtCertPdfRelativeUrl = relPrefix + "/wht.pdf";
+
+                if (Directory.Exists(folder))
+                    GlobCachedAttachments(folder, relPrefix, result);
+            }
+            catch { }
+            return result;
         }
 
         /// <summary>เก็บ URL ไฟล์แนบที่ cache ไว้บนดิสก์ (ชื่อ att*) เข้า result</summary>
@@ -4585,9 +4634,10 @@ namespace Take_Time_BangPhra.Integration
                     try
                     {
                         var certs = await _apiClient.GetWhtCertsByDocumentAsync(d.Id);
+                        var certItems = certs?.data?.Items;
                         // กรองฝั่ง client ด้วย DocumentId เสมอ เผื่อ endpoint คืนทั้งหมด (ไม่กรองตาม query param)
-                        var cert = certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id)
-                                   ?? certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty);
+                        var cert = certItems?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id)
+                                   ?? certItems?.FirstOrDefault(c => c != null && c.Id != Guid.Empty);
                         if (cert != null)
                         {
                             byte[] whtPdf = await _apiClient.GetWhtCertPdfAsync(cert.Id);
