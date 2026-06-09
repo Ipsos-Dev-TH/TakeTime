@@ -733,20 +733,24 @@ namespace Take_Time_BangPhra.Account
                 var config = new AccountingConfig(conn);
                 if (!config.IsConfigured || !config.Enabled) return new List<NextAccCachedDocument>();
 
-                // จำกัดเวลาไม่ให้หน้าค้าง — ถ้า NextAcc ช้า ให้แสดงผลที่มีก่อน แล้วค้นหาอีกครั้งจะได้ครบ
-                // (งานเบื้องหลังจะ cache ต่อจนเสร็จ รอบถัดไปอ่านจากดิสก์เร็ว)
-                var task = System.Threading.Tasks.Task.Run(() =>
-                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true));
+                string cn = conn;
 
-                if (task.Wait(TimeSpan.FromSeconds(10)))
+                // 1) รันเบื้องหลัง (fire-and-forget): โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บดิสก์ไว้ใช้รอบถัดไป
+                System.Threading.Tasks.Task.Run(() =>
                 {
-                    var list = task.Result ?? new List<NextAccCachedDocument>();
-                    return list;
-                }
+                    try { new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: true).Wait(); }
+                    catch { }
+                });
 
-                // timeout: เอกสารที่ sync แล้วยังแสดงจาก sync queue + disk cache ได้ (ดูคอลัมน์เอกสาร NextAcc)
-                // งานเบื้องหลังจะ cache PDF/ไฟล์แนบต่อจนเสร็จ — ค้นหาอีกครั้งจะเห็นไฟล์ครบ
-                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: แสดงจากแคช — บางไฟล์กำลังอัปเดตเบื้องหลัง)</span>";
+                // 2) แสดงผลเร็ว: ดึงเฉพาะ "รายการเอกสาร" (metadata) + ไฟล์ที่ cache ไว้บนดิสก์ — ไม่ยิง API ต่อเอกสาร
+                //    → เอกสารที่สร้างบน NextAcc โดยตรง (เช่น PV-202606-0003) จะโผล่ในตารางทันทีพร้อมลิงก์เปิดดู
+                var task = System.Threading.Tasks.Task.Run(() =>
+                    new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
+
+                if (task.Wait(TimeSpan.FromSeconds(12)))
+                    return task.Result ?? new List<NextAccCachedDocument>();
+
+                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: แสดงจากแคช — กำลังดึงรายการเบื้องหลัง ลองค้นหาอีกครั้ง)</span>";
                 return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
@@ -960,17 +964,19 @@ namespace Take_Time_BangPhra.Account
                 }
             }
 
-            // ── ไฟล์แนบ: รวมไฟล์ของระบบ (local) + ไฟล์จาก NextAcc + ใบหัก ณ ที่จ่าย ──
+            // ── ไฟล์แนบ ──
+            //   เอกสารที่สร้างจากระบบเรา (synced) → แสดงไฟล์ local อย่างเดียว (NextAcc มีไฟล์ชุดเดียวกันที่ sync ไป — ไม่ดึงมาซ้อน)
+            //   เอกสารที่สร้างบน NextAcc โดยตรง (NextAcc-only) → แสดงไฟล์แนบจาก NextAcc
             var litAtt = (Literal)e.Row.FindControl("litAttachments");
             if (litAtt != null)
             {
-                string nextAccAttUrls = SafeEval(e.Row.DataItem, "NextAccAttUrls");
                 string whtUrl = SafeEval(e.Row.DataItem, "WhtCertUrl");
                 bool isNaOnly = isNextAccOnly == "1";
                 var localFiles = isNaOnly
                     ? new List<string>()
                     : GetLocalAttachments(docId, DataBinder.Eval(e.Row.DataItem, "Created_Date"));
-                litAtt.Text = RenderAttachmentHtml(localFiles, nextAccAttUrls, whtUrl);
+                string naAtt = isNaOnly ? SafeEval(e.Row.DataItem, "NextAccAttUrls") : "";
+                litAtt.Text = RenderAttachmentHtml(localFiles, naAtt, whtUrl);
             }
 
             var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
