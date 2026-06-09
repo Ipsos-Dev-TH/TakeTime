@@ -4720,8 +4720,9 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"FetchAttachments: doc={d.DocumentNumber} entityType={usedType} พบ {atts.Count} ไฟล์ โหลดสำเร็จ {ok} ล้มเหลว {fail}", "SYSTEM");
 
-                // แน่ชัดเมื่อโหลดได้ครบ; ถ้ามีไฟล์โหลดไม่ได้เลย = ชั่วคราว (ลองใหม่รอบหน้า)
-                return fail == 0;
+                // ดึง list สำเร็จแล้ว = แน่ชัด (เขียน marker กันยิงซ้ำทุก search) แม้บางไฟล์โหลดไม่ได้
+                // (ถ้า download endpoint ผิด การ retry ทุกครั้งไม่ช่วย แค่ทำให้หน้าค้าง — ดู log เพื่อปรับ endpoint)
+                return true;
             }
             catch (Exception ex)
             {

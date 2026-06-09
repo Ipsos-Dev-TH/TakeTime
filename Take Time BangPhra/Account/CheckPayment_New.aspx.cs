@@ -733,12 +733,20 @@ namespace Take_Time_BangPhra.Account
                 var config = new AccountingConfig(conn);
                 if (!config.IsConfigured || !config.Enabled) return new List<NextAccCachedDocument>();
 
-                var list = System.Threading.Tasks.Task.Run(() =>
-                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true)).Result
-                    ?? new List<NextAccCachedDocument>();
+                // จำกัดเวลาไม่ให้หน้าค้าง — ถ้า NextAcc ช้า ให้แสดงผลที่มีก่อน แล้วค้นหาอีกครั้งจะได้ครบ
+                // (งานเบื้องหลังจะ cache ต่อจนเสร็จ รอบถัดไปอ่านจากดิสก์เร็ว)
+                var task = System.Threading.Tasks.Task.Run(() =>
+                    new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true));
 
-                lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {list.Count})</span>";
-                return list;
+                if (task.Wait(TimeSpan.FromSeconds(15)))
+                {
+                    var list = task.Result ?? new List<NextAccCachedDocument>();
+                    lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {list.Count})</span>";
+                    return list;
+                }
+
+                lblDateRange.Text += " <span style='color:#e67e22;font-weight:bold;'>(NextAcc กำลังดึงข้อมูลเบื้องหลัง — กดค้นหาอีกครั้งเพื่อแสดงให้ครบ)</span>";
+                return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
             {
