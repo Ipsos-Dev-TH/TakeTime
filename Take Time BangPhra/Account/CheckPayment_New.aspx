@@ -540,10 +540,15 @@
             hideLoading();
         });
 
+        var _loadingTimer = null;
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
+            // safety: ซ่อนอัตโนมัติถ้าเกิน 60 วิ (กันค้างหน้าจอถ้า request ช้ามาก)
+            if (_loadingTimer) clearTimeout(_loadingTimer);
+            _loadingTimer = setTimeout(hideLoading, 60000);
         }
         function hideLoading() {
+            if (_loadingTimer) { clearTimeout(_loadingTimer); _loadingTimer = null; }
             document.getElementById('loadingOverlay').style.display = 'none';
         }
     </script>
