@@ -1270,6 +1270,7 @@ namespace Take_Time_BangPhra.Integration
                 if (isSalaryVoucher)
                     expense.Sensitivity = "Payroll";
                 ApplyContactToExpense(expense, supplierContact);
+                ApplyPreparerSignature(expense, docNumber);   // ส่งลายเซ็นผู้จัดทำไป NextAcc
 
                 ApiResponse<IntegrationDocumentResponse> result;
                 var filePaths = ExtractFilePaths(attachments);
@@ -3015,6 +3016,66 @@ namespace Take_Time_BangPhra.Integration
             expense.SupplierExternalId = info.ExternalId;
             if (string.IsNullOrEmpty(expense.SupplierName)) expense.SupplierName = info.Name;
             if (!string.IsNullOrEmpty(info.TaxId)) expense.SupplierTaxId = info.TaxId;
+        }
+
+        /// <summary>
+        /// แนบลายเซ็น + ชื่อ "ผู้จัดทำ" ลงใน request ที่จะส่งไป NextAcc.
+        /// ดึงผู้จัดทำจาก Account_Payment.Created_By_ID ของใบสำคัญจ่าย → Admin (ชื่อ + SignaturePath)
+        /// → อ่านไฟล์รูปลายเซ็นเป็น base64 data URI. ไม่ throw ถ้าไม่มีลายเซ็น (เป็น optional)
+        /// </summary>
+        private void ApplyPreparerSignature(CreateIntegrationExpenseRequest expense, string documentNumber)
+        {
+            if (expense == null || string.IsNullOrEmpty(documentNumber)) return;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT a.ID AS AdminId, a.FirstName, a.LastName, a.SignaturePath
+                      FROM Account_Payment ap
+                      LEFT JOIN Admin a ON ap.Created_By_ID = a.ID
+                      WHERE ap.ID = @ID",
+                    new Dictionary<string, object> { { "@ID", documentNumber } });
+                if (dt == null || dt.Rows.Count == 0 || dt.Rows[0]["AdminId"] == DBNull.Value) return;
+
+                var row = dt.Rows[0];
+                string first = row["FirstName"] == DBNull.Value ? "" : row["FirstName"].ToString();
+                string last = row["LastName"] == DBNull.Value ? "" : row["LastName"].ToString();
+                string name = (first + " " + last).Trim();
+                if (!string.IsNullOrEmpty(name)) expense.PreparerName = name;
+
+                short adminId = Convert.ToInt16(row["AdminId"]);
+                string dataUri = LoadSignatureDataUri(adminId);
+                if (!string.IsNullOrEmpty(dataUri)) expense.PreparerSignatureBase64 = dataUri;
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ApplyPreparerSignature: doc={documentNumber} preparer='{name}' signature={(dataUri != null ? "แนบแล้ว" : "ไม่พบไฟล์ลายเซ็น")}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ApplyPreparerSignature: doc={documentNumber} ล้มเหลว: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        /// <summary>อ่านไฟล์ลายเซ็นของ admin → base64 data URI ("data:image/png;base64,..."). คืน null ถ้าไม่มี.</summary>
+        private string LoadSignatureDataUri(short adminId)
+        {
+            try
+            {
+                var sigService = new SignatureService();
+                string virtualPath = sigService.GetSignaturePath(adminId);   // เช่น ~/Documents/Staff/Signature/sig_1_xxx.png
+                if (string.IsNullOrEmpty(virtualPath)) return null;
+
+                string physical = System.Web.Hosting.HostingEnvironment.MapPath(virtualPath);
+                if (string.IsNullOrEmpty(physical) || !File.Exists(physical)) return null;
+
+                byte[] bytes = File.ReadAllBytes(physical);
+                if (bytes.Length == 0) return null;
+
+                string ext = Path.GetExtension(physical).ToLowerInvariant();
+                string mime = ext == ".jpg" || ext == ".jpeg" ? "image/jpeg" : "image/png";
+                return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+            }
+            catch { return null; }
         }
 
         /// <summary>
