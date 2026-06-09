@@ -669,6 +669,9 @@
                                                     <li><a runat="server" href="~/Admin/ManageAboutUs">
                                                         <i class="fas fa-info-circle"></i> จัดการเกี่ยวกับเรา
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/ManagePromotions">
+                                                        <i class="fas fa-bullhorn"></i> จัดการโปรโมชั่น
+                                                    </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
