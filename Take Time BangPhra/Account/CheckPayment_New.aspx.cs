@@ -1159,6 +1159,18 @@ namespace Take_Time_BangPhra.Account
             return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp";
         }
 
+        private static readonly System.Text.RegularExpressions.Regex _attachPrefixRx =
+            new System.Text.RegularExpressions.Regex(
+                @"^PAY\d+_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}_",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static string StripAttachmentPrefix(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return fileName;
+            string stripped = _attachPrefixRx.Replace(fileName, "");
+            return string.IsNullOrEmpty(stripped) ? fileName : stripped;
+        }
+
         private string RenderAttachmentHtml(List<string> localUrls, string nextAccAttUrlsCsv, string whtCertUrl = null)
         {
             var sb = new StringBuilder();
@@ -1185,26 +1197,31 @@ namespace Take_Time_BangPhra.Account
                 string url = item.Key;
                 string src = item.Value;
                 string encUrl = Server.HtmlEncode(url);
-                string fileName = Path.GetFileName(url);
-                string srcTag = !string.IsNullOrEmpty(src)
-                    ? $"<span class='att-src-label'>{Server.HtmlEncode(src)}</span>" : "";
+                string rawFileName = Path.GetFileName(url);
+                string displayName = StripAttachmentPrefix(rawFileName);
+                string srcBadge = !string.IsNullOrEmpty(src)
+                    ? $"<span class='att-src-badge'>{Server.HtmlEncode(src)}</span>" : "";
 
                 if (IsImageFile(url))
                 {
-                    sb.Append($"{srcTag}<a href='{encUrl}' target='_blank' title='{Server.HtmlEncode(fileName)}'><img src='{encUrl}' class='att-thumb' alt='{Server.HtmlEncode(fileName)}' loading='lazy'/></a>");
+                    sb.Append($"<div class='att-chip'><a href='{encUrl}' target='_blank' title='{Server.HtmlEncode(displayName)}'>"
+                        + $"<img src='{encUrl}' class='att-thumb' alt='{Server.HtmlEncode(displayName)}' loading='lazy'/>"
+                        + $"</a><span class='att-name'>{Server.HtmlEncode(displayName)}</span>{srcBadge}</div>");
                 }
                 else
                 {
                     string icon = url.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "📄" : "📎";
-                    sb.Append($"{srcTag}<a href='{encUrl}' target='_blank' class='att-link' title='{Server.HtmlEncode(fileName)}'>{icon} {Server.HtmlEncode(fileName)}</a>");
+                    sb.Append($"<div class='att-chip'><a href='{encUrl}' target='_blank' class='att-link' title='{Server.HtmlEncode(displayName)}'>"
+                        + $"{icon} <span class='att-name'>{Server.HtmlEncode(displayName)}</span>"
+                        + $"</a>{srcBadge}</div>");
                 }
             }
 
-            // ใบหัก ณ ที่จ่าย (50 ทวิ) — แสดงเป็นลิงก์เด่นแยกจากไฟล์แนบทั่วไป
             if (hasWht)
             {
                 string encWht = Server.HtmlEncode(whtCertUrl);
-                sb.Append($"<a href='{encWht}' target='_blank' class='att-link att-wht' title='ใบหัก ณ ที่จ่าย (50 ทวิ)'>🧾 ใบหัก ณ ที่จ่าย</a>");
+                sb.Append($"<div class='att-chip'><a href='{encWht}' target='_blank' class='att-link att-wht' title='ใบหัก ณ ที่จ่าย (50 ทวิ)'>"
+                    + "🧾 <span class='att-name'>ใบหัก ณ ที่จ่าย</span></a></div>");
             }
 
             sb.Append("</div>");

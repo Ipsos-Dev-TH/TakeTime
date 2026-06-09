@@ -273,12 +273,15 @@
         a.sync-badge.completed { text-decoration: none; cursor: pointer; }
         a.sync-badge.completed:hover { background: #b7dfb5; text-decoration: underline; }
 
-        .att-wrap { display: flex; flex-wrap: wrap; gap: 4px; max-width: 260px; }
-        .att-thumb { width: 48px; height: 48px; object-fit: cover; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; transition: transform .15s; }
-        .att-thumb:hover { transform: scale(1.6); z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
-        .att-link { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; background: #ecf0f1; color: #2c3e50; white-space: nowrap; }
+        .att-wrap { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; align-items: flex-start; }
+        .att-chip { display: flex; flex-direction: column; align-items: center; width: 72px; text-align: center; }
+        .att-thumb { width: 52px; height: 52px; object-fit: cover; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; transition: transform .15s; }
+        .att-thumb:hover { transform: scale(1.8); z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.3); position: relative; }
+        .att-link { display: flex; align-items: center; gap: 3px; padding: 4px 8px; border-radius: 6px; font-size: 11px; text-decoration: none; background: #ecf0f1; color: #2c3e50; max-width: 100%; }
         .att-link:hover { background: #d5dbdb; }
-        .att-src-label { font-size: 10px; color: #888; display: block; margin-bottom: 2px; }
+        .att-name { display: block; max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #555; margin-top: 2px; line-height: 1.2; }
+        .att-link .att-name { display: inline; max-width: 52px; margin-top: 0; color: inherit; }
+        .att-src-badge { font-size: 8px; color: #fff; background: #3498db; border-radius: 3px; padding: 0 4px; line-height: 14px; margin-top: 1px; }
         .att-wht { background: #fdebd0; color: #9c640c; font-weight: 600; }
         .att-wht:hover { background: #f8d7a3; }
 
