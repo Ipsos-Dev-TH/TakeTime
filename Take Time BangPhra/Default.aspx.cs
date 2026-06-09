@@ -75,6 +75,10 @@ namespace Take_Time_BangPhra
                     Calendar1.DataBind();
                     Calendar1_SelectionChanged(null, null);
                 }
+
+                // 📢 โปรโมชั่น/โฆษณา — เด้ง popup หน้าแรก (ไม่ให้ล้มหน้าถ้ามี error)
+                try { RenderPromotionPopup(); } catch { }
+
                 // 🔄 Google Reviews - ดึงข้อมูลใหม่ทุก 7 วัน
                 string jsonResponse = "";
                 try
@@ -194,6 +198,86 @@ namespace Take_Time_BangPhra
                 // Return an error message if API call fails
                 return $"{{\"error\": \"{ex.Message}\"}}";
             }
+        }
+
+        /// <summary>
+        /// สร้าง popup โปรโมชั่นหน้าแรกจากรายการที่ active + ตั้งให้เด้งหน้าแรก
+        /// แสดงครั้งเดียวต่อวันต่อเบราว์เซอร์ (เก็บสถานะใน localStorage)
+        /// </summary>
+        private void RenderPromotionPopup()
+        {
+            var svc = new PromotionService(conn);
+            DataTable dt;
+            try { dt = svc.GetActiveHomepagePromotions(); }
+            catch { svc.EnsureTableExists(); return; }   // ยังไม่ได้รัน migration → ข้ามเงียบๆ
+
+            if (dt == null || dt.Rows.Count == 0) return;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append(@"<div id='promoOverlay' class='promo-overlay' style='display:none;'>");
+            sb.Append(@"<div class='promo-modal'>");
+            sb.Append(@"<button type='button' class='promo-close' onclick='closePromo()'>&times;</button>");
+            sb.Append(@"<div class='promo-track'>");
+
+            foreach (DataRow r in dt.Rows)
+            {
+                string title = Server.HtmlEncode(r["Title"]?.ToString() ?? "");
+                string desc = r["Description"] == DBNull.Value ? "" : Server.HtmlEncode(r["Description"].ToString()).Replace("\n", "<br/>");
+                string img = r["Image_Url"] == DBNull.Value ? "" : r["Image_Url"].ToString();
+                string link = r["Link_Url"] == DBNull.Value ? "" : r["Link_Url"].ToString();
+
+                sb.Append("<div class='promo-slide'>");
+                string inner = "";
+                if (!string.IsNullOrEmpty(img))
+                    inner += $"<img src='{Server.HtmlEncode(img)}' alt='{title}' class='promo-img'/>";
+                inner += "<div class='promo-body'>";
+                if (!string.IsNullOrEmpty(title)) inner += $"<h3 class='promo-title'>{title}</h3>";
+                if (!string.IsNullOrEmpty(desc)) inner += $"<p class='promo-desc'>{desc}</p>";
+                inner += "</div>";
+
+                if (!string.IsNullOrEmpty(link))
+                    sb.Append($"<a href='{Server.HtmlEncode(link)}' class='promo-link'>{inner}</a>");
+                else
+                    sb.Append(inner);
+                sb.Append("</div>");
+            }
+
+            sb.Append("</div></div></div>");
+
+            // CSS + JS (แสดงครั้งเดียวต่อวัน)
+            sb.Append(@"
+<style>
+.promo-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;}
+.promo-modal{position:relative;background:#fff;border-radius:12px;max-width:460px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.3);}
+.promo-close{position:absolute;top:8px;right:12px;background:rgba(0,0,0,.45);color:#fff;border:none;width:34px;height:34px;border-radius:50%;font-size:22px;line-height:1;cursor:pointer;z-index:2;}
+.promo-close:hover{background:rgba(0,0,0,.7);}
+.promo-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;}
+.promo-slide{flex:0 0 100%;scroll-snap-align:start;}
+.promo-link{text-decoration:none;color:inherit;display:block;}
+.promo-img{width:100%;display:block;border-radius:12px 12px 0 0;object-fit:cover;}
+.promo-body{padding:16px 20px;}
+.promo-title{margin:0 0 8px;color:#d35400;font-size:20px;font-weight:700;}
+.promo-desc{margin:0;color:#5D4037;font-size:14px;line-height:1.6;}
+</style>
+<script>
+(function(){
+  try{
+    var key='ttPromoSeen';
+    var today=new Date().toISOString().slice(0,10);
+    if(localStorage.getItem(key)===today) return;
+    var ov=document.getElementById('promoOverlay');
+    if(!ov) return;
+    setTimeout(function(){ ov.style.display='flex'; }, 800);
+    window.closePromo=function(){
+      ov.style.display='none';
+      try{ localStorage.setItem(key, today); }catch(e){}
+    };
+    ov.addEventListener('click',function(e){ if(e.target===ov) window.closePromo(); });
+  }catch(e){}
+})();
+</script>");
+
+            ClientScript.RegisterStartupScript(GetType(), "promoPopup", sb.ToString(), false);
         }
 
         protected void Calendar1_SelectionChanged(object sender, EventArgs e)

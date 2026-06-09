@@ -808,6 +808,7 @@
     <Compile Include="Class\PaymentService.cs" />
     <Compile Include="Class\ProductDataAccess.cs" />
     <Compile Include="Class\ProductService.cs" />
+    <Compile Include="Class\PromotionService.cs" />
     <Compile Include="Class\ReceiptService.cs" />
     <Compile Include="Class\SignatureService.cs" />
     <Compile Include="Class\EmployeeService.cs" />

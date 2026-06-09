@@ -1162,6 +1162,26 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/attachments/{entityType}/{entityId}");
         }
 
+        /// <summary>ดาวน์โหลดเนื้อไฟล์แนบผ่าน attachment Id (ใช้ X-Api-Key). คืน null ถ้าไม่สำเร็จ.
+        /// ลองหลาย route ที่ NextAcc อาจใช้ — บาง deployment serve storagePath ตรงๆ ไม่ได้.</summary>
+        public async Task<byte[]> DownloadAttachmentByIdAsync(Guid attachmentId)
+        {
+            if (attachmentId == Guid.Empty || string.IsNullOrEmpty(_config.BaseUrl)) return null;
+            string baseUrl = _config.BaseUrl.TrimEnd('/');
+            string[] candidates =
+            {
+                $"{baseUrl}{CompanyPath}/attachments/{attachmentId}/download",
+                $"{baseUrl}{CompanyPath}/attachments/{attachmentId}/content",
+                $"{baseUrl}{CompanyPath}/attachments/{attachmentId}"
+            };
+            foreach (var url in candidates)
+            {
+                byte[] bytes = await DownloadFileAsync(url);
+                if (bytes != null && bytes.Length > 0) return bytes;
+            }
+            return null;
+        }
+
         public async Task DeleteAttachmentAsync(Guid attachmentId)
         {
             await DeleteAsync($"{CompanyPath}/attachments/{attachmentId}");
