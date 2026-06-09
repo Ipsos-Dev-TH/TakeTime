@@ -279,6 +279,8 @@
         .att-link { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; background: #ecf0f1; color: #2c3e50; white-space: nowrap; }
         .att-link:hover { background: #d5dbdb; }
         .att-src-label { font-size: 10px; color: #888; display: block; margin-bottom: 2px; }
+        .att-wht { background: #fdebd0; color: #9c640c; font-weight: 600; }
+        .att-wht:hover { background: #f8d7a3; }
 
         /* Mobile responsive */
         @media (max-width: 768px) {

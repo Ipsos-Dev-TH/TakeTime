@@ -519,6 +519,11 @@ namespace Take_Time_BangPhra.Integration
         public bool IncludeVat { get; set; }
         public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+
+        /// <summary>ชื่อผู้จัดทำเอกสาร (ผู้สร้างใบสำคัญจ่ายฝั่ง TakeTime) — ใช้แสดงในช่อง "ผู้จัดทำ"</summary>
+        public string PreparerName { get; set; }
+        /// <summary>ลายเซ็นผู้จัดทำ (PNG เป็น base64 data URI: "data:image/png;base64,....") — NextAcc นำไปเซ็นช่องผู้จัดทำ</summary>
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     public class IntegrationLineRequest
@@ -1095,6 +1100,9 @@ namespace Take_Time_BangPhra.Integration
         public int AttachmentCount { get; set; }
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
+
+        /// <summary>URL ไฟล์ PDF ใบหัก ณ ที่จ่าย (50 ทวิ) ที่ cache ไว้ฝั่ง TakeTime — ว่างถ้าไม่มี</summary>
+        public string WhtCertPdfRelativeUrl { get; set; }
 
         // ── Metadata จากเอกสาร NextAcc (ใช้ merge เข้าตารางและแสดงเลขที่เอกสารตาม NextAcc) ──
         public Guid NextAccId { get; set; }

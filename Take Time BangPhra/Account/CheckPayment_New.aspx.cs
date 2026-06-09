@@ -763,6 +763,7 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("NextAccDeepLink")) dt.Columns.Add("NextAccDeepLink", typeof(string));
             if (!dt.Columns.Contains("NextAccAttCount")) dt.Columns.Add("NextAccAttCount", typeof(int));
             if (!dt.Columns.Contains("NextAccAttUrls")) dt.Columns.Add("NextAccAttUrls", typeof(string));
+            if (!dt.Columns.Contains("WhtCertUrl")) dt.Columns.Add("WhtCertUrl", typeof(string));
 
             nextAccDocs = nextAccDocs ?? new List<NextAccCachedDocument>();
 
@@ -806,6 +807,7 @@ namespace Take_Time_BangPhra.Account
                     row["NextAccAttCount"] = nd.AttachmentCount;
                     row["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                         ? string.Join("|", nd.AttachmentRelativeUrls) : "";
+                    row["WhtCertUrl"] = nd.WhtCertPdfRelativeUrl ?? "";
                 }
                 else
                 {
@@ -815,6 +817,7 @@ namespace Take_Time_BangPhra.Account
                     row["NextAccDeepLink"] = "";
                     row["NextAccAttCount"] = 0;
                     row["NextAccAttUrls"] = "";
+                    row["WhtCertUrl"] = "";
                 }
             }
 
@@ -840,6 +843,7 @@ namespace Take_Time_BangPhra.Account
                 nr["NextAccAttCount"] = nd.AttachmentCount;
                 nr["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                     ? string.Join("|", nd.AttachmentRelativeUrls) : "";
+                nr["WhtCertUrl"] = nd.WhtCertPdfRelativeUrl ?? "";
                 dt.Rows.Add(nr);
             }
         }
@@ -912,16 +916,17 @@ namespace Take_Time_BangPhra.Account
                 }
             }
 
-            // ── ไฟล์แนบ: รวมไฟล์ของระบบ (local) + ไฟล์จาก NextAcc ──
+            // ── ไฟล์แนบ: รวมไฟล์ของระบบ (local) + ไฟล์จาก NextAcc + ใบหัก ณ ที่จ่าย ──
             var litAtt = (Literal)e.Row.FindControl("litAttachments");
             if (litAtt != null)
             {
                 string nextAccAttUrls = SafeEval(e.Row.DataItem, "NextAccAttUrls");
+                string whtUrl = SafeEval(e.Row.DataItem, "WhtCertUrl");
                 bool isNaOnly = isNextAccOnly == "1";
                 var localFiles = isNaOnly
                     ? new List<string>()
                     : GetLocalAttachments(docId, DataBinder.Eval(e.Row.DataItem, "Created_Date"));
-                litAtt.Text = RenderAttachmentHtml(localFiles, nextAccAttUrls);
+                litAtt.Text = RenderAttachmentHtml(localFiles, nextAccAttUrls, whtUrl);
             }
 
             var lblSync = (Label)e.Row.FindControl("lblSyncStatus");
@@ -1055,7 +1060,7 @@ namespace Take_Time_BangPhra.Account
             return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp";
         }
 
-        private string RenderAttachmentHtml(List<string> localUrls, string nextAccAttUrlsCsv)
+        private string RenderAttachmentHtml(List<string> localUrls, string nextAccAttUrlsCsv, string whtCertUrl = null)
         {
             var sb = new StringBuilder();
             var allItems = new List<KeyValuePair<string, string>>(); // url, source label
@@ -1072,7 +1077,8 @@ namespace Take_Time_BangPhra.Account
                 }
             }
 
-            if (allItems.Count == 0) return "<span style='color:#bbb;font-size:11px;'>-</span>";
+            bool hasWht = !string.IsNullOrEmpty(whtCertUrl);
+            if (allItems.Count == 0 && !hasWht) return "<span style='color:#bbb;font-size:11px;'>-</span>";
 
             sb.Append("<div class='att-wrap'>");
             foreach (var item in allItems)
@@ -1094,6 +1100,14 @@ namespace Take_Time_BangPhra.Account
                     sb.Append($"{srcTag}<a href='{encUrl}' target='_blank' class='att-link' title='{Server.HtmlEncode(fileName)}'>{icon} {Server.HtmlEncode(fileName)}</a>");
                 }
             }
+
+            // ใบหัก ณ ที่จ่าย (50 ทวิ) — แสดงเป็นลิงก์เด่นแยกจากไฟล์แนบทั่วไป
+            if (hasWht)
+            {
+                string encWht = Server.HtmlEncode(whtCertUrl);
+                sb.Append($"<a href='{encWht}' target='_blank' class='att-link att-wht' title='ใบหัก ณ ที่จ่าย (50 ทวิ)'>🧾 ใบหัก ณ ที่จ่าย</a>");
+            }
+
             sb.Append("</div>");
             return sb.ToString();
         }
