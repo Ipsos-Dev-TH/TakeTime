@@ -4468,26 +4468,26 @@ namespace Take_Time_BangPhra.Integration
             string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
             string noPdfMarker = Path.Combine(folder, "_nopdf.marker");
             string attDoneMarker = Path.Combine(folder, "_att.done");
+            string whtPath = Path.Combine(folder, "wht.pdf");
+            string noWhtMarker = Path.Combine(folder, "_nowht.marker");
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
+
+            // re-check ไฟล์แนบ/WHT ใหม่ ถ้า marker เก่ากว่า TTL — เพื่อให้ไฟล์ที่เพิ่งเพิ่มบน NextAcc แสดงได้
+            TimeSpan recheckTtl = TimeSpan.FromMinutes(10);
 
             try
             {
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
+                // ── 1) PDF เอกสารหลัก (ถ้า NextAcc มี template) ──
                 bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0;
-
-                // ── Fast path: PDF cache แล้ว → ไม่ต้องยิง API ใดๆ ──
                 if (pdfCached)
                 {
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
                     result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
-                    GlobCachedAttachments(folder, relPrefix, result);
-                    return result;
                 }
-
-                // PDF อย่างเป็นทางการ (ถ้า NextAcc มี template) — ข้ามถ้าเคยรู้ว่าไม่มี
-                if (!File.Exists(noPdfMarker))
+                else if (!File.Exists(noPdfMarker))
                 {
                     byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(d.Id);
                     if (pdf != null && pdf.Length > 0)
@@ -4499,57 +4499,82 @@ namespace Take_Time_BangPhra.Integration
                     }
                     else
                     {
-                        // NextAcc ไม่มี template/PDF — เขียน marker กันลองซ้ำทุกครั้ง (เปิดดูผ่าน DeepLink แทน)
                         try { File.WriteAllText(noPdfMarker, DateTime.Now.ToString("o")); } catch { }
                     }
                 }
 
-                // ไฟล์แนบ — โหลดครั้งแรกแล้วทำ marker; ครั้งถัดไปอ่านจากดิสก์
-                if (includeAttachments)
+                // ── 2) ไฟล์แนบ — ดึงรายการใหม่เมื่อ marker หาย/เก่ากว่า TTL (ไฟล์ที่มีบนดิสก์แล้วไม่โหลดซ้ำ) ──
+                if (includeAttachments && IsMarkerStale(attDoneMarker, recheckTtl))
                 {
-                    if (File.Exists(attDoneMarker))
+                    try
                     {
-                        GlobCachedAttachments(folder, relPrefix, result);
-                    }
-                    else
-                    {
-                        try
+                        var attResp = await _apiClient.GetAttachmentsAsync("Document", d.Id);
+                        if (attResp?.data != null && attResp.data.Count > 0)
                         {
-                            var attResp = await _apiClient.GetAttachmentsAsync("Document", d.Id);
-                            if (attResp?.data != null && attResp.data.Count > 0)
+                            int idx = 0;
+                            foreach (var a in attResp.data)
                             {
-                                int idx = 0;
-                                foreach (var a in attResp.data)
+                                idx++;
+                                string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                                if (string.IsNullOrEmpty(storage)) continue;
+
+                                string ext = Path.GetExtension(a.OriginalFileName ?? a.FileName ?? "");
+                                if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                                string attName = $"att{idx}{ext}";
+                                string attLocal = Path.Combine(folder, attName);
+
+                                if (!File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
                                 {
-                                    idx++;
-                                    string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
-                                    if (string.IsNullOrEmpty(storage)) continue;
-
-                                    string ext = Path.GetExtension(a.OriginalFileName ?? a.FileName ?? "");
-                                    if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
-                                    string attName = $"att{idx}{ext}";
-                                    string attLocal = Path.Combine(folder, attName);
-
-                                    if (!File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
-                                    {
-                                        byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
-                                        if (bytes != null && bytes.Length > 0)
-                                            File.WriteAllBytes(attLocal, bytes);
-                                    }
-                                    if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0)
-                                    {
-                                        result.AttachmentCount++;
-                                        result.AttachmentRelativeUrls.Add(relPrefix + "/" + attName);
-                                    }
+                                    byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
+                                    if (bytes != null && bytes.Length > 0)
+                                        File.WriteAllBytes(attLocal, bytes);
                                 }
                             }
-                            try { File.WriteAllText(attDoneMarker, DateTime.Now.ToString("o")); } catch { }
                         }
-                        catch (Exception exAtt)
+                        try { File.WriteAllText(attDoneMarker, DateTime.Now.ToString("o")); } catch { }
+                    }
+                    catch (Exception exAtt)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"CacheNextAccDocument: attachments doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exAtt.Message}", "SYSTEM");
+                    }
+                }
+                // เก็บ URL ไฟล์แนบที่มีบนดิสก์ (ทั้งที่โหลดใหม่และที่ cache ไว้แล้ว)
+                GlobCachedAttachments(folder, relPrefix, result);
+
+                // ── 3) ใบหัก ณ ที่จ่าย (50 ทวิ) — เฉพาะเมื่อใช้ API Key (acc_) ──
+                bool whtCached = File.Exists(whtPath) && new FileInfo(whtPath).Length > 0;
+                if (whtCached)
+                {
+                    result.WhtCertPdfRelativeUrl = relPrefix + "/wht.pdf";
+                }
+                else if (!_config.IsIntegrationKey && IsMarkerStale(noWhtMarker, recheckTtl))
+                {
+                    try
+                    {
+                        var certs = await _apiClient.GetWhtCertsByDocumentAsync(d.Id);
+                        // กรองฝั่ง client ด้วย DocumentId เสมอ เผื่อ endpoint คืนทั้งหมด (ไม่กรองตาม query param)
+                        var cert = certs?.data?.FirstOrDefault(c => c != null && c.Id != Guid.Empty && c.DocumentId == d.Id);
+                        if (cert != null)
                         {
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"CacheNextAccDocument: attachments doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exAtt.Message}", "SYSTEM");
+                            byte[] whtPdf = await _apiClient.GetWhtCertPdfAsync(cert.Id);
+                            if (whtPdf == null || whtPdf.Length == 0)
+                                whtPdf = await _apiClient.GenerateDocumentPdfAsync(cert.Id); // fallback ผ่าน template engine
+                            if (whtPdf != null && whtPdf.Length > 0)
+                            {
+                                File.WriteAllBytes(whtPath, whtPdf);
+                                result.WhtCertPdfRelativeUrl = relPrefix + "/wht.pdf";
+                            }
                         }
+                        else
+                        {
+                            try { File.WriteAllText(noWhtMarker, DateTime.Now.ToString("o")); } catch { }
+                        }
+                    }
+                    catch (Exception exWht)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"CacheNextAccDocument: WHT cert doc={d.DocumentNumber} ({d.Reference}) ล้มเหลว: {exWht.Message}", "SYSTEM");
                     }
                 }
             }
@@ -4561,6 +4586,17 @@ namespace Take_Time_BangPhra.Integration
             }
 
             return result;
+        }
+
+        /// <summary>true ถ้า marker ไม่มี หรือเก่ากว่า ttl — ใช้ตัดสินใจว่าควร re-fetch จาก NextAcc ใหม่หรือไม่</summary>
+        private static bool IsMarkerStale(string markerPath, TimeSpan ttl)
+        {
+            try
+            {
+                if (!File.Exists(markerPath)) return true;
+                return (DateTime.Now - File.GetLastWriteTime(markerPath)) > ttl;
+            }
+            catch { return true; }
         }
     }
 }

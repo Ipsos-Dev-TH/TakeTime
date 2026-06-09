@@ -909,6 +909,48 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/withholding-tax-certs/bulk-generate", request);
         }
 
+        /// <summary>ดึงรายการใบหัก ณ ที่จ่าย (50 ทวิ) ที่ออกให้กับเอกสารต้นทาง (read-only).
+        /// ต้องใช้ API Key (acc_) — Integration Key ใช้ไม่ได้.</summary>
+        public async Task<ApiResponse<List<WithholdingTaxCertResponse>>> GetWhtCertsByDocumentAsync(Guid documentId)
+        {
+            return await GetAsync<ApiResponse<List<WithholdingTaxCertResponse>>>(
+                $"{CompanyPath}/withholding-tax-certs?documentId={documentId}");
+        }
+
+        /// <summary>ดึง PDF ใบหัก ณ ที่จ่ายตาม certId. คืน null ถ้าไม่มี/ล้มเหลว.</summary>
+        public async Task<byte[]> GetWhtCertPdfAsync(Guid certId)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl) || certId == Guid.Empty) return null;
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            string path = $"{CompanyPath}/withholding-tax-certs/{certId}/pdf";
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                var startTime = DateTime.Now;
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("GET", path, "", errBody, (int)response.StatusCode, false, durationMs);
+                    if ((int)response.StatusCode == 401 || (int)response.StatusCode == 403)
+                        throw new AuthenticationFailedException(
+                            $"wht-cert pdf auth failed ({(int)response.StatusCode}): {errBody}");
+                    return null;
+                }
+
+                LogApiCall("GET", path, "", "[pdf bytes]", (int)response.StatusCode, true, durationMs);
+                return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            }
+        }
+
         public async Task<ApiResponse<List<IncomeTypeInfo>>> GetIncomeTypesAsync()
         {
             return await GetAsync<ApiResponse<List<IncomeTypeInfo>>>("/api/reference/income-types");

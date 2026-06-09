@@ -1096,6 +1096,9 @@ namespace Take_Time_BangPhra.Integration
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
 
+        /// <summary>URL ไฟล์ PDF ใบหัก ณ ที่จ่าย (50 ทวิ) ที่ cache ไว้ฝั่ง TakeTime — ว่างถ้าไม่มี</summary>
+        public string WhtCertPdfRelativeUrl { get; set; }
+
         // ── Metadata จากเอกสาร NextAcc (ใช้ merge เข้าตารางและแสดงเลขที่เอกสารตาม NextAcc) ──
         public Guid NextAccId { get; set; }
         public string Reference { get; set; }          // เลขที่อ้างอิง (= เลขใบสำคัญจ่ายฝั่ง TakeTime ถ้ามาจากการ sync)
