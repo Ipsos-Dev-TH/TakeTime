@@ -738,14 +738,15 @@ namespace Take_Time_BangPhra.Account
                 var task = System.Threading.Tasks.Task.Run(() =>
                     new AccountingSyncService(conn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true));
 
-                if (task.Wait(TimeSpan.FromSeconds(15)))
+                if (task.Wait(TimeSpan.FromSeconds(10)))
                 {
                     var list = task.Result ?? new List<NextAccCachedDocument>();
-                    lblDateRange.Text += $" <span style='color:#2980b9;font-weight:bold;'>(เอกสาร NextAcc: {list.Count})</span>";
                     return list;
                 }
 
-                lblDateRange.Text += " <span style='color:#e67e22;font-weight:bold;'>(NextAcc กำลังดึงข้อมูลเบื้องหลัง — กดค้นหาอีกครั้งเพื่อแสดงให้ครบ)</span>";
+                // timeout: เอกสารที่ sync แล้วยังแสดงจาก sync queue + disk cache ได้ (ดูคอลัมน์เอกสาร NextAcc)
+                // งานเบื้องหลังจะ cache PDF/ไฟล์แนบต่อจนเสร็จ — ค้นหาอีกครั้งจะเห็นไฟล์ครบ
+                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: แสดงจากแคช — บางไฟล์กำลังอัปเดตเบื้องหลัง)</span>";
                 return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
@@ -817,6 +818,10 @@ namespace Take_Time_BangPhra.Account
                         ? string.Join("|", nd.AttachmentRelativeUrls) : "";
                     row["WhtCertUrl"] = nd.WhtCertPdfRelativeUrl ?? "";
                 }
+                else if (TryFillFromSyncQueueAndDisk(row, id))
+                {
+                    // เติมจาก sync queue (เลข EXP + ลิงก์) + disk cache (PDF/ไฟล์แนบ) — เชื่อถือได้ ไม่ต้องรอ API
+                }
                 else
                 {
                     row["DisplayDoc"] = id;
@@ -854,6 +859,37 @@ namespace Take_Time_BangPhra.Account
                 nr["WhtCertUrl"] = nd.WhtCertPdfRelativeUrl ?? "";
                 dt.Rows.Add(nr);
             }
+        }
+
+        /// <summary>
+        /// เติมข้อมูล NextAcc ให้แถวจาก sync queue (เลขเอกสาร EXP + ลิงก์เปิดใน NextAcc) และ disk cache
+        /// (PDF/ไฟล์แนบ/ใบหัก ณ ที่จ่าย ที่เคยโหลดไว้) — ใช้เมื่อ API prefetch ไม่ทัน/timeout.
+        /// คืน true ถ้ามีข้อมูล NextAcc ให้แสดง
+        /// </summary>
+        private bool TryFillFromSyncQueueAndDisk(DataRow row, string id)
+        {
+            if (_syncStatusCache == null || !_syncStatusCache.TryGetValue(id, out var sq))
+                return false;
+
+            string naDocNum = sq.Table.Columns.Contains("Nexaacc_Document_Number") ? sq["Nexaacc_Document_Number"]?.ToString() : "";
+            string naId = sq.Table.Columns.Contains("Nexaacc_Response_Id") ? sq["Nexaacc_Response_Id"]?.ToString() : "";
+            string naType = sq.Table.Columns.Contains("Nexaacc_Document_Type") ? sq["Nexaacc_Document_Type"]?.ToString() : "";
+            string deepLink = BuildNexaaccLink(naId, naType);
+
+            var disk = ReadCachedNextAccFromDisk(id);
+
+            // ไม่มีทั้งลิงก์และไฟล์ cache → ถือว่าไม่มีข้อมูล NextAcc
+            if (string.IsNullOrEmpty(deepLink) && disk == null && string.IsNullOrEmpty(naDocNum))
+                return false;
+
+            row["DisplayDoc"] = !string.IsNullOrEmpty(naDocNum) ? naDocNum : id;
+            row["HasNextAcc"] = "1";
+            row["NextAccViewUrl"] = (disk?.PdfUrl) ?? deepLink ?? "";
+            row["NextAccDeepLink"] = deepLink ?? "";
+            row["NextAccAttCount"] = disk?.AttUrls?.Count ?? 0;
+            row["NextAccAttUrls"] = (disk != null && disk.AttUrls.Count > 0) ? string.Join("|", disk.AttUrls) : "";
+            row["WhtCertUrl"] = disk?.WhtUrl ?? "";
+            return true;
         }
 
         private void LoadSyncStatusCache()
@@ -1019,6 +1055,55 @@ namespace Take_Time_BangPhra.Account
                 if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(uid))
                     _uidCache[id] = uid;
             }
+        }
+
+        // ── NextAcc cache บนดิสก์ (PDF + ไฟล์แนบ + ใบหัก ณ ที่จ่าย) ที่ service เคยโหลดไว้ ──
+        private class DiskNextAcc
+        {
+            public string PdfUrl;
+            public List<string> AttUrls = new List<string>();
+            public string WhtUrl;
+            public bool HasAny => !string.IsNullOrEmpty(PdfUrl) || AttUrls.Count > 0 || !string.IsNullOrEmpty(WhtUrl);
+        }
+
+        /// <summary>
+        /// อ่านไฟล์ NextAcc ที่ cache ไว้บนดิสก์ตามเลขเอกสาร TakeTime (ไม่เรียก API)
+        /// โฟลเดอร์: {PaymentFolderPath}\NextAcc\{docId}\  (ตรงกับที่ AccountingSyncService เขียนไว้)
+        /// </summary>
+        private DiskNextAcc ReadCachedNextAccFromDisk(string docId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(docId)) return null;
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return null;
+
+                string safe = docId;
+                foreach (char c in Path.GetInvalidFileNameChars()) safe = safe.Replace(c, '_');
+
+                string folder = Path.Combine(basePath, "NextAcc", safe);
+                if (!Directory.Exists(folder)) return null;
+
+                string relPrefix = "/Documents/Payment/NextAcc/" + safe;
+                var result = new DiskNextAcc();
+
+                string pdf = Path.Combine(folder, safe + ".pdf");
+                if (File.Exists(pdf) && new FileInfo(pdf).Length > 0)
+                    result.PdfUrl = relPrefix + "/" + safe + ".pdf";
+
+                string wht = Path.Combine(folder, "wht.pdf");
+                if (File.Exists(wht) && new FileInfo(wht).Length > 0)
+                    result.WhtUrl = relPrefix + "/wht.pdf";
+
+                foreach (var f in Directory.GetFiles(folder, "att*"))
+                {
+                    if (new FileInfo(f).Length > 0)
+                        result.AttUrls.Add(relPrefix + "/" + Path.GetFileName(f));
+                }
+
+                return result.HasAny ? result : null;
+            }
+            catch { return null; }
         }
 
         private List<string> GetLocalAttachments(string docNum, object createdDateObj)
