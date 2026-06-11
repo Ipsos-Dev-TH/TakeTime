@@ -1302,7 +1302,8 @@ namespace Take_Time_BangPhra.Integration
                 var journal = _mapper.MapVoucherToJournal(voucherId, expenseCategory, amount, paymentMethod,
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                    expenseLines: expenseLines, documentNumber: docNumber);
+                    expenseLines: expenseLines, documentNumber: docNumber,
+                    isCredit: isCredit);
                 if (isSalaryVoucher)
                     journal.Sensitivity = "Payroll";
                 var result = await _apiClient.CreateJournalAsync(journal);
