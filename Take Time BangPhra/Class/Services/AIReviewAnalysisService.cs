@@ -749,6 +749,140 @@ HTML:
             return results;
         }
 
+        // ── AI Discovery: web-search every platform, no per-source API config needed ──
+
+        private static readonly Dictionary<string, string> _discoverySiteFilters = new Dictionary<string, string>
+        {
+            { "GOOGLE",      "google.com/maps OR g.co" },
+            { "FACEBOOK",    "facebook.com" },
+            { "AGODA",       "agoda.com" },
+            { "BOOKING",     "booking.com" },
+            { "TRIPADVISOR", "tripadvisor.com OR tripadvisor.co.th" },
+            { "EXPEDIA",     "expedia.com OR expedia.co.th" },
+            { "TRAVELOKA",   "traveloka.com" },
+            { "PANTIP",      "pantip.com" },
+            { "TIKTOK",      "tiktok.com" },
+            { "LEMON8",      "lemon8-app.com" },
+            { "WONGNAI",     "wongnai.com" },
+            { "TWITTER",     "x.com OR twitter.com" },
+            { "INSTAGRAM",   "instagram.com" },
+            { "YOUTUBE",     "youtube.com" }
+        };
+
+        /// <summary>
+        /// AI Discovery: search the web for hotel reviews/mentions on a platform without
+        /// requiring API keys or the source to be enabled. Searches via DuckDuckGo/Bing,
+        /// then DeepSeek extracts review content from the result snippets and imports
+        /// with the standard dedup. ApiConfig "searchKeyword" is honored if set.
+        /// </summary>
+        public Dictionary<string, object> AIDiscoverSource(string sourceCode)
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
+            try
+            {
+                if (string.IsNullOrEmpty(sourceCode) || sourceCode == "INTERNAL")
+                {
+                    result["success"] = false;
+                    result["message"] = "แหล่งที่มาไม่ถูกต้อง";
+                    return result;
+                }
+
+                string siteFilter;
+                if (!_discoverySiteFilters.TryGetValue(sourceCode, out siteFilter))
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่รู้จักแพลตฟอร์ม: " + sourceCode;
+                    return result;
+                }
+
+                string keyword = GetSearchKeyword(sourceCode);
+                // Use the first domain as a site: filter; GOOGLE gets a plain query
+                // because Google Maps reviews aren't indexed under a usable site: path
+                string firstDomain = siteFilter.Split(new[] { " OR " }, StringSplitOptions.None)[0];
+                string query = sourceCode == "GOOGLE"
+                    ? keyword + " รีวิว โรงแรม"
+                    : keyword + " รีวิว site:" + firstDomain;
+
+                string encoded = Uri.EscapeDataString(query);
+
+                // DuckDuckGo HTML endpoint renders without JS; Bing as fallback
+                string html = MakeHttpGetRequest("https://html.duckduckgo.com/html/?q=" + encoded);
+                if (string.IsNullOrEmpty(html) || html.Length < 500)
+                    html = MakeHttpGetRequest("https://www.bing.com/search?q=" + encoded + "&setlang=th");
+
+                if (string.IsNullOrEmpty(html) || html.Length < 500)
+                {
+                    result["success"] = false;
+                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบ)";
+                    return result;
+                }
+
+                string prompt = BuildDiscoveryPrompt(sourceCode, keyword, html);
+                var parsed = CallAIAndParseReviews(prompt, sourceCode);
+                if (parsed == null)
+                {
+                    // No mentions found is a normal outcome, not an error
+                    result["success"] = true;
+                    result["newCount"] = 0;
+                    result["skipCount"] = 0;
+                    result["message"] = sourceCode + ": AI ไม่พบรีวิว/การกล่าวถึงจากผลค้นหา";
+                    return result;
+                }
+
+                foreach (var r in parsed)
+                {
+                    int added = InsertReview(sourceCode, r.PlatformId, r.ReviewerName, null,
+                        r.Rating, r.ReviewTitle, r.ReviewText, r.ReviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata(sourceCode);
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = sourceCode + " error: " + ex.Message;
+            }
+            return result;
+        }
+
+        private string BuildDiscoveryPrompt(string sourceCode, string keyword, string searchHtml)
+        {
+            if (searchHtml.Length > 15000)
+                searchHtml = searchHtml.Substring(0, 15000);
+
+            return string.Format(
+                @"ด้านล่างคือ HTML ผลการค้นหาเว็บสำหรับรีวิวของโรงแรม ""{0}"" บนแพลตฟอร์ม {1}
+ให้ดึงรีวิว/การกล่าวถึงโรงแรมนี้จาก title และ snippet ของผลค้นหา
+
+ตอบเป็น JSON array เท่านั้น:
+[
+  {{
+    ""reviewerName"": ""ชื่อผู้รีวิว/ผู้โพสต์ หรือชื่อเพจ/ช่อง ถ้าไม่ทราบใช้ \""{1} User\"""",
+    ""rating"": 4.0,
+    ""reviewText"": ""เนื้อหารีวิว/การกล่าวถึง (รวมข้อความจาก snippet)"",
+    ""reviewDate"": ""2026-06-01"",
+    ""reviewTitle"": ""หัวข้อ หรือ null""
+  }}
+]
+
+กฎ:
+- เอาเฉพาะผลที่เกี่ยวกับโรงแรม ""{0}"" จริงๆ ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
+- rating 1-5 ถ้าเห็นคะแนนใน snippet ใช้คะแนนนั้น (สเกล 1-10 ให้หาร 2) ถ้าไม่มีให้ประเมินจากน้ำเสียง (ชม=4-5, กลาง=3, ติ=1-2, บอกไม่ได้=0)
+- reviewDate ใช้ yyyy-MM-dd ถ้าไม่ทราบวันที่ ใช้ {2}
+- snippet เป็นข้อความตัดตอน ให้เก็บเท่าที่มี ไม่ต้องแต่งเติม
+- ถ้าไม่พบเลย ตอบ []
+
+HTML:
+{3}", keyword, sourceCode, DateTime.Now.ToString("yyyy-MM-dd"), searchHtml);
+        }
+
         /// <summary>
         /// Import reviews manually — with robust dedup by reviewer+date+rating+source
         /// </summary>

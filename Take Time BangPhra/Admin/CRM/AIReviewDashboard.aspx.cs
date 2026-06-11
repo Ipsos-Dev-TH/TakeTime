@@ -81,6 +81,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                 case "fetchAll":
                     result = HandleFetchAll();
                     break;
+                case "aiDiscover":
+                    result = HandleAIDiscover(data);
+                    break;
                 case "analyzePending":
                     result = HandleAnalyzePending();
                     break;
@@ -219,6 +222,23 @@ namespace Take_Time_BangPhra.Admin.CRM
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "ดึงรีวิวไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> HandleAIDiscover(Dictionary<string, object> data)
+        {
+            try
+            {
+                var svc = new AIReviewAnalysisService(ConnStr);
+                string sourceCode = GetString(data, "sourceCode", "");
+                if (string.IsNullOrEmpty(sourceCode))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้องระบุ sourceCode" } };
+
+                return svc.AIDiscoverSource(sourceCode);
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "AI ค้นหาไม่สำเร็จ: " + ex.Message } };
             }
         }
 
