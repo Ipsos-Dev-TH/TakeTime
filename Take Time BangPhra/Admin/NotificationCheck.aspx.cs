@@ -8,6 +8,12 @@ namespace Take_Time_BangPhra.Admin
 {
     public partial class NotificationCheck : Page
     {
+        protected override void OnInit(EventArgs e)
+        {
+            base.OnInit(e);
+            ViewStateUserKey = Session.SessionID;
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             Response.Clear();

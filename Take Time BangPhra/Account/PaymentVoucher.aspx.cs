@@ -292,26 +292,15 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 try
                 {
-                    string yourHTMLstring = "<script> var Material_Name = [";
+                    var vendorNames = new List<string>();
                     DataTable dt = code.DatabaseQuery(conn, "SELECT Distinct([Name]) as Material_Name FROM [Taketime].[dbo].[Vendor] Where [Status] = 'True'");
                     for (int i = 0; i < dt.Rows.Count; i++)
                     {
-                        // Properly escape special characters for JavaScript string
-                        string vendorName = dt.Rows[i][0].ToString()
-                            .Replace("\\", "\\\\")  // Escape backslashes first
-                            .Replace("\"", "\\\"")  // Escape double quotes
-                            .Replace("'", "\\'")    // Escape single quotes
-                            .Replace("\r", "")      // Remove carriage return
-                            .Replace("\n", "")      // Remove newline
-                            .Replace(",", "");      // Remove commas
-                        yourHTMLstring += "\"" + vendorName + "\"";
-                        if (i < dt.Rows.Count - 1)
-                        {
-                            yourHTMLstring += ",";
-                        }
+                        vendorNames.Add(dt.Rows[i][0].ToString());
                     }
-                    yourHTMLstring += "];\r\nautocomplete(document.getElementById(\"MainContent_TextBox9\"), Material_Name);</script>";
-                    Literal1.Text = yourHTMLstring;
+                    var jsSerializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                    string jsonArray = jsSerializer.Serialize(vendorNames);
+                    Literal1.Text = "<script> var Material_Name = " + jsonArray + ";\r\nautocomplete(document.getElementById(\"MainContent_TextBox9\"), Material_Name);</script>";
                 }
                 catch { }
                 
@@ -350,7 +339,7 @@ namespace Take_Time_BangPhra.Account.Report
                 catch { }
 
                 dtDetail.Rows.Add(dtDetail.Rows.Count + 1, TextBox1.Text,
-                    NumberHelper.TwoDecimalPoints(Convert.ToDouble(TextBox2.Text)),
+                    NumberHelper.TwoDecimalPoints(Convert.ToDecimal(TextBox2.Text)),
                     paidTypeId, paidTypeName, nexaaccAccId);
                 Session["dtDetail"] = (DataTable)dtDetail;
                 GridView1.DataSource = dtDetail;
@@ -367,10 +356,10 @@ namespace Take_Time_BangPhra.Account.Report
 
         public void calAmount(DataTable dtDetail,string vatType)
         {
-            double totalAmount = 0;
+            decimal totalAmount = 0m;
             for(int i=0;i<dtDetail.Rows.Count;i++)
             {
-                totalAmount += Convert.ToDouble(dtDetail.Rows[i]["Amount"].ToString());
+                totalAmount += Convert.ToDecimal(dtDetail.Rows[i]["Amount"].ToString());
             }
 
             // SECURE: Get VAT percent with parameterized query
@@ -381,17 +370,21 @@ namespace Take_Time_BangPhra.Account.Report
             int vatPercent = Convert.ToInt32(code.DatabaseQuerySafe(conn,
                 "SELECT Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' AND ID = @VatTypeID",
                 vatParams).Rows[0][0].ToString());
-            double vat = (totalAmount * vatPercent) / 100;
-            double AmountIncludeVat = 0;
+            decimal vat = (totalAmount * vatPercent) / 100m;
+            decimal AmountIncludeVat = 0m;
             if (vatType == "2")
             {
-                AmountIncludeVat = totalAmount - vat;
+                // VAT included: line items sum is VAT-inclusive total
+                decimal preVat = totalAmount / (1m + vatPercent / 100m);
+                vat = totalAmount - preVat;
+                AmountIncludeVat = totalAmount;
+                totalAmount = preVat; // override: TextBox3 shows pre-VAT
             }
             else
             {
                 AmountIncludeVat = totalAmount + vat;
             }
-            
+
             TextBox3.Text = (NumberHelper.TwoDecimalPoints(totalAmount)).ToString();
             TextBox4.Text = (NumberHelper.TwoDecimalPoints(vat)).ToString();
             TextBox6.Text = (NumberHelper.TwoDecimalPoints(AmountIncludeVat)).ToString();
@@ -476,23 +469,17 @@ namespace Take_Time_BangPhra.Account.Report
                     new code().Logs(conn, "Accounting Sync", $"Void voucher error (PaymentVoucher edit): id={id} {accEx.Message}", "SYSTEM");
                 }
 
-                // SECURE: Delete payment record with parameterized query
-                var deletePaymentParams = new Dictionary<string, object>
+                var deleteParams = new Dictionary<string, object>
                 {
-                    { "@UID", uid ?? "" }
-                };
-                code.DatabaseInsertSafe(conn,
-                    "DELETE FROM [dbo].[Account_Payment] WHERE UID = @UID",
-                    deletePaymentParams);
-
-                // SECURE: Delete payment details with parameterized query
-                var deleteDetailParams = new Dictionary<string, object>
-                {
+                    { "@UID", uid ?? "" },
                     { "@PaymentID", id }
                 };
                 code.DatabaseInsertSafe(conn,
-                    "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
-                    deleteDetailParams);
+                    @"BEGIN TRAN;
+                      DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID;
+                      DELETE FROM [dbo].[Account_Payment] WHERE UID = @UID;
+                      COMMIT TRAN;",
+                    deleteParams);
             }
             else
             {
@@ -510,11 +497,11 @@ namespace Take_Time_BangPhra.Account.Report
                 }
 
                 // Validate: line amounts sum matches total (before VAT)
-                double lineSum = 0;
+                decimal lineSum = 0m;
                 bool allLinesHaveCategory = true;
                 for (int i = 0; i < dtDetail.Rows.Count; i++)
                 {
-                    lineSum += Convert.ToDouble(dtDetail.Rows[i]["Amount"]);
+                    lineSum += Convert.ToDecimal(dtDetail.Rows[i]["Amount"]);
                     if (dtDetail.Columns.Contains("PaidTypeName"))
                     {
                         string catName = dtDetail.Rows[i]["PaidTypeName"]?.ToString();
@@ -523,8 +510,8 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                 }
 
-                double displayedTotal = Convert.ToDouble(TextBox3.Text);
-                if (Math.Abs(lineSum - displayedTotal) > 0.01 && !CheckBox1.Checked)
+                decimal displayedTotal = Convert.ToDecimal(TextBox3.Text);
+                if (Math.Abs(lineSum - displayedTotal) > 0.01m && !CheckBox1.Checked)
                 {
                     ClientScript.RegisterStartupScript(this.GetType(), "summismatch",
                         $"alert('ยอดรวมรายการ ({lineSum:N2}) ไม่ตรงกับยอดรวมก่อนภาษี ({displayedTotal:N2}) กรุณาตรวจสอบ');", true);

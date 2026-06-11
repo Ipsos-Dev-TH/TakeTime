@@ -695,6 +695,44 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// Map a credit voucher payment to journal: DR Accounts Payable, CR Cash/Bank
+        /// </summary>
+        public CreateJournalEntryRequest MapCreditPaymentToJournal(string originalDocNumber, decimal amount,
+            string paymentMethod, DateTime paymentDate, string vendorName,
+            string paymentAccountId = null)
+        {
+            var lines = new List<JournalEntryLineRequest>();
+
+            // DR: Accounts Payable (ลดหนี้)
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = GetAccountId("ACCOUNTS_PAYABLE"),
+                DebitAmount = amount,
+                CreditAmount = 0,
+                Description = $"ชำระหนี้ - {vendorName}"
+            });
+
+            // CR: Cash or Bank (จ่ายเงิน)
+            Guid cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = amount,
+                Description = $"จ่ายชำระ {originalDocNumber} - {paymentMethod}"
+            });
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = paymentDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"ชำระหนี้ใบสำคัญจ่าย {originalDocNumber}",
+                Reference = originalDocNumber,
+                Lines = lines
+            };
+        }
+
         // ──────────────────────────────────────────────
         // Product / Room Charge → Journal Entry
         // ──────────────────────────────────────────────

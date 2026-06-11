@@ -18,6 +18,12 @@ namespace Take_Time_BangPhra.Admin.CRM
     {
         private string ConnStr => ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString ?? "";
 
+        protected override void OnInit(EventArgs e)
+        {
+            base.OnInit(e);
+            ViewStateUserKey = Session.SessionID;
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             // Auth check

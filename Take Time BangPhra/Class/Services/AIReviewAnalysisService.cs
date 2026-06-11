@@ -1731,10 +1731,55 @@ HTML:
             return results.Count > 0 ? results : null;
         }
 
+        private static readonly HashSet<string> _allowedDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "google.com", "googleapis.com", "facebook.com", "agoda.com",
+            "booking.com", "tripadvisor.com", "expedia.com", "traveloka.com",
+            "pantip.com", "wongnai.com", "youtube.com", "tiktok.com",
+            "lemon8-app.com", "twitter.com", "x.com", "instagram.com",
+            "duckduckgo.com", "bing.com"
+        };
+
+        private bool IsAllowedUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri)) return false;
+            if (uri.Scheme != "http" && uri.Scheme != "https") return false;
+
+            string host = uri.Host;
+            if (string.IsNullOrEmpty(host)) return false;
+
+            // Block private/internal IPs
+            System.Net.IPAddress ip;
+            if (System.Net.IPAddress.TryParse(host, out ip))
+            {
+                byte[] bytes = ip.GetAddressBytes();
+                if (System.Net.IPAddress.IsLoopback(ip) ||
+                    (bytes.Length == 4 && (bytes[0] == 10 || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+                    (bytes[0] == 192 && bytes[1] == 168) || (bytes[0] == 169 && bytes[1] == 254) || bytes[0] == 0)))
+                    return false;
+                return false; // Block all raw IP access
+            }
+
+            // Check domain whitelist
+            string lowerHost = host.ToLowerInvariant();
+            foreach (string allowed in _allowedDomains)
+            {
+                if (lowerHost == allowed || lowerHost.EndsWith("." + allowed))
+                    return true;
+            }
+
+            _code.Logs(_connectionString, "AIReview", $"Blocked SSRF attempt: {url}", "SYSTEM");
+            return false;
+        }
+
         private string MakeHttpGetRequest(string url)
         {
             try
             {
+                if (!IsAllowedUrl(url))
+                    return null;
                 // TLS 1.2 — many sites reject the .NET default (SSL3/TLS1.0)
                 try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
 

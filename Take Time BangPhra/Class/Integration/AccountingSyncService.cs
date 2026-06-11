@@ -78,11 +78,11 @@ namespace Take_Time_BangPhra.Integration
 
                 // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
                 // (prevents form resubmission / browser refresh from creating duplicates)
-                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 60);
+                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 86400);
                 if (recent > 0)
                 {
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                        $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
                         "SYSTEM");
                     return recent;
                 }
@@ -120,6 +120,41 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Enqueue payment for a credit voucher that was previously recorded (ตั้งหนี้แล้ว).
+        /// Creates journal: DR Accounts Payable / CR Cash|Bank
+        /// Call when user marks a credit voucher as paid.
+        /// </summary>
+        public long EnqueueCreditVoucherPayment(string originalDocumentNumber, decimal amount,
+            string paymentMethod, DateTime paymentDate, string vendorName,
+            string paymentAccountId = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (amount <= 0 || string.IsNullOrEmpty(originalDocumentNumber)) return -1;
+
+            string refKey = $"CREDITPAY-{originalDocumentNumber}";
+
+            long existing = FindPendingEntry("VOUCHER", "PAY_CREDIT_VOUCHER", "creditPayRef", refKey);
+            if (existing > 0) return existing;
+
+            long recent = FindRecentCompletedEntry("VOUCHER", "PAY_CREDIT_VOUCHER", "creditPayRef", refKey, 86400);
+            if (recent > 0) return recent;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "creditPayRef", refKey },
+                { "originalDocumentNumber", originalDocumentNumber },
+                { "amount", amount },
+                { "paymentMethod", paymentMethod },
+                { "paymentDate", paymentDate.ToString("yyyy-MM-dd") },
+                { "vendorName", vendorName ?? "" }
+            };
+            if (!string.IsNullOrEmpty(paymentAccountId))
+                payload["paymentAccountId"] = paymentAccountId;
+
+            return InsertQueue("VOUCHER", 0, "PAY_CREDIT_VOUCHER", payload);
+        }
+
+        /// <summary>
         /// Enqueue payroll journal entry with proper SSF/WHT breakdown.
         /// Uses MapPayrollToJournal / MapPayrollToExpense for correct accounting.
         /// </summary>
@@ -135,7 +170,7 @@ namespace Take_Time_BangPhra.Integration
                 long existing = FindPendingEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber);
                 if (existing > 0) return existing;
 
-                long recent = FindRecentCompletedEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber, 60);
+                long recent = FindRecentCompletedEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber, 86400);
                 if (recent > 0) return recent;
             }
 
@@ -173,11 +208,11 @@ namespace Take_Time_BangPhra.Integration
 
             // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
             // (prevents form resubmission / browser refresh from creating duplicates)
-            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 60);
+            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 86400);
             if (recent > 0)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 60s window)",
+                    $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
                     "SYSTEM");
                 return recent;
             }
@@ -1021,6 +1056,9 @@ namespace Take_Time_BangPhra.Integration
                 case "CREATE_VOUCHER_JOURNAL":
                     return await ProcessVoucherJournal(payload);
 
+                case "PAY_CREDIT_VOUCHER":
+                    return await ProcessCreditVoucherPayment(payload);
+
                 case "CREATE_PAYROLL_ENTRY":
                     return await ProcessPayrollEntry(payload);
 
@@ -1320,6 +1358,53 @@ namespace Take_Time_BangPhra.Integration
             BackfillNextAccRefToPayment(docNumber, nexaaccId, nexaaccDocNumber);
 
             return nexaaccId;
+        }
+
+        /// <summary>
+        /// Process credit voucher payment: DR A/P, CR Cash/Bank
+        /// </summary>
+        private async Task<string> ProcessCreditVoucherPayment(Dictionary<string, object> p)
+        {
+            if (_config.IsVoucherLocal)
+                return "SKIPPED_LOCAL_MODE";
+
+            string origDocNum = p["originalDocumentNumber"]?.ToString();
+            decimal amount = Convert.ToDecimal(p["amount"]);
+            string paymentMethod = p["paymentMethod"]?.ToString();
+            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
+            string vendorName = p.ContainsKey("vendorName") ? p["vendorName"]?.ToString() : "";
+            string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
+
+            if (string.IsNullOrEmpty(paymentAccountId))
+                paymentAccountId = LookupPaidHowAccountId(paymentMethod);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessCreditVoucherPayment: origDoc={origDocNum} amount={amount} method={paymentMethod}", "SYSTEM");
+
+            if (_config.IsVoucherDocumentMode)
+            {
+                // In DOCUMENT mode: find the original expense doc and record payment against it
+                string nexaaccId = LookupNexaaccId(origDocNum, "VOUCHER");
+                if (!string.IsNullOrEmpty(nexaaccId))
+                {
+                    Guid expDocId;
+                    if (Guid.TryParse(nexaaccId, out expDocId))
+                    {
+                        await AutoRecordPaymentForVoucher(expDocId, amount, 0, paymentDate,
+                            paymentMethod, vendorName, origDocNum, paymentAccountId);
+                        return nexaaccId;
+                    }
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessCreditVoucherPayment: original doc {origDocNum} not found in NextAcc — falling back to journal", "SYSTEM");
+            }
+
+            // JOURNAL mode or fallback: DR A/P, CR Cash/Bank
+            var journal = _mapper.MapCreditPaymentToJournal(origDocNum, amount, paymentMethod,
+                paymentDate, vendorName, paymentAccountId);
+
+            var result = await _apiClient.CreateJournalAsync(journal);
+            return RequireValidDocId(result?.data?.Id, $"CreditVoucherPayment doc={origDocNum}").ToString();
         }
 
         private async System.Threading.Tasks.Task AutoRecordPaymentForVoucher(
