@@ -13,6 +13,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
 namespace Take_Time_BangPhra.Services
@@ -214,6 +215,71 @@ END", null);
                     _schemaEnsured = true;
                 }
                 catch { /* keep _schemaEnsured false so a later call retries */ }
+
+                try { EnsureDefaultSourceConfigs(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// Backfill example ApiConfig for every review source that has none yet, so the
+        /// settings screen shows ready-to-edit templates with the exact keys each
+        /// fetcher reads. Never overwrites a config the user has already saved.
+        /// </summary>
+        private void EnsureDefaultSourceConfigs()
+        {
+            var exampleConfigs = new Dictionary<string, string>
+            {
+                { "INTERNAL",
+                  "{\"_hint\":\"รีวิวจากระบบ Guest Portal ไม่ต้องตั้งค่าเพิ่ม\"}" },
+                { "GOOGLE",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"placeId\":\"\",\"apiKey\":\"\",\"_hint\":\"ดึงตรงจาก Google Places API: ใส่ placeId + apiKey (สร้างที่ Google Cloud Console เปิดใช้ Places API) | ถ้าเว้นว่าง ยังใช้ปุ่ม AI ค้นหาได้\"}" },
+                { "FACEBOOK",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"pageId\":\"\",\"pageAccessToken\":\"\",\"_hint\":\"ดึงตรงจาก Facebook Graph API: ใส่ pageId ของเพจ + pageAccessToken (ต้องมีสิทธิ์ pages_read_user_content)\"}" },
+                { "AGODA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้ารีวิวที่พักของเราบน Agoda เช่น https://www.agoda.com/th-th/take-time-bangphra/hotel/chonburi-th.html\"}" },
+                { "BOOKING",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Booking.com เช่น https://www.booking.com/hotel/th/take-time-bangphra.th.html\"}" },
+                { "TRIPADVISOR",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้า Hotel_Review ของเราบน TripAdvisor\"}" },
+                { "EXPEDIA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Expedia\"}" },
+                { "TRAVELOKA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Traveloka\"}" },
+                { "PANTIP",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้น searchUrl ว่าง = ค้นจาก pantip.com อัตโนมัติ หรือวางลิงก์ผลค้นหา/กระทู้เอง\"}" },
+                { "TIKTOK",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ TikTok อัตโนมัติ\"}" },
+                { "LEMON8",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ Lemon8 อัตโนมัติ\"}" },
+                { "WONGNAI",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ค้นหาอัตโนมัติ หรือวาง URL หน้าร้าน/รีวิวบน Wongnai\"}" },
+                { "TWITTER",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ X (Twitter) อัตโนมัติ\"}" },
+                { "INSTAGRAM",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า hashtag ของ Instagram อัตโนมัติ\"}" },
+                { "YOUTUBE",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"apiKey\":\"\",\"_hint\":\"ใส่ apiKey ของ YouTube Data API v3 จะดึงวิดีโอรีวิวแม่นยำขึ้น | เว้นว่างได้ จะใช้หน้า search แทน\"}" }
+            };
+
+            // แหล่งที่ดึงได้เลยโดยไม่ต้องมี API key (scrape หน้า search) — เปิดใช้งานให้ทันที
+            // ทำครั้งเดียวพร้อม backfill config เท่านั้น จึงไม่ทับการตั้งค่าที่ผู้ใช้แก้ภายหลัง
+            var enableWithoutKey = new HashSet<string>
+                { "PANTIP", "WONGNAI", "TIKTOK", "LEMON8", "TWITTER", "INSTAGRAM", "YOUTUBE" };
+
+            foreach (var kv in exampleConfigs)
+            {
+                string sql = enableWithoutKey.Contains(kv.Key)
+                    ? @"UPDATE AI_Review_Sources
+                        SET ApiConfig = @Config, IsEnabled = 1, Updated_Date = GETDATE()
+                        WHERE SourceCode = @Code
+                          AND (ApiConfig IS NULL OR LTRIM(RTRIM(ApiConfig)) = '')"
+                    : @"UPDATE AI_Review_Sources
+                        SET ApiConfig = @Config, Updated_Date = GETDATE()
+                        WHERE SourceCode = @Code
+                          AND (ApiConfig IS NULL OR LTRIM(RTRIM(ApiConfig)) = '')";
+
+                _code.DatabaseInsertSafe(_connectionString, sql,
+                    new Dictionary<string, object> { { "@Code", kv.Key }, { "@Config", kv.Value } });
             }
         }
 
@@ -798,28 +864,45 @@ HTML:
                 }
 
                 string keyword = GetSearchKeyword(sourceCode);
-                // Use the first domain as a site: filter; GOOGLE gets a plain query
-                // because Google Maps reviews aren't indexed under a usable site: path
+                // GOOGLE gets a plain query because Google Maps reviews aren't
+                // indexed under a usable site: path
                 string firstDomain = siteFilter.Split(new[] { " OR " }, StringSplitOptions.None)[0];
-                string query = sourceCode == "GOOGLE"
-                    ? keyword + " รีวิว โรงแรม"
-                    : keyword + " รีวิว site:" + firstDomain;
 
-                string encoded = Uri.EscapeDataString(query);
+                // หลายคำค้น × หลาย search engine แล้วรวมข้อความ เพื่อให้ครอบคลุมที่สุด
+                var keywords = new List<string> { keyword };
+                if (keyword == "TakeTime BangPhra")
+                    keywords.Add("Take Time บางพระ");
 
-                // DuckDuckGo HTML endpoint renders without JS; Bing as fallback
-                string html = MakeHttpGetRequest("https://html.duckduckgo.com/html/?q=" + encoded);
-                if (string.IsNullOrEmpty(html) || html.Length < 500)
-                    html = MakeHttpGetRequest("https://www.bing.com/search?q=" + encoded + "&setlang=th");
+                var queries = new List<string>();
+                foreach (string kw in keywords)
+                {
+                    if (sourceCode == "GOOGLE")
+                        queries.Add(kw + " รีวิว โรงแรม ที่พัก");
+                    else
+                        queries.Add(kw + " site:" + firstDomain);
+                }
+                // เผื่อ engine เมิน site: — query เปิดที่ระบุชื่อแพลตฟอร์มตรงๆ
+                if (sourceCode != "GOOGLE")
+                    queries.Add(keyword + " " + sourceCode + " รีวิว");
 
-                if (string.IsNullOrEmpty(html) || html.Length < 500)
+                var combined = new StringBuilder();
+                foreach (string q in queries)
+                {
+                    string enc = Uri.EscapeDataString(q);
+                    AppendSearchResultText(combined, "https://html.duckduckgo.com/html/?q=" + enc);
+                    if (combined.Length < 16000)
+                        AppendSearchResultText(combined, "https://www.bing.com/search?q=" + enc + "&setlang=th&count=30");
+                    if (combined.Length >= 16000) break;
+                }
+
+                if (combined.Length < 300)
                 {
                     result["success"] = false;
-                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบ)";
+                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบหรือไม่มีผลลัพธ์)";
                     return result;
                 }
 
-                string prompt = BuildDiscoveryPrompt(sourceCode, keyword, html);
+                string prompt = BuildDiscoveryPrompt(sourceCode, keyword, combined.ToString());
                 var parsed = CallAIAndParseReviews(prompt, sourceCode);
                 if (parsed == null)
                 {
@@ -852,14 +935,45 @@ HTML:
             return result;
         }
 
-        private string BuildDiscoveryPrompt(string sourceCode, string keyword, string searchHtml)
+        /// <summary>
+        /// Fetch a search-result URL, strip the HTML to plain text, and append to the buffer.
+        /// Plain text packs far more result snippets into the AI context than raw HTML.
+        /// </summary>
+        private void AppendSearchResultText(StringBuilder sb, string url)
         {
-            if (searchHtml.Length > 15000)
-                searchHtml = searchHtml.Substring(0, 15000);
+            try
+            {
+                string html = MakeHttpGetRequest(url);
+                string text = StripHtmlToText(html);
+                if (!string.IsNullOrEmpty(text) && text.Length > 200)
+                {
+                    sb.AppendLine(text.Length > 9000 ? text.Substring(0, 9000) : text);
+                    sb.AppendLine("-----");
+                }
+            }
+            catch { }
+        }
+
+        private static string StripHtmlToText(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return "";
+            html = Regex.Replace(html, @"<script[^>]*>[\s\S]*?</script>", " ", RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"<style[^>]*>[\s\S]*?</style>", " ", RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"<[^>]+>", " ");
+            html = WebUtility.HtmlDecode(html);
+            html = Regex.Replace(html, @"[ \t ]+", " ");
+            html = Regex.Replace(html, @"(\s*\r?\n\s*)+", "\n");
+            return html.Trim();
+        }
+
+        private string BuildDiscoveryPrompt(string sourceCode, string keyword, string searchText)
+        {
+            if (searchText.Length > 16000)
+                searchText = searchText.Substring(0, 16000);
 
             return string.Format(
-                @"ด้านล่างคือ HTML ผลการค้นหาเว็บสำหรับรีวิวของโรงแรม ""{0}"" บนแพลตฟอร์ม {1}
-ให้ดึงรีวิว/การกล่าวถึงโรงแรมนี้จาก title และ snippet ของผลค้นหา
+                @"ด้านล่างคือข้อความผลการค้นหาเว็บ (หลายหน้า คั่นด้วย -----) สำหรับรีวิวของโรงแรม ""{0}"" บนแพลตฟอร์ม {1}
+ให้ดึงรีวิว/การกล่าวถึงโรงแรมนี้ออกมาให้ครบทุกรายการที่พบ
 
 ตอบเป็น JSON array เท่านั้น:
 [
@@ -873,14 +987,15 @@ HTML:
 ]
 
 กฎ:
-- เอาเฉพาะผลที่เกี่ยวกับโรงแรม ""{0}"" จริงๆ ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
+- ดึงให้ครบทุกรายการที่เกี่ยวกับโรงแรม ""{0}"" อย่าเลือกแค่บางรายการ แต่ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
+- ผลซ้ำกัน (เนื้อหาเดียวกันจากหลาย engine) ให้รวมเป็นรายการเดียว
 - rating 1-5 ถ้าเห็นคะแนนใน snippet ใช้คะแนนนั้น (สเกล 1-10 ให้หาร 2) ถ้าไม่มีให้ประเมินจากน้ำเสียง (ชม=4-5, กลาง=3, ติ=1-2, บอกไม่ได้=0)
 - reviewDate ใช้ yyyy-MM-dd ถ้าไม่ทราบวันที่ ใช้ {2}
 - snippet เป็นข้อความตัดตอน ให้เก็บเท่าที่มี ไม่ต้องแต่งเติม
 - ถ้าไม่พบเลย ตอบ []
 
-HTML:
-{3}", keyword, sourceCode, DateTime.Now.ToString("yyyy-MM-dd"), searchHtml);
+ผลการค้นหา:
+{3}", keyword, sourceCode, DateTime.Now.ToString("yyyy-MM-dd"), searchText);
         }
 
         /// <summary>
@@ -1865,13 +1980,13 @@ HTML:
                     dashboard["avgRating"] = 0.0;
                 }
 
-                // Sentiment breakdown
+                // Sentiment breakdown (ISNULL: SUM over zero rows returns NULL → Convert crash)
                 DataTable dtSentiment = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
-                        SUM(CASE WHEN Sentiment = 'POSITIVE' THEN 1 ELSE 0 END) AS Positive,
-                        SUM(CASE WHEN Sentiment = 'NEGATIVE' THEN 1 ELSE 0 END) AS Negative,
-                        SUM(CASE WHEN Sentiment = 'NEUTRAL' THEN 1 ELSE 0 END) AS Neutral,
-                        SUM(CASE WHEN Sentiment = 'MIXED' THEN 1 ELSE 0 END) AS Mixed
+                        ISNULL(SUM(CASE WHEN Sentiment = 'POSITIVE' THEN 1 ELSE 0 END), 0) AS Positive,
+                        ISNULL(SUM(CASE WHEN Sentiment = 'NEGATIVE' THEN 1 ELSE 0 END), 0) AS Negative,
+                        ISNULL(SUM(CASE WHEN Sentiment = 'NEUTRAL' THEN 1 ELSE 0 END), 0) AS Neutral,
+                        ISNULL(SUM(CASE WHEN Sentiment = 'MIXED' THEN 1 ELSE 0 END), 0) AS Mixed
                       FROM vw_AI_Review_AllSources
                       WHERE Sentiment IS NOT NULL",
                     null);
@@ -1948,14 +2063,14 @@ HTML:
                 }
                 dashboard["recentReviews"] = recentReviews;
 
-                // Rating distribution
+                // Rating distribution (ISNULL guards + ROUND so 4.5-4.9 counts as 5 ฯลฯ)
                 DataTable dtRating = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT
-                        SUM(CASE WHEN Rating = 5 THEN 1 ELSE 0 END) AS Star5,
-                        SUM(CASE WHEN Rating = 4 THEN 1 ELSE 0 END) AS Star4,
-                        SUM(CASE WHEN Rating = 3 THEN 1 ELSE 0 END) AS Star3,
-                        SUM(CASE WHEN Rating = 2 THEN 1 ELSE 0 END) AS Star2,
-                        SUM(CASE WHEN Rating = 1 THEN 1 ELSE 0 END) AS Star1
+                        ISNULL(SUM(CASE WHEN ROUND(Rating, 0) >= 5 THEN 1 ELSE 0 END), 0) AS Star5,
+                        ISNULL(SUM(CASE WHEN ROUND(Rating, 0) = 4 THEN 1 ELSE 0 END), 0) AS Star4,
+                        ISNULL(SUM(CASE WHEN ROUND(Rating, 0) = 3 THEN 1 ELSE 0 END), 0) AS Star3,
+                        ISNULL(SUM(CASE WHEN ROUND(Rating, 0) = 2 THEN 1 ELSE 0 END), 0) AS Star2,
+                        ISNULL(SUM(CASE WHEN ROUND(Rating, 0) = 1 THEN 1 ELSE 0 END), 0) AS Star1
                       FROM vw_AI_Review_AllSources",
                     null);
 
