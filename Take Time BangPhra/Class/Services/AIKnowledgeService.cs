@@ -12,12 +12,124 @@ namespace Take_Time_BangPhra.Services
     {
         private readonly string _connStr;
         private readonly code _code;
+        private static bool _schemaEnsured = false;
+        private static readonly object _schemaLock = new object();
 
         public AIKnowledgeService(string connectionString)
         {
             _connStr = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _code = new code();
+            EnsureSchema();
         }
+
+        #region Schema
+
+        /// <summary>
+        /// Auto-creates AI knowledge/learning tables if they don't exist (covers PHASE14 Migration 02).
+        /// Runs once per app domain. Safe to call repeatedly.
+        /// </summary>
+        private void EnsureSchema()
+        {
+            if (_schemaEnsured) return;
+            lock (_schemaLock)
+            {
+                if (_schemaEnsured) return;
+                try
+                {
+                    _code.DatabaseInsertSafe(_connStr, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Knowledge_Base')
+BEGIN
+    CREATE TABLE AI_Knowledge_Base (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        Category NVARCHAR(50) NOT NULL DEFAULT 'GENERAL',
+        Question NVARCHAR(MAX) NOT NULL,
+        Answer NVARCHAR(MAX) NOT NULL,
+        Keywords NVARCHAR(500),
+        Language NVARCHAR(10) DEFAULT 'TH',
+        Source NVARCHAR(50) DEFAULT 'MANUAL',
+        IsActive BIT DEFAULT 1,
+        MatchCount INT DEFAULT 0,
+        Created_Date DATETIME DEFAULT GETDATE(),
+        Updated_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AI_KB_Category (Category),
+        INDEX IX_AI_KB_Active (IsActive)
+    );
+END", null);
+
+                    _code.DatabaseInsertSafe(_connStr, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Learned_Patterns')
+BEGIN
+    CREATE TABLE AI_Learned_Patterns (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        InputPattern NVARCHAR(MAX) NOT NULL,
+        InputKeywords NVARCHAR(500),
+        Response NVARCHAR(MAX) NOT NULL,
+        Category NVARCHAR(50),
+        Confidence FLOAT DEFAULT 0.5,
+        SuccessCount INT DEFAULT 0,
+        FailCount INT DEFAULT 0,
+        Source NVARCHAR(30) DEFAULT 'LEARNED',
+        LearnedFrom NVARCHAR(100),
+        IsActive BIT DEFAULT 1,
+        Created_Date DATETIME DEFAULT GETDATE(),
+        Updated_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AI_LP_Active (IsActive),
+        INDEX IX_AI_LP_Confidence (Confidence DESC)
+    );
+END", null);
+
+                    _code.DatabaseInsertSafe(_connStr, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Feature_Settings')
+BEGIN
+    CREATE TABLE AI_Feature_Settings (
+        ID INT IDENTITY(1,1) PRIMARY KEY,
+        FeatureCode NVARCHAR(50) NOT NULL,
+        FeatureName NVARCHAR(100) NOT NULL,
+        Description NVARCHAR(300),
+        IsEnabled BIT DEFAULT 0,
+        ChannelScope NVARCHAR(200) DEFAULT 'ALL',
+        Config NVARCHAR(MAX),
+        Updated_Date DATETIME DEFAULT GETDATE(),
+        CONSTRAINT UQ_AI_Feature UNIQUE (FeatureCode)
+    );
+
+    INSERT INTO AI_Feature_Settings (FeatureCode, FeatureName, Description, IsEnabled, ChannelScope) VALUES
+    ('AUTO_REPLY',          N'AI ตอบอัตโนมัติ',              N'AI ตอบกลับข้อความลูกค้าอัตโนมัติในทุกช่องทาง',          0, 'ALL'),
+    ('AUTO_REPLY_KB_ONLY',  N'ตอบจาก Knowledge Base เท่านั้น', N'ตอบเฉพาะเมื่อมีคำตอบใน Knowledge Base (ไม่เรียก API)',  0, 'ALL'),
+    ('BOOKING_LOOKUP',      N'ค้นหาข้อมูลการจอง',             N'AI สามารถค้นหาข้อมูลการจอง ห้องว่าง ราคาให้ลูกค้า',    0, 'ALL'),
+    ('BOOKING_CREATE',      N'สร้างการจองอัตโนมัติ',           N'AI สามารถสร้างการจองเบื้องต้นให้ลูกค้า (ต้องพนักงานยืนยัน)', 0, 'ALL'),
+    ('LEARN_FROM_STAFF',    N'เรียนรู้จากพนักงาน',            N'บันทึกรูปแบบการตอบของพนักงานเพื่อเรียนรู้',            1, 'ALL'),
+    ('SUGGEST_REPLY',       N'แนะนำคำตอบ',                   N'แนะนำข้อความตอบกลับให้พนักงาน',                       0, 'ALL'),
+    ('SENTIMENT_ANALYSIS',  N'วิเคราะห์ความรู้สึก',           N'วิเคราะห์อารมณ์ลูกค้า (บวก/ลบ/กลาง) และแจ้งเตือน',   0, 'ALL'),
+    ('AUTO_TAG',            N'ติดแท็กอัตโนมัติ',             N'ติดหมวดหมู่สนทนาอัตโนมัติ',                           0, 'ALL'),
+    ('GUEST_CHAT_AI',       N'AI แชทผู้ช่วยแขก',             N'เปิด AI Assistant ในหน้าแชทของแขก',                   0, 'ALL');
+END", null);
+
+                    _code.DatabaseInsertSafe(_connStr, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Booking_Actions')
+BEGIN
+    CREATE TABLE AI_Booking_Actions (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        ConversationID BIGINT,
+        ActionType NVARCHAR(30) NOT NULL,
+        RequestData NVARCHAR(MAX),
+        ResponseData NVARCHAR(MAX),
+        ReservationID BIGINT NULL,
+        Status NVARCHAR(20) DEFAULT 'PENDING',
+        StaffConfirmedBy NVARCHAR(100),
+        Created_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AI_BA_Conv (ConversationID),
+        INDEX IX_AI_BA_Status (Status)
+    );
+END", null);
+
+                    _schemaEnsured = true;
+                }
+                catch { /* keep _schemaEnsured false so a later call retries */ }
+            }
+        }
+
+        #endregion
 
         #region Feature Settings
 
