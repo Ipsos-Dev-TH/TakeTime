@@ -16,11 +16,53 @@ namespace Take_Time_BangPhra.Services
     {
         private readonly string _connStr;
         private readonly code _code;
+        private static bool _schemaEnsured = false;
+        private static readonly object _schemaLock = new object();
 
         public AIReportService(string connectionString)
         {
             _connStr = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _code = new code();
+            EnsureSchema();
+        }
+
+        /// <summary>
+        /// Auto-creates AI_Report_Summaries if it doesn't exist (covers PHASE16 Migration 01, section 4).
+        /// Runs once per app domain. Safe to call repeatedly.
+        /// </summary>
+        private void EnsureSchema()
+        {
+            if (_schemaEnsured) return;
+            lock (_schemaLock)
+            {
+                if (_schemaEnsured) return;
+                try
+                {
+                    _code.DatabaseInsertSafe(_connStr, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Report_Summaries')
+BEGIN
+    CREATE TABLE AI_Report_Summaries (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        ReportType NVARCHAR(30) NOT NULL,
+        PeriodType NVARCHAR(20) NOT NULL,
+        PeriodStart DATE NOT NULL,
+        PeriodEnd DATE NOT NULL,
+        DataSnapshot NVARCHAR(MAX),
+        AISummary NVARCHAR(MAX) NOT NULL,
+        KeyInsights NVARCHAR(MAX),
+        Recommendations NVARCHAR(MAX),
+        TokensUsed INT DEFAULT 0,
+        GeneratedBy NVARCHAR(100),
+        Created_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AIReport_Type (ReportType, PeriodType),
+        INDEX IX_AIReport_Period (PeriodStart, PeriodEnd)
+    );
+END", null);
+
+                    _schemaEnsured = true;
+                }
+                catch { /* keep _schemaEnsured false so a later call retries */ }
+            }
         }
 
         #region Data Gathering Methods

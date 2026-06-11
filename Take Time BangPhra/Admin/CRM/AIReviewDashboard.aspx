@@ -317,6 +317,12 @@
                 <button class="btn btn-green" onclick="fetchAll()">ดึงรีวิวทั้งหมด</button>
             </div>
             <div class="tool-card">
+                <h4><i class="fas fa-robot" style="color:#7C4DFF"></i> AI ค้นหาทุกแหล่ง</h4>
+                <p>AI ค้นหารีวิว/การกล่าวถึงจากเว็บทุกแพลตฟอร์มอัตโนมัติ ไม่ต้องตั้งค่า API</p>
+                <button class="btn btn-green" id="btnAiDiscover" onclick="aiDiscoverAll()">🤖 เริ่ม AI ค้นหา</button>
+                <div id="aiDiscoverProgress" style="display:none;margin-top:10px;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.8;background:#f8f9fa;border-radius:8px;padding:8px 12px;"></div>
+            </div>
+            <div class="tool-card">
                 <h4><i class="fas fa-file-import" style="color:#FF9800"></i> นำเข้ารีวิว (JSON)</h4>
                 <p>วาง JSON array ที่มี reviewerName, rating, reviewText, reviewDate</p>
                 <button class="btn btn-brown" onclick="openImportModal()">นำเข้า JSON</button>
@@ -922,6 +928,79 @@
         }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
     }
 
+    // ===== AI Discovery: search the web for reviews on every platform =====
+    var AI_DISCOVER_SOURCES = [
+        { code: 'GOOGLE',      name: 'Google' },
+        { code: 'FACEBOOK',    name: 'Facebook' },
+        { code: 'AGODA',       name: 'Agoda' },
+        { code: 'BOOKING',     name: 'Booking.com' },
+        { code: 'TRIPADVISOR', name: 'TripAdvisor' },
+        { code: 'EXPEDIA',     name: 'Expedia' },
+        { code: 'TRAVELOKA',   name: 'Traveloka' },
+        { code: 'PANTIP',      name: 'Pantip' },
+        { code: 'TIKTOK',      name: 'TikTok' },
+        { code: 'LEMON8',      name: 'Lemon8' },
+        { code: 'WONGNAI',     name: 'Wongnai' },
+        { code: 'TWITTER',     name: 'X (Twitter)' },
+        { code: 'INSTAGRAM',   name: 'Instagram' },
+        { code: 'YOUTUBE',     name: 'YouTube' }
+    ];
+    var aiDiscoverRunning = false;
+
+    function aiDiscoverAll() {
+        if (aiDiscoverRunning) return;
+        aiDiscoverRunning = true;
+
+        var btn = document.getElementById('btnAiDiscover');
+        var panel = document.getElementById('aiDiscoverProgress');
+        btn.disabled = true;
+        btn.textContent = '⏳ กำลังค้นหา...';
+        panel.style.display = 'block';
+        panel.innerHTML = '';
+
+        var totalNew = 0;
+        var idx = 0;
+
+        function lineHtml(name, status, cls) {
+            return '<div id="aiDisc_' + idx + '"><b>' + name + '</b>: <span style="color:' + cls + '">' + status + '</span></div>';
+        }
+
+        function next() {
+            if (idx >= AI_DISCOVER_SOURCES.length) {
+                btn.disabled = false;
+                btn.textContent = '🤖 เริ่ม AI ค้นหา';
+                aiDiscoverRunning = false;
+                panel.innerHTML += '<div style="margin-top:6px;font-weight:bold;color:#2e7d32;">เสร็จสิ้น — พบรีวิวใหม่รวม ' + totalNew + ' รายการ</div>';
+                if (totalNew > 0) loadDashboard();
+                return;
+            }
+
+            var src = AI_DISCOVER_SOURCES[idx];
+            panel.innerHTML += lineHtml(src.name, '⏳ กำลังค้นหา...', '#888');
+            panel.scrollTop = panel.scrollHeight;
+            var lineEl = document.getElementById('aiDisc_' + idx);
+
+            apiCall('aiDiscover', { sourceCode: src.code }).then(function (res) {
+                if (res.success) {
+                    var n = res.newCount || 0;
+                    totalNew += n;
+                    lineEl.innerHTML = '<b>' + src.name + '</b>: <span style="color:' + (n > 0 ? '#2e7d32' : '#888') + '">'
+                        + (n > 0 ? '✅ พบใหม่ ' + n + ' รายการ' : '— ไม่พบรีวิวใหม่') + '</span>';
+                } else {
+                    lineEl.innerHTML = '<b>' + src.name + '</b>: <span style="color:#c0392b">❌ ' + (res.message || 'ไม่สำเร็จ') + '</span>';
+                }
+                idx++;
+                next();
+            }).catch(function (err) {
+                lineEl.innerHTML = '<b>' + src.name + '</b>: <span style="color:#c0392b">❌ ' + err.message + '</span>';
+                idx++;
+                next();
+            });
+        }
+
+        next();
+    }
+
     function openImportModal() {
         document.getElementById('importContent').value = '';
         openModal('importModal');
@@ -1006,8 +1085,14 @@
         apiCall('getSources').then(function (res) {
             if (res.success) {
                 renderSourceSettings(res.data);
+            } else {
+                document.getElementById('sourceSettings').innerHTML =
+                    '<p style="color:#c0392b;text-align:center;">' + (res.message || 'โหลดแหล่งที่มาไม่สำเร็จ') + '</p>';
             }
-        }).catch(function () { });
+        }).catch(function (err) {
+            document.getElementById('sourceSettings').innerHTML =
+                '<p style="color:#c0392b;text-align:center;">โหลดแหล่งที่มาไม่สำเร็จ: ' + err.message + '</p>';
+        });
     }
 
     function renderSourceSettings(sources) {

@@ -26,13 +26,198 @@ namespace Take_Time_BangPhra.Services
         private readonly string _connectionString;
         private readonly code _code;
         private readonly JavaScriptSerializer _serializer;
+        private static bool _schemaEnsured = false;
+        private static readonly object _schemaLock = new object();
 
         public AIReviewAnalysisService(string connectionString)
         {
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _code = new code();
             _serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            EnsureSchema();
         }
+
+        #region Schema
+
+        /// <summary>
+        /// Auto-creates review analysis tables + view if they don't exist (covers PHASE16 Migration 01).
+        /// Runs once per app domain. Safe to call repeatedly.
+        /// </summary>
+        private void EnsureSchema()
+        {
+            if (_schemaEnsured) return;
+            lock (_schemaLock)
+            {
+                if (_schemaEnsured) return;
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Review_Sources')
+BEGIN
+    CREATE TABLE AI_Review_Sources (
+        ID INT IDENTITY(1,1) PRIMARY KEY,
+        SourceCode NVARCHAR(30) NOT NULL,
+        SourceName NVARCHAR(100) NOT NULL,
+        IconClass NVARCHAR(50),
+        BrandColor NVARCHAR(20),
+        IsEnabled BIT DEFAULT 0,
+        ApiConfig NVARCHAR(MAX),
+        LastFetchDate DATETIME,
+        TotalReviews INT DEFAULT 0,
+        Created_Date DATETIME DEFAULT GETDATE(),
+        Updated_Date DATETIME DEFAULT GETDATE(),
+        CONSTRAINT UQ_ReviewSource UNIQUE (SourceCode)
+    );
+
+    INSERT INTO AI_Review_Sources (SourceCode, SourceName, IconClass, BrandColor, IsEnabled) VALUES
+    ('INTERNAL',    N'รีวิวจากระบบ',  'fas fa-home',        '#5D4037', 1),
+    ('GOOGLE',      N'Google Reviews', 'fab fa-google',      '#4285F4', 0),
+    ('FACEBOOK',    N'Facebook Reviews','fab fa-facebook',   '#1877F2', 0),
+    ('AGODA',       N'Agoda',          'fas fa-bed',         '#5542F6', 0),
+    ('BOOKING',     N'Booking.com',    'fas fa-suitcase',    '#003580', 0),
+    ('TRIPADVISOR', N'TripAdvisor',    'fab fa-tripadvisor', '#34E0A1', 0),
+    ('EXPEDIA',     N'Expedia',        'fas fa-globe',       '#FFCC00', 0),
+    ('TRAVELOKA',   N'Traveloka',      'fas fa-plane',       '#0194F3', 0),
+    ('PANTIP',      N'Pantip',         'fas fa-comments',    '#7A2D8F', 0),
+    ('TIKTOK',      N'TikTok',         'fab fa-tiktok',      '#000000', 0),
+    ('LEMON8',      N'Lemon8',         'fas fa-lemon',       '#FFE135', 0),
+    ('WONGNAI',     N'Wongnai',        'fas fa-utensils',    '#ED1C24', 0),
+    ('TWITTER',     N'X (Twitter)',    'fab fa-x-twitter',   '#000000', 0),
+    ('INSTAGRAM',   N'Instagram',      'fab fa-instagram',   '#E4405F', 0),
+    ('YOUTUBE',     N'YouTube',        'fab fa-youtube',     '#FF0000', 0);
+END", null);
+
+                    _code.DatabaseInsertSafe(_connectionString, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Online_Reviews')
+BEGIN
+    CREATE TABLE AI_Online_Reviews (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        SourceCode NVARCHAR(30) NOT NULL,
+        PlatformReviewId NVARCHAR(200),
+        ReviewerName NVARCHAR(200),
+        ReviewerAvatar NVARCHAR(500),
+        Rating FLOAT,
+        ReviewTitle NVARCHAR(300),
+        ReviewText NVARCHAR(MAX),
+        ReviewDate DATETIME,
+        Language NVARCHAR(10) DEFAULT 'TH',
+        Sentiment NVARCHAR(20),
+        SentimentScore FLOAT,
+        Topics NVARCHAR(500),
+        TopicScores NVARCHAR(MAX),
+        AISummary NVARCHAR(500),
+        SuggestedResponse NVARCHAR(MAX),
+        ResponseStatus NVARCHAR(20) DEFAULT 'PENDING',
+        ActualResponse NVARCHAR(MAX),
+        RespondedDate DATETIME,
+        RespondedBy NVARCHAR(100),
+        IsAnalyzed BIT DEFAULT 0,
+        IsFlagged BIT DEFAULT 0,
+        FlagReason NVARCHAR(200),
+        Created_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AIReview_Source (SourceCode),
+        INDEX IX_AIReview_Sentiment (Sentiment),
+        INDEX IX_AIReview_Rating (Rating),
+        INDEX IX_AIReview_Date (ReviewDate DESC),
+        INDEX IX_AIReview_PlatformId (SourceCode, PlatformReviewId)
+    );
+END", null);
+
+                    _code.DatabaseInsertSafe(_connectionString, @"
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Guest_Reviews')
+   AND NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Guest_Reviews' AND COLUMN_NAME = 'Sentiment')
+BEGIN
+    ALTER TABLE Guest_Reviews ADD Sentiment NVARCHAR(20) NULL;
+    ALTER TABLE Guest_Reviews ADD SentimentScore FLOAT NULL;
+    ALTER TABLE Guest_Reviews ADD AITopics NVARCHAR(500) NULL;
+    ALTER TABLE Guest_Reviews ADD AISummary NVARCHAR(500) NULL;
+    ALTER TABLE Guest_Reviews ADD AISuggestedResponse NVARCHAR(MAX) NULL;
+    ALTER TABLE Guest_Reviews ADD AITopicScores NVARCHAR(MAX) NULL;
+    ALTER TABLE Guest_Reviews ADD IsAIAnalyzed BIT DEFAULT 0;
+    ALTER TABLE Guest_Reviews ADD IsFlagged BIT DEFAULT 0;
+    ALTER TABLE Guest_Reviews ADD FlagReason NVARCHAR(200) NULL;
+END", null);
+
+                    _code.DatabaseInsertSafe(_connectionString, @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Report_Summaries')
+BEGIN
+    CREATE TABLE AI_Report_Summaries (
+        ID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        ReportType NVARCHAR(30) NOT NULL,
+        PeriodType NVARCHAR(20) NOT NULL,
+        PeriodStart DATE NOT NULL,
+        PeriodEnd DATE NOT NULL,
+        DataSnapshot NVARCHAR(MAX),
+        AISummary NVARCHAR(MAX) NOT NULL,
+        KeyInsights NVARCHAR(MAX),
+        Recommendations NVARCHAR(MAX),
+        TokensUsed INT DEFAULT 0,
+        GeneratedBy NVARCHAR(100),
+        Created_Date DATETIME DEFAULT GETDATE(),
+        INDEX IX_AIReport_Type (ReportType, PeriodType),
+        INDEX IX_AIReport_Period (PeriodStart, PeriodEnd)
+    );
+END", null);
+
+                    // CREATE VIEW must be the only statement in its batch → EXEC with doubled quotes
+                    _code.DatabaseInsertSafe(_connectionString, @"
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Guest_Reviews')
+   AND EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Guest_Reviews' AND COLUMN_NAME = 'Sentiment')
+   AND NOT EXISTS (SELECT * FROM sys.views WHERE name = 'vw_AI_Review_AllSources')
+BEGIN
+    EXEC('CREATE VIEW vw_AI_Review_AllSources AS
+    SELECT
+        ''INTERNAL'' AS SourceCode,
+        gr.ID,
+        c.Name AS ReviewerName,
+        NULL AS ReviewerAvatar,
+        CAST(gr.OverallRating AS FLOAT) AS Rating,
+        gr.ReviewTitle,
+        ISNULL(gr.ReviewText, '''') + CASE WHEN gr.Pros IS NOT NULL THEN N'' ข้อดี: '' + gr.Pros ELSE '''' END + CASE WHEN gr.Cons IS NOT NULL THEN N'' ข้อเสีย: '' + gr.Cons ELSE '''' END AS ReviewText,
+        gr.SubmittedDate AS ReviewDate,
+        gr.Sentiment,
+        gr.SentimentScore,
+        gr.AITopics AS Topics,
+        gr.AISummary,
+        gr.AISuggestedResponse AS SuggestedResponse,
+        gr.Status AS ResponseStatus,
+        gr.ResponseText AS ActualResponse,
+        CASE WHEN gr.IsAIAnalyzed = 1 THEN 1 ELSE 0 END AS IsAnalyzed,
+        ISNULL(gr.IsFlagged, 0) AS IsFlagged,
+        gr.FlagReason
+    FROM Guest_Reviews gr
+    LEFT JOIN Customer c ON c.MobilePhone = gr.Customer_MobilePhone
+    WHERE gr.Status IN (''APPROVED'', ''PENDING'')
+    UNION ALL
+    SELECT
+        aor.SourceCode,
+        aor.ID,
+        aor.ReviewerName,
+        aor.ReviewerAvatar,
+        aor.Rating,
+        aor.ReviewTitle,
+        aor.ReviewText,
+        aor.ReviewDate,
+        aor.Sentiment,
+        aor.SentimentScore,
+        aor.Topics,
+        aor.AISummary,
+        aor.SuggestedResponse,
+        aor.ResponseStatus,
+        aor.ActualResponse,
+        CAST(aor.IsAnalyzed AS INT) AS IsAnalyzed,
+        ISNULL(aor.IsFlagged, 0) AS IsFlagged,
+        aor.FlagReason
+    FROM AI_Online_Reviews aor')
+END", null);
+
+                    _schemaEnsured = true;
+                }
+                catch { /* keep _schemaEnsured false so a later call retries */ }
+            }
+        }
+
+        #endregion
 
         #region 1. Online Review Fetching
 
@@ -562,6 +747,140 @@ HTML:
             }
 
             return results;
+        }
+
+        // ── AI Discovery: web-search every platform, no per-source API config needed ──
+
+        private static readonly Dictionary<string, string> _discoverySiteFilters = new Dictionary<string, string>
+        {
+            { "GOOGLE",      "google.com/maps OR g.co" },
+            { "FACEBOOK",    "facebook.com" },
+            { "AGODA",       "agoda.com" },
+            { "BOOKING",     "booking.com" },
+            { "TRIPADVISOR", "tripadvisor.com OR tripadvisor.co.th" },
+            { "EXPEDIA",     "expedia.com OR expedia.co.th" },
+            { "TRAVELOKA",   "traveloka.com" },
+            { "PANTIP",      "pantip.com" },
+            { "TIKTOK",      "tiktok.com" },
+            { "LEMON8",      "lemon8-app.com" },
+            { "WONGNAI",     "wongnai.com" },
+            { "TWITTER",     "x.com OR twitter.com" },
+            { "INSTAGRAM",   "instagram.com" },
+            { "YOUTUBE",     "youtube.com" }
+        };
+
+        /// <summary>
+        /// AI Discovery: search the web for hotel reviews/mentions on a platform without
+        /// requiring API keys or the source to be enabled. Searches via DuckDuckGo/Bing,
+        /// then DeepSeek extracts review content from the result snippets and imports
+        /// with the standard dedup. ApiConfig "searchKeyword" is honored if set.
+        /// </summary>
+        public Dictionary<string, object> AIDiscoverSource(string sourceCode)
+        {
+            int newCount = 0, skipCount = 0;
+            var result = new Dictionary<string, object> { { "source", sourceCode } };
+
+            try
+            {
+                if (string.IsNullOrEmpty(sourceCode) || sourceCode == "INTERNAL")
+                {
+                    result["success"] = false;
+                    result["message"] = "แหล่งที่มาไม่ถูกต้อง";
+                    return result;
+                }
+
+                string siteFilter;
+                if (!_discoverySiteFilters.TryGetValue(sourceCode, out siteFilter))
+                {
+                    result["success"] = false;
+                    result["message"] = "ไม่รู้จักแพลตฟอร์ม: " + sourceCode;
+                    return result;
+                }
+
+                string keyword = GetSearchKeyword(sourceCode);
+                // Use the first domain as a site: filter; GOOGLE gets a plain query
+                // because Google Maps reviews aren't indexed under a usable site: path
+                string firstDomain = siteFilter.Split(new[] { " OR " }, StringSplitOptions.None)[0];
+                string query = sourceCode == "GOOGLE"
+                    ? keyword + " รีวิว โรงแรม"
+                    : keyword + " รีวิว site:" + firstDomain;
+
+                string encoded = Uri.EscapeDataString(query);
+
+                // DuckDuckGo HTML endpoint renders without JS; Bing as fallback
+                string html = MakeHttpGetRequest("https://html.duckduckgo.com/html/?q=" + encoded);
+                if (string.IsNullOrEmpty(html) || html.Length < 500)
+                    html = MakeHttpGetRequest("https://www.bing.com/search?q=" + encoded + "&setlang=th");
+
+                if (string.IsNullOrEmpty(html) || html.Length < 500)
+                {
+                    result["success"] = false;
+                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบ)";
+                    return result;
+                }
+
+                string prompt = BuildDiscoveryPrompt(sourceCode, keyword, html);
+                var parsed = CallAIAndParseReviews(prompt, sourceCode);
+                if (parsed == null)
+                {
+                    // No mentions found is a normal outcome, not an error
+                    result["success"] = true;
+                    result["newCount"] = 0;
+                    result["skipCount"] = 0;
+                    result["message"] = sourceCode + ": AI ไม่พบรีวิว/การกล่าวถึงจากผลค้นหา";
+                    return result;
+                }
+
+                foreach (var r in parsed)
+                {
+                    int added = InsertReview(sourceCode, r.PlatformId, r.ReviewerName, null,
+                        r.Rating, r.ReviewTitle, r.ReviewText, r.ReviewDate);
+                    if (added > 0) newCount++; else skipCount++;
+                }
+
+                UpdateSourceMetadata(sourceCode);
+                result["success"] = true;
+                result["newCount"] = newCount;
+                result["skipCount"] = skipCount;
+                result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+            }
+            catch (Exception ex)
+            {
+                result["success"] = false;
+                result["message"] = sourceCode + " error: " + ex.Message;
+            }
+            return result;
+        }
+
+        private string BuildDiscoveryPrompt(string sourceCode, string keyword, string searchHtml)
+        {
+            if (searchHtml.Length > 15000)
+                searchHtml = searchHtml.Substring(0, 15000);
+
+            return string.Format(
+                @"ด้านล่างคือ HTML ผลการค้นหาเว็บสำหรับรีวิวของโรงแรม ""{0}"" บนแพลตฟอร์ม {1}
+ให้ดึงรีวิว/การกล่าวถึงโรงแรมนี้จาก title และ snippet ของผลค้นหา
+
+ตอบเป็น JSON array เท่านั้น:
+[
+  {{
+    ""reviewerName"": ""ชื่อผู้รีวิว/ผู้โพสต์ หรือชื่อเพจ/ช่อง ถ้าไม่ทราบใช้ \""{1} User\"""",
+    ""rating"": 4.0,
+    ""reviewText"": ""เนื้อหารีวิว/การกล่าวถึง (รวมข้อความจาก snippet)"",
+    ""reviewDate"": ""2026-06-01"",
+    ""reviewTitle"": ""หัวข้อ หรือ null""
+  }}
+]
+
+กฎ:
+- เอาเฉพาะผลที่เกี่ยวกับโรงแรม ""{0}"" จริงๆ ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
+- rating 1-5 ถ้าเห็นคะแนนใน snippet ใช้คะแนนนั้น (สเกล 1-10 ให้หาร 2) ถ้าไม่มีให้ประเมินจากน้ำเสียง (ชม=4-5, กลาง=3, ติ=1-2, บอกไม่ได้=0)
+- reviewDate ใช้ yyyy-MM-dd ถ้าไม่ทราบวันที่ ใช้ {2}
+- snippet เป็นข้อความตัดตอน ให้เก็บเท่าที่มี ไม่ต้องแต่งเติม
+- ถ้าไม่พบเลย ตอบ []
+
+HTML:
+{3}", keyword, sourceCode, DateTime.Now.ToString("yyyy-MM-dd"), searchHtml);
         }
 
         /// <summary>
