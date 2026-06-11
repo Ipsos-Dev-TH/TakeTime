@@ -217,6 +217,18 @@ END", null);
                 catch { /* keep _schemaEnsured false so a later call retries */ }
 
                 try { EnsureDefaultSourceConfigs(); } catch { }
+
+                // One-time cleanup: clamp any future-dated reviews (from earlier
+                // AI date-parsing bugs) back to today
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Online_Reviews')
+                          UPDATE AI_Online_Reviews
+                          SET ReviewDate = CAST(GETDATE() AS DATE)
+                          WHERE ReviewDate > GETDATE()", null);
+                }
+                catch { }
             }
         }
 
@@ -679,8 +691,8 @@ END", null);
 
 หมายเหตุ:
 - rating ให้แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
-- reviewDate ให้แปลงเป็นรูปแบบ yyyy-MM-dd
-- ถ้าไม่มีวันที่ชัดเจน ให้ประมาณจากข้อความเช่น ""2 เดือนที่แล้ว"" หรือ ""มกราคม 2024""
+- reviewDate รูปแบบ yyyy-MM-dd (ค.ศ.) ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543
+- ถ้าไม่มีวันที่ชัดเจน ให้ประมาณจากข้อความเช่น ""2 เดือนที่แล้ว"" หรือ ""มกราคม 2024"" ถ้าเดาไม่ได้ใส่ null อย่าแต่งวันที่อนาคต
 - ถ้าไม่พบรีวิวเลย ให้ตอบ []
 
 HTML:
@@ -864,55 +876,53 @@ HTML:
                 }
 
                 string keyword = GetSearchKeyword(sourceCode);
-                // GOOGLE gets a plain query because Google Maps reviews aren't
-                // indexed under a usable site: path
                 string firstDomain = siteFilter.Split(new[] { " OR " }, StringSplitOptions.None)[0];
+                string platformName = GetPlatformDisplayName(sourceCode);
 
                 // หลายคำค้น × หลาย search engine แล้วรวมข้อความ เพื่อให้ครอบคลุมที่สุด
                 var keywords = new List<string> { keyword };
                 if (keyword == "TakeTime BangPhra")
                     keywords.Add("Take Time บางพระ");
 
+                // กลยุทธ์: ใช้ query แบบกว้าง (ชื่อโรงแรม + ชื่อแพลตฟอร์ม + รีวิว) เป็นหลัก
+                // เพราะ snippet ของ search engine มักมีเนื้อหารีวิวจริงมากกว่า site: filter
+                // แล้วเสริมด้วย site: filter เพื่อเจาะหน้าบนแพลตฟอร์มนั้นโดยตรง
                 var queries = new List<string>();
                 foreach (string kw in keywords)
                 {
                     if (sourceCode == "GOOGLE")
                         queries.Add(kw + " รีวิว โรงแรม ที่พัก");
                     else
+                    {
+                        queries.Add(kw + " " + platformName + " รีวิว");
                         queries.Add(kw + " site:" + firstDomain);
+                    }
                 }
-                // เผื่อ engine เมิน site: — query เปิดที่ระบุชื่อแพลตฟอร์มตรงๆ
-                if (sourceCode != "GOOGLE")
-                    queries.Add(keyword + " " + sourceCode + " รีวิว");
 
                 var combined = new StringBuilder();
+                int engineHits = 0;
                 foreach (string q in queries)
                 {
                     string enc = Uri.EscapeDataString(q);
-                    AppendSearchResultText(combined, "https://html.duckduckgo.com/html/?q=" + enc);
-                    if (combined.Length < 16000)
-                        AppendSearchResultText(combined, "https://www.bing.com/search?q=" + enc + "&setlang=th&count=30");
+                    if (AppendSearchResultText(combined, "https://html.duckduckgo.com/html/?q=" + enc)) engineHits++;
+                    if (combined.Length < 16000 &&
+                        AppendSearchResultText(combined, "https://www.bing.com/search?q=" + enc + "&setlang=th&count=30")) engineHits++;
                     if (combined.Length >= 16000) break;
                 }
 
-                if (combined.Length < 300)
+                int searchChars = combined.Length;
+                if (searchChars < 300)
                 {
                     result["success"] = false;
-                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบหรือไม่มีผลลัพธ์)";
+                    result["newCount"] = 0;
+                    result["message"] = string.Format("{0}: search engine ไม่ตอบ/ถูกบล็อก (ลองผลรวม {1} หน้า ได้ {2} ตัวอักษร)",
+                        sourceCode, queries.Count * 2, searchChars);
                     return result;
                 }
 
                 string prompt = BuildDiscoveryPrompt(sourceCode, keyword, combined.ToString());
-                var parsed = CallAIAndParseReviews(prompt, sourceCode);
-                if (parsed == null)
-                {
-                    // No mentions found is a normal outcome, not an error
-                    result["success"] = true;
-                    result["newCount"] = 0;
-                    result["skipCount"] = 0;
-                    result["message"] = sourceCode + ": AI ไม่พบรีวิว/การกล่าวถึงจากผลค้นหา";
-                    return result;
-                }
+                var parsed = CallAIAndParseReviews(prompt, sourceCode) ?? new List<ParsedReview>();
+                int rawCount = parsed.Count;
 
                 foreach (var r in parsed)
                 {
@@ -925,7 +935,12 @@ HTML:
                 result["success"] = true;
                 result["newCount"] = newCount;
                 result["skipCount"] = skipCount;
-                result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+                if (rawCount == 0)
+                    result["message"] = string.Format("{0}: AI ไม่พบการกล่าวถึงในผลค้นหา (อ่าน {1} ตัวอักษรจาก {2} หน้า)",
+                        sourceCode, searchChars, engineHits);
+                else
+                    result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} (AI ดึงได้ {3} จาก {4} ตัวอักษร)",
+                        sourceCode, newCount, skipCount, rawCount, searchChars);
             }
             catch (Exception ex)
             {
@@ -938,8 +953,9 @@ HTML:
         /// <summary>
         /// Fetch a search-result URL, strip the HTML to plain text, and append to the buffer.
         /// Plain text packs far more result snippets into the AI context than raw HTML.
+        /// Returns true if usable text was appended.
         /// </summary>
-        private void AppendSearchResultText(StringBuilder sb, string url)
+        private bool AppendSearchResultText(StringBuilder sb, string url)
         {
             try
             {
@@ -949,9 +965,33 @@ HTML:
                 {
                     sb.AppendLine(text.Length > 9000 ? text.Substring(0, 9000) : text);
                     sb.AppendLine("-----");
+                    return true;
                 }
             }
             catch { }
+            return false;
+        }
+
+        private static string GetPlatformDisplayName(string sourceCode)
+        {
+            switch (sourceCode)
+            {
+                case "GOOGLE": return "Google";
+                case "FACEBOOK": return "Facebook";
+                case "AGODA": return "Agoda";
+                case "BOOKING": return "Booking.com";
+                case "TRIPADVISOR": return "TripAdvisor";
+                case "EXPEDIA": return "Expedia";
+                case "TRAVELOKA": return "Traveloka";
+                case "PANTIP": return "Pantip";
+                case "TIKTOK": return "TikTok";
+                case "LEMON8": return "Lemon8";
+                case "WONGNAI": return "Wongnai";
+                case "TWITTER": return "Twitter X";
+                case "INSTAGRAM": return "Instagram";
+                case "YOUTUBE": return "YouTube";
+                default: return sourceCode;
+            }
         }
 
         private static string StripHtmlToText(string html)
@@ -990,7 +1030,10 @@ HTML:
 - ดึงให้ครบทุกรายการที่เกี่ยวกับโรงแรม ""{0}"" อย่าเลือกแค่บางรายการ แต่ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
 - ผลซ้ำกัน (เนื้อหาเดียวกันจากหลาย engine) ให้รวมเป็นรายการเดียว
 - rating 1-5 ถ้าเห็นคะแนนใน snippet ใช้คะแนนนั้น (สเกล 1-10 ให้หาร 2) ถ้าไม่มีให้ประเมินจากน้ำเสียง (ชม=4-5, กลาง=3, ติ=1-2, บอกไม่ได้=0)
-- reviewDate ใช้ yyyy-MM-dd ถ้าไม่ทราบวันที่ ใช้ {2}
+- reviewDate: ใช้รูปแบบ yyyy-MM-dd (ค.ศ. เท่านั้น) วันนี้คือ {2}
+  * ถ้าพบ พ.ศ. (ปี > 2500) ให้ลบ 543 เป็น ค.ศ. ก่อน เช่น 2569 = 2026
+  * ห้ามให้วันที่เป็นอนาคต (หลังจาก {2}) เด็ดขาด
+  * ถ้าไม่เห็นวันที่จริงใน snippet ให้ใส่ null อย่าเดาหรือแต่งวันที่ขึ้นเอง
 - snippet เป็นข้อความตัดตอน ให้เก็บเท่าที่มี ไม่ต้องแต่งเติม
 - ถ้าไม่พบเลย ตอบ []
 
@@ -1032,20 +1075,9 @@ HTML:
                     string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
                     string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
 
-                    // Date is required — if not provided, still import but with today's date
-                    DateTime reviewDate = DateTime.Now;
-                    if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
-                    {
-                        string dateStr = review["reviewDate"].ToString();
-                        DateTime parsed;
-                        // Support multiple formats
-                        if (DateTime.TryParse(dateStr, out parsed))
-                            reviewDate = parsed;
-                        else if (DateTime.TryParseExact(dateStr, "dd/MM/yyyy",
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.None, out parsed))
-                            reviewDate = parsed;
-                    }
+                    // Robust parse: handles Buddhist era, day/month order, and future dates
+                    DateTime reviewDate = review.ContainsKey("reviewDate")
+                        ? SanitizeReviewDate(review["reviewDate"]) : DateTime.Now.Date;
 
                     if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                         continue;
@@ -1110,7 +1142,8 @@ HTML:
 
 หมายเหตุ:
 - rating แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
-- reviewDate แปลงเป็น yyyy-MM-dd ถ้าเห็น ""2 เดือนที่แล้ว"" ให้คำนวณจากวันที่ {1}
+- reviewDate รูปแบบ yyyy-MM-dd (ค.ศ.) วันนี้คือ {1} ถ้าเห็น ""2 เดือนที่แล้ว"" ให้คำนวณจาก {1}
+  ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543 / ห้ามใส่วันที่อนาคต / เดาไม่ได้ใส่ null
 - ถ้าไม่พบรีวิวให้ตอบ []
 
 ข้อความ:
@@ -1560,7 +1593,10 @@ HTML:
 
 กฎ:
 - rating 1-5 (ถ้าไม่มีคะแนน ให้ประเมินจากน้ำเสียง: ชม/แนะนำ=4-5, กลางๆ=3, บ่น/ด่า=1-2, ไม่ระบุ=0)
-- reviewDate ใช้ yyyy-MM-dd ถ้าเห็น ""3 วันที่แล้ว"" ให้คำนวณจาก {3}
+- reviewDate: รูปแบบ yyyy-MM-dd (ค.ศ.) วันนี้คือ {3}
+  * ถ้าเห็น ""3 วันที่แล้ว"" ให้คำนวณจาก {3}
+  * ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543 เช่น 2569 = 2026
+  * ห้ามให้วันที่เป็นอนาคต (หลัง {3}) และถ้าไม่เห็นวันที่จริง ให้ใส่ null อย่าเดา
 - เฉพาะโพสต์ที่เกี่ยวกับโรงแรม ""{0}"" เท่านั้น ข้ามโพสต์ไม่เกี่ยวข้อง
 - ถ้าไม่พบเลย ตอบ []
 
@@ -1597,6 +1633,53 @@ HTML:
             public DateTime ReviewDate;
         }
 
+        /// <summary>
+        /// Parse an AI-supplied review date robustly:
+        /// - parse with InvariantCulture (avoid th-TH Buddhist/day-month surprises)
+        /// - convert Buddhist-era years (พ.ศ.) to A.D. by subtracting 543
+        /// - reject future dates (a review can't be in the future) → clamp to today
+        /// - fall back to today when missing/unparseable
+        /// </summary>
+        private static DateTime SanitizeReviewDate(object rawValue)
+        {
+            DateTime today = DateTime.Now.Date;
+            if (rawValue == null) return today;
+
+            string raw = rawValue.ToString().Trim();
+            if (string.IsNullOrEmpty(raw)) return today;
+
+            string[] formats =
+            {
+                "yyyy-MM-dd", "yyyy/MM/dd", "dd/MM/yyyy", "d/M/yyyy",
+                "dd-MM-yyyy", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-dd HH:mm:ss",
+                "MMM yyyy", "MMMM yyyy", "dd MMM yyyy", "dd MMMM yyyy"
+            };
+
+            DateTime parsed;
+            bool ok = DateTime.TryParseExact(raw, formats,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out parsed)
+                   || DateTime.TryParse(raw,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out parsed);
+
+            if (!ok) return today;
+
+            // Buddhist era: AI sometimes returns the พ.ศ. year (e.g. 2569 = 2026)
+            if (parsed.Year > today.Year + 1)
+            {
+                try { parsed = parsed.AddYears(-543); } catch { return today; }
+            }
+
+            // No future-dated reviews — clamp to today
+            if (parsed.Date > today) return today;
+
+            // Sanity floor: nothing before the platforms existed
+            if (parsed.Year < 2000) return today;
+
+            return parsed;
+        }
+
         private List<ParsedReview> CallAIAndParseReviews(string prompt, string sourceCode)
         {
             var deepSeek = new DeepSeekService(_connectionString);
@@ -1625,13 +1708,8 @@ HTML:
                 string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
                 string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
 
-                DateTime reviewDate = DateTime.Now;
-                if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
-                {
-                    DateTime parsed;
-                    if (DateTime.TryParse(review["reviewDate"].ToString(), out parsed))
-                        reviewDate = parsed;
-                }
+                DateTime reviewDate = review.ContainsKey("reviewDate")
+                    ? SanitizeReviewDate(review["reviewDate"]) : DateTime.Now.Date;
 
                 if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                     continue;
@@ -1657,11 +1735,17 @@ HTML:
         {
             try
             {
+                // TLS 1.2 — many sites reject the .NET default (SSL3/TLS1.0)
+                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+
                 var request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "GET";
-                request.ContentType = "application/json";
                 request.Timeout = 30000;
-                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+                request.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+                request.Headers.Add("Accept-Language", "th,en-US;q=0.9,en;q=0.8");
+                request.AllowAutoRedirect = true;
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
                 using (var response = (HttpWebResponse)request.GetResponse())
                 using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
@@ -1669,13 +1753,12 @@ HTML:
                     return reader.ReadToEnd();
                 }
             }
-            catch (WebException wex)
+            catch (WebException)
             {
-                if (wex.Response != null)
-                {
-                    using (var reader = new StreamReader(wex.Response.GetResponseStream()))
-                        return null;
-                }
+                return null;
+            }
+            catch
+            {
                 return null;
             }
         }

@@ -984,8 +984,9 @@
                 if (res.success) {
                     var n = res.newCount || 0;
                     totalNew += n;
+                    var detail = res.message ? ' <span style="color:#aaa;font-size:11px;">(' + res.message + ')</span>' : '';
                     lineEl.innerHTML = '<b>' + src.name + '</b>: <span style="color:' + (n > 0 ? '#2e7d32' : '#888') + '">'
-                        + (n > 0 ? '✅ พบใหม่ ' + n + ' รายการ' : '— ไม่พบรีวิวใหม่') + '</span>';
+                        + (n > 0 ? '✅ พบใหม่ ' + n + ' รายการ' : '— ไม่พบรีวิวใหม่') + '</span>' + detail;
                 } else {
                     lineEl.innerHTML = '<b>' + src.name + '</b>: <span style="color:#c0392b">❌ ' + (res.message || 'ไม่สำเร็จ') + '</span>';
                 }
