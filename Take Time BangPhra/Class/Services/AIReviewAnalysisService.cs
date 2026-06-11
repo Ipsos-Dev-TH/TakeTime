@@ -215,6 +215,71 @@ END", null);
                     _schemaEnsured = true;
                 }
                 catch { /* keep _schemaEnsured false so a later call retries */ }
+
+                try { EnsureDefaultSourceConfigs(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// Backfill example ApiConfig for every review source that has none yet, so the
+        /// settings screen shows ready-to-edit templates with the exact keys each
+        /// fetcher reads. Never overwrites a config the user has already saved.
+        /// </summary>
+        private void EnsureDefaultSourceConfigs()
+        {
+            var exampleConfigs = new Dictionary<string, string>
+            {
+                { "INTERNAL",
+                  "{\"_hint\":\"รีวิวจากระบบ Guest Portal ไม่ต้องตั้งค่าเพิ่ม\"}" },
+                { "GOOGLE",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"placeId\":\"\",\"apiKey\":\"\",\"_hint\":\"ดึงตรงจาก Google Places API: ใส่ placeId + apiKey (สร้างที่ Google Cloud Console เปิดใช้ Places API) | ถ้าเว้นว่าง ยังใช้ปุ่ม AI ค้นหาได้\"}" },
+                { "FACEBOOK",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"pageId\":\"\",\"pageAccessToken\":\"\",\"_hint\":\"ดึงตรงจาก Facebook Graph API: ใส่ pageId ของเพจ + pageAccessToken (ต้องมีสิทธิ์ pages_read_user_content)\"}" },
+                { "AGODA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้ารีวิวที่พักของเราบน Agoda เช่น https://www.agoda.com/th-th/take-time-bangphra/hotel/chonburi-th.html\"}" },
+                { "BOOKING",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Booking.com เช่น https://www.booking.com/hotel/th/take-time-bangphra.th.html\"}" },
+                { "TRIPADVISOR",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้า Hotel_Review ของเราบน TripAdvisor\"}" },
+                { "EXPEDIA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Expedia\"}" },
+                { "TRAVELOKA",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"scrapeUrl\":\"\",\"_hint\":\"วาง URL หน้าที่พักของเราบน Traveloka\"}" },
+                { "PANTIP",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้น searchUrl ว่าง = ค้นจาก pantip.com อัตโนมัติ หรือวางลิงก์ผลค้นหา/กระทู้เอง\"}" },
+                { "TIKTOK",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ TikTok อัตโนมัติ\"}" },
+                { "LEMON8",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ Lemon8 อัตโนมัติ\"}" },
+                { "WONGNAI",
+                  "{\"searchKeyword\":\"TakeTime BangPhra\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ค้นหาอัตโนมัติ หรือวาง URL หน้าร้าน/รีวิวบน Wongnai\"}" },
+                { "TWITTER",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า search ของ X (Twitter) อัตโนมัติ\"}" },
+                { "INSTAGRAM",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"searchUrl\":\"\",\"_hint\":\"เว้นว่าง = ใช้หน้า hashtag ของ Instagram อัตโนมัติ\"}" },
+                { "YOUTUBE",
+                  "{\"searchKeyword\":\"TakeTime บางพระ\",\"apiKey\":\"\",\"_hint\":\"ใส่ apiKey ของ YouTube Data API v3 จะดึงวิดีโอรีวิวแม่นยำขึ้น | เว้นว่างได้ จะใช้หน้า search แทน\"}" }
+            };
+
+            // แหล่งที่ดึงได้เลยโดยไม่ต้องมี API key (scrape หน้า search) — เปิดใช้งานให้ทันที
+            // ทำครั้งเดียวพร้อม backfill config เท่านั้น จึงไม่ทับการตั้งค่าที่ผู้ใช้แก้ภายหลัง
+            var enableWithoutKey = new HashSet<string>
+                { "PANTIP", "WONGNAI", "TIKTOK", "LEMON8", "TWITTER", "INSTAGRAM", "YOUTUBE" };
+
+            foreach (var kv in exampleConfigs)
+            {
+                string sql = enableWithoutKey.Contains(kv.Key)
+                    ? @"UPDATE AI_Review_Sources
+                        SET ApiConfig = @Config, IsEnabled = 1, Updated_Date = GETDATE()
+                        WHERE SourceCode = @Code
+                          AND (ApiConfig IS NULL OR LTRIM(RTRIM(ApiConfig)) = '')"
+                    : @"UPDATE AI_Review_Sources
+                        SET ApiConfig = @Config, Updated_Date = GETDATE()
+                        WHERE SourceCode = @Code
+                          AND (ApiConfig IS NULL OR LTRIM(RTRIM(ApiConfig)) = '')";
+
+                _code.DatabaseInsertSafe(_connectionString, sql,
+                    new Dictionary<string, object> { { "@Code", kv.Key }, { "@Config", kv.Value } });
             }
         }
 
