@@ -876,55 +876,53 @@ HTML:
                 }
 
                 string keyword = GetSearchKeyword(sourceCode);
-                // GOOGLE gets a plain query because Google Maps reviews aren't
-                // indexed under a usable site: path
                 string firstDomain = siteFilter.Split(new[] { " OR " }, StringSplitOptions.None)[0];
+                string platformName = GetPlatformDisplayName(sourceCode);
 
                 // หลายคำค้น × หลาย search engine แล้วรวมข้อความ เพื่อให้ครอบคลุมที่สุด
                 var keywords = new List<string> { keyword };
                 if (keyword == "TakeTime BangPhra")
                     keywords.Add("Take Time บางพระ");
 
+                // กลยุทธ์: ใช้ query แบบกว้าง (ชื่อโรงแรม + ชื่อแพลตฟอร์ม + รีวิว) เป็นหลัก
+                // เพราะ snippet ของ search engine มักมีเนื้อหารีวิวจริงมากกว่า site: filter
+                // แล้วเสริมด้วย site: filter เพื่อเจาะหน้าบนแพลตฟอร์มนั้นโดยตรง
                 var queries = new List<string>();
                 foreach (string kw in keywords)
                 {
                     if (sourceCode == "GOOGLE")
                         queries.Add(kw + " รีวิว โรงแรม ที่พัก");
                     else
+                    {
+                        queries.Add(kw + " " + platformName + " รีวิว");
                         queries.Add(kw + " site:" + firstDomain);
+                    }
                 }
-                // เผื่อ engine เมิน site: — query เปิดที่ระบุชื่อแพลตฟอร์มตรงๆ
-                if (sourceCode != "GOOGLE")
-                    queries.Add(keyword + " " + sourceCode + " รีวิว");
 
                 var combined = new StringBuilder();
+                int engineHits = 0;
                 foreach (string q in queries)
                 {
                     string enc = Uri.EscapeDataString(q);
-                    AppendSearchResultText(combined, "https://html.duckduckgo.com/html/?q=" + enc);
-                    if (combined.Length < 16000)
-                        AppendSearchResultText(combined, "https://www.bing.com/search?q=" + enc + "&setlang=th&count=30");
+                    if (AppendSearchResultText(combined, "https://html.duckduckgo.com/html/?q=" + enc)) engineHits++;
+                    if (combined.Length < 16000 &&
+                        AppendSearchResultText(combined, "https://www.bing.com/search?q=" + enc + "&setlang=th&count=30")) engineHits++;
                     if (combined.Length >= 16000) break;
                 }
 
-                if (combined.Length < 300)
+                int searchChars = combined.Length;
+                if (searchChars < 300)
                 {
                     result["success"] = false;
-                    result["message"] = sourceCode + ": ค้นหาเว็บไม่สำเร็จ (search engine ไม่ตอบหรือไม่มีผลลัพธ์)";
+                    result["newCount"] = 0;
+                    result["message"] = string.Format("{0}: search engine ไม่ตอบ/ถูกบล็อก (ลองผลรวม {1} หน้า ได้ {2} ตัวอักษร)",
+                        sourceCode, queries.Count * 2, searchChars);
                     return result;
                 }
 
                 string prompt = BuildDiscoveryPrompt(sourceCode, keyword, combined.ToString());
-                var parsed = CallAIAndParseReviews(prompt, sourceCode);
-                if (parsed == null)
-                {
-                    // No mentions found is a normal outcome, not an error
-                    result["success"] = true;
-                    result["newCount"] = 0;
-                    result["skipCount"] = 0;
-                    result["message"] = sourceCode + ": AI ไม่พบรีวิว/การกล่าวถึงจากผลค้นหา";
-                    return result;
-                }
+                var parsed = CallAIAndParseReviews(prompt, sourceCode) ?? new List<ParsedReview>();
+                int rawCount = parsed.Count;
 
                 foreach (var r in parsed)
                 {
@@ -937,7 +935,12 @@ HTML:
                 result["success"] = true;
                 result["newCount"] = newCount;
                 result["skipCount"] = skipCount;
-                result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} รายการ", sourceCode, newCount, skipCount);
+                if (rawCount == 0)
+                    result["message"] = string.Format("{0}: AI ไม่พบการกล่าวถึงในผลค้นหา (อ่าน {1} ตัวอักษรจาก {2} หน้า)",
+                        sourceCode, searchChars, engineHits);
+                else
+                    result["message"] = string.Format("{0}: พบใหม่ {1} รายการ, ข้ามซ้ำ {2} (AI ดึงได้ {3} จาก {4} ตัวอักษร)",
+                        sourceCode, newCount, skipCount, rawCount, searchChars);
             }
             catch (Exception ex)
             {
@@ -950,8 +953,9 @@ HTML:
         /// <summary>
         /// Fetch a search-result URL, strip the HTML to plain text, and append to the buffer.
         /// Plain text packs far more result snippets into the AI context than raw HTML.
+        /// Returns true if usable text was appended.
         /// </summary>
-        private void AppendSearchResultText(StringBuilder sb, string url)
+        private bool AppendSearchResultText(StringBuilder sb, string url)
         {
             try
             {
@@ -961,9 +965,33 @@ HTML:
                 {
                     sb.AppendLine(text.Length > 9000 ? text.Substring(0, 9000) : text);
                     sb.AppendLine("-----");
+                    return true;
                 }
             }
             catch { }
+            return false;
+        }
+
+        private static string GetPlatformDisplayName(string sourceCode)
+        {
+            switch (sourceCode)
+            {
+                case "GOOGLE": return "Google";
+                case "FACEBOOK": return "Facebook";
+                case "AGODA": return "Agoda";
+                case "BOOKING": return "Booking.com";
+                case "TRIPADVISOR": return "TripAdvisor";
+                case "EXPEDIA": return "Expedia";
+                case "TRAVELOKA": return "Traveloka";
+                case "PANTIP": return "Pantip";
+                case "TIKTOK": return "TikTok";
+                case "LEMON8": return "Lemon8";
+                case "WONGNAI": return "Wongnai";
+                case "TWITTER": return "Twitter X";
+                case "INSTAGRAM": return "Instagram";
+                case "YOUTUBE": return "YouTube";
+                default: return sourceCode;
+            }
         }
 
         private static string StripHtmlToText(string html)
@@ -1707,11 +1735,17 @@ HTML:
         {
             try
             {
+                // TLS 1.2 — many sites reject the .NET default (SSL3/TLS1.0)
+                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+
                 var request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "GET";
-                request.ContentType = "application/json";
                 request.Timeout = 30000;
-                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+                request.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+                request.Headers.Add("Accept-Language", "th,en-US;q=0.9,en;q=0.8");
+                request.AllowAutoRedirect = true;
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
                 using (var response = (HttpWebResponse)request.GetResponse())
                 using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
@@ -1719,13 +1753,12 @@ HTML:
                     return reader.ReadToEnd();
                 }
             }
-            catch (WebException wex)
+            catch (WebException)
             {
-                if (wex.Response != null)
-                {
-                    using (var reader = new StreamReader(wex.Response.GetResponseStream()))
-                        return null;
-                }
+                return null;
+            }
+            catch
+            {
                 return null;
             }
         }
