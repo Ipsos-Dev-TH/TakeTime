@@ -217,6 +217,18 @@ END", null);
                 catch { /* keep _schemaEnsured false so a later call retries */ }
 
                 try { EnsureDefaultSourceConfigs(); } catch { }
+
+                // One-time cleanup: clamp any future-dated reviews (from earlier
+                // AI date-parsing bugs) back to today
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AI_Online_Reviews')
+                          UPDATE AI_Online_Reviews
+                          SET ReviewDate = CAST(GETDATE() AS DATE)
+                          WHERE ReviewDate > GETDATE()", null);
+                }
+                catch { }
             }
         }
 
@@ -679,8 +691,8 @@ END", null);
 
 หมายเหตุ:
 - rating ให้แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
-- reviewDate ให้แปลงเป็นรูปแบบ yyyy-MM-dd
-- ถ้าไม่มีวันที่ชัดเจน ให้ประมาณจากข้อความเช่น ""2 เดือนที่แล้ว"" หรือ ""มกราคม 2024""
+- reviewDate รูปแบบ yyyy-MM-dd (ค.ศ.) ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543
+- ถ้าไม่มีวันที่ชัดเจน ให้ประมาณจากข้อความเช่น ""2 เดือนที่แล้ว"" หรือ ""มกราคม 2024"" ถ้าเดาไม่ได้ใส่ null อย่าแต่งวันที่อนาคต
 - ถ้าไม่พบรีวิวเลย ให้ตอบ []
 
 HTML:
@@ -990,7 +1002,10 @@ HTML:
 - ดึงให้ครบทุกรายการที่เกี่ยวกับโรงแรม ""{0}"" อย่าเลือกแค่บางรายการ แต่ข้ามโฆษณา/ผลไม่เกี่ยวข้อง
 - ผลซ้ำกัน (เนื้อหาเดียวกันจากหลาย engine) ให้รวมเป็นรายการเดียว
 - rating 1-5 ถ้าเห็นคะแนนใน snippet ใช้คะแนนนั้น (สเกล 1-10 ให้หาร 2) ถ้าไม่มีให้ประเมินจากน้ำเสียง (ชม=4-5, กลาง=3, ติ=1-2, บอกไม่ได้=0)
-- reviewDate ใช้ yyyy-MM-dd ถ้าไม่ทราบวันที่ ใช้ {2}
+- reviewDate: ใช้รูปแบบ yyyy-MM-dd (ค.ศ. เท่านั้น) วันนี้คือ {2}
+  * ถ้าพบ พ.ศ. (ปี > 2500) ให้ลบ 543 เป็น ค.ศ. ก่อน เช่น 2569 = 2026
+  * ห้ามให้วันที่เป็นอนาคต (หลังจาก {2}) เด็ดขาด
+  * ถ้าไม่เห็นวันที่จริงใน snippet ให้ใส่ null อย่าเดาหรือแต่งวันที่ขึ้นเอง
 - snippet เป็นข้อความตัดตอน ให้เก็บเท่าที่มี ไม่ต้องแต่งเติม
 - ถ้าไม่พบเลย ตอบ []
 
@@ -1032,20 +1047,9 @@ HTML:
                     string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
                     string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
 
-                    // Date is required — if not provided, still import but with today's date
-                    DateTime reviewDate = DateTime.Now;
-                    if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
-                    {
-                        string dateStr = review["reviewDate"].ToString();
-                        DateTime parsed;
-                        // Support multiple formats
-                        if (DateTime.TryParse(dateStr, out parsed))
-                            reviewDate = parsed;
-                        else if (DateTime.TryParseExact(dateStr, "dd/MM/yyyy",
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.None, out parsed))
-                            reviewDate = parsed;
-                    }
+                    // Robust parse: handles Buddhist era, day/month order, and future dates
+                    DateTime reviewDate = review.ContainsKey("reviewDate")
+                        ? SanitizeReviewDate(review["reviewDate"]) : DateTime.Now.Date;
 
                     if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                         continue;
@@ -1110,7 +1114,8 @@ HTML:
 
 หมายเหตุ:
 - rating แปลงเป็นมาตรฐาน 1-5 (ถ้าแพลตฟอร์มใช้ 1-10 ให้หาร 2)
-- reviewDate แปลงเป็น yyyy-MM-dd ถ้าเห็น ""2 เดือนที่แล้ว"" ให้คำนวณจากวันที่ {1}
+- reviewDate รูปแบบ yyyy-MM-dd (ค.ศ.) วันนี้คือ {1} ถ้าเห็น ""2 เดือนที่แล้ว"" ให้คำนวณจาก {1}
+  ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543 / ห้ามใส่วันที่อนาคต / เดาไม่ได้ใส่ null
 - ถ้าไม่พบรีวิวให้ตอบ []
 
 ข้อความ:
@@ -1560,7 +1565,10 @@ HTML:
 
 กฎ:
 - rating 1-5 (ถ้าไม่มีคะแนน ให้ประเมินจากน้ำเสียง: ชม/แนะนำ=4-5, กลางๆ=3, บ่น/ด่า=1-2, ไม่ระบุ=0)
-- reviewDate ใช้ yyyy-MM-dd ถ้าเห็น ""3 วันที่แล้ว"" ให้คำนวณจาก {3}
+- reviewDate: รูปแบบ yyyy-MM-dd (ค.ศ.) วันนี้คือ {3}
+  * ถ้าเห็น ""3 วันที่แล้ว"" ให้คำนวณจาก {3}
+  * ถ้าเป็น พ.ศ. (ปี > 2500) ให้ลบ 543 เช่น 2569 = 2026
+  * ห้ามให้วันที่เป็นอนาคต (หลัง {3}) และถ้าไม่เห็นวันที่จริง ให้ใส่ null อย่าเดา
 - เฉพาะโพสต์ที่เกี่ยวกับโรงแรม ""{0}"" เท่านั้น ข้ามโพสต์ไม่เกี่ยวข้อง
 - ถ้าไม่พบเลย ตอบ []
 
@@ -1597,6 +1605,53 @@ HTML:
             public DateTime ReviewDate;
         }
 
+        /// <summary>
+        /// Parse an AI-supplied review date robustly:
+        /// - parse with InvariantCulture (avoid th-TH Buddhist/day-month surprises)
+        /// - convert Buddhist-era years (พ.ศ.) to A.D. by subtracting 543
+        /// - reject future dates (a review can't be in the future) → clamp to today
+        /// - fall back to today when missing/unparseable
+        /// </summary>
+        private static DateTime SanitizeReviewDate(object rawValue)
+        {
+            DateTime today = DateTime.Now.Date;
+            if (rawValue == null) return today;
+
+            string raw = rawValue.ToString().Trim();
+            if (string.IsNullOrEmpty(raw)) return today;
+
+            string[] formats =
+            {
+                "yyyy-MM-dd", "yyyy/MM/dd", "dd/MM/yyyy", "d/M/yyyy",
+                "dd-MM-yyyy", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-dd HH:mm:ss",
+                "MMM yyyy", "MMMM yyyy", "dd MMM yyyy", "dd MMMM yyyy"
+            };
+
+            DateTime parsed;
+            bool ok = DateTime.TryParseExact(raw, formats,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out parsed)
+                   || DateTime.TryParse(raw,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out parsed);
+
+            if (!ok) return today;
+
+            // Buddhist era: AI sometimes returns the พ.ศ. year (e.g. 2569 = 2026)
+            if (parsed.Year > today.Year + 1)
+            {
+                try { parsed = parsed.AddYears(-543); } catch { return today; }
+            }
+
+            // No future-dated reviews — clamp to today
+            if (parsed.Date > today) return today;
+
+            // Sanity floor: nothing before the platforms existed
+            if (parsed.Year < 2000) return today;
+
+            return parsed;
+        }
+
         private List<ParsedReview> CallAIAndParseReviews(string prompt, string sourceCode)
         {
             var deepSeek = new DeepSeekService(_connectionString);
@@ -1625,13 +1680,8 @@ HTML:
                 string reviewText = review.ContainsKey("reviewText") ? review["reviewText"]?.ToString() : "";
                 string reviewTitle = review.ContainsKey("reviewTitle") ? review["reviewTitle"]?.ToString() : null;
 
-                DateTime reviewDate = DateTime.Now;
-                if (review.ContainsKey("reviewDate") && review["reviewDate"] != null)
-                {
-                    DateTime parsed;
-                    if (DateTime.TryParse(review["reviewDate"].ToString(), out parsed))
-                        reviewDate = parsed;
-                }
+                DateTime reviewDate = review.ContainsKey("reviewDate")
+                    ? SanitizeReviewDate(review["reviewDate"]) : DateTime.Now.Date;
 
                 if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                     continue;
