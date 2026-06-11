@@ -872,6 +872,31 @@ namespace Take_Time_BangPhra.Integration
             return WrapDoc(flat, flat?.documentId);
         }
 
+        // Integration Void Document (/api/integration/documents/void)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> VoidDocumentViaIntegrationAsync(InboundVoidDocumentRequest request)
+        {
+            if (!request.DocumentId.HasValue && string.IsNullOrEmpty(request.ExternalRef))
+                throw new ArgumentException("VoidDocument requires DocumentId or ExternalRef.");
+
+            var flat = await PostAsync<InboundVoidDocumentRequest, IntegrationSyncResponse>(
+                "/api/integration/documents/void", request);
+            return WrapDoc(flat, flat?.documentId);
+        }
+
+        // Integration Certificates in Lieu (/api/integration/certificates-in-lieu)
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreateCertificateInLieuAsync(InboundCertificateInLieuRequest request)
+        {
+            if (request.Lines == null || request.Lines.Count == 0)
+                throw new ArgumentException("Certificate in lieu must have at least 1 line item.");
+
+            EnsureLinesHaveAccountCode(request.Lines);
+            ValidateDocumentLines(request.Lines, "CertificateInLieu");
+
+            var flat = await PostAsync<InboundCertificateInLieuRequest, IntegrationSyncResponse>(
+                "/api/integration/certificates-in-lieu", request);
+            return WrapDoc(flat, flat?.documentId);
+        }
+
         // Integration Outbound Queries — NextAcc คืน flat (ไม่มี ApiResponse wrapper)
         public async Task<PagedResponse<OutboundDocumentResponse>> GetIntegrationDocumentsAsync(OutboundQueryParams query = null)
         {

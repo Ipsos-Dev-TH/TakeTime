@@ -2068,57 +2068,96 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (_config.IsReceiptDocumentMode)
                 {
-                    // DOCUMENT mode: ใบเสร็จถูกออกผ่าน /api/integration/invoices ซึ่ง auto-creates journal
-                    // VoidDocumentAsync เรียก /document/{id}/void → ต้อง JWT auth (ไม่มีใน Integration Key)
-                    // → ใช้ credit note (/api/integration/credit-notes) แทน — ออกใบลดหนี้ที่กลับ Revenue + VAT
-                    if (!string.IsNullOrEmpty(receiptNumber))
+                    // DOCUMENT mode: ลองใช้ /api/integration/documents/void ก่อน
+                    // ยกเลิกเอกสาร + journal ในคำสั่งเดียว
+                    // fallback → credit note ถ้า void endpoint ยังไม่พร้อม (404)
+                    try
                     {
-                        var info = LookupReceiptHeaderInfo(receiptNumber);
-                        decimal totalAmount = LookupReceiptAmount(receiptNumber);
-                        bool hasVat = LookupBusinessHasVat();
-                        int resId = info?.reservationId ?? LookupReservationIdByReceipt(receiptNumber);
-                        string custName = info?.customerName ?? "";
-
-                        if (totalAmount > 0)
+                        var voidReq = new InboundVoidDocumentRequest
                         {
-                            var creditNote = _mapper.MapReceiptVoidToCreditNote(
-                                resId, receiptNumber, totalAmount, hasVat, custName, DateTime.Now, reason);
-                            var cnResult = await _apiClient.CreateIntegrationCreditNoteAsync(creditNote);
-                            Guid cnId = RequireValidDocId(cnResult?.data?.Id, $"CreditNote (void receipt) receipt={receiptNumber}");
+                            DocumentId = docId,
+                            ExternalRef = receiptNumber,
+                            Reason = reason ?? $"ยกเลิกใบเสร็จ {receiptNumber}"
+                        };
+                        var voidResult = await _apiClient.VoidDocumentViaIntegrationAsync(voidReq);
 
-                            // ถ้าใบเสร็จเดิมมี deposit applied → ต้อง restore ADVANCE_DEPOSIT
-                            // (DOCUMENT mode flow มี separate adjustment journal ที่ต้อง undo)
+                        // ถ้าใบเสร็จเดิมมี deposit applied → ต้อง restore ADVANCE_DEPOSIT
+                        if (!string.IsNullOrEmpty(receiptNumber))
+                        {
                             decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
-                            if (applied > 0 && info != null)
+                            if (applied > 0)
                             {
-                                // ห้ามกลืน exception — ถ้า counter-adj fail แล้วมาร์ค COMPLETED
-                                // ADVANCE_DEPOSIT จะไม่ถูก restore → phantom liability ค้างถาวร
-                                // re-throw → queue retry (credit note idempotent ด้วย ExternalRef ไม่สร้างซ้ำ)
-                                var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                    resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                    custName, info.Value.paymentAccountId, receiptNumber);
-                                var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
-                                _code.Logs(_connectionString, "AccountingSync",
-                                    $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
-                                    "SYSTEM");
+                                var info = LookupReceiptHeaderInfo(receiptNumber);
+                                if (info != null)
+                                {
+                                    int resId = info.Value.reservationId;
+                                    string custName = info.Value.customerName ?? "";
+                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                    RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                        "SYSTEM");
+                                }
                             }
-
-                            return $"CREDIT_NOTE:{cnId}";
                         }
-                    }
 
-                    // ไม่มี receiptNumber/totalAmount → log warning, ไม่ throw (caller ลบในระบบไปแล้ว)
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessVoidReceipt(DOCUMENT): missing receiptNumber/total for nexaaccId={nexaaccId} — manual review required",
-                        "SYSTEM");
-                    return $"VOID_SKIPPED:{nexaaccId} (manual review needed)";
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt(DOCUMENT): voided via integration endpoint receipt={receiptNumber} nexaaccId={nexaaccId}",
+                            "SYSTEM");
+                        return $"VOIDED:{nexaaccId}";
+                    }
+                    catch (AccountingApiException voidEx) when (voidEx.StatusCode == 404)
+                    {
+                        // Void endpoint ยังไม่มี — fallback เป็น credit note
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt(DOCUMENT): void endpoint returned 404, falling back to credit note for {receiptNumber}",
+                            "SYSTEM");
+
+                        if (!string.IsNullOrEmpty(receiptNumber))
+                        {
+                            var info = LookupReceiptHeaderInfo(receiptNumber);
+                            decimal totalAmount = LookupReceiptAmount(receiptNumber);
+                            bool hasVat = LookupBusinessHasVat();
+                            int resId = info?.reservationId ?? LookupReservationIdByReceipt(receiptNumber);
+                            string custName = info?.customerName ?? "";
+
+                            if (totalAmount > 0)
+                            {
+                                var creditNote = _mapper.MapReceiptVoidToCreditNote(
+                                    resId, receiptNumber, totalAmount, hasVat, custName, DateTime.Now, reason);
+                                var cnResult = await _apiClient.CreateIntegrationCreditNoteAsync(creditNote);
+                                Guid cnId = RequireValidDocId(cnResult?.data?.Id, $"CreditNote (void receipt) receipt={receiptNumber}");
+
+                                decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
+                                if (applied > 0 && info != null)
+                                {
+                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                    RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                        "SYSTEM");
+                                }
+
+                                return $"CREDIT_NOTE:{cnId}";
+                            }
+                        }
+
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt(DOCUMENT): missing receiptNumber/total for nexaaccId={nexaaccId} — manual review required",
+                            "SYSTEM");
+                        return $"VOID_SKIPPED:{nexaaccId} (manual review needed)";
+                    }
                 }
                 else
                 {
                     // JOURNAL mode: ใบเสร็จเป็น compound journal ที่รวม deposit-debit อยู่แล้ว
                     // → reverse เพียงพอ (NextAcc auto-flip DR↔CR ทุก line รวมทั้ง Advance Deposit)
-                    // ห้ามโพสต์ counter-adjustment เพิ่ม เพราะจะทำให้เกิด phantom liability
                     try
                     {
                         var reverseReq = new ReverseJournalEntryRequest
@@ -2164,34 +2203,55 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (_config.IsVoucherDocumentMode)
                 {
-                    // DOCUMENT mode: voucher = expense doc + journal posted by NextAcc
-                    // VoidDocumentAsync (JWT-only) ไม่ work — ใช้ /api/integration/debit-notes แทน
-                    // (ใบเพิ่มหนี้ฝั่งซื้อ: CR Expense + CR VAT / DR A/P → กลับ expense + ลด BalanceDue)
-                    if (!string.IsNullOrEmpty(documentNumber))
+                    // DOCUMENT mode: ใช้ /api/integration/documents/void (Integration Key)
+                    // ยกเลิกเอกสาร + journal ที่เกี่ยวข้องในคำสั่งเดียว
+                    // fallback → debit note ถ้า void endpoint ไม่รองรับ
+                    try
                     {
-                        var supplier = LookupSupplierFromVoucherDoc(documentNumber);
-                        decimal totalAmount = LookupVoucherAmount(documentNumber);
-                        bool hasVat = LookupBusinessHasVat();
-
-                        if (totalAmount > 0)
+                        var voidReq = new InboundVoidDocumentRequest
                         {
-                            var debitNote = _mapper.MapVoucherVoidToDebitNote(
-                                supplier?.voucherId ?? 0, documentNumber, totalAmount, hasVat,
-                                supplier?.supplierName ?? "", DateTime.Now, reason);
-                            var dnResult = await _apiClient.CreateIntegrationDebitNoteAsync(debitNote);
-                            Guid dnId = RequireValidDocId(dnResult?.data?.Id, $"DebitNote (void voucher) doc={documentNumber}");
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnId}",
-                                "SYSTEM");
-                            return $"DEBIT_NOTE:{dnId}";
-                        }
+                            DocumentId = docId,
+                            ExternalRef = documentNumber,
+                            Reason = reason ?? $"ยกเลิกใบสำคัญจ่าย {documentNumber}"
+                        };
+                        var voidResult = await _apiClient.VoidDocumentViaIntegrationAsync(voidReq);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher(DOCUMENT): voided via integration endpoint doc={documentNumber} nexaaccId={nexaaccId}",
+                            "SYSTEM");
+                        return $"VOIDED:{nexaaccId}";
                     }
+                    catch (AccountingApiException voidEx) when (voidEx.StatusCode == 404)
+                    {
+                        // Void endpoint ยังไม่มีบน NextAcc version นี้ — fallback เป็น debit note
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher(DOCUMENT): void endpoint returned 404, falling back to debit note for {documentNumber}",
+                            "SYSTEM");
 
-                    // ไม่มี documentNumber/total → log warning
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessVoidVoucher(DOCUMENT): missing documentNumber/total for nexaaccId={nexaaccId} — manual review",
-                        "SYSTEM");
-                    return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual review needed)";
+                        if (!string.IsNullOrEmpty(documentNumber))
+                        {
+                            var supplier = LookupSupplierFromVoucherDoc(documentNumber);
+                            decimal totalAmount = LookupVoucherAmount(documentNumber);
+                            bool hasVat = LookupBusinessHasVat();
+
+                            if (totalAmount > 0)
+                            {
+                                var debitNote = _mapper.MapVoucherVoidToDebitNote(
+                                    supplier?.voucherId ?? 0, documentNumber, totalAmount, hasVat,
+                                    supplier?.supplierName ?? "", DateTime.Now, reason);
+                                var dnResult = await _apiClient.CreateIntegrationDebitNoteAsync(debitNote);
+                                Guid dnId = RequireValidDocId(dnResult?.data?.Id, $"DebitNote (void voucher) doc={documentNumber}");
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"ProcessVoidVoucher(DOCUMENT): debit note created for voucher {documentNumber} → {dnId}",
+                                    "SYSTEM");
+                                return $"DEBIT_NOTE:{dnId}";
+                            }
+                        }
+
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher(DOCUMENT): missing documentNumber/total for nexaaccId={nexaaccId} — manual review",
+                            "SYSTEM");
+                        return $"VOID_SKIPPED:{nexaaccId} (DOCUMENT mode — manual review needed)";
+                    }
                 }
                 else
                 {

@@ -239,15 +239,27 @@ namespace Take_Time_BangPhra.Integration
         public string PaymentMethod { get; set; }
         public string Reference { get; set; }
         public Guid? BankAccountId { get; set; }
+        public string BankAccount { get; set; }
+        public string Notes { get; set; }
+        public decimal? WithholdingTaxAmount { get; set; }
+        public Guid? OverrideBankAccountId { get; set; }
+        public Guid? OverridePaymentAccountId { get; set; }
+        public Guid? ProjectId { get; set; }
     }
 
     public class PaymentResponse
     {
         public Guid Id { get; set; }
+        public string PaymentNumber { get; set; }
         public Guid DocumentId { get; set; }
         public decimal Amount { get; set; }
         public string PaymentMethod { get; set; }
         public DateTime PaymentDate { get; set; }
+        public string Reference { get; set; }
+        public string BankAccount { get; set; }
+        public Guid? BankAccountId { get; set; }
+        public string Notes { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -497,6 +509,8 @@ namespace Take_Time_BangPhra.Integration
         public bool IncludeVat { get; set; }
         public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+        public string PreparerName { get; set; }
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     public class CreateIntegrationExpenseRequest
@@ -684,10 +698,51 @@ namespace Take_Time_BangPhra.Integration
 
     public class CreateIntegrationBatchRequest
     {
+        public List<InboundCustomerRequest> Customers { get; set; }
         public List<CreateIntegrationInvoiceRequest> Invoices { get; set; }
         public List<CreateIntegrationPaymentRequest> Payments { get; set; }
         public List<CreateIntegrationExpenseRequest> Expenses { get; set; }
+        public List<InboundProductRequest> Products { get; set; }
         public List<CreateIntegrationJournalRequest> Journals { get; set; }
+        public List<InboundCertificateInLieuRequest> CertificatesInLieu { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Void Document (POST /api/integration/documents/void)
+    // ──────────────────────────────────────────────
+
+    public class InboundVoidDocumentRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public Guid? DocumentId { get; set; }
+        public string Reason { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Certificate in Lieu of Tax Invoice
+    // (ใบรับรองแทนใบกำกับภาษี — POST /api/integration/certificates-in-lieu)
+    // ──────────────────────────────────────────────
+
+    public class InboundCertificateInLieuRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public string SupplierExternalId { get; set; }
+        public string SupplierName { get; set; }
+        public string SupplierTaxId { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? PaymentDate { get; set; }
+        public string CertificateReason { get; set; }
+        public string CertifierName { get; set; }
+        public string CertifierPosition { get; set; }
+        public string WitnessName { get; set; }
+        public string WitnessPosition { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public decimal? VatRate { get; set; }
+        public string Notes { get; set; }
+        public bool IncludeVat { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
     }
 
     /// <summary>
@@ -716,6 +771,10 @@ namespace Take_Time_BangPhra.Integration
         public string Phone { get; set; }
         public string Email { get; set; }
         public string Address { get; set; }
+        public string Moo { get; set; }
+        public string BuildingNumber { get; set; }
+        public string BuildingName { get; set; }
+        public string StreetName { get; set; }
         public string SubDistrict { get; set; }
         public string District { get; set; }
         public string Province { get; set; }
@@ -829,6 +888,23 @@ namespace Take_Time_BangPhra.Integration
         public string Reference { get; set; }
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
+        public List<OutboundDocumentLineResponse> Lines { get; set; }
+    }
+
+    public class OutboundDocumentLineResponse
+    {
+        public Guid Id { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemName { get; set; }
+        public string Description { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal? DiscountAmount { get; set; }
+        public string Unit { get; set; }
+        public string AccountCode { get; set; }
+        public decimal VatRate { get; set; }
+        public decimal WithholdingTaxRate { get; set; }
+        public decimal Amount { get; set; }
     }
 
     public class OutboundContactResponse
@@ -837,16 +913,22 @@ namespace Take_Time_BangPhra.Integration
         public string Name { get; set; }
         public string TaxId { get; set; }
         public string BranchCode { get; set; }
+        public string BranchName { get; set; }
         public string ContactType { get; set; }
         public bool IsCustomer { get; set; }
         public bool IsSupplier { get; set; }
         public string Address { get; set; }
+        public string Moo { get; set; }
+        public string BuildingNumber { get; set; }
+        public string BuildingName { get; set; }
+        public string StreetName { get; set; }
         public string Phone { get; set; }
         public string Email { get; set; }
         public string SubDistrict { get; set; }
         public string District { get; set; }
         public string Province { get; set; }
         public string PostalCode { get; set; }
+        public string CountryCode { get; set; }
         public string ContactPerson { get; set; }
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
