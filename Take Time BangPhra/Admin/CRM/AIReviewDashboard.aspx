@@ -1006,8 +1006,14 @@
         apiCall('getSources').then(function (res) {
             if (res.success) {
                 renderSourceSettings(res.data);
+            } else {
+                document.getElementById('sourceSettings').innerHTML =
+                    '<p style="color:#c0392b;text-align:center;">' + (res.message || 'โหลดแหล่งที่มาไม่สำเร็จ') + '</p>';
             }
-        }).catch(function () { });
+        }).catch(function (err) {
+            document.getElementById('sourceSettings').innerHTML =
+                '<p style="color:#c0392b;text-align:center;">โหลดแหล่งที่มาไม่สำเร็จ: ' + err.message + '</p>';
+        });
     }
 
     function renderSourceSettings(sources) {
