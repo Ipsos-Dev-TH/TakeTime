@@ -2569,6 +2569,27 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        public CreateIntegrationPaymentVoucherRequest MapPayrollToPaymentVoucher(
+            string period, decimal totalSalary, decimal totalSsf, decimal totalWht,
+            DateTime payrollDate, string description, string paymentMethod = null,
+            string employeeName = null, string citizenId = null)
+        {
+            var exp = MapPayrollToExpense(period, totalSalary, totalSsf, totalWht,
+                payrollDate, description, paymentMethod);
+
+            return new CreateIntegrationPaymentVoucherRequest
+            {
+                ExternalRef = exp.Reference,
+                SupplierName = !string.IsNullOrEmpty(employeeName) ? employeeName : exp.SupplierName,
+                SupplierTaxId = citizenId,
+                DocumentDate = payrollDate,
+                PaymentDate = payrollDate,
+                Lines = exp.Lines,
+                IncludeVat = false,
+                Notes = exp.Description
+            };
+        }
+
         /// <summary>
         /// กลับรายการจ่ายเงินเดือน — ต้องสะท้อนสิ่งที่บันทึกไว้จริง:
         ///   DOCUMENT mode: expense บันทึกแค่ DR เงินเดือน + DR ปกส.นายจ้าง / CR เงินสด(เต็มยอด)

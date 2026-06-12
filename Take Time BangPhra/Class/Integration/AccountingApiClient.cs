@@ -1081,6 +1081,107 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        // ══════════════════════════════════════════════
+        // Payroll — Employee Sync + Payroll Run + PND.1
+        // ══════════════════════════════════════════════
+
+        public async Task<ApiResponse<SyncEmployeesResponse>> SyncEmployeesAsync(SyncEmployeesRequest request)
+        {
+            if (request?.Employees == null || request.Employees.Count == 0)
+                throw new ArgumentException("SyncEmployees: at least 1 employee required.");
+            return await PostAsync<SyncEmployeesRequest, ApiResponse<SyncEmployeesResponse>>(
+                $"{CompanyPath}/payroll/employees/sync", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CreatePayrollRunAsync(CreatePayrollRunRequest request)
+        {
+            return await PostAsync<CreatePayrollRunRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CalculatePayrollRunAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/calculate", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> ApprovePayrollRunAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/approve", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> PayPayrollRunAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/pay", null);
+        }
+
+        public async Task<ApiResponse<Pnd1ReportResponse>> GeneratePnd1Async(int year, int month)
+        {
+            return await GetAsync<ApiResponse<Pnd1ReportResponse>>(
+                $"{CompanyPath}/payroll/pnd1/{year}/{month}");
+        }
+
+        public async Task<ApiResponse<Pnd1ReportResponse>> GeneratePnd3Async(int year, int month)
+        {
+            return await GetAsync<ApiResponse<Pnd1ReportResponse>>(
+                $"{CompanyPath}/payroll/pnd3/{year}/{month}");
+        }
+
+        public async Task<byte[]> ExportPnd1FilingAsync(int year, int month)
+        {
+            return await DownloadTaxFilingAsync(
+                $"{CompanyPath}/tax-filing-export/pnd1?year={year}&month={month}", "ExportPnd1");
+        }
+
+        public async Task<byte[]> ExportSso110Async(int year, int month)
+        {
+            return await DownloadTaxFilingAsync(
+                $"{CompanyPath}/tax-filing-export/sso110?year={year}&month={month}", "ExportSso110");
+        }
+
+        public async Task<byte[]> ExportPnd1kAsync(int year)
+        {
+            return await DownloadTaxFilingAsync(
+                $"{CompanyPath}/tax-filing-export/pnd1k?year={year}", "ExportPnd1k");
+        }
+
+        private async Task<byte[]> DownloadTaxFilingAsync(string path, string label)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl)) return null;
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                var startTime = DateTime.Now;
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("GET", path, "", errBody, (int)response.StatusCode, false, durationMs);
+                    if ((int)response.StatusCode == 401 || (int)response.StatusCode == 403)
+                        throw new AuthenticationFailedException(
+                            $"{label} auth failed ({(int)response.StatusCode}): {errBody}");
+                    throw new AccountingApiException(
+                        $"{label} failed: {(int)response.StatusCode}", (int)response.StatusCode, errBody);
+                }
+
+                LogApiCall("GET", path, "", $"[{label} bytes]", (int)response.StatusCode, true, durationMs);
+                return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            }
+        }
+
+        // ══════════════════════════════════════════════
+        // Document PDF generation
+        // ══════════════════════════════════════════════
+
         /// <summary>
         /// สร้าง/ดึง PDF อย่างเป็นทางการของเอกสารจาก NextAcc (เรนเดอร์ตาม template ใน NextAcc)
         /// POST /api/companies/{companyId}/document-templates/generate-pdf
