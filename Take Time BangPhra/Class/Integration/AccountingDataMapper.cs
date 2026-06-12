@@ -2334,6 +2334,38 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// Map ใบสำคัญจ่ายที่ "จ่ายเงินแล้ว" → PV request (/api/integration/payment-vouchers)
+        /// ใบเดียวจบ: NextAcc สร้างเอกสาร PV Approved จ่ายครบ + journal
+        /// (DR ค่าใช้จ่าย+ภาษีซื้อ / CR เงินสด + CR WHT ค้างจ่าย 21916/21917) + 50ทวิ อัตโนมัติ
+        /// — ไม่ผ่านเจ้าหนี้ 21220 จึงไม่เกิดเจ้าหนี้หลอกใน GL
+        /// reuse การสร้างบรรทัดจาก MapVoucherToExpense เพื่อให้ account mapping เหมือนกันทุกกรณี
+        /// </summary>
+        public CreateIntegrationPaymentVoucherRequest MapVoucherToPaymentVoucher(
+            int voucherId, string expenseCategory, decimal amount, string paymentMethod,
+            DateTime voucherDate, string description, string payeeName,
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+        {
+            var exp = MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
+                voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                paymentAccountId, expenseAccountId, expenseLines, documentNumber);
+
+            return new CreateIntegrationPaymentVoucherRequest
+            {
+                ExternalRef = !string.IsNullOrEmpty(exp.ExternalRef) ? exp.ExternalRef : exp.Reference,
+                SupplierExternalId = exp.SupplierExternalId,
+                SupplierName = exp.SupplierName,
+                SupplierTaxId = exp.SupplierTaxId,
+                DocumentDate = exp.DocumentDate,
+                PaymentDate = voucherDate,
+                Lines = exp.Lines,
+                IncludeVat = exp.IncludeVat,
+                Notes = exp.Description
+            };
+        }
+
         // ══════════════════════════════════════════════
         // Integration Credit Note (ใบลดหนี้)
         // ใช้กับ /api/integration/credit-notes

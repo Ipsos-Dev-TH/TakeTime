@@ -872,6 +872,23 @@ namespace Take_Time_BangPhra.Integration
             return WrapDoc(flat, flat?.documentId);
         }
 
+        // Integration Payment Vouchers (/api/integration/payment-vouchers)
+        // ใบสำคัญจ่าย = จ่ายเงินแล้ว — NextAcc สร้าง PV Approved + จ่ายครบ + journal + 50ทวิ ในคำสั่งเดียว
+        // หมายเหตุ: NextAcc ยังไม่ dedupe PV ด้วย ExternalRef (ต่างจาก invoices/credit-notes)
+        // — การกันยิงซ้ำพึ่ง queue dedup ฝั่ง TakeTime เท่านั้น
+        public async Task<ApiResponse<IntegrationDocumentResponse>> CreatePaymentVoucherAsync(CreateIntegrationPaymentVoucherRequest voucher)
+        {
+            if (voucher.Lines == null || voucher.Lines.Count == 0)
+                throw new ArgumentException("Payment voucher must have at least 1 line item.");
+
+            EnsureLinesHaveAccountCode(voucher.Lines);
+            ValidateDocumentLines(voucher.Lines, "PaymentVoucher");
+
+            var flat = await PostAsync<CreateIntegrationPaymentVoucherRequest, IntegrationSyncResponse>(
+                "/api/integration/payment-vouchers", voucher);
+            return WrapDoc(flat, flat?.documentId);
+        }
+
         // Integration Void Document (/api/integration/documents/void)
         public async Task<ApiResponse<IntegrationDocumentResponse>> VoidDocumentViaIntegrationAsync(InboundVoidDocumentRequest request)
         {

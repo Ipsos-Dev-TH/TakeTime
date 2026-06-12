@@ -369,7 +369,12 @@ namespace Take_Time_BangPhra.Integration
         public const int ReceiptVoucher = 14;
         // ฝั่งรายจ่าย
         public const int PurchaseOrder = 7;
+        public const int PurchaseInvoice = 8;
+        public const int Expense = 9;
         public const int PurchaseRequisition = 12;
+        public const int PaymentVoucher = 13;       // ใบสำคัญจ่าย — จ่ายเงินแล้วใบเดียวจบ
+        public const int CertificateInLieu = 15;    // ใบรับรองแทนใบกำกับภาษี
+        public const int GoodsReceiptNote = 16;
     }
 
     public static class NexaaccDocumentStatus
@@ -704,7 +709,33 @@ namespace Take_Time_BangPhra.Integration
         public List<CreateIntegrationExpenseRequest> Expenses { get; set; }
         public List<InboundProductRequest> Products { get; set; }
         public List<CreateIntegrationJournalRequest> Journals { get; set; }
+        public List<CreateIntegrationPaymentVoucherRequest> PaymentVouchers { get; set; }
         public List<InboundCertificateInLieuRequest> CertificatesInLieu { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Integration: Payment Voucher (POST /api/integration/payment-vouchers)
+    // ใบสำคัญจ่าย = จ่ายเงินแล้วใบเดียวจบ — NextAcc สร้างเอกสาร PV สถานะ Approved
+    // จ่ายครบ (BalanceDue=0) + journal (DR ค่าใช้จ่าย+ภาษีซื้อ / CR เงินสด + CR WHT ค้างจ่าย)
+    // + ออกใบ 50 ทวิอัตโนมัติเมื่อมี WHT — ตรงตาม NextAcc InboundPaymentVoucherRequest
+    // ──────────────────────────────────────────────
+
+    public class CreateIntegrationPaymentVoucherRequest
+    {
+        public string ExternalId { get; set; }
+        public string ExternalRef { get; set; }
+        public string SupplierExternalId { get; set; }
+        public string SupplierName { get; set; }
+        public string SupplierTaxId { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public DateTime? PaymentDate { get; set; }
+        public List<IntegrationLineRequest> Lines { get; set; }
+        public decimal? VatRate { get; set; }
+        public string Notes { get; set; }
+        public bool IncludeVat { get; set; }
+        public List<IntegrationAttachment> Attachments { get; set; }
+        public string PreparerName { get; set; }
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     // ──────────────────────────────────────────────

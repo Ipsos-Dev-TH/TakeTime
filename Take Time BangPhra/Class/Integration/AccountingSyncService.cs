@@ -76,10 +76,13 @@ namespace Take_Time_BangPhra.Integration
                 long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
                 if (existing > 0) return existing;
 
-                // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+                // Anti-duplicate: if a COMPLETED entry exists within the window, return it
                 // (prevents form resubmission / browser refresh from creating duplicates)
+                // ยกเว้น edit flow: ถ้ามี VOID_VOUCHER ของเอกสารเดียวกันที่ใหม่กว่า CREATE เดิม
+                // แปลว่าเอกสารเดิมถูก void เพื่อสร้างใหม่ด้วยเลขเดิม — ต้องปล่อยให้สร้าง
+                // ไม่งั้นเอกสารจะโดน void แล้วหายจาก NextAcc ถาวร
                 long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 86400);
-                if (recent > 0)
+                if (recent > 0 && !HasNewerVoidEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber, recent))
                 {
                     _code.Logs(_connectionString, "AccountingSync",
                         $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
@@ -206,10 +209,11 @@ namespace Take_Time_BangPhra.Integration
             long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
 
-            // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+            // Anti-duplicate: if a COMPLETED entry exists within the window, return it
             // (prevents form resubmission / browser refresh from creating duplicates)
+            // ยกเว้น edit flow (void → สร้างใหม่เลขเดิม): ถ้ามี VOID_RECEIPT ที่ใหม่กว่า ต้องปล่อยให้สร้าง
             long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 86400);
-            if (recent > 0)
+            if (recent > 0 && !HasNewerVoidEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber, recent))
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
@@ -914,7 +918,7 @@ namespace Take_Time_BangPhra.Integration
                   WHERE Status IN ('PENDING', 'FAILED')
                     AND (Next_Retry_Date IS NULL OR Next_Retry_Date <= GETDATE())
                     AND Retry_Count < Max_Retries
-                  ORDER BY Created_Date ASC",
+                  ORDER BY Created_Date ASC, ID ASC",
                 new Dictionary<string, object> { { "@batchSize", batchSize } });
 
             if (pending == null || pending.Rows.Count == 0) return 0;
@@ -1300,39 +1304,80 @@ namespace Take_Time_BangPhra.Integration
 
             if (_config.IsVoucherDocumentMode)
             {
-                var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
-                    voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
-                    paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                    expenseLines: expenseLines, documentNumber: docNumber);
-                expense.Attachments = attachments;
-                if (isSalaryVoucher)
-                    expense.Sensitivity = "Payroll";
-                ApplyContactToExpense(expense, supplierContact);
-                ApplyPreparerSignature(expense, docNumber);   // ส่งลายเซ็นผู้จัดทำไป NextAcc
-
-                ApiResponse<IntegrationDocumentResponse> result;
-                var filePaths = ExtractFilePaths(attachments);
-                if (filePaths != null && filePaths.Count > 0)
-                    result = await _apiClient.CreateExpenseMultipartAsync(expense, filePaths);
-                else
-                    result = await _apiClient.CreateExpenseAsync(expense);
-
-                Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
-                nexaaccId = expDocId.ToString();
-                nexaaccDocNumber = result?.data?.DocumentNumber;
-                nexaaccDocType = "EXPENSE";
-                _lastDocNumber = nexaaccDocNumber;
-                _lastDocType = nexaaccDocType;
-
-                // Auto-generate WHT certificate if WHT was applied
-                if (whtAmount > 0)
-                    await TryAutoGenerateWhtCertAsync(expDocId, docNumber);
-
-                // Auto-record payment in NextAcc: Cash/Bank + no credit
-                if (autoRecordPayment && !isCredit)
+                // ใบสำคัญจ่ายที่จ่ายเงินแล้ว → POST /api/integration/payment-vouchers ใบเดียวจบ
+                // NextAcc สร้าง PV Approved + จ่ายครบ + journal (ไม่ผ่านเจ้าหนี้ 21220 — ไม่มีเจ้าหนี้หลอก)
+                // + WHT 21916/21917 ตาม TaxId + ออก 50ทวิ อัตโนมัติ
+                // ยกเว้น: ตั้งหนี้เครดิต (isCredit) ใช้ expense → payment สองจังหวะตามเดิม
+                //        และใบเงินเดือน (ต้อง Sensitivity=Payroll ซึ่ง PV request ยังไม่รองรับ)
+                bool pvCreated = false;
+                if (!isCredit && !isSalaryVoucher)
                 {
-                    await AutoRecordPaymentForVoucher(expDocId, amount, whtAmount, voucherDate,
-                        paymentMethod, payeeName, docNumber, paymentAccountId);
+                    try
+                    {
+                        var pv = _mapper.MapVoucherToPaymentVoucher(voucherId, expenseCategory, amount, paymentMethod,
+                            voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                            paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
+                            expenseLines: expenseLines, documentNumber: docNumber);
+                        pv.Attachments = attachments;   // PV endpoint รับ base64 attachments ใน JSON
+                        ApplyContactToPaymentVoucher(pv, supplierContact);
+                        ApplyPreparerSignature(pv, docNumber);
+
+                        var pvResult = await _apiClient.CreatePaymentVoucherAsync(pv);
+                        Guid pvDocId = RequireValidDocId(pvResult?.data?.Id, $"CreatePaymentVoucher doc={docNumber}");
+                        nexaaccId = pvDocId.ToString();
+                        nexaaccDocNumber = pvResult?.data?.DocumentNumber;
+                        nexaaccDocType = "PAYMENT_VOUCHER";
+                        _lastDocNumber = nexaaccDocNumber;
+                        _lastDocType = nexaaccDocType;
+                        pvCreated = true;
+                        // ไม่ต้อง TryAutoGenerateWhtCertAsync / AutoRecordPaymentForVoucher —
+                        // NextAcc จัดการครบใน ProcessPaymentVoucherAsync แล้ว
+                    }
+                    catch (AccountingApiException pvEx) when (pvEx.StatusCode == 404)
+                    {
+                        // NextAcc deployment เก่า ยังไม่มี /payment-vouchers → ใช้ expense + payment ตามเดิม
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoucherJournal: /payment-vouchers returned 404 (NextAcc เก่า) — fallback expense+payment doc={docNumber}",
+                            "SYSTEM");
+                    }
+                }
+
+                if (!pvCreated)
+                {
+                    var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
+                        voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                        paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
+                        expenseLines: expenseLines, documentNumber: docNumber);
+                    expense.Attachments = attachments;
+                    if (isSalaryVoucher)
+                        expense.Sensitivity = "Payroll";
+                    ApplyContactToExpense(expense, supplierContact);
+                    ApplyPreparerSignature(expense, docNumber);   // ส่งลายเซ็นผู้จัดทำไป NextAcc
+
+                    ApiResponse<IntegrationDocumentResponse> result;
+                    var filePaths = ExtractFilePaths(attachments);
+                    if (filePaths != null && filePaths.Count > 0)
+                        result = await _apiClient.CreateExpenseMultipartAsync(expense, filePaths);
+                    else
+                        result = await _apiClient.CreateExpenseAsync(expense);
+
+                    Guid expDocId = RequireValidDocId(result?.data?.Id, $"CreateExpense (voucher) doc={docNumber}");
+                    nexaaccId = expDocId.ToString();
+                    nexaaccDocNumber = result?.data?.DocumentNumber;
+                    nexaaccDocType = "EXPENSE";
+                    _lastDocNumber = nexaaccDocNumber;
+                    _lastDocType = nexaaccDocType;
+
+                    // Auto-generate WHT certificate if WHT was applied
+                    if (whtAmount > 0)
+                        await TryAutoGenerateWhtCertAsync(expDocId, docNumber);
+
+                    // Auto-record payment in NextAcc: Cash/Bank + no credit
+                    if (autoRecordPayment && !isCredit)
+                    {
+                        await AutoRecordPaymentForVoucher(expDocId, amount, whtAmount, voucherDate,
+                            paymentMethod, payeeName, docNumber, paymentAccountId);
+                    }
                 }
             }
             else
@@ -3164,6 +3209,14 @@ namespace Take_Time_BangPhra.Integration
             if (!string.IsNullOrEmpty(info.TaxId)) expense.SupplierTaxId = info.TaxId;
         }
 
+        private static void ApplyContactToPaymentVoucher(CreateIntegrationPaymentVoucherRequest voucher, ContactInfo info)
+        {
+            if (voucher == null || info == null) return;
+            voucher.SupplierExternalId = info.ExternalId;
+            if (string.IsNullOrEmpty(voucher.SupplierName)) voucher.SupplierName = info.Name;
+            if (!string.IsNullOrEmpty(info.TaxId)) voucher.SupplierTaxId = info.TaxId;
+        }
+
         /// <summary>
         /// แนบลายเซ็น + ชื่อ "ผู้จัดทำ" ลงใน request ที่จะส่งไป NextAcc.
         /// ดึงผู้จัดทำจาก Account_Payment.Created_By_ID ของใบสำคัญจ่าย → Admin (ชื่อ + SignaturePath)
@@ -3172,6 +3225,23 @@ namespace Take_Time_BangPhra.Integration
         private void ApplyPreparerSignature(CreateIntegrationExpenseRequest expense, string documentNumber)
         {
             if (expense == null || string.IsNullOrEmpty(documentNumber)) return;
+            var info = LookupPreparerInfo(documentNumber);
+            if (info == null) return;
+            if (!string.IsNullOrEmpty(info.Value.name)) expense.PreparerName = info.Value.name;
+            if (!string.IsNullOrEmpty(info.Value.dataUri)) expense.PreparerSignatureBase64 = info.Value.dataUri;
+        }
+
+        private void ApplyPreparerSignature(CreateIntegrationPaymentVoucherRequest voucher, string documentNumber)
+        {
+            if (voucher == null || string.IsNullOrEmpty(documentNumber)) return;
+            var info = LookupPreparerInfo(documentNumber);
+            if (info == null) return;
+            if (!string.IsNullOrEmpty(info.Value.name)) voucher.PreparerName = info.Value.name;
+            if (!string.IsNullOrEmpty(info.Value.dataUri)) voucher.PreparerSignatureBase64 = info.Value.dataUri;
+        }
+
+        private (string name, string dataUri)? LookupPreparerInfo(string documentNumber)
+        {
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
@@ -3180,25 +3250,25 @@ namespace Take_Time_BangPhra.Integration
                       LEFT JOIN Admin a ON ap.Created_By_ID = a.ID
                       WHERE ap.ID = @ID",
                     new Dictionary<string, object> { { "@ID", documentNumber } });
-                if (dt == null || dt.Rows.Count == 0 || dt.Rows[0]["AdminId"] == DBNull.Value) return;
+                if (dt == null || dt.Rows.Count == 0 || dt.Rows[0]["AdminId"] == DBNull.Value) return null;
 
                 var row = dt.Rows[0];
                 string first = row["FirstName"] == DBNull.Value ? "" : row["FirstName"].ToString();
                 string last = row["LastName"] == DBNull.Value ? "" : row["LastName"].ToString();
                 string name = (first + " " + last).Trim();
-                if (!string.IsNullOrEmpty(name)) expense.PreparerName = name;
 
                 short adminId = Convert.ToInt16(row["AdminId"]);
                 string dataUri = LoadSignatureDataUri(adminId);
-                if (!string.IsNullOrEmpty(dataUri)) expense.PreparerSignatureBase64 = dataUri;
 
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ApplyPreparerSignature: doc={documentNumber} preparer='{name}' signature={(dataUri != null ? "แนบแล้ว" : "ไม่พบไฟล์ลายเซ็น")}", "SYSTEM");
+                return (name, dataUri);
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ApplyPreparerSignature: doc={documentNumber} ล้มเหลว: {ex.Message}", "SYSTEM");
+                return null;
             }
         }
 
@@ -3602,6 +3672,33 @@ namespace Take_Time_BangPhra.Integration
                 return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
             }
             catch { return -1; }
+        }
+
+        /// <summary>
+        /// มี void entry ของเอกสารเดียวกันที่ enqueue หลัง queue entry ที่ระบุหรือไม่ (ทุกสถานะ).
+        /// ใช้แยก "edit flow (void → สร้างใหม่เลขเดิม)" ออกจาก "submit ซ้ำ" ใน anti-duplicate check —
+        /// ถ้ามี void ที่ใหม่กว่า แปลว่าเอกสารบน NextAcc ถูก/กำลังถูกยกเลิก ต้องปล่อยให้สร้างใหม่
+        /// </summary>
+        private bool HasNewerVoidEntry(string entityType, string voidActionType, string payloadKey, string payloadValue, long afterQueueId)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND ID > @afterId
+                        AND Payload LIKE @pattern",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", voidActionType },
+                        { "@afterId", afterQueueId },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0;
+            }
+            catch { return false; }
         }
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
