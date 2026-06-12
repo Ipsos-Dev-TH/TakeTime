@@ -76,10 +76,13 @@ namespace Take_Time_BangPhra.Integration
                 long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
                 if (existing > 0) return existing;
 
-                // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+                // Anti-duplicate: if a COMPLETED entry exists within the window, return it
                 // (prevents form resubmission / browser refresh from creating duplicates)
+                // ยกเว้น edit flow: ถ้ามี VOID_VOUCHER ของเอกสารเดียวกันที่ใหม่กว่า CREATE เดิม
+                // แปลว่าเอกสารเดิมถูก void เพื่อสร้างใหม่ด้วยเลขเดิม — ต้องปล่อยให้สร้าง
+                // ไม่งั้นเอกสารจะโดน void แล้วหายจาก NextAcc ถาวร
                 long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 86400);
-                if (recent > 0)
+                if (recent > 0 && !HasNewerVoidEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber, recent))
                 {
                     _code.Logs(_connectionString, "AccountingSync",
                         $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
@@ -206,10 +209,11 @@ namespace Take_Time_BangPhra.Integration
             long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
 
-            // Anti-duplicate: if a COMPLETED entry exists within the last 60s, return it
+            // Anti-duplicate: if a COMPLETED entry exists within the window, return it
             // (prevents form resubmission / browser refresh from creating duplicates)
+            // ยกเว้น edit flow (void → สร้างใหม่เลขเดิม): ถ้ามี VOID_RECEIPT ที่ใหม่กว่า ต้องปล่อยให้สร้าง
             long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 86400);
-            if (recent > 0)
+            if (recent > 0 && !HasNewerVoidEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber, recent))
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
@@ -914,7 +918,7 @@ namespace Take_Time_BangPhra.Integration
                   WHERE Status IN ('PENDING', 'FAILED')
                     AND (Next_Retry_Date IS NULL OR Next_Retry_Date <= GETDATE())
                     AND Retry_Count < Max_Retries
-                  ORDER BY Created_Date ASC",
+                  ORDER BY Created_Date ASC, ID ASC",
                 new Dictionary<string, object> { { "@batchSize", batchSize } });
 
             if (pending == null || pending.Rows.Count == 0) return 0;
@@ -3668,6 +3672,33 @@ namespace Take_Time_BangPhra.Integration
                 return dt?.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0]["ID"]) : -1;
             }
             catch { return -1; }
+        }
+
+        /// <summary>
+        /// มี void entry ของเอกสารเดียวกันที่ enqueue หลัง queue entry ที่ระบุหรือไม่ (ทุกสถานะ).
+        /// ใช้แยก "edit flow (void → สร้างใหม่เลขเดิม)" ออกจาก "submit ซ้ำ" ใน anti-duplicate check —
+        /// ถ้ามี void ที่ใหม่กว่า แปลว่าเอกสารบน NextAcc ถูก/กำลังถูกยกเลิก ต้องปล่อยให้สร้างใหม่
+        /// </summary>
+        private bool HasNewerVoidEntry(string entityType, string voidActionType, string payloadKey, string payloadValue, long afterQueueId)
+        {
+            if (string.IsNullOrEmpty(payloadValue)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND ID > @afterId
+                        AND Payload LIKE @pattern",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", voidActionType },
+                        { "@afterId", afterQueueId },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                return dt?.Rows.Count > 0;
+            }
+            catch { return false; }
         }
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
