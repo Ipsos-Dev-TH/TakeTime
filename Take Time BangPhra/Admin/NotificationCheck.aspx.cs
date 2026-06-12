@@ -8,12 +8,26 @@ namespace Take_Time_BangPhra.Admin
 {
     public partial class NotificationCheck : Page
     {
+        protected override void OnInit(EventArgs e)
+        {
+            base.OnInit(e);
+            ViewStateUserKey = Session.SessionID;
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             Response.Clear();
             Response.ContentType = "application/json";
             Response.Cache.SetCacheability(HttpCacheability.NoCache);
-            Response.AddHeader("Access-Control-Allow-Origin", "*");
+
+            // Admin-only: leaks guest names + chat content otherwise
+            if (Session["permission"]?.ToString() != "True")
+            {
+                Response.StatusCode = 401;
+                Response.Write("{\"error\":\"unauthorized\"}");
+                FlushAndComplete();
+                return;
+            }
 
             string action = Request.QueryString["action"];
             if (action == null) action = "";
@@ -42,6 +56,11 @@ namespace Take_Time_BangPhra.Admin
                 Response.Write("{\"error\":\"" + EscapeJson(ex.Message) + "\"}");
             }
 
+            FlushAndComplete();
+        }
+
+        private void FlushAndComplete()
+        {
             try
             {
                 if (Response.IsClientConnected)

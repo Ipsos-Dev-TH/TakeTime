@@ -11,7 +11,20 @@ namespace Take_Time_BangPhra.Admin
     {
         protected void Page_Load(object sender, EventArgs e)
         {
-
+            // Owner only — เมนูเข้าหน้าแก้ไขข้อมูลดิบ (Admin/Business_Info/Customer)
+            try
+            {
+                if (Session["permission"]?.ToString() != "True" || Session["User"]?.ToString() != "Owner")
+                {
+                    Response.Redirect("~/Admin/Login", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                }
+            }
+            catch
+            {
+                Response.Redirect("~/Admin/Login", false);
+                Context.ApplicationInstance.CompleteRequest();
+            }
         }
 
         protected void Button1_Click(object sender, EventArgs e)

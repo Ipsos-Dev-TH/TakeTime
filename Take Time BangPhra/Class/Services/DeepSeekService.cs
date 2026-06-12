@@ -101,6 +101,16 @@ END", null);
                     _schemaEnsured = true;
                 }
                 catch { /* keep _schemaEnsured false so a later call retries */ }
+
+                // Retention: เก็บประวัติแชท/usage log 90 วัน — กันตารางโตไม่จำกัด
+                // (รันครั้งเดียวต่อ app domain ตอน schema ensure)
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"DELETE FROM AI_Chat_History WHERE Created_Date < DATEADD(DAY, -90, GETDATE());
+                          DELETE FROM AI_Usage_Log WHERE RequestDate < DATEADD(DAY, -180, GETDATE());", null);
+                }
+                catch { }
             }
         }
 
@@ -122,11 +132,14 @@ END", null);
 
         public void SetConfig(string key, string value)
         {
+            // UPDLOCK+HOLDLOCK: atomic upsert — กัน lost update เมื่อหลาย thread เซ็ต key เดียวกัน
             _code.DatabaseInsertSafe(_connectionString,
-                @"IF EXISTS (SELECT 1 FROM AI_Integration_Config WHERE ConfigKey = @Key)
-                    UPDATE AI_Integration_Config SET ConfigValue = @Value, Updated_Date = GETDATE() WHERE ConfigKey = @Key
-                  ELSE
-                    INSERT INTO AI_Integration_Config (ConfigKey, ConfigValue) VALUES (@Key, @Value)",
+                @"BEGIN TRAN;
+                  UPDATE AI_Integration_Config WITH (UPDLOCK, HOLDLOCK)
+                  SET ConfigValue = @Value, Updated_Date = GETDATE() WHERE ConfigKey = @Key;
+                  IF @@ROWCOUNT = 0
+                    INSERT INTO AI_Integration_Config (ConfigKey, ConfigValue) VALUES (@Key, @Value);
+                  COMMIT TRAN;",
                 new Dictionary<string, object> { { "@Key", key }, { "@Value", value } });
         }
 
@@ -152,7 +165,9 @@ END", null);
 
         #region API Communication
 
-        public ChatResponse SendMessage(string userMessage, string sessionKey, List<ChatMessage> history = null)
+        /// <param name="systemPromptOverride">ถ้าระบุ จะใช้แทน AI_SystemPrompt จาก config —
+        /// ใช้ส่ง prompt เสริม (booking context ฯลฯ) แบบ per-request โดยไม่แตะ config กลาง</param>
+        public ChatResponse SendMessage(string userMessage, string sessionKey, List<ChatMessage> history = null, string systemPromptOverride = null)
         {
             var sw = Stopwatch.StartNew();
             string model = GetConfig("AI_Model", "deepseek-chat");
@@ -168,7 +183,9 @@ END", null);
                 int maxTokens = int.Parse(GetConfig("AI_MaxTokens", "2048"));
                 double temperature = double.Parse(GetConfig("AI_Temperature", "0.7"));
                 int timeoutSec = int.Parse(GetConfig("AI_TimeoutSec", "30"));
-                string systemPrompt = GetConfig("AI_SystemPrompt", "You are a helpful assistant.");
+                string systemPrompt = !string.IsNullOrEmpty(systemPromptOverride)
+                    ? systemPromptOverride
+                    : GetConfig("AI_SystemPrompt", "You are a helpful assistant.");
                 int maxHistory = int.Parse(GetConfig("AI_MaxHistory", "20"));
 
                 var messages = new List<object>();
@@ -393,14 +410,43 @@ END", null);
 
         #region Helpers
 
+        // DPAPI (machine scope) — เข้ารหัสจริง ผูกกับเครื่อง server
+        // prefix "dpapi:" แยกจากค่าเก่าที่เป็น base64 เปล่าๆ (อ่านย้อนหลังได้)
+        private const string DpapiPrefix = "dpapi:";
+        private static readonly byte[] _dpapiEntropy = Encoding.UTF8.GetBytes("TakeTime.AI.ApiKey.v1");
+
         private string EncryptKey(string plainKey)
         {
-            return Convert.ToBase64String(Encoding.UTF8.GetBytes(plainKey));
+            try
+            {
+                byte[] protectedBytes = System.Security.Cryptography.ProtectedData.Protect(
+                    Encoding.UTF8.GetBytes(plainKey), _dpapiEntropy,
+                    System.Security.Cryptography.DataProtectionScope.LocalMachine);
+                return DpapiPrefix + Convert.ToBase64String(protectedBytes);
+            }
+            catch
+            {
+                // DPAPI ใช้ไม่ได้ (เช่น non-Windows) → fallback base64 เดิม
+                return Convert.ToBase64String(Encoding.UTF8.GetBytes(plainKey));
+            }
         }
 
         private string DecryptKey(string encryptedKey)
         {
-            try { return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedKey)); }
+            if (string.IsNullOrEmpty(encryptedKey)) return encryptedKey;
+            try
+            {
+                if (encryptedKey.StartsWith(DpapiPrefix))
+                {
+                    byte[] protectedBytes = Convert.FromBase64String(encryptedKey.Substring(DpapiPrefix.Length));
+                    byte[] plain = System.Security.Cryptography.ProtectedData.Unprotect(
+                        protectedBytes, _dpapiEntropy,
+                        System.Security.Cryptography.DataProtectionScope.LocalMachine);
+                    return Encoding.UTF8.GetString(plain);
+                }
+                // ค่าเก่า: base64 เปล่า — อ่านได้ และจะถูก upgrade เป็น DPAPI ตอนบันทึกครั้งถัดไป
+                return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedKey));
+            }
             catch { return encryptedKey; }
         }
 

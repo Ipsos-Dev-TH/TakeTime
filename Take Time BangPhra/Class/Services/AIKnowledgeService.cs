@@ -586,8 +586,45 @@ END", null);
         {
             try
             {
+                // ── Guardrails: AI-initiated bookings มาจากข้อความลูกค้า (untrusted) ──
+                phone = new string((phone ?? "").Where(char.IsDigit).ToArray());
+                if (phone.Length < 9 || phone.Length > 15)
+                    return new Dictionary<string, object> { { "success", false }, { "error", "เบอร์โทรไม่ถูกต้อง" } };
+                if (string.IsNullOrWhiteSpace(name) || name.Length > 100)
+                    return new Dictionary<string, object> { { "success", false }, { "error", "ชื่อผู้จองไม่ถูกต้อง" } };
+                if (checkIn.Date < DateTime.Today)
+                    return new Dictionary<string, object> { { "success", false }, { "error", "วันเช็คอินย้อนหลังไม่ได้" } };
+                if (checkIn.Date > DateTime.Today.AddYears(1))
+                    return new Dictionary<string, object> { { "success", false }, { "error", "วันเช็คอินไกลเกิน 1 ปี" } };
+                if (people < 1 || people > 50)
+                    return new Dictionary<string, object> { { "success", false }, { "error", "จำนวนผู้เข้าพักไม่ถูกต้อง" } };
+
                 int nights = (checkOut - checkIn).Days;
                 if (nights <= 0) return new Dictionary<string, object> { { "success", false }, { "error", "วันที่ไม่ถูกต้อง" } };
+                if (nights > 30)
+                    return new Dictionary<string, object> { { "success", false }, { "error", "จองเกิน 30 คืนต่อครั้งไม่ได้ กรุณาติดต่อพนักงาน" } };
+
+                // Rate limit: 1 การจองค้างยืนยันต่อบทสนทนาต่อชั่วโมง + เบอร์เดียวกันสูงสุด 3 รายการค้าง
+                try
+                {
+                    DataTable dtRate = _code.DatabaseQuerySafe(_connStr,
+                        @"SELECT
+                            (SELECT COUNT(*) FROM AI_Booking_Actions
+                             WHERE ConversationID = @ConvId AND ActionType = 'CREATE' AND Status = 'PENDING'
+                               AND Created_Date > DATEADD(HOUR, -1, GETDATE())) AS ConvCount,
+                            (SELECT COUNT(*) FROM AI_Booking_Actions ba
+                             JOIN Reservation r ON r.ID = ba.ReservationID
+                             WHERE r.Customer_MobilePhone = @Phone AND ba.Status = 'PENDING') AS PhoneCount",
+                        new Dictionary<string, object> { { "@ConvId", conversationId }, { "@Phone", phone } });
+                    if (dtRate.Rows.Count > 0)
+                    {
+                        if (Convert.ToInt32(dtRate.Rows[0]["ConvCount"]) >= 1)
+                            return new Dictionary<string, object> { { "success", false }, { "error", "มีการจองรอยืนยันอยู่แล้ว กรุณารอพนักงานตรวจสอบก่อนนะคะ" } };
+                        if (Convert.ToInt32(dtRate.Rows[0]["PhoneCount"]) >= 3)
+                            return new Dictionary<string, object> { { "success", false }, { "error", "เบอร์นี้มีการจองรอยืนยันหลายรายการ กรุณาติดต่อพนักงานค่ะ" } };
+                    }
+                }
+                catch { /* rate-limit query ล้มเหลว → ปล่อยผ่าน ไม่บล็อกลูกค้าจริง */ }
 
                 DataTable dtRoom = _code.DatabaseQuerySafe(_connStr,
                     "SELECT AccomName, Price, People, LimitWithPeople FROM Accommodation WHERE ID = @Id AND Status = 1",
@@ -692,20 +729,18 @@ END", null);
                 if (!string.IsNullOrEmpty(kbContext))
                     systemContext += "\n\n=== ข้อมูลที่เกี่ยวข้อง ===\n" + kbContext;
 
-                string originalPrompt = deepSeek.GetAllConfig()
-                    .ContainsKey("AI_SystemPrompt") ? deepSeek.GetAllConfig()["AI_SystemPrompt"] : "";
+                var cfg = deepSeek.GetAllConfig();
+                string originalPrompt = cfg.ContainsKey("AI_SystemPrompt") ? cfg["AI_SystemPrompt"] : "";
 
                 string enhancedPrompt = originalPrompt + systemContext;
                 if (IsFeatureEnabled("BOOKING_CREATE"))
                     enhancedPrompt += BOOKING_CREATE_INSTRUCTION;
 
-                deepSeek.SetConfig("AI_SystemPrompt", enhancedPrompt);
-
+                // ส่ง prompt เสริมแบบ per-request — ห้าม SetConfig เด็ดขาด เพราะเป็น config กลาง
+                // (แชทพร้อมกันจะ prompt ปนกัน และถ้า exception ระหว่างทาง prompt จะเสียถาวร)
                 string sessionKey = "omni_" + conversationId + "_" + channelCode;
                 var history = deepSeek.GetHistory(sessionKey);
-                var result = deepSeek.SendMessage(userMessage, sessionKey, history);
-
-                deepSeek.SetConfig("AI_SystemPrompt", originalPrompt);
+                var result = deepSeek.SendMessage(userMessage, sessionKey, history, enhancedPrompt);
 
                 if (result.Success)
                 {

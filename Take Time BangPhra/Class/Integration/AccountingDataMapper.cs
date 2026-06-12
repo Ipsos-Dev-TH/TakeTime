@@ -561,9 +561,13 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null,
+            bool isCredit = false)
         {
-            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            // ซื้อเครดิต → CR เจ้าหนี้การค้า (ยังไม่จ่ายเงิน) แทน CR เงินสด/ธนาคาร
+            var cashAccountId = isCredit
+                ? GetAccountId("ACCOUNTS_PAYABLE")
+                : (ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod));
             var lines = new List<JournalEntryLineRequest>();
 
             bool hasMultipleLines = expenseLines != null && expenseLines.Count > 0;
@@ -658,14 +662,14 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
-            // CR: เงินสด/ธนาคาร (ยอดจ่ายจริง = DR total - WHT)
+            // CR: เงินสด/ธนาคาร (จ่ายสด) หรือ เจ้าหนี้การค้า (เครดิต) = DR total - WHT
             decimal cashPaid = totalDebit - whtAmount;
             lines.Add(new JournalEntryLineRequest
             {
                 AccountId = cashAccountId,
                 DebitAmount = 0,
                 CreditAmount = cashPaid,
-                Description = $"จ่ายเงิน - {paymentMethod}",
+                Description = isCredit ? $"ตั้งหนี้เจ้าหนี้ - {payeeName}" : $"จ่ายเงิน - {paymentMethod}",
             });
 
             // DR=CR validation before returning
@@ -683,9 +687,48 @@ namespace Take_Time_BangPhra.Integration
             return new CreateJournalEntryRequest
             {
                 EntryDate = voucherDate,
-                JournalType = NexaaccJournalType.CashPayments,
-                Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
+                // เครดิต = ตั้งหนี้ → สมุดรายวันซื้อ / จ่ายสด → สมุดรายวันจ่าย
+                JournalType = isCredit ? NexaaccJournalType.Purchase : NexaaccJournalType.CashPayments,
+                Description = (isCredit ? $"ตั้งหนี้ใบสำคัญจ่าย {refStr}" : $"ใบสำคัญจ่าย {refStr}") + $" - {description} ({payeeName})",
                 Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// Map a credit voucher payment to journal: DR Accounts Payable, CR Cash/Bank
+        /// </summary>
+        public CreateJournalEntryRequest MapCreditPaymentToJournal(string originalDocNumber, decimal amount,
+            string paymentMethod, DateTime paymentDate, string vendorName,
+            string paymentAccountId = null)
+        {
+            var lines = new List<JournalEntryLineRequest>();
+
+            // DR: Accounts Payable (ลดหนี้)
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = GetAccountId("ACCOUNTS_PAYABLE"),
+                DebitAmount = amount,
+                CreditAmount = 0,
+                Description = $"ชำระหนี้ - {vendorName}"
+            });
+
+            // CR: Cash or Bank (จ่ายเงิน)
+            Guid cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = amount,
+                Description = $"จ่ายชำระ {originalDocNumber} - {paymentMethod}"
+            });
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = paymentDate,
+                JournalType = NexaaccJournalType.CashPayments,
+                Description = $"ชำระหนี้ใบสำคัญจ่าย {originalDocNumber}",
+                Reference = originalDocNumber,
                 Lines = lines
             };
         }
