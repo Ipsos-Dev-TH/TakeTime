@@ -874,13 +874,15 @@ public class PayrollService
 
                     transaction.Commit();
 
-                    // Auto-sync voucher to accounting (using payroll-specific journal with SSF/WHT breakdown)
+                    // Auto-sync voucher to accounting
+                    // DOCUMENT mode → ใช้ระบบเงินเดือน NextAcc (sync ทั้งงวดใน GenerateAllVouchersForPeriod)
+                    // JOURNAL_ONLY mode → โพสต์ journal per employee (เดิม)
                     try
                     {
                         var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                        if (acctConfig.IsConfigured && acctConfig.Enabled)
+                        if (acctConfig.IsConfigured && acctConfig.Enabled && !acctConfig.IsPayrollDocumentMode)
                         {
-                            if (acctConfig.IsDocumentMode || (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0"))
+                            if (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0")
                             {
                                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
                                 sync.EnqueuePayrollJournal(
@@ -956,6 +958,26 @@ public class PayrollService
                     successCount++;
                 else
                     failCount++;
+            }
+        }
+
+        // DOCUMENT mode: sync ไประบบเงินเดือน NextAcc (Sync พนักงาน → PayrollRun → Calculate → Approve → Pay)
+        // จัดการ GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip ฝั่ง NextAcc ทั้งหมด
+        if (successCount > 0)
+        {
+            try
+            {
+                var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                if (acctConfig.IsConfigured && acctConfig.Enabled && acctConfig.IsPayrollDocumentMode)
+                {
+                    var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                    sync.EnqueuePayrollRunSync(payrollPeriodId);
+                }
+            }
+            catch (Exception accEx)
+            {
+                try { new code().Logs(connectionString, "Accounting Sync",
+                    $"PayrollRun sync error: periodId={payrollPeriodId} {accEx.Message}", "SYSTEM"); } catch { }
             }
         }
 

@@ -1235,4 +1235,75 @@ namespace Take_Time_BangPhra.Integration
             get { return !string.IsNullOrEmpty(PdfRelativeUrl) ? PdfRelativeUrl : DeepLinkUrl; }
         }
     }
+
+    // ══════════════════════════════════════════════
+    // Payroll System (NextAcc /api/companies/{companyId}/payroll/*)
+    // Sync พนักงาน → สร้าง PayrollRun → Calculate → Approve → Pay
+    // ══════════════════════════════════════════════
+
+    public class PayrollEmployeeSyncRow
+    {
+        public string ExternalId { get; set; }
+        public string ExternalSystem { get; set; }
+        public string EmployeeCode { get; set; }
+        public string TitleTh { get; set; }
+        public string FirstNameTh { get; set; }
+        public string LastNameTh { get; set; }
+        public string CitizenId { get; set; }
+        public DateTime StartDate { get; set; }
+        public decimal BaseSalary { get; set; }
+        public string SalaryType { get; set; }
+        public string Department { get; set; }
+        public string Position { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string BankName { get; set; }
+        public string BankAccountNumber { get; set; }
+        public string BankAccountName { get; set; }
+        public bool IsSubjectToSocialSecurity { get; set; }
+        public bool? IsActive { get; set; }
+    }
+
+    public class PayrollSyncEmployeesRequest
+    {
+        public string ExternalSystem { get; set; }
+        public List<PayrollEmployeeSyncRow> Rows { get; set; }
+    }
+
+    public class PayrollSyncEmployeesResponse
+    {
+        public int Inserted { get; set; }
+        public int Updated { get; set; }
+        public int Skipped { get; set; }
+        public List<string> Errors { get; set; }
+    }
+
+    public class PayrollCreateRunRequest
+    {
+        public string Name { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public DateTime PayDate { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+    }
+
+    public class PayrollRunResponse
+    {
+        public Guid Id { get; set; }
+        public string PayrollNumber { get; set; }
+        public string Name { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public DateTime PayDate { get; set; }
+        public string Status { get; set; }
+        public decimal TotalGrossSalary { get; set; }
+        public decimal TotalDeductions { get; set; }
+        public decimal TotalNetPay { get; set; }
+        public decimal TotalWithholdingTax { get; set; }
+        public decimal TotalSocialSecurityEmployee { get; set; }
+        public decimal TotalSocialSecurityEmployer { get; set; }
+        public int EmployeeCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
 }

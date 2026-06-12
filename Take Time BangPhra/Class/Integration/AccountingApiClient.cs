@@ -1165,6 +1165,46 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Payroll System (/api/companies/{companyId}/payroll/*)
+        // ใช้ X-Api-Key (acc_) — Integration Key (int_) ใช้ไม่ได้
+        // ──────────────────────────────────────────────
+
+        public async Task<ApiResponse<PayrollSyncEmployeesResponse>> SyncPayrollEmployeesAsync(PayrollSyncEmployeesRequest request)
+        {
+            return await PostAsync<PayrollSyncEmployeesRequest, ApiResponse<PayrollSyncEmployeesResponse>>(
+                $"{CompanyPath}/payroll/employees/sync", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CreatePayrollRunAsync(PayrollCreateRunRequest request)
+        {
+            return await PostAsync<PayrollCreateRunRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CalculatePayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/calculate", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> ApprovePayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/approve", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> PayPayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/pay", null);
+        }
+
+        public async Task VoidPayrollRunAsync(Guid runId)
+        {
+            await PostActionAsync($"{CompanyPath}/payroll/runs/{runId}/void");
+        }
+
+        // ──────────────────────────────────────────────
         // File Attachments (FileAttachmentController)
         // POST /api/companies/{companyId}/attachments/{entityType}/{entityId}
         // ──────────────────────────────────────────────
