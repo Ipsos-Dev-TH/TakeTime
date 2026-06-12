@@ -551,6 +551,126 @@ namespace Take_Time_BangPhra.Admin.Payroll
             }
         }
 
+        /// <summary>
+        /// Export ใบแนบ ภ.ง.ด.1 (แบบยื่นภาษีเงินได้หัก ณ ที่จ่าย เงินเดือน ม.40(1)) รายเดือน
+        /// — รวมพนักงานทุกคนที่มีเงินได้ในงวด (ภาษีที่หักอาจเป็น 0 ได้ถ้าเงินได้ไม่ถึงเกณฑ์)
+        /// — พนักงานประจำไม่ต้องออก 50ทวิ รายเดือน, ออกปีละครั้ง/ตอนลาออก
+        /// </summary>
+        protected void btnExportPND1_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId) || currentPayrollPeriodId <= 0)
+                {
+                    ShowMessage("ไม่พบรอบเงินเดือน", "error");
+                    return;
+                }
+
+                short year = Convert.ToInt16(ddlYear.SelectedValue);
+                byte month = Convert.ToByte(ddlMonth.SelectedValue);
+
+                DataTable dtSource = GetPayrollRecordsForSSExport(currentPayrollPeriodId);
+                if (dtSource == null || dtSource.Rows.Count == 0)
+                {
+                    ShowMessage("ไม่มีข้อมูลสำหรับ Export", "error");
+                    return;
+                }
+
+                // วันที่จ่ายของงวด (พ.ศ.)
+                DateTime payDate = GetPayrollPeriodPayDate(currentPayrollPeriodId, year, month);
+                string payDateTh = $"{payDate:dd/MM/}{payDate.Year + 543}";
+
+                // คอลัมน์ใบแนบ ภ.ง.ด.1 ตามรูปแบบกรมสรรพากร
+                DataTable dtExport = new DataTable();
+                dtExport.Columns.Add("ลำดับที่", typeof(int));
+                dtExport.Columns.Add("เลขประจำตัวผู้เสียภาษีอากร(13หลัก)", typeof(string));
+                dtExport.Columns.Add("คำนำหน้าชื่อ", typeof(string));
+                dtExport.Columns.Add("ชื่อ", typeof(string));
+                dtExport.Columns.Add("ชื่อสกุล", typeof(string));
+                dtExport.Columns.Add("วันเดือนปีที่จ่าย", typeof(string));
+                dtExport.Columns.Add("ประเภทเงินได้", typeof(string));
+                dtExport.Columns.Add("จำนวนเงินที่จ่าย", typeof(decimal));
+                dtExport.Columns.Add("ภาษีที่หักและนำส่ง", typeof(decimal));
+                dtExport.Columns.Add("เงื่อนไขการหักภาษี", typeof(string));
+
+                int seq = 0;
+                decimal totalIncome = 0, totalTax = 0;
+                foreach (DataRow row in dtSource.Rows)
+                {
+                    string idCard = row["IDCard"]?.ToString()?.Trim()?.Replace(" ", "").Replace("-", "") ?? "";
+
+                    decimal totalEarnings = row["TotalEarnings"] != DBNull.Value ? Convert.ToDecimal(row["TotalEarnings"]) : 0;
+                    if (totalEarnings <= 0)
+                    {
+                        decimal baseSalary = row["BaseSalary"] != DBNull.Value ? Convert.ToDecimal(row["BaseSalary"]) : 0;
+                        decimal otAmount = row["OTAmount"] != DBNull.Value ? Convert.ToDecimal(row["OTAmount"]) : 0;
+                        decimal bonusAmount = row["BonusAmount"] != DBNull.Value ? Convert.ToDecimal(row["BonusAmount"]) : 0;
+                        decimal allowanceAmount = row["AllowanceAmount"] != DBNull.Value ? Convert.ToDecimal(row["AllowanceAmount"]) : 0;
+                        totalEarnings = baseSalary + otAmount + bonusAmount + allowanceAmount;
+                    }
+
+                    // ข้ามคนที่ไม่มีเงินได้ในงวด
+                    if (totalEarnings <= 0) continue;
+
+                    decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
+                    string title = row["Title"]?.ToString() ?? "";
+                    string firstName = row["FirstName"]?.ToString() ?? "";
+                    string lastName = row["LastName"]?.ToString() ?? "";
+
+                    seq++;
+                    totalIncome += totalEarnings;
+                    totalTax += tax;
+
+                    dtExport.Rows.Add(seq, idCard, title, firstName, lastName, payDateTh,
+                        "1 (40(1))", totalEarnings, tax, "1 (หัก ณ ที่จ่าย)");
+                }
+
+                if (dtExport.Rows.Count == 0)
+                {
+                    ShowMessage("ไม่มีข้อมูลสำหรับ Export (ไม่มีพนักงานที่มีเงินได้ในงวดนี้)", "error");
+                    return;
+                }
+
+                string fileName = $"PND1_{year + 543}_{month:D2}";
+                ExcelCreator.CreateExcelFileNoTitle(dtExport, fileName, "PND1", Response);
+            }
+            catch (System.Threading.ThreadAbortException)
+            {
+                // Response.End() throws this - ignore it
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
+        }
+
+        /// <summary>ดึงวันที่จ่ายของงวดเงินเดือน (PayrollDate) — fallback เป็นวันสิ้นเดือน</summary>
+        private DateTime GetPayrollPeriodPayDate(int periodId, int year, int month)
+        {
+            try
+            {
+                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SqlClient.SqlCommand(
+                        "SELECT PayrollDate FROM Payroll_Periods WHERE ID = @id", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@id", periodId);
+                        object result = cmd.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                            return Convert.ToDateTime(result);
+                    }
+                }
+            }
+            catch { }
+
+            // fallback: วันสิ้นเดือน (year ใน ddl เป็น ค.ศ.)
+            int gregYear = year > 2500 ? year - 543 : year;
+            try { return new DateTime(gregYear, month, DateTime.DaysInMonth(gregYear, month)); }
+            catch { return DateTime.Now; }
+        }
+
         protected void gvPayroll_RowCommand(object sender, GridViewCommandEventArgs e)
         {
             if (e.CommandName == "ViewDetails")

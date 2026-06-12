@@ -959,38 +959,6 @@ public class PayrollService
             }
         }
 
-        // Sync employees + payroll run to NextAcc → PND.1
-        if (successCount > 0)
-        {
-            try
-            {
-                var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                if (acctConfig.IsConfigured && acctConfig.Enabled)
-                {
-                    var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                    sync.EnqueueEmployeeSync();
-
-                    // ดึง Year/Month จาก period
-                    DataTable periodDt = new code().DatabaseQuerySafe(connectionString,
-                        "SELECT Year, Month, PeriodName FROM Payroll_Periods WHERE ID = @id",
-                        new Dictionary<string, object> { { "@id", payrollPeriodId } });
-                    if (periodDt?.Rows.Count > 0)
-                    {
-                        int yr = Convert.ToInt32(periodDt.Rows[0]["Year"]);
-                        int mo = Convert.ToInt32(periodDt.Rows[0]["Month"]);
-                        string pName = periodDt.Rows[0]["PeriodName"]?.ToString() ?? $"{yr}/{mo:D2}";
-
-                        sync.EnqueuePayrollRunSync(yr, mo, DateTime.Now, pName);
-                        sync.EnqueuePnd1Generation(yr, mo);
-                    }
-                }
-            }
-            catch (Exception syncEx)
-            {
-                try { new code().Logs(connectionString, "Accounting Sync", $"Payroll period sync error: {syncEx.Message}", "SYSTEM"); } catch { }
-            }
-        }
-
         return (successCount, failCount, $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ" +
             (failCount > 0 ? $", ล้มเหลว {failCount} รายการ" : ""));
     }

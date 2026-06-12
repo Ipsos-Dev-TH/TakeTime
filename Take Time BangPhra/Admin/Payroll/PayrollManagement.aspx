@@ -252,6 +252,7 @@
                 <asp:Button ID="btnApprovePayroll" runat="server" Text="&#9989; อนุมัติเงินเดือน" CssClass="btn btn-warning" OnClick="btnApprovePayroll_Click" Visible="false" />
                 <asp:Button ID="btnProcessAll" runat="server" Text="&#128179; ทำจ่ายทั้งหมด" CssClass="btn btn-process" OnClick="btnProcessAll_Click" Visible="false" />
                 <asp:Button ID="btnExportSS" runat="server" Text="&#128190; Export ประกันสังคม" CssClass="btn btn-export" OnClick="btnExportSS_Click" />
+                <asp:Button ID="btnExportPND1" runat="server" Text="&#128196; Export ภ.ง.ด.1" CssClass="btn btn-export" OnClick="btnExportPND1_Click" />
             </div>
 
         </asp:Panel>
