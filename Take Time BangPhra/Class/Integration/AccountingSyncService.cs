@@ -201,6 +201,40 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Enqueue asset reclassification journal.
+        /// เมื่อซื้อสินทรัพย์ถาวรผ่านใบสำคัญจ่าย PV จะลงบัญชี DR ค่าใช้จ่าย / CR เงินสด
+        /// journal นี้ reclassify: DR สินทรัพย์ถาวร / CR ค่าใช้จ่าย → ผลสุทธิ DR สินทรัพย์ / CR เงินสด
+        /// </summary>
+        public long EnqueueAssetReclassification(decimal assetAmount, string assetName,
+            DateTime purchaseDate, string voucherDocNumber,
+            string expenseAccountId = null, string expenseCategory = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (assetAmount <= 0 || string.IsNullOrEmpty(voucherDocNumber)) return -1;
+
+            string refKey = $"ASSET-{voucherDocNumber}";
+            long existing = FindPendingEntry("ASSET", "ASSET_RECLASSIFICATION", "refKey", refKey);
+            if (existing > 0) return existing;
+            long recent = FindRecentCompletedEntry("ASSET", "ASSET_RECLASSIFICATION", "refKey", refKey, 86400);
+            if (recent > 0) return recent;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "assetAmount", assetAmount },
+                { "assetName", assetName ?? "สินทรัพย์ถาวร" },
+                { "purchaseDate", purchaseDate.ToString("yyyy-MM-dd") },
+                { "voucherDocNumber", voucherDocNumber }
+            };
+            if (!string.IsNullOrEmpty(expenseAccountId))
+                payload["expenseAccountId"] = expenseAccountId;
+            if (!string.IsNullOrEmpty(expenseCategory))
+                payload["expenseCategory"] = expenseCategory;
+
+            return InsertQueue("ASSET", 0, "ASSET_RECLASSIFICATION", payload);
+        }
+
+        /// <summary>
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
@@ -1055,6 +1089,9 @@ namespace Take_Time_BangPhra.Integration
             if (payload == null || payload.Count == 0)
                 throw new ArgumentException($"Empty or null payload for {actionType}.");
 
+            // Set X-Acting-User from queue payload (captured at enqueue time)
+            _apiClient.ActingUser = payload.ContainsKey("operatorUser") ? payload["operatorUser"]?.ToString() : null;
+
             try
             {
             switch (actionType)
@@ -1102,6 +1139,10 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessStockWriteOff(payload);
                 case "SYNC_PRODUCT_MASTER":
                     return await ProcessProductSync(payload);
+
+                // ── Asset Reclassification (DR สินทรัพย์ / CR ค่าใช้จ่าย) ──
+                case "ASSET_RECLASSIFICATION":
+                    return await ProcessAssetReclassification(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -1652,6 +1693,32 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessVoidPayroll: ไม่พบยอดเดิมของ {documentNumber} — ต้องกลับรายการบน NextAcc เอง", "SYSTEM");
             return $"VOID_SKIPPED:{nexaaccId} (payroll — manual review)";
+        }
+
+        /// <summary>
+        /// บันทึกสินทรัพย์ถาวร — journal reclassify: DR Fixed Asset / CR Expense
+        /// </summary>
+        private async Task<string> ProcessAssetReclassification(Dictionary<string, object> p)
+        {
+            decimal assetAmount = Convert.ToDecimal(p["assetAmount"]);
+            string assetName = p.ContainsKey("assetName") ? p["assetName"]?.ToString() : "สินทรัพย์ถาวร";
+            DateTime purchaseDate = DateTime.Parse(p["purchaseDate"]?.ToString());
+            string voucherDocNumber = p["voucherDocNumber"]?.ToString();
+            string expenseAccountId = p.ContainsKey("expenseAccountId") ? p["expenseAccountId"]?.ToString() : null;
+            string expenseCategory = p.ContainsKey("expenseCategory") ? p["expenseCategory"]?.ToString() : null;
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessAssetReclassification: {assetName} amount={assetAmount} voucher={voucherDocNumber}", "SYSTEM");
+
+            var journal = _mapper.MapAssetReclassificationToJournal(
+                assetAmount, assetName, purchaseDate, voucherDocNumber, expenseAccountId, expenseCategory);
+            var intJournal = _mapper.ConvertJournalToIntegration(journal);
+            var result = await _apiClient.CreateIntegrationJournalAsync(intJournal);
+            Guid journalId = RequireValidDocId(result?.data?.Id, $"AssetReclassification voucher={voucherDocNumber}");
+
+            _lastDocNumber = result?.data?.DocumentNumber;
+            _lastDocType = "JOURNAL";
+            return journalId.ToString();
         }
 
         /// <summary>อ่าน payload เดิมของ action ที่ระบุ จาก Accounting_Sync_Queue (COMPLETED ล่าสุด)</summary>
@@ -3689,6 +3756,22 @@ namespace Take_Time_BangPhra.Integration
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
         {
+            // Capture operator user from HttpContext for X-Acting-User attribution on NextAcc
+            if (!payload.ContainsKey("operatorUser"))
+            {
+                try
+                {
+                    var ctx = System.Web.HttpContext.Current;
+                    if (ctx?.Session != null)
+                    {
+                        string user = ctx.Session["User"]?.ToString();
+                        if (!string.IsNullOrEmpty(user))
+                            payload["operatorUser"] = user;
+                    }
+                }
+                catch { /* background thread — no HttpContext */ }
+            }
+
             var payloadJson = _serializer.Serialize(payload);
 
             var parameters = new Dictionary<string, object>

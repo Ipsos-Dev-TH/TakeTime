@@ -1011,6 +1011,17 @@ namespace Take_Time_BangPhra.Account.Report
                             expenseLines: expenseLines,
                             isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
                             supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId);
+
+                        // Asset reclassification: DR Fixed Asset / CR Expense
+                        if (chkRecordAsset.Checked && voucherAmount > 0)
+                        {
+                            string assetName = txtAssetName.Text.Trim();
+                            if (!string.IsNullOrEmpty(assetName))
+                            {
+                                sync.EnqueueAssetReclassification(voucherAmount, assetName, docDate, docNum,
+                                    expenseAccountId: expAccId, expenseCategory: expenseCategory);
+                            }
+                        }
                     }
                 }
                 catch (Exception accEx)

@@ -2327,6 +2327,7 @@ namespace Take_Time_BangPhra.Integration
                 ExternalRef = !string.IsNullOrEmpty(documentNumber) ? documentNumber : null,
                 ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
+                VatRate = hasInputVat ? 7 : 0,
                 IncludeVat = hasMultipleLines ? false : hasInputVat,
                 PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
@@ -2361,6 +2362,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = exp.DocumentDate,
                 PaymentDate = voucherDate,
                 Lines = exp.Lines,
+                VatRate = exp.VatRate ?? (hasInputVat ? 7 : 0),
                 IncludeVat = exp.IncludeVat,
                 Notes = exp.Description
             };
@@ -2625,6 +2627,51 @@ namespace Take_Time_BangPhra.Integration
                 Reference = $"{refStr}-VOID",
                 Sensitivity = "Payroll",
                 Lines = lines
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // Asset Reclassification Journal
+        // (DR สินทรัพย์ถาวร / CR ค่าใช้จ่าย — เปลี่ยนประเภทจากค่าใช้จ่ายเป็นสินทรัพย์)
+        // ══════════════════════════════════════════════
+
+        /// <summary>
+        /// สร้าง journal เพื่อ reclassify รายจ่ายที่บันทึกเป็นค่าใช้จ่ายแล้ว ให้เป็นสินทรัพย์ถาวร
+        /// PV/Expense ที่โพสต์ไปแล้ว: DR Expense / CR Cash
+        /// Reclassification: DR Fixed Asset / CR Expense → ผลสุทธิ: DR Fixed Asset / CR Cash
+        /// </summary>
+        public CreateJournalEntryRequest MapAssetReclassificationToJournal(
+            decimal assetAmount, string assetName, DateTime purchaseDate,
+            string voucherDocNumber, string expenseAccountId = null, string expenseCategory = null)
+        {
+            Guid fixedAssetAccountId = TryGetAccountId("FIXED_ASSET", out var fa) ? fa : GetAccountId("EQUIPMENT");
+            Guid expAccId = !string.IsNullOrEmpty(expenseAccountId)
+                ? (ResolveAccountId(expenseAccountId) ?? GetExpenseCategoryAccountId(expenseCategory ?? "OTHER"))
+                : GetExpenseCategoryAccountId(expenseCategory ?? "OTHER");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = purchaseDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"บันทึกสินทรัพย์ - {assetName} (จาก {voucherDocNumber})",
+                Reference = $"ASSET-{voucherDocNumber}",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = fixedAssetAccountId,
+                        DebitAmount = assetAmount,
+                        CreditAmount = 0,
+                        Description = $"สินทรัพย์ถาวร - {assetName}"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = expAccId,
+                        DebitAmount = 0,
+                        CreditAmount = assetAmount,
+                        Description = $"เปลี่ยนประเภทจากค่าใช้จ่ายเป็นสินทรัพย์ - {voucherDocNumber}"
+                    }
+                }
             };
         }
     }

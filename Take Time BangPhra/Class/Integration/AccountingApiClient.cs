@@ -48,6 +48,12 @@ namespace Take_Time_BangPhra.Integration
         // Auth failure tracking — avoid hammering API with an invalid key on every queue item
         private static DateTime _authFailedUntil = DateTime.MinValue;
         private static string _lastAuthError = null;
+
+        /// <summary>
+        /// NextAcc X-Acting-User header — ระบุว่าผู้ใดทำรายการจริง
+        /// NextAcc จะ resolve เป็น user จริงในบริษัท เพื่อแสดงชื่อผู้สร้างเอกสาร
+        /// </summary>
+        public string ActingUser { get; set; }
         private static readonly object _authLock = new object();
         private static readonly TimeSpan AuthCooldownPeriod = TimeSpan.FromMinutes(5);
 
@@ -326,7 +332,11 @@ namespace Take_Time_BangPhra.Integration
                     //      ก่อน request ถึง ExternalIntegrationController)
                     //   อื่นๆ ({company}/*) → X-Api-Key เท่านั้น
                     if (path.StartsWith("/api/integration/"))
+                    {
                         request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                        if (!string.IsNullOrEmpty(ActingUser))
+                            request.Headers.Add("X-Acting-User", ActingUser);
+                    }
                     else
                         request.Headers.Add("X-Api-Key", _config.ApiKey);
                     request.Headers.Add("Accept", "application/json");
