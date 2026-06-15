@@ -6,6 +6,7 @@ using System.Web;
 using System.Web.Script.Serialization;
 using Take_Time_BangPhra.Services;
 using Take_Time_BangPhra.Helpers;
+using Take_Time_BangPhra.Class;
 
 namespace Take_Time_BangPhra.API
 {
@@ -576,6 +577,21 @@ namespace Take_Time_BangPhra.API
             if (customer == null || string.IsNullOrEmpty(customer.Phone))
                 return "0";
 
+            // Resolve the structured Thai address (ตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์) to an Address_ID,
+            // creating the master Address row if it does not exist yet. Without Address_ID the
+            // downstream documents (ใบกำกับภาษี/ใบสำคัญจ่าย) fall back to showing only the name,
+            // which is the "ลูกค้าขึ้นแค่ชื่อ ไม่มีที่อยู่" issue reported from the accounting side.
+            int? addressId = null;
+            if (!string.IsNullOrEmpty(customer.Province)
+                && !string.IsNullOrEmpty(customer.District)
+                && !string.IsNullOrEmpty(customer.SubDistrict)
+                && !string.IsNullOrEmpty(customer.PostalCode))
+            {
+                var addressHelper = new AddressHelper(_connectionString);
+                addressId = addressHelper.UpsertAddress(
+                    customer.PostalCode, customer.Province, customer.District, customer.SubDistrict);
+            }
+
             var parameters = new Dictionary<string, object>
             {
                 { "@phone", customer.Phone }
@@ -587,32 +603,35 @@ namespace Take_Time_BangPhra.API
 
             if (dt.Rows.Count > 0)
             {
-                // อัพเดทข้อมูลลูกค้าถ้ามีข้อมูลใหม่
-                if (!string.IsNullOrEmpty(customer.Name) || !string.IsNullOrEmpty(customer.Email))
+                // อัพเดทข้อมูลลูกค้าถ้ามีข้อมูลใหม่ (ไม่ทับค่าเดิมด้วยค่าว่าง)
+                var updateParams = new Dictionary<string, object>
                 {
-                    var updateParams = new Dictionary<string, object>
-                    {
-                        { "@phone", customer.Phone },
-                        { "@name", customer.Name ?? "" },
-                        { "@email", customer.Email ?? "" },
-                        { "@idNumber", customer.IDNumber ?? "" },
-                        { "@address", customer.Address ?? "" }
-                    };
+                    { "@phone", customer.Phone },
+                    { "@name", customer.Name ?? "" },
+                    { "@email", customer.Email ?? "" },
+                    { "@idNumber", customer.IDNumber ?? "" },
+                    { "@address", customer.Address ?? "" },
+                    { "@address1", customer.Address1 ?? "" },
+                    { "@branchNumber", customer.BranchNumber ?? "" },
+                    { "@addressId", (object)addressId ?? DBNull.Value }
+                };
 
-                    _code.DatabaseInsertSafe(_connectionString,
-                        @"UPDATE Customer SET
-                          FullName = CASE WHEN @name = '' THEN FullName ELSE @name END,
-                          Email = CASE WHEN @email = '' THEN Email ELSE @email END,
-                          IDNumber = CASE WHEN @idNumber = '' THEN IDNumber ELSE @idNumber END,
-                          Address = CASE WHEN @address = '' THEN Address ELSE @address END
-                          WHERE MobilePhone = @phone",
-                        updateParams);
-                }
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Customer SET
+                      FullName = CASE WHEN @name = '' THEN FullName ELSE @name END,
+                      Email = CASE WHEN @email = '' THEN Email ELSE @email END,
+                      IDNumber = CASE WHEN @idNumber = '' THEN IDNumber ELSE @idNumber END,
+                      Address = CASE WHEN @address = '' THEN Address ELSE @address END,
+                      Address1 = CASE WHEN @address1 = '' THEN Address1 ELSE @address1 END,
+                      Branch_Number = CASE WHEN @branchNumber = '' THEN Branch_Number ELSE @branchNumber END,
+                      Address_ID = CASE WHEN @addressId IS NULL THEN Address_ID ELSE @addressId END
+                      WHERE MobilePhone = @phone",
+                    updateParams);
 
                 return dt.Rows[0]["ID"].ToString();
             }
 
-            // สร้างลูกค้าใหม่
+            // สร้างลูกค้าใหม่ พร้อมที่อยู่แบบมีโครงสร้างและเลขสาขา
             var insertParams = new Dictionary<string, object>
             {
                 { "@phone", customer.Phone },
@@ -620,12 +639,15 @@ namespace Take_Time_BangPhra.API
                 { "@email", customer.Email ?? "" },
                 { "@idNumber", customer.IDNumber ?? "" },
                 { "@address", customer.Address ?? "" },
+                { "@address1", customer.Address1 ?? "" },
+                { "@branchNumber", customer.BranchNumber ?? "" },
+                { "@addressId", (object)addressId ?? DBNull.Value },
                 { "@customerType", customer.CustomerTypeId > 0 ? customer.CustomerTypeId : 2 }
             };
 
             _code.DatabaseInsertSafe(_connectionString,
-                @"INSERT INTO Customer (MobilePhone, FullName, Email, IDNumber, Address, Customer_Type_ID)
-                  VALUES (@phone, @name, @email, @idNumber, @address, @customerType)",
+                @"INSERT INTO Customer (MobilePhone, FullName, Email, IDNumber, Address, Address1, Branch_Number, Address_ID, Customer_Type_ID)
+                  VALUES (@phone, @name, @email, @idNumber, @address, @address1, @branchNumber, @addressId, @customerType)",
                 insertParams);
 
             // ดึง ID ของลูกค้าที่สร้าง
@@ -747,9 +769,14 @@ namespace Take_Time_BangPhra.API
         public string Name { get; set; }
         public string Email { get; set; }
         public string IDNumber { get; set; }
-        public string Address { get; set; }
+        public string Address { get; set; }       // ที่อยู่บรรทัดแรก (บ้านเลขที่/ถนน) - free text
+        public string Address1 { get; set; }      // ที่อยู่บรรทัดที่สอง (อาคาร/หมู่บ้าน) - free text
+        public string SubDistrict { get; set; }   // ตำบล/แขวง
+        public string District { get; set; }      // อำเภอ/เขต
+        public string Province { get; set; }      // จังหวัด
+        public string PostalCode { get; set; }    // รหัสไปรษณีย์
         public int CustomerTypeId { get; set; }
-        public string BranchNumber { get; set; }
+        public string BranchNumber { get; set; }  // เลขที่สาขา (5 หลัก) สำหรับนิติบุคคล
     }
 
     public class InvoiceItem
