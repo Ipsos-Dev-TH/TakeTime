@@ -1477,7 +1477,8 @@ namespace Take_Time_BangPhra.Integration
                     voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                     paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
                     expenseLines: expenseLines, documentNumber: docNumber,
-                    isCredit: isCredit);
+                    isCredit: isCredit,
+                    supplierTaxId: p.ContainsKey("supplierTaxId") ? p["supplierTaxId"]?.ToString() : null);
                 if (isSalaryVoucher)
                     journal.Sensitivity = "Payroll";
                 var result = await _apiClient.CreateJournalAsync(journal);
@@ -3707,7 +3708,9 @@ namespace Take_Time_BangPhra.Integration
                     Address = info.Address,
                     IsCustomer = false,
                     IsSupplier = true,
-                    ContactType = !string.IsNullOrEmpty(info.TaxId) && info.TaxId.Length == 13 ? "INDIVIDUAL" : "COMPANY"
+                    // นิติบุคคล (taxId 13 หลักขึ้นต้น 0) → JuristicPerson เพื่อให้ NextAcc หัก ภ.ง.ด.53
+                    // / บุคคลธรรมดา → Individual (ภ.ง.ด.3). อย่าใช้ความยาว 13 หลักตัดสิน (เท่ากันทั้งคู่)
+                    ContactType = AccountingDataMapper.IsJuristicPerson(info.TaxId) ? "JuristicPerson" : "Individual"
                 };
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
                 if (resp?.data != null && resp.data.Id != Guid.Empty)

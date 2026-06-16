@@ -562,7 +562,7 @@ namespace Take_Time_BangPhra.Integration
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
             List<ExpenseLine> expenseLines = null, string documentNumber = null,
-            bool isCredit = false)
+            bool isCredit = false, string supplierTaxId = null)
         {
             // ซื้อเครดิต → CR เจ้าหนี้การค้า (ยังไม่จ่ายเงิน) แทน CR เงินสด/ธนาคาร
             var cashAccountId = isCredit
@@ -649,16 +649,17 @@ namespace Take_Time_BangPhra.Integration
             decimal totalDebit = 0;
             foreach (var l in lines) totalDebit += l.DebitAmount;
 
-            // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี)
+            // CR: ภาษีหัก ณ ที่จ่าย (ถ้ามี) — แยกบัญชีตามผู้ถูกหัก: นิติบุคคล ภ.ง.ด.53 / บุคคล ภ.ง.ด.3
             if (whtAmount > 0)
             {
-                var whtAccountId = GetAccountId("WHT_PAYABLE");
+                var whtAccountId = GetWhtPayableAccountId(supplierTaxId);
+                string whtForm = IsJuristicPerson(supplierTaxId) ? "ภ.ง.ด.53" : "ภ.ง.ด.3";
                 lines.Add(new JournalEntryLineRequest
                 {
                     AccountId = whtAccountId,
                     DebitAmount = 0,
                     CreditAmount = whtAmount,
-                    Description = $"ภาษีหัก ณ ที่จ่าย {whtRate}%",
+                    Description = $"ภาษีหัก ณ ที่จ่าย {whtRate}% ({whtForm})",
                 });
             }
 
@@ -1249,16 +1250,17 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
-            // CR: ภาษีหัก ณ ที่จ่ายค้างจ่าย (ถ้ามี)
+            // CR: ภาษีเงินได้หัก ณ ที่จ่ายค้างจ่าย จากเงินเดือน = ภ.ง.ด.1 (WHT_PAYABLE_PND1)
+            //      fallback เป็น WHT_PAYABLE ถ้ายังไม่ได้แยกบัญชี ภ.ง.ด.1
             if (whtAmount > 0)
             {
-                var whtPayableId = GetAccountId("WHT_PAYABLE");
+                var whtPayableId = TryGetAccountId("WHT_PAYABLE_PND1", out var pnd1) ? pnd1 : GetAccountId("WHT_PAYABLE");
                 lines.Add(new JournalEntryLineRequest
                 {
                     AccountId = whtPayableId,
                     DebitAmount = 0,
                     CreditAmount = whtAmount,
-                    Description = $"ภาษีเงินได้หัก ณ ที่จ่าย - {period}",
+                    Description = $"ภาษีเงินได้หัก ณ ที่จ่าย (ภ.ง.ด.1) - {period}",
                 });
             }
 
@@ -1396,6 +1398,30 @@ namespace Take_Time_BangPhra.Integration
 
             // Fallback to generic expense
             return GetAccountId("EXPENSE_OTHER");
+        }
+
+        /// <summary>
+        /// นิติบุคคลไทย: เลขประจำตัวผู้เสียภาษี 13 หลักขึ้นต้นด้วย '0' (เลขทะเบียนนิติบุคคล)
+        /// ส่วนบุคคลธรรมดาใช้เลขบัตรประชาชนขึ้นต้น 1-8. ใช้กำหนดแบบภาษีหัก ณ ที่จ่าย:
+        /// นิติบุคคล → ภ.ง.ด.53, บุคคลธรรมดา → ภ.ง.ด.3. (อย่าใช้ความยาว 13 หลักตัดสิน — เท่ากันทั้งคู่)
+        /// </summary>
+        public static bool IsJuristicPerson(string taxId)
+        {
+            if (string.IsNullOrWhiteSpace(taxId)) return false;
+            string t = taxId.Trim().Replace("-", "").Replace(" ", "");
+            return t.Length == 13 && t.StartsWith("0");
+        }
+
+        /// <summary>
+        /// บัญชีภาษีหัก ณ ที่จ่ายค้างจ่าย ตามประเภทผู้ถูกหัก:
+        /// นิติบุคคล (ภ.ง.ด.53) → WHT_PAYABLE_PND53, บุคคลธรรมดา (ภ.ง.ด.3) → WHT_PAYABLE.
+        /// ถ้ายังไม่ได้ map WHT_PAYABLE_PND53 จะ fallback เป็น WHT_PAYABLE เพื่อไม่ให้ sync ล้ม.
+        /// </summary>
+        private Guid GetWhtPayableAccountId(string supplierTaxId)
+        {
+            if (IsJuristicPerson(supplierTaxId) && TryGetAccountId("WHT_PAYABLE_PND53", out var corp))
+                return corp;
+            return GetAccountId("WHT_PAYABLE");
         }
 
         // ──────────────────────────────────────────────
@@ -2487,7 +2513,7 @@ namespace Take_Time_BangPhra.Integration
                 TaxId = taxId,
                 IsCustomer = true,
                 IsSupplier = false,
-                ContactType = "Individual"
+                ContactType = IsJuristicPerson(taxId) ? "JuristicPerson" : "Individual"
             };
         }
 
@@ -2505,7 +2531,7 @@ namespace Take_Time_BangPhra.Integration
                 TaxId = taxId,
                 IsCustomer = false,
                 IsSupplier = true,
-                ContactType = "JuristicPerson"
+                ContactType = IsJuristicPerson(taxId) ? "JuristicPerson" : "Individual"
             };
         }
 
