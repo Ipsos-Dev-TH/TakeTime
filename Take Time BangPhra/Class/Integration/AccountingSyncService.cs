@@ -1391,8 +1391,14 @@ namespace Take_Time_BangPhra.Integration
                 // + WHT 21916/21917 ตาม TaxId + ออก 50ทวิ อัตโนมัติ
                 // ยกเว้น: ตั้งหนี้เครดิต (isCredit) ใช้ expense → payment สองจังหวะตามเดิม
                 //        และใบเงินเดือน (ต้อง Sensitivity=Payroll ซึ่ง PV request ยังไม่รองรับ)
+                // One-shot PV endpoint always credits เงินสด and can't override the credit account
+                // or carry the payer signature on its internal payment. Use it only for real
+                // cash/bank settlements (autoRecordPayment). Non-cash settlements such as
+                // จ่ายจากเงินทดรองกรรมการ fall through to the expense + explicit payment path,
+                // where AutoRecordPaymentForVoucher sends OverridePaymentAccountId (เจ้าหนี้กรรมการ)
+                // and the payer signature via /api/integration/payments.
                 bool pvCreated = false;
-                if (!isCredit && !isSalaryVoucher)
+                if (!isCredit && !isSalaryVoucher && autoRecordPayment)
                 {
                     try
                     {
@@ -1454,8 +1460,11 @@ namespace Take_Time_BangPhra.Integration
                     if (whtAmount > 0)
                         await TryAutoGenerateWhtCertAsync(expDocId, docNumber);
 
-                    // Auto-record payment in NextAcc: Cash/Bank + no credit
-                    if (autoRecordPayment && !isCredit)
+                    // Record the payment in NextAcc to settle the expense for every paid (non-credit)
+                    // voucher reaching this path — cash/bank fallback AND non-cash methods like
+                    // จ่ายจากเงินทดรองกรรมการ (settled by crediting OverridePaymentAccountId).
+                    // Salary keeps its original cash/bank-only behaviour.
+                    if (!isCredit && (!isSalaryVoucher || autoRecordPayment))
                     {
                         await AutoRecordPaymentForVoucher(expDocId, amount, whtAmount, voucherDate,
                             paymentMethod, payeeName, docNumber, paymentAccountId);
@@ -1554,6 +1563,31 @@ namespace Take_Time_BangPhra.Integration
                     PaymentMethod = AccountingDataMapper.NormalizePaymentMethod(paymentMethod),
                     Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
                 };
+
+                // Override the credit (จ่ายเงินจาก) account when an explicit NextAcc account id is
+                // configured — e.g. จ่ายจากเงินทดรองกรรมการ → CR เจ้าหนี้กรรมการ instead of เงินสด.
+                // Only a real account GUID (from Account_Paid_How.Nexaacc_AccountId) is used, so
+                // unconfigured methods keep NextAcc's default behaviour (no regression).
+                if (!string.IsNullOrEmpty(paymentAccountId)
+                    && Guid.TryParse(paymentAccountId, out var overrideAccId) && overrideAccId != Guid.Empty)
+                {
+                    paymentRequest.OverridePaymentAccountId = overrideAccId;
+                }
+
+                // Attach payer (ผู้จ่ายเงิน, slot 0) signature + name from the document creator.
+                var preparer = LookupPreparerInfo(docNumber);
+                if (preparer != null)
+                {
+                    if (!string.IsNullOrEmpty(preparer.Value.name))
+                        paymentRequest.PayerSignatureName = preparer.Value.name;
+                    // NextAcc caps the base64 at 512KB; skip oversize to avoid a 400 error.
+                    string sig = preparer.Value.dataUri;
+                    if (!string.IsNullOrEmpty(sig) && sig.Length <= 512 * 1024)
+                        paymentRequest.PayerSignatureBase64 = sig;
+                    else if (!string.IsNullOrEmpty(sig))
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecordPayment: payer signature for doc={docNumber} skipped — {sig.Length} bytes > 512KB", "SYSTEM");
+                }
 
                 var payResult = await _apiClient.CreateIntegrationPaymentAsync(paymentRequest);
 
@@ -3485,8 +3519,16 @@ namespace Take_Time_BangPhra.Integration
             if (voucher == null || string.IsNullOrEmpty(documentNumber)) return;
             var info = LookupPreparerInfo(documentNumber);
             if (info == null) return;
-            if (!string.IsNullOrEmpty(info.Value.name)) voucher.PreparerName = info.Value.name;
-            if (!string.IsNullOrEmpty(info.Value.dataUri)) voucher.PreparerSignatureBase64 = info.Value.dataUri;
+            if (!string.IsNullOrEmpty(info.Value.name))
+            {
+                voucher.PreparerName = info.Value.name;
+                voucher.PayerSignatureName = info.Value.name;   // slot 0 "ผู้จ่ายเงิน"
+            }
+            if (!string.IsNullOrEmpty(info.Value.dataUri) && info.Value.dataUri.Length <= 512 * 1024)
+            {
+                voucher.PreparerSignatureBase64 = info.Value.dataUri;
+                voucher.PayerSignatureBase64 = info.Value.dataUri;
+            }
         }
 
         private (string name, string dataUri)? LookupPreparerInfo(string documentNumber)

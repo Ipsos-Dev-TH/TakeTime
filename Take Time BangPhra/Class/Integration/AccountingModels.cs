@@ -629,6 +629,13 @@ namespace Take_Time_BangPhra.Integration
         public string ReferenceNo { get; set; }
         public string SlipUrl { get; set; }
         public string Notes { get; set; }
+        /// <summary>บัญชีฝั่งจ่าย (เครดิต) ที่ระบุชัดเจน — override บัญชี default (เงินสด) เช่น
+        /// เจ้าหนี้กรรมการเมื่อจ่ายจากเงินทดรองกรรมการ. ต้องเป็น NextAcc Account Id จริง.</summary>
+        public Guid? OverridePaymentAccountId { get; set; }
+        /// <summary>ลายเซ็นผู้จ่ายเงิน (slot 0 ใน PV PDF) — data URI หรือ bare base64, cap 512KB</summary>
+        public string PayerSignatureBase64 { get; set; }
+        /// <summary>ชื่อผู้จ่ายเงินที่แสดงใต้ลายเซ็น</summary>
+        public string PayerSignatureName { get; set; }
     }
 
     public class IntegrationPaymentResponse
@@ -741,6 +748,9 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationAttachment> Attachments { get; set; }
         public string PreparerName { get; set; }
         public string PreparerSignatureBase64 { get; set; }
+        /// <summary>ลายเซ็นผู้จ่ายเงิน (slot 0 ใน PV PDF) — เผื่อ endpoint PV one-shot รองรับโดยตรง</summary>
+        public string PayerSignatureBase64 { get; set; }
+        public string PayerSignatureName { get; set; }
     }
 
     // ──────────────────────────────────────────────
