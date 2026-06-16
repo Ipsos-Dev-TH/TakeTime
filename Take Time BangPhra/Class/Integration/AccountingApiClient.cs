@@ -48,6 +48,12 @@ namespace Take_Time_BangPhra.Integration
         // Auth failure tracking — avoid hammering API with an invalid key on every queue item
         private static DateTime _authFailedUntil = DateTime.MinValue;
         private static string _lastAuthError = null;
+
+        /// <summary>
+        /// NextAcc X-Acting-User header — ระบุว่าผู้ใดทำรายการจริง
+        /// NextAcc จะ resolve เป็น user จริงในบริษัท เพื่อแสดงชื่อผู้สร้างเอกสาร
+        /// </summary>
+        public string ActingUser { get; set; }
         private static readonly object _authLock = new object();
         private static readonly TimeSpan AuthCooldownPeriod = TimeSpan.FromMinutes(5);
 
@@ -326,7 +332,11 @@ namespace Take_Time_BangPhra.Integration
                     //      ก่อน request ถึง ExternalIntegrationController)
                     //   อื่นๆ ({company}/*) → X-Api-Key เท่านั้น
                     if (path.StartsWith("/api/integration/"))
+                    {
                         request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                        if (!string.IsNullOrEmpty(ActingUser))
+                            request.Headers.Add("X-Acting-User", ActingUser);
+                    }
                     else
                         request.Headers.Add("X-Api-Key", _config.ApiKey);
                     request.Headers.Add("Accept", "application/json");
@@ -1152,6 +1162,46 @@ namespace Take_Time_BangPhra.Integration
             var body = new { Address = rawAddress };
             return await PostAsync<object, ApiResponse<ContactResponse>>(
                 $"{CompanyPath}/document/contacts/parse-address", body);
+        }
+
+        // ──────────────────────────────────────────────
+        // Payroll System (/api/companies/{companyId}/payroll/*)
+        // ใช้ X-Api-Key (acc_) — Integration Key (int_) ใช้ไม่ได้
+        // ──────────────────────────────────────────────
+
+        public async Task<ApiResponse<PayrollSyncEmployeesResponse>> SyncPayrollEmployeesAsync(PayrollSyncEmployeesRequest request)
+        {
+            return await PostAsync<PayrollSyncEmployeesRequest, ApiResponse<PayrollSyncEmployeesResponse>>(
+                $"{CompanyPath}/payroll/employees/sync", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CreatePayrollRunAsync(PayrollCreateRunRequest request)
+        {
+            return await PostAsync<PayrollCreateRunRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs", request);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> CalculatePayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/calculate", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> ApprovePayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/approve", null);
+        }
+
+        public async Task<ApiResponse<PayrollRunResponse>> PayPayrollAsync(Guid runId)
+        {
+            return await PostAsync<object, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/pay", null);
+        }
+
+        public async Task VoidPayrollRunAsync(Guid runId)
+        {
+            await PostActionAsync($"{CompanyPath}/payroll/runs/{runId}/void");
         }
 
         // ──────────────────────────────────────────────

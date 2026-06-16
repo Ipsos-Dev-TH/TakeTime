@@ -159,11 +159,12 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Enqueue payroll journal entry with proper SSF/WHT breakdown.
-        /// Uses MapPayrollToJournal / MapPayrollToExpense for correct accounting.
+        /// เงินเดือน (ม.40(1)) โพสต์เป็น journal เสมอ (ไม่ออก 50ทวิ รายเดือน); ภงด.1 ออกใบแนบฝั่ง TakeTime เอง.
         /// </summary>
         public long EnqueuePayrollJournal(decimal totalSalary, DateTime payDate, string period,
             decimal socialSecurityEmployee = 0, decimal socialSecurityEmployer = 0,
-            decimal whtAmount = 0, string documentNumber = null, string paymentMethod = null)
+            decimal whtAmount = 0, string documentNumber = null, string paymentMethod = null,
+            string employeeName = null, string citizenId = null)
         {
             if (!_config.IsConfigured) return -1;
             if (totalSalary <= 0) return -1;
@@ -174,7 +175,8 @@ namespace Take_Time_BangPhra.Integration
                 if (existing > 0) return existing;
 
                 long recent = FindRecentCompletedEntry("PAYROLL", "CREATE_PAYROLL_ENTRY", "documentNumber", documentNumber, 86400);
-                if (recent > 0) return recent;
+                if (recent > 0 && !HasNewerVoidEntry("PAYROLL", "VOID_PAYROLL", "documentNumber", documentNumber, recent))
+                    return recent;
             }
 
             var payload = new Dictionary<string, object>
@@ -190,8 +192,71 @@ namespace Take_Time_BangPhra.Integration
                 payload["documentNumber"] = documentNumber;
             if (!string.IsNullOrEmpty(paymentMethod))
                 payload["paymentMethod"] = paymentMethod;
+            if (!string.IsNullOrEmpty(employeeName))
+                payload["employeeName"] = employeeName;
+            if (!string.IsNullOrEmpty(citizenId))
+                payload["citizenId"] = citizenId;
 
             return InsertQueue("PAYROLL", 0, "CREATE_PAYROLL_ENTRY", payload);
+        }
+
+        /// <summary>
+        /// Enqueue full payroll run sync to NextAcc payroll system.
+        /// Flow: Sync พนักงาน → Create PayrollRun → Calculate → Approve → Pay
+        /// NextAcc จัดการ GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip ทั้งหมด
+        /// ใช้เมื่อ PayrollSyncMode = DOCUMENT
+        /// </summary>
+        public long EnqueuePayrollRunSync(int payrollPeriodId)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            string refKey = $"PAYROLL-PERIOD-{payrollPeriodId}";
+            long existing = FindPendingEntry("PAYROLL", "SYNC_PAYROLL_RUN", "refKey", refKey);
+            if (existing > 0) return existing;
+            long recent = FindRecentCompletedEntry("PAYROLL", "SYNC_PAYROLL_RUN", "refKey", refKey, 86400);
+            if (recent > 0) return recent;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "payrollPeriodId", payrollPeriodId }
+            };
+
+            return InsertQueue("PAYROLL", payrollPeriodId, "SYNC_PAYROLL_RUN", payload);
+        }
+
+        /// <summary>
+        /// Enqueue asset reclassification journal.
+        /// เมื่อซื้อสินทรัพย์ถาวรผ่านใบสำคัญจ่าย PV จะลงบัญชี DR ค่าใช้จ่าย / CR เงินสด
+        /// journal นี้ reclassify: DR สินทรัพย์ถาวร / CR ค่าใช้จ่าย → ผลสุทธิ DR สินทรัพย์ / CR เงินสด
+        /// </summary>
+        public long EnqueueAssetReclassification(decimal assetAmount, string assetName,
+            DateTime purchaseDate, string voucherDocNumber,
+            string expenseAccountId = null, string expenseCategory = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (assetAmount <= 0 || string.IsNullOrEmpty(voucherDocNumber)) return -1;
+
+            string refKey = $"ASSET-{voucherDocNumber}";
+            long existing = FindPendingEntry("ASSET", "ASSET_RECLASSIFICATION", "refKey", refKey);
+            if (existing > 0) return existing;
+            long recent = FindRecentCompletedEntry("ASSET", "ASSET_RECLASSIFICATION", "refKey", refKey, 86400);
+            if (recent > 0) return recent;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "assetAmount", assetAmount },
+                { "assetName", assetName ?? "สินทรัพย์ถาวร" },
+                { "purchaseDate", purchaseDate.ToString("yyyy-MM-dd") },
+                { "voucherDocNumber", voucherDocNumber }
+            };
+            if (!string.IsNullOrEmpty(expenseAccountId))
+                payload["expenseAccountId"] = expenseAccountId;
+            if (!string.IsNullOrEmpty(expenseCategory))
+                payload["expenseCategory"] = expenseCategory;
+
+            return InsertQueue("ASSET", 0, "ASSET_RECLASSIFICATION", payload);
         }
 
         /// <summary>
@@ -1049,6 +1114,9 @@ namespace Take_Time_BangPhra.Integration
             if (payload == null || payload.Count == 0)
                 throw new ArgumentException($"Empty or null payload for {actionType}.");
 
+            // Set X-Acting-User from queue payload (captured at enqueue time)
+            _apiClient.ActingUser = payload.ContainsKey("operatorUser") ? payload["operatorUser"]?.ToString() : null;
+
             try
             {
             switch (actionType)
@@ -1065,6 +1133,9 @@ namespace Take_Time_BangPhra.Integration
 
                 case "CREATE_PAYROLL_ENTRY":
                     return await ProcessPayrollEntry(payload);
+
+                case "SYNC_PAYROLL_RUN":
+                    return await ProcessPayrollRunSync(payload);
 
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);
@@ -1096,6 +1167,10 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessStockWriteOff(payload);
                 case "SYNC_PRODUCT_MASTER":
                     return await ProcessProductSync(payload);
+
+                // ── Asset Reclassification (DR สินทรัพย์ / CR ค่าใช้จ่าย) ──
+                case "ASSET_RECLASSIFICATION":
+                    return await ProcessAssetReclassification(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -1539,7 +1614,6 @@ namespace Take_Time_BangPhra.Integration
 
         private async Task<string> ProcessPayrollEntry(Dictionary<string, object> p)
         {
-            // Per-type mode: skip if payroll sync is LOCAL
             if (_config.IsPayrollLocal)
             {
                 _code.Logs(_connectionString, "AccountingSync",
@@ -1563,53 +1637,23 @@ namespace Take_Time_BangPhra.Integration
                 $"ProcessPayrollEntry: period={period} gross={totalSalary} ssfEmp={ssfEmployee} ssfEr={ssfEmployer} wht={whtAmount} method={paymentMethod} doc={docNumber} mode={_config.PayrollSyncMode}",
                 "SYSTEM");
 
-            List<IntegrationAttachment> attachments = null;
-            if (_config.AttachFiles)
-                attachments = LookupPayrollAttachments(docNumber, payDate);
-
-            if (_config.IsPayrollDocumentMode)
-            {
-                var expense = _mapper.MapPayrollToExpense(period, totalSalary, ssfEmployee + ssfEmployer, whtAmount, payDate,
-                    $"เงินเดือน {period}", paymentMethod);
-                if (!string.IsNullOrEmpty(docNumber))
-                {
-                    expense.Reference = docNumber;
-                    expense.ExternalRef = docNumber;
-                    expense.ReplaceExistingForSource = true;
-                }
-                expense.Attachments = attachments;
-
-                ApiResponse<IntegrationDocumentResponse> result;
-                var filePaths = ExtractFilePaths(attachments);
-                if (filePaths != null && filePaths.Count > 0)
-                    result = await _apiClient.CreateExpenseMultipartAsync(expense, filePaths);
-                else
-                    result = await _apiClient.CreateExpenseAsync(expense);
-
-                Guid expId = RequireValidDocId(result?.data?.Id, $"CreateExpense (payroll) period={period}");
-                _lastDocNumber = result?.data?.DocumentNumber;
-                _lastDocType = "EXPENSE";
-
-                // ออกหนังสือรับรองหัก ณ ที่จ่าย (ภ.ง.ด.1) ถ้ามีภาษีหัก — เหมือน flow ใบสำคัญจ่าย
-                // (TryAutoGenerateWhtCertAsync จะข้ามให้เองถ้าใช้ Integration Key ที่เรียก endpoint นี้ไม่ได้)
-                if (whtAmount > 0)
-                    await TryAutoGenerateWhtCertAsync(expId, docNumber);
-
-                return expId.ToString();
-            }
-            else
-            {
-                var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period,
-                    ssfEmployee, ssfEmployer, whtAmount, paymentMethod);
-                if (!string.IsNullOrEmpty(docNumber))
-                    journal.Reference = docNumber;
-                var result = await _apiClient.CreateJournalAsync(journal);
-                Guid payrollId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payroll) period={period}");
-                _lastDocNumber = result?.data?.EntryNumber;
-                _lastDocType = "JOURNAL";
-                await SafePostJournalAsync(payrollId);
-                return payrollId.ToString();
-            }
+            // เงินเดือนพนักงานประจำ (เงินได้ ม.40(1)) โพสต์เป็น "journal" เสมอ — ไม่ใช่ expense/PV
+            // เหตุผลทางภาษี:
+            //   • พนักงานประจำ "ไม่ต้องออก 50ทวิ รายเดือน" (ออกปีละครั้ง/ตอนลาออก) — ถ้าใช้ /expenses
+            //     NextAcc จะ auto-generate 50ทวิ ทุกเดือน (ภงด.3/53 ตาม contact type) ซึ่งผิด
+            //   • ภงด.1 รายเดือนใช้แค่ "ข้อมูล" (เงินได้+ภาษีหัก ต่อคน) ซึ่ง TakeTime ออกใบแนบ ภงด.1 เองได้
+            //   • journal ลง GL ถูกต้องด้วยยอดจริงจาก TakeTime: DR เงินเดือน/ปกส.นายจ้าง,
+            //     CR ภาษีหัก ณ ที่จ่ายค้างจ่าย (ภงด.1) + ปกส.ค้างจ่าย + เงินสด — และไม่ออก 50ทวิ
+            var journal = _mapper.MapPayrollToJournal(totalSalary, payDate, period,
+                ssfEmployee, ssfEmployer, whtAmount, paymentMethod);
+            if (!string.IsNullOrEmpty(docNumber))
+                journal.Reference = docNumber;
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid payrollId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payroll) period={period}");
+            _lastDocNumber = result?.data?.EntryNumber;
+            _lastDocType = "JOURNAL";
+            await SafePostJournalAsync(payrollId);
+            return payrollId.ToString();
         }
 
         /// <summary>
@@ -1621,7 +1665,57 @@ namespace Take_Time_BangPhra.Integration
             string nexaaccId = p.ContainsKey("nexaaccId") ? p["nexaaccId"]?.ToString() : null;
             string documentNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : null;
 
-            // อ่านยอดเงินเดือนเดิมจาก payload ของ CREATE_PAYROLL_ENTRY
+            // ถ้า nexaaccId มาจาก SYNC_PAYROLL_RUN → void PayrollRun บน NextAcc (reverse GL อัตโนมัติ)
+            string docType = p.ContainsKey("documentType") ? p["documentType"]?.ToString() : null;
+            if (docType == "PAYROLL_RUN" && Guid.TryParse(nexaaccId, out Guid prId))
+            {
+                try
+                {
+                    await _apiClient.VoidPayrollRunAsync(prId);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidPayroll: voided PayrollRun {nexaaccId} doc={documentNumber}", "SYSTEM");
+                    return $"VOIDED_RUN:{nexaaccId}";
+                }
+                catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
+                {
+                    return $"VOIDED_RUN:{nexaaccId} (already)";
+                }
+                catch (AccountingApiException ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidPayroll: void PayrollRun failed {ex.StatusCode}: {ex.Message}", "SYSTEM");
+                }
+            }
+
+            // Journal mode: ยกเลิกด้วยการกลับรายการ journal
+            // วิธีที่ 1: reverse journal ตรงๆ ด้วย id เดิม (ถ้าเป็น GUID ของ journal)
+            if (Guid.TryParse(nexaaccId, out Guid jid))
+            {
+                try
+                {
+                    var reverseResult = await _apiClient.ReverseJournalAsync(jid, new ReverseJournalEntryRequest
+                    {
+                        ReversalDate = DateTime.Now,
+                        Description = $"กลับรายการจ่ายเงินเดือน {documentNumber}"
+                    });
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidPayroll: reversed journal {nexaaccId} → {reverseResult.data?.Id} doc={documentNumber}",
+                        "SYSTEM");
+                    return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                }
+                catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
+                {
+                    return $"REVERSED:{nexaaccId} (already)";
+                }
+                catch (AccountingApiException ex) when (ex.StatusCode == 404)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidPayroll: reverse-journal 404 for {nexaaccId}, falling back to reversal entry doc={documentNumber}",
+                        "SYSTEM");
+                }
+            }
+
+            // วิธีที่ 2 (fallback): สร้าง journal กลับรายการจากยอดเดิม
             var orig = LookupOriginalPayload(documentNumber, "PAYROLL", "CREATE_PAYROLL_ENTRY");
             if (orig != null)
             {
@@ -1634,8 +1728,9 @@ namespace Take_Time_BangPhra.Integration
 
                 if (totalSalary > 0)
                 {
+                    // เงินเดือนโพสต์ผ่าน MapPayrollToJournal (journal เต็ม) เสมอ → กลับรายการแบบ journal (isDocumentMode:false)
                     var reversal = _mapper.MapPayrollReversalToJournal(totalSalary, DateTime.Now, period,
-                        ssfEmployee, ssfEmployer, whtAmount, paymentMethod, documentNumber, _config.IsPayrollDocumentMode);
+                        ssfEmployee, ssfEmployer, whtAmount, paymentMethod, documentNumber, isDocumentMode: false);
                     var result = await _apiClient.CreateJournalAsync(reversal);
                     Guid revId = RequireValidDocId(result?.data?.Id, $"VoidPayroll reversal doc={documentNumber}");
                     await SafePostJournalAsync(revId);
@@ -1645,27 +1740,174 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
-            // Fallback: ถ้า id เดิมเป็น journal (JOURNAL mode) → reverse ตรงๆ
-            if (Guid.TryParse(nexaaccId, out Guid jid) && !_config.IsPayrollDocumentMode)
-            {
-                try
-                {
-                    var reverseResult = await _apiClient.ReverseJournalAsync(jid, new ReverseJournalEntryRequest
-                    {
-                        ReversalDate = DateTime.Now,
-                        Description = $"กลับรายการจ่ายเงินเดือน {documentNumber}"
-                    });
-                    return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
-                }
-                catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
-                {
-                    return $"REVERSED:{nexaaccId} (already)";
-                }
-            }
-
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessVoidPayroll: ไม่พบยอดเดิมของ {documentNumber} — ต้องกลับรายการบน NextAcc เอง", "SYSTEM");
             return $"VOID_SKIPPED:{nexaaccId} (payroll — manual review)";
+        }
+
+        /// <summary>
+        /// Full payroll run sync: Sync พนักงาน → Create PayrollRun → Calculate → Approve → Pay
+        /// NextAcc จัดการ GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip ทั้งหมด
+        /// </summary>
+        private async Task<string> ProcessPayrollRunSync(Dictionary<string, object> p)
+        {
+            int periodId = Convert.ToInt32(p["payrollPeriodId"]);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: periodId={periodId} — starting full payroll sync", "SYSTEM");
+
+            // 1. ดึงข้อมูลงวดเงินเดือน
+            var dtPeriod = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT * FROM Payroll_Periods WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", periodId } });
+            if (dtPeriod == null || dtPeriod.Rows.Count == 0)
+                throw new ArgumentException($"Payroll period {periodId} not found");
+
+            var periodRow = dtPeriod.Rows[0];
+            int year = Convert.ToInt32(periodRow["Year"]);
+            int month = Convert.ToInt32(periodRow["Month"]);
+            string periodName = periodRow["PeriodName"]?.ToString() ?? $"{year}-{month:D2}";
+            DateTime payrollDate = periodRow["PayrollDate"] != DBNull.Value
+                ? Convert.ToDateTime(periodRow["PayrollDate"])
+                : new DateTime(year, month, DateTime.DaysInMonth(year, month));
+            DateTime periodStart = new DateTime(year, month, 1);
+            DateTime periodEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+
+            // 2. Sync พนักงานทั้งหมดไป NextAcc
+            var employees = LoadEmployeesForPayrollSync();
+            if (employees.Count == 0)
+                throw new ArgumentException("No active employees found for payroll sync");
+
+            var syncRequest = new PayrollSyncEmployeesRequest
+            {
+                ExternalSystem = "TakeTime",
+                Rows = employees
+            };
+
+            var syncResult = await _apiClient.SyncPayrollEmployeesAsync(syncRequest);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: employee sync done — inserted={syncResult?.data?.Inserted} updated={syncResult?.data?.Updated} skipped={syncResult?.data?.Skipped}",
+                "SYSTEM");
+
+            // 3. สร้าง PayrollRun
+            var createRequest = new PayrollCreateRunRequest
+            {
+                Name = $"เงินเดือน {periodName}",
+                Year = year,
+                Month = month,
+                PayDate = payrollDate,
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd
+            };
+
+            var runResult = await _apiClient.CreatePayrollRunAsync(createRequest);
+            Guid runId = runResult?.data?.Id ?? Guid.Empty;
+            if (runId == Guid.Empty)
+                throw new Exception($"CreatePayrollRun failed: {runResult?.message}");
+
+            string payrollNumber = runResult?.data?.PayrollNumber;
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: run created id={runId} number={payrollNumber}", "SYSTEM");
+
+            // 4. Calculate (NextAcc คำนวณ SSF/WHT จากข้อมูลพนักงานที่ sync ไป)
+            var calcResult = await _apiClient.CalculatePayrollAsync(runId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: calculated — gross={calcResult?.data?.TotalGrossSalary} net={calcResult?.data?.TotalNetPay} employees={calcResult?.data?.EmployeeCount}",
+                "SYSTEM");
+
+            // 5. Approve
+            var approveResult = await _apiClient.ApprovePayrollAsync(runId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: approved status={approveResult?.data?.Status}", "SYSTEM");
+
+            // 6. Pay (สร้าง GL journal + ภงด.1 + สปส.1-10 + 50ทวิ + payslip อัตโนมัติ)
+            var payResult = await _apiClient.PayPayrollAsync(runId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunSync: PAID — run={runId} number={payrollNumber} gross={payResult?.data?.TotalGrossSalary} tax={payResult?.data?.TotalWithholdingTax} ssfEmp={payResult?.data?.TotalSocialSecurityEmployee} ssfEr={payResult?.data?.TotalSocialSecurityEmployer} net={payResult?.data?.TotalNetPay}",
+                "SYSTEM");
+
+            _lastDocNumber = payrollNumber;
+            _lastDocType = "PAYROLL_RUN";
+            return runId.ToString();
+        }
+
+        /// <summary>
+        /// ดึงข้อมูลพนักงานทั้งหมดจาก Admin + Employee_Salary เพื่อ sync ไป NextAcc
+        /// </summary>
+        private List<PayrollEmployeeSyncRow> LoadEmployeesForPayrollSync()
+        {
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT A.ID, A.FirstName, A.LastName, A.Title, A.IDCard,
+                         A.Phone, A.Email, A.HireDate, A.Status,
+                         A.BankCode, A.BankAccountNumber, A.BankAccountName,
+                         ES.MonthlySalary, ES.Position
+                  FROM Admin A
+                  INNER JOIN Employee_Salary ES ON ES.Admin_ID = A.ID AND ES.IsActive = 1
+                  WHERE A.Status = 1 AND ES.MonthlySalary > 0",
+                null);
+
+            var employees = new List<PayrollEmployeeSyncRow>();
+            if (dt == null) return employees;
+
+            foreach (DataRow row in dt.Rows)
+            {
+                string firstName = row["FirstName"]?.ToString() ?? "";
+                string lastName = row["LastName"]?.ToString() ?? "";
+                string title = row["Title"]?.ToString() ?? "";
+                string idCard = row["IDCard"]?.ToString() ?? "";
+                int adminId = Convert.ToInt32(row["ID"]);
+
+                employees.Add(new PayrollEmployeeSyncRow
+                {
+                    ExternalId = $"EMP-{adminId}",
+                    ExternalSystem = "TakeTime",
+                    EmployeeCode = $"EMP-{adminId:D4}",
+                    TitleTh = title,
+                    FirstNameTh = firstName,
+                    LastNameTh = lastName,
+                    CitizenId = idCard,
+                    StartDate = row["HireDate"] != DBNull.Value
+                        ? Convert.ToDateTime(row["HireDate"]) : new DateTime(2020, 1, 1),
+                    BaseSalary = Convert.ToDecimal(row["MonthlySalary"]),
+                    SalaryType = "Monthly",
+                    Position = row["Position"]?.ToString(),
+                    Phone = row["Phone"]?.ToString(),
+                    Email = row["Email"]?.ToString(),
+                    BankName = row["BankCode"]?.ToString(),
+                    BankAccountNumber = row["BankAccountNumber"]?.ToString(),
+                    BankAccountName = row["BankAccountName"]?.ToString(),
+                    IsSubjectToSocialSecurity = true,
+                    IsActive = true
+                });
+            }
+
+            return employees;
+        }
+
+        /// <summary>
+        /// บันทึกสินทรัพย์ถาวร — journal reclassify: DR Fixed Asset / CR Expense
+        /// </summary>
+        private async Task<string> ProcessAssetReclassification(Dictionary<string, object> p)
+        {
+            decimal assetAmount = Convert.ToDecimal(p["assetAmount"]);
+            string assetName = p.ContainsKey("assetName") ? p["assetName"]?.ToString() : "สินทรัพย์ถาวร";
+            DateTime purchaseDate = DateTime.Parse(p["purchaseDate"]?.ToString());
+            string voucherDocNumber = p["voucherDocNumber"]?.ToString();
+            string expenseAccountId = p.ContainsKey("expenseAccountId") ? p["expenseAccountId"]?.ToString() : null;
+            string expenseCategory = p.ContainsKey("expenseCategory") ? p["expenseCategory"]?.ToString() : null;
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessAssetReclassification: {assetName} amount={assetAmount} voucher={voucherDocNumber}", "SYSTEM");
+
+            var journal = _mapper.MapAssetReclassificationToJournal(
+                assetAmount, assetName, purchaseDate, voucherDocNumber, expenseAccountId, expenseCategory);
+            var intJournal = _mapper.ConvertJournalToIntegration(journal);
+            var result = await _apiClient.CreateIntegrationJournalAsync(intJournal);
+            Guid journalId = RequireValidDocId(result?.data?.Id, $"AssetReclassification voucher={voucherDocNumber}");
+
+            _lastDocNumber = result?.data?.DocumentNumber;
+            _lastDocType = "JOURNAL";
+            return journalId.ToString();
         }
 
         /// <summary>อ่าน payload เดิมของ action ที่ระบุ จาก Accounting_Sync_Queue (COMPLETED ล่าสุด)</summary>
@@ -3703,6 +3945,22 @@ namespace Take_Time_BangPhra.Integration
 
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
         {
+            // Capture operator user from HttpContext for X-Acting-User attribution on NextAcc
+            if (!payload.ContainsKey("operatorUser"))
+            {
+                try
+                {
+                    var ctx = System.Web.HttpContext.Current;
+                    if (ctx?.Session != null)
+                    {
+                        string user = ctx.Session["User"]?.ToString();
+                        if (!string.IsNullOrEmpty(user))
+                            payload["operatorUser"] = user;
+                    }
+                }
+                catch { /* background thread — no HttpContext */ }
+            }
+
             var payloadJson = _serializer.Serialize(payload);
 
             var parameters = new Dictionary<string, object>
