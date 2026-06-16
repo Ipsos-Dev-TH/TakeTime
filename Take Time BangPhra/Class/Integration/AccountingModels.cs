@@ -733,6 +733,11 @@ namespace Take_Time_BangPhra.Integration
         public decimal? VatRate { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        /// <summary>ช่องทางจ่ายเงิน (Cash/BankTransfer/...) — NextAcc ใช้เลือกบัญชีฝั่งเครดิตถ้าไม่ได้ส่ง PaymentAccountId</summary>
+        public string PaymentMethod { get; set; }
+        /// <summary>บัญชีฝั่งจ่าย (เครดิต) ที่ระบุชัดเจน — เช่น เจ้าหนี้กรรมการเมื่อจ่ายจากเงินทดรองกรรมการ
+        /// แทนการ default เป็นเงินสด. ต้องเป็น NextAcc Account Id.</summary>
+        public Guid? PaymentAccountId { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
         public string PreparerName { get; set; }
         public string PreparerSignatureBase64 { get; set; }

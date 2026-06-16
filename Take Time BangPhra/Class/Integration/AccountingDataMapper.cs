@@ -2364,6 +2364,11 @@ namespace Take_Time_BangPhra.Integration
                 Lines = exp.Lines,
                 VatRate = exp.VatRate ?? (hasInputVat ? 7 : 0),
                 IncludeVat = exp.IncludeVat,
+                // Forward the resolved credit (จ่ายเงินจาก) account so NextAcc credits the
+                // correct account (e.g. เจ้าหนี้กรรมการ when paid from เงินทดรองกรรมการ) instead
+                // of always defaulting to เงินสด. MapVoucherToExpense already resolved these.
+                PaymentMethod = exp.PaymentMethod,
+                PaymentAccountId = exp.PaymentAccountId,
                 Notes = exp.Description
             };
         }

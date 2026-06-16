@@ -1356,12 +1356,19 @@ namespace Take_Time_BangPhra.Integration
                 string supplierTaxId = p.ContainsKey("supplierTaxId") ? p["supplierTaxId"]?.ToString() : null;
                 if (!string.IsNullOrEmpty(supplierExternalId))
                 {
-                    // Explicit vendor info from the Account_Payment voucher flow (voucherId == 0)
+                    // Explicit vendor info from the Account_Payment voucher flow (voucherId == 0).
+                    // Include the vendor Address so NextAcc creates the contact with full
+                    // address (not name-only). Address comes from the payload when supplied,
+                    // otherwise it is looked up from the Vendor table via the "VENDOR-{id}" id.
+                    string supplierAddress = p.ContainsKey("supplierAddress") ? p["supplierAddress"]?.ToString() : null;
+                    if (string.IsNullOrEmpty(supplierAddress))
+                        supplierAddress = LookupVendorAddressByExternalId(supplierExternalId);
                     supplierContact = await EnsureSupplierContactAsync(new ContactInfo
                     {
                         ExternalId = supplierExternalId,
                         Name = payeeName,
-                        TaxId = supplierTaxId
+                        TaxId = supplierTaxId,
+                        Address = supplierAddress
                     });
                 }
                 else
@@ -3575,6 +3582,36 @@ namespace Take_Time_BangPhra.Integration
                     ExternalId = "PAYEE-" + fallbackName.GetHashCode().ToString("X"),
                     Name = fallbackName
                 };
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Look up the Vendor address from an ExternalId of the form "VENDOR-{id}".
+        /// Used by the Account_Payment voucher flow (voucherId == 0) where the vendor is
+        /// referenced only by its external id, so the contact upsert can include the address
+        /// instead of creating a name-only contact in NextAcc.
+        /// </summary>
+        private string LookupVendorAddressByExternalId(string externalId)
+        {
+            if (string.IsNullOrEmpty(externalId) || !externalId.StartsWith("VENDOR-")) return null;
+            string vendorId = externalId.Substring("VENDOR-".Length);
+            if (string.IsNullOrEmpty(vendorId)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Address FROM Vendor WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", vendorId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Address"] != DBNull.Value)
+                {
+                    string addr = dt.Rows[0]["Address"].ToString();
+                    return string.IsNullOrWhiteSpace(addr) ? null : addr;
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVendorAddressByExternalId failed for {externalId}: {ex.Message}", "SYSTEM");
             }
             return null;
         }
