@@ -764,28 +764,71 @@ namespace Take_Time_BangPhra.Admin.Settings
         private int AutoMatchMappings()
         {
             DataTable mappings = _code.DatabaseQuerySafe(ConnStr,
-                "SELECT ID, TakeTime_Code, Nexaacc_AccountCode FROM Accounting_Account_Mapping WHERE Is_Active = 1", null);
+                "SELECT ID, TakeTime_Code, TakeTime_Description, Nexaacc_AccountCode, Nexaacc_AccountId FROM Accounting_Account_Mapping WHERE Is_Active = 1", null);
 
             if (mappings == null) return 0;
 
             int matched = 0;
             foreach (DataRow row in mappings.Rows)
             {
+                // ผูกไว้แล้ว → ข้าม
+                if (row["Nexaacc_AccountId"] != DBNull.Value) continue;
+
                 int mappingId = Convert.ToInt32(row["ID"]);
                 string accountCode = (row["Nexaacc_AccountCode"]?.ToString() ?? "").Trim();
-                if (string.IsNullOrEmpty(accountCode)) continue;
 
-                // Exact match only — no prefix matching (prefix caused wrong matches like "1111" → "11111")
-                DataTable found = _code.DatabaseQuerySafe(ConnStr,
-                    "SELECT TOP 1 Nexaacc_AccountId FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code AND Is_Active = 1",
-                    new Dictionary<string, object> { { "@code", accountCode } });
+                Guid? matchedId = null;
+                string matchedCode = null;
 
-                if (found?.Rows.Count > 0)
+                // Pass 1: จับคู่ด้วยรหัสบัญชีแบบเป๊ะ (ไม่ทำ prefix match — กัน "1111" → "11111")
+                if (!string.IsNullOrEmpty(accountCode))
                 {
-                    Guid matchedId = (Guid)found.Rows[0]["Nexaacc_AccountId"];
+                    DataTable found = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT TOP 1 Nexaacc_AccountId, Account_Code FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @code AND Is_Active = 1",
+                        new Dictionary<string, object> { { "@code", accountCode } });
+                    if (found?.Rows.Count > 0)
+                    {
+                        matchedId = (Guid)found.Rows[0]["Nexaacc_AccountId"];
+                        matchedCode = found.Rows[0]["Account_Code"]?.ToString();
+                    }
+                }
+
+                // Pass 2: จับคู่ด้วยชื่อบัญชีแบบเป๊ะ "และไม่กำกวม" (เจอบัญชีเดียวเท่านั้น)
+                // ใช้ TakeTime_Description ↔ Account_Name / Account_Name_En — auto เฉพาะตัวที่ชื่อตรงพอดี
+                // ตัวที่ชื่อไม่ตรง/ซ้ำ จะเว้นไว้ให้เลือกเองในหน้า Mapping (กันจับคู่ผิดเงียบ ๆ)
+                if (matchedId == null)
+                {
+                    string desc = (row["TakeTime_Description"]?.ToString() ?? "").Trim();
+                    if (!string.IsNullOrEmpty(desc))
+                    {
+                        DataTable byName = _code.DatabaseQuerySafe(ConnStr,
+                            @"SELECT Nexaacc_AccountId, Account_Code FROM Accounting_Nexaacc_Accounts
+                              WHERE Is_Active = 1
+                                AND (LTRIM(RTRIM(Account_Name)) = @name OR LTRIM(RTRIM(Account_Name_En)) = @name)",
+                            new Dictionary<string, object> { { "@name", desc } });
+                        if (byName != null && byName.Rows.Count == 1)
+                        {
+                            matchedId = (Guid)byName.Rows[0]["Nexaacc_AccountId"];
+                            matchedCode = byName.Rows[0]["Account_Code"]?.ToString();
+                        }
+                    }
+                }
+
+                if (matchedId != null)
+                {
+                    // เซ็ตทั้ง Id และ Code (ถ้ายังว่าง) เพื่อให้ resolve ด้วยรหัสในอนาคต + แสดงในหน้า UI ได้
                     _code.DatabaseInsertSafe(ConnStr,
-                        "UPDATE Accounting_Account_Mapping SET Nexaacc_AccountId = @accId WHERE ID = @id",
-                        new Dictionary<string, object> { { "@accId", matchedId }, { "@id", mappingId } });
+                        @"UPDATE Accounting_Account_Mapping
+                          SET Nexaacc_AccountId = @accId,
+                              Nexaacc_AccountCode = CASE WHEN (Nexaacc_AccountCode IS NULL OR Nexaacc_AccountCode = '')
+                                                         THEN @code ELSE Nexaacc_AccountCode END
+                          WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@accId", matchedId.Value },
+                            { "@code", matchedCode ?? "" },
+                            { "@id", mappingId }
+                        });
                     matched++;
                 }
             }
