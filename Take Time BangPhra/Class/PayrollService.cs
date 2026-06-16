@@ -976,7 +976,7 @@ public class PayrollService
             }
             catch (Exception accEx)
             {
-                try { new code().Logs(connectionString, "Accounting Sync",
+                try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync",
                     $"PayrollRun sync error: periodId={payrollPeriodId} {accEx.Message}", "SYSTEM"); } catch { }
             }
         }
