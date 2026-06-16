@@ -1344,7 +1344,9 @@ namespace Take_Time_BangPhra.Integration
                 case "KTB": mappingKey = "BANK_KTB"; break;
                 case "PROMPTPAY": mappingKey = "BANK_KBANK"; break;
                 case "CARD": mappingKey = "BANK_CARD"; break;
-                case "DIRECTOR": mappingKey = "DIRECTOR_ADVANCE"; break;
+                // จ่ายจากเงินทดรองกรรมการ → CR เจ้าหนี้กรรมการ (21230, หนี้สิน) ไม่ใช่ลูกหนี้/เงินสด
+                // (บริษัทค้างจ่ายกรรมการที่สำรองจ่ายแทน) — ใช้ DIRECTOR_ADVANCE_REPAY
+                case "DIRECTOR": mappingKey = "DIRECTOR_ADVANCE_REPAY"; break;
                 default:
                     if (pm.Contains("กสิกร") || pmUpper.Contains("KBANK"))
                         mappingKey = "BANK_KBANK";
@@ -1359,7 +1361,7 @@ namespace Take_Time_BangPhra.Integration
                     else if (pm.Contains("บัตร") || pmUpper.Contains("CARD") || pm.Contains("เครดิต") || pm.Contains("เดบิต"))
                         mappingKey = "BANK_CARD";
                     else if (pm.Contains("กรรมการ") || pmUpper.Contains("DIRECTOR") || pm.Contains("ทดรอง"))
-                        mappingKey = "DIRECTOR_ADVANCE";
+                        mappingKey = "DIRECTOR_ADVANCE_REPAY";   // CR เจ้าหนี้กรรมการ (21230) — ดูหมายเหตุ case "DIRECTOR"
                     else if (pm.Contains("เงินสด"))
                         mappingKey = "CASH";
                     else if (pm.Contains("โอน") || pm.Contains("ธนาคาร") || pmUpper.Contains("TRANSFER"))
