@@ -100,10 +100,13 @@ namespace Take_Time_BangPhra
                         System.Diagnostics.Debug.WriteLine($"[Google Reviews] Cache expires: {cacheExpiryDate:yyyy-MM-dd HH:mm}");
                         System.Diagnostics.Debug.WriteLine($"[Google Reviews] Current time: {now:yyyy-MM-dd HH:mm}");
 
-                        // ✅ เช็คว่า cache ยังไม่หมดอายุ และ lastFetchDate ไม่ใช่อนาคต
-                        if (lastFetchDate <= now && now < cacheExpiryDate)
+                        // ✅ ใช้ cache เฉพาะเมื่อยังไม่หมดอายุ + เป็น JSON รีวิวที่ valid (status OK, มี result)
+                        // กันกรณีเคย cache คำตอบ error ของ Google (เช่น OVER_QUERY_LIMIT/REQUEST_DENIED)
+                        // ไว้ → หน้าแรกจะไม่มีรีวิวจนกว่าจะครบ 7 วัน
+                        string cachedJson = dtReviews.Rows[0]["json"]?.ToString() ?? "";
+                        if (lastFetchDate <= now && now < cacheExpiryDate && IsValidReviewJson(cachedJson))
                         {
-                            jsonResponse = dtReviews.Rows[0]["json"].ToString();
+                            jsonResponse = cachedJson;
                             needRefresh = false;
                             double daysUntilExpiry = (cacheExpiryDate - now).TotalDays;
                             System.Diagnostics.Debug.WriteLine($"[Google Reviews] ✅ Using cached data (expires in {daysUntilExpiry:F1} days)");
@@ -123,8 +126,9 @@ namespace Take_Time_BangPhra
                         System.Diagnostics.Debug.WriteLine("[Google Reviews] 🔄 Fetching new data from Google API...");
                         jsonResponse = await FetchGoogleReviews();
 
-                        // Check if fetch was successful (not error)
-                        if (!jsonResponse.Contains("\"error\""))
+                        // บันทึกเฉพาะเมื่อได้ JSON รีวิวที่ valid (status OK + มี result) เท่านั้น
+                        // ไม่ทับ cache ที่ดีด้วยคำตอบ error ของ Google (status != OK) หรือ exception
+                        if (IsValidReviewJson(jsonResponse))
                         {
                             // ลบข้อมูลเก่าทั้งหมด แล้ว insert ใหม่
                             DatabaseQuery(conn, code.AdaptSql("DELETE FROM Reviews"));
@@ -142,13 +146,11 @@ namespace Take_Time_BangPhra
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API Error: {jsonResponse}");
-                            // ถ้า API error แต่มี cached data เก่า → ใช้ cached แทน
-                            if (dtReviews.Rows.Count > 0)
-                            {
-                                jsonResponse = dtReviews.Rows[0]["json"].ToString();
-                                System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ Using old cached data due to API error");
-                            }
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API invalid response: {jsonResponse}");
+                            // ใช้ cache เก่าได้เฉพาะถ้ายัง valid — ไม่งั้นปล่อย reviews ว่างให้ frontend แสดง "ไม่มีรีวิว"
+                            string oldJson = dtReviews.Rows.Count > 0 ? dtReviews.Rows[0]["json"]?.ToString() ?? "" : "";
+                            jsonResponse = IsValidReviewJson(oldJson) ? oldJson : "{\"result\":{\"reviews\":[]}}";
+                            System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ Kept old cache / empty (did not overwrite good data)");
                         }
                     }
                 }
@@ -176,6 +178,27 @@ namespace Take_Time_BangPhra
             {
                 Session["permission"] = "No";
             }
+        }
+
+        /// <summary>
+        /// ตรวจว่า JSON ที่ได้จาก Google Places เป็นคำตอบที่ใช้ได้จริง:
+        /// parse ได้ + status = OK (หรือไม่มี status) + มี result. ใช้กันการ cache คำตอบ error
+        /// (OVER_QUERY_LIMIT / REQUEST_DENIED / INVALID_REQUEST / NOT_FOUND / {"error":...})
+        /// ทับข้อมูลรีวิวที่ดีไว้.
+        /// </summary>
+        private static bool IsValidReviewJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            try
+            {
+                var o = JObject.Parse(json);
+                if (o["error"] != null) return false;
+                string status = o["status"]?.ToString();
+                if (!string.IsNullOrEmpty(status) && !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return o["result"] != null;   // reviews อาจว่างได้ถ้าสถานที่ไม่มีรีวิว
+            }
+            catch { return false; }
         }
 
         private async Task<string> FetchGoogleReviews()
