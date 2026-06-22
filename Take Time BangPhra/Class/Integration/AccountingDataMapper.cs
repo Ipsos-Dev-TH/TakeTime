@@ -252,8 +252,9 @@ namespace Take_Time_BangPhra.Integration
                 // โหมด deferred (opt-in): พัก VAT ไว้ที่ "ภาษีขายรอเรียกเก็บ/รอรับรู้" (21913)
                 // แล้วโอนเข้า "ภาษีขาย" (21911) ตอน check-out. ถ้ายังไม่ map OUTPUT_VAT_DEFERRED
                 // จะ fallback กลับไป OUTPUT_VAT (พฤติกรรมเดิม) เพื่อไม่ให้ JE ไม่บาลานซ์.
+                Guid deferredVatId = Guid.Empty;
                 bool useDeferred = deferOutputVat
-                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var deferredVatId) && deferredVatId != Guid.Empty;
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty;
                 var outputVatAccountId = useDeferred ? deferredVatId : GetAccountId("OUTPUT_VAT");
 
                 lines.Add(new JournalEntryLineRequest
