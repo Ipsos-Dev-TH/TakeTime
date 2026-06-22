@@ -222,7 +222,7 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapDepositToJournal(
             int reservationId, decimal amount, string paymentMethod, DateTime paymentDate, string customerName,
             string paymentAccountId = null, string documentNumber = null,
-            bool hasVat = false, bool vatAtReceipt = false)
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
         {
             var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
@@ -248,7 +248,13 @@ namespace Take_Time_BangPhra.Integration
                 //   (ถ้าใช้ amount - round(amount*7/107) อาจต่างกัน 0.01 → เศษค้างใน ADVANCE_DEPOSIT)
                 decimal netAmount = Math.Round(amount * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal vatAmount = amount - netAmount;
-                var outputVatAccountId = GetAccountId("OUTPUT_VAT");
+
+                // โหมด deferred (opt-in): พัก VAT ไว้ที่ "ภาษีขายรอเรียกเก็บ/รอรับรู้" (21913)
+                // แล้วโอนเข้า "ภาษีขาย" (21911) ตอน check-out. ถ้ายังไม่ map OUTPUT_VAT_DEFERRED
+                // จะ fallback กลับไป OUTPUT_VAT (พฤติกรรมเดิม) เพื่อไม่ให้ JE ไม่บาลานซ์.
+                bool useDeferred = deferOutputVat
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var deferredVatId) && deferredVatId != Guid.Empty;
+                var outputVatAccountId = useDeferred ? deferredVatId : GetAccountId("OUTPUT_VAT");
 
                 lines.Add(new JournalEntryLineRequest
                 {
@@ -262,7 +268,7 @@ namespace Take_Time_BangPhra.Integration
                     AccountId = outputVatAccountId,
                     DebitAmount = 0,
                     CreditAmount = vatAmount,
-                    Description = "ภาษีขาย 7% (มัดจำ)"
+                    Description = useDeferred ? "ภาษีขายรอเรียกเก็บ 7% (มัดจำ)" : "ภาษีขาย 7% (มัดจำ)"
                 });
             }
             else
@@ -362,7 +368,7 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapCheckoutToJournal(
             int reservationId, decimal depositAmount, string customerName, DateTime checkoutDate,
             decimal damageAmount = 0, string reservationRef = null, bool hasVat = false,
-            bool vatAtReceipt = false)
+            bool vatAtReceipt = false, bool deferOutputVat = false)
         {
             if (depositAmount <= 0)
                 throw new ArgumentException($"MapCheckoutToJournal: depositAmount ต้อง > 0 (ได้ {depositAmount})");
@@ -444,6 +450,33 @@ namespace Take_Time_BangPhra.Integration
                     CreditAmount = damageAmount,
                     Description = $"ค่าเสียหาย/หักจากมัดจำ - การจอง #{reservationId}"
                 });
+            }
+
+            // Realize deferred output VAT: ตอนรับมัดจำในโหมด deferred ภาษีถูกพักไว้ที่
+            // "ภาษีขายรอเรียกเก็บ" (21913). check-out = จุดรับรู้รายได้ → โอนกลับเข้า
+            // "ภาษีขาย" (21911) เพื่อให้ขึ้น ภ.พ.30. Dr 21913 / Cr 21911 (บาลานซ์ในตัว).
+            if (depositVatAlreadyRecognized && deferOutputVat
+                && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var deferredVatId) && deferredVatId != Guid.Empty)
+            {
+                decimal vatPortion = depositAmount - clearAmount; // VAT ที่แยกไว้ตอนรับเงิน
+                if (vatPortion > 0)
+                {
+                    var outputVatAccountId = GetAccountId("OUTPUT_VAT");
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = deferredVatId,
+                        DebitAmount = vatPortion,
+                        CreditAmount = 0,
+                        Description = $"โอนภาษีขายรอเรียกเก็บเป็นภาษีขาย (มัดจำ) - การจอง #{reservationId}"
+                    });
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = outputVatAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = vatPortion,
+                        Description = "ภาษีขาย 7% (รับรู้จากมัดจำ)"
+                    });
+                }
             }
 
             return new CreateJournalEntryRequest

@@ -192,6 +192,17 @@
                         CHECKOUT: เลื่อนรับรู้ VAT ไปตอนตัดมัดจำเป็นรายได้
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDeferOutputVat" />
+                        พักภาษีขายมัดจำไว้ที่ "ภาษีขายรอเรียกเก็บ" (21913) แล้วโอนเข้าภาษีขายตอนเช็คเอาท์
+                    </label>
+                    <div class="help-text">
+                        ใช้ได้เฉพาะโหมด RECEIPT — เมื่อเปิด ตอนรับมัดจำจะ Cr บัญชี OUTPUT_VAT_DEFERRED (21913)
+                        แทน OUTPUT_VAT แล้วโอนกลับเข้า OUTPUT_VAT (21911) ตอนเช็คเอาท์ (VAT ขึ้น ภ.พ.30 ตอนรับรู้รายได้).
+                        ⚠ ต้อง map บัญชี OUTPUT_VAT_DEFERRED ก่อนเปิด มิฉะนั้นระบบจะ fallback กลับไปใช้ OUTPUT_VAT
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -738,6 +749,7 @@
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
+                document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -778,6 +790,7 @@
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
                 attachFiles: document.getElementById('cfgAttachFiles').value,
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
+                depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

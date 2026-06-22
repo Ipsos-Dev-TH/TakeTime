@@ -83,6 +83,16 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>true = แยก VAT ออกจากมัดจำตั้งแต่ตอนรับเงิน (ยิงเข้า OUTPUT_VAT ทันที)</summary>
         public bool IsDepositVatAtReceipt => DepositVatRecognition.Equals("RECEIPT", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// (โหมด RECEIPT เท่านั้น) true = พัก VAT ของมัดจำไว้ที่ "ภาษีขายรอเรียกเก็บ/รอรับรู้"
+        /// (mapping <c>OUTPUT_VAT_DEFERRED</c>, ปกติ 21913) ตอนรับเงิน แล้วโอนกลับเข้า
+        /// "ภาษีขาย" (<c>OUTPUT_VAT</c>, 21911) ตอน check-out → VAT จะไม่ขึ้น ภ.พ.30 จนกว่า
+        /// จะ realize ตอนรับรู้รายได้. false (ค่าเริ่มต้น) = เข้า OUTPUT_VAT ทันที (พฤติกรรมเดิม).
+        /// ⚠ ต้อง map บัญชี OUTPUT_VAT_DEFERRED ก่อนเปิด ไม่งั้นระบบจะ fallback กลับไป OUTPUT_VAT.
+        /// </summary>
+        public bool IsDepositOutputVatDeferred => GetConfig("Deposit_Defer_Output_Vat", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Deposit_Defer_Output_Vat", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────

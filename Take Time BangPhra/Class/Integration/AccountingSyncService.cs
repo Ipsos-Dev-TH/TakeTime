@@ -2101,7 +2101,8 @@ namespace Take_Time_BangPhra.Integration
                 {
                     var journal = _mapper.MapDepositToJournal(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
                         paymentAccountId: paymentAccountId, documentNumber: receiptNumber,
-                        hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
+                        hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt,
+                        deferOutputVat: _config.IsDepositOutputVatDeferred);
                     var result = await _apiClient.CreateJournalAsync(journal);
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (deposit) receipt={receiptNumber}");
                     _lastDocNumber = result?.data?.EntryNumber;
@@ -2759,7 +2760,7 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, _config.IsDepositVatAtReceipt);
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, _config.IsDepositVatAtReceipt, _config.IsDepositOutputVatDeferred);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid clearId = RequireValidDocId(result?.data?.Id, $"DepositClearing resId={reservationId}");
             await SafePostJournalAsync(clearId);
