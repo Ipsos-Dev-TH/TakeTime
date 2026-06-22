@@ -1554,47 +1554,89 @@ namespace Take_Time_BangPhra.Integration
                 decimal payAmount = totalAmount - whtAmount;
                 if (payAmount <= 0) return;
 
-                var paymentRequest = new CreateIntegrationPaymentRequest
-                {
-                    ExternalId = $"PAY-{docNumber}",
-                    ExternalRef = docNumber,
-                    DocumentId = documentId,
-                    PaymentDate = voucherDate,
-                    Amount = payAmount,
-                    PaymentMethod = AccountingDataMapper.NormalizePaymentMethod(paymentMethod),
-                    Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
-                };
+                string method = AccountingDataMapper.NormalizePaymentMethod(paymentMethod);
 
                 // Override the credit (จ่ายเงินจาก) account when an explicit NextAcc account id is
                 // configured — e.g. จ่ายจากเงินทดรองกรรมการ → CR เจ้าหนี้กรรมการ instead of เงินสด.
                 // Only a real account GUID (from Account_Paid_How.Nexaacc_AccountId) is used, so
                 // unconfigured methods keep NextAcc's default behaviour (no regression).
+                Guid? overrideAccId = null;
                 if (!string.IsNullOrEmpty(paymentAccountId)
-                    && Guid.TryParse(paymentAccountId, out var overrideAccId) && overrideAccId != Guid.Empty)
+                    && Guid.TryParse(paymentAccountId, out var parsedAccId) && parsedAccId != Guid.Empty)
                 {
-                    paymentRequest.OverridePaymentAccountId = overrideAccId;
+                    overrideAccId = parsedAccId;
                 }
 
-                // Attach payer (ผู้จ่ายเงิน, slot 0) signature + name from the document creator.
+                // Payer (ผู้จ่ายเงิน, slot 0) signature + name from the document creator.
+                string payerSigName = null, payerSigBase64 = null;
                 var preparer = LookupPreparerInfo(docNumber);
                 if (preparer != null)
                 {
                     if (!string.IsNullOrEmpty(preparer.Value.name))
-                        paymentRequest.PayerSignatureName = preparer.Value.name;
+                        payerSigName = preparer.Value.name;
                     // NextAcc caps the base64 at 512KB; skip oversize to avoid a 400 error.
                     string sig = preparer.Value.dataUri;
                     if (!string.IsNullOrEmpty(sig) && sig.Length <= 512 * 1024)
-                        paymentRequest.PayerSignatureBase64 = sig;
+                        payerSigBase64 = sig;
                     else if (!string.IsNullOrEmpty(sig))
                         _code.Logs(_connectionString, "AccountingSync",
                             $"AutoRecordPayment: payer signature for doc={docNumber} skipped — {sig.Length} bytes > 512KB", "SYSTEM");
                 }
 
-                var payResult = await _apiClient.CreateIntegrationPaymentAsync(paymentRequest);
+                string paymentId = null;
+                bool paymentOk = false;
+                string paymentMsg = null;
 
-                if (payResult?.success == true && payResult.data != null)
+                // OverridePaymentAccountId + PayerSignature are ONLY honoured by the company
+                // endpoint POST /api/companies/{id}/document/payments (acc_ key). The integration
+                // endpoint /api/integration/payments silently ignores both (verified against
+                // Wachira-d/Accounting: InboundPaymentRequest has neither field). So when either
+                // feature is actually needed and we hold an acc_ key, route to the company endpoint;
+                // otherwise keep the integration endpoint (no regression for the common case).
+                bool needsCompanyEndpoint = overrideAccId.HasValue || !string.IsNullOrEmpty(payerSigBase64);
+                if (needsCompanyEndpoint && !_config.IsIntegrationKey)
                 {
-                    string paymentId = payResult.data.Id.ToString();
+                    var companyReq = new CreatePaymentRequest
+                    {
+                        DocumentId = documentId,
+                        PaymentDate = voucherDate,
+                        Amount = payAmount,
+                        PaymentMethod = method,
+                        Reference = docNumber,
+                        Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}",
+                        OverridePaymentAccountId = overrideAccId,
+                        PayerSignatureName = payerSigName,
+                        PayerSignatureBase64 = payerSigBase64
+                    };
+                    var companyResult = await _apiClient.CreatePaymentAsync(companyReq);
+                    paymentOk = companyResult?.success == true && companyResult.data != null;
+                    paymentId = paymentOk ? companyResult.data.Id.ToString() : null;
+                    paymentMsg = companyResult?.message;
+                }
+                else
+                {
+                    if (needsCompanyEndpoint && _config.IsIntegrationKey)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecordPayment: doc={docNumber} ต้องใช้ override account/ลายเซ็นผู้จ่าย แต่ API key เป็น int_ — NextAcc integration endpoint ไม่รองรับ จึงข้ามฟีเจอร์นี้ (ตั้งค่า acc_ key เพื่อใช้งาน)", "SYSTEM");
+
+                    var paymentRequest = new CreateIntegrationPaymentRequest
+                    {
+                        ExternalId = $"PAY-{docNumber}",
+                        ExternalRef = docNumber,
+                        DocumentId = documentId,
+                        PaymentDate = voucherDate,
+                        Amount = payAmount,
+                        PaymentMethod = method,
+                        Notes = $"ชำระเงินอัตโนมัติจากใบสำคัญจ่าย {docNumber}"
+                    };
+                    var payResult = await _apiClient.CreateIntegrationPaymentAsync(paymentRequest);
+                    paymentOk = payResult?.success == true && payResult.data != null;
+                    paymentId = paymentOk ? payResult.data.Id.ToString() : null;
+                    paymentMsg = payResult?.message;
+                }
+
+                if (paymentOk)
+                {
                     _code.Logs(_connectionString, "AccountingSync",
                         $"AutoRecordPayment: SUCCESS doc={docNumber} paymentId={paymentId} amount={payAmount:N2}",
                         "SYSTEM");
@@ -1619,7 +1661,7 @@ namespace Take_Time_BangPhra.Integration
                 else
                 {
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"AutoRecordPayment: FAILED doc={docNumber} msg={payResult?.message ?? "null response"}",
+                        $"AutoRecordPayment: FAILED doc={docNumber} msg={paymentMsg ?? "null response"}",
                         "SYSTEM");
                 }
             }

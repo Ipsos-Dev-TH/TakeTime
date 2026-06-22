@@ -245,6 +245,12 @@ namespace Take_Time_BangPhra.Integration
         public Guid? OverrideBankAccountId { get; set; }
         public Guid? OverridePaymentAccountId { get; set; }
         public Guid? ProjectId { get; set; }
+
+        // base64 ลายเซ็น "ผู้จ่ายเงิน" (slot 0 ของ PV PDF). NextAcc cap 512KB.
+        // ใช้กับ integration service account ที่ไม่มีลายเซ็นบนระบบ NextAcc.
+        public string PayerSignatureBase64 { get; set; }
+        // ชื่อที่พิมพ์ใต้ลายเซ็นผู้จ่าย (default = ชื่อ CreatedBy ฝั่ง NextAcc)
+        public string PayerSignatureName { get; set; }
     }
 
     public class PaymentResponse
