@@ -1786,6 +1786,258 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // Company /document Receipt mappers (DOCUMENT mode, acc_ key)
+        // NextAcc Receipt doc (approve) ลง GL ถูกต้องในเอกสารเดียว:
+        //   Dr เงินสด/ธนาคาร (PaymentAccountId) / Cr รายได้ "ราย line" (docLine.AccountId) / Cr ภาษีขาย
+        //   มัดจำ (IsDeposit): Cr ขายรอรับรู้ (DepositDeferredAccountCode) แทนรายได้ + VAT รอเรียกเก็บได้
+        // → แก้ทั้ง multi-line revenue flattening และ deposit-as-revenue ที่ /integration/invoices มี
+        // ──────────────────────────────────────────────
+
+        /// <summary>account code ของ mapping (null ถ้าไม่ได้ map — กัน exception)</summary>
+        private string SafeGetAccountCode(string takeTimeCode)
+        {
+            try { return GetAccountCode(takeTimeCode); }
+            catch { return null; }
+        }
+
+        /// <summary>แปลง ReceiptLineSpec → DocumentLineRequest (UnitPrice รวม VAT, ผูกบัญชีรายได้ราย line)</summary>
+        private List<DocumentLineRequest> BuildDocumentLines(List<ReceiptLineSpec> lines, bool hasVat)
+        {
+            var result = new List<DocumentLineRequest>();
+            foreach (var line in lines)
+            {
+                if (line == null) continue;
+                decimal amount = line.Amount > 0 ? line.Amount : line.Quantity * line.UnitPrice;
+                if (amount == 0) continue;
+
+                string revCode = !string.IsNullOrEmpty(line.RevenueTypeOverride)
+                    ? line.RevenueTypeOverride
+                    : GetProductTypeRevenueCode(line.ProductTypeId);
+
+                decimal qty = line.Quantity > 0 ? line.Quantity : 1;
+                result.Add(new DocumentLineRequest
+                {
+                    Description = !string.IsNullOrEmpty(line.Description) ? line.Description : revCode,
+                    Quantity = qty,
+                    Unit = line.Unit,
+                    UnitPrice = amount / qty,
+                    VatRate = hasVat ? 7m : 0m,
+                    AccountId = GetAccountId(revCode)
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// สร้าง Receipt document (DocumentType=3) สำหรับ company /document endpoint.
+        /// - แหล่งเงินบังคับผ่าน PaymentAccountId (Dr บัญชีนั้นตรง ๆ)
+        /// - รายได้แยกราย line (AccountId ต่อบรรทัด) — NextAcc ยึดให้
+        /// - มัดจำ (isDeposit): Cr "ขายรอรับรู้" = บัญชี ADVANCE_DEPOSIT (ให้ตรงกับ checkout clearing)
+        ///   + VAT รอเรียกเก็บ (21913) เมื่อ deferOutputVat; VAT แยกเฉพาะโหมด RECEIPT (depositVatAtReceipt)
+        /// </summary>
+        public CreateDocumentRequest MapReceiptToDocument(
+            int reservationId, List<ReceiptLineSpec> lines, decimal totalAmount, string revenueType,
+            string paymentMethod, DateTime paymentDate, string customerName, Guid contactId,
+            string paymentAccountId, bool hasVat, string receiptNumber,
+            bool isDeposit = false, bool depositVatAtReceipt = false, bool deferOutputVat = false)
+        {
+            var docLines = new List<DocumentLineRequest>();
+
+            if (isDeposit)
+            {
+                bool splitVat = hasVat && depositVatAtReceipt;
+                docLines.Add(new DocumentLineRequest
+                {
+                    Description = $"เงินรับล่วงหน้า - การจอง #{reservationId}",
+                    Quantity = 1,
+                    UnitPrice = totalAmount,
+                    VatRate = splitVat ? 7m : 0m,
+                    AccountId = null   // IsDeposit → NextAcc ใช้ DepositDeferredAccountCode เป็นฝั่งเครดิต
+                });
+            }
+            else if (lines != null && lines.Count > 0)
+            {
+                docLines = BuildDocumentLines(lines, hasVat);
+            }
+
+            if (docLines.Count == 0)
+            {
+                string revCode = !string.IsNullOrEmpty(revenueType) ? revenueType : "ROOM_REVENUE";
+                docLines.Add(new DocumentLineRequest
+                {
+                    Description = $"รายได้ - การจอง #{reservationId}",
+                    Quantity = 1,
+                    UnitPrice = totalAmount,
+                    VatRate = hasVat ? 7m : 0m,
+                    AccountId = GetAccountId(revCode)
+                });
+            }
+
+            // แหล่งเงิน — ใช้นิพจน์เดียวกับฝั่ง adjustment (Cr Cash) เพื่อให้บัญชีตรงกันเสมอ
+            Guid cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+
+            return new CreateDocumentRequest
+            {
+                DocumentType = 3, // Receipt (ใบเสร็จรับเงิน)
+                DocumentDate = paymentDate,
+                PaymentDate = paymentDate,
+                ContactId = contactId,
+                Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}",
+                PaymentAccountId = cashAccountId,
+                PricesIncludeVat = true,
+                IsDeposit = isDeposit,
+                DepositDeferredAccountCode = isDeposit ? SafeGetAccountCode("ADVANCE_DEPOSIT") : null,
+                DepositOutputVatDeferred = isDeposit && hasVat && depositVatAtReceipt && deferOutputVat,
+                Notes = isDeposit
+                    ? $"รับมัดจำ - การจอง #{reservationId} ({customerName})"
+                    : $"รับชำระ - การจอง #{reservationId} ({customerName})",
+                Lines = docLines
+            };
+        }
+
+        /// <summary>
+        /// Adjustment เมื่อใบเสร็จ (Receipt doc) หักมัดจำ: ใบเสร็จ Dr เงินสดเต็มจำนวน แต่ลูกค้าจ่ายจริง
+        /// = total − depositApplied → ตัดส่วนมัดจำออกจากเงินสดและล้างเงินรับล่วงหน้า:
+        ///   Dr ADVANCE_DEPOSIT (net ถ้า VAT รับรู้ตอนรับมัดจำ) [+ Dr VAT มัดจำ (21913 ถ้า defer ไม่งั้น 21911)]
+        ///   Cr เงินสด/ธนาคาร (gross depositApplied)
+        /// บัญชีเงินสดใช้นิพจน์เดียวกับ Receipt doc (PaymentAccountId) เพื่อหักล้างพอดี
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositAppliedReceiptAdjustment(
+            int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
+            string customerName, string paymentAccountId = null, string receiptNumber = null,
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
+        {
+            if (depositApplied <= 0)
+                throw new ArgumentException("MapDepositAppliedReceiptAdjustment: depositApplied ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ" : $"RES-{reservationId}-DEPADJ";
+
+            var lines = new List<JournalEntryLineRequest>();
+
+            if (hasVat && vatAtReceipt)
+            {
+                decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+                decimal depositVat = depositApplied - depositNet;
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = depositNet,
+                    CreditAmount = 0,
+                    Description = "ตัดเงินรับล่วงหน้า net (หักมัดจำในใบเสร็จ)"
+                });
+                // มัดจำ defer → VAT ค้างที่ 21913 (ใบเสร็จสุดท้าย Cr 21911 เต็ม) → Dr 21913
+                // มัดจำ immediate → VAT อยู่ 21911 แล้ว (ใบเสร็จสุดท้าย Cr 21911 ซ้ำ) → Dr 21911 กันซ้ำ
+                Guid vatAcc = (deferOutputVat
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var dv) && dv != Guid.Empty)
+                    ? dv : GetAccountId("OUTPUT_VAT");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = vatAcc,
+                    DebitAmount = depositVat,
+                    CreditAmount = 0,
+                    Description = "ตัด/กลับ VAT มัดจำ (กัน VAT ซ้ำกับใบเสร็จ)"
+                });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = depositApplied,
+                    CreditAmount = 0,
+                    Description = "ตัดเงินรับล่วงหน้า (หักมัดจำในใบเสร็จ)"
+                });
+            }
+
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = depositApplied,
+                Description = "ลดเงินสดที่ใบเสร็จบันทึกเกิน (ส่วนที่จ่ายด้วยมัดจำ)"
+            });
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ปรับปรุง — หักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
+                Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        /// <summary>กลับรายการ MapDepositAppliedReceiptAdjustment (ตอน void ใบเสร็จ Receipt doc):
+        ///   Dr เงินสด/ธนาคาร / Cr ADVANCE_DEPOSIT (+ Cr VAT มัดจำ) — เปิดเงินรับล่วงหน้าคืน</summary>
+        public CreateJournalEntryRequest MapDepositAppliedReceiptAdjustmentReverse(
+            int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
+            string customerName, string paymentAccountId = null, string receiptNumber = null,
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
+        {
+            if (depositApplied <= 0)
+                throw new ArgumentException("MapDepositAppliedReceiptAdjustmentReverse: depositApplied ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ-REV" : $"RES-{reservationId}-DEPADJ-REV";
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = cashAccountId,
+                    DebitAmount = depositApplied,
+                    CreditAmount = 0,
+                    Description = "คืนเงินสดส่วนที่หักมัดจำ (กลับรายการ void)"
+                }
+            };
+
+            if (hasVat && vatAtReceipt)
+            {
+                decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+                decimal depositVat = depositApplied - depositNet;
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = depositNet,
+                    Description = "เปิดเงินรับล่วงหน้าคืน net (กลับรายการ void)"
+                });
+                Guid vatAcc = (deferOutputVat
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var dv) && dv != Guid.Empty)
+                    ? dv : GetAccountId("OUTPUT_VAT");
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = vatAcc,
+                    DebitAmount = 0,
+                    CreditAmount = depositVat,
+                    Description = "คืน VAT มัดจำ (กลับรายการ void)"
+                });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = depositApplied,
+                    Description = "เปิดเงินรับล่วงหน้าคืน (กลับรายการ void)"
+                });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการหักมัดจำ — void ใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
+                Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        // ──────────────────────────────────────────────
         // Multi-Line Receipt Mappers
         // รองรับใบเสร็จที่มีหลายรายการ (ห้องพัก + อาหาร + สินค้า + ส่วนลด) →
         // แยกบัญชีรายได้ใน NextAcc พร้อม support การหักมัดจำในใบเสร็จเดียว

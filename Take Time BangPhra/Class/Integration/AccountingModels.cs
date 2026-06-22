@@ -144,6 +144,22 @@ namespace Take_Time_BangPhra.Integration
         public string Reference { get; set; }
         public string Notes { get; set; }
         public List<DocumentLineRequest> Lines { get; set; }
+        public Guid? ProjectId { get; set; }
+        public Guid? BankAccountId { get; set; }
+        /// <summary>บัญชีเงินสด/ธนาคารฝั่งรับ-จ่าย (ChartOfAccount id) — แหล่งเงิน.
+        /// Receipt/ReceiptVoucher: Dr บัญชีนี้. null → NextAcc ใช้เงินสด 111.</summary>
+        public Guid? PaymentAccountId { get; set; }
+        public DateTime? PaymentDate { get; set; }
+        public string Currency { get; set; } = "THB";
+        /// <summary>true → UnitPrice รวม VAT แล้ว (NextAcc ถอด 7% ออกเอง)</summary>
+        public bool PricesIncludeVat { get; set; }
+        /// <summary>เงินมัดจำ/รับล่วงหน้า — Cr "ขายรอรับรู้" (217xx) แทนรายได้</summary>
+        public bool IsDeposit { get; set; }
+        /// <summary>ผังพักรายได้สำหรับมัดจำ (null → 21712). ตั้งให้ตรงกับบัญชี ADVANCE_DEPOSIT
+        /// ฝั่ง TakeTime เพื่อให้ checkout clearing (Dr ADVANCE_DEPOSIT) หักล้างได้พอดี</summary>
+        public string DepositDeferredAccountCode { get; set; }
+        /// <summary>true → Cr ภาษีขายรอเรียกเก็บ 21913 (ยังไม่เข้า ภ.พ.30); false → Cr 21911 ทันที</summary>
+        public bool DepositOutputVatDeferred { get; set; }
     }
 
     public class DocumentLineRequest

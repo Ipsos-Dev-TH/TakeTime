@@ -142,13 +142,26 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    queue retries. Void: primary `/documents/void` cascades the payment reversal; the credit-note
    fallback calls `VoidPaymentAsync`; `MapDepositAppliedAdjustmentReverse` now reverses Dr AR / Cr
    ADVANCE_DEPOSIT(+VAT). The จ่าย side already settled AP correctly (PV one-shot / expense+payment).
-6. **DOCUMENT-mode invoice caveats (pre-existing, NOT fixed — needs NextAcc-side work):** NextAcc's
-   integration invoice JE credits a **single** `AccountType=Revenue` account for the whole SubTotal
-   and ignores per-line `AccountId`. So (a) multi-line revenue splits are flattened to one revenue
-   account, and (b) **deposits routed through `/invoices` are recognised as revenue immediately, not
-   as เงินรับล่วงหน้า (liability)**. JOURNAL mode (TakeTime-controlled per-line) is more faithful for
-   the รับ side. Fixing in DOCUMENT mode requires the company `/documents` endpoint (per-line accounts
-   + `IsDeposit`) or a NextAcc change to honour line accounts on `/integration/invoices`.
+6. **รับ-side full accounting correctness (DOCUMENT mode, acc_ key):** ✅ DONE. Root cause: NextAcc's
+   integration invoice JE credits a **single** `AccountType=Revenue` account for the whole SubTotal and
+   ignores per-line `AccountId`, so (a) multi-line revenue was flattened and (b) deposits via `/invoices`
+   were recognised as revenue immediately, not as เงินรับล่วงหน้า (liability). **Fix:** when an `acc_`
+   key is configured, `ProcessReceiptDocument` now creates a **`Receipt` document (DocumentType=3) via the
+   company `/document` endpoint** (`MapReceiptToDocument` → `CreateDocumentAsync` → `ApproveDocumentAsync`)
+   instead of an integration invoice. NextAcc `AutoPostToJournalAsync` Receipt branch (verified) posts in
+   ONE doc: **Dr Cash/Bank (`PaymentAccountId` = แหล่งเงิน) / Cr revenue PER LINE (`docLine.AccountId`) /
+   Cr Output VAT** — no AR opened, no separate payment. Deposits set `IsDeposit=true` +
+   `DepositDeferredAccountCode = GetAccountCode("ADVANCE_DEPOSIT")` (so checkout clearing's
+   `Dr ADVANCE_DEPOSIT` nets exactly) + `DepositOutputVatDeferred` → Cr 21712 liability + Cr 21913
+   deferred VAT. `PricesIncludeVat=true` (our amounts are gross). In-receipt deposit deduction →
+   `MapDepositAppliedReceiptAdjustment` (Dr ADVANCE_DEPOSIT net + Dr 21913/21911 VAT / Cr Cash) reduces
+   the doc's full Dr-cash to the actual cash received. Idempotent via `Nexaacc_Receipt_Payment_Id`
+   3-phase marker (`DOC:{id}` → `APR:{id}` → `{id}`/`VOIDED`); company create-document isn't deduped.
+   Void: company `/document/{id}/void` (cascades JE) + `MapDepositAppliedReceiptAdjustmentReverse`
+   (Dr Cash / Cr ADVANCE_DEPOSIT(+VAT)). GL verified balanced across RECEIPT / CHECKOUT / deferred-VAT
+   timing. **`int_` key keeps the integration-invoice + `SettleReceiptInNextAcc` fallback (item 5)** —
+   correct GL totals but single revenue account + deposit-as-revenue caveat remains for `int_`.
+   Needs Windows build + live-NextAcc testing (cannot build/test on Linux).
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
