@@ -269,6 +269,102 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
+    // Document approve (company endpoint, acc_) — ตรงตาม Nexaacc DocumentDtos.ApproveDocumentRequest
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Body ของ POST /api/companies/{cid}/document/{id}/approve. ครั้งแรกถ้ามี soft warning
+    /// NextAcc จะตอบ 422 + รายการเตือน → ส่งซ้ำด้วย AcknowledgeWarnings=true เพื่อยืนยัน.
+    /// </summary>
+    public class ApproveDocumentRequest
+    {
+        public string Notes { get; set; }
+        public bool AcknowledgeWarnings { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // OCR (company endpoint, acc_) — ตรงตาม Nexaacc OcrDtos.OcrResultResponse (subset)
+    // Newtonsoft จะข้าม field ที่ไม่ได้ map ให้เอง จึง model เฉพาะที่ TakeTime ใช้
+    // ──────────────────────────────────────────────
+
+    public class OcrResultResponse
+    {
+        public Guid Id { get; set; }
+        public string OriginalFileName { get; set; }
+        public string ScanStatus { get; set; }            // Pending/Processing/Completed/Failed/...
+        public string DocumentType { get; set; }
+        public decimal Confidence { get; set; }
+        public string ExtractedVendorName { get; set; }
+        public string ExtractedVendorTaxId { get; set; }
+        public string ExtractedDocumentNumber { get; set; }
+        public DateTime? ExtractedDate { get; set; }
+        public decimal? ExtractedSubTotal { get; set; }
+        public decimal? ExtractedVatAmount { get; set; }
+        public decimal? ExtractedTotalAmount { get; set; }
+        public decimal? ExtractedDiscountAmount { get; set; }
+        public Guid? MatchedContactId { get; set; }
+        public Guid? CreatedDocumentId { get; set; }
+        public DateTime? ProcessedAt { get; set; }
+        public bool IsDuplicate { get; set; }
+        public string ProcessingNotes { get; set; }
+        public string ExpenseCategory { get; set; }
+        public OcrSuggestedAccountsDto SuggestedAccounts { get; set; }
+        public bool HasWht { get; set; }
+        public decimal? WhtRate { get; set; }
+        public int? PaymentTermsDays { get; set; }
+        public List<OcrLineItemDto> ExtractedItems { get; set; }
+        public string BuyerName { get; set; }
+        public string BuyerTaxId { get; set; }
+        public OcrDbdInfo DbdInfo { get; set; }
+        public string ScannedDocumentType { get; set; }
+        public string OurRole { get; set; }              // "Buyer"/"Seller"
+        public string TargetDocumentType { get; set; }   // เอกสารที่ควรสร้าง เช่น PaymentVoucher
+        public string OcrEngine { get; set; }
+        public bool HasPotentialFixedAsset { get; set; }
+        public bool HasHandwriting { get; set; }
+        public OcrQualityGradeDto Quality { get; set; }
+        public string SuggestedEntryMode { get; set; }
+        public bool GlAccountUsedAi { get; set; }         // true = AI จริงช่วยจัดผังบัญชี
+    }
+
+    public class OcrSuggestedAccountsDto
+    {
+        public string DebitAccountCode { get; set; }
+        public string DebitAccountName { get; set; }
+        public string CreditAccountCode { get; set; }
+        public string CreditAccountName { get; set; }
+        public string VatAccountCode { get; set; }
+        public string VatAccountName { get; set; }
+    }
+
+    public class OcrLineItemDto
+    {
+        public string Description { get; set; }
+        public decimal? Quantity { get; set; }
+        public decimal? UnitPrice { get; set; }
+        public decimal? Amount { get; set; }
+        public string SuggestedAccountCode { get; set; }
+        public string Unit { get; set; }
+    }
+
+    public class OcrDbdInfo
+    {
+        public bool LookupAttempted { get; set; }
+        public bool Matched { get; set; }
+        public string CanonicalName { get; set; }
+        public string Address { get; set; }
+        public string JuristicType { get; set; }
+        public string Status { get; set; }
+    }
+
+    public class OcrQualityGradeDto
+    {
+        public string Letter { get; set; }    // A/B/C/D
+        public int Score { get; set; }         // 0-100
+        public string Color { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
     // Products (ตรงตาม Nexaacc ProductDtos.cs)
     // ──────────────────────────────────────────────
 

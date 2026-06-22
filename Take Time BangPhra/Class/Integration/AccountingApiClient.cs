@@ -589,6 +589,89 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// อนุมัติเอกสาร (company endpoint, acc_) พร้อม body. ครั้งแรกถ้ามี soft warning จะได้ 422
+        /// → เรียกซ้ำด้วย AcknowledgeWarnings=true. Auto-post GL (ไม่ auto-pay).
+        /// </summary>
+        public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId, ApproveDocumentRequest request)
+        {
+            return await PostAsync<ApproveDocumentRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/approve", request ?? new ApproveDocumentRequest());
+        }
+
+        // ──────────────────────────────────────────────
+        // OCR (company endpoint, acc_) — OcrController
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// อัปโหลดไฟล์เข้า OCR inbox. autoCreate=false (ค่าเริ่มต้นฝั่ง web) = สแกนอย่างเดียว
+        /// ไม่สร้างเอกสาร — ให้ผู้ใช้ตรวจ/แก้ก่อนแล้วค่อยเรียก CreateDocumentFromOcrAsync.
+        /// รับทั้ง int_/acc_ แต่ flow ต่อ (create-document/approve) ต้องใช้ acc_.
+        /// </summary>
+        public async Task<ApiResponse<OcrResultResponse>> UploadOcrAsync(
+            string filePath, string preferredEngine = null, bool autoCreate = false)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                throw new FileNotFoundException("OCR upload: file not found", filePath);
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            var qs = new List<string> { "autoCreate=" + (autoCreate ? "true" : "false") };
+            if (!string.IsNullOrEmpty(preferredEngine))
+                qs.Add("preferredEngine=" + Uri.EscapeDataString(preferredEngine));
+            string path = $"{CompanyPath}/ocr/upload?" + string.Join("&", qs);
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+
+            using (var form = new MultipartFormDataContent())
+            {
+                var fileBytes = File.ReadAllBytes(filePath);
+                var fileContent = new ByteArrayContent(fileBytes);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetContentType(filePath));
+                form.Add(fileContent, "file", Path.GetFileName(filePath));
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                // OCR upload อยู่ใต้ /api/companies/* → ใช้ X-Api-Key (acc_)
+                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("Accept", "application/json");
+                request.Content = form;
+
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                LogApiCall("POST", path, "[multipart file]", responseBody,
+                    (int)response.StatusCode, response.IsSuccessStatusCode, 0);
+
+                if (!response.IsSuccessStatusCode)
+                    throw new AccountingApiException(
+                        $"OCR upload failed: {response.StatusCode} {responseBody}",
+                        (int)response.StatusCode, responseBody);
+
+                return JsonConvert.DeserializeObject<ApiResponse<OcrResultResponse>>(responseBody, _jsonSettings);
+            }
+        }
+
+        /// <summary>ดึงผล OCR (poll จนกว่า ScanStatus จะเป็น Completed/Failed).</summary>
+        public async Task<ApiResponse<OcrResultResponse>> GetOcrResultAsync(Guid scanId)
+        {
+            return await GetAsync<ApiResponse<OcrResultResponse>>($"{CompanyPath}/ocr/{scanId}");
+        }
+
+        /// <summary>
+        /// สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId แล้ว Name).
+        /// targetType เช่น PaymentVoucher/Expense. คืน OcrResultResponse ที่มี CreatedDocumentId.
+        /// จากนั้นเรียก ApproveDocumentAsync(CreatedDocumentId, ...).
+        /// </summary>
+        public async Task<ApiResponse<OcrResultResponse>> CreateDocumentFromOcrAsync(Guid scanId, string targetType)
+        {
+            string path = $"{CompanyPath}/ocr/{scanId}/create-document";
+            if (!string.IsNullOrEmpty(targetType))
+                path += "?targetType=" + Uri.EscapeDataString(targetType);
+            return await PostAsync<object, ApiResponse<OcrResultResponse>>(path, null);
+        }
+
+        /// <summary>
         /// DEPRECATED: ใช้ /document/{id}/void (JWT-only). Process* flow ใช้ credit note แทนแล้ว
         /// คงไว้สำหรับ admin tools ที่อาจมี API Key (JWT) แยก
         /// </summary>

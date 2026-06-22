@@ -105,15 +105,25 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
 21916/21917 by supplier TaxId/ContactType, so send correct ContactType.
 
 ### Known gaps / TODO (NextAcc-dependent)
-1. **Director-advance credit account (เจ้าหนี้กรรมการ):** integration endpoints can't override
-   the cash credit. Needs the company `documents/payments` `OverridePaymentAccountId` (acc_ key),
-   or a NextAcc enhancement to the integration PV/payment endpoints.
-2. **Deposit deferred VAT (มัดจำ → 21913 ภาษีขายรอรับรู้) + realize at check-in:** needs company
-   `documents` (IsDeposit/DepositOutputVatDeferred) + `realize-deposit` (acc_ key). Reservation
-   number goes in Reference (already `RES-{id}-DEP`).
-3. **OCR-first ใบสำคัญจ่าย flow:** upload→`ocr/upload`(autoCreate=false)→pull OcrResultResponse
-   →prefill + AI suggest→user confirm→`ocr/{id}/create-document?targetType=PaymentVoucher`→`approve`.
-   Auto-create Vendor from OCR DBD/tax-id. Stop claiming VAT off plain receipts (see §86/4).
+1. **Director-advance credit account (เจ้าหนี้กรรมการ):** ✅ DONE. `AutoRecordPaymentForVoucher`
+   now routes to the company `document/payments` endpoint (`CreatePaymentAsync`,
+   `OverridePaymentAccountId` + `PayerSignature*`) whenever an override/signature is needed AND an
+   `acc_` key is configured; falls back to `/api/integration/payments` (which ignores both) with a
+   log line when an `int_` key blocks it. Verified vs Wachira-d/Accounting: `InboundPaymentRequest`
+   has neither field; `CreatePaymentRequest` (DocumentController) has both.
+2. **Deposit deferred VAT (มัดจำ → 21913 ภาษีขายรอรับรู้) + realize at check-in:** ✅ DONE (opt-in,
+   journal-based — no native deposit-doc/ContactId dependency). Config `Deposit_Defer_Output_Vat`:
+   when on (RECEIPT mode), deposit receipt CR `OUTPUT_VAT_DEFERRED` (21913) instead of OUTPUT_VAT,
+   and checkout reclassifies Dr 21913 / Cr 21911 so VAT only hits ภ.พ.30 at revenue recognition.
+   Default off = unchanged; unmapped 21913 → falls back to OUTPUT_VAT. Migration PHASE17_05 seeds
+   the config + `OUTPUT_VAT_DEFERRED` mapping; admin toggle on AccountingIntegration page.
+3. **OCR-first ใบสำคัญจ่าย flow:** ✅ DONE (page `Voucher/OcrUpload.aspx`, acc_ key required).
+   upload→`ocr/upload`(autoCreate=false)→poll `OcrResultResponse`→prefill review (shows OCR
+   `SuggestedAccounts` + quality/role/WHT)→user confirm→`ocr/{id}/create-document?targetType=…`
+   →`approve` (retries with AcknowledgeWarnings=true on 422). NextAcc auto-creates the Vendor from
+   OCR DBD/tax-id. Client: `UploadOcrAsync` / `GetOcrResultAsync` / `CreateDocumentFromOcrAsync` /
+   `ApproveDocumentAsync(id, ApproveDocumentRequest)`. (Future: line-level AI suggest endpoints +
+   editable line grid; current page submits the OCR-derived doc as-is.)
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
 
 ## Git / workflow

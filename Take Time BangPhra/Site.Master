@@ -587,6 +587,9 @@
                                                 <li><a runat="server" href="~/Account/CheckPayment_New">
                                                     <i class="fas fa-file-invoice-dollar"></i> จัดการใบสำคัญจ่าย
                                                 </a></li>
+                                                <li><a runat="server" href="~/Voucher/OcrUpload">
+                                                    <i class="fas fa-file-import"></i> OCR ใบสำคัญจ่าย
+                                                </a></li>
                                                 <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
                                                 <li><a runat="server" href="~/Admin/CustomerManagement">
                                                     <i class="fas fa-address-book"></i> จัดการลูกค้า

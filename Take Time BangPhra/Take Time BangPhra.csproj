@@ -580,6 +580,7 @@
     </Content>
     <Content Include="ViewSwitcher.ascx" />
     <Content Include="Voucher\Default.aspx" />
+    <Content Include="Voucher\OcrUpload.aspx" />
     <Content Include="Voucher\MatchTaxInvoice.aspx" />
     <Content Include="Voucher\VoucherList.aspx" />
     <Content Include="Voucher\Voucher_Confirmed.aspx" />
@@ -1378,6 +1379,13 @@
     </Compile>
     <Compile Include="Voucher\Default.aspx.designer.cs">
       <DependentUpon>Default.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Voucher\OcrUpload.aspx.cs">
+      <DependentUpon>OcrUpload.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Voucher\OcrUpload.aspx.designer.cs">
+      <DependentUpon>OcrUpload.aspx</DependentUpon>
     </Compile>
     <Compile Include="Voucher\MatchTaxInvoice.aspx.cs">
       <DependentUpon>MatchTaxInvoice.aspx</DependentUpon>
