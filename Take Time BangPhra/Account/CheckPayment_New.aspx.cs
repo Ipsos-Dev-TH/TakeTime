@@ -344,6 +344,14 @@ namespace Take_Time_BangPhra.Account
                 var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
                 if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
 
+                // เรียงทั้งตาราง (รวมเอกสารที่ดึง/สร้างบน NextAcc ซึ่งถูก append ท้าย) ตามเลขที่เอกสาร
+                // ที่แสดง (DisplayDoc) — ใหม่สุดอยู่บน. แก้ปัญหาเอกสาร NextAcc ไม่เรียงตามเลขที่เอกสาร
+                if (dt != null && dt.Columns.Contains("DisplayDoc"))
+                {
+                    dt.DefaultView.Sort = "DisplayDoc DESC";
+                    dt = dt.DefaultView.ToTable();
+                }
+
                 if (dt != null) BuildUidCacheFromGrid(dt);
 
                 gvDetails.DataSource = dt;
