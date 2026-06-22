@@ -1724,30 +1724,75 @@ namespace Take_Time_BangPhra.Integration
                 return;
             }
 
-            var payReq = new CreateIntegrationPaymentRequest
+            string method = AccountingDataMapper.NormalizePaymentMethod(paymentMethod);
+
+            // บังคับบัญชี "แหล่งเงิน" (ฝั่ง Dr เงินสด/ธนาคาร) ตามที่ผู้ใช้เลือกฝั่ง TakeTime
+            // (Account_Paid_How.Nexaacc_AccountId → ChartOfAccount GUID). NextAcc
+            // CreatePaymentJournalAsync เลือกบัญชีฝั่งเงินสดจาก OverridePaymentAccountId ก่อน
+            // (verified vs Wachira-d/Accounting) → ต้องใช้ company endpoint. integration endpoint
+            // ละเลย override → NextAcc เดาบัญชีจาก PaymentMethod เอง (ไม่ยึดแหล่งเงินที่เลือก).
+            Guid? overrideAccId = null;
+            if (!string.IsNullOrEmpty(paymentAccountId)
+                && Guid.TryParse(paymentAccountId, out var parsedAccId) && parsedAccId != Guid.Empty)
+                overrideAccId = parsedAccId;
+
+            string paymentId = null;
+            bool payOk = false;
+            string payMsg = null;
+
+            if (overrideAccId.HasValue && !_config.IsIntegrationKey)
             {
-                ExternalId = $"RCPT-PAY-{receiptNumber}",
-                ExternalRef = receiptNumber,
-                InvoiceExternalRef = receiptNumber,
-                DocumentId = invoiceDocId,
-                CustomerName = customerName,
-                PaymentDate = receiptDate,
-                Amount = cashNow,
-                PaymentMethod = AccountingDataMapper.NormalizePaymentMethod(paymentMethod),
-                ReferenceNo = receiptNumber,
-                Notes = $"รับชำระอัตโนมัติจากใบเสร็จ {receiptNumber}"
-            };
-            var payResult = await _apiClient.CreateIntegrationPaymentAsync(payReq);
-            if (payResult?.success == true && payResult.data != null)
+                // company endpoint บังคับแหล่งเงินได้ (acc_ key)
+                var companyReq = new CreatePaymentRequest
+                {
+                    DocumentId = invoiceDocId,
+                    PaymentDate = receiptDate,
+                    Amount = cashNow,
+                    PaymentMethod = method,
+                    Reference = receiptNumber,
+                    Notes = $"รับชำระอัตโนมัติจากใบเสร็จ {receiptNumber}",
+                    OverridePaymentAccountId = overrideAccId
+                };
+                var companyResult = await _apiClient.CreatePaymentAsync(companyReq);
+                payOk = companyResult?.success == true && companyResult.data != null;
+                paymentId = payOk ? companyResult.data.Id.ToString() : null;
+                payMsg = companyResult?.message;
+            }
+            else
             {
-                SetReceiptPaymentMarker(receiptNumber, payResult.data.Id.ToString());
+                if (overrideAccId.HasValue && _config.IsIntegrationKey)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceipt: receipt={receiptNumber} มีแหล่งเงินที่ map ไว้ (acc={paymentAccountId}) แต่ API key เป็น int_ — integration endpoint ไม่บังคับบัญชี NextAcc จะเลือกตาม PaymentMethod เอง (ตั้งค่า acc_ key เพื่อยึดแหล่งเงิน)", "SYSTEM");
+
+                var payReq = new CreateIntegrationPaymentRequest
+                {
+                    ExternalId = $"RCPT-PAY-{receiptNumber}",
+                    ExternalRef = receiptNumber,
+                    InvoiceExternalRef = receiptNumber,
+                    DocumentId = invoiceDocId,
+                    CustomerName = customerName,
+                    PaymentDate = receiptDate,
+                    Amount = cashNow,
+                    PaymentMethod = method,
+                    ReferenceNo = receiptNumber,
+                    Notes = $"รับชำระอัตโนมัติจากใบเสร็จ {receiptNumber}"
+                };
+                var payResult = await _apiClient.CreateIntegrationPaymentAsync(payReq);
+                payOk = payResult?.success == true && payResult.data != null;
+                paymentId = payOk ? payResult.data.Id.ToString() : null;
+                payMsg = payResult?.message;
+            }
+
+            if (payOk)
+            {
+                SetReceiptPaymentMarker(receiptNumber, paymentId);
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={payResult.data.Id}", "SYSTEM");
+                    $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={paymentId} แหล่งเงิน={(overrideAccId.HasValue && !_config.IsIntegrationKey ? "บังคับ "+paymentAccountId : "default ตาม PaymentMethod")}", "SYSTEM");
             }
             else
             {
                 // re-throw → queue retry; invoice (ExternalRef) + adjustment (marker) idempotent ไม่ซ้ำ
-                throw new Exception($"SettleReceipt: บันทึกรับชำระไม่สำเร็จ receipt={receiptNumber}: {payResult?.message ?? "null response"}");
+                throw new Exception($"SettleReceipt: บันทึกรับชำระไม่สำเร็จ receipt={receiptNumber}: {payMsg ?? "null response"}");
             }
         }
 

@@ -131,6 +131,12 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `ProcessReceiptDocument` now calls `SettleReceiptInNextAcc` after the invoice: posts the
    deposit-applied adjustment (now **Cr ROOM_AR**, not Cr Cash) then records the real cash via
    `/integration/payments` (Dr Cash / Cr AR "ตัดลูกหนี้"), amount = total − depositApplied.
+   **แหล่งเงิน (Account_Paid_How.Nexaacc_AccountId) is now FORCED** onto NextAcc: when a mapped
+   account GUID exists AND an `acc_` key is configured, the cash leg routes to the company
+   `document/payments` endpoint with `OverridePaymentAccountId` (verified: NextAcc
+   `CreatePaymentJournalAsync` resolves the cash-side GL from `OverridePaymentAccountId` first →
+   Dr that exact account). `int_` key can't force it → integration endpoint, NextAcc picks by
+   PaymentMethod, logged. (Mirrors the จ่าย side `AutoRecordPaymentForVoucher`.)
    Idempotent via `Account_Receipt.Nexaacc_Receipt_Payment_Id` (migration PHASE17_06) — payment
    endpoint isn't deduped, so a two-phase marker (`ADJ:{jid}` → paymentId/`NOCASH`/`VOIDED`) guards
    queue retries. Void: primary `/documents/void` cascades the payment reversal; the credit-note
