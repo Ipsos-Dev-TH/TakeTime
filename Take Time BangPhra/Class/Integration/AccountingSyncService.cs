@@ -1672,6 +1672,145 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        // ──────────────────────────────────────────────
+        // รับชำระฝั่งรายรับ (ปิดลูกหนี้) — DOCUMENT mode
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// ปิดลูกหนี้ของ invoice ที่เพิ่งสร้างในโหมด DOCUMENT (NextAcc invoice ลง Dr ลูกหนี้
+        /// และไม่ auto-record payment): ตัดมัดจำที่หัก (ถ้ามี) เข้าลูกหนี้ผ่าน adjustment journal
+        /// แล้วบันทึกรับเงินสดจริง (= total − depositApplied) ผ่าน integration payment
+        /// (Dr เงินสด / Cr ลูกหนี้). idempotent ด้วย Account_Receipt.Nexaacc_Receipt_Payment_Id
+        /// (payment endpoint ของ NextAcc ไม่ dedupe → ต้องกัน double เมื่อ queue retry).
+        /// </summary>
+        private async System.Threading.Tasks.Task SettleReceiptInNextAcc(
+            Guid invoiceDocId, string receiptNumber, decimal totalAmount, decimal depositApplied,
+            string paymentMethod, DateTime receiptDate, string customerName, bool hasVat, int reservationId,
+            string paymentAccountId)
+        {
+            if (string.IsNullOrEmpty(receiptNumber))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    "SettleReceiptInNextAcc: ข้าม — ไม่มี receiptNumber (ใช้เป็น idempotency key ไม่ได้)", "SYSTEM");
+                return;
+            }
+
+            string marker = LookupReceiptPaymentMarker(receiptNumber);
+            bool payDone = !string.IsNullOrEmpty(marker) && !marker.StartsWith("ADJ:");
+            bool adjDone = !string.IsNullOrEmpty(marker);   // "ADJ:" หรือ final → adjustment ลงแล้ว
+            if (payDone) return;                            // ปิดลูกหนี้ครบแล้ว
+
+            // 1) ตัดมัดจำที่หักออกจากลูกหนี้ (ถ้ามี) — Dr เงินรับล่วงหน้า / Cr ลูกหนี้
+            if (depositApplied > 0 && !adjDone)
+            {
+                var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
+                    receiptDate, customerName, paymentAccountId, receiptNumber,
+                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
+                var adjResult = await _apiClient.CreateJournalAsync(adj);
+                Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
+                await SafePostJournalAsync(adjId);
+                SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SettleReceipt: deposit adjustment posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId}", "SYSTEM");
+            }
+
+            // 2) บันทึกรับเงินสดจริง (= total − depositApplied) → Dr เงินสด / Cr ลูกหนี้
+            decimal cashNow = totalAmount - depositApplied;
+            if (cashNow <= 0.005m)
+            {
+                SetReceiptPaymentMarker(receiptNumber, "NOCASH");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SettleReceipt: receipt={receiptNumber} ไม่มีเงินสดรับเพิ่ม (หักมัดจำหมด) — ปิดลูกหนี้ด้วยมัดจำอย่างเดียว", "SYSTEM");
+                return;
+            }
+
+            var payReq = new CreateIntegrationPaymentRequest
+            {
+                ExternalId = $"RCPT-PAY-{receiptNumber}",
+                ExternalRef = receiptNumber,
+                InvoiceExternalRef = receiptNumber,
+                DocumentId = invoiceDocId,
+                CustomerName = customerName,
+                PaymentDate = receiptDate,
+                Amount = cashNow,
+                PaymentMethod = AccountingDataMapper.NormalizePaymentMethod(paymentMethod),
+                ReferenceNo = receiptNumber,
+                Notes = $"รับชำระอัตโนมัติจากใบเสร็จ {receiptNumber}"
+            };
+            var payResult = await _apiClient.CreateIntegrationPaymentAsync(payReq);
+            if (payResult?.success == true && payResult.data != null)
+            {
+                SetReceiptPaymentMarker(receiptNumber, payResult.data.Id.ToString());
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={payResult.data.Id}", "SYSTEM");
+            }
+            else
+            {
+                // re-throw → queue retry; invoice (ExternalRef) + adjustment (marker) idempotent ไม่ซ้ำ
+                throw new Exception($"SettleReceipt: บันทึกรับชำระไม่สำเร็จ receipt={receiptNumber}: {payResult?.message ?? "null response"}");
+            }
+        }
+
+        private string LookupReceiptPaymentMarker(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Nexaacc_Receipt_Payment_Id FROM Account_Receipt WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return dt.Rows[0][0]?.ToString();
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptPaymentMarker: receipt={receiptNumber} {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Void payment ฝั่งรับที่บันทึกไว้ตอน settle (กัน cash/AR เพี้ยนเมื่อ void ใบเสร็จ).
+        /// alreadyCascaded=true (integration void endpoint จัดการ payment ให้แล้ว) → แค่ตั้ง marker.
+        /// alreadyCascaded=false (credit-note fallback) → ต้องเรียก VoidPaymentAsync เอง.
+        /// </summary>
+        private async System.Threading.Tasks.Task VoidRecordedReceiptPaymentAsync(string receiptNumber, bool alreadyCascaded)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return;
+            string marker = LookupReceiptPaymentMarker(receiptNumber);
+            Guid pid;
+            if (!alreadyCascaded && !string.IsNullOrEmpty(marker) && Guid.TryParse(marker, out pid))
+            {
+                try
+                {
+                    await _apiClient.VoidPaymentAsync(pid);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"VoidRecordedReceiptPayment: voided payment {pid} for receipt={receiptNumber}", "SYSTEM");
+                }
+                catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"VoidRecordedReceiptPayment: payment {pid} already voided/terminal receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                }
+            }
+            SetReceiptPaymentMarker(receiptNumber, "VOIDED");
+        }
+
+        private void SetReceiptPaymentMarker(string receiptNumber, string marker)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Account_Receipt SET Nexaacc_Receipt_Payment_Id = @m WHERE ID = @num",
+                    new Dictionary<string, object> { { "@m", marker }, { "@num", receiptNumber } });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SetReceiptPaymentMarker: receipt={receiptNumber} {ex.Message}", "SYSTEM");
+            }
+        }
+
         private void BackfillNextAccRefToPayment(string docNumber, string nexaaccId, string nexaaccDocNumber)
         {
             if (string.IsNullOrEmpty(docNumber)) return;
@@ -2094,6 +2233,9 @@ namespace Take_Time_BangPhra.Integration
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (deposit) receipt={receiptNumber}");
                     _lastDocNumber = result?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";
+                    // บันทึกรับเงินสดของมัดจำเพื่อปิดลูกหนี้ที่ invoice เปิดไว้ (NextAcc ไม่ auto-pay)
+                    await SettleReceiptInNextAcc(invDocId, receiptNumber, totalAmount, 0m,
+                        paymentMethod, receiptDate, customerName, depositHasVat, reservationId, paymentAccountId);
                     await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
                     return invDocId.ToString();
                 }
@@ -2178,32 +2320,10 @@ namespace Take_Time_BangPhra.Integration
 
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (payment) receipt={receiptNumber}");
 
-                    // Adjustment journal: ถ้ามี deposit applied ให้ตัด ADVANCE_DEPOSIT + ลด Cash
-                    if (depositApplied > 0)
-                    {
-                        try
-                        {
-                            var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
-                                receiptDate, customerName, paymentAccountId, receiptNumber,
-                                hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
-                            var adjResult = await _apiClient.CreateJournalAsync(adj);
-                            Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
-                            await SafePostJournalAsync(adjId);
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"Deposit-applied adjustment posted: receipt={receiptNumber} amount={depositApplied} journalId={adjId}",
-                                "SYSTEM");
-                        }
-                        catch (Exception adjEx)
-                        {
-                            // ต้อง re-throw — ถ้ากลืน exception ใบเสร็จจะถูกมาร์ค COMPLETED
-                            // แต่ ADVANCE_DEPOSIT ไม่ถูกตัด → มัดจำค้างถาวร ไม่มี retry
-                            // re-throw → queue retry → invoice idempotent (ExternalRef) ไม่สร้างซ้ำ + adjustment retry
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"Deposit-applied adjustment FAILED for receipt={receiptNumber}: {adjEx.Message} — จะ retry ทั้งรายการ", "SYSTEM");
-                            throw new Exception(
-                                $"Deposit-applied adjustment failed for receipt {receiptNumber} (invoice {invDocId} created OK, will retry): {adjEx.Message}", adjEx);
-                        }
-                    }
+                    // ปิดลูกหนี้ที่ invoice เปิดไว้ (NextAcc ไม่ auto-pay): ตัดมัดจำที่หัก (ถ้ามี)
+                    // เข้าลูกหนี้ + บันทึกรับเงินสดจริง (= total − depositApplied). idempotent ภายใน.
+                    await SettleReceiptInNextAcc(invDocId, receiptNumber, totalAmount, depositApplied,
+                        paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
 
                     _lastDocNumber = result?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";
@@ -2466,7 +2586,8 @@ namespace Take_Time_BangPhra.Integration
                                     string custName = info.Value.customerName ?? "";
                                     var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
                                         resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                        custName, info.Value.paymentAccountId, receiptNumber,
+                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
                                     var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
                                     RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
                                     _code.Logs(_connectionString, "AccountingSync",
@@ -2475,6 +2596,9 @@ namespace Take_Time_BangPhra.Integration
                                 }
                             }
                         }
+
+                        // integration void cascade ได้ void payment ที่บันทึกรับชำระให้แล้ว — แค่ mark marker
+                        await VoidRecordedReceiptPaymentAsync(receiptNumber, alreadyCascaded: true);
 
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt(DOCUMENT): voided via integration endpoint receipt={receiptNumber} nexaaccId={nexaaccId}",
@@ -2508,13 +2632,17 @@ namespace Take_Time_BangPhra.Integration
                                 {
                                     var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
                                         resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        custName, info.Value.paymentAccountId, receiptNumber);
+                                        custName, info.Value.paymentAccountId, receiptNumber,
+                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
                                     var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
                                     RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
                                     _code.Logs(_connectionString, "AccountingSync",
                                         $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
                                         "SYSTEM");
                                 }
+
+                                // credit-note fallback ไม่ cascade payment → ต้อง void payment ที่บันทึกรับชำระเอง
+                                await VoidRecordedReceiptPaymentAsync(receiptNumber, alreadyCascaded: false);
 
                                 return $"CREDIT_NOTE:{cnId}";
                             }

@@ -2082,9 +2082,13 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>
         /// Adjustment journal สำหรับ DOCUMENT mode เมื่อมีการหักมัดจำ:
-        ///   หลังจากสร้าง invoice เต็มจำนวน (3700) — invoice บันทึก DR Cash 3700, CR Revenue 3700
-        ///   adjustment นี้: DR Advance Deposit (depositApplied), CR Cash/Bank (depositApplied)
-        ///   ผลสุทธิ: Cash จริง = 3700 - 1000 = 2700, Advance Deposit ลด 1000, Revenue 3700 ✓
+        ///   invoice บันทึก DR ลูกหนี้การค้า (total) / CR รายได้ + CR ภาษีขาย (ตาม contract NextAcc)
+        ///   adjustment นี้ตัด "ส่วนที่จ่ายด้วยมัดจำ" ออกจากลูกหนี้ ด้วยเงินรับล่วงหน้า:
+        ///     DR เงินรับล่วงหน้า (ADVANCE_DEPOSIT, net ถ้า VAT รับรู้ตอนรับมัดจำ)
+        ///     [DR ภาษีขาย (กลับ VAT มัดจำที่รับรู้ไปแล้ว กัน VAT ซ้ำ) — เฉพาะโหมด RECEIPT]
+        ///     CR ลูกหนี้การค้า (ROOM_AR) = depositApplied
+        ///   ส่วนเงินสดจริงที่รับเพิ่ม (total − depositApplied) บันทึกแยกผ่าน integration payment
+        ///   (AutoRecordReceiptPayment) ซึ่งลง DR เงินสด / CR ลูกหนี้ → ลูกหนี้สุทธิ = 0 ✓
         /// </summary>
         public CreateJournalEntryRequest MapDepositAppliedAdjustment(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
@@ -2095,7 +2099,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("MapDepositAppliedAdjustment: depositApplied ต้อง > 0");
 
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
-            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            var arAccountId = GetAccountId("ROOM_AR");
             string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ" : $"RES-{reservationId}-DEPADJ";
 
             var lines = new List<JournalEntryLineRequest>();
@@ -2104,7 +2108,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 // โหมด RECEIPT: ADVANCE_DEPOSIT เก็บ net, VAT รับรู้ตอนรับมัดจำแล้ว
                 //   invoice บันทึก revenue+VAT เต็ม → VAT ซ้ำ → ต้อง DR Output VAT คืน depositVat
-                //   DR Advance Deposit (net) + DR Output VAT (depositVat) / CR Cash (gross)
+                //   DR Advance Deposit (net) + DR Output VAT (depositVat) / CR ลูกหนี้ (gross)
                 decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal depositVat = depositApplied - depositNet;
                 lines.Add(new JournalEntryLineRequest
@@ -2135,10 +2139,10 @@ namespace Take_Time_BangPhra.Integration
 
             lines.Add(new JournalEntryLineRequest
             {
-                AccountId = cashAccountId,
+                AccountId = arAccountId,
                 DebitAmount = 0,
                 CreditAmount = depositApplied,
-                Description = "ลดเงินสดที่ invoice บันทึกเกินจริง"
+                Description = "ตัดลูกหนี้ด้วยมัดจำที่รับล่วงหน้า"
             });
 
             return new CreateJournalEntryRequest
@@ -2152,19 +2156,63 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// Counter-adjustment สำหรับการ void ใบเสร็จที่เคยหักมัดจำ:
-        ///   DR Cash/Bank, CR Advance Deposit (กลับ adjustment เดิมเพื่อเอาเจ้าหนี้กลับมา)
+        /// Counter-adjustment สำหรับการ void ใบเสร็จที่เคยหักมัดจำ — กลับรายการของ
+        /// MapDepositAppliedAdjustment (manual JE ไม่ถูก cascade ตอน void เอกสาร):
+        ///   DR ลูกหนี้การค้า (เปิดลูกหนี้คืน) / CR เงินรับล่วงหน้า (+ CR ภาษีขาย ถ้าโหมด RECEIPT)
+        /// ต้องส่ง hasVat/vatAtReceipt ให้ตรงกับตอน settle เพื่อให้ VAT กลับถูกต้อง
         /// </summary>
         public CreateJournalEntryRequest MapDepositAppliedAdjustmentReverse(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
-            string customerName, string paymentAccountId = null, string receiptNumber = null)
+            string customerName, string paymentAccountId = null, string receiptNumber = null,
+            bool hasVat = false, bool vatAtReceipt = false)
         {
             if (depositApplied <= 0)
                 throw new ArgumentException("MapDepositAppliedAdjustmentReverse: depositApplied ต้อง > 0");
 
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
-            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            var arAccountId = GetAccountId("ROOM_AR");
             string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ-REV" : $"RES-{reservationId}-DEPADJ-REV";
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = arAccountId,
+                    DebitAmount = depositApplied,
+                    CreditAmount = 0,
+                    Description = "กลับการตัดลูกหนี้ด้วยมัดจำ (เปิดลูกหนี้คืน)"
+                }
+            };
+
+            if (hasVat && vatAtReceipt)
+            {
+                decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+                decimal depositVat = depositApplied - depositNet;
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = depositNet,
+                    Description = "เอาเงินรับล่วงหน้ากลับมา (net)"
+                });
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = GetAccountId("OUTPUT_VAT"),
+                    DebitAmount = 0,
+                    CreditAmount = depositVat,
+                    Description = "กลับ VAT มัดจำที่เคยกลับไว้ในใบเสร็จ"
+                });
+            }
+            else
+            {
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = depositApplied,
+                    Description = "เอาเงินรับล่วงหน้ากลับมา (เจ้าหนี้)"
+                });
+            }
 
             return new CreateJournalEntryRequest
             {
@@ -2172,23 +2220,7 @@ namespace Take_Time_BangPhra.Integration
                 JournalType = NexaaccJournalType.General,
                 Description = $"กลับรายการ adjustment — ยกเลิกการหักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
                 Reference = refStr,
-                Lines = new List<JournalEntryLineRequest>
-                {
-                    new JournalEntryLineRequest
-                    {
-                        AccountId = cashAccountId,
-                        DebitAmount = depositApplied,
-                        CreditAmount = 0,
-                        Description = "กลับลด cash"
-                    },
-                    new JournalEntryLineRequest
-                    {
-                        AccountId = advanceDepositAccountId,
-                        DebitAmount = 0,
-                        CreditAmount = depositApplied,
-                        Description = "เอาเงินรับล่วงหน้ากลับมา (เจ้าหนี้)"
-                    }
-                }
+                Lines = lines
             };
         }
 

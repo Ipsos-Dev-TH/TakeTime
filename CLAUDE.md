@@ -125,6 +125,24 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `ApproveDocumentAsync(id, ApproveDocumentRequest)`. (Future: line-level AI suggest endpoints +
    editable line grid; current page submits the OCR-derived doc as-is.)
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
+5. **รับ-side AR closure (DOCUMENT mode):** ✅ DONE. NextAcc `/integration/invoices` posts
+   Dr ลูกหนี้การค้า / Cr รายได้ / Cr ภาษีขาย and does **NOT** auto-record a payment (PaymentMethod
+   is ignored; `BalanceDue=Total`). Previously every cash receipt left AR open + cash unbooked.
+   `ProcessReceiptDocument` now calls `SettleReceiptInNextAcc` after the invoice: posts the
+   deposit-applied adjustment (now **Cr ROOM_AR**, not Cr Cash) then records the real cash via
+   `/integration/payments` (Dr Cash / Cr AR "ตัดลูกหนี้"), amount = total − depositApplied.
+   Idempotent via `Account_Receipt.Nexaacc_Receipt_Payment_Id` (migration PHASE17_06) — payment
+   endpoint isn't deduped, so a two-phase marker (`ADJ:{jid}` → paymentId/`NOCASH`/`VOIDED`) guards
+   queue retries. Void: primary `/documents/void` cascades the payment reversal; the credit-note
+   fallback calls `VoidPaymentAsync`; `MapDepositAppliedAdjustmentReverse` now reverses Dr AR / Cr
+   ADVANCE_DEPOSIT(+VAT). The จ่าย side already settled AP correctly (PV one-shot / expense+payment).
+6. **DOCUMENT-mode invoice caveats (pre-existing, NOT fixed — needs NextAcc-side work):** NextAcc's
+   integration invoice JE credits a **single** `AccountType=Revenue` account for the whole SubTotal
+   and ignores per-line `AccountId`. So (a) multi-line revenue splits are flattened to one revenue
+   account, and (b) **deposits routed through `/invoices` are recognised as revenue immediately, not
+   as เงินรับล่วงหน้า (liability)**. JOURNAL mode (TakeTime-controlled per-line) is more faithful for
+   the รับ side. Fixing in DOCUMENT mode requires the company `/documents` endpoint (per-line accounts
+   + `IsDeposit`) or a NextAcc change to honour line accounts on `/integration/invoices`.
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
