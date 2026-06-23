@@ -1593,8 +1593,10 @@ namespace Take_Time_BangPhra.Integration
                 // Wachira-d/Accounting: InboundPaymentRequest has neither field). So when either
                 // feature is actually needed and we hold an acc_ key, route to the company endpoint;
                 // otherwise keep the integration endpoint (no regression for the common case).
+                // ทั้ง int_ และ acc_ เรียก company endpoint ได้ผ่าน X-Api-Key (int_ ผ่าน fallback
+                // ของ NextAcc ApiKeyMiddleware) → gate ที่ CanUseCompanyEndpoints (มี CompanyId + flag)
                 bool needsCompanyEndpoint = overrideAccId.HasValue || !string.IsNullOrEmpty(payerSigBase64);
-                if (needsCompanyEndpoint && !_config.IsIntegrationKey)
+                if (needsCompanyEndpoint && _config.CanUseCompanyEndpoints)
                 {
                     var companyReq = new CreatePaymentRequest
                     {
@@ -1615,9 +1617,9 @@ namespace Take_Time_BangPhra.Integration
                 }
                 else
                 {
-                    if (needsCompanyEndpoint && _config.IsIntegrationKey)
+                    if (needsCompanyEndpoint && !_config.CanUseCompanyEndpoints)
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"AutoRecordPayment: doc={docNumber} ต้องใช้ override account/ลายเซ็นผู้จ่าย แต่ API key เป็น int_ — NextAcc integration endpoint ไม่รองรับ จึงข้ามฟีเจอร์นี้ (ตั้งค่า acc_ key เพื่อใช้งาน)", "SYSTEM");
+                            $"AutoRecordPayment: doc={docNumber} ต้องใช้ override account/ลายเซ็นผู้จ่าย แต่ company endpoint ปิดอยู่ (ไม่มี CompanyId หรือ Nexaacc_Company_Endpoints=0) — integration endpoint ไม่รองรับ จึงข้ามฟีเจอร์นี้", "SYSTEM");
 
                     var paymentRequest = new CreateIntegrationPaymentRequest
                     {
@@ -1740,9 +1742,9 @@ namespace Take_Time_BangPhra.Integration
             bool payOk = false;
             string payMsg = null;
 
-            if (overrideAccId.HasValue && !_config.IsIntegrationKey)
+            if (overrideAccId.HasValue && _config.CanUseCompanyEndpoints)
             {
-                // company endpoint บังคับแหล่งเงินได้ (acc_ key)
+                // company endpoint บังคับแหล่งเงินได้ (int_/acc_ ผ่าน X-Api-Key)
                 var companyReq = new CreatePaymentRequest
                 {
                     DocumentId = invoiceDocId,
@@ -1760,9 +1762,9 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
-                if (overrideAccId.HasValue && _config.IsIntegrationKey)
+                if (overrideAccId.HasValue && !_config.CanUseCompanyEndpoints)
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"SettleReceipt: receipt={receiptNumber} มีแหล่งเงินที่ map ไว้ (acc={paymentAccountId}) แต่ API key เป็น int_ — integration endpoint ไม่บังคับบัญชี NextAcc จะเลือกตาม PaymentMethod เอง (ตั้งค่า acc_ key เพื่อยึดแหล่งเงิน)", "SYSTEM");
+                        $"SettleReceipt: receipt={receiptNumber} มีแหล่งเงินที่ map ไว้ (acc={paymentAccountId}) แต่ company endpoint ปิดอยู่ — integration endpoint ไม่บังคับบัญชี NextAcc จะเลือกตาม PaymentMethod เอง", "SYSTEM");
 
                 var payReq = new CreateIntegrationPaymentRequest
                 {
@@ -1787,7 +1789,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 SetReceiptPaymentMarker(receiptNumber, paymentId);
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={paymentId} แหล่งเงิน={(overrideAccId.HasValue && !_config.IsIntegrationKey ? "บังคับ "+paymentAccountId : "default ตาม PaymentMethod")}", "SYSTEM");
+                    $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={paymentId} แหล่งเงิน={(overrideAccId.HasValue && _config.CanUseCompanyEndpoints ? "บังคับ "+paymentAccountId : "default ตาม PaymentMethod")}", "SYSTEM");
             }
             else
             {
@@ -2326,7 +2328,7 @@ namespace Take_Time_BangPhra.Integration
                 bool depositHasVat = LookupBusinessHasVat();
                 bool depositVatAtReceipt = _config.IsDepositVatAtReceipt;
 
-                if (_config.IsReceiptDocumentMode && !_config.IsIntegrationKey && customerContact?.NexaaccContactId != null)
+                if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null)
                 {
                     // ✅ แนวทางถูกต้องตามบัญชี: Receipt doc + IsDeposit → Cr รับล่วงหน้า(หนี้สิน) ไม่ใช่รายได้
                     var doc = _mapper.MapReceiptToDocument(reservationId, null, totalAmount, null,
@@ -2418,7 +2420,7 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
                     "SYSTEM");
 
-                if (_config.IsReceiptDocumentMode && !_config.IsIntegrationKey && customerContact?.NexaaccContactId != null)
+                if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null)
                 {
                     // ✅ แนวทางถูกต้องตามบัญชี: Receipt doc → Dr เงินสด(แหล่งเงิน)/Cr รายได้ราย line/Cr ภาษีขาย
                     //    ไม่เปิดลูกหนี้; หักมัดจำ (ถ้ามี) ด้วย adjustment Dr รับล่วงหน้า/Cr เงินสด
@@ -2700,7 +2702,7 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                if (_config.IsReceiptDocumentMode && !_config.IsIntegrationKey)
+                if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints)
                 {
                     // ✅ Receipt-doc path (acc_): void เอกสารผ่าน company endpoint (cascade JE)
                     //    + กลับรายการหักมัดจำ (Dr เงินสด/Cr รับล่วงหน้า) ถ้ามี
@@ -2975,13 +2977,13 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         private async Task TryAutoGenerateWhtCertAsync(Guid documentId, string documentNumber)
         {
-            // WHT cert endpoint ({company}/withholding-tax-certs/*) ต้องใช้ API Key (acc_)
-            // ข้ามเมื่อใช้ Integration Key (int_) — กัน 401 ซ้ำ
-            if (_config.IsIntegrationKey)
+            // WHT cert endpoint ({company}/withholding-tax-certs/*) เรียกผ่าน X-Api-Key
+            // (int_/acc_) ได้ — ข้ามเฉพาะเมื่อ company endpoint ปิด (ไม่มี CompanyId / flag=0)
+            if (!_config.CanUseCompanyEndpoints)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"WHT cert auto-generate ข้าม doc={documentNumber}: ระบบใช้ Integration Key (int_) " +
-                    "ซึ่งใช้กับ WHT endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก", "SYSTEM");
+                    $"WHT cert auto-generate ข้าม doc={documentNumber}: company endpoint ปิดอยู่ " +
+                    "(ตั้ง CompanyId + Nexaacc_Company_Endpoints=1 เพื่อใช้งาน)", "SYSTEM");
                 return;
             }
             try
@@ -3447,13 +3449,13 @@ namespace Take_Time_BangPhra.Integration
         {
             if (!_config.IsEtaxAutoGenerate) return;
 
-            // E-Tax endpoint ({company}/etax/*) ต้องใช้ API Key (acc_) — ใช้กับ Integration Key (int_) ไม่ได้
-            // ข้ามไปเพื่อไม่ให้เกิด 401 ซ้ำทุกใบเสร็จ (core sync ไม่กระทบ)
-            if (_config.IsIntegrationKey)
+            // E-Tax endpoint ({company}/etax/*) เรียกผ่าน X-Api-Key (int_/acc_) ได้
+            // ข้ามเฉพาะเมื่อ company endpoint ปิด (ไม่มี CompanyId / flag=0)
+            if (!_config.CanUseCompanyEndpoints)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"E-Tax auto-generate ข้าม receipt={receiptNumber}: ระบบใช้ Integration Key (int_) " +
-                    "ซึ่งใช้กับ E-Tax endpoint ไม่ได้ — ต้องใช้ API Key (acc_) แยก หรือสร้าง E-Tax เองในหน้าจัดการ", "SYSTEM");
+                    $"E-Tax auto-generate ข้าม receipt={receiptNumber}: company endpoint ปิดอยู่ " +
+                    "(ตั้ง CompanyId + Nexaacc_Company_Endpoints=1 เพื่อใช้งาน) หรือสร้าง E-Tax เองในหน้าจัดการ", "SYSTEM");
                 return;
             }
 

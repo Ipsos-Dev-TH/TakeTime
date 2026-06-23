@@ -32,10 +32,23 @@ namespace Take_Time_BangPhra.Integration
         public string RawBaseUrl => GetConfig("Nexaacc_BaseUrl", "");
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
 
-        /// <summary>true = key เป็น Integration Key (ขึ้นต้น "int_") — ใช้กับ /api/integration/* ได้
-        /// แต่ใช้กับ {company}/* (E-Tax, WHT, chart) ไม่ได้ (ต้องใช้ API Key "acc_")</summary>
+        /// <summary>true = key เป็น Integration Key (ขึ้นต้น "int_").
+        /// ใช้กับ /api/integration/* (X-Integration-Key) ได้ และ — ตั้งแต่ NextAcc เพิ่ม
+        /// fallback ใน ApiKeyMiddleware — ยังใช้กับ {company}/* ผ่าน header X-Api-Key ได้ด้วย
+        /// (middleware หา acc_ ไม่เจอ แล้ว fallback ไปตาราง integration). ดังนั้น int_ ครอบคลุม
+        /// ทั้งสอง surface; ส่วน acc_ ใช้ /api/integration/* ไม่ได้ (auth ด้วย X-Integration-Key
+        /// → ตาราง ExternalIntegration เท่านั้น) → ระบบควรตั้งค่าด้วย int_ เป็นหลัก.</summary>
         public bool IsIntegrationKey => (ApiKey ?? "").StartsWith("int_", StringComparison.OrdinalIgnoreCase);
         public Guid CompanyId => Guid.TryParse(GetConfig("Nexaacc_CompanyId", ""), out var id) ? id : Guid.Empty;
+
+        /// <summary>company endpoints (/api/companies/{id}/* — document, OCR, payment override,
+        /// แหล่งเงิน forcing, deposit docs) เรียกได้หรือไม่. ต้องมี CompanyId; ทั้ง int_ และ acc_
+        /// auth ผ่าน X-Api-Key ได้ (acc_ ตรง ๆ, int_ ผ่าน fallback). ปิดด้วย flag
+        /// Nexaacc_Company_Endpoints=0 ถ้า NextAcc รุ่นเก่ายังไม่รับ int_ บน company route
+        /// (ระบบจะ fallback ไป /api/integration/* แทน).</summary>
+        public bool CanUseCompanyEndpoints =>
+            CompanyId != Guid.Empty
+            && GetConfig("Nexaacc_Company_Endpoints", "1").Equals("1", StringComparison.OrdinalIgnoreCase);
         public bool Enabled => GetConfig("Nexaacc_Enabled", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         public int SyncIntervalSeconds => int.TryParse(GetConfig("Nexaacc_SyncInterval_Sec", "30"), out var v) ? v : 30;
         public int MaxRetries => int.TryParse(GetConfig("Nexaacc_MaxRetries", "5"), out var v) ? v : 5;

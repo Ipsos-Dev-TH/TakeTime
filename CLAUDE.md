@@ -25,9 +25,17 @@ Config in DB table `Accounting_Integration_Config` + `Accounting_Account_Mapping
 | **Integration** | `X-Integration-Key` / `Authorization: Bearer` with **`int_`** key | `/api/integration/*` | one-shot create (invoice, expense, payment-voucher, payment, journal, customer). Background sync uses this. |
 | **Company** | **`acc_`** API key (acts as the company Bearer) | `/api/companies/{companyId}/*` | OCR, AI suggestions, document approve, deposit deferred-VAT docs, payment with account override + payer signature, chart of accounts |
 
-`AccountingConfig.IsIntegrationKey => ApiKey.StartsWith("int_")`. **An `int_` key cannot
-call `/api/companies/*`.** Features below that need company endpoints REQUIRE an `acc_` key.
-Chart-of-Accounts sync ("ดึง Chart of Accounts") also needs `acc_`.
+`AccountingConfig.IsIntegrationKey => ApiKey.StartsWith("int_")`. **Key-type reality (verified
+in NextAcc `ApiKeyMiddleware`):** the `X-Api-Key` header (used for all `/api/companies/*` calls)
+looks up the `ApiKey` table (`acc_`) first, then **falls back to the `ExternalIntegration` table
+(`int_`)** — so **an `int_` key authenticates company endpoints too** (full access within its
+company). Conversely `/api/integration/*` is authed by `X-Integration-Key` → `ExternalIntegration`
+only, so **an `acc_` key CANNOT do the core sync**. ⟹ **Configure the system with an `int_` key**
+(it covers both surfaces); `acc_` breaks `/api/integration/*` (TestConnection 401). The client picks
+the header by PATH, not key type. Gate company-endpoint features on
+`AccountingConfig.CanUseCompanyEndpoints` (= `CompanyId` set + `Nexaacc_Company_Endpoints` flag,
+default `1`), **NOT** `!IsIntegrationKey`. Set the flag to `0` only if a deployment's NextAcc is too
+old to have the `X-Api-Key` int_ fallback (then everything routes via `/api/integration/*`).
 
 ### Verified API contracts (from Wachira-d/Accounting @ HEAD, June 2026)
 
