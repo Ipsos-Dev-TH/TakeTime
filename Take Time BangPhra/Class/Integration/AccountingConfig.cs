@@ -32,6 +32,23 @@ namespace Take_Time_BangPhra.Integration
         public string RawBaseUrl => GetConfig("Nexaacc_BaseUrl", "");
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
 
+        /// <summary>acc_ API Key สำหรับ company endpoints (/api/companies/* — document, OCR, override
+        /// แหล่งเงิน, E-Tax, WHT, chart) โดยเฉพาะ ส่งผ่าน header X-Api-Key. ถ้าเว้นว่าง → ใช้ ApiKey (int_)
+        /// ตัวเดียวกันผ่าน X-Api-Key fallback ของ NextAcc. แนะนำให้ตั้งคู่กับ int_ เพื่อให้แต่ละ surface
+        /// auth ด้วย key ที่ถูกประเภท (robust สุด ไม่ต้องพึ่ง fallback).</summary>
+        public string CompanyApiKey
+        {
+            get
+            {
+                var k = _code.Derypt(GetConfig("Nexaacc_CompanyApiKey_Encrypted", ""));
+                return string.IsNullOrEmpty(k) ? ApiKey : k;
+            }
+        }
+
+        /// <summary>true = ตั้ง acc_ key แยกสำหรับ company endpoints ไว้แล้ว (ไม่พึ่ง X-Api-Key fallback)</summary>
+        public bool HasDedicatedCompanyKey =>
+            !string.IsNullOrEmpty(_code.Derypt(GetConfig("Nexaacc_CompanyApiKey_Encrypted", "")));
+
         /// <summary>true = key เป็น Integration Key (ขึ้นต้น "int_").
         /// ใช้กับ /api/integration/* (X-Integration-Key) ได้ และ — ตั้งแต่ NextAcc เพิ่ม
         /// fallback ใน ApiKeyMiddleware — ยังใช้กับ {company}/* ผ่าน header X-Api-Key ได้ด้วย

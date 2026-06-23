@@ -36,6 +36,13 @@ the header by PATH, not key type. Gate company-endpoint features on
 `AccountingConfig.CanUseCompanyEndpoints` (= `CompanyId` set + `Nexaacc_Company_Endpoints` flag,
 default `1`), **NOT** `!IsIntegrationKey`. Set the flag to `0` only if a deployment's NextAcc is too
 old to have the `X-Api-Key` int_ fallback (then everything routes via `/api/integration/*`).
+**Dual-key (recommended):** the admin page accepts TWO keys — `Nexaacc_ApiKey_Encrypted` (the `int_`
+Integration Key, required, sent as `X-Integration-Key` on `/api/integration/*`) and the optional
+`Nexaacc_CompanyApiKey_Encrypted` (an `acc_` API Key, sent as `X-Api-Key` on `/api/companies/*`).
+`AccountingConfig.CompanyApiKey` returns the dedicated `acc_` key, or falls back to `ApiKey` (int_)
+when unset. Setting both makes each surface auth with its native key type (no reliance on the
+`X-Api-Key` int_ fallback); a single `int_` key still works via the fallback. The client uses
+`_config.ApiKey` for `X-Integration-Key` headers and `_config.CompanyApiKey` for `X-Api-Key` headers.
 
 ### Verified API contracts (from Wachira-d/Accounting @ HEAD, June 2026)
 

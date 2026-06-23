@@ -111,9 +111,17 @@
                     <div class="help-text">URL ของ Nexaacc API Server</div>
                 </div>
                 <div class="config-item">
-                    <label>API Key</label>
-                    <input type="password" id="cfgApiKey" placeholder="ใส่ API Key จากระบบ Nexaacc" />
-                    <div class="help-text">API Key สร้างได้จากหน้า Settings ของระบบ Nexaacc (ส่งผ่าน X-Api-Key header)</div>
+                    <label>Integration Key (int_) <span style="color:#c0392b;">*จำเป็น</span></label>
+                    <input type="password" id="cfgApiKey" placeholder="int_..." />
+                    <div class="help-text">สร้างจาก NextAcc → เมนู <b>Integrations</b> (ไม่ใช่ API Keys). ใช้กับ sync หลัก
+                        (/api/integration/* ผ่าน X-Integration-Key). คีย์นี้ครอบคลุม company endpoints ได้ด้วย</div>
+                </div>
+                <div class="config-item">
+                    <label>Company API Key (acc_) <span style="color:#7f8c8d;">— ไม่บังคับ</span></label>
+                    <input type="password" id="cfgCompanyApiKey" placeholder="acc_... (เว้นว่าง = ใช้ int_ ตัวเดียว)" />
+                    <div class="help-text">สร้างจาก NextAcc → เมนู <b>API Keys</b>. ตั้งคู่กับ int_ เพื่อให้ company endpoints
+                        (/api/companies/* — ใบเสร็จ/เอกสาร, OCR, บังคับแหล่งเงิน, E-Tax, WHT, chart) auth ด้วย acc_ โดยตรง
+                        ผ่าน X-Api-Key (robust สุด ไม่พึ่ง fallback). เว้นว่าง → ใช้ int_ ตัวเดียว</div>
                 </div>
                 <div class="config-item">
                     <label>Company ID (GUID)</label>
@@ -761,7 +769,10 @@
                 document.getElementById('cfgEtaxEmailLocalOnly').value = cfg.etaxEmailLocalOnly ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailFallback').value = cfg.etaxEmailFallback ? 'true' : 'false';
                 if (cfg.hasApiKey) {
-                    document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    document.getElementById('cfgApiKey').placeholder = '••••••••  (มี Integration Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                }
+                if (cfg.hasCompanyApiKey) {
+                    document.getElementById('cfgCompanyApiKey').placeholder = '••••••••  (มี acc_ key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน / ใส่ "-" เพื่อล้าง)';
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
@@ -772,6 +783,7 @@
                 action: 'saveApi',
                 baseUrl: document.getElementById('cfgBaseUrl').value,
                 apiKey: document.getElementById('cfgApiKey').value,
+                companyApiKey: document.getElementById('cfgCompanyApiKey').value,
                 companyId: document.getElementById('cfgCompanyId').value
             };
             postAction(data, 'apiTestResult');

@@ -338,7 +338,7 @@ namespace Take_Time_BangPhra.Integration
                             request.Headers.Add("X-Acting-User", ActingUser);
                     }
                     else
-                        request.Headers.Add("X-Api-Key", _config.ApiKey);
+                        request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -634,7 +634,7 @@ namespace Take_Time_BangPhra.Integration
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 // OCR upload อยู่ใต้ /api/companies/* → ใช้ X-Api-Key (acc_)
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 request.Headers.Add("Accept", "application/json");
                 request.Content = form;
 
@@ -1067,7 +1067,7 @@ namespace Take_Time_BangPhra.Integration
 
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 var startTime = DateTime.Now;
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
                 int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
@@ -1157,7 +1157,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (!string.IsNullOrEmpty(_config.ApiKey))
                 {
-                    client.DefaultRequestHeaders.Add("X-Api-Key", _config.ApiKey);
+                    client.DefaultRequestHeaders.Add("X-Api-Key", _config.CompanyApiKey);
                 }
                 try
                 {
@@ -1197,7 +1197,7 @@ namespace Take_Time_BangPhra.Integration
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, url))
             {
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
                 var startTime = DateTime.Now;
@@ -1317,7 +1317,7 @@ namespace Take_Time_BangPhra.Integration
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 // {company}/attachments/* เป็น JWT endpoint → X-Api-Key
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);

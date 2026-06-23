@@ -51,6 +51,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     { "baseUrl", config.BaseUrl },
                     { "hasApiKey", !string.IsNullOrEmpty(config.ApiKey) },
+                    { "hasCompanyApiKey", config.HasDedicatedCompanyKey },
                     { "companyId", config.CompanyId != Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
                     { "syncMode", config.SyncMode },
@@ -211,6 +212,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("baseUrl")) config.SetConfig("Nexaacc_BaseUrl", data["baseUrl"]?.ToString() ?? "");
                 if (data.ContainsKey("apiKey") && !string.IsNullOrEmpty(data["apiKey"]?.ToString()))
                     config.SetConfig("Nexaacc_ApiKey_Encrypted", _code.Crypt(data["apiKey"].ToString()));
+                // acc_ key สำหรับ company endpoints (ไม่บังคับ): ส่ง "-" เพื่อล้าง (กลับไปใช้ int_ ตัวเดียว)
+                if (data.ContainsKey("companyApiKey"))
+                {
+                    string ck = data["companyApiKey"]?.ToString() ?? "";
+                    if (ck == "-")
+                        config.SetConfig("Nexaacc_CompanyApiKey_Encrypted", "");
+                    else if (!string.IsNullOrEmpty(ck))
+                        config.SetConfig("Nexaacc_CompanyApiKey_Encrypted", _code.Crypt(ck));
+                }
                 if (data.ContainsKey("companyId")) config.SetConfig("Nexaacc_CompanyId", data["companyId"]?.ToString() ?? "");
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "บันทึก API Config สำเร็จ" } };
