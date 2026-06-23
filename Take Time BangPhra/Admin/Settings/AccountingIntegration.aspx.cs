@@ -285,12 +285,49 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var client = new Integration.AccountingApiClient(new Integration.AccountingConfig(ConnStr), ConnStr);
-                var result = System.Threading.Tasks.Task.Run(() => client.TestConnectionAsync()).Result;
+                var config = new Integration.AccountingConfig(ConnStr);
+                var client = new Integration.AccountingApiClient(config, ConnStr);
+
+                // (1) Integration surface (int_) — /api/integration/contacts ผ่าน X-Integration-Key
+                var intResult = System.Threading.Tasks.Task.Run(() => client.TestConnectionAsync()).Result;
+                string intLine = (intResult.Success ? "✓" : "✗") + " Integration (int_): " + intResult.Message;
+
+                // (2) Company surface — /api/companies/{id}/accounting/accounts ผ่าน X-Api-Key
+                //     (acc_ ถ้าตั้งแยก, ไม่งั้น int_ ผ่าน fallback). ข้ามถ้า company endpoints ปิด.
+                bool companyOk = true;
+                string companyLine;
+                if (!config.CanUseCompanyEndpoints)
+                {
+                    companyLine = "ℹ Company (/api/companies/*): ข้าม — ปิดอยู่ (ตั้ง Company ID + Nexaacc_Company_Endpoints=1)";
+                }
+                else
+                {
+                    string keyKind = config.HasDedicatedCompanyKey ? "acc_ แยก" : "int_ ผ่าน fallback";
+                    try
+                    {
+                        var acc = System.Threading.Tasks.Task.Run(() => client.GetAccountsAsync()).Result;
+                        companyOk = acc != null && acc.data != null;
+                        companyLine = (companyOk ? "✓" : "✗") + $" Company ({keyKind}): " +
+                            (companyOk ? $"เชื่อมต่อสำเร็จ (ผังบัญชี {acc.data.Count} รายการ)"
+                                       : "เรียก /accounting/accounts ไม่สำเร็จ");
+                    }
+                    catch (AggregateException caex)
+                    {
+                        companyOk = false;
+                        companyLine = $"✗ Company ({keyKind}): {(caex.InnerException ?? caex).Message}";
+                    }
+                    catch (Exception cex)
+                    {
+                        companyOk = false;
+                        companyLine = $"✗ Company ({keyKind}): {cex.Message}";
+                    }
+                }
+
+                bool overall = intResult.Success && companyOk;
                 return new Dictionary<string, object>
                 {
-                    { "success", result.Success },
-                    { "message", result.Message }
+                    { "success", overall },
+                    { "message", intLine + "\n" + companyLine }
                 };
             }
             catch (AggregateException aex)

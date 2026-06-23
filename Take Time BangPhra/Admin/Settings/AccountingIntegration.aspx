@@ -33,7 +33,7 @@
         .btn-warning { padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
         .btn-warning:hover { background: #F57C00; }
 
-        .test-result { margin-top: 10px; padding: 10px 15px; border-radius: 8px; font-size: 13px; display: none; }
+        .test-result { margin-top: 10px; padding: 10px 15px; border-radius: 8px; font-size: 13px; display: none; white-space: pre-line; }
         .test-result.success { display: block; background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9; }
         .test-result.error { display: block; background: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
         .test-result.loading { display: block; background: #E3F2FD; color: #1565C0; border: 1px solid #BBDEFB; }
@@ -131,7 +131,7 @@
                 </div>
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
+                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ Key (int_ + acc_)</button>
                     <button type="button" class="btn-primary" onclick="syncAccounts()"><i class="fas fa-cloud-download-alt"></i> Sync บัญชี</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
