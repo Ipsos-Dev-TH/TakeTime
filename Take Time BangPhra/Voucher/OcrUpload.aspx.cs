@@ -38,9 +38,9 @@ namespace Take_Time_BangPhra.Voucher
                     Msg(litStatus, "warn", "ยังไม่ได้ตั้งค่า/เปิดใช้งาน Accounting Integration — ไปที่ Admin → Settings → Accounting Integration ก่อน");
                     btnScan.Enabled = false;
                 }
-                else if (cfg.IsIntegrationKey)
+                else if (!cfg.CanUseCompanyEndpoints)
                 {
-                    Msg(litStatus, "warn", "API key ปัจจุบันเป็นชนิด int_ ซึ่งใช้กับ OCR flow ไม่ได้ — ต้องใช้ acc_ key (company) สำหรับ create-document/approve");
+                    Msg(litStatus, "warn", "OCR flow ใช้ company endpoints (/api/companies/*) — ต้องตั้ง Company ID และเปิด Nexaacc_Company_Endpoints. แนะนำตั้ง acc_ key แยกในหน้า Accounting Integration (ไม่งั้นจะใช้ int_ ผ่าน X-Api-Key fallback)");
                     btnScan.Enabled = false;
                 }
             }
