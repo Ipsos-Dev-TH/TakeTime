@@ -59,6 +59,13 @@
                 <div class="ocr-field"><label>VAT</label><asp:TextBox ID="txtVat" runat="server" /></div>
                 <div class="ocr-field"><label>ยอดรวม</label><asp:TextBox ID="txtTotal" runat="server" /></div>
             </div>
+            <div class="ocr-row">
+                <div class="ocr-field">
+                    <label>แหล่งจ่ายเงิน (บังคับบัญชีเงินสด/ธนาคารฝั่งเครดิต)</label>
+                    <asp:DropDownList ID="ddlPaidHow" runat="server" CssClass="form-control" />
+                    <span class="ocr-hint">เลือกแหล่งเงินที่จ่ายจริง → ระบบจะบังคับให้ NextAcc เครดิตบัญชีนั้น (ถ้าไม่เลือก = ปล่อยให้ NextAcc เลือกเอง)</span>
+                </div>
+            </div>
             <asp:Literal ID="litSuggested" runat="server" />
             <div style="margin-top:12px;">
                 <asp:Button ID="btnCreate" runat="server" CssClass="ocr-btn green" Text="สร้างใบสำคัญจ่าย & อนุมัติ" OnClick="btnCreate_Click" />
@@ -68,5 +75,6 @@
 
         <asp:Literal ID="litResult" runat="server" />
         <asp:HiddenField ID="hfScanId" runat="server" />
+        <asp:HiddenField ID="hfDebitAcc" runat="server" />
     </div>
 </asp:Content>

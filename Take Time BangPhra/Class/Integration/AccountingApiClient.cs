@@ -581,6 +581,14 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/document", document);
         }
 
+        /// <summary>แก้ไขเอกสาร Draft (PUT). ใช้บังคับ PaymentAccountId (แหล่งเงิน) + ค่าที่ผู้ใช้ยืนยัน
+        /// หลังสร้างจาก OCR ก่อน approve. company endpoint → X-Api-Key (acc_/int_ fallback).</summary>
+        public async Task<ApiResponse<DocumentResponse>> UpdateDocumentAsync(Guid documentId, UpdateDocumentRequest request)
+        {
+            return await PutAsync<UpdateDocumentRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}", request);
+        }
+
         [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {

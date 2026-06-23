@@ -172,6 +172,25 @@ namespace Take_Time_BangPhra.Integration
         public decimal VatRate { get; set; }
         public decimal WithholdingTaxRate { get; set; }
         public Guid? AccountId { get; set; }
+        /// <summary>ผังบัญชีในรูป AccountCode (string) — ทางเลือกแทน AccountId; NextAcc resolve code→Id ตอน save</summary>
+        public string AccountCode { get; set; }
+    }
+
+    /// <summary>แก้ไขเอกสาร Draft (PUT /api/companies/{id}/document/{docId}). ฟิลด์ null = คงค่าเดิม;
+    /// Lines != null = แทนที่ทั้งชุด; PaymentAccountId = บังคับแหล่งเงิน (ฝั่งเครดิตเงินสด/ธนาคาร)</summary>
+    public class UpdateDocumentRequest
+    {
+        public DateTime? DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public Guid? ContactId { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
+        public List<DocumentLineRequest> Lines { get; set; }
+        public Guid? PaymentAccountId { get; set; }
+        public Guid? BankAccountId { get; set; }
+        public string SupplierInvoiceNumber { get; set; }
+        public DateTime? SupplierTaxInvoiceDate { get; set; }
+        public bool? PricesIncludeVat { get; set; }
     }
 
     public class DocumentResponse

@@ -1,19 +1,23 @@
 using System;
+using System.Collections.Generic;
 using System.Configuration;
+using System.Data;
 using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.UI;
+using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Integration;
 
 namespace Take_Time_BangPhra.Voucher
 {
     /// <summary>
     /// OCR-first ใบสำคัญจ่าย flow (Known gap #3): อัปโหลด → ocr/upload (autoCreate=false)
-    /// → poll ผล → ให้ผู้ใช้ตรวจ/แก้ → ocr/{id}/create-document?targetType=PaymentVoucher
-    /// → approve. ต้องใช้ company API key (acc_) — endpoint /api/companies/* ไม่รับ int_.
+    /// → poll ผล → ให้ผู้ใช้ตรวจ/แก้ + เลือกแหล่งจ่ายเงิน → ocr/{id}/create-document?targetType=PaymentVoucher
+    /// → PUT แก้ Draft (บังคับ PaymentAccountId/แหล่งเงิน + ค่าที่ผู้ใช้ยืนยัน) → approve.
+    /// ใช้ company endpoints (/api/companies/*) ผ่าน X-Api-Key — รองรับทั้ง acc_/int_ (gate CanUseCompanyEndpoints).
     /// </summary>
     public partial class OcrUpload : Page
     {
@@ -147,6 +151,25 @@ namespace Take_Time_BangPhra.Voucher
                     return;
                 }
 
+                // บังคับแหล่งเงิน + ใช้ค่าที่ผู้ใช้ยืนยัน (PUT แก้ Draft ก่อน approve)
+                var upd = BuildUpdateFromReview();
+                if (upd != null)
+                {
+                    try
+                    {
+                        RunSync(() => client.UpdateDocumentAsync(docId.Value, upd));
+                    }
+                    catch (Exception uex)
+                    {
+                        // เอกสาร Draft ถูกสร้างแล้ว แต่บังคับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ → ไม่ approve อัตโนมัติ
+                        Msg(litResult, "warn", "สร้างเอกสาร (Draft) แล้ว แต่ปรับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ: " + uex.Message +
+                            " — กรุณาตรวจ/อนุมัติใน NextAcc เอง");
+                        pnlReview.Visible = false;
+                        hfScanId.Value = "";
+                        return;
+                    }
+                }
+
                 // อนุมัติ (auto-post GL). ครั้งแรกถ้ามี soft warning จะได้ 422 → ยืนยันซ้ำ
                 string approveMsg;
                 try
@@ -184,6 +207,9 @@ namespace Take_Time_BangPhra.Voucher
         private void BindReview(OcrResultResponse r)
         {
             pnlReview.Visible = true;
+            LoadPaidHowOptions();
+            hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
+            hfHasWht.Value = r.HasWht ? "1" : "0";
             txtVendorName.Text = r.ExtractedVendorName ?? "";
             txtVendorTaxId.Text = r.ExtractedVendorTaxId ?? "";
             txtDocNumber.Text = r.ExtractedDocumentNumber ?? "";
@@ -220,6 +246,82 @@ namespace Take_Time_BangPhra.Voucher
             if (r.HasWht && r.WhtRate.HasValue)
                 sg.Append("<div class=\"ocr-msg info\">ตรวจพบหัก ณ ที่จ่าย " + r.WhtRate.Value.ToString("0.##") + "%</div>");
             litSuggested.Text = sg.ToString();
+        }
+
+        /// <summary>โหลดตัวเลือกแหล่งจ่ายเงินจาก Account_Paid_How (เฉพาะที่ map Nexaacc_AccountId ไว้)</summary>
+        private void LoadPaidHowOptions()
+        {
+            ddlPaidHow.Items.Clear();
+            ddlPaidHow.Items.Add(new ListItem("— ไม่บังคับ (ให้ NextAcc เลือกเอง) —", ""));
+            try
+            {
+                var c = new Take_Time_BangPhra.code();
+                var dt = c.DatabaseQuerySafe(Conn,
+                    @"SELECT Paid_How, Nexaacc_AccountId FROM Account_Paid_How
+                      WHERE Status = 'True' AND Nexaacc_AccountId IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountId)) <> ''
+                      ORDER BY Paid_How", null);
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                        ddlPaidHow.Items.Add(new ListItem(
+                            row["Paid_How"]?.ToString() ?? "",
+                            row["Nexaacc_AccountId"]?.ToString() ?? ""));
+            }
+            catch { /* ถ้าโหลดไม่ได้ → เหลือแค่ตัวเลือก "ไม่บังคับ" */ }
+        }
+
+        /// <summary>สร้าง UpdateDocumentRequest จากค่าในแผงตรวจสอบ: บังคับแหล่งเงิน + วันที่ + เลขที่เอกสาร
+        /// + (ถ้าไม่มี WHT) สร้าง line เดียวจากยอดที่แก้. คืน null ถ้าไม่มีอะไรต้องอัปเดต.</summary>
+        private UpdateDocumentRequest BuildUpdateFromReview()
+        {
+            var upd = new UpdateDocumentRequest();
+            bool any = false;
+
+            if (Guid.TryParse(ddlPaidHow.SelectedValue, out var payAcc) && payAcc != Guid.Empty)
+            {
+                upd.PaymentAccountId = payAcc;
+                any = true;
+            }
+
+            if (DateTime.TryParse(txtDocDate.Text.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+            {
+                upd.DocumentDate = dt;
+                any = true;
+            }
+
+            string docNo = txtDocNumber.Text.Trim();
+            if (!string.IsNullOrEmpty(docNo))
+            {
+                upd.SupplierInvoiceNumber = docNo;
+                upd.Reference = docNo;
+                any = true;
+            }
+
+            // สร้าง line จากยอดที่แก้ — เฉพาะเมื่อมีบัญชีค่าใช้จ่ายจาก OCR และไม่มี WHT
+            // (มี WHT → คง line ที่ create-from-OCR สร้างไว้ เพื่อไม่ทิ้งการตั้งหัก ณ ที่จ่าย)
+            string debitAcc = hfDebitAcc.Value;
+            bool hasWht = hfHasWht.Value == "1";
+            if (!hasWht && !string.IsNullOrEmpty(debitAcc)
+                && decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal) && subTotal > 0)
+            {
+                decimal.TryParse(txtVat.Text.Trim(), out var vat);
+                string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
+                if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
+                upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
+                upd.Lines = new List<DocumentLineRequest>
+                {
+                    new DocumentLineRequest
+                    {
+                        Description = desc,
+                        Quantity = 1,
+                        UnitPrice = subTotal,
+                        VatRate = vat > 0 ? 7m : 0m,
+                        AccountCode = debitAcc
+                    }
+                };
+                any = true;
+            }
+
+            return any ? upd : null;
         }
 
         private static string JoinAcc(string code, string name)

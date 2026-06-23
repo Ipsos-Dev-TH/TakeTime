@@ -22,8 +22,11 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.TextBox txtVat;
         protected global::System.Web.UI.WebControls.TextBox txtTotal;
         protected global::System.Web.UI.WebControls.Literal litSuggested;
+        protected global::System.Web.UI.WebControls.DropDownList ddlPaidHow;
         protected global::System.Web.UI.WebControls.Button btnCreate;
         protected global::System.Web.UI.WebControls.Literal litResult;
         protected global::System.Web.UI.WebControls.HiddenField hfScanId;
+        protected global::System.Web.UI.WebControls.HiddenField hfDebitAcc;
+        protected global::System.Web.UI.WebControls.HiddenField hfHasWht;
     }
 }

@@ -132,13 +132,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    and checkout reclassifies Dr 21913 / Cr 21911 so VAT only hits ภ.พ.30 at revenue recognition.
    Default off = unchanged; unmapped 21913 → falls back to OUTPUT_VAT. Migration PHASE17_05 seeds
    the config + `OUTPUT_VAT_DEFERRED` mapping; admin toggle on AccountingIntegration page.
-3. **OCR-first ใบสำคัญจ่าย flow:** ✅ DONE (page `Voucher/OcrUpload.aspx`, acc_ key required).
-   upload→`ocr/upload`(autoCreate=false)→poll `OcrResultResponse`→prefill review (shows OCR
-   `SuggestedAccounts` + quality/role/WHT)→user confirm→`ocr/{id}/create-document?targetType=…`
-   →`approve` (retries with AcknowledgeWarnings=true on 422). NextAcc auto-creates the Vendor from
-   OCR DBD/tax-id. Client: `UploadOcrAsync` / `GetOcrResultAsync` / `CreateDocumentFromOcrAsync` /
-   `ApproveDocumentAsync(id, ApproveDocumentRequest)`. (Future: line-level AI suggest endpoints +
-   editable line grid; current page submits the OCR-derived doc as-is.)
+3. **OCR-first ใบสำคัญจ่าย flow:** ✅ DONE (page `Voucher/OcrUpload.aspx`; gated on
+   `CanUseCompanyEndpoints`, not key prefix). upload→`ocr/upload`(autoCreate=false)→poll
+   `OcrResultResponse`→prefill review (shows OCR `SuggestedAccounts` + quality/role/WHT)→user
+   confirm + **เลือกแหล่งจ่ายเงิน** (dropdown จาก `Account_Paid_How`)→`ocr/{id}/create-document?targetType=…`
+   (Draft + auto-create Vendor by tax-id)→**PUT `/document/{id}` (`UpdateDocumentAsync`) บังคับ
+   `PaymentAccountId`=แหล่งเงิน + วันที่/เลขที่เอกสาร + rebuild line เดียวจากยอดที่ผู้ใช้แก้ (เฉพาะกรณีไม่มี WHT
+   — มี WHT คง line จาก OCR)**→`approve` (retries with AcknowledgeWarnings=true on 422). Update แก้
+   ได้เฉพาะ Draft; null field = คงเดิม, `Lines!=null` = แทนที่. Client: `UploadOcrAsync` /
+   `GetOcrResultAsync` / `CreateDocumentFromOcrAsync` / `UpdateDocumentAsync` /
+   `ApproveDocumentAsync(id, ApproveDocumentRequest)`. (Future: line-level AI suggest + multi-line edit grid.)
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
 5. **รับ-side AR closure (DOCUMENT mode):** ✅ DONE. NextAcc `/integration/invoices` posts
    Dr ลูกหนี้การค้า / Cr รายได้ / Cr ภาษีขาย and does **NOT** auto-record a payment (PaymentMethod
