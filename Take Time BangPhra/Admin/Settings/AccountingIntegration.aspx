@@ -113,12 +113,14 @@
                 <div class="config-item">
                     <label>Integration Key (int_) <span style="color:#c0392b;">*จำเป็น</span></label>
                     <input type="password" id="cfgApiKey" placeholder="int_..." />
+                    <div id="cfgApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
                     <div class="help-text">สร้างจาก NextAcc → เมนู <b>Integrations</b> (ไม่ใช่ API Keys). ใช้กับ sync หลัก
                         (/api/integration/* ผ่าน X-Integration-Key). คีย์นี้ครอบคลุม company endpoints ได้ด้วย</div>
                 </div>
                 <div class="config-item">
                     <label>Company API Key (acc_) <span style="color:#7f8c8d;">— ไม่บังคับ</span></label>
                     <input type="password" id="cfgCompanyApiKey" placeholder="acc_... (เว้นว่าง = ใช้ int_ ตัวเดียว)" />
+                    <div id="cfgCompanyApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
                     <div class="help-text">สร้างจาก NextAcc → เมนู <b>API Keys</b>. ตั้งคู่กับ int_ เพื่อให้ company endpoints
                         (/api/companies/* — ใบเสร็จ/เอกสาร, OCR, บังคับแหล่งเงิน, E-Tax, WHT, chart) auth ด้วย acc_ โดยตรง
                         ผ่าน X-Api-Key (robust สุด ไม่พึ่ง fallback). เว้นว่าง → ใช้ int_ ตัวเดียว</div>
@@ -768,11 +770,19 @@
                 document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailLocalOnly').value = cfg.etaxEmailLocalOnly ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailFallback').value = cfg.etaxEmailFallback ? 'true' : 'false';
+                var intStatus = document.getElementById('cfgApiKeyStatus');
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี Integration Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    intStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว: <code>' + (cfg.apiKeyMask || '••••') + '</code></span>';
+                } else {
+                    intStatus.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง Integration Key (จำเป็น)</span>';
                 }
+                var accStatus = document.getElementById('cfgCompanyApiKeyStatus');
                 if (cfg.hasCompanyApiKey) {
                     document.getElementById('cfgCompanyApiKey').placeholder = '••••••••  (มี acc_ key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน / ใส่ "-" เพื่อล้าง)';
+                    accStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว (acc_ แยก): <code>' + (cfg.companyApiKeyMask || '••••') + '</code></span>';
+                } else {
+                    accStatus.innerHTML = '<span style="color:#7f8c8d;">ℹ ยังไม่ได้ตั้ง acc_ แยก — company endpoints จะใช้ Integration Key (int_) ผ่าน X-Api-Key fallback</span>';
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }

@@ -42,6 +42,14 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
+        /// <summary>ปกปิด API key สำหรับแสดงผล: เผยให้เห็น prefix (int_/acc_ + 4 ตัว) และ 4 ตัวท้าย</summary>
+        private static string MaskKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "";
+            if (key.Length <= 12) return key.Substring(0, Math.Min(4, key.Length)) + "••••";
+            return key.Substring(0, 8) + "••••" + key.Substring(key.Length - 4);
+        }
+
         private void LoadConfig()
         {
             try
@@ -51,7 +59,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     { "baseUrl", config.BaseUrl },
                     { "hasApiKey", !string.IsNullOrEmpty(config.ApiKey) },
+                    { "apiKeyMask", MaskKey(config.ApiKey) },
                     { "hasCompanyApiKey", config.HasDedicatedCompanyKey },
+                    { "companyApiKeyMask", config.HasDedicatedCompanyKey ? MaskKey(config.CompanyApiKey) : "" },
                     { "companyId", config.CompanyId != Guid.Empty ? config.CompanyId.ToString() : "" },
                     { "enabled", config.Enabled },
                     { "syncMode", config.SyncMode },
