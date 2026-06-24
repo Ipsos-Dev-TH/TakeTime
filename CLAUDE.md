@@ -176,7 +176,10 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    the doc's full Dr-cash to the actual cash received. Idempotent via `Nexaacc_Receipt_Payment_Id`
    3-phase marker (`DOC:{id}` → `APR:{id}` → `{id}`/`VOIDED`); company create-document isn't deduped.
    Void: company `/document/{id}/void` (cascades JE) + `MapDepositAppliedReceiptAdjustmentReverse`
-   (Dr Cash / Cr ADVANCE_DEPOSIT(+VAT)). GL verified balanced across RECEIPT / CHECKOUT / deferred-VAT
+   (Dr Cash / Cr ADVANCE_DEPOSIT(+VAT)). **Edit = void→recreate เลขเดิม**: void เก่า (doc id จาก queue
+   history) → CREATE ใหม่; marker `"VOIDED"` ถูก **reset เป็น null** ทั้งใน `SettleReceiptDocAsync` และ
+   `SettleReceiptInNextAcc` เพื่อไม่ให้บล็อกการสร้างใหม่ (delete ปกติไม่ enqueue CREATE จึงไม่สร้างซ้ำ).
+   GL verified balanced across RECEIPT / CHECKOUT / deferred-VAT
    timing. **`int_` key keeps the integration-invoice + `SettleReceiptInNextAcc` fallback (item 5)** —
    correct GL totals but single revenue account + deposit-as-revenue caveat remains for `int_`.
    Needs Windows build + live-NextAcc testing (cannot build/test on Linux).

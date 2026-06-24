@@ -1698,6 +1698,9 @@ namespace Take_Time_BangPhra.Integration
             }
 
             string marker = LookupReceiptPaymentMarker(receiptNumber);
+            // edit = void→สร้างเลขเดิม: marker "VOIDED" จาก void ก่อนหน้า ต้องไม่ทำให้ข้าม settle
+            // (ใบเสร็จใหม่ถูกสร้างแล้ว ต้องปิดลูกหนี้/บันทึกเงินสดใหม่) → รีเซ็ตเป็นเริ่มใหม่
+            if (marker == "VOIDED") marker = null;
             bool payDone = !string.IsNullOrEmpty(marker) && !marker.StartsWith("ADJ:");
             bool adjDone = !string.IsNullOrEmpty(marker);   // "ADJ:" หรือ final → adjustment ลงแล้ว
             if (payDone) return;                            // ปิดลูกหนี้ครบแล้ว
@@ -1809,12 +1812,9 @@ namespace Take_Time_BangPhra.Integration
             string paymentMethod, DateTime receiptDate, string customerName, bool hasVat, string paymentAccountId)
         {
             string marker = LookupReceiptPaymentMarker(receiptNumber);
-            if (marker == "VOIDED")
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"SettleReceiptDoc: receipt={receiptNumber} ถูก void แล้ว — ไม่สร้างซ้ำ", "SYSTEM");
-                return Guid.Empty;
-            }
+            // marker "VOIDED" = ใบเสร็จเดิมถูก void แล้ว. ถ้ามี CREATE เข้ามาใหม่ (edit = void→สร้างเลขเดิม,
+            // row ถูก reinsert) ให้เริ่มสร้างใหม่ตามปกติ — ไม่บล็อก (delete ปกติไม่ enqueue CREATE)
+            if (marker == "VOIDED") marker = null;
             bool isFinal = !string.IsNullOrEmpty(marker)
                 && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:");
             if (isFinal && Guid.TryParse(marker, out var finalId) && finalId != Guid.Empty)
