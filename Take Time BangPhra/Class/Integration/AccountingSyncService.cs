@@ -1816,13 +1816,16 @@ namespace Take_Time_BangPhra.Integration
             // row ถูก reinsert) ให้เริ่มสร้างใหม่ตามปกติ — ไม่บล็อก (delete ปกติไม่ enqueue CREATE)
             if (marker == "VOIDED") marker = null;
             bool isFinal = !string.IsNullOrEmpty(marker)
-                && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:");
+                && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:") && !marker.StartsWith("ADJ:");
             if (isFinal && Guid.TryParse(marker, out var finalId) && finalId != Guid.Empty)
                 return finalId;   // จบแล้ว
 
-            bool approved = !string.IsNullOrEmpty(marker) && marker.StartsWith("APR:");
+            // เฟส: DOC:{id} (สร้างแล้ว) → APR:{id} (อนุมัติแล้ว) → ADJ:{id} (ลงปรับมัดจำแล้ว) → {id} (จบ)
+            bool approved = !string.IsNullOrEmpty(marker) && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:"));
+            bool adjDone = !string.IsNullOrEmpty(marker) && marker.StartsWith("ADJ:");
             Guid docId = Guid.Empty;
-            if (!string.IsNullOrEmpty(marker) && (marker.StartsWith("DOC:") || marker.StartsWith("APR:")))
+            if (!string.IsNullOrEmpty(marker)
+                && (marker.StartsWith("DOC:") || marker.StartsWith("APR:") || marker.StartsWith("ADJ:")))
                 Guid.TryParse(marker.Substring(4), out docId);
 
             // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
@@ -1850,7 +1853,8 @@ namespace Take_Time_BangPhra.Integration
             }
 
             // 3) หักมัดจำ (ถ้ามี): Dr รับล่วงหน้า(+VAT) / Cr เงินสด — ลดเงินสดที่ใบเสร็จ Dr เกิน
-            if (depositApplied > 0)
+            //    CreateJournalAsync ไม่ dedupe → marker เฟส ADJ: กันโพสต์ซ้ำตอน retry
+            if (depositApplied > 0 && !adjDone)
             {
                 var adj = _mapper.MapDepositAppliedReceiptAdjustment(reservationId, depositApplied, paymentMethod,
                     receiptDate, customerName, paymentAccountId, receiptNumber,
@@ -1858,6 +1862,7 @@ namespace Take_Time_BangPhra.Integration
                 var adjResult = await _apiClient.CreateJournalAsync(adj);
                 Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedReceiptAdjustment receipt={receiptNumber}");
                 await SafePostJournalAsync(adjId);
+                SetReceiptPaymentMarker(receiptNumber, "ADJ:" + docId);
                 _code.Logs(_connectionString, "AccountingSync",
                     $"SettleReceiptDoc: deposit adjustment {adjId} deposit={depositApplied:N2} receipt={receiptNumber}", "SYSTEM");
             }

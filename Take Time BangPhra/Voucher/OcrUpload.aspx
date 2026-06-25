@@ -68,7 +68,8 @@
             </div>
             <asp:Literal ID="litSuggested" runat="server" />
             <div style="margin-top:12px;">
-                <asp:Button ID="btnCreate" runat="server" CssClass="ocr-btn green" Text="สร้างใบสำคัญจ่าย & อนุมัติ" OnClick="btnCreate_Click" />
+                <asp:Button ID="btnCreate" runat="server" CssClass="ocr-btn green" Text="สร้างใบสำคัญจ่าย & อนุมัติ" OnClick="btnCreate_Click"
+                    OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='กำลังสร้าง...';" UseSubmitBehavior="false" />
                 <span class="ocr-hint">การกดนี้จะสร้างเอกสารใน NextAcc และอนุมัติ (auto-post GL)</span>
             </div>
         </asp:Panel>
