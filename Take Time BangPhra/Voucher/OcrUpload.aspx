@@ -76,5 +76,6 @@
         <asp:Literal ID="litResult" runat="server" />
         <asp:HiddenField ID="hfScanId" runat="server" />
         <asp:HiddenField ID="hfDebitAcc" runat="server" />
+        <asp:HiddenField ID="hfHasWht" runat="server" />
     </div>
 </asp:Content>
