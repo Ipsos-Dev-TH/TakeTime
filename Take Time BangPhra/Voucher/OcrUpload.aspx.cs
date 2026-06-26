@@ -211,6 +211,7 @@ namespace Take_Time_BangPhra.Voucher
             LoadChargeAccountOptions();
             hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
             hfHasWht.Value = r.HasWht ? "1" : "0";
+            txtWhtRate.Text = (r.HasWht && r.WhtRate.HasValue) ? r.WhtRate.Value.ToString("0.##", CultureInfo.InvariantCulture) : "";
             txtVendorName.Text = r.ExtractedVendorName ?? "";
             txtVendorTaxId.Text = r.ExtractedVendorTaxId ?? "";
             txtDocNumber.Text = r.ExtractedDocumentNumber ?? "";
@@ -320,33 +321,39 @@ namespace Take_Time_BangPhra.Voucher
                 any = true;
             }
 
-            // สร้าง line จากยอดที่แก้ — เฉพาะเมื่อไม่มี WHT (มี WHT → คง line จาก OCR ไม่ทิ้งการตั้งหัก ณ ที่จ่าย)
-            // ผังบัญชี: ใช้ที่ผู้ใช้เลือก (ddlChargeAccount) ก่อน, ไม่งั้น fallback บัญชีที่ OCR แนะนำ
-            // VAT: เคลม (IsVatClaimable=true → Dr ภาษีซื้อ) / ไม่เคลม (false → NextAcc รวม VAT เข้าค่าใช้จ่าย §82/5)
+            // สร้าง line จากยอดที่ผู้ใช้ยืนยัน (ครอบคลุมทั้งกรณีมี/ไม่มี WHT — ผังบัญชี/VAT/WHT มีผลเสมอ)
+            //  • ผังบัญชี: ที่เลือก (ddlChargeAccount) ก่อน, ไม่งั้น fallback บัญชีที่ OCR แนะนำ
+            //  • VAT: เคลม (IsVatClaimable=true → Dr ภาษีซื้อ) / ไม่เคลม (false → NextAcc รวม VAT เข้าค่าใช้จ่าย §82/5)
+            //  • WHT: คิดบนฐานยอดก่อน VAT (ใส่ทั้งสอง line กรณี VAT ผสม)
+            //  • VAT ผสม (vat ≠ 7% ของ subTotal): แตก taxable@7% + non-taxable@0% ให้ NextAcc คิด VAT ตรง
             string chargeAcc = ddlChargeAccount.SelectedValue;
             if (string.IsNullOrEmpty(chargeAcc)) chargeAcc = hfDebitAcc.Value;
-            bool hasWht = hfHasWht.Value == "1";
-            if (!hasWht && !string.IsNullOrEmpty(chargeAcc)
+            if (!string.IsNullOrEmpty(chargeAcc)
                 && decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal) && subTotal > 0)
             {
                 decimal.TryParse(txtVat.Text.Trim(), out var vat);
+                decimal whtRate = 0m;
+                decimal.TryParse(txtWhtRate.Text.Trim(), out whtRate);
                 bool claimVat = ddlVatClaim.SelectedValue != "0";
+                string reason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)";
                 string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
                 if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
                 upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
-                upd.Lines = new List<DocumentLineRequest>
+
+                var lines = new List<DocumentLineRequest>();
+                decimal taxableNet = vat > 0 ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
+                decimal nonTaxableNet = Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero);
+                if (vat > 0 && nonTaxableNet >= 0.01m && taxableNet > 0)
                 {
-                    new DocumentLineRequest
-                    {
-                        Description = desc,
-                        Quantity = 1,
-                        UnitPrice = subTotal,
-                        VatRate = vat > 0 ? 7m : 0m,
-                        AccountCode = chargeAcc,
-                        IsVatClaimable = claimVat,
-                        VatNonClaimableReason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)"
-                    }
-                };
+                    // VAT ผสม → 2 บรรทัด
+                    lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนมีภาษี)", Quantity = 1, UnitPrice = taxableNet, VatRate = 7m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
+                    lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนไม่มีภาษี)", Quantity = 1, UnitPrice = nonTaxableNet, VatRate = 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = true });
+                }
+                else
+                {
+                    lines.Add(new DocumentLineRequest { Description = desc, Quantity = 1, UnitPrice = subTotal, VatRate = vat > 0 ? 7m : 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
+                }
+                upd.Lines = lines;
                 any = true;
             }
 

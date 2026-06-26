@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.DropDownList ddlPaidHow;
         protected global::System.Web.UI.WebControls.DropDownList ddlChargeAccount;
         protected global::System.Web.UI.WebControls.DropDownList ddlVatClaim;
+        protected global::System.Web.UI.WebControls.TextBox txtWhtRate;
         protected global::System.Web.UI.WebControls.Button btnCreate;
         protected global::System.Web.UI.WebControls.Literal litResult;
         protected global::System.Web.UI.WebControls.HiddenField hfScanId;

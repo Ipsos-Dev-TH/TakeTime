@@ -80,6 +80,11 @@
                     </asp:DropDownList>
                     <span class="ocr-hint">ไม่เคลม → NextAcc รวม VAT เข้าบัญชีค่าใช้จ่ายที่เลือก (ไม่แยกภาษีซื้อ)</span>
                 </div>
+                <div class="ocr-field">
+                    <label>หัก ณ ที่จ่าย (%)</label>
+                    <asp:TextBox ID="txtWhtRate" runat="server" placeholder="0" />
+                    <span class="ocr-hint">เช่น 3 = 3% (0 = ไม่หัก). คิดบนฐานยอดก่อน VAT</span>
+                </div>
             </div>
             <asp:Literal ID="litSuggested" runat="server" />
             <div style="margin-top:12px;">
