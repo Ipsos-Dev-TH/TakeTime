@@ -246,6 +246,17 @@ namespace Take_Time_BangPhra.Voucher
             LoadChargeAccountOptions();
             LoadVendorOptions();
             hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
+
+            // pre-select ผังบัญชีที่ AI/OCR แนะนำไว้เลย — เฉพาะใบ "รายการเดียว"
+            // (ใบหลายรายการคงค่า "ใช้บัญชีที่ OCR แนะนำ" ไว้ เพื่อรักษาผังบัญชีต่อบรรทัด)
+            string suggestedAcc = r.SuggestedAccounts?.DebitAccountCode;
+            bool ocrSingleLine = r.ExtractedItems == null || r.ExtractedItems.Count <= 1;
+            if (ocrSingleLine && !string.IsNullOrEmpty(suggestedAcc)
+                && ddlChargeAccount.Items.FindByValue(suggestedAcc) != null)
+            {
+                ddlChargeAccount.SelectedValue = suggestedAcc;
+            }
+
             hfHasWht.Value = r.HasWht ? "1" : "0";
             txtWhtRate.Text = (r.HasWht && r.WhtRate.HasValue) ? r.WhtRate.Value.ToString("0.##", CultureInfo.InvariantCulture) : "";
             txtVendorName.Text = r.ExtractedVendorName ?? "";
