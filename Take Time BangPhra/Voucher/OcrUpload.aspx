@@ -77,7 +77,7 @@
                 <div class="ocr-field">
                     <label>ผังบัญชีที่จะชาร์จ (บัญชีค่าใช้จ่าย / ฝั่งเดบิต)</label>
                     <asp:DropDownList ID="ddlChargeAccount" runat="server" CssClass="form-control" />
-                    <span class="ocr-hint">เลือกบัญชีค่าใช้จ่ายที่จะลง (ถ้าไม่เลือก = ใช้บัญชีที่ OCR แนะนำ)</span>
+                    <span class="ocr-hint">ไม่เลือก = คงหลายรายการตามที่ OCR แยก (ผังบัญชีต่อรายการ). เลือก = ยุบทุกรายการเป็นบัญชีเดียวนี้</span>
                 </div>
                 <div class="ocr-field">
                     <label>ภาษีซื้อ (VAT)</label>

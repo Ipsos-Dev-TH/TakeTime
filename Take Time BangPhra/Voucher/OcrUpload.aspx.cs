@@ -275,6 +275,28 @@ namespace Take_Time_BangPhra.Voucher
             }
             if (r.HasWht && r.WhtRate.HasValue)
                 sg.Append("<div class=\"ocr-msg info\">ตรวจพบหัก ณ ที่จ่าย " + r.WhtRate.Value.ToString("0.##") + "%</div>");
+
+            // แสดงรายการหลายบรรทัดที่ OCR แยกมา (read-only) — จะถูกสร้างเป็น multi-line ใน NextAcc
+            // ตามนี้ ตราบใดที่ไม่ได้ "เลือกผังบัญชีเดียว/ไม่เคลม VAT/ใส่ WHT" (ซึ่งจะยุบเป็นบรรทัดเดียว)
+            if (r.ExtractedItems != null && r.ExtractedItems.Count > 1)
+            {
+                sg.Append("<div class=\"ocr-msg info\"><b>รายการที่ OCR แยกได้ " + r.ExtractedItems.Count + " รายการ</b> "
+                    + "(จะสร้างเป็นหลายบรรทัดตามนี้ ถ้าไม่เลือกผังบัญชีเดียว/ไม่เคลม VAT/ใส่ WHT):"
+                    + "<table style=\"width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;\">"
+                    + "<tr style=\"background:#eee;\"><th style=\"text-align:left;padding:2px 6px;\">รายละเอียด</th>"
+                    + "<th style=\"text-align:right;padding:2px 6px;\">จำนวนเงิน</th>"
+                    + "<th style=\"text-align:left;padding:2px 6px;\">ผังบัญชี (OCR)</th></tr>");
+                foreach (var it in r.ExtractedItems)
+                {
+                    decimal amt = it.Amount ?? ((it.Quantity ?? 1) * (it.UnitPrice ?? 0));
+                    sg.Append("<tr>"
+                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;\">" + Server.HtmlEncode(it.Description ?? "") + "</td>"
+                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;text-align:right;\">" + amt.ToString("N2") + "</td>"
+                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;\">" + Server.HtmlEncode(it.SuggestedAccountCode ?? "-") + "</td>"
+                        + "</tr>");
+                }
+                sg.Append("</table></div>");
+            }
             litSuggested.Text = sg.ToString();
         }
 
@@ -366,40 +388,48 @@ namespace Take_Time_BangPhra.Voucher
                 any = true;
             }
 
-            // สร้าง line จากยอดที่ผู้ใช้ยืนยัน (ครอบคลุมทั้งกรณีมี/ไม่มี WHT — ผังบัญชี/VAT/WHT มีผลเสมอ)
-            //  • ผังบัญชี: ที่เลือก (ddlChargeAccount) ก่อน, ไม่งั้น fallback บัญชีที่ OCR แนะนำ
-            //  • VAT: เคลม (IsVatClaimable=true → Dr ภาษีซื้อ) / ไม่เคลม (false → NextAcc รวม VAT เข้าค่าใช้จ่าย §82/5)
-            //  • WHT: คิดบนฐานยอดก่อน VAT (ใส่ทั้งสอง line กรณี VAT ผสม)
-            //  • VAT ผสม (vat ≠ 7% ของ subTotal): แตก taxable@7% + non-taxable@0% ให้ NextAcc คิด VAT ตรง
-            string chargeAcc = ddlChargeAccount.SelectedValue;
-            if (string.IsNullOrEmpty(chargeAcc)) chargeAcc = hfDebitAcc.Value;
-            if (!string.IsNullOrEmpty(chargeAcc)
-                && decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal) && subTotal > 0)
-            {
-                decimal.TryParse(txtVat.Text.Trim(), out var vat);
-                decimal whtRate = 0m;
-                decimal.TryParse(txtWhtRate.Text.Trim(), out whtRate);
-                bool claimVat = ddlVatClaim.SelectedValue != "0";
-                string reason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)";
-                string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
-                if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
-                upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
+            // Lines: โดย default "ไม่ override" → คง multi-line ที่ create-from-OCR สร้างจาก ExtractedItems
+            // (NextAcc แตกหลายบรรทัดพร้อมผังบัญชีต่อรายการให้แล้ว). จะ rebuild เป็นบรรทัดเดียวเฉพาะเมื่อ
+            // ผู้ใช้ "สั่ง override" จริง: เลือกผังบัญชีเดียว / เลือกไม่เคลม VAT / ใส่ WHT / VAT ผสม
+            // (กรณีเหล่านี้ต้องคุมทั้งใบเป็นบัญชี/อัตราเดียว เพราะ OCR ไม่ได้ให้ flag ราย line)
+            decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal);
+            decimal.TryParse(txtVat.Text.Trim(), out var vat);
+            decimal whtRate = 0m;
+            decimal.TryParse(txtWhtRate.Text.Trim(), out whtRate);
+            bool userPickedAccount = !string.IsNullOrEmpty(ddlChargeAccount.SelectedValue);
+            bool noClaim = ddlVatClaim.SelectedValue == "0";
+            bool hasWht = whtRate > 0;
+            decimal taxableNet = vat > 0 ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal nonTaxableNet = Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero);
+            bool mixedVat = vat > 0 && nonTaxableNet >= 0.01m && taxableNet > 0;
+            bool needOverride = userPickedAccount || noClaim || hasWht || mixedVat;
 
-                var lines = new List<DocumentLineRequest>();
-                decimal taxableNet = vat > 0 ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
-                decimal nonTaxableNet = Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero);
-                if (vat > 0 && nonTaxableNet >= 0.01m && taxableNet > 0)
+            if (needOverride && subTotal > 0)
+            {
+                string chargeAcc = ddlChargeAccount.SelectedValue;
+                if (string.IsNullOrEmpty(chargeAcc)) chargeAcc = hfDebitAcc.Value;
+                if (!string.IsNullOrEmpty(chargeAcc))
                 {
-                    // VAT ผสม → 2 บรรทัด
-                    lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนมีภาษี)", Quantity = 1, UnitPrice = taxableNet, VatRate = 7m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
-                    lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนไม่มีภาษี)", Quantity = 1, UnitPrice = nonTaxableNet, VatRate = 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = true });
+                    bool claimVat = !noClaim;
+                    string reason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)";
+                    string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
+                    if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
+                    upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
+
+                    var lines = new List<DocumentLineRequest>();
+                    if (mixedVat)
+                    {
+                        // VAT ผสม → 2 บรรทัด (ยุบเป็นบัญชีเดียวเพื่อให้ VAT ตรง)
+                        lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนมีภาษี)", Quantity = 1, UnitPrice = taxableNet, VatRate = 7m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
+                        lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนไม่มีภาษี)", Quantity = 1, UnitPrice = nonTaxableNet, VatRate = 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = true });
+                    }
+                    else
+                    {
+                        lines.Add(new DocumentLineRequest { Description = desc, Quantity = 1, UnitPrice = subTotal, VatRate = vat > 0 ? 7m : 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
+                    }
+                    upd.Lines = lines;
+                    any = true;
                 }
-                else
-                {
-                    lines.Add(new DocumentLineRequest { Description = desc, Quantity = 1, UnitPrice = subTotal, VatRate = vat > 0 ? 7m : 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
-                }
-                upd.Lines = lines;
-                any = true;
             }
 
             return any ? upd : null;
