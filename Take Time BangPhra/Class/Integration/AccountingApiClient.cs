@@ -338,7 +338,13 @@ namespace Take_Time_BangPhra.Integration
                             request.Headers.Add("X-Acting-User", ActingUser);
                     }
                     else
+                    {
                         request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
+                        // X-Acting-User → NextAcc ตั้ง CreatedBy เป็น user จริง (audit + ลายเซ็นผู้จัดทำ
+                        // บนเอกสาร company /document ที่ไม่มีฟิลด์ลายเซ็น). ไม่ใส่ = fallback Owner
+                        if (!string.IsNullOrEmpty(ActingUser))
+                            request.Headers.Add("X-Acting-User", ActingUser);
+                    }
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -651,6 +657,8 @@ namespace Take_Time_BangPhra.Integration
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 // OCR upload อยู่ใต้ /api/companies/* → ใช้ X-Api-Key (acc_)
                 request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
+                if (!string.IsNullOrEmpty(ActingUser))
+                    request.Headers.Add("X-Acting-User", ActingUser);   // creator จริง → ลายเซ็น/audit
                 request.Headers.Add("Accept", "application/json");
                 request.Content = form;
 

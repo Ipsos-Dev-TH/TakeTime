@@ -39,7 +39,8 @@
                     </asp:DropDownList>
                 </div>
             </div>
-            <asp:Button ID="btnScan" runat="server" CssClass="ocr-btn" Text="อัปโหลด & สแกน OCR" OnClick="btnScan_Click" />
+            <asp:Button ID="btnScan" runat="server" CssClass="ocr-btn" Text="อัปโหลด & สแกน OCR" OnClick="btnScan_Click"
+                OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='⏳ กำลังสแกน...';" UseSubmitBehavior="false" />
             <asp:Literal ID="litStatus" runat="server" />
         </div>
 

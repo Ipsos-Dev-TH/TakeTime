@@ -60,12 +60,19 @@ namespace Take_Time_BangPhra.Voucher
                 Msg(litStatus, "err", "กรุณาเลือกไฟล์ก่อน");
                 return;
             }
+            // NextAcc จำกัด 10 MB/ไฟล์ — กันส่งไปแล้วโดน reject
+            if (fuOcr.PostedFile != null && fuOcr.PostedFile.ContentLength > 10 * 1024 * 1024)
+            {
+                Msg(litStatus, "err", "ไฟล์ใหญ่เกิน 10 MB — กรุณาบีบ/ลดขนาดไฟล์ก่อน");
+                return;
+            }
 
             string tempPath = null;
             try
             {
                 var cfg = new AccountingConfig(Conn);
                 var client = new AccountingApiClient(cfg, Conn);
+                client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็น/audit ใน NextAcc
 
                 // บันทึกไฟล์ชั่วคราว
                 string ext = Path.GetExtension(fuOcr.FileName);
@@ -143,6 +150,7 @@ namespace Take_Time_BangPhra.Voucher
             {
                 var cfg = new AccountingConfig(Conn);
                 var client = new AccountingApiClient(cfg, Conn);
+                client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็นผู้จัดทำ/audit
                 string target = ddlTargetType.SelectedValue;
 
                 // สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId/Name)
