@@ -70,6 +70,8 @@ namespace Take_Time_BangPhra.Integration
         public int SyncIntervalSeconds => int.TryParse(GetConfig("Nexaacc_SyncInterval_Sec", "30"), out var v) ? v : 30;
         public int MaxRetries => int.TryParse(GetConfig("Nexaacc_MaxRetries", "5"), out var v) ? v : 5;
         public int TimeoutSeconds => int.TryParse(GetConfig("Nexaacc_TimeoutSec", "30"), out var v) ? v : 30;
+        /// <summary>timeout สำหรับ OCR upload โดยเฉพาะ — OCR ประมวลผลรูป/PDF นานกว่า call ปกติมาก (default 180s)</summary>
+        public int OcrTimeoutSeconds => int.TryParse(GetConfig("Nexaacc_OcrTimeoutSec", "180"), out var v) && v > 0 ? v : 180;
 
         /// <summary>
         /// JOURNAL_ONLY = บันทึกสมุดบัญชีอย่างเดียว (debit/credit journal entries)

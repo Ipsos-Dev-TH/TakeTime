@@ -654,17 +654,37 @@ namespace Take_Time_BangPhra.Integration
                 request.Headers.Add("Accept", "application/json");
                 request.Content = form;
 
-                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
-                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                LogApiCall("POST", path, "[multipart file]", responseBody,
-                    (int)response.StatusCode, response.IsSuccessStatusCode, 0);
+                // OCR ประมวลผลรูป/PDF นานกว่า call ปกติมาก → ใช้ client แยกที่ timeout ยาว
+                // (_httpClient.Timeout เป็น global ใช้กับ sync อื่น ไม่ควรยืดทั้งระบบ)
+                int ocrTimeout = _config.OcrTimeoutSeconds;
+                using (var ocrHandler = new HttpClientHandler
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+                })
+                using (var ocrClient = new HttpClient(ocrHandler) { Timeout = TimeSpan.FromSeconds(ocrTimeout) })
+                {
+                    HttpResponseMessage response;
+                    try
+                    {
+                        response = await ocrClient.SendAsync(request).ConfigureAwait(false);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        throw new AccountingApiException(
+                            $"OCR ใช้เวลานานเกิน {ocrTimeout} วินาที (timeout) — ลองไฟล์ที่เล็ก/ชัดขึ้น หรือเพิ่มค่า Nexaacc_OcrTimeoutSec",
+                            408, null);
+                    }
+                    var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("POST", path, "[multipart file]", responseBody,
+                        (int)response.StatusCode, response.IsSuccessStatusCode, 0);
 
-                if (!response.IsSuccessStatusCode)
-                    throw new AccountingApiException(
-                        $"OCR upload failed: {response.StatusCode} {responseBody}",
-                        (int)response.StatusCode, responseBody);
+                    if (!response.IsSuccessStatusCode)
+                        throw new AccountingApiException(
+                            $"OCR upload failed: {response.StatusCode} {responseBody}",
+                            (int)response.StatusCode, responseBody);
 
-                return JsonConvert.DeserializeObject<ApiResponse<OcrResultResponse>>(responseBody, _jsonSettings);
+                    return JsonConvert.DeserializeObject<ApiResponse<OcrResultResponse>>(responseBody, _jsonSettings);
+                }
             }
         }
 

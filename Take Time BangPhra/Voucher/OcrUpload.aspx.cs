@@ -52,6 +52,8 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void btnScan_Click(object sender, EventArgs e)
         {
+            // OCR ประมวลผล + poll นานได้ → ยืด request timeout ของ ASP.NET (default 110s) กัน "A task was canceled"
+            Server.ScriptTimeout = 600;
             litResult.Text = "";
             if (!fuOcr.HasFile)
             {
@@ -129,6 +131,7 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void btnCreate_Click(object sender, EventArgs e)
         {
+            Server.ScriptTimeout = 600;   // create+update+approve หลาย call → ยืด request timeout
             Guid scanId;
             if (!Guid.TryParse(hfScanId.Value, out scanId))
             {
