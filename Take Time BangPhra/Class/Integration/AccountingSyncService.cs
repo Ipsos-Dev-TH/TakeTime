@@ -644,6 +644,130 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Look up the Nexaacc_Response_Id for a previously synced document.
         /// </summary>
+        // ──────────────────────────────────────────────
+        // Reconciliation: ลบ record ฝั่งเราเมื่อเอกสารหายจาก NextAcc (ยืนยัน 404 เท่านั้น)
+        // ใช้เฉพาะ DOCUMENT mode + company endpoints. transient error (timeout/5xx/network/401) → ไม่ลบ
+        // ──────────────────────────────────────────────
+        public class ReconcileResult
+        {
+            public int Checked;
+            public int Deleted;
+            public int Skipped;
+            public int Errors;
+            public List<string> DeletedDocs = new List<string>();
+        }
+
+        /// <summary>รอบตรวจ: เอกสารที่ sync แล้ว ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) → hard DELETE
+        /// record ฝั่ง TakeTime. ลบเฉพาะเมื่อ 404 ชัดเจน; error อื่นข้าม (กันลบจาก transient).</summary>
+        public async System.Threading.Tasks.Task<ReconcileResult> ReconcileDeletedDocumentsAsync(int maxPerType = 200)
+        {
+            var r = new ReconcileResult();
+            if (!_config.IsConfigured || !_config.Enabled) return r;
+            if (!_config.CanUseCompanyEndpoints)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    "ReconcileDeletedDocuments: ข้าม — company endpoint ปิดอยู่ (ต้องเปิดเพื่อตรวจเอกสารใน NextAcc)", "SYSTEM");
+                return r;
+            }
+
+            if (_config.IsReceiptDocumentMode)
+                await ReconcileEntityAsync("RECEIPT", "Account_Receipt", maxPerType, r);
+            if (_config.IsVoucherDocumentMode)
+                await ReconcileEntityAsync("VOUCHER", "Account_Payment", maxPerType, r);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ReconcileDeletedDocuments: checked={r.Checked} deleted={r.Deleted} skipped={r.Skipped} errors={r.Errors}", "SYSTEM");
+            return r;
+        }
+
+        private async System.Threading.Tasks.Task ReconcileEntityAsync(string entityType, string table, int maxRecords, ReconcileResult r)
+        {
+            System.Data.DataTable dt;
+            try
+            {
+                dt = _code.DatabaseQuerySafe(_connectionString,
+                    $"SELECT TOP ({maxRecords}) ID FROM {table} WHERE (Status = 'Normal' OR Status IS NULL) ORDER BY Created_Date DESC", null);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"Reconcile({entityType}): query failed {ex.Message}", "SYSTEM");
+                return;
+            }
+            if (dt == null) return;
+
+            foreach (System.Data.DataRow row in dt.Rows)
+            {
+                string docNumber = row["ID"]?.ToString();
+                if (string.IsNullOrEmpty(docNumber)) continue;
+
+                // เฉพาะที่เคย sync (มี NextAcc doc id จาก queue) — ไม่แตะใบที่ยังไม่ sync/LOCAL/pending
+                string nexaaccId = LookupNexaaccId(docNumber, entityType);
+                if (string.IsNullOrEmpty(nexaaccId) || !Guid.TryParse(nexaaccId, out var docId) || docId == Guid.Empty)
+                    continue;
+
+                r.Checked++;
+                try
+                {
+                    var doc = await _apiClient.GetDocumentAsync(docId);
+                    if (doc?.data == null)
+                        r.Skipped++;   // คืนค่าว่างผิดปกติ → ไม่ลบ (ปลอดภัยไว้ก่อน)
+                }
+                catch (AccountingApiException ex) when (ex.StatusCode == 404)
+                {
+                    bool ok = entityType == "RECEIPT" ? DeleteReceiptRecord(docNumber) : DeleteVoucherRecord(docNumber);
+                    if (ok)
+                    {
+                        r.Deleted++;
+                        r.DeletedDocs.Add(docNumber);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"Reconcile: HARD-DELETED {entityType} {docNumber} — NextAcc doc {docId} ตอบ 404 (ไม่มีเอกสารแล้ว)", "SYSTEM");
+                    }
+                    else r.Errors++;
+                }
+                catch (Exception ex)
+                {
+                    // transient (timeout/5xx/network/401) → ไม่ลบ
+                    r.Errors++;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"Reconcile: {entityType} {docNumber} ตรวจไม่ได้ (ไม่ลบ — กัน transient): {ex.Message}", "SYSTEM");
+                }
+            }
+        }
+
+        private bool DeleteReceiptRecord(string docNumber)
+        {
+            try
+            {
+                var p = new Dictionary<string, object> { { "@ID", docNumber } };
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Payment_History] WHERE Receipt_ID = @ID", p);
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Payment_Slips] WHERE Account_Receipt_ID = @ID", p);
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Account_Receipt_Detail] WHERE Receipt_ID = @ID", p);
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Account_Receipt] WHERE ID = @ID", p);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"DeleteReceiptRecord({docNumber}) failed: {ex.Message}", "SYSTEM");
+                return false;
+            }
+        }
+
+        private bool DeleteVoucherRecord(string docNumber)
+        {
+            try
+            {
+                var p = new Dictionary<string, object> { { "@ID", docNumber } };
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @ID", p);
+                _code.DatabaseInsertSafe(_connectionString, "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID", p);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"DeleteVoucherRecord({docNumber}) failed: {ex.Message}", "SYSTEM");
+                return false;
+            }
+        }
+
         private string LookupNexaaccId(string documentNumber, string entityType)
         {
             try

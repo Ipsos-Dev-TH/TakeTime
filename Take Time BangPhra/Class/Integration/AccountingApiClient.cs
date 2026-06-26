@@ -589,6 +589,14 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/document/{documentId}", request);
         }
 
+        /// <summary>ดึงเอกสารเดี่ยวจาก NextAcc — ใช้ตรวจว่าเอกสารยังอยู่หรือไม่ (reconciliation).
+        /// ถ้าไม่มี → throw AccountingApiException StatusCode=404 (ไม่ retry). transient (5xx/timeout)
+        /// → HttpRequestException/อื่น ๆ. company endpoint → X-Api-Key.</summary>
+        public async Task<ApiResponse<DocumentResponse>> GetDocumentAsync(Guid documentId)
+        {
+            return await GetAsync<ApiResponse<DocumentResponse>>($"{CompanyPath}/document/{documentId}");
+        }
+
         [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {

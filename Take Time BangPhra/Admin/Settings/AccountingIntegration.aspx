@@ -32,6 +32,8 @@
         .btn-success:hover { background: #388E3C; }
         .btn-warning { padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
         .btn-warning:hover { background: #F57C00; }
+        .btn-danger { padding: 10px 20px; background: #E53935; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
+        .btn-danger:hover { background: #C62828; }
 
         .test-result { margin-top: 10px; padding: 10px 15px; border-radius: 8px; font-size: 13px; display: none; white-space: pre-line; }
         .test-result.success { display: block; background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9; }
@@ -302,7 +304,9 @@
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
                     <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
+                    <button type="button" class="btn-danger" onclick="reconcileDeleted()"><i class="fas fa-trash-alt"></i> ตรวจ &amp; ลบใบที่หายจาก NextAcc</button>
                 </div>
+                <div class="help-text" style="margin-top:6px;">ตรวจใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว: ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะ <b>ลบ record ในระบบนี้ถาวร</b> — ลบเฉพาะ 404 ชัดเจน, error ชั่วคราวจะข้าม</div>
                 <div class="test-result" id="syncTestResult"></div>
             </div>
         </div>
@@ -859,6 +863,11 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        function reconcileDeleted() {
+            if (!confirm('⚠️ ยืนยันตรวจสอบ & ลบเอกสารที่หายจาก NextAcc?\n\nใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะถูก "ลบถาวร" ออกจากระบบนี้\n(ลบเฉพาะ 404 ชัดเจน — error ชั่วคราวจะข้าม)')) return;
+            getAction('reconcileDeleted', 'syncTestResult');
         }
 
         // ── Deposit Lifecycle ──

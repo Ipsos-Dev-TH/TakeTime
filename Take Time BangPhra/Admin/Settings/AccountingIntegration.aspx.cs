@@ -114,6 +114,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "processQueue":
                     result = ProcessQueueNow();
                     break;
+                case "reconcileDeleted":
+                    result = ReconcileDeletedDocuments();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -345,6 +348,28 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             // Delegate to SyncChartOfAccounts (same functionality, now with cache)
             return SyncChartOfAccounts();
+        }
+
+        private Dictionary<string, object> ReconcileDeletedDocuments()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                var r = System.Threading.Tasks.Task.Run(() => sync.ReconcileDeletedDocumentsAsync(500)).Result;
+                string msg = $"ตรวจ {r.Checked} ใบ — ลบ {r.Deleted} ใบ (หายจาก NextAcc 404), ข้าม {r.Skipped}, ตรวจไม่ได้ {r.Errors} (ไม่ลบ)";
+                if (r.DeletedDocs != null && r.DeletedDocs.Count > 0)
+                    msg += "\nลบ: " + string.Join(", ", r.DeletedDocs);
+                return new Dictionary<string, object> { { "success", true }, { "message", msg } };
+            }
+            catch (AggregateException aex)
+            {
+                var inner = aex.InnerException ?? aex;
+                return new Dictionary<string, object> { { "success", false }, { "message", inner.Message } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
         }
 
         private Dictionary<string, object> ProcessQueueNow()
