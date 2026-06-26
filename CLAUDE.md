@@ -120,6 +120,20 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
 21916/21917 by supplier TaxId/ContactType, so send correct ContactType.
 
 ### Known gaps / TODO (NextAcc-dependent)
+0. **จ่ายจริง = ใบสำคัญจ่าย (ไม่ใช่ค่าใช้จ่าย), DOCUMENT mode + acc_:** ✅ DONE. NextAcc แยกบทบาท
+   (DocumentService.cs): **Expense (type 9)** = ตั้งหนี้ (Cr เจ้าหนี้, เงินยังไม่ออก, บังคับ
+   PaymentType=Credit) / **PaymentVoucher (type 13)** = จ่ายจริง (Cr เงินสด/ธนาคาร, เงินออก,
+   standalone→PaymentType=Cash). เดิม `ProcessVoucherJournal` ใช้ one-shot `/integration/payment-vouchers`
+   เฉพาะกรณีจ่ายเงินสด/ธนาคาร (เพราะ endpoint นั้น **บังคับ Cr เงินสด override บัญชีไม่ได้**) → กรณีจ่ายแบบ
+   ไม่ใช่เงินสด (เจ้าหนี้กรรมการ) ตกไปสร้าง **Expense** ผิดบทบาท. **Fix:** เมื่อ `CanUseCompanyEndpoints`
+   + มี supplier contact + `!isCredit` + `!salary` → สร้าง **PaymentVoucher ผ่าน company `/document`**
+   (`MapVoucherToDocument` type 13, `PaymentAccountId`=แหล่งเงิน → Cr บัญชีนั้นตรง ๆ) → `SettleVoucherDocAsync`
+   (create+approve, idempotent marker `Account_Payment.Nexaacc_Voucher_Doc_Marker` DOC:→APR:→{id}/VOIDED,
+   migration PHASE17_07) → `TryAutoGenerateWhtCertAsync`. ครอบคลุม **ทุกกรณีจ่ายจริงรวมเงินสด** (เลิกใช้
+   one-shot PV เมื่อมี acc_). **เครดิต→ยังเป็น Expense** (ถูกต้อง — NextAcc ห้าม PV เครดิตลอย ๆ); เงินเดือน
+   ยังใช้ expense+Payroll; ไม่มี contact / `int_` → fallback one-shot PV / expense เดิม. Edit = void→สร้างใหม่
+   (row reinsert → marker null). **ข้อจำกัด:** company `/document` ไม่มีช่อง preparer signature
+   (ผู้จัดทำใช้ลายเซ็น CreatedBy user แทน); ไม่แนบไฟล์. ต้อง build+test บน Windows.
 1. **Director-advance credit account (เจ้าหนี้กรรมการ):** ✅ DONE. `AutoRecordPaymentForVoucher`
    now routes to the company `document/payments` endpoint (`CreatePaymentAsync`,
    `OverridePaymentAccountId` + `PayerSignature*`) whenever an override/signature is needed AND an

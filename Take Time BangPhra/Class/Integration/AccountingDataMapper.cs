@@ -2719,6 +2719,59 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// สร้าง "ใบสำคัญจ่าย (PaymentVoucher, DocumentType=13)" ผ่าน company /document endpoint.
+        /// ใช้เมื่อ "จ่ายเงินจริง" (ไม่ใช่เครดิต) — เงินออกจริง → NextAcc PV branch:
+        ///   Dr ค่าใช้จ่าย (ราย line) + Dr ภาษีซื้อ / Cr แหล่งเงิน (PaymentAccountId — เงินสด/ธนาคาร/
+        ///   เจ้าหนี้กรรมการ ตามที่ map) − WHT 21916/21917 (ตาม ContactType). standalone PV →
+        ///   NextAcc default PaymentType=Cash (เงินออกทันที). แก้ปัญหาที่ /integration/payment-vouchers
+        ///   บังคับ Cr เงินสดเสมอ จนกรณีจ่ายแบบไม่ใช่เงินสดตกไปเป็น Expense.
+        /// </summary>
+        public CreateDocumentRequest MapVoucherToDocument(
+            int voucherId, string expenseCategory, decimal amount, string paymentMethod,
+            DateTime voucherDate, string description, string payeeName, Guid contactId,
+            bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+        {
+            // reuse line/VAT/WHT/แหล่งเงิน resolution จาก expense mapper
+            var exp = MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
+                voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
+                paymentAccountId, expenseAccountId, expenseLines, documentNumber);
+
+            var docLines = new List<DocumentLineRequest>();
+            foreach (var l in exp.Lines)
+            {
+                docLines.Add(new DocumentLineRequest
+                {
+                    Description = !string.IsNullOrEmpty(l.Description) ? l.Description : l.ItemName,
+                    Quantity = l.Quantity > 0 ? l.Quantity : 1,
+                    UnitPrice = l.UnitPrice,
+                    VatRate = l.VatRate,
+                    WithholdingTaxRate = l.WithholdingTaxRate,
+                    AccountId = (l.AccountId != Guid.Empty) ? l.AccountId : (Guid?)null,
+                    AccountCode = l.AccountCode
+                });
+            }
+
+            return new CreateDocumentRequest
+            {
+                DocumentType = 13, // PaymentVoucher (ใบสำคัญจ่าย)
+                DocumentDate = voucherDate,
+                PaymentDate = voucherDate,
+                ContactId = contactId,
+                Reference = exp.Reference,
+                SupplierInvoiceNumber = exp.ExternalRef,
+                // แหล่งเงิน (ฝั่งเครดิต/เงินออก) — NextAcc PV Cr บัญชีนี้ตรง ๆ
+                PaymentAccountId = exp.PaymentAccountId,
+                // standalone PV → NextAcc default PaymentType=Cash (เงินออกทันที, ไม่เปิดเจ้าหนี้)
+                PricesIncludeVat = exp.IncludeVat,
+                Notes = exp.Description,
+                Lines = docLines
+            };
+        }
+
+
         // ══════════════════════════════════════════════
         // Integration Credit Note (ใบลดหนี้)
         // ใช้กับ /api/integration/credit-notes

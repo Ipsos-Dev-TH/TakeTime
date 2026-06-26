@@ -160,6 +160,8 @@ namespace Take_Time_BangPhra.Integration
         public string DepositDeferredAccountCode { get; set; }
         /// <summary>true → Cr ภาษีขายรอเรียกเก็บ 21913 (ยังไม่เข้า ภ.พ.30); false → Cr 21911 ทันที</summary>
         public bool DepositOutputVatDeferred { get; set; }
+        /// <summary>เลขที่ใบกำกับ/เอกสารของคู่ค้า (ฝั่งซื้อ/ใบสำคัญจ่าย) — แยกจาก DocumentNumber ของเรา</summary>
+        public string SupplierInvoiceNumber { get; set; }
     }
 
     public class DocumentLineRequest

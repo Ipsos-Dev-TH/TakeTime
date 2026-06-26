@@ -1398,7 +1398,30 @@ namespace Take_Time_BangPhra.Integration
                 // where AutoRecordPaymentForVoucher sends OverridePaymentAccountId (เจ้าหนี้กรรมการ)
                 // and the payer signature via /api/integration/payments.
                 bool pvCreated = false;
-                if (!isCredit && !isSalaryVoucher && autoRecordPayment)
+
+                // ✅ จ่ายเงินจริง (ไม่ใช่เครดิต/เงินเดือน) + company endpoints → ออกเป็น "ใบสำคัญจ่าย"
+                //    ผ่าน company /document (PaymentVoucher type 13) บังคับ Cr แหล่งเงิน (เงินสด/ธนาคาร/
+                //    เจ้าหนี้กรรมการ ตามที่ map) — แทน Expense ในทุกกรณีจ่ายจริง รวมเงินสด/ธนาคาร
+                //    (one-shot /integration/payment-vouchers override บัญชีเครดิตไม่ได้ จึงเลิกใช้เมื่อมี acc_)
+                if (_config.CanUseCompanyEndpoints && supplierContact?.NexaaccContactId != null
+                    && !isCredit && !isSalaryVoucher)
+                {
+                    var pvDoc = _mapper.MapVoucherToDocument(voucherId, expenseCategory, amount, paymentMethod,
+                        voucherDate, description, payeeName, supplierContact.NexaaccContactId.Value,
+                        hasInputVat, whtRate, whtAmount, paymentAccountId, expenseAccountId, expenseLines, docNumber);
+                    Guid pvDocId = await SettleVoucherDocAsync(pvDoc, docNumber);
+                    if (pvDocId != Guid.Empty)
+                    {
+                        nexaaccId = pvDocId.ToString();
+                        nexaaccDocNumber = _lastDocNumber;
+                        nexaaccDocType = "PAYMENT_VOUCHER";
+                        _lastDocType = nexaaccDocType;
+                        await TryAutoGenerateWhtCertAsync(pvDocId, docNumber);   // ออก 50ทวิ ถ้ามี WHT
+                        pvCreated = true;
+                    }
+                }
+
+                if (!pvCreated && !isCredit && !isSalaryVoucher && autoRecordPayment)
                 {
                     try
                     {
@@ -1872,6 +1895,91 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"SettleReceiptDoc: เสร็จ receipt={receiptNumber} docId={docId} depositApplied={depositApplied:N2} แหล่งเงิน={(string.IsNullOrEmpty(paymentAccountId) ? "default" : paymentAccountId)}", "SYSTEM");
             return docId;
+        }
+
+        // ──────────────────────────────────────────────
+        // PaymentVoucher document (company /document, DocumentType=13) — "จ่ายจริง" = ใบสำคัญจ่าย
+        //   Dr ค่าใช้จ่าย/ภาษีซื้อ / Cr แหล่งเงิน (PaymentAccountId) − WHT ; ไม่เปิดเจ้าหนี้หลอก
+        // idempotent ผ่าน Account_Payment.Nexaacc_Voucher_Doc_Marker (DOC:→APR:→{id}/VOIDED)
+        // ──────────────────────────────────────────────
+        private async System.Threading.Tasks.Task<Guid> SettleVoucherDocAsync(CreateDocumentRequest doc, string documentNumber)
+        {
+            string marker = LookupVoucherDocMarker(documentNumber);
+            // edit = void→สร้างใหม่เลขเดิม: marker "VOIDED" ไม่บล็อกการสร้างใหม่
+            if (marker == "VOIDED") marker = null;
+            bool isFinal = !string.IsNullOrEmpty(marker)
+                && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:");
+            if (isFinal && Guid.TryParse(marker, out var finalId) && finalId != Guid.Empty)
+                return finalId;   // จบแล้ว
+
+            bool approved = !string.IsNullOrEmpty(marker) && marker.StartsWith("APR:");
+            Guid docId = Guid.Empty;
+            if (!string.IsNullOrEmpty(marker) && (marker.StartsWith("DOC:") || marker.StartsWith("APR:")))
+                Guid.TryParse(marker.Substring(4), out docId);
+
+            // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
+            if (docId == Guid.Empty)
+            {
+                var createResult = await _apiClient.CreateDocumentAsync(doc);
+                docId = RequireValidDocId(createResult?.data?.Id, $"CreatePaymentVoucher (doc) doc={documentNumber}");
+                _lastDocNumber = createResult?.data?.DocumentNumber;
+                SetVoucherDocMarker(documentNumber, "DOC:" + docId);
+            }
+
+            // 2) อนุมัติ (auto-post GL) — idempotent
+            if (!approved)
+            {
+                try
+                {
+                    await _apiClient.ApproveDocumentAsync(docId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                }
+                catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleVoucherDoc: doc {docId} already approved/posted doc={documentNumber} ({ex.StatusCode})", "SYSTEM");
+                }
+                SetVoucherDocMarker(documentNumber, "APR:" + docId);
+            }
+
+            SetVoucherDocMarker(documentNumber, docId.ToString());   // final
+            _code.Logs(_connectionString, "AccountingSync",
+                $"SettleVoucherDoc: เสร็จ doc={documentNumber} docId={docId} (ใบสำคัญจ่าย company endpoint)", "SYSTEM");
+            return docId;
+        }
+
+        private string LookupVoucherDocMarker(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Voucher_Doc_Marker FROM Account_Payment WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Voucher_Doc_Marker"] != DBNull.Value)
+                    return dt.Rows[0]["Nexaacc_Voucher_Doc_Marker"].ToString();
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVoucherDocMarker: doc={documentNumber} {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        private void SetVoucherDocMarker(string documentNumber, string marker)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Account_Payment SET Nexaacc_Voucher_Doc_Marker = @m WHERE ID = @num",
+                    new Dictionary<string, object> { { "@m", marker }, { "@num", documentNumber } });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SetVoucherDocMarker: doc={documentNumber} {ex.Message}", "SYSTEM");
+            }
         }
 
         private string LookupReceiptPaymentMarker(string receiptNumber)
