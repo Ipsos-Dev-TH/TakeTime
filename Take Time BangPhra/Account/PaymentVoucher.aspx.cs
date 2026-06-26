@@ -995,7 +995,8 @@ namespace Take_Time_BangPhra.Account.Report
                         string expAccId = sync.LookupPaidTypeAccountId(expenseCategory);
 
                         bool hasVat = false;
-                        try { hasVat = Convert.ToDecimal(TextBox4.Text) > 0; } catch { }
+                        decimal vatAmt = 0m;
+                        try { vatAmt = Convert.ToDecimal(TextBox4.Text); hasVat = vatAmt > 0; } catch { }
 
                         decimal syncWhtRate = 0;
                         decimal.TryParse(ddlWHTRate.SelectedValue, out syncWhtRate);
@@ -1010,7 +1011,8 @@ namespace Take_Time_BangPhra.Account.Report
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines,
                             isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
-                            supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId);
+                            supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId,
+                            vatAmount: vatAmt);
 
                         // Asset reclassification: DR Fixed Asset / CR Expense
                         if (chkRecordAsset.Checked && voucherAmount > 0)

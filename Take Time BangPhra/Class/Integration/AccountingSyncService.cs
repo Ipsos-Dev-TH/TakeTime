@@ -66,7 +66,8 @@ namespace Take_Time_BangPhra.Integration
             string paymentAccountId = null, string expenseAccountId = null,
             List<Dictionary<string, object>> expenseLines = null,
             bool isCredit = false, bool autoRecordPayment = false,
-            string supplierExternalId = null, string supplierTaxId = null)
+            string supplierExternalId = null, string supplierTaxId = null,
+            decimal vatAmount = 0)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -104,7 +105,8 @@ namespace Take_Time_BangPhra.Integration
                 { "whtRate", whtRate },
                 { "whtAmount", whtAmount },
                 { "isCredit", isCredit },
-                { "autoRecordPayment", autoRecordPayment }
+                { "autoRecordPayment", autoRecordPayment },
+                { "vatAmount", vatAmount }
             };
             if (!string.IsNullOrEmpty(documentNumber))
                 payload["documentNumber"] = documentNumber;
@@ -1337,6 +1339,7 @@ namespace Take_Time_BangPhra.Integration
 
             bool isCredit = p.ContainsKey("isCredit") && Convert.ToBoolean(p["isCredit"]);
             bool autoRecordPayment = p.ContainsKey("autoRecordPayment") && Convert.ToBoolean(p["autoRecordPayment"]);
+            decimal vatAmount = p.ContainsKey("vatAmount") ? Convert.ToDecimal(p["vatAmount"]) : 0m;
 
             int lineCount = expenseLines?.Count ?? 0;
             _code.Logs(_connectionString, "AccountingSync",
@@ -1408,7 +1411,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     var pvDoc = _mapper.MapVoucherToDocument(voucherId, expenseCategory, amount, paymentMethod,
                         voucherDate, description, payeeName, supplierContact.NexaaccContactId.Value,
-                        hasInputVat, whtRate, whtAmount, paymentAccountId, expenseAccountId, expenseLines, docNumber);
+                        hasInputVat, whtRate, whtAmount, paymentAccountId, expenseAccountId, expenseLines, docNumber, vatAmount);
                     Guid pvDocId = await SettleVoucherDocAsync(pvDoc, docNumber);
                     if (pvDocId != Guid.Empty)
                     {
@@ -1428,7 +1431,7 @@ namespace Take_Time_BangPhra.Integration
                         var pv = _mapper.MapVoucherToPaymentVoucher(voucherId, expenseCategory, amount, paymentMethod,
                             voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                             paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                            expenseLines: expenseLines, documentNumber: docNumber);
+                            expenseLines: expenseLines, documentNumber: docNumber, vatAmount: vatAmount);
                         pv.Attachments = attachments;   // PV endpoint รับ base64 attachments ใน JSON
                         ApplyContactToPaymentVoucher(pv, supplierContact);
                         ApplyPreparerSignature(pv, docNumber);
@@ -1458,7 +1461,7 @@ namespace Take_Time_BangPhra.Integration
                     var expense = _mapper.MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                         voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
                         paymentAccountId: paymentAccountId, expenseAccountId: expenseAccountId,
-                        expenseLines: expenseLines, documentNumber: docNumber);
+                        expenseLines: expenseLines, documentNumber: docNumber, vatAmount: vatAmount);
                     expense.Attachments = attachments;
                     if (isSalaryVoucher)
                         expense.Sensitivity = "Payroll";

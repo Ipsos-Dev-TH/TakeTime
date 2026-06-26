@@ -132,8 +132,12 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    migration PHASE17_07) → `TryAutoGenerateWhtCertAsync`. ครอบคลุม **ทุกกรณีจ่ายจริงรวมเงินสด** (เลิกใช้
    one-shot PV เมื่อมี acc_). **เครดิต→ยังเป็น Expense** (ถูกต้อง — NextAcc ห้าม PV เครดิตลอย ๆ); เงินเดือน
    ยังใช้ expense+Payroll; ไม่มี contact / `int_` → fallback one-shot PV / expense เดิม. Edit = void→สร้างใหม่
-   (row reinsert → marker null). **ข้อจำกัด:** company `/document` ไม่มีช่อง preparer signature
-   (ผู้จัดทำใช้ลายเซ็น CreatedBy user แทน); ไม่แนบไฟล์. ต้อง build+test บน Windows.
+   (row reinsert → marker null). **VAT ผสม (มีของไม่เสียภาษีปน):** TakeTime ส่งยอด VAT จริง (`vatAmount`,
+   TextBox4) มาด้วย; `MapVoucherToExpense` ตรวจถ้า `vatAmount` ≠ 7% ของ net (ผสม) จะ **แตกเป็น 2 บรรทัด**
+   ส่วนมีภาษี (`vatAmount/0.07`@7%) + ส่วนไม่มีภาษี (ที่เหลือ@0%) `IncludeVat=false` → NextAcc คิด VAT ตรง
+   (เดิมส่ง VatRate=7 ทั้งใบ NextAcc คิด 7% เต็ม → ยอดเกิน เกิด "ค้างชำระ"). per-line VAT honored บน
+   company `/document`. **ข้อจำกัด:** company `/document` ไม่มีช่อง preparer signature (ผู้จัดทำใช้ลายเซ็น
+   CreatedBy user แทน); ไม่แนบไฟล์; VAT-mixed split รวมหมวดเป็นบัญชี line แรก. ต้อง build+test บน Windows.
 1. **Director-advance credit account (เจ้าหนี้กรรมการ):** ✅ DONE. `AutoRecordPaymentForVoucher`
    now routes to the company `document/payments` endpoint (`CreatePaymentAsync`,
    `OverridePaymentAccountId` + `PayerSignature*`) whenever an override/signature is needed AND an

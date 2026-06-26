@@ -2608,7 +2608,8 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null,
+            decimal vatAmount = 0)
         {
             var lines = new List<IntegrationLineRequest>();
             bool hasMultipleLines = expenseLines != null && expenseLines.Count > 0;
@@ -2664,6 +2665,42 @@ namespace Take_Time_BangPhra.Integration
                 });
             }
 
+            // ภาษีซื้อผสม (มีรายการไม่เสียภาษีปน): VAT จริง ≠ 7% ของยอดรวม net → ถ้าส่ง VatRate=7
+            // ทุก line NextAcc จะคิด 7% เต็ม (เกินจริง) → ยอดไม่ตรง เกิดค้างชำระ. แก้โดยแตกเป็น
+            // 2 บรรทัด: ส่วนมีภาษี (taxableNet@7% ให้ VAT = vatAmount พอดี) + ส่วนไม่มีภาษี (@0%).
+            // ใช้บัญชี/หมวดของ line แรก (ใบสำคัญจ่ายส่วนใหญ่หมวดเดียว). NextAcc honor per-line VatRate
+            // เมื่อ IncludeVat=false (โดยเฉพาะ company /document PV).
+            decimal totalNet = 0m;
+            foreach (var ln in lines) totalNet += ln.UnitPrice * (ln.Quantity > 0 ? ln.Quantity : 1);
+            if (hasInputVat && vatAmount > 0 && totalNet > 0)
+            {
+                decimal taxableNet = Math.Round(vatAmount / 0.07m, 2, MidpointRounding.AwayFromZero);
+                decimal nonTaxableNet = Math.Round(totalNet - taxableNet, 2, MidpointRounding.AwayFromZero);
+                if (nonTaxableNet >= 0.01m && taxableNet > 0)
+                {
+                    var primary = lines[0];
+                    lines = new List<IntegrationLineRequest>
+                    {
+                        new IntegrationLineRequest
+                        {
+                            ItemCode = primary.ItemCode, ItemName = primary.ItemName,
+                            Description = !string.IsNullOrEmpty(primary.Description) ? primary.Description + " (ส่วนมีภาษี)" : "ส่วนมีภาษี",
+                            Quantity = 1, UnitPrice = taxableNet, VatRate = 7,
+                            WithholdingTaxRate = whtRate,   // WHT คิดบนฐาน net ทั้งใบ → ใส่ทั้งสอง line
+                            AccountId = primary.AccountId, AccountCode = primary.AccountCode, Category = primary.Category
+                        },
+                        new IntegrationLineRequest
+                        {
+                            ItemCode = primary.ItemCode, ItemName = primary.ItemName,
+                            Description = !string.IsNullOrEmpty(primary.Description) ? primary.Description + " (ส่วนไม่มีภาษี)" : "ส่วนไม่มีภาษี",
+                            Quantity = 1, UnitPrice = nonTaxableNet, VatRate = 0,
+                            WithholdingTaxRate = whtRate,
+                            AccountId = primary.AccountId, AccountCode = primary.AccountCode, Category = primary.Category
+                        }
+                    };
+                }
+            }
+
             string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
             return new CreateIntegrationExpenseRequest
             {
@@ -2674,7 +2711,7 @@ namespace Take_Time_BangPhra.Integration
                 ReplaceExistingForSource = !string.IsNullOrEmpty(documentNumber),
                 Description = $"ใบสำคัญจ่าย {refStr} - {description} ({payeeName})",
                 VatRate = hasInputVat ? 7 : 0,
-                IncludeVat = hasMultipleLines ? false : hasInputVat,
+                IncludeVat = lines.Count > 1 ? false : hasInputVat,
                 PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 Lines = lines
@@ -2693,11 +2730,12 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null,
+            decimal vatAmount = 0)
         {
             var exp = MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                 voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
-                paymentAccountId, expenseAccountId, expenseLines, documentNumber);
+                paymentAccountId, expenseAccountId, expenseLines, documentNumber, vatAmount);
 
             return new CreateIntegrationPaymentVoucherRequest
             {
@@ -2732,12 +2770,13 @@ namespace Take_Time_BangPhra.Integration
             DateTime voucherDate, string description, string payeeName, Guid contactId,
             bool hasInputVat = false, decimal whtRate = 0, decimal whtAmount = 0,
             string paymentAccountId = null, string expenseAccountId = null,
-            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+            List<ExpenseLine> expenseLines = null, string documentNumber = null,
+            decimal vatAmount = 0)
         {
-            // reuse line/VAT/WHT/แหล่งเงิน resolution จาก expense mapper
+            // reuse line/VAT/WHT/แหล่งเงิน resolution จาก expense mapper (รวม split VAT ผสม)
             var exp = MapVoucherToExpense(voucherId, expenseCategory, amount, paymentMethod,
                 voucherDate, description, payeeName, hasInputVat, whtRate, whtAmount,
-                paymentAccountId, expenseAccountId, expenseLines, documentNumber);
+                paymentAccountId, expenseAccountId, expenseLines, documentNumber, vatAmount);
 
             var docLines = new List<DocumentLineRequest>();
             foreach (var l in exp.Lines)
