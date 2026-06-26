@@ -30,6 +30,8 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ClientScript.RegisterStartupScript(this.GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
                         InitializePage();
 
                         // Show success alert from Post-Redirect-Get sync
@@ -1151,9 +1153,10 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch { /* Ignore logging errors */ }
 
-                // Show success message and refresh page
-                ClientScript.RegisterStartupScript(this.GetType(), "deleteSuccess",
-                    $"alert('✅ ลบเอกสาร {docNum} สำเร็จ'); window.location='/Account/CheckDocument_New';", true);
+                // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS) → row หายจริง + แจ้งสำเร็จ
+                Response.Redirect("~/Account/CheckDocument_New?deleted=1", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
             }
             catch (Exception ex)
             {

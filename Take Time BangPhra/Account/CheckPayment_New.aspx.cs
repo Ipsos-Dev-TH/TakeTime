@@ -966,7 +966,9 @@ namespace Take_Time_BangPhra.Account
             {
                 if (ctrl is Button btnDel && btnDel.CommandName == "Delete")
                 {
-                    btnDel.OnClientClick = "return confirm('ยืนยันลบเอกสารนี้? (ลบถาวร ไม่สามารถกู้คืนได้)');";
+                    // ใช้ if(!confirm())return false; แทน return confirm(); — กันกรณีปุ่ม render เป็น __doPostBack
+                    // ที่ "return true" จะตัดไม่ให้ postback ทำงาน (อาการกด OK แล้วเงียบ)
+                    btnDel.OnClientClick = "if(!confirm('ยืนยันลบเอกสารนี้? (ลบถาวร ไม่สามารถกู้คืนได้)'))return false;";
                     break;
                 }
             }
