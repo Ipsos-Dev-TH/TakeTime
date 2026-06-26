@@ -420,7 +420,23 @@ namespace Take_Time_BangPhra.Voucher
                 {
                     bool claimVat = !noClaim;
                     string reason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)";
-                    string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
+
+                    // รายการ (description): ถ้าผู้ใช้เลือกผังบัญชี → ใช้ "ชื่อผังบัญชีที่เลือก" เป็นรายการ
+                    // (ตรงกับที่ผู้ใช้ต้องการ) + ต่อท้ายด้วยชื่อผู้ขายถ้ามี. ไม่งั้นใช้ ชื่อผู้ขาย+เลขเอกสาร
+                    string desc;
+                    if (userPickedAccount && ddlChargeAccount.SelectedItem != null)
+                    {
+                        desc = ddlChargeAccount.SelectedItem.Text;          // เช่น "51110 ซื้อสินค้า/วัตถุดิบ"
+                        string code = ddlChargeAccount.SelectedValue;
+                        if (!string.IsNullOrEmpty(code) && desc.StartsWith(code))
+                            desc = desc.Substring(code.Length).Trim();      // → "ซื้อสินค้า/วัตถุดิบ"
+                        string vn = txtVendorName.Text.Trim();
+                        if (!string.IsNullOrEmpty(vn)) desc = desc + " - " + vn;
+                    }
+                    else
+                    {
+                        desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
+                    }
                     if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
                     upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
 
