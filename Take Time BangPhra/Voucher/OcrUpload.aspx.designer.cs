@@ -16,6 +16,7 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.Literal litMeta;
         protected global::System.Web.UI.WebControls.TextBox txtVendorName;
         protected global::System.Web.UI.WebControls.TextBox txtVendorTaxId;
+        protected global::System.Web.UI.WebControls.DropDownList ddlVendor;
         protected global::System.Web.UI.WebControls.TextBox txtDocNumber;
         protected global::System.Web.UI.WebControls.TextBox txtDocDate;
         protected global::System.Web.UI.WebControls.TextBox txtSubTotal;

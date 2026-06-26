@@ -51,6 +51,13 @@
                 <div class="ocr-field"><label>เลขผู้เสียภาษี</label><asp:TextBox ID="txtVendorTaxId" runat="server" /></div>
             </div>
             <div class="ocr-row">
+                <div class="ocr-field">
+                    <label>หรือเลือกผู้ขายจากระบบ (กรณี OCR ไม่เจอชื่อ)</label>
+                    <asp:DropDownList ID="ddlVendor" runat="server" CssClass="form-control" />
+                    <span class="ocr-hint">เลือกแล้วระบบจะผูกผู้ติดต่อ (contact) ของผู้ขายนี้ให้เอกสารใน NextAcc (แทนชื่อที่ OCR ไม่เจอ)</span>
+                </div>
+            </div>
+            <div class="ocr-row">
                 <div class="ocr-field"><label>เลขที่เอกสาร</label><asp:TextBox ID="txtDocNumber" runat="server" /></div>
                 <div class="ocr-field"><label>วันที่ (yyyy-MM-dd)</label><asp:TextBox ID="txtDocDate" runat="server" /></div>
             </div>

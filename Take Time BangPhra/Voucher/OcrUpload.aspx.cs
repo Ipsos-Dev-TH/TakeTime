@@ -153,6 +153,30 @@ namespace Take_Time_BangPhra.Voucher
 
                 // บังคับแหล่งเงิน + ใช้ค่าที่ผู้ใช้ยืนยัน (PUT แก้ Draft ก่อน approve)
                 var upd = BuildUpdateFromReview();
+
+                // ผู้ใช้เลือกผู้ขายจากระบบ (กรณี OCR ไม่เจอชื่อ) → ผูก contact ใน NextAcc (set ContactId)
+                if (int.TryParse(ddlVendor.SelectedValue, out var vendorId) && vendorId > 0)
+                {
+                    try
+                    {
+                        var sync = new AccountingSyncService(Conn);
+                        Guid? contactId = RunSync(() => sync.EnsureVendorContactAsync(vendorId));
+                        if (contactId.HasValue && contactId.Value != Guid.Empty)
+                        {
+                            if (upd == null) upd = new UpdateDocumentRequest();
+                            upd.ContactId = contactId.Value;
+                        }
+                        else
+                        {
+                            Msg(litResult, "warn", "ผูกผู้ขายจากระบบไม่สำเร็จ (สร้าง contact ใน NextAcc ไม่ได้) — เอกสารจะใช้ผู้ติดต่อจาก OCR");
+                        }
+                    }
+                    catch (Exception vex)
+                    {
+                        Msg(litResult, "warn", "ผูกผู้ขายจากระบบไม่สำเร็จ: " + vex.Message);
+                    }
+                }
+
                 if (upd != null)
                 {
                     try
@@ -209,6 +233,7 @@ namespace Take_Time_BangPhra.Voucher
             pnlReview.Visible = true;
             LoadPaidHowOptions();
             LoadChargeAccountOptions();
+            LoadVendorOptions();
             hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
             hfHasWht.Value = r.HasWht ? "1" : "0";
             txtWhtRate.Text = (r.HasWht && r.WhtRate.HasValue) ? r.WhtRate.Value.ToString("0.##", CultureInfo.InvariantCulture) : "";
@@ -292,6 +317,23 @@ namespace Take_Time_BangPhra.Voucher
                     }
             }
             catch { /* เหลือแค่ "ใช้บัญชีที่ OCR แนะนำ" */ }
+        }
+
+        /// <summary>โหลดรายชื่อผู้ขายจากระบบ TakeTime (Vendor) — กรณี OCR ไม่เจอชื่อ</summary>
+        private void LoadVendorOptions()
+        {
+            ddlVendor.Items.Clear();
+            ddlVendor.Items.Add(new ListItem("— ใช้ชื่อจาก OCR —", ""));
+            try
+            {
+                var c = new Take_Time_BangPhra.code();
+                var dt = c.DatabaseQuerySafe(Conn,
+                    "SELECT ID, Name FROM Vendor WHERE (Status = 'True' OR Status IS NULL) ORDER BY Name", null);
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                        ddlVendor.Items.Add(new ListItem(row["Name"]?.ToString() ?? "", row["ID"]?.ToString() ?? ""));
+            }
+            catch { /* เหลือแค่ "ใช้ชื่อจาก OCR" */ }
         }
 
         /// <summary>สร้าง UpdateDocumentRequest จากค่าในแผงตรวจสอบ: บังคับแหล่งเงิน + วันที่ + เลขที่เอกสาร

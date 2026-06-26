@@ -4268,6 +4268,34 @@ namespace Take_Time_BangPhra.Integration
             return null;
         }
 
+        /// <summary>ผูกผู้ขายจากระบบ TakeTime (Vendor) เป็น contact ใน NextAcc แล้วคืน ContactId —
+        /// ใช้เมื่อ OCR ไม่เจอชื่อผู้ขาย ผู้ใช้เลือกผู้ขายจากระบบเอง (set ContactId ของเอกสาร)</summary>
+        public async System.Threading.Tasks.Task<Guid?> EnsureVendorContactAsync(int vendorId)
+        {
+            if (vendorId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ID, Name, IDNumber, Address FROM Vendor WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", vendorId } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                var row = dt.Rows[0];
+                var info = await EnsureSupplierContactAsync(new ContactInfo
+                {
+                    ExternalId = "VENDOR-" + row["ID"],
+                    Name = row["Name"]?.ToString(),
+                    TaxId = row["IDNumber"]?.ToString(),
+                    Address = row["Address"]?.ToString()
+                });
+                return info?.NexaaccContactId;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"EnsureVendorContactAsync({vendorId}) failed: {ex.Message}", "SYSTEM");
+                return null;
+            }
+        }
+
         /// <summary>Cache + upsert supplier ใน NextAcc (เหมือน customer แต่ IsSupplier=true)</summary>
         private async Task<ContactInfo> EnsureSupplierContactAsync(int voucherId, string payeeName)
         {
