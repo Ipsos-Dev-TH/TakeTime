@@ -479,6 +479,31 @@ namespace Take_Time_BangPhra.Account
                     return;
                 }
                 string docNum = keys.Values["ID"]?.ToString() ?? "";
+
+                // ลบ local ได้เฉพาะเมื่อเอกสารถูกลบจาก NextAcc แล้ว (ผู้ใช้ต้องลบ/ยกเลิกบน NextAcc ก่อน)
+                Server.ScriptTimeout = 300;
+                try
+                {
+                    var syncChk = new Integration.AccountingSyncService(conn);
+                    bool? gone = System.Threading.Tasks.Task.Run(() => syncChk.IsNextAccDocumentGoneAsync(docNum, "VOUCHER")).GetAwaiter().GetResult();
+                    if (gone == false)
+                    {
+                        ShowError("เอกสารยังอยู่บน NextAcc — กรุณาลบ/ยกเลิกบน NextAcc ก่อน แล้วค่อยลบในระบบนี้");
+                        return;
+                    }
+                    if (gone == null)
+                    {
+                        ShowError("ตรวจสอบสถานะเอกสารบน NextAcc ไม่ได้ (เครือข่าย/company endpoint ปิด) — ยังไม่ลบ ลองใหม่อีกครั้ง");
+                        return;
+                    }
+                    // gone == true → NextAcc ไม่มีเอกสารแล้ว → ลบ local ได้
+                }
+                catch
+                {
+                    ShowError("ตรวจสอบสถานะเอกสารบน NextAcc ไม่ได้ — ยังไม่ลบ");
+                    return;
+                }
+
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
                 string docMonthPadded = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
@@ -529,15 +554,8 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    try
-                    {
-                        var sync = new Integration.AccountingSyncService(conn);
-                        sync.EnqueueVoidPaymentVoucher(docNum);
-                    }
-                    catch (Exception accEx)
-                    {
-                        codeInstance.Logs(conn, "Accounting Sync", $"Void voucher error (CheckPayment_New): docNum={docNum} {accEx.Message}", "SYSTEM");
-                    }
+                    // NextAcc doc ถูกลบไปแล้ว (ตรวจก่อนลบด้านบน) → ไม่ต้อง enqueue void ซ้ำ
+                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ local {docNum} (NextAcc ไม่มีเอกสารแล้ว — ผู้ใช้ลบบน NextAcc ก่อน)", "SYSTEM");
 
                     // Show success message then redirect
                     ClientScript.RegisterStartupScript(this.GetType(), "success",

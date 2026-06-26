@@ -657,6 +657,30 @@ namespace Take_Time_BangPhra.Integration
             public List<string> DeletedDocs = new List<string>();
         }
 
+        /// <summary>ตรวจว่าเอกสารที่ sync แล้วยังอยู่บน NextAcc หรือไม่ (สำหรับปุ่มลบราย record):
+        /// true = หายแล้ว/ไม่เคย sync (ลบ local ได้), false = ยังอยู่บน NextAcc (อย่าเพิ่งลบ),
+        /// null = ตรวจไม่ได้ (transient/ปิด company endpoint — อย่าเพิ่งลบ).</summary>
+        public async System.Threading.Tasks.Task<bool?> IsNextAccDocumentGoneAsync(string documentNumber, string entityType)
+        {
+            if (!_config.CanUseCompanyEndpoints) return null;   // ตรวจไม่ได้
+            string nexaaccId = LookupNexaaccId(documentNumber, entityType);
+            if (string.IsNullOrEmpty(nexaaccId) || !Guid.TryParse(nexaaccId, out var docId) || docId == Guid.Empty)
+                return true;   // ไม่เคย sync → ไม่มีบน NextAcc → ลบ local ได้
+            try
+            {
+                var doc = await _apiClient.GetDocumentAsync(docId);
+                return doc?.data == null ? (bool?)null : false;   // เจอ → ยังอยู่
+            }
+            catch (AccountingApiException ex) when (ex.StatusCode == 404)
+            {
+                return true;   // 404 → หายจาก NextAcc แล้ว
+            }
+            catch
+            {
+                return null;   // transient → ไม่แน่ใจ อย่าเพิ่งลบ
+            }
+        }
+
         /// <summary>รอบตรวจ: เอกสารที่ sync แล้ว ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) → hard DELETE
         /// record ฝั่ง TakeTime. ลบเฉพาะเมื่อ 404 ชัดเจน; error อื่นข้าม (กันลบจาก transient).</summary>
         public async System.Threading.Tasks.Task<ReconcileResult> ReconcileDeletedDocumentsAsync(int maxPerType = 200)
