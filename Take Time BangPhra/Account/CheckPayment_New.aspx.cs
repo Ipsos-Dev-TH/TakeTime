@@ -31,6 +31,8 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ScriptManager.RegisterStartupScript(this, GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
                         InitializePage();
 
                         string syncedQ = Request.QueryString["synced"];
@@ -557,9 +559,11 @@ namespace Take_Time_BangPhra.Account
                     // NextAcc doc ถูกลบไปแล้ว (ตรวจก่อนลบด้านบน) → ไม่ต้อง enqueue void ซ้ำ
                     codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ local {docNum} (NextAcc ไม่มีเอกสารแล้ว — ผู้ใช้ลบบน NextAcc ก่อน)", "SYSTEM");
 
-                    // Show success message then redirect
-                    ClientScript.RegisterStartupScript(this.GetType(), "success",
-                        "alert('✅ ลบใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/CheckPayment_New';", true);
+                    // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS/UpdatePanel)
+                    // โหลดหน้าใหม่ → row ที่ลบจะหายจริง + แจ้งสำเร็จผ่าน query flag
+                    Response.Redirect("~/Account/CheckPayment_New?deleted=1", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
                 }
                 else
                 {
