@@ -1402,12 +1402,14 @@ namespace Take_Time_BangPhra.Integration
                 // and the payer signature via /api/integration/payments.
                 bool pvCreated = false;
 
-                // ✅ จ่ายเงินจริง (ไม่ใช่เครดิต/เงินเดือน) + company endpoints → ออกเป็น "ใบสำคัญจ่าย"
-                //    ผ่าน company /document (PaymentVoucher type 13) บังคับ Cr แหล่งเงิน (เงินสด/ธนาคาร/
-                //    เจ้าหนี้กรรมการ ตามที่ map) — แทน Expense ในทุกกรณีจ่ายจริง รวมเงินสด/ธนาคาร
-                //    (one-shot /integration/payment-vouchers override บัญชีเครดิตไม่ได้ จึงเลิกใช้เมื่อมี acc_)
+                // ✅ จ่ายจริงแบบ "ไม่ใช่เงินสด/ธนาคาร" (เช่น เจ้าหนี้กรรมการ ต้อง override บัญชีเครดิต) →
+                //    ออกเป็น "ใบสำคัญจ่าย" ผ่าน company /document (PaymentVoucher type 13) บังคับ Cr แหล่งเงิน
+                //    แทน Expense. เคสเงินสด/ธนาคาร (autoRecordPayment) ใช้ integration one-shot PV ด้านล่าง
+                //    แทน — เพราะ company /document (CreateDocumentRequest) "ไม่มีฟิลด์ลายเซ็นผู้จัดทำ" แต่
+                //    integration PV (InboundPaymentVoucherRequest) มี PreparerSignatureBase64 → ส่งลายเซ็นได้
+                //    (NextAcc รองรับลายเซ็นบน integration PV + company payment เท่านั้น ไม่รองรับบน company doc)
                 if (_config.CanUseCompanyEndpoints && supplierContact?.NexaaccContactId != null
-                    && !isCredit && !isSalaryVoucher)
+                    && !isCredit && !isSalaryVoucher && !autoRecordPayment)
                 {
                     var pvDoc = _mapper.MapVoucherToDocument(voucherId, expenseCategory, amount, paymentMethod,
                         voucherDate, description, payeeName, supplierContact.NexaaccContactId.Value,

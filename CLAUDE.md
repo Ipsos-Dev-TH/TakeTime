@@ -126,11 +126,15 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    standalone→PaymentType=Cash). เดิม `ProcessVoucherJournal` ใช้ one-shot `/integration/payment-vouchers`
    เฉพาะกรณีจ่ายเงินสด/ธนาคาร (เพราะ endpoint นั้น **บังคับ Cr เงินสด override บัญชีไม่ได้**) → กรณีจ่ายแบบ
    ไม่ใช่เงินสด (เจ้าหนี้กรรมการ) ตกไปสร้าง **Expense** ผิดบทบาท. **Fix:** เมื่อ `CanUseCompanyEndpoints`
-   + มี supplier contact + `!isCredit` + `!salary` → สร้าง **PaymentVoucher ผ่าน company `/document`**
+   + มี supplier contact + `!isCredit` + `!salary` + **`!autoRecordPayment` (จ่ายไม่ใช่เงินสด/ธนาคาร เช่น
+   เจ้าหนี้กรรมการ ต้อง override บัญชีเครดิต)** → สร้าง **PaymentVoucher ผ่าน company `/document`**
    (`MapVoucherToDocument` type 13, `PaymentAccountId`=แหล่งเงิน → Cr บัญชีนั้นตรง ๆ) → `SettleVoucherDocAsync`
    (create+approve, idempotent marker `Account_Payment.Nexaacc_Voucher_Doc_Marker` DOC:→APR:→{id}/VOIDED,
-   migration PHASE17_07) → `TryAutoGenerateWhtCertAsync`. ครอบคลุม **ทุกกรณีจ่ายจริงรวมเงินสด** (เลิกใช้
-   one-shot PV เมื่อมี acc_). **เครดิต→ยังเป็น Expense** (ถูกต้อง — NextAcc ห้าม PV เครดิตลอย ๆ); เงินเดือน
+   migration PHASE17_07) → `TryAutoGenerateWhtCertAsync`. **เคสเงินสด/ธนาคาร (`autoRecordPayment`) ใช้
+   integration one-shot PV** — เพราะ company `/document` (CreateDocumentRequest) **ไม่มีฟิลด์ลายเซ็นผู้จัดทำ**
+   ส่วน integration `InboundPaymentVoucherRequest` มี `PreparerSignatureBase64` → ส่งลายเซ็นได้ (NextAcc
+   รองรับลายเซ็นบน integration PV + company payment เท่านั้น ไม่รองรับบน company document). non-cash company PV
+   → ผู้จัดทำ fallback ลายเซ็น NextAcc user. **เครดิต→ยังเป็น Expense** (ถูกต้อง — NextAcc ห้าม PV เครดิตลอย ๆ); เงินเดือน
    ยังใช้ expense+Payroll; ไม่มี contact / `int_` → fallback one-shot PV / expense เดิม. Edit = void→สร้างใหม่
    (row reinsert → marker null). **VAT ผสม (มีของไม่เสียภาษีปน):** TakeTime ส่งยอด VAT จริง (`vatAmount`,
    TextBox4) มาด้วย; `MapVoucherToExpense` ตรวจถ้า `vatAmount` ≠ 7% ของ net (ผสม) จะ **แตกเป็น 2 บรรทัด**
