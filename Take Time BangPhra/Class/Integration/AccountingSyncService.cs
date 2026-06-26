@@ -1602,11 +1602,11 @@ namespace Take_Time_BangPhra.Integration
                         payerSigName = preparer.Value.name;
                     // NextAcc caps the base64 at 512KB; skip oversize to avoid a 400 error.
                     string sig = preparer.Value.dataUri;
-                    if (!string.IsNullOrEmpty(sig) && sig.Length <= 512 * 1024)
+                    if (!string.IsNullOrEmpty(sig) && sig.Length <= SignatureMaxBytes)
                         payerSigBase64 = sig;
                     else if (!string.IsNullOrEmpty(sig))
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"AutoRecordPayment: payer signature for doc={docNumber} skipped — {sig.Length} bytes > 512KB", "SYSTEM");
+                            $"AutoRecordPayment: payer signature for doc={docNumber} skipped — {sig.Length} bytes > {SignatureMaxBytes}", "SYSTEM");
                 }
 
                 string paymentId = null;
@@ -3978,13 +3978,24 @@ namespace Take_Time_BangPhra.Integration
         /// ดึงผู้จัดทำจาก Account_Payment.Created_By_ID ของใบสำคัญจ่าย → Admin (ชื่อ + SignaturePath)
         /// → อ่านไฟล์รูปลายเซ็นเป็น base64 data URI. ไม่ throw ถ้าไม่มีลายเซ็น (เป็น optional)
         /// </summary>
+        // NextAcc cap ลายเซ็น (PreparerSignatureMaxBytes) — เกินกว่านี้ NextAcc throw → เอกสารไม่ถูกสร้าง.
+        // จึง skip + log แทนที่จะส่งไปให้ล้มทั้งใบ (แนะนำบีบรูปลายเซ็น < 100KB)
+        private const int SignatureMaxBytes = 256 * 1024;
+
         private void ApplyPreparerSignature(CreateIntegrationExpenseRequest expense, string documentNumber)
         {
             if (expense == null || string.IsNullOrEmpty(documentNumber)) return;
             var info = LookupPreparerInfo(documentNumber);
             if (info == null) return;
             if (!string.IsNullOrEmpty(info.Value.name)) expense.PreparerName = info.Value.name;
-            if (!string.IsNullOrEmpty(info.Value.dataUri)) expense.PreparerSignatureBase64 = info.Value.dataUri;
+            if (!string.IsNullOrEmpty(info.Value.dataUri))
+            {
+                if (info.Value.dataUri.Length <= SignatureMaxBytes)
+                    expense.PreparerSignatureBase64 = info.Value.dataUri;
+                else
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ApplyPreparerSignature(expense): doc={documentNumber} ลายเซ็น {info.Value.dataUri.Length} bytes > {SignatureMaxBytes} — ข้าม (บีบรูปให้เล็กลง)", "SYSTEM");
+            }
         }
 
         private void ApplyPreparerSignature(CreateIntegrationPaymentVoucherRequest voucher, string documentNumber)
@@ -3997,7 +4008,7 @@ namespace Take_Time_BangPhra.Integration
                 voucher.PreparerName = info.Value.name;
                 voucher.PayerSignatureName = info.Value.name;   // slot 0 "ผู้จ่ายเงิน"
             }
-            if (!string.IsNullOrEmpty(info.Value.dataUri) && info.Value.dataUri.Length <= 512 * 1024)
+            if (!string.IsNullOrEmpty(info.Value.dataUri) && info.Value.dataUri.Length <= SignatureMaxBytes)
             {
                 voucher.PreparerSignatureBase64 = info.Value.dataUri;
                 voucher.PayerSignatureBase64 = info.Value.dataUri;
