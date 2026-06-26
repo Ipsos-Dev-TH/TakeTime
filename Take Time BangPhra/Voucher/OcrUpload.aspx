@@ -66,6 +66,21 @@
                     <span class="ocr-hint">เลือกแหล่งเงินที่จ่ายจริง → ระบบจะบังคับให้ NextAcc เครดิตบัญชีนั้น (ถ้าไม่เลือก = ปล่อยให้ NextAcc เลือกเอง)</span>
                 </div>
             </div>
+            <div class="ocr-row">
+                <div class="ocr-field">
+                    <label>ผังบัญชีที่จะชาร์จ (บัญชีค่าใช้จ่าย / ฝั่งเดบิต)</label>
+                    <asp:DropDownList ID="ddlChargeAccount" runat="server" CssClass="form-control" />
+                    <span class="ocr-hint">เลือกบัญชีค่าใช้จ่ายที่จะลง (ถ้าไม่เลือก = ใช้บัญชีที่ OCR แนะนำ)</span>
+                </div>
+                <div class="ocr-field">
+                    <label>ภาษีซื้อ (VAT)</label>
+                    <asp:DropDownList ID="ddlVatClaim" runat="server" CssClass="form-control">
+                        <asp:ListItem Value="1" Text="เคลมภาษีซื้อ (Dr ภาษีซื้อ)" Selected="True" />
+                        <asp:ListItem Value="0" Text="ไม่เคลม — รวม VAT เข้าค่าใช้จ่าย (§82/5)" />
+                    </asp:DropDownList>
+                    <span class="ocr-hint">ไม่เคลม → NextAcc รวม VAT เข้าบัญชีค่าใช้จ่ายที่เลือก (ไม่แยกภาษีซื้อ)</span>
+                </div>
+            </div>
             <asp:Literal ID="litSuggested" runat="server" />
             <div style="margin-top:12px;">
                 <asp:Button ID="btnCreate" runat="server" CssClass="ocr-btn green" Text="สร้างใบสำคัญจ่าย & อนุมัติ" OnClick="btnCreate_Click"

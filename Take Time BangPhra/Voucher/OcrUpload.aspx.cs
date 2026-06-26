@@ -208,6 +208,7 @@ namespace Take_Time_BangPhra.Voucher
         {
             pnlReview.Visible = true;
             LoadPaidHowOptions();
+            LoadChargeAccountOptions();
             hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
             hfHasWht.Value = r.HasWht ? "1" : "0";
             txtVendorName.Text = r.ExtractedVendorName ?? "";
@@ -269,6 +270,29 @@ namespace Take_Time_BangPhra.Voucher
             catch { /* ถ้าโหลดไม่ได้ → เหลือแค่ตัวเลือก "ไม่บังคับ" */ }
         }
 
+        /// <summary>โหลดผังบัญชีค่าใช้จ่ายจาก Account_Paid_Type (value = Nexaacc_AccountCode)</summary>
+        private void LoadChargeAccountOptions()
+        {
+            ddlChargeAccount.Items.Clear();
+            ddlChargeAccount.Items.Add(new ListItem("— ใช้บัญชีที่ OCR แนะนำ —", ""));
+            try
+            {
+                var c = new Take_Time_BangPhra.code();
+                var dt = c.DatabaseQuerySafe(Conn,
+                    @"SELECT Paid_Type, Nexaacc_AccountCode FROM Account_Paid_Type
+                      WHERE Status = 'True' AND Nexaacc_AccountCode IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountCode)) <> ''
+                      ORDER BY Paid_Type", null);
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        string code = row["Nexaacc_AccountCode"]?.ToString() ?? "";
+                        string name = row["Paid_Type"]?.ToString() ?? "";
+                        ddlChargeAccount.Items.Add(new ListItem($"{code} {name}".Trim(), code));
+                    }
+            }
+            catch { /* เหลือแค่ "ใช้บัญชีที่ OCR แนะนำ" */ }
+        }
+
         /// <summary>สร้าง UpdateDocumentRequest จากค่าในแผงตรวจสอบ: บังคับแหล่งเงิน + วันที่ + เลขที่เอกสาร
         /// + (ถ้าไม่มี WHT) สร้าง line เดียวจากยอดที่แก้. คืน null ถ้าไม่มีอะไรต้องอัปเดต.</summary>
         private UpdateDocumentRequest BuildUpdateFromReview()
@@ -296,14 +320,17 @@ namespace Take_Time_BangPhra.Voucher
                 any = true;
             }
 
-            // สร้าง line จากยอดที่แก้ — เฉพาะเมื่อมีบัญชีค่าใช้จ่ายจาก OCR และไม่มี WHT
-            // (มี WHT → คง line ที่ create-from-OCR สร้างไว้ เพื่อไม่ทิ้งการตั้งหัก ณ ที่จ่าย)
-            string debitAcc = hfDebitAcc.Value;
+            // สร้าง line จากยอดที่แก้ — เฉพาะเมื่อไม่มี WHT (มี WHT → คง line จาก OCR ไม่ทิ้งการตั้งหัก ณ ที่จ่าย)
+            // ผังบัญชี: ใช้ที่ผู้ใช้เลือก (ddlChargeAccount) ก่อน, ไม่งั้น fallback บัญชีที่ OCR แนะนำ
+            // VAT: เคลม (IsVatClaimable=true → Dr ภาษีซื้อ) / ไม่เคลม (false → NextAcc รวม VAT เข้าค่าใช้จ่าย §82/5)
+            string chargeAcc = ddlChargeAccount.SelectedValue;
+            if (string.IsNullOrEmpty(chargeAcc)) chargeAcc = hfDebitAcc.Value;
             bool hasWht = hfHasWht.Value == "1";
-            if (!hasWht && !string.IsNullOrEmpty(debitAcc)
+            if (!hasWht && !string.IsNullOrEmpty(chargeAcc)
                 && decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal) && subTotal > 0)
             {
                 decimal.TryParse(txtVat.Text.Trim(), out var vat);
+                bool claimVat = ddlVatClaim.SelectedValue != "0";
                 string desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
                 if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
                 upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
@@ -315,7 +342,9 @@ namespace Take_Time_BangPhra.Voucher
                         Quantity = 1,
                         UnitPrice = subTotal,
                         VatRate = vat > 0 ? 7m : 0m,
-                        AccountCode = debitAcc
+                        AccountCode = chargeAcc,
+                        IsVatClaimable = claimVat,
+                        VatNonClaimableReason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)"
                     }
                 };
                 any = true;

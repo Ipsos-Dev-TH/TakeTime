@@ -176,6 +176,10 @@ namespace Take_Time_BangPhra.Integration
         public Guid? AccountId { get; set; }
         /// <summary>ผังบัญชีในรูป AccountCode (string) — ทางเลือกแทน AccountId; NextAcc resolve code→Id ตอน save</summary>
         public string AccountCode { get; set; }
+        /// <summary>true (default) = เคลมภาษีซื้อได้ (Dr ภาษีซื้อ). false = ภาษีซื้อต้องห้าม §82/5 →
+        /// NextAcc รวม VAT เข้าบัญชีค่าใช้จ่าย (Dr ค่าใช้จ่าย = net+VAT) ไม่แยกภาษีซื้อ</summary>
+        public bool IsVatClaimable { get; set; } = true;
+        public string VatNonClaimableReason { get; set; }
     }
 
     /// <summary>แก้ไขเอกสาร Draft (PUT /api/companies/{id}/document/{docId}). ฟิลด์ null = คงค่าเดิม;
@@ -199,6 +203,7 @@ namespace Take_Time_BangPhra.Integration
     {
         public Guid Id { get; set; }
         public string DocumentNumber { get; set; }
+        [JsonConverter(typeof(DocumentTypeConverter))]
         public int DocumentType { get; set; }
         [JsonConverter(typeof(DocumentStatusConverter))]
         public int Status { get; set; }
@@ -581,6 +586,38 @@ namespace Take_Time_BangPhra.Integration
     /// Handles Status deserialization from both int and string values.
     /// The Nexaacc API may return either format (e.g. 0 or "Draft").
     /// </summary>
+    /// <summary>NextAcc คืน documentType ใน response เป็นชื่อ enum ("PaymentVoucher") ไม่ใช่ int
+    /// → แปลงชื่อ→ค่า int (รับ int ตรง ๆ ก็ได้). ไม่ throw ถ้าไม่รู้จัก (คืน 0) เพื่อไม่ให้ response พังทั้งก้อน.</summary>
+    public class DocumentTypeConverter : JsonConverter<int>
+    {
+        private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Quotation", 1 }, { "Invoice", 2 }, { "Receipt", 3 }, { "TaxInvoice", 4 },
+            { "DebitNote", 5 }, { "CreditNote", 6 }, { "PurchaseOrder", 7 }, { "PurchaseInvoice", 8 },
+            { "Expense", 9 }, { "DeliveryNote", 10 }, { "BillingNote", 11 }, { "PurchaseRequisition", 12 },
+            { "PaymentVoucher", 13 }, { "ReceiptVoucher", 14 }, { "CertificateInLieu", 15 }, { "GoodsReceiptNote", 16 }
+        };
+
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer)
+                return Convert.ToInt32(reader.Value);
+            if (reader.TokenType == JsonToken.String)
+            {
+                var str = (string)reader.Value;
+                if (_nameToValue.TryGetValue(str, out int value)) return value;
+                if (int.TryParse(str, out int parsed)) return parsed;
+                return 0;   // ไม่รู้จัก → 0 (informational เท่านั้น ไม่ throw)
+            }
+            return 0;
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
+    }
+
     public class DocumentStatusConverter : JsonConverter<int>
     {
         private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
