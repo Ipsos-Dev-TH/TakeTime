@@ -71,14 +71,14 @@
                 <div class="ocr-field">
                     <label>แหล่งจ่ายเงิน (บังคับบัญชีเงินสด/ธนาคารฝั่งเครดิต)</label>
                     <asp:DropDownList ID="ddlPaidHow" runat="server" CssClass="form-control" />
-                    <span class="ocr-hint">เลือกแหล่งเงินที่จ่ายจริง → ระบบจะบังคับให้ NextAcc เครดิตบัญชีนั้น (ถ้าไม่เลือก = ปล่อยให้ NextAcc เลือกเอง)</span>
+                    <span class="ocr-hint">รายการดึงจาก<b>ผังบัญชีจริงของ NextAcc</b> (เงินสด/ธนาคาร/เจ้าหนี้กรรมการ) → เลือกแล้วบังคับ Cr บัญชีนั้นตรง ๆ ไม่ผ่าน mapping. ถ้าว่าง กด "Sync บัญชี" ในหน้า Admin ก่อน</span>
                 </div>
             </div>
             <div class="ocr-row">
                 <div class="ocr-field">
                     <label>ผังบัญชีที่จะชาร์จ (บัญชีค่าใช้จ่าย / ฝั่งเดบิต)</label>
                     <asp:DropDownList ID="ddlChargeAccount" runat="server" CssClass="form-control" />
-                    <span class="ocr-hint">ไม่เลือก = คงหลายรายการตามที่ OCR แยก (ผังบัญชีต่อรายการ). เลือก = ยุบทุกรายการเป็นบัญชีเดียวนี้</span>
+                    <span class="ocr-hint">รายการดึงจาก<b>ผังบัญชีค่าใช้จ่ายของ NextAcc</b>. ไม่เลือก = คงหลายรายการตามที่ OCR แยก; เลือก = ยุบทุกรายการเป็นบัญชีเดียวนี้</span>
                 </div>
                 <div class="ocr-field">
                     <label>ภาษีซื้อ (VAT)</label>

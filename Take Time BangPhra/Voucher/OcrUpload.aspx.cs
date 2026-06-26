@@ -308,11 +308,39 @@ namespace Take_Time_BangPhra.Voucher
             litSuggested.Text = sg.ToString();
         }
 
-        /// <summary>โหลดตัวเลือกแหล่งจ่ายเงินจาก Account_Paid_How (เฉพาะที่ map Nexaacc_AccountId ไว้)</summary>
+        /// <summary>โหลดผังบัญชีจาก cache NextAcc (Accounting_Nexaacc_Accounts) ตาม code filter.
+        /// คืน null/ว่าง ถ้ายังไม่ได้กด "Sync บัญชี". codeFilter เป็นค่าคงที่ในโค้ด (ไม่ใช่ user input)</summary>
+        private DataTable LoadNexaaccAccounts(string codeFilter)
+        {
+            try
+            {
+                var c = new Take_Time_BangPhra.code();
+                return c.DatabaseQuerySafe(Conn,
+                    "SELECT Nexaacc_AccountId, Account_Code, Account_Name FROM Accounting_Nexaacc_Accounts " +
+                    "WHERE ISNULL(Is_Active, 1) = 1 AND (" + codeFilter + ") ORDER BY Account_Code", null);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>แหล่งจ่ายเงิน — ดึงผังบัญชีจริงจาก NextAcc (เงินสด/ธนาคาร/เจ้าหนี้กรรมการ) value = Nexaacc_AccountId
+        /// → เลี่ยงปัญหา mapping ผิด. ถ้ายังไม่ได้ Sync ผังบัญชี → fallback Account_Paid_How เดิม</summary>
         private void LoadPaidHowOptions()
         {
             ddlPaidHow.Items.Clear();
             ddlPaidHow.Items.Add(new ListItem("— ไม่บังคับ (ให้ NextAcc เลือกเอง) —", ""));
+
+            // ผังบัญชีจริงจาก NextAcc: สินทรัพย์หมุนเวียน (11x เงินสด/ธนาคาร) + หนี้สินหมุนเวียน (21x เจ้าหนี้กรรมการ)
+            var na = LoadNexaaccAccounts("Account_Code LIKE '11%' OR Account_Code LIKE '21%'");
+            if (na != null && na.Rows.Count > 0)
+            {
+                foreach (DataRow row in na.Rows)
+                    ddlPaidHow.Items.Add(new ListItem(
+                        ($"{row["Account_Code"]} {row["Account_Name"]}").Trim(),
+                        row["Nexaacc_AccountId"]?.ToString() ?? ""));
+                return;
+            }
+
+            // fallback: mapping เดิม (Account_Paid_How) เมื่อยังไม่ได้ Sync ผังบัญชี
             try
             {
                 var c = new Take_Time_BangPhra.code();
@@ -326,14 +354,29 @@ namespace Take_Time_BangPhra.Voucher
                             row["Paid_How"]?.ToString() ?? "",
                             row["Nexaacc_AccountId"]?.ToString() ?? ""));
             }
-            catch { /* ถ้าโหลดไม่ได้ → เหลือแค่ตัวเลือก "ไม่บังคับ" */ }
+            catch { /* เหลือแค่ "ไม่บังคับ" */ }
         }
 
-        /// <summary>โหลดผังบัญชีค่าใช้จ่ายจาก Account_Paid_Type (value = Nexaacc_AccountCode)</summary>
+        /// <summary>ผังบัญชีที่จะชาร์จ — ดึงผังบัญชีค่าใช้จ่ายจริงจาก NextAcc (5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร)
+        /// value = Account_Code → ใช้เป็น DocumentLineRequest.AccountCode. ถ้ายังไม่ได้ Sync → fallback Account_Paid_Type</summary>
         private void LoadChargeAccountOptions()
         {
             ddlChargeAccount.Items.Clear();
             ddlChargeAccount.Items.Add(new ListItem("— ใช้บัญชีที่ OCR แนะนำ —", ""));
+
+            var na = LoadNexaaccAccounts("Account_Code LIKE '5%' OR Account_Code LIKE '12%'");
+            if (na != null && na.Rows.Count > 0)
+            {
+                foreach (DataRow row in na.Rows)
+                {
+                    string code = row["Account_Code"]?.ToString() ?? "";
+                    string name = row["Account_Name"]?.ToString() ?? "";
+                    ddlChargeAccount.Items.Add(new ListItem($"{code} {name}".Trim(), code));
+                }
+                return;
+            }
+
+            // fallback: mapping เดิม (Account_Paid_Type) เมื่อยังไม่ได้ Sync ผังบัญชี
             try
             {
                 var c = new Take_Time_BangPhra.code();
