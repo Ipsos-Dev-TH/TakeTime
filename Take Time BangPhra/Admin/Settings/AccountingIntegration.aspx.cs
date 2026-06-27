@@ -68,6 +68,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "receiptSyncMode", config.ReceiptSyncMode },
                     { "voucherSyncMode", config.VoucherSyncMode },
                     { "payrollSyncMode", config.PayrollSyncMode },
+                    { "posDailyRollup", config.IsPosDailyRollupEnabled },
                     { "attachFiles", config.AttachFiles },
                     { "depositVatRecognition", config.DepositVatRecognition },
                     { "depositDeferOutputVat", config.IsDepositOutputVatDeferred },
@@ -254,6 +255,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("receiptSyncMode")) config.SetConfig("Nexaacc_SyncMode_Receipt", data["receiptSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
+                if (data.ContainsKey("posDailyRollup")) config.SetConfig("Nexaacc_PosDailyRollup", BoolToFlag(data["posDailyRollup"]));
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
                 if (data.ContainsKey("depositVatRecognition"))
                 {

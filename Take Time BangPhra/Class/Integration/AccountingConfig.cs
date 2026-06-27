@@ -109,6 +109,10 @@ namespace Take_Time_BangPhra.Integration
 
         public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>รวบยอดขายหน้าร้านที่ "ไม่ออกใบกำกับในระบบ" เป็นใบรับเงินสดสรุปรายวัน (1 ใบ/วัน/แหล่งรับเงิน)
+        /// → sync รายได้+VAT ขาย + COGS ตัดสต๊อก อัตโนมัติผ่าน background timer. default ปิด</summary>
+        public bool IsPosDailyRollupEnabled => GetConfig("Nexaacc_PosDailyRollup", "0") == "1";
+
         // ──────────────────────────────────────────────
         // Deposit VAT recognition timing (จุดความรับผิด VAT ของเงินมัดจำ)
         // ──────────────────────────────────────────────

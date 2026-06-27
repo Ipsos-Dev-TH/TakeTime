@@ -89,6 +89,12 @@ namespace Take_Time_BangPhra
                 var syncService = new AccountingSyncService();
                 var task = syncService.ProcessQueueAsync(20);
                 task.Wait(TimeSpan.FromMinutes(2));
+
+                // รวบยอดขายหน้าร้านที่ไม่ออกใบกำกับเป็นใบรับเงินสดสรุปรายวัน (auto, ไม่ต้องกด)
+                // — no-op ถ้า config ปิด; แยก try กันพังเฉพาะส่วนนี้ ไม่กระทบ queue หลัก
+                try { syncService.RollupPosDailySalesIfDue(); }
+                catch (Exception rex) { System.Diagnostics.Trace.TraceError($"PosDailyRollup timer error: {rex.Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)

@@ -518,6 +518,205 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("STOCK", productId, "STOCK_OUT_COGS_REVERSE", payload);
         }
 
+        // ──────────────────────────────────────────────
+        // รวบยอดขายหน้าร้าน "ไม่ออกใบกำกับ" เป็นใบรับเงินสดสรุปรายวัน (auto, ไม่ต้องกด)
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// รวบการขายหน้าร้านที่ไม่ออกใบกำกับ (Product_Out: Remark='ขาย', Account_Receipt_ID='0',
+        /// Pos_Rollup_Ref IS NULL) ของ "วันที่ผ่านมาแล้ว" เป็นใบรับเงินสดสรุป 1 ใบ/วัน/แหล่งรับเงิน →
+        /// EnqueueReceipt (รายได้+VAT ขาย) + EnqueueStockOutCogs ต่อสินค้า (ตัดสต๊อก Dr COGS/Cr Inventory).
+        /// เรียกจาก background timer (Global.asax) — idempotent (marker Pos_Rollup_Ref + queue dedup).
+        /// </summary>
+        public void RollupPosDailySalesIfDue(int maxDaysPerRun = 14)
+        {
+            if (!_config.IsConfigured || !_config.Enabled || !_config.IsPosDailyRollupEnabled) return;
+
+            try
+            {
+                // หา (วัน, แหล่งรับเงิน) ที่ยังไม่รวบ — เฉพาะวันที่จบแล้ว (< วันนี้) กันรวบวันที่ยังขายอยู่
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP (@cap) CAST(DateTime_Out AS DATE) AS D, Account_Paid_How_ID AS PH
+                      FROM Product_Out
+                      WHERE Remark = N'ขาย'
+                        AND (Account_Receipt_ID = '0' OR Account_Receipt_ID IS NULL)
+                        AND Pos_Rollup_Ref IS NULL
+                        AND CAST(DateTime_Out AS DATE) < CAST(GETDATE() AS DATE)
+                      GROUP BY CAST(DateTime_Out AS DATE), Account_Paid_How_ID
+                      ORDER BY CAST(DateTime_Out AS DATE)",
+                    new Dictionary<string, object> { { "@cap", maxDaysPerRun } });
+
+                if (dt == null || dt.Rows.Count == 0) return;
+
+                foreach (DataRow g in dt.Rows)
+                {
+                    DateTime day = Convert.ToDateTime(g["D"]);
+                    string paidHowId = g["PH"]?.ToString() ?? "";
+                    try { ProcessOnePosDay(day, paidHowId); }
+                    catch (Exception exDay)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"PosDailyRollup: day={day:yyyy-MM-dd} paidHowId={paidHowId} ล้มเหลว: {exDay.Message}", "SYSTEM");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"RollupPosDailySalesIfDue: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private void ProcessOnePosDay(DateTime day, string paidHowId)
+        {
+            string ds = day.ToString("yyyyMMdd");
+            string rollupRef = $"POSDAY-{ds}-{paidHowId}";
+
+            // 1) ยอดต่อสินค้าในกลุ่ม (วัน+แหล่งรับเงิน) ที่ยังไม่รวบ
+            var prod = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT po.Product_ID AS PID, SUM(po.Amount) AS Qty,
+                         SUM(po.Amount * po.PricePerUnit) AS Gross,
+                         MAX(p.Product_Name) AS Name, MAX(p.Cost_Price) AS Cost
+                  FROM Product_Out po
+                  LEFT JOIN Product p ON p.ID = po.Product_ID
+                  WHERE po.Remark = N'ขาย'
+                    AND (po.Account_Receipt_ID = '0' OR po.Account_Receipt_ID IS NULL)
+                    AND po.Pos_Rollup_Ref IS NULL
+                    AND CAST(po.DateTime_Out AS DATE) = @d
+                    AND po.Account_Paid_How_ID = @ph
+                  GROUP BY po.Product_ID",
+                new Dictionary<string, object> { { "@d", day.Date }, { "@ph", paidHowId } });
+
+            if (prod == null || prod.Rows.Count == 0) return;
+
+            decimal grossTotal = 0m;
+            foreach (DataRow r in prod.Rows) grossTotal += SafeDec(r["Gross"]);
+            if (grossTotal <= 0m)
+            {
+                // ไม่มียอด (ราคา 0) → mark กันวนซ้ำ แล้วข้าม
+                MarkPosRowsRolledUp(day, paidHowId, rollupRef);
+                return;
+            }
+
+            // 2) ชื่อแหล่งรับเงิน + บัญชี NextAcc (สำหรับ Dr เงินสด/ธนาคาร)
+            string paidHowName = "เงินสด";
+            string paidHowAccId = null;
+            try
+            {
+                var ph = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Paid_How, Nexaacc_AccountId FROM Account_Paid_How WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", paidHowId } });
+                if (ph?.Rows.Count > 0)
+                {
+                    paidHowName = ph.Rows[0]["Paid_How"]?.ToString() ?? "เงินสด";
+                    string acc = ph.Rows[0]["Nexaacc_AccountId"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(acc)) paidHowAccId = acc;
+                }
+            }
+            catch { }
+            if (string.IsNullOrEmpty(paidHowAccId)) paidHowAccId = LookupPaidHowAccountId(paidHowName);
+
+            // 3) สร้าง Account_Receipt "ใบรับเงินสดสรุปรายวัน" (idempotent: ID = rollupRef) ถ้ายังไม่มี
+            //    VAT: ถ้าธุรกิจจด VAT → ราคาขายรวม VAT แล้ว ถอดออก (7%); ไม่จด → ไม่มี VAT
+            bool useVat = BusinessUsesVat();
+            decimal exVat = useVat ? Math.Round(grossTotal / 1.07m, 2, MidpointRounding.AwayFromZero) : grossTotal;
+            decimal vat = useVat ? (grossTotal - exVat) : 0m;
+
+            bool receiptExists = false;
+            try
+            {
+                var ex = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", rollupRef } });
+                receiptExists = ex?.Rows.Count > 0;
+            }
+            catch { }
+
+            if (!receiptExists)
+            {
+                var rp = new Dictionary<string, object>
+                {
+                    { "@ID", rollupRef },
+                    { "@CreatedDate", day.Date },
+                    { "@TotalAmount", grossTotal },
+                    { "@Vat", vat },
+                    { "@ExVat", exVat },
+                    { "@PaidType", paidHowName }
+                };
+                _code.DatabaseInsertSafe(_connectionString,
+                    "INSERT INTO [dbo].[Account_Receipt] " +
+                    "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat]," +
+                    "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) " +
+                    "VALUES (@ID,'0',@CreatedDate,@TotalAmount,@Vat,@ExVat,0,0,@PaidType,'Normal',0,0,0)",
+                    rp);
+
+                _code.DatabaseInsertSafe(_connectionString,
+                    "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                    "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                    "VALUES (1,@ReceiptID,'3','0',@Data,1,N'ครั้ง',@Total,@Total)",
+                    new Dictionary<string, object>
+                    {
+                        { "@ReceiptID", rollupRef },
+                        { "@Data", $"สรุปยอดขายหน้าร้าน {day:dd/MM/yyyy} ({paidHowName})" },
+                        { "@Total", grossTotal }
+                    });
+            }
+
+            // 4) รายได้ → EnqueueReceipt (ใช้ path เดิม: Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย, VAT คำนวณ downstream)
+            EnqueueReceipt(0, rollupRef, grossTotal, 0, day.Date,
+                $"ขายสดหน้าร้าน {day:dd/MM/yyyy} ({paidHowName})",
+                isDeposit: false, paymentMethod: paidHowName,
+                revenueType: "PRODUCT_REVENUE", paymentAccountId: paidHowAccId);
+
+            // 5) COGS ตัดสต๊อก ต่อสินค้า (Dr COGS / Cr Inventory) — ต้นทุนจาก Product.Cost_Price
+            foreach (DataRow r in prod.Rows)
+            {
+                int pid = 0; int.TryParse(r["PID"]?.ToString(), out pid);
+                decimal qty = SafeDec(r["Qty"]);
+                decimal cost = SafeDec(r["Cost"]);
+                string name = r["Name"]?.ToString() ?? "";
+                if (pid > 0 && qty > 0 && cost > 0)
+                    EnqueueStockOutCogs(pid, name, qty, cost, day.Date, "ขายสดหน้าร้าน (รวบรายวัน)",
+                        stockRef: $"POSDAY-COGS-{ds}-{paidHowId}-{pid}");
+            }
+
+            // 6) mark แถว Product_Out ว่ารวบแล้ว (กันรวบซ้ำ)
+            MarkPosRowsRolledUp(day, paidHowId, rollupRef);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"PosDailyRollup: doc={rollupRef} gross={grossTotal:N2} vat={vat:N2} products={prod.Rows.Count} paidHow={paidHowName}", "SYSTEM");
+        }
+
+        private void MarkPosRowsRolledUp(DateTime day, string paidHowId, string rollupRef)
+        {
+            _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE Product_Out SET Pos_Rollup_Ref = @ref
+                  WHERE Remark = N'ขาย'
+                    AND (Account_Receipt_ID = '0' OR Account_Receipt_ID IS NULL)
+                    AND Pos_Rollup_Ref IS NULL
+                    AND CAST(DateTime_Out AS DATE) = @d
+                    AND Account_Paid_How_ID = @ph",
+                new Dictionary<string, object>
+                {
+                    { "@ref", rollupRef }, { "@d", day.Date }, { "@ph", paidHowId }
+                });
+        }
+
+        /// <summary>ธุรกิจจดทะเบียน VAT หรือไม่ (Business_Info.Use_Vat) — ใช้ถอด VAT จากยอดขายรวม</summary>
+        private bool BusinessUsesVat()
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString, "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Use_Vat"] != DBNull.Value)
+                {
+                    string v = dt.Rows[0]["Use_Vat"].ToString();
+                    return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase) || v.Equals("True", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch { }
+            return false;
+        }
+
         /// <summary>Stock adjustment จากการนับ — quantityDiff +/- (gain or loss)</summary>
         public long EnqueueStockAdjustment(long adjustmentLogId, int productId, string productName,
             decimal quantityDiff, decimal costPerUnit, DateTime adjustDate, string reason)

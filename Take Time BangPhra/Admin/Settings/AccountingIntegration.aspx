@@ -186,6 +186,19 @@
                     </select>
                 </div>
                 <div class="config-item">
+                    <label>ขายหน้าร้านไม่ออกใบกำกับ → รวบรายวัน</label>
+                    <select id="cfgPosDailyRollup">
+                        <option value="false">ปิด — ไม่รวบ (ขายไม่ออกใบกำกับจะไม่ขึ้น NextAcc)</option>
+                        <option value="true">เปิด — รวบเป็นใบรับเงินสดสรุปรายวันอัตโนมัติ</option>
+                    </select>
+                    <div class="help-text">
+                        เปิดแล้ว ระบบจะรวบการขายหน้าร้านที่ <b>ไม่ติ๊ก "ออกใบกำกับภาษีในระบบ"</b> ของแต่ละวัน
+                        เป็น <b>ใบรับเงินสดสรุป 1 ใบ/วัน/แหล่งรับเงิน</b> → ส่ง NextAcc (Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย)
+                        + ตัดต้นทุน (Dr COGS/Cr สินค้าคงเหลือ) อัตโนมัติเบื้องหลัง (ไม่ต้องกดรายวัน).
+                        กรณีที่ออกใบกำกับในระบบยังยิงทีละใบเหมือนเดิม.
+                    </div>
+                </div>
+                <div class="config-item">
                     <label>แนบไฟล์เอกสาร</label>
                     <select id="cfgAttachFiles">
                         <option value="true">เปิด — ส่งไฟล์ใบเสร็จ/สลิปไปพร้อมเอกสาร</option>
@@ -762,6 +775,7 @@
                 if (cfg.receiptSyncMode) document.getElementById('cfgReceiptSyncMode').value = cfg.receiptSyncMode;
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
+                document.getElementById('cfgPosDailyRollup').value = cfg.posDailyRollup ? 'true' : 'false';
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
@@ -815,6 +829,7 @@
                 receiptSyncMode: document.getElementById('cfgReceiptSyncMode').value,
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
+                posDailyRollup: document.getElementById('cfgPosDailyRollup').value === 'true',
                 attachFiles: document.getElementById('cfgAttachFiles').value,
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
                 depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,

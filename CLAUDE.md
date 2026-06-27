@@ -257,6 +257,19 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `Payroll_Records` (→0); `LeaveDeduction` folded into `OtherDeductions` so validation balances; employer
    SSO = employee SSO (5%/5%); `IncomeTypeCode="01"`; account-code overrides left null (NextAcc defaults).
    **Use:** set `Nexaacc_SyncMode_Payroll=DOCUMENT_IMPORT` in Admin → Accounting Integration. Needs Windows build.
+8. **POS daily roll-up — ขายหน้าร้านไม่ออกใบกำกับ → ใบรับเงินสดสรุปรายวัน:** ✅ DONE (opt-in,
+   `Nexaacc_PosDailyRollup`, default off). การขายใน `Product/Default.aspx` ที่ **ไม่ติ๊ก "ออกใบกำกับภาษีในระบบ"
+   (CheckBox1)** เดิมเขียนแค่ `Product_Out` (Remark='ขาย', Account_Receipt_ID='0') ไม่ sync เลย → รายได้ไม่เข้า NextAcc.
+   **Fix (ไม่แตะ flow ขาย):** `RollupPosDailySalesIfDue` (เรียกจาก background timer ใน `Global.asax` หลัง
+   `ProcessQueueAsync` — auto ไม่ต้องกด) รวบแถว Product_Out ที่ยังไม่รวบของ **วันที่จบแล้ว (< วันนี้)** group ตาม
+   วัน × แหล่งรับเงิน (`Account_Paid_How_ID`) → สร้าง `Account_Receipt` สรุป (ID=`POSDAY-{yyyyMMdd}-{paidHowId}`) +
+   `EnqueueReceipt` (Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย — VAT คำนวณจาก `Business_Info.Use_Vat`, จด VAT=ถอด 7%) +
+   `EnqueueStockOutCogs` ต่อสินค้า (Dr COGS/Cr Inventory, ต้นทุน `Product.Cost_Price`) → mark `Product_Out.Pos_Rollup_Ref`.
+   **ออกใบกำกับในระบบ (CheckBox1 ติ๊ก) ยิงต่อใบเหมือนเดิม** (Product_Out มี Account_Receipt_ID จริง → ถูก exclude).
+   Idempotent: marker + queue dedup (receiptNumber/stockRef). Migration PHASE18_01 เพิ่ม `Pos_Rollup_Ref`
+   (+ backfill 'LEGACY' กันรวบย้อนหลังทั้งประวัติ) + seed flag. **ข้อจำกัด:** ตัด GL/COGS (journal-driven เหมือน
+   STOCK_IN เดิม) แต่ **ไม่ขยับ qty StockMovement ฝั่ง NextAcc** (DocumentLineRequest ไม่มี product code) — qty
+   sync ต้องรอ inventory spec (`docs/NextAcc_Inventory_Sync_Spec.md`). Needs Windows build + live test.
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
