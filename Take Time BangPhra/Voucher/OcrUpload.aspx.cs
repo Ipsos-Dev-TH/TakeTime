@@ -307,9 +307,35 @@ namespace Take_Time_BangPhra.Voucher
             txtVendorTaxId.Text = r.ExtractedVendorTaxId ?? "";
             txtDocNumber.Text = r.ExtractedDocumentNumber ?? "";
             txtDocDate.Text = r.ExtractedDate.HasValue ? r.ExtractedDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "";
-            txtSubTotal.Text = r.ExtractedSubTotal.HasValue ? r.ExtractedSubTotal.Value.ToString("0.00") : "";
-            txtVat.Text = r.ExtractedVatAmount.HasValue ? r.ExtractedVatAmount.Value.ToString("0.00") : "";
-            txtTotal.Text = r.ExtractedTotalAmount.HasValue ? r.ExtractedTotalAmount.Value.ToString("0.00") : "";
+            // ── ยอดเงิน + ภาษีซื้อ ตามชนิดเอกสาร ──
+            // ใบกำกับภาษี (หรือ OCR เจอ VAT) → เคลมภาษีซื้อ, คงยอดที่ OCR แยกไว้
+            // ไม่ใช่ใบกำกับ (ใบเสร็จ/บิลเงินสด/ลายมือ) + ไม่เจอ VAT → ไม่มีภาษีซื้อให้เคลม:
+            //   ตั้ง "ยอดก่อน VAT = ยอดรวม", VAT = 0, และเลือก "ไม่เคลม" ให้อัตโนมัติ (§82/5)
+            decimal? sub = r.ExtractedSubTotal;
+            decimal? vat = r.ExtractedVatAmount;
+            decimal? total = r.ExtractedTotalAmount;
+            bool isTaxInvoice = IsScannedTaxInvoice(r) || (r.ExtractedVatAmount ?? 0m) > 0m;
+
+            if (!isTaxInvoice)
+            {
+                bool vatMissing = !vat.HasValue || vat.Value == 0m;
+                if (vatMissing)
+                {
+                    decimal amount = total ?? sub ?? 0m;   // ใช้ยอดรวมเป็นยอดก่อน VAT
+                    if (amount > 0m) sub = amount;
+                    vat = 0m;
+                    if (!total.HasValue && sub.HasValue) total = sub;
+                }
+            }
+
+            txtSubTotal.Text = sub.HasValue ? sub.Value.ToString("0.00") : "";
+            txtVat.Text = vat.HasValue ? vat.Value.ToString("0.00") : "";
+            txtTotal.Text = total.HasValue ? total.Value.ToString("0.00") : "";
+
+            // ภาษีซื้อ: ใบกำกับ → เคลม (1), ไม่ใช่ใบกำกับ → ไม่เคลม (0)
+            string vatClaimDefault = isTaxInvoice ? "1" : "0";
+            if (ddlVatClaim.Items.FindByValue(vatClaimDefault) != null)
+                ddlVatClaim.SelectedValue = vatClaimDefault;
 
             var meta = new StringBuilder();
             if (r.Quality != null)
@@ -567,6 +593,17 @@ namespace Take_Time_BangPhra.Voucher
             if (string.IsNullOrEmpty(name)) return code;
             if (string.IsNullOrEmpty(code)) return name;
             return code + " " + name;
+        }
+
+        /// <summary>เอกสารที่สแกนเป็น "ใบกำกับภาษี" หรือไม่ (ดูจากชนิดเอกสารที่ OCR ตรวจได้).
+        /// ใช้ตั้งค่า default ภาษีซื้อ: ใบกำกับ → เคลม, ไม่ใช่ → ไม่เคลม.
+        /// หมายเหตุ: "Invoice" (TargetDocumentType เอกสารที่จะสร้าง) ไม่นับ — เช็คเฉพาะ "ใบกำกับภาษี/TaxInvoice"</summary>
+        private static bool IsScannedTaxInvoice(OcrResultResponse r)
+        {
+            if (r == null) return false;
+            string t = ((r.ScannedDocumentType ?? "") + "|" + (r.DocumentType ?? "")).ToLowerInvariant();
+            return t.Contains("taxinvoice") || t.Contains("tax invoice") || t.Contains("tax_invoice")
+                || t.Contains("ใบกำกับ");
         }
 
         private static bool IsTerminal(string status)
