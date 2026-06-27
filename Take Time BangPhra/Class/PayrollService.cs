@@ -880,7 +880,10 @@ public class PayrollService
                     try
                     {
                         var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                        if (acctConfig.IsConfigured && acctConfig.Enabled && !acctConfig.IsPayrollDocumentMode)
+                        // โพสต์ journal per employee เฉพาะ JOURNAL_ONLY mode — DOCUMENT (native run) และ
+                        // DOCUMENT_IMPORT (import ยอดทั้งงวด) จัดการ GL ทั้งงวดใน GenerateAllVouchersForPeriod
+                        if (acctConfig.IsConfigured && acctConfig.Enabled
+                            && !acctConfig.IsPayrollDocumentMode && !acctConfig.IsPayrollImportMode)
                         {
                             if (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0")
                             {
@@ -968,10 +971,19 @@ public class PayrollService
             try
             {
                 var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                if (acctConfig.IsConfigured && acctConfig.Enabled && acctConfig.IsPayrollDocumentMode)
+                if (acctConfig.IsConfigured && acctConfig.Enabled)
                 {
                     var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                    sync.EnqueuePayrollRunSync(payrollPeriodId);
+                    if (acctConfig.IsPayrollImportMode)
+                    {
+                        // DOCUMENT_IMPORT: ส่งยอดที่ TakeTime คำนวณเอง (ผันแปร) → NextAcc ออกเอกสารครบจากยอดเรา
+                        sync.EnqueuePayrollRunImport(payrollPeriodId);
+                    }
+                    else if (acctConfig.IsPayrollDocumentMode)
+                    {
+                        // DOCUMENT (native run): NextAcc คำนวณใหม่ server-side (ใช้กับเงินเดือนคงที่)
+                        sync.EnqueuePayrollRunSync(payrollPeriodId);
+                    }
                 }
             }
             catch (Exception accEx)

@@ -1,3 +1,15 @@
+> ✅ **สถานะ: NextAcc ทำแล้ว (commit fc6ff90) + TakeTime พร้อมแล้ว.** NextAcc เปิด
+> `POST /api/companies/{id}/payroll/runs/import` (Option A) — สร้าง run สถานะ Calculated จากยอดที่ส่ง
+> (Recalculate=false), idempotent ด้วย ExternalRunRef, map ด้วย EmployeeExternalId→CitizenId,
+> validate `net == gross − หักฝั่งลูกจ้าง`, override SalaryExpenseAccountCode/NetPaymentAccountCode,
+> แล้ว approve→pay ออก GL+ภงด.1+สปส.1-10+50ทวิ+payslip จากยอด import. **ฝั่ง TakeTime:** client
+> `ImportPayrollRunAsync` + models `PayrollImportRunRequest/PayrollImportLine` + queue action
+> `IMPORT_PAYROLL_RUN` (`EnqueuePayrollRunImport`/`ProcessPayrollRunImport`) อ่านยอดจาก `Payroll_Records`
+> + mode ใหม่ `Nexaacc_SyncMode_Payroll=DOCUMENT_IMPORT` (เลือกในหน้า Admin). **วิธีใช้: ตั้ง payroll mode =
+> DOCUMENT_IMPORT** แล้วสร้างใบสำคัญจ่ายทั้งงวด (GenerateAllVouchersForPeriod) → enqueue import อัตโนมัติ.
+> หมายเหตุ map: TakeTime ไม่มีช่อง ProvidentFund/SalaryAdvance แยก, และ "หักลา (LeaveDeduction)" รวมเข้า
+> `OtherDeductions` เพื่อให้ validation balance; SSO นายจ้าง = SSO ลูกจ้าง (5% เท่ากัน).
+
 # NextAcc — Payroll "Import / External-Amounts" Endpoint (คำขอจาก TakeTime)
 
 > ผู้ขอ: TakeTime BangPhra • ผู้รับ: ทีม Wachira-d/Accounting (NextAcc)

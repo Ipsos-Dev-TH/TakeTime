@@ -1308,6 +1308,15 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/payroll/runs", request);
         }
 
+        /// <summary>Import ยอดเงินเดือนสำเร็จรูป (Option A): POST /payroll/runs/import.
+        /// NextAcc สร้าง run สถานะ Calculated จากยอดที่ส่ง (Recalculate=false), idempotent ด้วย ExternalRunRef
+        /// (ยิงซ้ำคืน run เดิม). จากนั้นเรียก ApprovePayrollAsync → PayPayrollAsync ตามปกติ</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> ImportPayrollRunAsync(PayrollImportRunRequest request)
+        {
+            return await PostAsync<PayrollImportRunRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/import", request);
+        }
+
         public async Task<ApiResponse<PayrollRunResponse>> CalculatePayrollAsync(Guid runId)
         {
             return await PostAsync<object, ApiResponse<PayrollRunResponse>>(

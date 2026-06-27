@@ -242,6 +242,20 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    when you want NextAcc's native statutory forms and accept NextAcc's calculation. Statutory forms
    (ภ.ง.ด.1/สปส) for the JOURNAL path must be filed from TakeTime data (NextAcc can't auto-gen them
    without the recalculating native run).
+   **DOCUMENT_IMPORT mode (✅ NEW — variable amounts + NextAcc statutory forms):** NextAcc shipped
+   `POST /api/companies/{id}/payroll/runs/import` (Option A, commit fc6ff90) — creates a run as
+   **Calculated from the amounts we send (`Recalculate=false`)**, idempotent by `ExternalRunRef`,
+   maps by `EmployeeExternalId`→`CitizenId`, validates `net == gross − หักฝั่งลูกจ้าง` (SSO emp + WHT +
+   PVD emp + advance + other; **excludes employer SSO/PVD**, else GL won't balance at pay → 422),
+   then approve→pay issues GL + ภ.ง.ด.1 + สปส.1-10 + 50ทวิ + payslip **from our numbers**. TakeTime side:
+   `ImportPayrollRunAsync` + `PayrollImportRunRequest`/`PayrollImportLine`; queue action `IMPORT_PAYROLL_RUN`
+   (`EnqueuePayrollRunImport`/`ProcessPayrollRunImport`) reads per-employee amounts from `Payroll_Records`,
+   syncs employees, imports→approve→pay (status-gated, idempotent). `GenerateAllVouchersForPeriod` routes to
+   import when `IsPayrollImportMode`; per-employee `EnqueuePayrollJournal` is skipped in DOCUMENT and
+   DOCUMENT_IMPORT (only JOURNAL_ONLY posts per-employee). **Map caveats:** no PVD/SalaryAdvance fields in
+   `Payroll_Records` (→0); `LeaveDeduction` folded into `OtherDeductions` so validation balances; employer
+   SSO = employee SSO (5%/5%); `IncomeTypeCode="01"`; account-code overrides left null (NextAcc defaults).
+   **Use:** set `Nexaacc_SyncMode_Payroll=DOCUMENT_IMPORT` in Admin → Accounting Integration. Needs Windows build.
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch

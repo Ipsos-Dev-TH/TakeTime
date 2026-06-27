@@ -180,8 +180,9 @@
                     <select id="cfgPayrollSyncMode">
                         <option value="">ใช้ค่าเริ่มต้น</option>
                         <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
-                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
-                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — โพสต์ GL จากยอดเรา (ค่าเริ่มต้น, ไม่ออก ภงด.1/สปส/payslip)</option>
+                        <option value="DOCUMENT_IMPORT">DOCUMENT_IMPORT — ส่งยอดที่เราคำนวณ → NextAcc ออกเอกสารครบ (GL+ภงด.1+สปส+50ทวิ+payslip) ตามยอดเรา ✅ แนะนำสำหรับยอดผันแปร</option>
+                        <option value="DOCUMENT">DOCUMENT — NextAcc คำนวณใหม่เอง (เฉพาะเงินเดือนคงที่)</option>
                     </select>
                 </div>
                 <div class="config-item">

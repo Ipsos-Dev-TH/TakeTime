@@ -228,6 +228,31 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Enqueue payroll IMPORT to NextAcc (Option A): ส่งยอดที่ TakeTime คำนวณเองต่อพนักงาน เข้า
+        /// POST /payroll/runs/import (Recalculate=false) → NextAcc สร้าง run Calculated ตามยอดเรา →
+        /// approve → pay → ออก GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip จากยอดของเรา (ไม่คำนวณใหม่).
+        /// ใช้เมื่อ PayrollSyncMode = DOCUMENT_IMPORT (รองรับยอดผันแปรต่องวด)
+        /// </summary>
+        public long EnqueuePayrollRunImport(int payrollPeriodId)
+        {
+            if (!_config.IsConfigured) return -1;
+
+            string refKey = $"PAYROLL-IMPORT-{payrollPeriodId}";
+            long existing = FindPendingEntry("PAYROLL", "IMPORT_PAYROLL_RUN", "refKey", refKey);
+            if (existing > 0) return existing;
+            long recent = FindRecentCompletedEntry("PAYROLL", "IMPORT_PAYROLL_RUN", "refKey", refKey, 86400);
+            if (recent > 0) return recent;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "payrollPeriodId", payrollPeriodId }
+            };
+
+            return InsertQueue("PAYROLL", payrollPeriodId, "IMPORT_PAYROLL_RUN", payload);
+        }
+
+        /// <summary>
         /// Enqueue asset reclassification journal.
         /// เมื่อซื้อสินทรัพย์ถาวรผ่านใบสำคัญจ่าย PV จะลงบัญชี DR ค่าใช้จ่าย / CR เงินสด
         /// journal นี้ reclassify: DR สินทรัพย์ถาวร / CR ค่าใช้จ่าย → ผลสุทธิ DR สินทรัพย์ / CR เงินสด
@@ -1286,6 +1311,9 @@ namespace Take_Time_BangPhra.Integration
 
                 case "SYNC_PAYROLL_RUN":
                     return await ProcessPayrollRunSync(payload);
+
+                case "IMPORT_PAYROLL_RUN":
+                    return await ProcessPayrollRunImport(payload);
 
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);
@@ -2436,6 +2464,160 @@ namespace Take_Time_BangPhra.Integration
             _lastDocNumber = payrollNumber;
             _lastDocType = "PAYROLL_RUN";
             return runId.ToString();
+        }
+
+        /// <summary>
+        /// Option A — Import ยอดเงินเดือนที่ TakeTime คำนวณเอง (ผันแปรต่องวด) เข้า NextAcc:
+        /// Sync พนักงาน → POST /payroll/runs/import (Recalculate=false, ยอดจาก Payroll_Records) →
+        /// approve → pay → NextAcc ออก GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip จากยอดของเรา.
+        /// Idempotent: queue refKey + NextAcc ExternalRunRef (ยิงซ้ำคืน run เดิม)
+        /// </summary>
+        private async Task<string> ProcessPayrollRunImport(Dictionary<string, object> p)
+        {
+            int periodId = Convert.ToInt32(p["payrollPeriodId"]);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunImport: periodId={periodId} — starting payroll IMPORT (Option A)", "SYSTEM");
+
+            // 1. งวดเงินเดือน
+            var dtPeriod = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT * FROM Payroll_Periods WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", periodId } });
+            if (dtPeriod == null || dtPeriod.Rows.Count == 0)
+                throw new ArgumentException($"Payroll period {periodId} not found");
+
+            var periodRow = dtPeriod.Rows[0];
+            int year = Convert.ToInt32(periodRow["Year"]);
+            int month = Convert.ToInt32(periodRow["Month"]);
+            string periodName = periodRow["PeriodName"]?.ToString() ?? $"{year}-{month:D2}";
+            DateTime payrollDate = periodRow["PayrollDate"] != DBNull.Value
+                ? Convert.ToDateTime(periodRow["PayrollDate"])
+                : new DateTime(year, month, DateTime.DaysInMonth(year, month));
+            DateTime periodStart = new DateTime(year, month, 1);
+            DateTime periodEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+
+            // 2. Sync พนักงาน (ให้ EmployeeExternalId/CitizenId map ตรงฝั่ง NextAcc)
+            var employees = LoadEmployeesForPayrollSync();
+            if (employees.Count > 0)
+            {
+                var syncResult = await _apiClient.SyncPayrollEmployeesAsync(
+                    new PayrollSyncEmployeesRequest { ExternalSystem = "TakeTime", Rows = employees });
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPayrollRunImport: employee sync — inserted={syncResult?.data?.Inserted} updated={syncResult?.data?.Updated} skipped={syncResult?.data?.Skipped}",
+                    "SYSTEM");
+            }
+
+            // 3. ยอดต่อพนักงานที่ TakeTime คำนวณไว้ (Payroll_Records) → import lines
+            var dtRec = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT PR.Admin_ID, PR.EmployeeName, PR.BaseSalary, PR.OTAmount, PR.BonusAmount,
+                         PR.AllowanceAmount, PR.LeaveDeduction, PR.SocialSecurity, PR.Tax,
+                         PR.OtherDeductions, PR.TotalEarnings, PR.TotalDeductions, PR.NetSalary,
+                         A.IDCard
+                  FROM Payroll_Records PR
+                  LEFT JOIN Admin A ON A.ID = PR.Admin_ID
+                  WHERE PR.PayrollPeriod_ID = @id",
+                new Dictionary<string, object> { { "@id", periodId } });
+
+            if (dtRec == null || dtRec.Rows.Count == 0)
+                throw new ArgumentException($"No Payroll_Records for period {periodId} — สร้างรอบเงินเดือนก่อน");
+
+            var lines = new List<PayrollImportLine>();
+            foreach (DataRow r in dtRec.Rows)
+            {
+                int adminId = Convert.ToInt32(r["Admin_ID"]);
+                decimal baseSalary = SafeDec(r["BaseSalary"]);
+                decimal ot = SafeDec(r["OTAmount"]);
+                decimal bonus = SafeDec(r["BonusAmount"]);
+                decimal allowance = SafeDec(r["AllowanceAmount"]);
+                decimal leave = SafeDec(r["LeaveDeduction"]);
+                decimal sso = SafeDec(r["SocialSecurity"]);
+                decimal wht = SafeDec(r["Tax"]);
+                decimal other = SafeDec(r["OtherDeductions"]);
+                decimal gross = SafeDec(r["TotalEarnings"]);       // = base+OT+bonus+allowance
+                decimal totalDed = SafeDec(r["TotalDeductions"]);  // = leave+sso+wht+other (ฝั่งลูกจ้าง)
+                decimal net = SafeDec(r["NetSalary"]);             // = gross − totalDed
+
+                // NextAcc validation: net == gross − (SSO emp + WHT + PVD emp + advance + other)
+                // TakeTime มี "หักลา (LeaveDeduction)" ที่ไม่มีช่องตรงใน import → รวมเข้า OtherDeductions
+                // เพื่อให้สมการ balance (otherImport = other + leave). ProvidentFund/advance = 0
+                decimal otherImport = other + leave;
+
+                lines.Add(new PayrollImportLine
+                {
+                    EmployeeExternalId = $"EMP-{adminId}",
+                    CitizenId = r["IDCard"]?.ToString(),
+                    EmployeeName = r["EmployeeName"]?.ToString(),
+                    BaseSalary = baseSalary,
+                    OvertimePay = ot,
+                    Allowances = allowance,
+                    Commission = 0,
+                    Bonus = bonus,
+                    OtherEarnings = 0,
+                    GrossIncome = gross,
+                    SocialSecurityEmployee = sso,
+                    SocialSecurityEmployer = sso,   // นายจ้างสมทบเท่าลูกจ้าง (5% เท่ากัน) — ตรงกับ EnqueuePayrollJournal
+                    WithholdingTax = wht,
+                    ProvidentFundEmployee = 0,
+                    ProvidentFundEmployer = 0,
+                    SalaryAdvance = 0,
+                    OtherDeductions = otherImport,
+                    TotalDeductions = totalDed,
+                    NetPay = net,
+                    IncomeTypeCode = "01"           // ม.40(1) เงินเดือน
+                });
+            }
+
+            // 4. Import (Recalculate=false) — idempotent ด้วย ExternalRunRef
+            var req = new PayrollImportRunRequest
+            {
+                Name = $"เงินเดือน {periodName}",
+                Year = year,
+                Month = month,
+                PayDate = payrollDate,
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                ExternalSystem = "TakeTime",
+                ExternalRunRef = $"PAYRUN-{year}{month:D2}",
+                Recalculate = false,
+                Lines = lines
+            };
+
+            var imp = await _apiClient.ImportPayrollRunAsync(req);
+            Guid runId = imp?.data?.Id ?? Guid.Empty;
+            if (runId == Guid.Empty)
+                throw new Exception($"ImportPayrollRun failed: {imp?.message}");
+            string status = imp?.data?.Status ?? "";
+            string payrollNumber = imp?.data?.PayrollNumber;
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPayrollRunImport: imported run={runId} number={payrollNumber} status={status} employees={lines.Count} gross={imp?.data?.TotalGrossSalary} net={imp?.data?.TotalNetPay}",
+                "SYSTEM");
+
+            // 5. approve → pay (gate ตามสถานะ → idempotent เมื่อ run เดิมถูก approve/pay ไปแล้ว)
+            if (!status.Equals("Approved", StringComparison.OrdinalIgnoreCase)
+                && !status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                var ap = await _apiClient.ApprovePayrollAsync(runId);
+                status = ap?.data?.Status ?? "Approved";
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPayrollRunImport: approved run={runId} status={status}", "SYSTEM");
+            }
+            if (!status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                var pay = await _apiClient.PayPayrollAsync(runId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPayrollRunImport: PAID run={runId} number={payrollNumber} gross={pay?.data?.TotalGrossSalary} wht={pay?.data?.TotalWithholdingTax} ssfEmp={pay?.data?.TotalSocialSecurityEmployee} ssfEr={pay?.data?.TotalSocialSecurityEmployer} net={pay?.data?.TotalNetPay}",
+                    "SYSTEM");
+            }
+
+            _lastDocNumber = payrollNumber;
+            _lastDocType = "PAYROLL_RUN";
+            return runId.ToString();
+        }
+
+        private static decimal SafeDec(object v)
+        {
+            if (v == null || v == DBNull.Value) return 0m;
+            try { return Convert.ToDecimal(v); } catch { return 0m; }
         }
 
         /// <summary>

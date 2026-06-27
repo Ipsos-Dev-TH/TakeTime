@@ -1496,6 +1496,57 @@ namespace Take_Time_BangPhra.Integration
         public DateTime PeriodEnd { get; set; }
     }
 
+    /// <summary>Import ยอดเงินเดือนสำเร็จรูปต่อพนักงาน (Option A) — POST /api/companies/{id}/payroll/runs/import.
+    /// Recalculate=false → NextAcc ใช้ยอดที่ส่งมาตรง ๆ ไม่คำนวณใหม่. Idempotent ด้วย ExternalRunRef.</summary>
+    public class PayrollImportRunRequest
+    {
+        public string Name { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public DateTime PayDate { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public string ExternalSystem { get; set; } = "TakeTime";
+        /// <summary>idempotency key (ยิงซ้ำ → คืน run เดิม). เช่น PAYRUN-202606</summary>
+        public string ExternalRunRef { get; set; }
+        /// <summary>false = ห้ามคำนวณใหม่ ใช้ยอดที่ส่งมาเป็น source of truth</summary>
+        public bool Recalculate { get; set; } = false;
+        public List<PayrollImportLine> Lines { get; set; } = new List<PayrollImportLine>();
+    }
+
+    public class PayrollImportLine
+    {
+        public string EmployeeExternalId { get; set; }   // map ก่อน (เช่น EMP-1024)
+        public string CitizenId { get; set; }            // fallback map
+        public string EmployeeName { get; set; }
+
+        // รายได้ (ยอดจริงจาก TakeTime)
+        public decimal BaseSalary { get; set; }
+        public decimal OvertimePay { get; set; }
+        public decimal Allowances { get; set; }
+        public decimal Commission { get; set; }
+        public decimal Bonus { get; set; }
+        public decimal OtherEarnings { get; set; }
+        public decimal GrossIncome { get; set; }         // = ผลรวมรายได้
+
+        // รายการหัก (ยอดจริง)
+        public decimal SocialSecurityEmployee { get; set; }
+        public decimal SocialSecurityEmployer { get; set; }
+        public decimal WithholdingTax { get; set; }      // ภ.ง.ด.1
+        public decimal ProvidentFundEmployee { get; set; }
+        public decimal ProvidentFundEmployer { get; set; }
+        public decimal SalaryAdvance { get; set; }
+        public decimal OtherDeductions { get; set; }
+        public decimal TotalDeductions { get; set; }     // ฝั่งลูกจ้างเท่านั้น (ไม่รวม SSO/PVD นายจ้าง)
+
+        public decimal NetPay { get; set; }              // = gross − หักฝั่งลูกจ้าง
+
+        // ผังบัญชี override (null → NextAcc ใช้ default)
+        public string SalaryExpenseAccountCode { get; set; }
+        public string PaymentAccountCode { get; set; }
+        public string IncomeTypeCode { get; set; }       // ประเภทเงินได้ ภ.ง.ด.1 (เช่น 01 = ม.40(1))
+    }
+
     public class PayrollRunResponse
     {
         public Guid Id { get; set; }

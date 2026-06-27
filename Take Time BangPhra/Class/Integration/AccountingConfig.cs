@@ -101,6 +101,11 @@ namespace Take_Time_BangPhra.Integration
         public bool IsVoucherLocal => VoucherSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
         public bool IsPayrollDocumentMode => PayrollSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
         public bool IsPayrollLocal => PayrollSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
+        // DOCUMENT_IMPORT: ส่ง "ยอดเงินเดือนสำเร็จรูปต่อพนักงาน" ที่ TakeTime คำนวณเอง เข้า NextAcc
+        // ผ่าน POST /payroll/runs/import (Recalculate=false) → NextAcc สร้าง run Calculated ตามยอดที่ส่ง
+        // แล้ว approve→pay ออก GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip "จากยอดของเรา" (ไม่คำนวณใหม่).
+        // ต่างจาก DOCUMENT (native run) ที่ NextAcc คำนวณใหม่ server-side → ใช้กับยอดผันแปรไม่ได้.
+        public bool IsPayrollImportMode => PayrollSyncMode.Equals("DOCUMENT_IMPORT", StringComparison.OrdinalIgnoreCase);
 
         public bool AttachFiles => GetConfig("Nexaacc_AttachFiles", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
 
