@@ -270,6 +270,17 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    (+ backfill 'LEGACY' กันรวบย้อนหลังทั้งประวัติ) + seed flag. **ข้อจำกัด:** ตัด GL/COGS (journal-driven เหมือน
    STOCK_IN เดิม) แต่ **ไม่ขยับ qty StockMovement ฝั่ง NextAcc** (DocumentLineRequest ไม่มี product code) — qty
    sync ต้องรอ inventory spec (`docs/NextAcc_Inventory_Sync_Spec.md`). Needs Windows build + live test.
+9. **Stock qty 2-way sync (TakeTime ↔ NextAcc):** ✅ DONE (opt-in, PHASE18_02). NextAcc มีระบบ inventory
+   จริง (StockMovement + costing) — verified `POST {company}/product/stock/adjust` (qty-only, **ไม่โพสต์ GL**)
+   + `GET {company}/product/{id}/stock/movements`. **ขาออก** (`Nexaacc_StockQtySync`): ทุก `EnqueueStock*`
+   เพิ่ม `STOCK_QTY_PUSH` → `ProcessStockQtyPush` (resolve `Accounting_Product_Map` TT→Nexaacc GUID, ไม่ map→
+   EnqueueProductSync+retry) → `AdjustStockAsync`; ไม่เบิล GL (journal เดิมคุมมูลค่า). **ขากลับ**
+   (`Nexaacc_StockQtyPull`): `PullNextAccStockMovementsIfDue` (timer Global.asax, round-robin
+   `Stock_Last_Pulled` cap 25) → movement ที่ไม่อยู่ใน `Nexaacc_Stock_Movement_Seen` (= ปรับฝั่ง NextAcc เอง)
+   → ลง `Product_In`/`Product_Out` (Remark='NEXTACC_SYNC'). echo-safe: push ทุกตัวบันทึก movement id ใน Seen
+   + inbound insert ตรงไม่ trigger ขาออก. Migration PHASE18_02 (Seen table + Stock_Last_Pulled + 2 flags) +
+   admin toggles. ข้อจำกัด: pull เป็น per-product polling (รอ NextAcc เพิ่ม global `?since=` cursor),
+   inbound Product_Out omit Account_Paid_How_ID. Needs Windows build + live test.
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch

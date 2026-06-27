@@ -145,3 +145,24 @@ Headers: `X-Integration-Key` (int_)
   (ADJUSTMENT_*) ใน TakeTime, dedup ด้วย `Nexaacc_Movement_Id`
 - ต้องได้ field list เต็มของ `StockMovementResponse` / `StockAdjustmentRequest` (MovementType enum,
   source/reference, qty, unitCost, date) ก่อนเขียน DTO ฝั่ง TakeTime ให้ตรง
+
+## 9. ✅ IMPLEMENTED ฝั่ง TakeTime (qty 2 ทาง — PHASE18_02, feature-flag default off)
+
+Routes ที่ใช้ (verified): `POST {company}/product/stock/adjust` (qty-only, **ไม่โพสต์ GL** — ProductService
+ไม่มี Journal) + `GET {company}/product/{productId}/stock/movements`.
+DTO: `StockAdjustmentRequest(ProductId, Quantity, MovementType IN/OUT/ADJUST/TRANSFER_*, UnitCost?, ...)`,
+`StockMovementResponse(Id, ProductId, ProductName, MovementDate, MovementType, Quantity, UnitCost)`.
+
+- **ขาออก (`Nexaacc_StockQtySync`):** ทุก `EnqueueStock*` (In/OutCogs/Reverse/Adjustment/WriteOff) เพิ่ม
+  paired `STOCK_QTY_PUSH` → `ProcessStockQtyPush` resolve `Accounting_Product_Map` (TakeTime→Nexaacc GUID;
+  ถ้ายังไม่ map → EnqueueProductSync แล้ว retry) → `AdjustStockAsync`. ไม่เบิล GL (journal เดิมยังโพสต์มูลค่า,
+  adjust คุม qty). บันทึก movement id ที่สร้างใน `Nexaacc_Stock_Movement_Seen` (กัน echo).
+- **ขากลับ (`Nexaacc_StockQtyPull`):** `PullNextAccStockMovementsIfDue` (เรียกจาก timer Global.asax) วน
+  product ที่ map (round-robin ตาม `Accounting_Product_Map.Stock_Last_Pulled`, cap 25/รอบ) →
+  `GetProductStockMovementsAsync` → movement ที่ไม่อยู่ใน Seen (= ปรับฝั่ง NextAcc เอง) → ลง
+  `Product_In` (IN) / `Product_Out` (OUT, Remark='NEXTACC_SYNC') → mark Seen. echo-safe เพราะ push ทุกตัว
+  อยู่ใน Seen + inbound insert ตรง ๆ ไม่ trigger ขาออก.
+- Migration PHASE18_02: `Nexaacc_Stock_Movement_Seen`, `Accounting_Product_Map.Stock_Last_Pulled`, 2 flags.
+  Admin toggles เพิ่มในหน้า Accounting Integration. **ข้อจำกัด:** pull เป็น per-product polling (ยังไม่มี
+  global delta — ถ้า NextAcc เพิ่ม `?since=` ตาม §4.3 จะเร็วขึ้นมาก); inbound Product_Out omit
+  Account_Paid_How_ID (ถ้า NOT NULL ต้องปรับ). Needs Windows build + live test.

@@ -1449,6 +1449,34 @@ namespace Take_Time_BangPhra.Integration
     // Sync พนักงาน → สร้าง PayrollRun → Calculate → Approve → Pay
     // ══════════════════════════════════════════════
 
+    // ──────────────────────────────────────────────
+    // Inventory qty (NextAcc ProductController /product/stock/*)
+    // POST /api/companies/{cid}/product/stock/adjust  (qty-only, ไม่โพสต์ GL)
+    // GET  /api/companies/{cid}/product/{productId}/stock/movements
+    // ──────────────────────────────────────────────
+
+    /// <summary>ปรับจำนวนสต๊อกฝั่ง NextAcc (qty-only). MovementType: "IN"/"OUT"/"ADJUST"/"TRANSFER_OUT"/"TRANSFER_IN"</summary>
+    public class StockAdjustmentRequest
+    {
+        public Guid ProductId { get; set; }       // = Nexaacc_Product_Id (GUID)
+        public decimal Quantity { get; set; }     // ปริมาณ (บวกเสมอ; ทิศทางอยู่ที่ MovementType)
+        public string MovementType { get; set; }
+        public decimal? UnitCost { get; set; }
+        public string Reference { get; set; }     // อ้างอิงจากฝั่ง TakeTime (อาจถูก NextAcc ละเว้น)
+        public string Note { get; set; }
+    }
+
+    public class StockMovementResponse
+    {
+        public Guid Id { get; set; }
+        public Guid ProductId { get; set; }
+        public string ProductName { get; set; }
+        public DateTime MovementDate { get; set; }
+        public string MovementType { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitCost { get; set; }
+    }
+
     public class PayrollEmployeeSyncRow
     {
         public string ExternalId { get; set; }

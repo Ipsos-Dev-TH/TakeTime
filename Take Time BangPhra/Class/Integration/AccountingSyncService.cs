@@ -460,6 +460,7 @@ namespace Take_Time_BangPhra.Integration
                 { "paymentMethod", paymentMethod ?? "" },
                 { "hasInputVat", hasInputVat }
             };
+            EnqueueStockQtyPush(productId, productName, quantity, "IN", costPerUnit, receiveDate, refStr);
             return InsertQueue("STOCK", productId, "STOCK_IN", payload);
         }
 
@@ -489,6 +490,7 @@ namespace Take_Time_BangPhra.Integration
                 { "outDate", outDate.ToString("yyyy-MM-dd HH:mm:ss") },
                 { "reason", reason ?? "" }
             };
+            EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, outDate, refStr);
             return InsertQueue("STOCK", productId, "STOCK_OUT_COGS", payload);
         }
 
@@ -515,6 +517,7 @@ namespace Take_Time_BangPhra.Integration
                 { "reverseDate", reverseDate.ToString("yyyy-MM-dd HH:mm:ss") },
                 { "reason", reason ?? "" }
             };
+            EnqueueStockQtyPush(productId, productName, quantity, "IN", costPerUnit, reverseDate, "REV-" + stockRef);
             return InsertQueue("STOCK", productId, "STOCK_OUT_COGS_REVERSE", payload);
         }
 
@@ -741,6 +744,7 @@ namespace Take_Time_BangPhra.Integration
                 { "adjustDate", adjustDate.ToString("yyyy-MM-dd HH:mm:ss") },
                 { "reason", reason ?? "" }
             };
+            EnqueueStockQtyPush(productId, productName, Math.Abs(quantityDiff), quantityDiff > 0 ? "IN" : "OUT", costPerUnit, adjustDate, refStr);
             return InsertQueue("STOCK", productId, "STOCK_ADJUSTMENT", payload);
         }
 
@@ -768,7 +772,212 @@ namespace Take_Time_BangPhra.Integration
                 { "writeOffDate", writeOffDate.ToString("yyyy-MM-dd HH:mm:ss") },
                 { "reason", reason ?? "" }
             };
+            EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, writeOffDate, refStr);
             return InsertQueue("STOCK", productId, "STOCK_WRITEOFF", payload);
+        }
+
+        // ──────────────────────────────────────────────
+        // Sync จำนวนสต๊อก (qty) 2 ทาง กับ NextAcc /product/stock/*  (feature-flag, default off)
+        //   ขาออก: STOCK_QTY_PUSH → POST /product/stock/adjust (qty-only, ไม่ซ้ำ GL)
+        //   ขากลับ: PullNextAccStockMovementsIfDue → GET /product/{id}/stock/movements → ลง Product_In/Out
+        //   echo-safe: movement ที่เรา push บันทึกใน Nexaacc_Stock_Movement_Seen → ขากลับข้าม
+        // ──────────────────────────────────────────────
+
+        /// <summary>คู่กับ EnqueueStock* — ส่ง qty push เข้าคิว (no-op ถ้า flag ปิด). idempotent ด้วย ref ของตัวเอง</summary>
+        private void EnqueueStockQtyPush(int productId, string productName, decimal qty, string movementType,
+            decimal unitCost, DateTime moveDate, string srcRef)
+        {
+            if (!_config.IsConfigured || !_config.IsStockQtySyncEnabled) return;
+            if (productId <= 0 || qty <= 0) return;
+
+            string refStr = $"QTY-{movementType}-{srcRef}";
+            if (FindPendingEntry("STOCK", "STOCK_QTY_PUSH", "stockRef", refStr) > 0) return;
+            if (FindRecentCompletedEntry("STOCK", "STOCK_QTY_PUSH", "stockRef", refStr, 86400) > 0) return;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", qty },
+                { "movementType", movementType },
+                { "unitCost", unitCost },
+                { "moveDate", moveDate.ToString("yyyy-MM-dd HH:mm:ss") }
+            };
+            InsertQueue("STOCK", productId, "STOCK_QTY_PUSH", payload);
+        }
+
+        private async Task<string> ProcessStockQtyPush(Dictionary<string, object> p)
+        {
+            if (!_config.IsStockQtySyncEnabled) return "SKIPPED_QTY_SYNC_OFF";
+
+            int productId = Convert.ToInt32(p["productId"]);
+            decimal qty = SafeDec(p["quantity"]);
+            string movementType = p.ContainsKey("movementType") ? p["movementType"]?.ToString() : "ADJUST";
+            decimal unitCost = p.ContainsKey("unitCost") ? SafeDec(p["unitCost"]) : 0m;
+            string srcRef = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : "";
+            if (qty <= 0) return "SKIPPED_ZERO_QTY";
+
+            Guid nexId = ResolveNexaaccProductId(productId);
+            if (nexId == Guid.Empty)
+            {
+                // ยังไม่ map → sync product master ก่อน แล้ว retry รอบหน้า
+                EnqueueProductSync(productId);
+                throw new Exception($"StockQtyPush: product {productId} ยังไม่ map กับ NextAcc — enqueue product sync แล้ว retry");
+            }
+
+            var req = new StockAdjustmentRequest
+            {
+                ProductId = nexId,
+                Quantity = qty,
+                MovementType = movementType,
+                UnitCost = unitCost > 0 ? (decimal?)unitCost : null,
+                Reference = srcRef,
+                Note = "TakeTime stock sync"
+            };
+            var res = await _apiClient.AdjustStockAsync(req);
+            if (res?.success != true || res.data == null)
+                throw new Exception($"StockQtyPush: NextAcc ปฏิเสธ product={productId}: {res?.message ?? "null"}");
+
+            // กัน pull ขากลับดึง movement นี้กลับเข้ามา (echo)
+            MarkMovementSeen(res.data.Id, "PUSH", productId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"StockQtyPush: product={productId} nex={nexId} {movementType} qty={qty:N2} → movId={res.data.Id}", "SYSTEM");
+            return res.data.Id.ToString();
+        }
+
+        /// <summary>ดึง stock movement ที่ปรับฝั่ง NextAcc เอง → ลง Product_In/Out ฝั่ง TakeTime (ขากลับ).
+        /// per-product polling (round-robin ตาม Stock_Last_Pulled), dedup/echo ด้วย Nexaacc_Stock_Movement_Seen.
+        /// เรียกจาก background timer (Global.asax). no-op ถ้า flag ปิด</summary>
+        public async Task PullNextAccStockMovementsIfDue(int maxProductsPerRun = 25)
+        {
+            if (!_config.IsConfigured || !_config.Enabled || !_config.IsStockQtyPullEnabled) return;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP (@n) TakeTime_Product_ID, Nexaacc_Product_Id
+                      FROM Accounting_Product_Map
+                      WHERE Nexaacc_Product_Id IS NOT NULL
+                      ORDER BY CASE WHEN Stock_Last_Pulled IS NULL THEN 0 ELSE 1 END, Stock_Last_Pulled ASC",
+                    new Dictionary<string, object> { { "@n", maxProductsPerRun } });
+                if (dt == null || dt.Rows.Count == 0) return;
+
+                foreach (DataRow r in dt.Rows)
+                {
+                    int ttId = 0; int.TryParse(r["TakeTime_Product_ID"]?.ToString(), out ttId);
+                    Guid nexId; Guid.TryParse(r["Nexaacc_Product_Id"]?.ToString(), out nexId);
+                    if (ttId <= 0 || nexId == Guid.Empty) continue;
+
+                    try { await PullOneProductMovements(ttId, nexId); }
+                    catch (Exception exP)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"StockQtyPull: product={ttId} ล้มเหลว: {exP.Message}", "SYSTEM");
+                    }
+                    // ขยับ cursor เสมอ กันค้างอยู่ที่สินค้าเดิม
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Accounting_Product_Map SET Stock_Last_Pulled = GETDATE() WHERE TakeTime_Product_ID = @id",
+                            new Dictionary<string, object> { { "@id", ttId } });
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"PullNextAccStockMovementsIfDue: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private async Task PullOneProductMovements(int ttProductId, Guid nexProductId)
+        {
+            var resp = await _apiClient.GetProductStockMovementsAsync(nexProductId);
+            var moves = resp?.data;
+            if (moves == null || moves.Count == 0) return;
+
+            foreach (var m in moves)
+            {
+                if (m == null || m.Id == Guid.Empty) continue;
+                if (IsMovementSeen(m.Id)) continue;   // เราเคย push/import แล้ว → ข้าม (กัน echo/ซ้ำ)
+
+                decimal qty = Math.Abs(m.Quantity);
+                if (qty <= 0) { MarkMovementSeen(m.Id, "PULL", ttProductId); continue; }
+
+                string mt = (m.MovementType ?? "").ToUpperInvariant();
+                bool isIn;
+                if (mt == "IN" || mt == "TRANSFER_IN") isIn = true;
+                else if (mt == "OUT" || mt == "TRANSFER_OUT") isIn = false;
+                else isIn = m.Quantity >= 0;   // ADJUST → ตามเครื่องหมาย
+
+                if (isIn) InsertInboundProductIn(ttProductId, qty, m.UnitCost, m.MovementDate);
+                else InsertInboundProductOut(ttProductId, qty, m.UnitCost, m.MovementDate);
+
+                MarkMovementSeen(m.Id, "PULL", ttProductId);
+            }
+            _code.Logs(_connectionString, "AccountingSync",
+                $"StockQtyPull: product={ttProductId} ตรวจ {moves.Count} movement", "SYSTEM");
+        }
+
+        private void InsertInboundProductIn(int productId, decimal qty, decimal unitCost, DateTime when)
+        {
+            _code.DatabaseInsertSafe(_connectionString,
+                "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) " +
+                "VALUES (@d,@pid,@amt,@cost)",
+                new Dictionary<string, object>
+                {
+                    { "@d", when }, { "@pid", productId }, { "@amt", qty }, { "@cost", unitCost }
+                });
+        }
+
+        private void InsertInboundProductOut(int productId, decimal qty, decimal unitCost, DateTime when)
+        {
+            // Remark='NEXTACC_SYNC' (ไม่ใช่ 'ขาย') → POS daily rollup ไม่หยิบ; Pos_Rollup_Ref='NEXTACC' กันอีกชั้น
+            _code.DatabaseInsertSafe(_connectionString,
+                "INSERT INTO [dbo].[Product_Out] ([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Remark],[Pos_Rollup_Ref]) " +
+                "VALUES (@d,@pid,@amt,@cost,'0',N'NEXTACC_SYNC',N'NEXTACC')",
+                new Dictionary<string, object>
+                {
+                    { "@d", when }, { "@pid", productId }, { "@amt", qty }, { "@cost", unitCost }
+                });
+        }
+
+        private Guid ResolveNexaaccProductId(int takeTimeProductId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Product_Id FROM Accounting_Product_Map WHERE TakeTime_Product_ID = @id AND Nexaacc_Product_Id IS NOT NULL",
+                    new Dictionary<string, object> { { "@id", takeTimeProductId } });
+                if (dt?.Rows.Count > 0 && Guid.TryParse(dt.Rows[0][0]?.ToString(), out var g)) return g;
+            }
+            catch { }
+            return Guid.Empty;
+        }
+
+        private bool IsMovementSeen(Guid movementId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 1 FROM Nexaacc_Stock_Movement_Seen WHERE Nexaacc_Movement_Id = @id",
+                    new Dictionary<string, object> { { "@id", movementId } });
+                return dt?.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        private void MarkMovementSeen(Guid movementId, string direction, int takeTimeProductId)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"IF NOT EXISTS (SELECT 1 FROM Nexaacc_Stock_Movement_Seen WHERE Nexaacc_Movement_Id = @id)
+                      INSERT INTO Nexaacc_Stock_Movement_Seen (Nexaacc_Movement_Id, Direction, TakeTime_Product_ID, Created_Date)
+                      VALUES (@id, @dir, @pid, GETDATE())",
+                    new Dictionary<string, object> { { "@id", movementId }, { "@dir", direction }, { "@pid", takeTimeProductId } });
+            }
+            catch { }
         }
 
         /// <summary>Sync product master ไป NextAcc — ใช้ตอนสร้าง/แก้ไขสินค้า</summary>
@@ -1513,6 +1722,9 @@ namespace Take_Time_BangPhra.Integration
 
                 case "IMPORT_PAYROLL_RUN":
                     return await ProcessPayrollRunImport(payload);
+
+                case "STOCK_QTY_PUSH":
+                    return await ProcessStockQtyPush(payload);
 
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);

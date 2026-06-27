@@ -95,6 +95,10 @@ namespace Take_Time_BangPhra
                 try { syncService.RollupPosDailySalesIfDue(); }
                 catch (Exception rex) { System.Diagnostics.Trace.TraceError($"PosDailyRollup timer error: {rex.Message}"); }
 
+                // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
+                try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
+                catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)

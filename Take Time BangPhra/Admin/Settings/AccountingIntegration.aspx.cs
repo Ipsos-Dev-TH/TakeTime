@@ -69,6 +69,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "voucherSyncMode", config.VoucherSyncMode },
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "posDailyRollup", config.IsPosDailyRollupEnabled },
+                    { "stockQtySync", config.IsStockQtySyncEnabled },
+                    { "stockQtyPull", config.IsStockQtyPullEnabled },
                     { "attachFiles", config.AttachFiles },
                     { "depositVatRecognition", config.DepositVatRecognition },
                     { "depositDeferOutputVat", config.IsDepositOutputVatDeferred },
@@ -256,6 +258,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("posDailyRollup")) config.SetConfig("Nexaacc_PosDailyRollup", BoolToFlag(data["posDailyRollup"]));
+                if (data.ContainsKey("stockQtySync")) config.SetConfig("Nexaacc_StockQtySync", BoolToFlag(data["stockQtySync"]));
+                if (data.ContainsKey("stockQtyPull")) config.SetConfig("Nexaacc_StockQtyPull", BoolToFlag(data["stockQtyPull"]));
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
                 if (data.ContainsKey("depositVatRecognition"))
                 {

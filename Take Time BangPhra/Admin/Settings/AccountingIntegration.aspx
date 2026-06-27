@@ -199,6 +199,28 @@
                     </div>
                 </div>
                 <div class="config-item">
+                    <label>Sync จำนวนสต๊อก → NextAcc (ขาออก)</label>
+                    <select id="cfgStockQtySync">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ดันจำนวนรับเข้า/ตัดออก ไป NextAcc (/product/stock/adjust)</option>
+                    </select>
+                    <div class="help-text">
+                        ดันจำนวนสต๊อก (รับเข้า/ขาย/ปรับ/ตัดจำหน่าย) ของ TakeTime ไปอัปเดต qty ฝั่ง NextAcc แบบ qty-only
+                        (ไม่ซ้ำ GL กับ journal ที่ส่งอยู่). ต้อง Sync ผังสินค้า (product master) ให้ map ก่อน
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>Sync จำนวนสต๊อก ← NextAcc (ขากลับ)</label>
+                    <select id="cfgStockQtyPull">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ดึงการปรับสต๊อกที่ทำฝั่ง NextAcc กลับเข้า TakeTime</option>
+                    </select>
+                    <div class="help-text">
+                        ดึง stock movement ที่ <b>ปรับ/นับ/โอนในฝั่ง NextAcc เอง</b> กลับมาลง Product_In/Out ของ TakeTime
+                        (กัน echo ด้วย movement id). เปิดคู่กับขาออกเพื่อให้สต๊อกตรงกัน 2 ทาง
+                    </div>
+                </div>
+                <div class="config-item">
                     <label>แนบไฟล์เอกสาร</label>
                     <select id="cfgAttachFiles">
                         <option value="true">เปิด — ส่งไฟล์ใบเสร็จ/สลิปไปพร้อมเอกสาร</option>
@@ -776,6 +798,8 @@
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgPosDailyRollup').value = cfg.posDailyRollup ? 'true' : 'false';
+                document.getElementById('cfgStockQtySync').value = cfg.stockQtySync ? 'true' : 'false';
+                document.getElementById('cfgStockQtyPull').value = cfg.stockQtyPull ? 'true' : 'false';
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
@@ -830,6 +854,8 @@
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
                 posDailyRollup: document.getElementById('cfgPosDailyRollup').value === 'true',
+                stockQtySync: document.getElementById('cfgStockQtySync').value === 'true',
+                stockQtyPull: document.getElementById('cfgStockQtyPull').value === 'true',
                 attachFiles: document.getElementById('cfgAttachFiles').value,
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
                 depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,

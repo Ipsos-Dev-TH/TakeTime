@@ -1296,6 +1296,24 @@ namespace Take_Time_BangPhra.Integration
         // ใช้ X-Api-Key (acc_) — Integration Key (int_) ใช้ไม่ได้
         // ──────────────────────────────────────────────
 
+        // ──────────────────────────────────────────────
+        // Inventory qty (company endpoint /product/stock/*) — int_ ผ่าน X-Api-Key fallback ได้
+        // ──────────────────────────────────────────────
+
+        /// <summary>ปรับจำนวนสต๊อกฝั่ง NextAcc (qty-only, ไม่โพสต์ GL): POST /product/stock/adjust → StockMovement ที่สร้าง</summary>
+        public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest request)
+        {
+            return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
+                $"{CompanyPath}/product/stock/adjust", request);
+        }
+
+        /// <summary>ดึง stock movements ของสินค้า 1 ตัวจาก NextAcc: GET /product/{productId}/stock/movements</summary>
+        public async Task<ApiResponse<List<StockMovementResponse>>> GetProductStockMovementsAsync(Guid productId)
+        {
+            return await GetAsync<ApiResponse<List<StockMovementResponse>>>(
+                $"{CompanyPath}/product/{productId}/stock/movements");
+        }
+
         public async Task<ApiResponse<PayrollSyncEmployeesResponse>> SyncPayrollEmployeesAsync(PayrollSyncEmployeesRequest request)
         {
             return await PostAsync<PayrollSyncEmployeesRequest, ApiResponse<PayrollSyncEmployeesResponse>>(

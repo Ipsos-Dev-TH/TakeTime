@@ -113,6 +113,11 @@ namespace Take_Time_BangPhra.Integration
         /// → sync รายได้+VAT ขาย + COGS ตัดสต๊อก อัตโนมัติผ่าน background timer. default ปิด</summary>
         public bool IsPosDailyRollupEnabled => GetConfig("Nexaacc_PosDailyRollup", "0") == "1";
 
+        /// <summary>ดันจำนวนสต๊อก (ขาออก) TakeTime → NextAcc /product/stock/adjust (qty-only). default ปิด</summary>
+        public bool IsStockQtySyncEnabled => GetConfig("Nexaacc_StockQtySync", "0") == "1";
+        /// <summary>ดึงจำนวนสต๊อก (ขากลับ) NextAcc → TakeTime (ปรับสต๊อกฝั่ง NextAcc เอง). default ปิด</summary>
+        public bool IsStockQtyPullEnabled => GetConfig("Nexaacc_StockQtyPull", "0") == "1";
+
         // ──────────────────────────────────────────────
         // Deposit VAT recognition timing (จุดความรับผิด VAT ของเงินมัดจำ)
         // ──────────────────────────────────────────────
