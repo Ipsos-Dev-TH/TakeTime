@@ -311,11 +311,17 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch { }
 
-                // แจ้งบันทึกสำเร็จ (server-side redirect จาก Button3 → ?saved=1) — เชื่อถือได้กว่า alert ฝั่ง client
+                // แจ้งบันทึกสำเร็จ (server-side redirect จาก Button3 → ?saved=1) + สถานะ sync ไป NextAcc
                 if (Request.QueryString["saved"] == "1")
                 {
+                    string s = Request.QueryString["s"] ?? "";
+                    string syncMsg;
+                    if (s == "queued") syncMsg = "✅ ส่งเข้าคิว sync ไป NextAcc แล้ว";
+                    else if (s == "off") syncMsg = "ℹ️ ยังไม่ได้เปิด/ตั้งค่า NextAcc — เอกสารบันทึกในระบบเท่านั้น (ไม่ sync)";
+                    else syncMsg = "⚠️ บันทึกแล้ว แต่ส่ง sync ไป NextAcc ไม่สำเร็จ — ตรวจสอบการตั้งค่า/คิว sync";
+                    string alertMsg = ("✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว\\n" + syncMsg).Replace("'", "\\'");
                     ClientScript.RegisterStartupScript(this.GetType(), "savedok",
-                        "alert('✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว');", true);
+                        "alert('" + alertMsg + "');", true);
                 }
 
             }
@@ -625,14 +631,19 @@ namespace Take_Time_BangPhra.Account.Report
 
                     var validationResults = new System.Collections.Generic.List<AccountingArithmeticValidator.ValidationResult>();
 
-                    if (vWhtRate > 0)
+                    // WHT auto-calc check (wht == subtotal×rate): ข้ามได้ในโหมด "แก้ไขยอดเงินด้วยตนเอง"
+                    // เพราะผู้ใช้อาจกรอก WHT เองที่ต่างจากสูตร
+                    if (vWhtRate > 0 && !CheckBox1.Checked)
                     {
                         var whtCheck = AccountingArithmeticValidator.ValidateWhtCalculation(vSubtotal, vWhtRate, vWht);
                         if (!whtCheck.IsValid) validationResults.Add(whtCheck);
                     }
 
+                    // สมการยอด (ยอดก่อน VAT + VAT − WHT = สุทธิ) — บังคับ "เสมอ" แม้โหมดแก้ยอดเอง
+                    // กัน checkbox "แก้ไขยอดเงินด้วยตนเอง" กลายเป็นปุ่มปิด validation ทั้งหมด (ข้อมูลบัญชีเพี้ยน)
                     var totalCheck = AccountingArithmeticValidator.ValidateInvoiceTotal(vSubtotal, vVat, vWht, vNet);
-                    if (!totalCheck.IsValid) validationResults.Add(totalCheck);
+                    bool totalInvalid = !totalCheck.IsValid;
+                    if (totalInvalid) validationResults.Add(totalCheck);
 
                     if (validationResults.Count > 0)
                     {
@@ -640,11 +651,14 @@ namespace Take_Time_BangPhra.Account.Report
                         foreach (var r in validationResults)
                             AccountingArithmeticValidator.LogValidationFailure("VOUCHER", txtVoucherNo.Text, r, user);
 
-                        if (AccountingArithmeticValidator.HasBlockingError(validationResults) && !CheckBox1.Checked)
+                        // บล็อกเมื่อสมการยอดไม่ผ่าน (เสมอ) หรือมี blocking error อื่นในโหมดปกติ
+                        bool block = totalInvalid
+                            || (AccountingArithmeticValidator.HasBlockingError(validationResults) && !CheckBox1.Checked);
+                        if (block)
                         {
                             string errMsg = AccountingArithmeticValidator.FormatErrors(validationResults).Replace("'", "\\'").Replace("\n", "\\n");
                             ClientScript.RegisterStartupScript(this.GetType(), "acctvalidate",
-                                $"alert('⚠️ ตรวจสอบความถูกต้องทางบัญชีไม่ผ่าน:\\n\\n{errMsg}\\n\\nกรุณาแก้ไขก่อนบันทึก หรือเลือก \"แทนที่ค่าตรวจสอบ\" เพื่อบันทึกแบบ override');", true);
+                                $"alert('⚠️ ตรวจสอบความถูกต้องทางบัญชีไม่ผ่าน:\\n\\n{errMsg}\\n\\nยอด: ยอดก่อน VAT + VAT − WHT ต้องเท่ากับยอดสุทธิ — กรุณาแก้ไขก่อนบันทึก');", true);
                             return;
                         }
                     }
@@ -1047,6 +1061,7 @@ namespace Take_Time_BangPhra.Account.Report
                 }
 
                 // Auto-sync voucher to accounting (with per-line expense categories)
+                string syncStatus = "off";   // off=ปิด/ไม่ตั้งค่า, queued=ส่งคิวแล้ว, err=ล้มเหลว
                 try
                 {
                     var config = new Integration.AccountingConfig(conn);
@@ -1148,13 +1163,14 @@ namespace Take_Time_BangPhra.Account.Report
                         // Check if payment method is Cash or Bank (for auto-payment recording)
                         bool paidHowIsCashOrBank = sync.IsPaidHowCashOrBank(paymentMethod);
 
-                        sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                        long syncQid = sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
                             hasInputVat: hasVat, whtRate: syncWhtRate, whtAmount: syncWhtAmount,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines,
                             isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
                             supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId,
                             vatAmount: vatAmt);
+                        syncStatus = syncQid > 0 ? "queued" : "err";
 
                         // Asset reclassification: DR Fixed Asset / CR Expense
                         if (chkRecordAsset.Checked && voucherAmount > 0)
@@ -1170,12 +1186,13 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
+                    syncStatus = "err";
                     new code().Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentVoucher): docNum={docNum} {accEx.Message}", "SYSTEM");
                 }
 
                 // บันทึกสำเร็จ → redirect ฝั่ง server (เชื่อถือได้กว่า alert+window.location ฝั่ง client
-                // ซึ่งเงียบหายถ้า JS error) แล้วแสดง alert ผ่าน ?saved=1 ใน Page_Load
-                Response.Redirect("/Account/PaymentVoucher?saved=1", false);
+                // ซึ่งเงียบหายถ้า JS error) แล้วแสดง alert ผ่าน ?saved=1 ใน Page_Load (พร้อมสถานะ sync)
+                Response.Redirect("/Account/PaymentVoucher?saved=1&s=" + syncStatus, false);
                 Context.ApplicationInstance.CompleteRequest();
                 return;
             }

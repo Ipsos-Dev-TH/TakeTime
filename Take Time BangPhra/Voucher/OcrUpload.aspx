@@ -40,7 +40,7 @@
                 </div>
             </div>
             <asp:Button ID="btnScan" runat="server" CssClass="ocr-btn" Text="อัปโหลด & สแกน OCR" OnClick="btnScan_Click"
-                OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='⏳ กำลังสแกน...';" UseSubmitBehavior="false" />
+                OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='⏳ กำลังสแกน...'; var o=document.getElementById('ocrOverlay'); if(o){document.getElementById('ocrOverlayMsg').innerText='กำลังสแกน OCR… อาจใช้เวลาสักครู่ (อย่าปิดหน้านี้)'; o.style.display='flex';}" UseSubmitBehavior="false" />
             <asp:Literal ID="litStatus" runat="server" />
         </div>
 
@@ -97,7 +97,7 @@
             <asp:Literal ID="litSuggested" runat="server" />
             <div style="margin-top:12px;">
                 <asp:Button ID="btnCreate" runat="server" CssClass="ocr-btn green" Text="สร้างใบสำคัญจ่าย & อนุมัติ" OnClick="btnCreate_Click"
-                    OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='กำลังสร้าง...';" UseSubmitBehavior="false" />
+                    OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='กำลังสร้าง...'; var o=document.getElementById('ocrOverlay'); if(o){document.getElementById('ocrOverlayMsg').innerText='กำลังสร้าง & อนุมัติเอกสารใน NextAcc… (อย่าปิดหน้านี้)'; o.style.display='flex';}" UseSubmitBehavior="false" />
                 <span class="ocr-hint">การกดนี้จะสร้างเอกสารใน NextAcc และอนุมัติ (auto-post GL)</span>
             </div>
         </asp:Panel>
@@ -106,5 +106,14 @@
         <asp:HiddenField ID="hfScanId" runat="server" />
         <asp:HiddenField ID="hfDebitAcc" runat="server" />
         <asp:HiddenField ID="hfHasWht" runat="server" />
+        <asp:HiddenField ID="hfCreatedDocId" runat="server" />
     </div>
+
+    <div id="ocrOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:22px 30px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,.25); font-size:15px; text-align:center;">
+            <div style="width:38px; height:38px; margin:0 auto 12px; border:4px solid #cbd5e0; border-top-color:#2b6cb0; border-radius:50%; animation:ocrspin 0.8s linear infinite;"></div>
+            <span id="ocrOverlayMsg">กำลังประมวลผล… กรุณารอสักครู่ (อย่าปิดหน้านี้)</span>
+        </div>
+    </div>
+    <style>@keyframes ocrspin { to { transform: rotate(360deg); } }</style>
 </asp:Content>

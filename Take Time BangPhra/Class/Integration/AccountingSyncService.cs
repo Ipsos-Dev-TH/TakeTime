@@ -1755,8 +1755,33 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // M8 idempotency: ถ้าเอกสารนี้บันทึกชำระเงินสำเร็จไปแล้ว (มี Nexaacc_Payment_Id)
+                // → ข้าม เพื่อกันจ่ายซ้ำเมื่อ queue retry (เช่น retry หลัง step อื่นล้มเหลว)
+                string existingPayId = LookupVoucherPaymentId(docNumber);
+                if (!string.IsNullOrEmpty(existingPayId))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"AutoRecordPayment: doc={docNumber} มี paymentId={existingPayId} แล้ว — ข้าม (idempotent)", "SYSTEM");
+                    return;
+                }
+
                 decimal payAmount = totalAmount - whtAmount;
                 if (payAmount <= 0) return;
+
+                // M6: ปิดยอดด้วย BalanceDue จริงของเอกสาร (กัน WHT/VAT rounding mismatch → ค้างชำระเศษ)
+                // ปรับเฉพาะเมื่อต่างกันแค่เศษปัด (≤ 2 บาท); ถ้าต่างมากแปลว่ามีอย่างอื่นผิด → คงยอดเดิม
+                try
+                {
+                    var docResp = await _apiClient.GetDocumentAsync(documentId);
+                    decimal bal = docResp?.data?.BalanceDue ?? 0m;
+                    if (bal > 0m && Math.Abs(bal - payAmount) <= 2.00m && bal != payAmount)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecordPayment: doc={docNumber} ปรับยอดชำระตาม BalanceDue {bal:N2} (เดิม {payAmount:N2}) กันเศษค้างชำระ", "SYSTEM");
+                        payAmount = bal;
+                    }
+                }
+                catch { /* ดึง BalanceDue ไม่ได้ → ใช้ payAmount เดิม (total − wht) */ }
 
                 string method = AccountingDataMapper.NormalizePaymentMethod(paymentMethod);
 
@@ -1866,15 +1891,19 @@ namespace Take_Time_BangPhra.Integration
                 }
                 else
                 {
+                    // M8: อย่ากลืน error เงียบ ๆ (เดิมทำให้ AP ค้างเปิดใน NextAcc โดยไม่มีใครรู้)
+                    // → throw เพื่อให้ queue mark FAILED + retry (idempotent guard ด้านบนกันจ่ายซ้ำ)
                     _code.Logs(_connectionString, "AccountingSync",
                         $"AutoRecordPayment: FAILED doc={docNumber} msg={paymentMsg ?? "null response"}",
                         "SYSTEM");
+                    throw new Exception($"AutoRecordPayment failed for doc={docNumber}: {paymentMsg ?? "null response"}");
                 }
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"AutoRecordPayment: ERROR doc={docNumber} {ex.Message}", "SYSTEM");
+                throw;   // M8: ให้ queue retry แทนการปล่อยให้ AP ค้างเปิดเงียบ ๆ
             }
         }
 
@@ -2161,6 +2190,29 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"SetVoucherDocMarker: doc={documentNumber} {ex.Message}", "SYSTEM");
             }
+        }
+
+        /// <summary>คืน Nexaacc_Payment_Id ของใบสำคัญจ่าย (ถ้าบันทึกชำระเงินแล้ว) — ใช้กันจ่ายซ้ำ (M8 idempotent)</summary>
+        private string LookupVoucherPaymentId(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Payment_Id FROM Account_Payment WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Nexaacc_Payment_Id"] != DBNull.Value)
+                {
+                    string v = dt.Rows[0]["Nexaacc_Payment_Id"].ToString();
+                    return string.IsNullOrWhiteSpace(v) ? null : v;
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVoucherPaymentId: doc={documentNumber} {ex.Message}", "SYSTEM");
+            }
+            return null;
         }
 
         private string LookupReceiptPaymentMarker(string receiptNumber)

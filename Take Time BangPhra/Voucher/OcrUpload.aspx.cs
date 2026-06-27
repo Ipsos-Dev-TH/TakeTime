@@ -163,13 +163,24 @@ namespace Take_Time_BangPhra.Voucher
                 client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็นผู้จัดทำ/audit
                 string target = ddlTargetType.SelectedValue;
 
-                // สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId/Name)
-                var created = RunSync(() => client.CreateDocumentFromOcrAsync(scanId, target));
-                Guid? docId = created?.data?.CreatedDocumentId;
-                if (docId == null || docId == Guid.Empty)
+                // Resume guard: ถ้าเคยสร้าง Draft แล้วแต่ขั้นตอนถัดไป (update/approve) ล้มเหลว
+                // → ใช้ docId เดิม ไม่เรียก create-document ซ้ำ (กัน Draft ซ้ำใน NextAcc)
+                Guid? docId = null;
+                if (Guid.TryParse(hfCreatedDocId.Value, out var resumeDoc) && resumeDoc != Guid.Empty)
                 {
-                    Msg(litResult, "err", "สร้างเอกสารไม่สำเร็จ: " + (created?.message ?? "NextAcc ไม่คืนรหัสเอกสาร"));
-                    return;
+                    docId = resumeDoc;
+                }
+                else
+                {
+                    // สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId/Name)
+                    var created = RunSync(() => client.CreateDocumentFromOcrAsync(scanId, target));
+                    docId = created?.data?.CreatedDocumentId;
+                    if (docId == null || docId == Guid.Empty)
+                    {
+                        Msg(litResult, "err", "สร้างเอกสารไม่สำเร็จ: " + (created?.message ?? "NextAcc ไม่คืนรหัสเอกสาร"));
+                        return;
+                    }
+                    hfCreatedDocId.Value = docId.Value.ToString();   // persist ทันที กัน re-create ตอนกดซ้ำ
                 }
 
                 // บังคับแหล่งเงิน + ใช้ค่าที่ผู้ใช้ยืนยัน (PUT แก้ Draft ก่อน approve)
@@ -206,11 +217,10 @@ namespace Take_Time_BangPhra.Voucher
                     }
                     catch (Exception uex)
                     {
-                        // เอกสาร Draft ถูกสร้างแล้ว แต่บังคับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ → ไม่ approve อัตโนมัติ
+                        // Draft ถูกสร้างแล้ว แต่ปรับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ → คงสถานะไว้ (panel + hfCreatedDocId)
+                        // กด"สร้าง"อีกครั้งจะ resume จาก Draft เดิม (ไม่สร้างซ้ำ) ลอง update+approve ใหม่
                         Msg(litResult, "warn", "สร้างเอกสาร (Draft) แล้ว แต่ปรับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ: " + uex.Message +
-                            " — กรุณาตรวจ/อนุมัติใน NextAcc เอง");
-                        pnlReview.Visible = false;
-                        hfScanId.Value = "";
+                            " — กด \"สร้างใบสำคัญจ่าย & อนุมัติ\" อีกครั้งเพื่อลองใหม่ (จะใช้เอกสารเดิม ไม่สร้างซ้ำ) หรือไปจัดการใน NextAcc");
                         return;
                     }
                 }
@@ -271,6 +281,7 @@ namespace Take_Time_BangPhra.Voucher
 
                 pnlReview.Visible = false;
                 hfScanId.Value = "";
+                hfCreatedDocId.Value = "";   // เสร็จสมบูรณ์ → เคลียร์ resume guard
                 Msg(litResult, "ok", "สำเร็จ! " + approveMsg + attachNote);
             }
             catch (AccountingApiException ae)

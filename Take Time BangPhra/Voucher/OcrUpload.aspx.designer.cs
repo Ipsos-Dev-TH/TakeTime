@@ -32,5 +32,6 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.HiddenField hfScanId;
         protected global::System.Web.UI.WebControls.HiddenField hfDebitAcc;
         protected global::System.Web.UI.WebControls.HiddenField hfHasWht;
+        protected global::System.Web.UI.WebControls.HiddenField hfCreatedDocId;
     }
 }
