@@ -10,7 +10,8 @@ Main project: `Take Time BangPhra/`. Database scripts: `Database/` (phased migra
 ## NextAcc accounting integration
 
 NextAcc = "Nexaacc" accounting backend. **Source of truth repo:** `Wachira-d/Accounting`
-(clone to read the real API — it is the authoritative contract, not guesswork).
+→ **https://github.com/Wachira-d/Accounting** (ดู code/สัญญา API ล่าสุดของ NextAcc ที่นี่เสมอ —
+authoritative contract, ห้ามเดา. clone หรือเปิด GitHub อ่านจริงก่อน map endpoint ใด ๆ).
 
 TakeTime side lives in `Take Time BangPhra/Class/Integration/`:
 `AccountingConfig`, `AccountingApiClient`, `AccountingDataMapper`, `AccountingSyncService`,
