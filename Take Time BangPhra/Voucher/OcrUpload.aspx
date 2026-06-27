@@ -41,8 +41,18 @@
             </div>
             <asp:Button ID="btnScan" runat="server" CssClass="ocr-btn" Text="อัปโหลด & สแกน OCR" OnClick="btnScan_Click"
                 OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='⏳ กำลังสแกน...'; var o=document.getElementById('ocrOverlay'); if(o){document.getElementById('ocrOverlayMsg').innerText='กำลังสแกน OCR… อาจใช้เวลาสักครู่ (อย่าปิดหน้านี้)'; o.style.display='flex';}" UseSubmitBehavior="false" />
-            <asp:Literal ID="litStatus" runat="server" />
         </div>
+
+        <asp:UpdatePanel ID="upOcr" runat="server" UpdateMode="Conditional">
+        <ContentTemplate>
+        <asp:Literal ID="litStatus" runat="server" />
+
+        <asp:Panel ID="pnlScanning" runat="server" Visible="false" CssClass="ocr-card">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width:28px;height:28px;border:4px solid #cbd5e0;border-top-color:#2b6cb0;border-radius:50%;animation:ocrspin .8s linear infinite;"></div>
+                <span>กำลังประมวลผล OCR… ระบบจะแสดงผลให้อัตโนมัติเมื่อเสร็จ (ไม่ต้องรีเฟรชหน้า อย่าปิดหน้านี้)</span>
+            </div>
+        </asp:Panel>
 
         <asp:Panel ID="pnlReview" runat="server" Visible="false" CssClass="ocr-card">
             <h3><i class="fas fa-clipboard-check"></i> ตรวจสอบ & แก้ไขข้อมูลก่อนสร้างเอกสาร</h3>
@@ -103,6 +113,16 @@
         </asp:Panel>
 
         <asp:Literal ID="litResult" runat="server" />
+
+        <%-- โพลล์สถานะ OCR แบบ async (ไม่บล็อก thread) — แสดงผลรีวิวอัตโนมัติเมื่อประมวลผลเสร็จ --%>
+        <asp:Timer ID="tmrPoll" runat="server" Interval="2500" Enabled="false" OnTick="tmrPoll_Tick" />
+        </ContentTemplate>
+        <Triggers>
+            <%-- btnCreate = full postback (มี server-side redirect/Session) ไม่ทำเป็น async --%>
+            <asp:PostBackTrigger ControlID="btnCreate" />
+        </Triggers>
+        </asp:UpdatePanel>
+
         <asp:HiddenField ID="hfScanId" runat="server" />
         <asp:HiddenField ID="hfDebitAcc" runat="server" />
         <asp:HiddenField ID="hfHasWht" runat="server" />

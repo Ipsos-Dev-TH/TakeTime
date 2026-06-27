@@ -12,6 +12,9 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.DropDownList ddlTargetType;
         protected global::System.Web.UI.WebControls.Button btnScan;
         protected global::System.Web.UI.WebControls.Literal litStatus;
+        protected global::System.Web.UI.UpdatePanel upOcr;
+        protected global::System.Web.UI.WebControls.Panel pnlScanning;
+        protected global::System.Web.UI.Timer tmrPoll;
         protected global::System.Web.UI.WebControls.Panel pnlReview;
         protected global::System.Web.UI.WebControls.Literal litMeta;
         protected global::System.Web.UI.WebControls.TextBox txtVendorName;

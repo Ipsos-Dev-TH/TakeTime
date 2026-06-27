@@ -96,33 +96,34 @@ namespace Take_Time_BangPhra.Voucher
                 var result = up.data;
                 Guid scanId = result.Id;
 
-                // poll จนกว่าจะเสร็จ (สูงสุด ~40 วินาที)
-                int tries = 0;
-                while (!IsTerminal(result.ScanStatus) && tries < 20)
-                {
-                    Thread.Sleep(2000);
-                    tries++;
-                    var poll = RunSync(() => client.GetOcrResultAsync(scanId));
-                    if (poll?.data != null) result = poll.data;
-                }
-
-                if (string.Equals(result.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
-                {
-                    Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (result.ProcessingNotes ?? "ไม่ทราบสาเหตุ"));
-                    return;
-                }
-                if (!IsTerminal(result.ScanStatus))
-                {
-                    Msg(litStatus, "warn", "OCR ยังประมวลผลไม่เสร็จ (สถานะ: " + result.ScanStatus + ") — ลองกดสแกนใหม่อีกครั้งภายหลัง");
-                    return;
-                }
-
-                BindReview(result);
-                hfScanId.Value = scanId.ToString();
                 // เก็บไฟล์ที่อัปโหลดไว้ (ผูกกับ scanId) เพื่อแนบเข้าเอกสาร NextAcc ตอนกดสร้าง
+                hfScanId.Value = scanId.ToString();
+                hfCreatedDocId.Value = "";                       // สแกนใหม่ → รีเซ็ต resume guard
                 Session["OcrScanFile_" + scanId.ToString("N")] = tempPath;
                 keepFile = true;
-                Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
+                ViewState["ocrTicks"] = 0;
+
+                // ไม่ poll แบบ block thread อีกต่อไป — ถ้ายังไม่เสร็จให้ Timer (async) โพลล์ต่อ
+                if (IsTerminal(result.ScanStatus))
+                {
+                    if (string.Equals(result.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (result.ProcessingNotes ?? "ไม่ทราบสาเหตุ"));
+                    }
+                    else
+                    {
+                        BindReview(result);
+                        Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
+                    }
+                }
+                else
+                {
+                    // กำลังประมวลผล → แสดง spinner inline + เปิด Timer โพลล์อัตโนมัติ (ไม่ค้างหน้า)
+                    pnlReview.Visible = false;
+                    pnlScanning.Visible = true;
+                    tmrPoll.Enabled = true;
+                    Msg(litStatus, "info", "อัปโหลดแล้ว — กำลังประมวลผล OCR (จะแสดงผลให้อัตโนมัติ)");
+                }
             }
             catch (AuthenticationFailedException ax)
             {
@@ -142,6 +143,69 @@ namespace Take_Time_BangPhra.Voucher
                 if (!keepFile && tempPath != null)
                 {
                     try { TryDeleteScanFile(tempPath); } catch { /* ไฟล์ชั่วคราว — ละเลยถ้าลบไม่ได้ */ }
+                }
+            }
+        }
+
+        /// <summary>โพลล์สถานะ OCR แบบ async (UpdatePanel + Timer) — ไม่บล็อก request thread.
+        /// เมื่อประมวลผลเสร็จ → bind รีวิวอัตโนมัติ; cap ~30 รอบ (~75 วิ) กันโพลล์ไม่จบ</summary>
+        protected void tmrPoll_Tick(object sender, EventArgs e)
+        {
+            Server.ScriptTimeout = 600;
+            Guid scanId;
+            if (!Guid.TryParse(hfScanId.Value, out scanId))
+            {
+                tmrPoll.Enabled = false;
+                pnlScanning.Visible = false;
+                return;
+            }
+
+            int ticks = 0;
+            int.TryParse(ViewState["ocrTicks"]?.ToString(), out ticks);
+            ticks++;
+            ViewState["ocrTicks"] = ticks;
+
+            try
+            {
+                var cfg = new AccountingConfig(Conn);
+                var client = new AccountingApiClient(cfg, Conn);
+                var poll = RunSync(() => client.GetOcrResultAsync(scanId));
+                var result = poll?.data;
+
+                if (result != null && IsTerminal(result.ScanStatus))
+                {
+                    tmrPoll.Enabled = false;
+                    pnlScanning.Visible = false;
+                    if (string.Equals(result.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (result.ProcessingNotes ?? "ไม่ทราบสาเหตุ"));
+                    }
+                    else
+                    {
+                        BindReview(result);
+                        Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
+                    }
+                    return;
+                }
+
+                if (ticks >= 30)   // ~75 วินาที → หยุดโพลล์ กันค้าง
+                {
+                    tmrPoll.Enabled = false;
+                    pnlScanning.Visible = false;
+                    Msg(litStatus, "warn", "OCR ยังประมวลผลไม่เสร็จ — กดสแกนใหม่อีกครั้งภายหลัง");
+                    return;
+                }
+
+                Msg(litStatus, "info", $"กำลังประมวลผล OCR… (รอบ {ticks})");
+            }
+            catch (Exception ex)
+            {
+                // ล้มเหลวชั่วคราว → โพลล์ต่อ ยกเว้นเกิน cap
+                if (ticks >= 30)
+                {
+                    tmrPoll.Enabled = false;
+                    pnlScanning.Visible = false;
+                    Msg(litStatus, "err", "ตรวจผล OCR ล้มเหลว: " + ex.Message);
                 }
             }
         }
