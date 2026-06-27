@@ -2672,7 +2672,10 @@ namespace Take_Time_BangPhra.Integration
             // เมื่อ IncludeVat=false (โดยเฉพาะ company /document PV).
             decimal totalNet = 0m;
             foreach (var ln in lines) totalNet += ln.UnitPrice * (ln.Quantity > 0 ? ln.Quantity : 1);
-            if (hasInputVat && vatAmount > 0 && totalNet > 0)
+            // VAT ผสมจริง = VAT ขาดจาก 7% เต็มของ net เกิน 1 บาท (ไม่ใช่เศษปัดเศษ).
+            // เดิมเช็ค nonTaxableNet >= 0.01 ทำให้ใบภาษีเต็มถูกแตกเป็น line "ไม่มีภาษี" จิ๋ว ๆ (เช่น 0.04) โดยไม่จำเป็น
+            decimal expectedFullVat = Math.Round(totalNet * 0.07m, 2, MidpointRounding.AwayFromZero);
+            if (hasInputVat && vatAmount > 0 && totalNet > 0 && (expectedFullVat - vatAmount) > 1.00m)
             {
                 decimal taxableNet = Math.Round(vatAmount / 0.07m, 2, MidpointRounding.AwayFromZero);
                 decimal nonTaxableNet = Math.Round(totalNet - taxableNet, 2, MidpointRounding.AwayFromZero);

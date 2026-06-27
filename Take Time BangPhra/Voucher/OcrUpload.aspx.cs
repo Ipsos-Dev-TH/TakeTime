@@ -461,9 +461,13 @@ namespace Take_Time_BangPhra.Voucher
             bool userPickedAccount = !string.IsNullOrEmpty(ddlChargeAccount.SelectedValue);
             bool noClaim = ddlVatClaim.SelectedValue == "0";
             bool hasWht = whtRate > 0;
-            decimal taxableNet = vat > 0 ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
-            decimal nonTaxableNet = Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero);
-            bool mixedVat = vat > 0 && nonTaxableNet >= 0.01m && taxableNet > 0;
+            // VAT ผสมจริง = VAT ขาดจาก "7% เต็มของยอดก่อน VAT" เกิน 1 บาท (ไม่ใช่เศษปัดเศษ)
+            //   เดิมเช็ค nonTaxableNet >= 0.01 → ไวเกิน: VAT 82.10 ≈ 7% ของ 1172.90 พอดี แต่ 82.10/0.07
+            //   ปัดเหลือเศษ 0.04 → แตก line "ไม่มีภาษี 0.04" ไร้ความหมาย. ใช้ tolerance 1 บาทแทน
+            decimal expectedFullVat = Math.Round(subTotal * 0.07m, 2, MidpointRounding.AwayFromZero);
+            bool mixedVat = vat > 0 && (expectedFullVat - vat) > 1.00m;
+            decimal taxableNet = mixedVat ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
+            decimal nonTaxableNet = mixedVat ? Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero) : 0m;
             bool needOverride = userPickedAccount || noClaim || hasWht || mixedVat;
 
             if (needOverride && subTotal > 0)
