@@ -505,7 +505,10 @@ namespace Take_Time_BangPhra.Account.Report
         {
             ddlLineChargeNexaacc.Items.Clear();
             ddlLineChargeNexaacc.Items.Add(new ListItem("— ใช้หมวดค่าใช้จ่าย (mapping) —", ""));
-            var na = LoadNexaaccAccounts("Account_Code LIKE '5%' OR Account_Code LIKE '12%'");
+            // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ชื่อมี "กรรมการ")
+            // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร)
+            var na = LoadNexaaccAccounts(
+                "Account_Code LIKE '5%' OR Account_Code LIKE '12%' OR (Account_Code LIKE '2%' AND Account_Name LIKE N'%กรรมการ%')");
             if (na != null)
                 foreach (DataRow r in na.Rows)
                 {

@@ -78,7 +78,7 @@
                 <div class="ocr-field">
                     <label>ผังบัญชีที่จะชาร์จ (บัญชีค่าใช้จ่าย / ฝั่งเดบิต)</label>
                     <asp:DropDownList ID="ddlChargeAccount" runat="server" CssClass="form-control" />
-                    <span class="ocr-hint">รายการดึงจาก<b>ผังบัญชีค่าใช้จ่ายของ NextAcc</b>. ไม่เลือก = คงหลายรายการตามที่ OCR แยก; เลือก = ยุบทุกรายการเป็นบัญชีเดียวนี้</span>
+                    <span class="ocr-hint">รายการดึงจาก<b>ผังบัญชีค่าใช้จ่ายของ NextAcc</b> (+ เจ้าหนี้/เงินทดรองกรรมการ สำหรับเคส "คืนเงินทดรองกรรมการ" = เดบิตเจ้าหนี้กรรมการ / เครดิตธนาคาร). ไม่เลือก = คงหลายรายการตามที่ OCR แยก; เลือก = ยุบทุกรายการเป็นบัญชีเดียวนี้</span>
                 </div>
                 <div class="ocr-field">
                     <label>ภาษีซื้อ (VAT)</label>

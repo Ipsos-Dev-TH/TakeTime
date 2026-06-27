@@ -445,7 +445,10 @@ namespace Take_Time_BangPhra.Voucher
             ddlChargeAccount.Items.Clear();
             ddlChargeAccount.Items.Add(new ListItem("— ใช้บัญชีที่ OCR แนะนำ —", ""));
 
-            var na = LoadNexaaccAccounts("Account_Code LIKE '5%' OR Account_Code LIKE '12%'");
+            // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ที่ชื่อมี "กรรมการ")
+            // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร) ที่เดบิตเป็นหนี้สิน
+            var na = LoadNexaaccAccounts(
+                "Account_Code LIKE '5%' OR Account_Code LIKE '12%' OR (Account_Code LIKE '2%' AND Account_Name LIKE N'%กรรมการ%')");
             if (na != null && na.Rows.Count > 0)
             {
                 foreach (DataRow row in na.Rows)

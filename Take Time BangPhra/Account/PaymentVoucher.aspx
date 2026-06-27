@@ -515,7 +515,7 @@
                     <div style="margin-top:6px;">
                         <span style="font-size:12px; color:#2b6cb0;">หรือเลือกผังบัญชีค่าใช้จ่ายจาก NextAcc โดยตรง:</span>
                         <asp:DropDownList ID="ddlLineChargeNexaacc" runat="server" Width="55%" CssClass="form-control" />
-                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีค่าใช้จ่ายจริงของ NextAcc (5x/12x) → เลี่ยงปัญหา mapping ผิด. เลือกแล้วใช้บัญชีนี้กับรายการที่กำลังเพิ่ม</span>
+                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีค่าใช้จ่ายจริงของ NextAcc (5x/12x + เจ้าหนี้/เงินทดรองกรรมการ สำหรับเคส "คืนเงินทดรองกรรมการ") → เลี่ยงปัญหา mapping ผิด. เลือกแล้วใช้บัญชีนี้กับรายการที่กำลังเพิ่ม</span>
                     </div>
                  </td>
             </tr>
