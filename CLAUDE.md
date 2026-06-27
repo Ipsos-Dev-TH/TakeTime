@@ -175,6 +175,17 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ดึงครั้งแรก. TakeTime อ่าน `OutboundDocumentResponse.Attachments` (fast-path ใน `FetchAndCacheNextAccAttachmentsAsync`
    โหลดผ่าน `DownloadUrl` กัน N+1) ถ้าว่าง/null → fallback `GetAttachmentsAsync` เดิม (มี repair). เมื่อ NextAcc
    deploy แล้ว guard ในหน้า OCR จะ skip การ upload ซ้ำเอง (GetAttachments trigger repair → เจอไฟล์).
+3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
+   เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
+   `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)
+   แก้ปัญหา กสิกร→กรุงไทย; (b) `ddlLineChargeNexaacc` ผังค่าใช้จ่ายจาก NextAcc (5x/12x, value=
+   `Account_Code`) ต่อรายการ — เก็บ code+GUID+ชื่อลง line (`AccountCode` column) ตอน Button2 เพิ่มรายการ
+   → expenseLines ใช้ code นี้ก่อน mapping; (c) `ddlVatClaim` เคลม/ไม่เคลม — **ไม่เคลม = bundle VAT
+   เข้ายอด line (กระจายตามสัดส่วน, ปัดเศษไปบรรทัดสุดท้าย) แล้วส่ง `hasInputVat=false`/`vatAmount=0`** →
+   ได้ §82/5 ทุก endpoint (integration `IntegrationLineRequest` ไม่มี `IsVatClaimable` ต่างจาก company
+   `DocumentLineRequest`). ทั้งหมด fallback ไป mapping เดิมถ้าไม่เลือก/ยังไม่ Sync ผังบัญชี. โหลด dropdown
+   จาก `Accounting_Nexaacc_Accounts` ใน Page_Load !IsPostBack (ViewState คงค่า). Save สำเร็จ → server-side
+   `Response.Redirect(?saved=1)` + alert ใน Page_Load (แทน ClientScript alert+window.location ที่เงียบถ้า JS error).
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
 5. **รับ-side AR closure (DOCUMENT mode):** ✅ DONE. NextAcc `/integration/invoices` posts
    Dr ลูกหนี้การค้า / Cr รายได้ / Cr ภาษีขาย and does **NOT** auto-record a payment (PaymentMethod

@@ -455,6 +455,12 @@
                     &nbsp;
                     <asp:CheckBox ID="chkIsCredit" runat="server" Text=" เครดิต (ยังไม่จ่ายเงิน)" Font-Bold="true" />
                     <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ</span>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">บังคับแหล่งจ่ายเงิน (ผังบัญชี NextAcc):</span>
+                        <asp:DropDownList ID="ddlPaidHowNexaacc" runat="server" Width="55%" CssClass="form-control" />
+                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีจริงของ NextAcc (เงินสด/ธนาคาร/เจ้าหนี้กรรมการ) → เลือกแล้วบังคับ Cr บัญชีนั้นตรง ๆ. เว้นว่าง = ใช้ mapping ตามวิธีจ่ายเงิน</span>
+                    </div>
                  </td>
 
             </tr>
@@ -484,8 +490,17 @@
                             <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
                         </SelectParameters>
                     </asp:SqlDataSource>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">ภาษีซื้อ (VAT):</span>
+                        <asp:DropDownList ID="ddlVatClaim" runat="server" Width="40%" CssClass="form-control">
+                            <asp:ListItem Value="1" Text="เคลมภาษีซื้อ (แยก Dr ภาษีซื้อ)" Selected="True" />
+                            <asp:ListItem Value="0" Text="ไม่เคลม — รวม VAT เข้าค่าใช้จ่าย (§82/5)" />
+                        </asp:DropDownList>
+                        <span style="color:#888; font-size:11px;">ไม่เคลม → NextAcc รวม VAT เข้าบัญชีค่าใช้จ่าย ไม่แยกภาษีซื้อ (ใช้กับใบเสร็จที่เครดิตภาษีซื้อไม่ได้)</span>
+                    </div>
                  </td>
-            
+
             </tr>
 
            
@@ -496,6 +511,12 @@
                     &nbsp;<asp:DropDownList ID="ddlLineCategory" runat="server" Width="60%" AppendDataBoundItems="true">
                     <asp:ListItem Value="">---เลือกหมวดค่าใช้จ่าย---</asp:ListItem>
                     </asp:DropDownList>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">หรือเลือกผังบัญชีค่าใช้จ่ายจาก NextAcc โดยตรง:</span>
+                        <asp:DropDownList ID="ddlLineChargeNexaacc" runat="server" Width="55%" CssClass="form-control" />
+                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีค่าใช้จ่ายจริงของ NextAcc (5x/12x) → เลี่ยงปัญหา mapping ผิด. เลือกแล้วใช้บัญชีนี้กับรายการที่กำลังเพิ่ม</span>
+                    </div>
                  </td>
             </tr>
 
