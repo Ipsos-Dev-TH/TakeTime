@@ -68,15 +68,21 @@ namespace Take_Time_BangPhra.Voucher
             }
 
             string tempPath = null;
+            bool keepFile = false;   // เก็บไฟล์ไว้ให้ btnCreate แนบเข้าเอกสาร NextAcc (ไม่ลบใน finally)
             try
             {
                 var cfg = new AccountingConfig(Conn);
                 var client = new AccountingApiClient(cfg, Conn);
                 client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็น/audit ใน NextAcc
 
-                // บันทึกไฟล์ชั่วคราว
-                string ext = Path.GetExtension(fuOcr.FileName);
-                tempPath = Path.Combine(Path.GetTempPath(), "ocr_" + Guid.NewGuid().ToString("N") + ext);
+                // บันทึกไฟล์ชั่วคราว — เก็บชื่อไฟล์เดิมไว้ (ในโฟลเดอร์ย่อย) เพื่อใช้เป็นชื่อไฟล์แนบที่อ่านง่าย
+                // (ไม่งั้น NextAcc/ระบบจะตั้งชื่อเป็น ocr_<guid>)
+                string origName = Path.GetFileName(fuOcr.FileName ?? "");
+                if (string.IsNullOrWhiteSpace(origName)) origName = "scan" + Path.GetExtension(fuOcr.FileName);
+                foreach (char ch in Path.GetInvalidFileNameChars()) origName = origName.Replace(ch, '_');
+                string tempDir = Path.Combine(Path.GetTempPath(), "ocrupload_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                tempPath = Path.Combine(tempDir, origName);
                 fuOcr.SaveAs(tempPath);
 
                 // อัปโหลดเข้า OCR inbox (ไม่สร้างเอกสารอัตโนมัติ)
@@ -113,6 +119,9 @@ namespace Take_Time_BangPhra.Voucher
 
                 BindReview(result);
                 hfScanId.Value = scanId.ToString();
+                // เก็บไฟล์ที่อัปโหลดไว้ (ผูกกับ scanId) เพื่อแนบเข้าเอกสาร NextAcc ตอนกดสร้าง
+                Session["OcrScanFile_" + scanId.ToString("N")] = tempPath;
+                keepFile = true;
                 Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
             }
             catch (AuthenticationFailedException ax)
@@ -129,9 +138,10 @@ namespace Take_Time_BangPhra.Voucher
             }
             finally
             {
-                if (tempPath != null && File.Exists(tempPath))
+                // ลบเฉพาะกรณีไม่ได้เก็บไว้ให้ btnCreate แนบ (เช่น OCR ล้มเหลว/ยกเลิก)
+                if (!keepFile && tempPath != null)
                 {
-                    try { File.Delete(tempPath); } catch { /* ไฟล์ชั่วคราว — ละเลยถ้าลบไม่ได้ */ }
+                    try { TryDeleteScanFile(tempPath); } catch { /* ไฟล์ชั่วคราว — ละเลยถ้าลบไม่ได้ */ }
                 }
             }
         }
@@ -225,9 +235,43 @@ namespace Take_Time_BangPhra.Voucher
                         : "อนุมัติแล้ว (ยืนยันคำเตือน)";
                 }
 
+                // แนบไฟล์ที่สแกนเข้าเอกสารใน NextAcc ในรูปแบบ "ไฟล์แนบเอกสาร" (Document attachment)
+                // เพื่อให้แสดงในหน้า CheckPayment ฝั่ง TakeTime ได้ (ตัว linked-scan ที่ NextAcc สร้างเอง
+                // ชื่อ ocr_... เป็นคนละชนิด /attachments/Document/{id} จึงอ่านไม่เจอ → คอลัมน์ไฟล์แนบขึ้น "-")
+                string scanKey = "OcrScanFile_" + scanId.ToString("N");
+                string scanFile = Session[scanKey]?.ToString();
+                string attachNote = "";
+                if (!string.IsNullOrEmpty(scanFile) && File.Exists(scanFile))
+                {
+                    try
+                    {
+                        // แนบเฉพาะเมื่อยังไม่มีไฟล์แนบชนิด Document อยู่แล้ว (กันซ้ำ)
+                        var existing = RunSync(() => client.GetAttachmentsAsync("Document", docId.Value));
+                        bool hasDocAttachment = existing?.data != null && existing.data.Count > 0;
+                        if (!hasDocAttachment)
+                        {
+                            RunSync(() => client.UploadAttachmentAsync("Document", docId.Value, scanFile));
+                            attachNote = " (แนบไฟล์เอกสารแล้ว)";
+                        }
+                        else
+                        {
+                            attachNote = " (มีไฟล์แนบอยู่แล้ว)";
+                        }
+                    }
+                    catch (Exception aex)
+                    {
+                        attachNote = " — แต่แนบไฟล์ไม่สำเร็จ: " + aex.Message;
+                    }
+                    finally
+                    {
+                        TryDeleteScanFile(scanFile);
+                        Session.Remove(scanKey);
+                    }
+                }
+
                 pnlReview.Visible = false;
                 hfScanId.Value = "";
-                Msg(litResult, "ok", "สำเร็จ! " + approveMsg);
+                Msg(litResult, "ok", "สำเร็จ! " + approveMsg + attachNote);
             }
             catch (AccountingApiException ae)
             {
@@ -536,6 +580,24 @@ namespace Take_Time_BangPhra.Voucher
         private void Msg(System.Web.UI.WebControls.Literal lit, string kind, string text)
         {
             lit.Text = "<div class=\"ocr-msg " + kind + "\">" + Server.HtmlEncode(text) + "</div>";
+        }
+
+        /// <summary>ลบไฟล์สแกนชั่วคราว + โฟลเดอร์ย่อยที่สร้างไว้ (ocrupload_*) — ละเลยข้อผิดพลาด</summary>
+        private static void TryDeleteScanFile(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+            try
+            {
+                if (File.Exists(filePath)) File.Delete(filePath);
+                string dir = Path.GetDirectoryName(filePath);
+                if (!string.IsNullOrEmpty(dir)
+                    && Path.GetFileName(dir).StartsWith("ocrupload_", StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, true);
+                }
+            }
+            catch { /* ไฟล์ชั่วคราว — ละเลยถ้าลบไม่ได้ */ }
         }
     }
 }
