@@ -2548,14 +2548,16 @@ namespace Take_Time_BangPhra.Integration
             DateTime periodStart = new DateTime(year, month, 1);
             DateTime periodEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
 
-            // 2. Sync พนักงาน (ให้ EmployeeExternalId/CitizenId map ตรงฝั่ง NextAcc)
-            var employees = LoadEmployeesForPayrollSync();
+            // 2. Sync พนักงาน "เฉพาะคนในงวดนี้" (จาก Payroll_Records) — ให้ EmployeeExternalId map ครบ 1:1
+            //    กับ import lines เสมอ (ครอบคลุมคนที่ลาออก/ไม่มี Employee_Salary active/เงินเดือน 0 ที่
+            //    LoadEmployeesForPayrollSync กรองออก แต่ยังมีในงวด) ไม่งั้น NextAcc map ไม่เจอ → reject ทั้ง run
+            var employees = LoadEmployeesForPayrollPeriod(periodId);
             if (employees.Count > 0)
             {
                 var syncResult = await _apiClient.SyncPayrollEmployeesAsync(
                     new PayrollSyncEmployeesRequest { ExternalSystem = "TakeTime", Rows = employees });
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPayrollRunImport: employee sync — inserted={syncResult?.data?.Inserted} updated={syncResult?.data?.Updated} skipped={syncResult?.data?.Skipped}",
+                    $"ProcessPayrollRunImport: employee sync (period {periodId}) — count={employees.Count} inserted={syncResult?.data?.Inserted} updated={syncResult?.data?.Updated} skipped={syncResult?.data?.Skipped}",
                     "SYSTEM");
             }
 
@@ -2731,6 +2733,58 @@ namespace Take_Time_BangPhra.Integration
                     BankAccountName = row["BankAccountName"]?.ToString(),
                     IsSubjectToSocialSecurity = true,
                     IsActive = true
+                });
+            }
+
+            return employees;
+        }
+
+        /// <summary>
+        /// ดึงพนักงาน "เฉพาะที่อยู่ในงวดเงินเดือนนี้" (จาก Payroll_Records) พร้อม master จาก Admin —
+        /// ใช้ก่อน import เพื่อให้ทุก import line map กับพนักงานใน NextAcc ได้ (ExternalId=EMP-{id}) ครบ
+        /// ไม่ตัดคนที่ลาออก/ไม่มี Employee_Salary active/เงินเดือน 0 ออก (ต่างจาก LoadEmployeesForPayrollSync)
+        /// </summary>
+        private List<PayrollEmployeeSyncRow> LoadEmployeesForPayrollPeriod(int periodId)
+        {
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT A.ID, A.FirstName, A.LastName, A.Title, A.IDCard,
+                         A.Phone, A.Email, A.HireDate, A.Status,
+                         A.BankCode, A.BankAccountNumber, A.BankAccountName,
+                         PR.BaseSalary,
+                         (SELECT TOP 1 Position FROM Employee_Salary WHERE Admin_ID = A.ID AND IsActive = 1) AS Position
+                  FROM Payroll_Records PR
+                  INNER JOIN Admin A ON A.ID = PR.Admin_ID
+                  WHERE PR.PayrollPeriod_ID = @id",
+                new Dictionary<string, object> { { "@id", periodId } });
+
+            var employees = new List<PayrollEmployeeSyncRow>();
+            if (dt == null) return employees;
+
+            foreach (DataRow row in dt.Rows)
+            {
+                int adminId = Convert.ToInt32(row["ID"]);
+                bool active = row["Status"] != DBNull.Value && Convert.ToInt32(row["Status"]) == 1;
+                employees.Add(new PayrollEmployeeSyncRow
+                {
+                    ExternalId = $"EMP-{adminId}",
+                    ExternalSystem = "TakeTime",
+                    EmployeeCode = $"EMP-{adminId:D4}",
+                    TitleTh = row["Title"]?.ToString() ?? "",
+                    FirstNameTh = row["FirstName"]?.ToString() ?? "",
+                    LastNameTh = row["LastName"]?.ToString() ?? "",
+                    CitizenId = row["IDCard"]?.ToString() ?? "",
+                    StartDate = row["HireDate"] != DBNull.Value
+                        ? Convert.ToDateTime(row["HireDate"]) : new DateTime(2020, 1, 1),
+                    BaseSalary = SafeDec(row["BaseSalary"]),
+                    SalaryType = "Monthly",
+                    Position = row["Position"]?.ToString(),
+                    Phone = row["Phone"]?.ToString(),
+                    Email = row["Email"]?.ToString(),
+                    BankName = row["BankCode"]?.ToString(),
+                    BankAccountNumber = row["BankAccountNumber"]?.ToString(),
+                    BankAccountName = row["BankAccountName"]?.ToString(),
+                    IsSubjectToSocialSecurity = true,
+                    IsActive = active
                 });
             }
 
