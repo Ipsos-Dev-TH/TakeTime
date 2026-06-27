@@ -2522,6 +2522,7 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException($"No Payroll_Records for period {periodId} — สร้างรอบเงินเดือนก่อน");
 
             var lines = new List<PayrollImportLine>();
+            var balanceErrors = new List<string>();
             foreach (DataRow r in dtRec.Rows)
             {
                 int adminId = Convert.ToInt32(r["Admin_ID"]);
@@ -2541,6 +2542,12 @@ namespace Take_Time_BangPhra.Integration
                 // TakeTime มี "หักลา (LeaveDeduction)" ที่ไม่มีช่องตรงใน import → รวมเข้า OtherDeductions
                 // เพื่อให้สมการ balance (otherImport = other + leave). ProvidentFund/advance = 0
                 decimal otherImport = other + leave;
+
+                // pre-validate ฝั่งเรา: net == gross − (sso + wht + otherImport) ก่อนส่ง
+                // ถ้าไม่ตรง NextAcc จะ reject ทั้ง run ด้วย 422 แบบ opaque → ดักไว้พร้อมระบุพนักงาน
+                decimal expectedNet = gross - (sso + wht + otherImport);
+                if (Math.Abs(expectedNet - net) > 0.01m)
+                    balanceErrors.Add($"{r["EmployeeName"]}: net {net:N2} ≠ gross {gross:N2} − หัก(SSO {sso:N2}+WHT {wht:N2}+อื่น {otherImport:N2})={expectedNet:N2}");
 
                 lines.Add(new PayrollImportLine
                 {
@@ -2566,6 +2573,11 @@ namespace Take_Time_BangPhra.Integration
                     IncomeTypeCode = "01"           // ม.40(1) เงินเดือน
                 });
             }
+
+            if (balanceErrors.Count > 0)
+                throw new ArgumentException(
+                    "ยอดเงินเดือนไม่ balance (net ≠ gross − หักฝั่งลูกจ้าง) — NextAcc จะปฏิเสธทั้ง run. แก้ที่ Payroll_Records ก่อน:\n"
+                    + string.Join("\n", balanceErrors));
 
             // 4. Import (Recalculate=false) — idempotent ด้วย ExternalRunRef
             var req = new PayrollImportRunRequest
@@ -4715,6 +4727,9 @@ namespace Take_Time_BangPhra.Integration
 
         private static bool IsAlreadyVoided(AccountingApiException ex)
         {
+            // 404 = เอกสาร/รายการถูกลบ/ไม่พบแล้ว, 409 = conflict (มักอยู่สถานะ terminal แล้ว)
+            // → การ void/reverse ซ้ำถือว่าสำเร็จแบบ idempotent (ไม่ใช่ error ที่ต้อง retry วนไป)
+            if (ex.StatusCode == 404 || ex.StatusCode == 409) return true;
             if (ex.StatusCode != 400) return false;
             string body = ex.ResponseBody ?? "";
             const string escapedThai = "\\u0E16\\u0E39\\u0E01\\u0E22\\u0E01\\u0E40\\u0E25\\u0E34\\u0E01\\u0E44\\u0E1B\\u0E41\\u0E25\\u0E49\\u0E27";

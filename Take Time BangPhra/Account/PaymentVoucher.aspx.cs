@@ -1026,11 +1026,24 @@ namespace Take_Time_BangPhra.Account.Report
                 }
 
                 // Create asset if checkbox is checked
+                // (ห่อ try/catch + TryParse: ใบสำคัญจ่ายถูกบันทึกไปแล้ว — อย่าให้ asset ล้มเหลว
+                //  ทำทั้งหน้าพังเป็น error แล้วทิ้ง voucher ค้างไม่ sync)
                 if (chkRecordAsset.Checked)
                 {
-                    decimal purchasePrice = decimal.Parse(TextBox6.Text);
-                    int vendorId = Convert.ToInt32(DropDownList1.SelectedValue);
-                    CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
+                    try
+                    {
+                        decimal purchasePrice;
+                        int vendorId;
+                        if (decimal.TryParse(TextBox6.Text, out purchasePrice)
+                            && int.TryParse(DropDownList1.SelectedValue, out vendorId))
+                        {
+                            CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
+                        }
+                    }
+                    catch (Exception assetEx)
+                    {
+                        try { new code().Logs(conn, "Asset", $"CreateAssetFromPaymentVoucher error: docNum={docNum} {assetEx.Message}", "SYSTEM"); } catch { }
+                    }
                 }
 
                 // Auto-sync voucher to accounting (with per-line expense categories)

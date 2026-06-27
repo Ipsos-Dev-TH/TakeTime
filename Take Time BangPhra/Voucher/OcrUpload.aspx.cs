@@ -338,6 +338,11 @@ namespace Take_Time_BangPhra.Voucher
                 ddlVatClaim.SelectedValue = vatClaimDefault;
 
             var meta = new StringBuilder();
+            // เตือนเมื่อยังไม่ได้ Sync ผังบัญชี NextAcc → dropdown แหล่งจ่ายเงิน/ผังบัญชีจะ fallback ไป
+            // mapping เดิม (เสี่ยงบัญชีผิด เช่น กสิกร→กรุงไทย). ชี้ทางไปกด Sync
+            var chartChk = LoadNexaaccAccounts("Account_Code LIKE '%'");
+            if (chartChk == null || chartChk.Rows.Count == 0)
+                meta.Append("<div class=\"ocr-msg warn\">⚠️ ยังไม่ได้ Sync ผังบัญชีจาก NextAcc — dropdown แหล่งจ่ายเงิน/ผังบัญชีจะใช้ mapping เดิม (อาจได้บัญชีไม่ตรง). แนะนำไปที่ <a href=\"/Admin/Settings/AccountingIntegration\" target=\"_blank\">Admin → Accounting Integration → กด \"Sync บัญชี\"</a> ก่อน</div>");
             if (r.Quality != null)
                 meta.Append("<span class=\"badge\" style=\"background:" + Server.HtmlEncode(r.Quality.Color ?? "#888") + "\">คุณภาพ " +
                     Server.HtmlEncode(r.Quality.Letter ?? "?") + " (" + r.Quality.Score + ")</span> ");

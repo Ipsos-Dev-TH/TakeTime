@@ -1297,15 +1297,23 @@
                 });
         }
 
+        var _postActionBusy = false;
         function postAction(data, resultId) {
             var el = document.getElementById(resultId);
+            if (_postActionBusy) return;          // กันกดบันทึกซ้ำระหว่างรอ
+            _postActionBusy = true;
             el.className = 'test-result loading';
             el.textContent = 'กำลังบันทึก...';
+
+            // timeout 60s กันค้าง "กำลังบันทึก..." ถาวรถ้าเครือข่าย/เซิร์ฟเวอร์ไม่ตอบ
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 60000);
 
             fetch(pageUrl + '?action=' + data.action, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+                body: JSON.stringify(data),
+                signal: controller.signal
             })
             .then(function(r) { return r.json(); })
             .then(function(result) {
@@ -1317,8 +1325,10 @@
             })
             .catch(function(err) {
                 el.className = 'test-result error';
-                el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
-            });
+                el.innerHTML = '<i class="fas fa-times-circle"></i> ' +
+                    (err.name === 'AbortError' ? 'หมดเวลาการเชื่อมต่อ (60 วินาที) — ลองใหม่อีกครั้ง' : err.message);
+            })
+            .then(function() { clearTimeout(timer); _postActionBusy = false; });
         }
         // ── Account Sync & Mapping ──
 

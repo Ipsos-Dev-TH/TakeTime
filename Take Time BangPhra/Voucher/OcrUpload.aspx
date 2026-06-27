@@ -24,7 +24,7 @@
             <h3><i class="fas fa-file-import"></i> สแกนเอกสารด้วย OCR แล้วสร้างใบสำคัญจ่าย</h3>
             <p class="ocr-hint">
                 อัปโหลดใบกำกับภาษี/ใบเสร็จ → ระบบ OCR ดึงข้อมูลให้ตรวจสอบ/แก้ไข → กดสร้างใบสำคัญจ่าย (Draft) และอนุมัติใน NextAcc.
-                ต้องตั้งค่า API key แบบ acc_ และเปิดใช้งาน Accounting Integration ก่อน
+                ต้องเปิดใช้งาน Accounting Integration + ตั้ง Company ID (ใช้ได้ทั้ง key แบบ int_ และ acc_)
             </p>
             <div class="ocr-row">
                 <div class="ocr-field" style="flex:2 1 380px;">
