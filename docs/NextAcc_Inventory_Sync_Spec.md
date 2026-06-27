@@ -106,3 +106,42 @@ Headers: `X-Integration-Key` (int_)
 ## 7. ขั้นต่ำที่รับได้ (ถ้าทำเต็มไม่ได้)
 - อย่างน้อยขอ **§4.1 (รับ movement) + §4.2A (pull changes-since)** ก็พอเริ่ม 2 ทางได้
 - ถ้า NextAcc ไม่นับ qty ต่อสินค้า → แจ้งกลับ; TakeTime จะคง one-way journal เดิม (ไม่เสียเวลาทั้งคู่)
+
+---
+
+## 8. ✅ VERIFIED จาก Wachira-d/Accounting (มิ.ย. 2026, ผ่าน GitHub code search)
+
+**NextAcc มีระบบ inventory เต็มรูปแบบ + นับ qty จริง** (ไม่ใช่แค่ Inventory account ใน GL):
+- Entity **`StockMovement`** (ledger ต่อสินค้า) + costing service (`InventoryCostingService` —
+  `Product.CostingMethod ∈ {SpecificIdentification, FIFO, WeightedAverage}`; ห้าม LIFO), lot/batch (FEFO).
+- `ProductController` (company endpoint `/api/companies/{companyId}/product/*`):
+  - `GET .../product/{productId}/stock-movements` → `ApiResponse<List<StockMovementResponse>>`
+    (`IProductService.GetStockMovementsAsync(companyId, productId)`) — **query ต่อสินค้า** (ไม่ใช่ global feed)
+  - `POST .../product/stock/adjust` (`StockAdjustmentRequest` → `StockMovementResponse`,
+    `AdjustStockAsync`) — ปรับสต็อก/สร้าง movement ฝั่ง NextAcc
+  - `GET .../product/stock/low`, `/product/inventory/valuation|balance|aging`, `/product/stock-counts*`
+- **StockMovement ถูกสร้างอัตโนมัติตอน document approve** (DOCUMENT_FLOW 5.6) + จาก OCR
+  (`StockMovementsCreated`) + StockTransfer. Auth: company endpoint (int_ ผ่าน X-Api-Key fallback ได้).
+- **ไม่มี integration endpoint (`/api/integration/*`) สำหรับ inventory** — เป็น company endpoint ล้วน.
+
+### ผลต่อดีไซน์ (สำคัญมาก)
+1. **ทิศ TT → NextAcc ส่วนใหญ่ "เกิดขึ้นแล้ว" ผ่านเอกสาร** — เมื่อ TakeTime push invoice/receipt/expense
+   (DOCUMENT mode) และ line ผูกกับ product ที่ track stock ฝั่ง NextAcc → NextAcc สร้าง StockMovement
+   ให้เอง. **⟹ ห้าม push movement ตรง ๆ ซ้ำ (จะ double-count).** ต้องยืนยันก่อนว่า product ของ TakeTime
+   บน NextAcc เปิด stock tracking และ line ItemCode map ถึงสินค้าจริงหรือไม่.
+2. **ทิศที่ "ขาด" จริงคือ NextAcc → TT** (สต็อกที่ปรับ/นับ/โอนฝั่ง NextAcc เอง). ดึงผ่าน
+   `GET .../product/{productId}/stock-movements` — แต่ **เป็นต่อสินค้า ไม่มี "changes since" รวม** →
+   pull ต้อง loop ทีละ product + dedup ด้วย `StockMovement.Id` + กรอง movement ที่ "มาจากเอกสารของ TakeTime"
+   (กัน echo/double เข้า ledger ฝั่งเรา).
+3. **คำขอที่จะช่วยให้ inbound ทำได้มีประสิทธิภาพ** (ฝาก NextAcc): เพิ่ม **global delta query**
+   `GET /api/integration/inventory/movements?since={cursor}` ที่คืน movement ทุกสินค้าหลัง cursor พร้อม
+   field `source` (Document/Adjustment/Transfer/Ocr) + `sourceExternalRef` → TakeTime กรอง echo ได้แม่นยำ
+   และไม่ต้อง loop ต่อสินค้า. ถ้าไม่มี global query → TakeTime จะ poll ต่อสินค้าตาม `GetStockMovementsAsync`.
+
+### สิ่งที่ TakeTime จะทำ (อิงของจริงที่ verify แล้ว)
+- **เลิกแนวคิด "push movement"** ทิศออก (เพราะเอกสารทำให้แล้ว) — คงการ sync เอกสาร/journal เดิม
+- โฟกัส **inbound pull**: client `GetStockMovementsAsync(productId)` / `AdjustStockAsync` (ถ้าจำเป็นต้อง
+  เขียนกลับ) + job ดึง movement ที่ NextAcc-originated → ลงเป็น `Product_In`/`Product_Out`
+  (ADJUSTMENT_*) ใน TakeTime, dedup ด้วย `Nexaacc_Movement_Id`
+- ต้องได้ field list เต็มของ `StockMovementResponse` / `StockAdjustmentRequest` (MovementType enum,
+  source/reference, qty, unitCost, date) ก่อนเขียน DTO ฝั่ง TakeTime ให้ตรง
