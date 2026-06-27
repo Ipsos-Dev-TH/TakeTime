@@ -205,6 +205,21 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    timing. **`int_` key keeps the integration-invoice + `SettleReceiptInNextAcc` fallback (item 5)** —
    correct GL totals but single revenue account + deposit-as-revenue caveat remains for `int_`.
    Needs Windows build + live-NextAcc testing (cannot build/test on Linux).
+7. **Payroll (เงินเดือน) — TakeTime calc + NextAcc GL, variable amounts:** TWO modes via
+   `Nexaacc_SyncMode_Payroll`. **JOURNAL_ONLY (now the DEFAULT — no longer inherits DOCUMENT):**
+   TakeTime computes (gross/OT/bonus/deductions/SSO/WHT — fully variable per period) →
+   `EnqueuePayrollJournal` per employee → `MapPayrollToJournal` posts the COMPLETE balanced GL to
+   NextAcc with our exact numbers (Dr SALARY_EXPENSE + Dr SSF_EMPLOYER_EXPENSE / Cr SSF_PAYABLE
+   (emp+er) / Cr WHT_PAYABLE_PND1 (ภ.ง.ด.1) / Cr cash net). TakeTime generates the payslip/voucher
+   PDF locally. **DOCUMENT mode:** NextAcc's NATIVE payroll run (`ProcessPayrollRunSync`:
+   sync employees→create run→**calculate (server-side)**→approve→pay) auto-issues payslip + ภ.ง.ด.1
+   + สปส.1-10 + 50ทวิ + GL — but NextAcc RECALCULATES from employee master + its SSO/tax config and
+   has **no per-employee per-run amount override** (verified: PayrollController has create/calculate/
+   approve/pay/void only; `items` are templates), so it CANNOT honor TakeTime's variable per-period
+   amounts. ⟹ for variable payroll use JOURNAL_ONLY (default); use DOCUMENT only for fixed salary
+   when you want NextAcc's native statutory forms and accept NextAcc's calculation. Statutory forms
+   (ภ.ง.ด.1/สปส) for the JOURNAL path must be filed from TakeTime data (NextAcc can't auto-gen them
+   without the recalculating native run).
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch

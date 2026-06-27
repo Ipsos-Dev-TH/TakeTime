@@ -89,7 +89,11 @@ namespace Take_Time_BangPhra.Integration
 
         public string ReceiptSyncMode => GetConfig("Nexaacc_SyncMode_Receipt", SyncMode);
         public string VoucherSyncMode => GetConfig("Nexaacc_SyncMode_Voucher", SyncMode);
-        public string PayrollSyncMode => GetConfig("Nexaacc_SyncMode_Payroll", SyncMode);
+        // Payroll default = JOURNAL_ONLY (ไม่ inherit DOCUMENT) — เพราะ NextAcc payroll DOCUMENT mode
+        // "คำนวณใหม่ server-side" จาก master พนักงาน ไม่รับยอดต่องวดที่ TakeTime คำนวณ (OT/โบนัส/หักพิเศษ
+        // ผันแปร) → JOURNAL mode โพสต์ GL ครบด้วยตัวเลขจริงของเรา. ตั้ง DOCUMENT เองได้เฉพาะกรณีเงินเดือน
+        // คงที่ + ต้องการให้ NextAcc ออก ภงด.1/สปส/payslip native (ยอมรับว่า NextAcc คำนวณเอง)
+        public string PayrollSyncMode => GetConfig("Nexaacc_SyncMode_Payroll", "JOURNAL_ONLY");
 
         public bool IsReceiptLocal => ReceiptSyncMode.Equals("LOCAL", StringComparison.OrdinalIgnoreCase);
         public bool IsReceiptDocumentMode => ReceiptSyncMode.Equals("DOCUMENT", StringComparison.OrdinalIgnoreCase);
