@@ -5942,6 +5942,46 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // ── Fast path: ไฟล์แนบฝังมากับ integration list response แล้ว (NextAcc มิ.ย. 2026+) ──
+                // โหลดผ่าน DownloadUrl ตรง ๆ → ไม่ต้องยิง GET /attachments ต่อเอกสาร (กัน N+1)
+                // (DownloadUrl = /api/companies/{cid}/attachments/{fileId}/download → ต่อกับ host + X-Api-Key)
+                if (d.Attachments != null && d.Attachments.Count > 0)
+                {
+                    int eidx = 0, eok = 0, efail = 0;
+                    foreach (var a in d.Attachments)
+                    {
+                        eidx++;
+                        string ext = Path.GetExtension(a.FileName ?? "");
+                        if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                        string attName = $"att{eidx}{ext}";
+                        string attLocal = Path.Combine(folder, attName);
+                        if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0) { eok++; continue; }
+
+                        byte[] bytes = null;
+                        string dl = a.DownloadUrl;
+                        if (!string.IsNullOrEmpty(dl))
+                        {
+                            string url = dl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                                ? dl : baseUrl + (dl.StartsWith("/") ? dl : "/" + dl);
+                            bytes = await _apiClient.DownloadFileAsync(url);
+                        }
+                        // fallback: ผ่าน attachment Id endpoint (เผื่อ DownloadUrl ใช้ไม่ได้)
+                        if ((bytes == null || bytes.Length == 0) && a.Id != Guid.Empty)
+                            bytes = await _apiClient.DownloadAttachmentByIdAsync(a.Id);
+
+                        if (bytes != null && bytes.Length > 0) { File.WriteAllBytes(attLocal, bytes); eok++; }
+                        else
+                        {
+                            efail++;
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"FetchAttachments: doc={d.DocumentNumber} ไฟล์ฝัง '{a.FileName}' โหลดไม่สำเร็จ (url='{dl}', id={a.Id})", "SYSTEM");
+                        }
+                    }
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"FetchAttachments: doc={d.DocumentNumber} (embedded) พบ {d.Attachments.Count} ไฟล์ โหลดสำเร็จ {eok} ล้มเหลว {efail}", "SYSTEM");
+                    return true;   // integration list ส่งไฟล์แนบมาแล้ว = แน่ชัด (รวมกรณี repair ฝั่ง NextAcc)
+                }
+
                 // ลองหลาย entity type — NextAcc อาจผูกไฟล์แนบกับ "Document" หรือชนิดเอกสารจริง
                 var entityTypes = new List<string> { "Document" };
                 if (!string.IsNullOrEmpty(d.DocumentType) && d.DocumentType != "Document")

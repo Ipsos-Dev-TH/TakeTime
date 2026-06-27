@@ -1111,6 +1111,23 @@ namespace Take_Time_BangPhra.Integration
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
         public List<OutboundDocumentLineResponse> Lines { get; set; }
+
+        /// <summary>ไฟล์แนบของเอกสาร — NextAcc เพิ่มใน GET /api/integration/documents (มิ.ย. 2026).
+        /// ถ้า null/ว่าง = NextAcc รุ่นเก่าที่ยังไม่ส่งไฟล์แนบมาใน list → fallback เรียก
+        /// GET /api/companies/{cid}/attachments/Document/{id} แยก (ซึ่งมี on-read repair ของ OcrScan ด้วย)</summary>
+        public List<OutboundDocumentAttachmentResponse> Attachments { get; set; }
+    }
+
+    /// <summary>ไฟล์แนบที่ฝังมากับ OutboundDocumentResponse (integration list).
+    /// DownloadUrl = /api/companies/{cid}/attachments/{fileId}/download (relative → ต่อกับ BaseUrl + X-Api-Key)</summary>
+    public class OutboundDocumentAttachmentResponse
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; }
+        public string ContentType { get; set; }
+        public long FileSize { get; set; }
+        public string DownloadUrl { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     public class OutboundDocumentLineResponse

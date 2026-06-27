@@ -164,6 +164,17 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ได้เฉพาะ Draft; null field = คงเดิม, `Lines!=null` = แทนที่. Client: `UploadOcrAsync` /
    `GetOcrResultAsync` / `CreateDocumentFromOcrAsync` / `UpdateDocumentAsync` /
    `ApproveDocumentAsync(id, ApproveDocumentRequest)`. (Future: line-level AI suggest + multi-line edit grid.)
+   **ไฟล์แนบ OCR:** NextAcc create-from-OCR เก็บไฟล์เป็น **linked scan** (`EntityType="OcrScan"`, ชื่อ
+   `ocr_...`) — คนละชนิดกับ Document attachment ที่ `GET /attachments/Document/{id}` อ่าน → คอลัมน์ไฟล์แนบ
+   หน้า CheckPayment ขึ้น "-". **TakeTime fix:** หลัง create+approve ใน `OcrUpload.btnCreate_Click`
+   อัปโหลดไฟล์ที่สแกน (เก็บไว้ใน `Session["OcrScanFile_<scanId>"]` ตอน scan) เป็น Document attachment
+   ผ่าน `UploadAttachmentAsync("Document", docId, file)` **เฉพาะเมื่อ `GetAttachmentsAsync("Document",id)`
+   ว่าง** (กันซ้ำ). **NextAcc-side fix (มิ.ย. 2026):** `GET /integration/documents` เพิ่ม `Attachments[]`
+   (Id/FileName/ContentType/FileSize/DownloadUrl/CreatedAt) + on-read repair ที่ relink `OcrScan`→`Document`
+   ทั้ง `/integration/documents` และ `/attachments?entityType=Document` → เอกสารเก่า auto-repair เมื่อ partner
+   ดึงครั้งแรก. TakeTime อ่าน `OutboundDocumentResponse.Attachments` (fast-path ใน `FetchAndCacheNextAccAttachmentsAsync`
+   โหลดผ่าน `DownloadUrl` กัน N+1) ถ้าว่าง/null → fallback `GetAttachmentsAsync` เดิม (มี repair). เมื่อ NextAcc
+   deploy แล้ว guard ในหน้า OCR จะ skip การ upload ซ้ำเอง (GetAttachments trigger repair → เจอไฟล์).
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
 5. **รับ-side AR closure (DOCUMENT mode):** ✅ DONE. NextAcc `/integration/invoices` posts
    Dr ลูกหนี้การค้า / Cr รายได้ / Cr ภาษีขาย and does **NOT** auto-record a payment (PaymentMethod
