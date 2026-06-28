@@ -594,6 +594,28 @@ namespace Take_Time_BangPhra.Account
                         uid = uidResult.Rows[0][0].ToString();
                     }
 
+                    // เอกสารที่ sync กับ NextAcc → NextAcc คือ source of truth (ยอดล่าสุด/หลังแก้ไข)
+                    // ดึง PDF ทางการจาก NextAcc แบบ force-refresh (ทับ cache เก่าที่อาจค้างยอดผิดหลัง edit)
+                    // → กดดู PDF แล้วได้ยอดตรงกับ NextAcc เสมอ; ดึงไม่ได้ค่อย fallback ไฟล์ local
+                    string hasNextAcc = keys.Values["HasNextAcc"]?.ToString() ?? "";
+                    if (hasNextAcc == "1")
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            bool cancelled = docStatus == "Cancel";
+                            var fresh = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, true, cancelled)
+                            ).GetAwaiter().GetResult();
+                            if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
+                            {
+                                Response.Redirect(fresh.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { /* ดึงจาก NextAcc ไม่ได้ → ใช้ไฟล์ local ด้านล่าง */ }
+                    }
+
                     // Build file paths - check both non-padded month (1,2,...) and padded (01,02,...)
                     List<string> filesToCheck = new List<string>();
 

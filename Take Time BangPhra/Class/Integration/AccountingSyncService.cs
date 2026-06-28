@@ -5619,6 +5619,20 @@ namespace Take_Time_BangPhra.Integration
                     $"PrepareResync: doc={documentNumber} cleaned {affected} existing entries",
                     "SYSTEM");
             }
+
+            // ล้าง PDF cache บนดิสก์ของเอกสารนี้ (NextAcc cache + markers _att.done/_nopdf) →
+            // ครั้งต่อไปจะ re-download ยอดใหม่จาก NextAcc ไม่ค้างยอดเก่าหลัง edit/re-sync
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (!string.IsNullOrEmpty(basePath))
+                {
+                    string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(documentNumber));
+                    if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
+                }
+            }
+            catch { }
+
             return affected;
         }
 
