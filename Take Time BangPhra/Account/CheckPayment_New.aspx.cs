@@ -481,30 +481,7 @@ namespace Take_Time_BangPhra.Account
                     return;
                 }
                 string docNum = keys.Values["ID"]?.ToString() ?? "";
-
-                // ลบ local ได้เฉพาะเมื่อเอกสารถูกลบจาก NextAcc แล้ว (ผู้ใช้ต้องลบ/ยกเลิกบน NextAcc ก่อน)
                 Server.ScriptTimeout = 300;
-                try
-                {
-                    var syncChk = new Integration.AccountingSyncService(conn);
-                    bool? gone = System.Threading.Tasks.Task.Run(() => syncChk.IsNextAccDocumentGoneAsync(docNum, "VOUCHER")).GetAwaiter().GetResult();
-                    if (gone == false)
-                    {
-                        ShowError("เอกสารยังอยู่บน NextAcc — กรุณาลบ/ยกเลิกบน NextAcc ก่อน แล้วค่อยลบในระบบนี้");
-                        return;
-                    }
-                    if (gone == null)
-                    {
-                        ShowError("ตรวจสอบสถานะเอกสารบน NextAcc ไม่ได้ (เครือข่าย/company endpoint ปิด) — ยังไม่ลบ ลองใหม่อีกครั้ง");
-                        return;
-                    }
-                    // gone == true → NextAcc ไม่มีเอกสารแล้ว → ลบ local ได้
-                }
-                catch
-                {
-                    ShowError("ตรวจสอบสถานะเอกสารบน NextAcc ไม่ได้ — ยังไม่ลบ");
-                    return;
-                }
 
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
@@ -521,6 +498,19 @@ namespace Take_Time_BangPhra.Account
                             $"DocNum={docNum}, DeletedBy={deletedBy}", true, GetCurrentUserId());
                     }
                     catch { }
+
+                    // ลบ → void เอกสารบน NextAcc ด้วย (cascade): enqueue VOID_VOUCHER ก่อนลบ local
+                    // (void process แบบ async + retry ใน queue; ใช้ queue history หา NextAcc doc id ไม่ต้องพึ่ง local row)
+                    // no-op ถ้าเอกสารไม่ได้ sync / NextAcc ไม่มีเอกสาร (ProcessVoidVoucher จัดการ already-gone เอง)
+                    try
+                    {
+                        new Integration.AccountingSyncService(conn).EnqueueVoidPaymentVoucher(docNum);
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ {docNum} → enqueue void บน NextAcc (by {deletedBy})", "SYSTEM");
+                    }
+                    catch (Exception vex)
+                    {
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: enqueue void {docNum} ล้มเหลว: {vex.Message}", "SYSTEM");
+                    }
 
                     string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
                     string path = basePath + "\\" + docYear + "\\" + docMonth;
@@ -556,8 +546,7 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    // NextAcc doc ถูกลบไปแล้ว (ตรวจก่อนลบด้านบน) → ไม่ต้อง enqueue void ซ้ำ
-                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ local {docNum} (NextAcc ไม่มีเอกสารแล้ว — ผู้ใช้ลบบน NextAcc ก่อน)", "SYSTEM");
+                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ local {docNum} เรียบร้อย (void NextAcc ถูก enqueue แล้ว)", "SYSTEM");
 
                     // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS/UpdatePanel)
                     // โหลดหน้าใหม่ → row ที่ลบจะหายจริง + แจ้งสำเร็จผ่าน query flag
@@ -968,7 +957,10 @@ namespace Take_Time_BangPhra.Account
                 {
                     // ใช้ if(!confirm())return false; แทน return confirm(); — กันกรณีปุ่ม render เป็น __doPostBack
                     // ที่ "return true" จะตัดไม่ให้ postback ทำงาน (อาการกด OK แล้วเงียบ)
-                    btnDel.OnClientClick = "if(!confirm('ยืนยันลบเอกสารนี้? (ลบถาวร ไม่สามารถกู้คืนได้)'))return false;";
+                    // ยืนยัน 2 ขั้น (ลบ cascade ไป void เอกสารบน NextAcc ด้วย — ทำลายถาวร)
+                    btnDel.OnClientClick =
+                        "if(!confirm('ขั้น 1/2: ลบใบสำคัญจ่ายนี้ และ \\\"ยกเลิก (void) เอกสารบน NextAcc\\\" ด้วย ใช่หรือไม่?'))return false;" +
+                        "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ลบถาวร + void บน NextAcc กู้คืนไม่ได้'))return false;";
                     break;
                 }
             }
