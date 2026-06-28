@@ -6211,6 +6211,34 @@ namespace Take_Time_BangPhra.Integration
             return name;
         }
 
+        /// <summary>true ถ้า PDF cache บนดิสก์ "เก่ากว่า" การ sync ล่าสุดของเอกสาร (ถูกแก้/re-sync หลัง cache)
+        /// → ควรดึงใหม่. ปกติ PDF ถูกโหลดหลัง sync เสร็จ (ไฟล์ใหม่กว่า) จึงคืน false (ใช้ cache, เร็ว)</summary>
+        private bool IsVoucherPdfCacheStale(string documentNumber, string pdfPath)
+        {
+            try
+            {
+                DateTime pdfTime = File.GetLastWriteTime(pdfPath);
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT MAX(ISNULL(Processed_Date, Created_Date)) AS LastSync
+                      FROM Accounting_Sync_Queue
+                      WHERE (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT')
+                        AND Status IN ('COMPLETED','SUPERSEDED')
+                        AND (Payload LIKE @p1 OR Payload LIKE @p2)",
+                    new Dictionary<string, object>
+                    {
+                        { "@p1", $"%\"documentNumber\":\"{documentNumber}\"%" },
+                        { "@p2", $"%\"receiptNumber\":\"{documentNumber}\"%" }
+                    });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["LastSync"] != DBNull.Value)
+                {
+                    DateTime lastSync = Convert.ToDateTime(dt.Rows[0]["LastSync"]);
+                    return lastSync > pdfTime.AddSeconds(1);   // เผื่อ clock skew 1 วิ
+                }
+            }
+            catch { }
+            return false;   // หาไม่ได้ → ถือว่าไม่ stale (ใช้ cache, ไม่ download มั่ว)
+        }
+
         /// <summary>
         /// ดาวน์โหลดเอกสารใบสำคัญจ่ายอย่างเป็นทางการจาก NextAcc (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
         /// คืน NextAccCachedDocument พร้อม relative URL ของ PDF (ถ้าสำเร็จ)
@@ -6226,15 +6254,18 @@ namespace Take_Time_BangPhra.Integration
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
-            // ── Fast path: ถ้า PDF cache อยู่แล้วบนดิสก์ → คืนทันที ไม่ต้อง query DB/ยิง API ──
-            // (ทำให้การค้นหาซ้ำช่วงเดิมเร็วมาก — โหลดจริงเฉพาะครั้งแรกต่อเอกสาร)
+            // ── Fast path: ถ้า PDF cache อยู่แล้วบนดิสก์ + ยังใหม่ → คืนทันที ไม่ต้อง query DB/ยิง API ──
+            // (ทำให้การค้นหาซ้ำช่วงเดิมเร็วมาก — ดึงจริงเฉพาะครั้งแรก/หลังเอกสารถูกแก้)
             {
                 string safeEarly = MakeSafeFileName(voucherDocNumber);
                 string suffixEarly = isCancelled ? "_Cancel" : "";
                 string folderEarly = Path.Combine(basePath, "NextAcc", safeEarly);
                 string pdfEarly = Path.Combine(folderEarly, safeEarly + suffixEarly + ".pdf");
                 string relEarly = "/Documents/Payment/NextAcc/" + safeEarly;
-                if (!forceRefresh && File.Exists(pdfEarly) && new FileInfo(pdfEarly).Length > 0)
+                // ใช้ cache ก็ต่อเมื่อ "ยังใหม่" (ไม่มีการ re-sync เอกสารหลังเวลาที่ cache ไฟล์)
+                // → ปกติเร็ว (ไม่ยิง API); ดึงใหม่เฉพาะตอนเอกสารถูกแก้/re-sync เท่านั้น (กันค้างยอดเก่า)
+                if (!forceRefresh && File.Exists(pdfEarly) && new FileInfo(pdfEarly).Length > 0
+                    && !IsVoucherPdfCacheStale(voucherDocNumber, pdfEarly))
                 {
                     result.Found = true;
                     result.PdfLocalPath = pdfEarly;

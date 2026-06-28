@@ -595,8 +595,8 @@ namespace Take_Time_BangPhra.Account
                     }
 
                     // เอกสารที่ sync กับ NextAcc → NextAcc คือ source of truth (ยอดล่าสุด/หลังแก้ไข)
-                    // ดึง PDF ทางการจาก NextAcc แบบ force-refresh (ทับ cache เก่าที่อาจค้างยอดผิดหลัง edit)
-                    // → กดดู PDF แล้วได้ยอดตรงกับ NextAcc เสมอ; ดึงไม่ได้ค่อย fallback ไฟล์ local
+                    // ดึง PDF ทางการจาก NextAcc แบบ "smart cache": ใช้ไฟล์ cache ถ้ายังใหม่ (เร็ว ไม่ยิง API),
+                    // ดึงใหม่เฉพาะตอนเอกสารถูกแก้/re-sync หลัง cache (กันค้างยอดเก่า) — เช็คใน IsVoucherPdfCacheStale
                     string hasNextAcc = keys.Values["HasNextAcc"]?.ToString() ?? "";
                     if (hasNextAcc == "1")
                     {
@@ -605,7 +605,7 @@ namespace Take_Time_BangPhra.Account
                         {
                             bool cancelled = docStatus == "Cancel";
                             var fresh = System.Threading.Tasks.Task.Run(() =>
-                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, true, cancelled)
+                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, cancelled)
                             ).GetAwaiter().GetResult();
                             if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
                             {
