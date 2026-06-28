@@ -33,6 +33,9 @@ namespace Take_Time_BangPhra.Account
                     {
                         if (Request.QueryString["deleted"] == "1")
                             ScriptManager.RegisterStartupScript(this, GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
+                        if (Request.QueryString["cancelled"] == "1")
+                            ScriptManager.RegisterStartupScript(this, GetType(), "cancelok",
+                                "alert('✅ ยกเลิกเอกสารแล้ว — กำลัง void บน NextAcc และจัดทำใบยกเลิก\\nดูใบยกเลิกได้จากปุ่ม \"ดู PDF\" ในมุมมองรวมเอกสารที่ยกเลิก (รอ sync สักครู่)');", true);
                         InitializePage();
 
                         string syncedQ = Request.QueryString["synced"];
@@ -468,7 +471,7 @@ namespace Take_Time_BangPhra.Account
         {
             if (!chkEnableDelete.Checked)
             {
-                ShowError("กรุณาเปิดใช้งานปุ่มลบก่อน");
+                ShowError("กรุณาติ๊ก \"เปิดใช้งานปุ่มยกเลิกเอกสาร\" ก่อน");
                 return;
             }
 
@@ -512,45 +515,17 @@ namespace Take_Time_BangPhra.Account
                         codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: enqueue void {docNum} ล้มเหลว: {vex.Message}", "SYSTEM");
                     }
 
-                    string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                    string path = basePath + "\\" + docYear + "\\" + docMonth;
-                    string pathPadded = basePath + "\\" + docYear + "\\" + docMonthPadded;
-
-                    var deleteDetailsParams = new Dictionary<string, object>
-                    {
-                        { "@PaymentID", docNum }
-                    };
+                    // ยกเลิก (soft) แทนการลบถาวร — เก็บ row ไว้เป็น "เอกสารยกเลิก" เพื่อพิมพ์ส่งบัญชีได้
+                    // (Status='Cancel' → แสดงในมุมมอง "รวมเอกสารที่ยกเลิก", ดู PDF ดึงใบยกเลิกจาก NextAcc)
+                    // ไม่ลบ detail/ไฟล์ เพื่อคงหลักฐาน; void บน NextAcc ถูก enqueue ไว้แล้วด้านบน
                     codeInstance.DatabaseInsertSafe(conn,
-                        "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
-                        deleteDetailsParams);
+                        "UPDATE [dbo].[Account_Payment] SET Status = N'Cancel' WHERE ID = @ID",
+                        new Dictionary<string, object> { { "@ID", docNum } });
 
-                    // SECURE: Delete payment record with parameterized query
-                    var deletePaymentParams = new Dictionary<string, object>
-                    {
-                        { "@ID", docNum }
-                    };
-                    codeInstance.DatabaseInsertSafe(conn,
-                        "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
-                        deletePaymentParams);
+                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ยกเลิก {docNum} (Status=Cancel) + void NextAcc enqueued (by {deletedBy})", "SYSTEM");
 
-                    // Delete payment files (check both non-padded and padded paths)
-                    foreach (string checkPath in new[] { path, pathPadded })
-                    {
-                        if (Directory.Exists(checkPath))
-                        {
-                            string[] files = Directory.GetFiles(checkPath, docNum + "*");
-                            foreach (string file in files)
-                            {
-                                File.Delete(file);
-                            }
-                        }
-                    }
-
-                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ local {docNum} เรียบร้อย (void NextAcc ถูก enqueue แล้ว)", "SYSTEM");
-
-                    // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS/UpdatePanel)
-                    // โหลดหน้าใหม่ → row ที่ลบจะหายจริง + แจ้งสำเร็จผ่าน query flag
-                    Response.Redirect("~/Account/CheckPayment_New?deleted=1", false);
+                    // Server-side redirect — โหลดหน้าใหม่ + แจ้งผ่าน query flag
+                    Response.Redirect("~/Account/CheckPayment_New?cancelled=1", false);
                     Context.ApplicationInstance.CompleteRequest();
                     return;
                 }
@@ -654,6 +629,27 @@ namespace Take_Time_BangPhra.Account
                             Response.Redirect(relativeUrl);
                             return;
                         }
+                    }
+
+                    // เอกสารยกเลิก: ยังไม่มีใบยกเลิกบนดิสก์ → ดึงจาก NextAcc (ใบเพิ่มหนี้/ต้นฉบับ+ลายน้ำ "ยกเลิก")
+                    // เพื่อพิมพ์ส่งบัญชีได้ (DownloadVoucherDocument จะ cache เป็น _Cancel.pdf ให้ครั้งต่อไป)
+                    if (docStatus == "Cancel")
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            var cached = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, true)
+                            ).GetAwaiter().GetResult();
+                            if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
+                            {
+                                Response.Redirect(cached.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { }
+                        ShowError("ใบยกเลิกยังไม่พร้อม — NextAcc กำลังสร้างเอกสารยกเลิก (void) รอสักครู่แล้วกดดู PDF ใหม่อีกครั้ง");
+                        return;
                     }
 
                     // PDF not found - redirect to edit mode to regenerate PDF
@@ -957,10 +953,10 @@ namespace Take_Time_BangPhra.Account
                 {
                     // ใช้ if(!confirm())return false; แทน return confirm(); — กันกรณีปุ่ม render เป็น __doPostBack
                     // ที่ "return true" จะตัดไม่ให้ postback ทำงาน (อาการกด OK แล้วเงียบ)
-                    // ยืนยัน 2 ขั้น (ลบ cascade ไป void เอกสารบน NextAcc ด้วย — ทำลายถาวร)
+                    // ยืนยัน 2 ขั้น — ยกเลิกเอกสาร + void บน NextAcc (เก็บใบยกเลิกไว้พิมพ์ส่งบัญชี)
                     btnDel.OnClientClick =
-                        "if(!confirm('ขั้น 1/2: ลบใบสำคัญจ่ายนี้ และ \\\"ยกเลิก (void) เอกสารบน NextAcc\\\" ด้วย ใช่หรือไม่?'))return false;" +
-                        "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ลบถาวร + void บน NextAcc กู้คืนไม่ได้'))return false;";
+                        "if(!confirm('ขั้น 1/2: ยกเลิกใบสำคัญจ่ายนี้ และ void เอกสารบน NextAcc ใช่หรือไม่? (เอกสารจะกลายเป็น \\\"ยกเลิก\\\" พิมพ์ใบยกเลิกส่งบัญชีได้)'))return false;" +
+                        "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ยกเลิกถาวร + void บน NextAcc'))return false;";
                     break;
                 }
             }

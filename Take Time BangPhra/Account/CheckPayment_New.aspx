@@ -472,7 +472,7 @@
         <div class="detail-section">
             <div class="detail-title">📋 รายละเอียดใบสำคัญจ่าย</div>
             <div style="margin-bottom: 10px;">
-                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ (Delete)" />
+                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มยกเลิกเอกสาร (Cancel + void NextAcc)" />
             </div>
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
@@ -482,7 +482,7 @@
                 OnRowCommand="gvDetails_RowCommand"
                 OnRowDataBound="gvDetails_RowDataBound">
                 <Columns>
-                    <asp:CommandField ButtonType="Button" HeaderText="ลบ" DeleteText="🗑️ ลบ" ShowDeleteButton="True" />
+                    <asp:CommandField ButtonType="Button" HeaderText="ยกเลิก" DeleteText="🚫 ยกเลิก" ShowDeleteButton="True" />
                     <asp:CommandField ButtonType="Button" HeaderText="ดู PDF" SelectText="📄 ดู PDF" ShowSelectButton="True" />
                     <asp:ButtonField ButtonType="Button" CommandName="edit" Text="✏️ แก้ไข" HeaderText="แก้ไข" />
                     <asp:BoundField DataField="DisplayDoc" HeaderText="เลขที่เอกสาร" />
