@@ -6239,6 +6239,25 @@ namespace Take_Time_BangPhra.Integration
             return false;   // หาไม่ได้ → ถือว่าไม่ stale (ใช้ cache, ไม่ download มั่ว)
         }
 
+        private static void WritePdfAmtMarker(string amtMarker, decimal total)
+        {
+            try { File.WriteAllText(amtMarker, total.ToString("0.0000")); } catch { }
+        }
+
+        /// <summary>true ถ้ายอดรวมจาก NextAcc ปัจจุบัน ≠ ยอดที่ cache ไว้ (เอกสารถูกแก้ ไม่ว่าฝั่งไหน) → ควรดึง PDF ใหม่.
+        /// ไม่มี baseline (ไฟล์ marker) → คืน false (ปล่อยให้ queue-staleness ตัดสิน, ไม่ฟันธงว่าเปลี่ยน)</summary>
+        private static bool PdfAmountChanged(string amtMarker, decimal currentTotal)
+        {
+            try
+            {
+                if (!File.Exists(amtMarker)) return false;
+                if (decimal.TryParse(File.ReadAllText(amtMarker).Trim(), out var stored))
+                    return Math.Abs(stored - currentTotal) > 0.005m;
+            }
+            catch { }
+            return false;
+        }
+
         /// <summary>
         /// ดาวน์โหลดเอกสารใบสำคัญจ่ายอย่างเป็นทางการจาก NextAcc (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
         /// คืน NextAccCachedDocument พร้อม relative URL ของ PDF (ถ้าสำเร็จ)
@@ -6585,6 +6604,7 @@ namespace Take_Time_BangPhra.Integration
             string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
             string noPdfMarker = Path.Combine(folder, "_nopdf.marker");
             string attDoneMarker = Path.Combine(folder, "_att.done");
+            string amtMarker = Path.Combine(folder, "_amt.marker");   // ยอดรวม ณ ตอน cache (ตรวจยอดเปลี่ยน)
             string whtPath = Path.Combine(folder, "wht.pdf");
             string noWhtMarker = Path.Combine(folder, "_nowht.marker");
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
@@ -6600,8 +6620,11 @@ namespace Take_Time_BangPhra.Integration
                 // ใช้ไฟล์ cache เฉพาะที่ "ยังใหม่" — ถ้าเอกสารถูกแก้/re-sync หลัง cache → ถือว่าไม่ cached
                 // เพื่อ re-download ทับยอดใหม่ (กันลิงก์ "เอกสาร NextAcc" ค้างยอดเก่า เช่น 630 ทั้งที่แก้เป็น 530 แล้ว)
                 string ttDocRef = !string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber;
+                // stale ถ้า: (ก) re-sync ใน TakeTime หลัง cache  หรือ  (ข) ยอดรวมจาก NextAcc ปัจจุบัน ≠ ที่ cache ไว้
+                // (ข) ครอบคลุมการแก้ตรงบน NextAcc ด้วย (ไม่มี record ในคิวฝั่งเรา)
                 bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
-                                 && !IsVoucherPdfCacheStale(ttDocRef, pdfPath);
+                                 && !IsVoucherPdfCacheStale(ttDocRef, pdfPath)
+                                 && !PdfAmountChanged(amtMarker, d.TotalAmount);
                 if (pdfCached)
                 {
                     result.Found = true;
@@ -6614,6 +6637,7 @@ namespace Take_Time_BangPhra.Integration
                     if (pdf != null && pdf.Length > 0)
                     {
                         File.WriteAllBytes(pdfPath, pdf);
+                        WritePdfAmtMarker(amtMarker, d.TotalAmount);   // บันทึกยอด baseline ไว้ตรวจรอบหน้า
                         result.Found = true;
                         result.PdfLocalPath = pdfPath;
                         result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
