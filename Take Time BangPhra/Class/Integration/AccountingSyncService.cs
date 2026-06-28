@@ -6597,7 +6597,11 @@ namespace Take_Time_BangPhra.Integration
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 // ── 1) PDF เอกสารหลัก (ถ้า NextAcc มี template) ──
-                bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0;
+                // ใช้ไฟล์ cache เฉพาะที่ "ยังใหม่" — ถ้าเอกสารถูกแก้/re-sync หลัง cache → ถือว่าไม่ cached
+                // เพื่อ re-download ทับยอดใหม่ (กันลิงก์ "เอกสาร NextAcc" ค้างยอดเก่า เช่น 630 ทั้งที่แก้เป็น 530 แล้ว)
+                string ttDocRef = !string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber;
+                bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+                                 && !IsVoucherPdfCacheStale(ttDocRef, pdfPath);
                 if (pdfCached)
                 {
                     result.Found = true;
