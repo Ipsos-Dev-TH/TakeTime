@@ -6244,15 +6244,16 @@ namespace Take_Time_BangPhra.Integration
             try { File.WriteAllText(amtMarker, total.ToString("0.0000")); } catch { }
         }
 
-        /// <summary>true ถ้ายอดรวมจาก NextAcc ปัจจุบัน ≠ ยอดที่ cache ไว้ (เอกสารถูกแก้ ไม่ว่าฝั่งไหน) → ควรดึง PDF ใหม่.
-        /// ไม่มี baseline (ไฟล์ marker) → คืน false (ปล่อยให้ queue-staleness ตัดสิน, ไม่ฟันธงว่าเปลี่ยน)</summary>
-        private static bool PdfAmountChanged(string amtMarker, decimal currentTotal)
+        /// <summary>true ก็ต่อเมื่อ "มี baseline ยอด (marker) + ตรงกับยอด NextAcc ปัจจุบัน" → cache ใช้ได้.
+        /// ไม่มี marker (ไฟล์เก่า/สร้างจาก OCR ที่ไม่ผ่านคิว) หรือยอดต่าง → false → ดึง PDF ใหม่ 1 รอบ
+        /// (ตั้ง/อัปเดต baseline) → self-heal ทุกใบไม่ว่ามาจากไหน (แก้ในระบบเรา/OCR/แก้ตรงบน NextAcc)</summary>
+        private static bool AmtMarkerFresh(string amtMarker, decimal currentTotal)
         {
             try
             {
                 if (!File.Exists(amtMarker)) return false;
                 if (decimal.TryParse(File.ReadAllText(amtMarker).Trim(), out var stored))
-                    return Math.Abs(stored - currentTotal) > 0.005m;
+                    return Math.Abs(stored - currentTotal) <= 0.005m;
             }
             catch { }
             return false;
@@ -6624,7 +6625,7 @@ namespace Take_Time_BangPhra.Integration
                 // (ข) ครอบคลุมการแก้ตรงบน NextAcc ด้วย (ไม่มี record ในคิวฝั่งเรา)
                 bool pdfCached = File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
                                  && !IsVoucherPdfCacheStale(ttDocRef, pdfPath)
-                                 && !PdfAmountChanged(amtMarker, d.TotalAmount);
+                                 && AmtMarkerFresh(amtMarker, d.TotalAmount);
                 if (pdfCached)
                 {
                     result.Found = true;
