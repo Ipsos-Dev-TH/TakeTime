@@ -1524,12 +1524,6 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/product/{productId}", product);
         }
 
-        [Obsolete("JWT-only — will 401 with Integration Key. NextAcc Integration ไม่มี stock-adjust endpoint โดยตรง; ใช้ ProcessStockAdjustment ส่ง journal แทน")]
-        public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest adjustment)
-        {
-            return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
-                $"{CompanyPath}/product/stock/adjust", adjustment);
-        }
 
         // ──────────────────────────────────────────────
         // Connection Test

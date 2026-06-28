@@ -618,12 +618,13 @@ namespace Take_Time_BangPhra.Integration
             catch { }
             if (string.IsNullOrEmpty(paidHowAccId)) paidHowAccId = LookupPaidHowAccountId(paidHowName);
 
-            // 3) สร้าง Account_Receipt "ใบรับเงินสดสรุปรายวัน" (idempotent: ID = rollupRef) ถ้ายังไม่มี
-            //    VAT: ถ้าธุรกิจจด VAT → ราคาขายรวม VAT แล้ว ถอดออก (7%); ไม่จด → ไม่มี VAT
             bool useVat = BusinessUsesVat();
             decimal exVat = useVat ? Math.Round(grossTotal / 1.07m, 2, MidpointRounding.AwayFromZero) : grossTotal;
             decimal vat = useVat ? (grossTotal - exVat) : 0m;
 
+            // 3) Idempotency guard: Account_Receipt(rollupRef) = "เคย enqueue ครบแล้ว" (สร้างเป็น step สุดท้าย
+            //    ก่อน mark). ถ้ามีอยู่แล้ว = รอบก่อน enqueue ไปแล้ว แต่ crash ก่อน mark → แค่ mark ซ้ำ ไม่ enqueue ใหม่
+            //    (กันใบรับเงิน/COGS ซ้ำเกินหน้าต่าง dedup 24 ชม.)
             bool receiptExists = false;
             try
             {
@@ -634,34 +635,10 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { }
 
-            if (!receiptExists)
+            if (receiptExists)
             {
-                var rp = new Dictionary<string, object>
-                {
-                    { "@ID", rollupRef },
-                    { "@CreatedDate", day.Date },
-                    { "@TotalAmount", grossTotal },
-                    { "@Vat", vat },
-                    { "@ExVat", exVat },
-                    { "@PaidType", paidHowName }
-                };
-                _code.DatabaseInsertSafe(_connectionString,
-                    "INSERT INTO [dbo].[Account_Receipt] " +
-                    "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat]," +
-                    "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) " +
-                    "VALUES (@ID,'0',@CreatedDate,@TotalAmount,@Vat,@ExVat,0,0,@PaidType,'Normal',0,0,0)",
-                    rp);
-
-                _code.DatabaseInsertSafe(_connectionString,
-                    "INSERT INTO [dbo].[Account_Receipt_Detail] " +
-                    "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
-                    "VALUES (1,@ReceiptID,'3','0',@Data,1,N'ครั้ง',@Total,@Total)",
-                    new Dictionary<string, object>
-                    {
-                        { "@ReceiptID", rollupRef },
-                        { "@Data", $"สรุปยอดขายหน้าร้าน {day:dd/MM/yyyy} ({paidHowName})" },
-                        { "@Total", grossTotal }
-                    });
+                MarkPosRowsRolledUp(day, paidHowId, rollupRef);
+                return;
             }
 
             // 4) รายได้ → EnqueueReceipt (ใช้ path เดิม: Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย, VAT คำนวณ downstream)
@@ -682,7 +659,31 @@ namespace Take_Time_BangPhra.Integration
                         stockRef: $"POSDAY-COGS-{ds}-{paidHowId}-{pid}");
             }
 
-            // 6) mark แถว Product_Out ว่ารวบแล้ว (กันรวบซ้ำ)
+            // 6) สร้าง Account_Receipt "ใบรับเงินสดสรุปรายวัน" (durable marker ว่า enqueue ครบ) — หลัง enqueue
+            //    เพื่อให้ "receiptExists" ข้างบนหมายถึง enqueue เสร็จแน่ ๆ (ProcessReceipt อ่านแถวนี้รอบ timer ถัดไป)
+            var rp = new Dictionary<string, object>
+            {
+                { "@ID", rollupRef }, { "@CreatedDate", day.Date }, { "@TotalAmount", grossTotal },
+                { "@Vat", vat }, { "@ExVat", exVat }, { "@PaidType", paidHowName }
+            };
+            _code.DatabaseInsertSafe(_connectionString,
+                "INSERT INTO [dbo].[Account_Receipt] " +
+                "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat]," +
+                "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) " +
+                "VALUES (@ID,'0',@CreatedDate,@TotalAmount,@Vat,@ExVat,0,0,@PaidType,'Normal',0,0,0)",
+                rp);
+            _code.DatabaseInsertSafe(_connectionString,
+                "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                "VALUES (1,@ReceiptID,'3','0',@Data,1,N'ครั้ง',@Total,@Total)",
+                new Dictionary<string, object>
+                {
+                    { "@ReceiptID", rollupRef },
+                    { "@Data", $"สรุปยอดขายหน้าร้าน {day:dd/MM/yyyy} ({paidHowName})" },
+                    { "@Total", grossTotal }
+                });
+
+            // 7) mark แถว Product_Out ว่ารวบแล้ว (กันรวบซ้ำ)
             MarkPosRowsRolledUp(day, paidHowId, rollupRef);
 
             _code.Logs(_connectionString, "AccountingSync",
@@ -840,6 +841,9 @@ namespace Take_Time_BangPhra.Integration
                 throw new Exception($"StockQtyPush: NextAcc ปฏิเสธ product={productId}: {res?.message ?? "null"}");
 
             // กัน pull ขากลับดึง movement นี้กลับเข้ามา (echo)
+            // หมายเหตุ: มี crash window แคบ ๆ ระหว่าง AdjustStockAsync สำเร็จ ↔ MarkMovementSeen
+            // ถ้า crash ตรงนี้ retry จะ push ซ้ำ (NextAcc /stock/adjust ยังไม่ idempotent by Reference).
+            // เราส่ง Reference=srcRef ไปแล้ว → ปิดช่องนี้ 100% เมื่อ NextAcc ทำ dedup by Reference (ดู inventory spec §4.1)
             MarkMovementSeen(res.data.Id, "PUSH", productId);
             _code.Logs(_connectionString, "AccountingSync",
                 $"StockQtyPush: product={productId} nex={nexId} {movementType} qty={qty:N2} → movId={res.data.Id}", "SYSTEM");

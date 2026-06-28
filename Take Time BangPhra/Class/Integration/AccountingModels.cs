@@ -446,25 +446,9 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
-    // Stock (ตรงตาม Nexaacc ProductDtos.cs)
+    // Stock: StockAdjustmentRequest / StockMovementResponse ย้ายไปนิยามใกล้ inventory qty sync
+    // (ดู "Inventory qty (NextAcc ProductController /product/stock/*)") — ตรงตาม ProductDtos.cs จริง
     // ──────────────────────────────────────────────
-
-    public class StockAdjustmentRequest
-    {
-        public Guid ProductId { get; set; }
-        public decimal Quantity { get; set; }
-        public string Reason { get; set; }
-        public string Reference { get; set; }
-    }
-
-    public class StockMovementResponse
-    {
-        public Guid Id { get; set; }
-        public Guid ProductId { get; set; }
-        public decimal Quantity { get; set; }
-        public string Reason { get; set; }
-        public DateTime CreatedDate { get; set; }
-    }
 
     // ──────────────────────────────────────────────
     // Enums (ตรงตาม Nexaacc AllEnums.cs)
