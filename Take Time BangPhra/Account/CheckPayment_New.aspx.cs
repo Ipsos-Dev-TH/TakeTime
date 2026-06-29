@@ -189,7 +189,9 @@ namespace Take_Time_BangPhra.Account
             foreach (DataRow row in allPayments.Rows)
             {
                 string status = row["Status"]?.ToString() ?? "";
-                if (!status.Equals("Normal", StringComparison.OrdinalIgnoreCase)) continue;
+                // นับทุกเอกสารที่ไม่ถูกยกเลิก (รวม "NextAcc" = เอกสารที่สร้างบน NextAcc/OCR ไม่มี row local)
+                // เดิมนับเฉพาะ "Normal" → เอกสาร NextAcc ตกหล่น ทำให้จำนวน/ยอดสรุปไม่ตรงกับตาราง
+                if (status.Equals("Cancel", StringComparison.OrdinalIgnoreCase)) continue;
 
                 string paidHow = row["Paid_How"]?.ToString() ?? "";
                 decimal amount = row["Total_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Total_Amount"]) : 0;
@@ -332,6 +334,11 @@ namespace Take_Time_BangPhra.Account
                 dt = GetAllPayments(startDate, endDate, "%", vendorSearch, expenseType, minAmount);
                 System.Diagnostics.Debug.WriteLine($"   Retrieved {dt?.Rows.Count ?? 0} rows");
 
+                // merge เอกสารจาก NextAcc (รวมที่สร้างบน NextAcc/OCR ที่ไม่มี row local) ก่อน
+                // แล้วค่อยนับ/สรุป → จำนวนเอกสาร + ยอดรวม + VAT ตรงกับที่แสดงในตาราง
+                var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
+                if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
+
                 if (dt != null && dt.Rows.Count > 0)
                 {
                     lblDateRange.Text += $" <span style='color: green; font-weight: bold;'>(✓ พบ {dt.Rows.Count} เอกสาร)</span>";
@@ -343,11 +350,8 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
-                // คำนวณสรุปค่าใช้จ่ายจาก DataTable ที่ดึงมาแล้ว (ไม่ต้อง query ซ้ำ)
+                // คำนวณสรุปค่าใช้จ่ายจาก DataTable หลัง merge (รวมเอกสาร NextAcc ด้วย)
                 if (dt != null) CalculateExpensesFromData(dt);
-
-                var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
-                if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
 
                 // เรียงทั้งตาราง (รวมเอกสารที่ดึง/สร้างบน NextAcc ซึ่งถูก append ท้าย) ตามเลขที่เอกสาร
                 // ที่แสดง (DisplayDoc) — ใหม่สุดอยู่บน. แก้ปัญหาเอกสาร NextAcc ไม่เรียงตามเลขที่เอกสาร
