@@ -448,7 +448,35 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     }
                 }
 
-                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน)", "success");
+                // ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมดที่ตั้งไว้)
+                //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                //   DOCUMENT (native) → NextAcc คำนวณเอง   |   JOURNAL_ONLY → โพสต์ต่อพนักงานตอน GeneratePayrollVoucher แล้ว
+                string nextAccMsg = "";
+                try
+                {
+                    string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                        if (acctConfig.IsPayrollImportMode)
+                        {
+                            sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                            nextAccMsg = " + ส่งออกเอกสารบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว";
+                        }
+                        else if (acctConfig.IsPayrollDocumentMode)
+                        {
+                            sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                            nextAccMsg = " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว";
+                        }
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    nextAccMsg = " (แต่ส่ง NextAcc ไม่สำเร็จ: " + accEx.Message + ")";
+                }
+
+                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน){nextAccMsg}", "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
