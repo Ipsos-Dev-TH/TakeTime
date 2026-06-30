@@ -527,6 +527,24 @@ namespace Take_Time_BangPhra.Account
                         "UPDATE [dbo].[Account_Payment] SET Status = N'Cancel' WHERE ID = @ID",
                         new Dictionary<string, object> { { "@ID", docNum } });
 
+                    // ── ใบสำคัญจ่ายเงินเดือน: ปลดล็อก Payroll_Records ให้กลับเป็น "รอทำจ่าย" ──
+                    // เดิมยกเลิกใบแล้ว Payroll_Records ยังค้าง VoucherGenerated=1 → ทำจ่ายใหม่ไม่ได้
+                    // (GeneratePayrollVoucher คืน "ใบสำคัญจ่ายถูกสร้างแล้ว") = อาการ "ลบไม่ได้".
+                    // reset เพื่อให้ re-process คนนั้นได้ (ใบที่ยกเลิกยังเก็บไว้พิมพ์ส่งบัญชี)
+                    try
+                    {
+                        codeInstance.DatabaseInsertSafe(conn,
+                            @"UPDATE [dbo].[Payroll_Records]
+                              SET VoucherGenerated = 0, VoucherNumber = NULL,
+                                  VoucherGeneratedDate = NULL, VoucherGeneratedBy = NULL
+                              WHERE VoucherNumber = @ID",
+                            new Dictionary<string, object> { { "@ID", docNum } });
+                    }
+                    catch (Exception prx)
+                    {
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: reset Payroll_Records ของ {docNum} ล้มเหลว: {prx.Message}", "SYSTEM");
+                    }
+
                     codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ยกเลิก {docNum} (Status=Cancel) + void NextAcc enqueued (by {deletedBy})", "SYSTEM");
 
                     // Server-side redirect — โหลดหน้าใหม่ + แจ้งผ่าน query flag
