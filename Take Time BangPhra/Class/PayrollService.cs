@@ -901,6 +901,21 @@ public class PayrollService
                                     citizenId: idCard);
                             }
                         }
+                        // DOCUMENT_IMPORT / DOCUMENT modes are RUN-based (NextAcc payroll run for the
+                        // whole period → ภ.ง.ด.1 / สปส.1-10 / 50ทวิ / payslip). กดทำจ่ายรายคนก็ให้ sync
+                        // ทั้งงวดไปด้วย (idempotent: import refKey = PAYROLL-IMPORT-{periodId} → ถ้ามี run
+                        // อยู่แล้วจะคืน run เดิม ไม่สร้างซ้ำ). อ่านยอดต่อคนจาก Payroll_Records ทุกแถวของงวด.
+                        else if (acctConfig.IsConfigured && acctConfig.Enabled
+                            && (acctConfig.IsPayrollImportMode || acctConfig.IsPayrollDocumentMode)
+                            && payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                        {
+                            int periodId = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                            if (acctConfig.IsPayrollImportMode)
+                                sync.EnqueuePayrollRunImport(periodId);
+                            else
+                                sync.EnqueuePayrollRunSync(periodId);
+                        }
                     }
                     catch (Exception accEx)
                     {
