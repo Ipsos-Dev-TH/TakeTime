@@ -705,7 +705,27 @@ public class PayrollService
                     if (alreadyGenerated)
                     {
                         string existingVoucher = payrollRecord["VoucherNumber"]?.ToString() ?? "";
-                        return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว");
+                        // Backfill: คนที่กดทำจ่ายไปก่อนหน้านี้ (ก่อนมีโค้ด sync) แล้วยังไม่ได้ขึ้น NextAcc
+                        // → กดทำจ่ายซ้ำให้ re-trigger period run อีกครั้ง (idempotent — ถ้า run มีแล้วคืนของเดิม).
+                        // โหมด run-based (DOCUMENT_IMPORT/DOCUMENT) sync ทั้งงวด อ่านยอดทุกแถวของงวด.
+                        try
+                        {
+                            var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                            if (cfg.IsConfigured && cfg.Enabled
+                                && (cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode)
+                                && payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                            {
+                                int pid = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                                var s = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                                if (cfg.IsPayrollImportMode) s.EnqueuePayrollRunImport(pid);
+                                else s.EnqueuePayrollRunSync(pid);
+                            }
+                        }
+                        catch (Exception reEx)
+                        {
+                            try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll re-sync (already generated) error: voucher={existingVoucher} {reEx.Message}", "SYSTEM"); } catch { }
+                        }
+                        return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว (ส่ง sync NextAcc ซ้ำให้แล้ว)");
                     }
 
                     // Generate voucher number using DocumentHelper - same running number as Account_Payment
