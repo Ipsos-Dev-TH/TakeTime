@@ -241,6 +241,7 @@ namespace Take_Time_BangPhra.Account
                            WHEN ap.Paid_Type = N'เงินเดือน' AND pr.EmployeeName IS NOT NULL THEN pr.EmployeeName
                            ELSE ISNULL(v.Name, '-')
                        END as Vendor_Name,
+                       CASE WHEN pr.ID IS NOT NULL THEN 1 ELSE 0 END as IsPayroll,
                        a.Username as Created_By
                 FROM Account_Payment ap
                 LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
@@ -937,6 +938,25 @@ namespace Take_Time_BangPhra.Account
             return true;
         }
 
+        // เงินเดือนเป็นโหมด run-based (sync ทั้งงวด) หรือไม่ — cache ต่อ request
+        private bool? _payrollRunBased;
+        private bool PayrollRunBasedMode
+        {
+            get
+            {
+                if (_payrollRunBased == null)
+                {
+                    try
+                    {
+                        var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                        _payrollRunBased = cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode;
+                    }
+                    catch { _payrollRunBased = false; }
+                }
+                return _payrollRunBased.Value;
+            }
+        }
+
         private void LoadSyncStatusCache()
         {
             _syncStatusCache = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
@@ -1044,6 +1064,35 @@ namespace Take_Time_BangPhra.Account
             {
                 lblSync.Text = "<span class='sync-badge none'>-</span>";
                 btnSync.Visible = false;
+                return;
+            }
+
+            // ── ใบสำคัญจ่ายเงินเดือน (สร้างจากการ "ทำจ่าย" payroll) ──
+            // GL/เอกสารเงินเดือน sync ผ่าน "งวดเงินเดือน" (run-based: IMPORT_PAYROLL_RUN / SYNC_PAYROLL_RUN
+            // หรือ per-person PAYROLL journal สำหรับ JOURNAL_ONLY) — ไม่ใช่ใบสำคัญจ่ายเดี่ยว ๆ.
+            // จึง **ห้าม** โชว์ปุ่ม Sync ทั่วไป (EnqueuePaymentVoucher) เพราะจะสร้างเอกสารซ้ำบน NextAcc.
+            string isPayroll = SafeEval(e.Row.DataItem, "IsPayroll");
+            if (isPayroll == "1")
+            {
+                btnSync.Visible = false;
+                if (_syncStatusCache == null) LoadSyncStatusCache();
+                // JOURNAL_ONLY → มี entry PAYROLL/CREATE_PAYROLL_ENTRY ต่อคน (key = เลขใบสำคัญ) แสดงสถานะจริง
+                if (!PayrollRunBasedMode && _syncStatusCache.ContainsKey(docId))
+                {
+                    var prow = _syncStatusCache[docId];
+                    string pst = prow["Status"]?.ToString() ?? "";
+                    if (pst == "COMPLETED")
+                        lblSync.Text = "<span class='sync-badge completed'>✓ เงินเดือน (GL)</span>";
+                    else if (pst == "FAILED")
+                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(prow["Error_Message"]?.ToString() ?? "")}'>เงินเดือน: Failed</span>";
+                    else
+                        lblSync.Text = "<span class='sync-badge pending'>เงินเดือน: รอดำเนินการ</span>";
+                }
+                else
+                {
+                    // run-based (DOCUMENT_IMPORT/DOCUMENT) — sync ทั้งงวดบนหน้าจัดการเงินเดือน
+                    lblSync.Text = "<span class='sync-badge completed' title='เงินเดือน sync ทั้งงวดผ่านหน้าจัดการเงินเดือน (NextAcc payroll run) — ไม่ sync เป็นใบสำคัญจ่ายเดี่ยว'>ผ่านงวดเงินเดือน</span>";
+                }
                 return;
             }
 
@@ -1292,6 +1341,16 @@ namespace Take_Time_BangPhra.Account
                 Session[sessionKey] = DateTime.Now;
 
                 var docParams = new Dictionary<string, object> { { "@ID", docId } };
+
+                // กันสร้างเอกสารซ้ำบน NextAcc: ใบสำคัญจ่ายเงินเดือน sync ผ่าน "งวดเงินเดือน"
+                // (payroll run / per-person journal) ไม่ใช่ผ่าน EnqueuePaymentVoucher — ปฏิเสธที่นี่
+                var payrollChk = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 ID FROM Payroll_Records WHERE VoucherNumber = @ID", docParams);
+                if (payrollChk != null && payrollChk.Rows.Count > 0)
+                {
+                    ShowError("ใบสำคัญจ่ายเงินเดือนจะ sync ผ่านหน้าจัดการเงินเดือน (ทั้งงวด) — ไม่ sync เป็นใบสำคัญจ่ายเดี่ยว เพื่อกันเอกสารซ้ำบน NextAcc");
+                    return;
+                }
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ap.ID, ap.Created_Date, ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type,
                              ISNULL(ap.WHT_Rate, 0) AS WHT_Rate, ISNULL(ap.WHT_Amount, 0) AS WHT_Amount,
