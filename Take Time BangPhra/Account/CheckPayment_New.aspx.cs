@@ -507,6 +507,55 @@ namespace Take_Time_BangPhra.Account
                     }
                     catch { }
 
+                    // ── ใบสำคัญจ่ายเงินเดือน (สร้างจากการ "ทำจ่าย") ──
+                    // ใบนี้ไม่ใช่เอกสารบัญชีตัวจริง (GL/payslip ไปอยู่ฝั่ง NextAcc ผ่าน payroll run หรือ journal)
+                    // โดยเฉพาะใบที่ออกผิดในโหมด NextAcc-ออกเอกสาร → "ลบถาวร" ออกไปเลย (ไม่เก็บเป็นใบยกเลิก)
+                    // แล้วปลดล็อก Payroll_Records ให้คนนั้นกลับเป็น "รอทำจ่าย"
+                    var prChk = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 ID FROM Payroll_Records WHERE VoucherNumber = @ID",
+                        new Dictionary<string, object> { { "@ID", docNum } });
+                    bool isPayrollVoucher = prChk != null && prChk.Rows.Count > 0;
+
+                    if (isPayrollVoucher)
+                    {
+                        // void บน NextAcc เผื่อเคยถูก sync (no-op ถ้าไม่มี — ProcessVoidVoucher จัดการเอง)
+                        try { new Integration.AccountingSyncService(conn).EnqueueVoidPaymentVoucher(docNum); } catch { }
+
+                        try
+                        {
+                            codeInstance.DatabaseInsertSafe(conn,
+                                "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @ID",
+                                new Dictionary<string, object> { { "@ID", docNum } });
+                        }
+                        catch (Exception ddx)
+                        {
+                            codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ detail ของ {docNum} ล้มเหลว: {ddx.Message}", "SYSTEM");
+                        }
+
+                        codeInstance.DatabaseInsertSafe(conn,
+                            "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                            new Dictionary<string, object> { { "@ID", docNum } });
+
+                        try
+                        {
+                            codeInstance.DatabaseInsertSafe(conn,
+                                @"UPDATE [dbo].[Payroll_Records]
+                                  SET VoucherGenerated = 0, VoucherNumber = NULL,
+                                      VoucherGeneratedDate = NULL, VoucherGeneratedBy = NULL
+                                  WHERE VoucherNumber = @ID",
+                                new Dictionary<string, object> { { "@ID", docNum } });
+                        }
+                        catch (Exception prx)
+                        {
+                            codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: reset Payroll_Records ของ {docNum} ล้มเหลว: {prx.Message}", "SYSTEM");
+                        }
+
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบถาวรใบสำคัญจ่ายเงินเดือน {docNum} (by {deletedBy})", "SYSTEM");
+                        Response.Redirect("~/Account/CheckPayment_New?deleted=1", false);
+                        Context.ApplicationInstance.CompleteRequest();
+                        return;
+                    }
+
                     // ลบ → void เอกสารบน NextAcc ด้วย (cascade): enqueue VOID_VOUCHER ก่อนลบ local
                     // (void process แบบ async + retry ใน queue; ใช้ queue history หา NextAcc doc id ไม่ต้องพึ่ง local row)
                     // no-op ถ้าเอกสารไม่ได้ sync / NextAcc ไม่มีเอกสาร (ProcessVoidVoucher จัดการ already-gone เอง)
@@ -526,24 +575,6 @@ namespace Take_Time_BangPhra.Account
                     codeInstance.DatabaseInsertSafe(conn,
                         "UPDATE [dbo].[Account_Payment] SET Status = N'Cancel' WHERE ID = @ID",
                         new Dictionary<string, object> { { "@ID", docNum } });
-
-                    // ── ใบสำคัญจ่ายเงินเดือน: ปลดล็อก Payroll_Records ให้กลับเป็น "รอทำจ่าย" ──
-                    // เดิมยกเลิกใบแล้ว Payroll_Records ยังค้าง VoucherGenerated=1 → ทำจ่ายใหม่ไม่ได้
-                    // (GeneratePayrollVoucher คืน "ใบสำคัญจ่ายถูกสร้างแล้ว") = อาการ "ลบไม่ได้".
-                    // reset เพื่อให้ re-process คนนั้นได้ (ใบที่ยกเลิกยังเก็บไว้พิมพ์ส่งบัญชี)
-                    try
-                    {
-                        codeInstance.DatabaseInsertSafe(conn,
-                            @"UPDATE [dbo].[Payroll_Records]
-                              SET VoucherGenerated = 0, VoucherNumber = NULL,
-                                  VoucherGeneratedDate = NULL, VoucherGeneratedBy = NULL
-                              WHERE VoucherNumber = @ID",
-                            new Dictionary<string, object> { { "@ID", docNum } });
-                    }
-                    catch (Exception prx)
-                    {
-                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: reset Payroll_Records ของ {docNum} ล้มเหลว: {prx.Message}", "SYSTEM");
-                    }
 
                     codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ยกเลิก {docNum} (Status=Cancel) + void NextAcc enqueued (by {deletedBy})", "SYSTEM");
 
@@ -1020,10 +1051,19 @@ namespace Take_Time_BangPhra.Account
                 {
                     // ใช้ if(!confirm())return false; แทน return confirm(); — กันกรณีปุ่ม render เป็น __doPostBack
                     // ที่ "return true" จะตัดไม่ให้ postback ทำงาน (อาการกด OK แล้วเงียบ)
-                    // ยืนยัน 2 ขั้น — ยกเลิกเอกสาร + void บน NextAcc (เก็บใบยกเลิกไว้พิมพ์ส่งบัญชี)
-                    btnDel.OnClientClick =
-                        "if(!confirm('ขั้น 1/2: ยกเลิกใบสำคัญจ่ายนี้ และ void เอกสารบน NextAcc ใช่หรือไม่? (เอกสารจะกลายเป็น \\\"ยกเลิก\\\" พิมพ์ใบยกเลิกส่งบัญชีได้)'))return false;" +
-                        "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ยกเลิกถาวร + void บน NextAcc'))return false;";
+                    // ยืนยัน 2 ขั้น. ใบเงินเดือน = ลบถาวร (ออกผิด, ไม่เก็บเป็นใบยกเลิก) / อื่น ๆ = ยกเลิก+เก็บใบ
+                    if (SafeEval(e.Row.DataItem, "IsPayroll") == "1")
+                    {
+                        btnDel.OnClientClick =
+                            "if(!confirm('ขั้น 1/2: ลบถาวรใบสำคัญจ่ายเงินเดือนนี้ใช่หรือไม่? (เอกสารจะถูกลบออกจากระบบ ไม่เก็บเป็นใบยกเลิก — เงินเดือนออกเอกสารจริงบน NextAcc)'))return false;" +
+                            "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ลบถาวร'))return false;";
+                    }
+                    else
+                    {
+                        btnDel.OnClientClick =
+                            "if(!confirm('ขั้น 1/2: ยกเลิกใบสำคัญจ่ายนี้ และ void เอกสารบน NextAcc ใช่หรือไม่? (เอกสารจะกลายเป็น \\\"ยกเลิก\\\" พิมพ์ใบยกเลิกส่งบัญชีได้)'))return false;" +
+                            "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ยกเลิกถาวร + void บน NextAcc'))return false;";
+                    }
                     break;
                 }
             }
