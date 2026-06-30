@@ -6430,6 +6430,127 @@ namespace Take_Time_BangPhra.Integration
             return result;
         }
 
+        /// <summary>
+        /// ดึง PDF + ไฟล์แนบของ "เอกสารที่สร้างบน NextAcc โดยตรง" (NextAcc-only) ตาม NextAcc document id (GUID)
+        /// มาเก็บฝั่ง TakeTime แล้วคืน relative url ของไฟล์ local — ใช้ตอนกด "ดู PDF" ในตาราง เพื่อเปิดไฟล์
+        /// จริงแทนการเด้งไปหน้า NextAcc. เอกสารพวกนี้ไม่มี entry ใน sync queue จึงหา docId ผ่าน queue ไม่ได้
+        /// (ต่างจาก DownloadVoucherDocumentFromNextAccAsync) — รับ GUID ที่ได้จากรายการเอกสารโดยตรง.
+        /// smart-cache: ถ้ามีไฟล์อยู่แล้ว + ไม่ force → คืนเลย (ไม่ยิง API ซ้ำ ไม่ช้า).
+        /// </summary>
+        public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadNextAccDocumentByIdAsync(
+            Guid nextAccId, string docNumber, bool forceRefresh = false)
+        {
+            var result = new NextAccCachedDocument();
+            if (nextAccId == Guid.Empty) { result.Message = "ไม่มี NextAcc document id"; return result; }
+            if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
+
+            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
+
+            string safeDoc = MakeSafeFileName(string.IsNullOrEmpty(docNumber) ? nextAccId.ToString() : docNumber);
+            string folder = Path.Combine(basePath, "NextAcc", safeDoc);
+            string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+            string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
+
+            // fast path: มี cache อยู่แล้ว
+            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+            {
+                result.Found = true;
+                result.PdfLocalPath = pdfPath;
+                result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                try
+                {
+                    foreach (var f in Directory.GetFiles(folder, "att*"))
+                    {
+                        string fn = Path.GetFileName(f);
+                        if (fn.StartsWith("att_Cancel")) continue;
+                        result.AttachmentCount++;
+                        result.AttachmentRelativeUrls.Add(relPrefix + "/" + fn);
+                    }
+                }
+                catch { }
+                return result;
+            }
+
+            try
+            {
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+                // 1) PDF อย่างเป็นทางการจาก NextAcc (ตาม document id)
+                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                {
+                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(nextAccId);
+                    if (pdf != null && pdf.Length > 0)
+                        File.WriteAllBytes(pdfPath, pdf);
+                }
+                if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+                {
+                    result.Found = true;
+                    result.PdfLocalPath = pdfPath;
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                }
+                else
+                {
+                    result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
+                }
+
+                // 2) ไฟล์แนบ
+                try
+                {
+                    var attResp = await _apiClient.GetAttachmentsAsync("Document", nextAccId);
+                    if (attResp?.data != null && attResp.data.Count > 0)
+                    {
+                        string baseUrl = _config.RawBaseUrl.TrimEnd('/');
+                        int idx = 0;
+                        foreach (var a in attResp.data)
+                        {
+                            idx++;
+                            string storage = (a.StoragePath ?? "").Replace("\\", "/").TrimStart('/');
+                            if (string.IsNullOrEmpty(storage)) continue;
+                            string origName = a.OriginalFileName ?? a.FileName ?? ("att" + idx);
+                            string ext = Path.GetExtension(origName);
+                            if (string.IsNullOrEmpty(ext)) ext = ExtFromContentType(a.ContentType);
+                            string attName = $"att{idx}{ext}";
+                            string attLocal = Path.Combine(folder, attName);
+                            if (forceRefresh || !File.Exists(attLocal) || new FileInfo(attLocal).Length == 0)
+                            {
+                                byte[] bytes = await _apiClient.DownloadFileAsync($"{baseUrl}/{storage}");
+                                if (bytes != null && bytes.Length > 0)
+                                    File.WriteAllBytes(attLocal, bytes);
+                            }
+                            if (File.Exists(attLocal) && new FileInfo(attLocal).Length > 0)
+                            {
+                                result.AttachmentCount++;
+                                result.AttachmentRelativeUrls.Add(relPrefix + "/" + attName);
+                            }
+                        }
+                    }
+                }
+                catch (Exception exAtt)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"DownloadNextAccDocumentById: attachments doc={docNumber} ล้มเหลว: {exAtt.Message}", "SYSTEM");
+                }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadNextAccDocumentById: doc={docNumber} id={nextAccId} pdf={result.Found} att={result.AttachmentCount}", "SYSTEM");
+            }
+            catch (AuthenticationFailedException exAuth)
+            {
+                result.Message = "NextAcc auth ล้มเหลว: " + exAuth.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadNextAccDocumentById: doc={docNumber} {exAuth.Message}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                result.Message = "ดาวน์โหลดเอกสารล้มเหลว: " + ex.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadNextAccDocumentById: doc={docNumber} {ex.Message}", "SYSTEM");
+            }
+
+            return result;
+        }
+
         private static string ExtFromContentType(string contentType)
         {
             switch ((contentType ?? "").ToLower())

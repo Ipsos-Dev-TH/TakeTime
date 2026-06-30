@@ -476,7 +476,7 @@
             </div>
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
-                DataKeyNames="ID,Status,IsNextAccOnly,NextAccViewUrl,HasNextAcc"
+                DataKeyNames="ID,Status,IsNextAccOnly,NextAccViewUrl,HasNextAcc,NextAccId,NextAccDeepLink"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"

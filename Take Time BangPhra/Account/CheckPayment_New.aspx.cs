@@ -590,19 +590,51 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}, NextAccUrl: {viewUrl}");
 
-                // ── เอกสารที่มีบน NextAcc → เปิด PDF/ลิงก์ NextAcc ที่ cache ไว้ (เลขที่/รูปแบบตาม NextAcc) ──
-                if (!string.IsNullOrEmpty(viewUrl))
+                // ── เอกสารที่ cache เป็นไฟล์ local แล้ว → เปิดไฟล์ทันที (เร็ว ไม่ยิง API) ──
+                if (!string.IsNullOrEmpty(viewUrl) && viewUrl.StartsWith("/"))
                 {
                     Response.Redirect(viewUrl);
                     return;
                 }
 
-                // เอกสารที่สร้างบน NextAcc แต่ไม่มีลิงก์ — ไม่มี PDF ฝั่งระบบเราให้เปิด
+                // ── เอกสารที่สร้างบน NextAcc โดยตรง (NextAcc-only) → ดึง PDF จริงมาเปิด local ──
+                // กดดู PDF ต้องได้ "ไฟล์" ไม่เด้งไปหน้า NextAcc. เอกสารพวกนี้ไม่มี entry ใน sync queue
+                // จึงดึงด้วย NextAcc document id (GUID) ที่ติดมากับแถวโดยตรง (smart-cache: ครั้งต่อไปเปิด local เลย)
                 if (isNextAccOnly)
                 {
-                    ShowError("เอกสารนี้สร้างบน NextAcc แต่ยังไม่มีไฟล์ให้เปิดดู (ไม่มี template PDF บน NextAcc)");
+                    string naIdStr = keys.Values["NextAccId"]?.ToString() ?? "";
+                    if (Guid.TryParse(naIdStr, out var naGuid) && naGuid != Guid.Empty)
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            var dl = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadNextAccDocumentByIdAsync(naGuid, docNum)
+                            ).GetAwaiter().GetResult();
+                            if (dl != null && dl.Found && !string.IsNullOrEmpty(dl.PdfRelativeUrl))
+                            {
+                                Response.Redirect(dl.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { /* ดึงไม่ได้ → fallback ลิงก์ NextAcc ด้านล่าง */ }
+                    }
+
+                    // ดึงไฟล์ไม่ได้ (NextAcc ไม่มี template PDF ฯลฯ) → เปิดหน้า NextAcc แทน
+                    string deepLink = keys.Values["NextAccDeepLink"]?.ToString() ?? "";
+                    string fb = !string.IsNullOrEmpty(deepLink) ? deepLink : viewUrl;
+                    if (!string.IsNullOrEmpty(fb))
+                    {
+                        Response.Redirect(fb);
+                        return;
+                    }
+                    ShowError("เอกสารนี้สร้างบน NextAcc แต่ยังไม่มีไฟล์ PDF ให้เปิดดู");
                     return;
                 }
+
+                // เอกสารที่ sync จากระบบเรา (PAY...) ที่ยังไม่ได้ cache local → ตกไปดึง PDF จริงในส่วนล่าง
+                // (PAY branch ทำ smart-cache ผ่าน DownloadVoucherDocumentFromNextAccAsync — ได้ไฟล์ local เช่นกัน
+                //  ไม่เด้งไป NextAcc ตามลิงก์ภายนอกอีกต่อไป)
 
                 // Parse document info
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
@@ -848,6 +880,7 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("HasNextAcc")) dt.Columns.Add("HasNextAcc", typeof(string));
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
             if (!dt.Columns.Contains("NextAccDeepLink")) dt.Columns.Add("NextAccDeepLink", typeof(string));
+            if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
             if (!dt.Columns.Contains("NextAccAttCount")) dt.Columns.Add("NextAccAttCount", typeof(int));
             if (!dt.Columns.Contains("NextAccAttUrls")) dt.Columns.Add("NextAccAttUrls", typeof(string));
             if (!dt.Columns.Contains("WhtCertUrl")) dt.Columns.Add("WhtCertUrl", typeof(string));
@@ -891,6 +924,7 @@ namespace Take_Time_BangPhra.Account
                     row["HasNextAcc"] = "1";
                     row["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                     row["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                    row["NextAccId"] = nd.NextAccId != Guid.Empty ? nd.NextAccId.ToString() : "";
                     row["NextAccAttCount"] = nd.AttachmentCount;
                     row["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                         ? string.Join("|", nd.AttachmentRelativeUrls) : "";
@@ -931,6 +965,7 @@ namespace Take_Time_BangPhra.Account
                 nr["HasNextAcc"] = "1";
                 nr["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                 nr["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                nr["NextAccId"] = nd.NextAccId != Guid.Empty ? nd.NextAccId.ToString() : "";
                 nr["NextAccAttCount"] = nd.AttachmentCount;
                 nr["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                     ? string.Join("|", nd.AttachmentRelativeUrls) : "";
