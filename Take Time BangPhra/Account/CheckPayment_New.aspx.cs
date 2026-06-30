@@ -942,11 +942,14 @@ namespace Take_Time_BangPhra.Account
             _syncStatusCache = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
             try
             {
+                // รวมเงินเดือน (PAYROLL/CREATE_PAYROLL_ENTRY = JOURNAL_ONLY ต่อพนักงาน, documentNumber=เลขใบสำคัญ)
+                // → คอลัมน์ "Sync บัญชี" ของใบเงินเดือนจะแสดงสถานะ sync จริง ไม่ค้าง "ยังไม่ sync"
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload, Created_Date,
                              Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
                       FROM Accounting_Sync_Queue
-                      WHERE Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL'
+                      WHERE (Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL')
+                         OR (Entity_Type = 'PAYROLL' AND Action_Type = 'CREATE_PAYROLL_ENTRY')
                       ORDER BY ID DESC",
                     null);
 

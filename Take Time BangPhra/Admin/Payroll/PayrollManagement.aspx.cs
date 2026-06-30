@@ -290,7 +290,39 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     if (success)
                     {
-                        ShowMessage("อนุมัติเงินเดือนสำเร็จ", "success");
+                        // อนุมัติงวด = ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมด)
+                        //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                        //   DOCUMENT → NextAcc คำนวณเอง  |  JOURNAL_ONLY → GL โพสต์ต่อพนักงานตอนทำจ่ายแล้ว (ไม่ต้องทำซ้ำ)
+                        string naMsg = "";
+                        try
+                        {
+                            string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                            var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                            if (acctConfig.IsConfigured && acctConfig.Enabled)
+                            {
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                                if (acctConfig.IsPayrollImportMode)
+                                {
+                                    long qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                                    naMsg = qid > 0 ? " + ส่งออกเอกสารเงินเดือนบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
+                                }
+                                else if (acctConfig.IsPayrollDocumentMode)
+                                {
+                                    long qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                                    naMsg = qid > 0 ? " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
+                                }
+                                else
+                                {
+                                    naMsg = " (โหมด JOURNAL_ONLY: GL ลง NextAcc ตอนทำจ่ายรายคน)";
+                                }
+                            }
+                        }
+                        catch (Exception ax)
+                        {
+                            naMsg = " (ส่ง NextAcc ไม่สำเร็จ: " + ax.Message + ")";
+                        }
+
+                        ShowMessage("อนุมัติเงินเดือนสำเร็จ" + naMsg, "success");
                         LoadPayrollData();
                     }
                     else
