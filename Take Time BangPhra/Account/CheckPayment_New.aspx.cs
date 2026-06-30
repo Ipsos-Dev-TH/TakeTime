@@ -509,8 +509,8 @@ namespace Take_Time_BangPhra.Account
 
                     // ── ใบสำคัญจ่ายเงินเดือน (สร้างจากการ "ทำจ่าย") ──
                     // ใบนี้ไม่ใช่เอกสารบัญชีตัวจริง (GL/payslip ไปอยู่ฝั่ง NextAcc ผ่าน payroll run หรือ journal)
-                    // โดยเฉพาะใบที่ออกผิดในโหมด NextAcc-ออกเอกสาร → "ลบถาวร" ออกไปเลย (ไม่เก็บเป็นใบยกเลิก)
-                    // แล้วปลดล็อก Payroll_Records ให้คนนั้นกลับเป็น "รอทำจ่าย"
+                    // ใบที่ออกผิด/ไม่ควรสร้าง → "ลบถาวร" เฉพาะตัวใบออกไป (ไม่เก็บเป็นใบยกเลิก)
+                    // **ไม่แตะสถานะ "ทำจ่าย" ใน Payroll_Records** ตามที่ต้องการ — แค่ลบเอกสารที่ออกผิดเท่านั้น
                     var prChk = codeInstance.DatabaseQuerySafe(conn,
                         "SELECT TOP 1 ID FROM Payroll_Records WHERE VoucherNumber = @ID",
                         new Dictionary<string, object> { { "@ID", docNum } });
@@ -518,9 +518,6 @@ namespace Take_Time_BangPhra.Account
 
                     if (isPayrollVoucher)
                     {
-                        // void บน NextAcc เผื่อเคยถูก sync (no-op ถ้าไม่มี — ProcessVoidVoucher จัดการเอง)
-                        try { new Integration.AccountingSyncService(conn).EnqueueVoidPaymentVoucher(docNum); } catch { }
-
                         try
                         {
                             codeInstance.DatabaseInsertSafe(conn,
@@ -536,21 +533,7 @@ namespace Take_Time_BangPhra.Account
                             "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
                             new Dictionary<string, object> { { "@ID", docNum } });
 
-                        try
-                        {
-                            codeInstance.DatabaseInsertSafe(conn,
-                                @"UPDATE [dbo].[Payroll_Records]
-                                  SET VoucherGenerated = 0, VoucherNumber = NULL,
-                                      VoucherGeneratedDate = NULL, VoucherGeneratedBy = NULL
-                                  WHERE VoucherNumber = @ID",
-                                new Dictionary<string, object> { { "@ID", docNum } });
-                        }
-                        catch (Exception prx)
-                        {
-                            codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: reset Payroll_Records ของ {docNum} ล้มเหลว: {prx.Message}", "SYSTEM");
-                        }
-
-                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบถาวรใบสำคัญจ่ายเงินเดือน {docNum} (by {deletedBy})", "SYSTEM");
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบถาวรใบสำคัญจ่ายเงินเดือน {docNum} (ไม่แตะ Payroll_Records) (by {deletedBy})", "SYSTEM");
                         Response.Redirect("~/Account/CheckPayment_New?deleted=1", false);
                         Context.ApplicationInstance.CompleteRequest();
                         return;
