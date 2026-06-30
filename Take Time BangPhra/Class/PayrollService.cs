@@ -728,6 +728,50 @@ public class PayrollService
                         return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว (ส่ง sync NextAcc ซ้ำให้แล้ว)");
                     }
 
+                    // ── โหมดที่ NextAcc เป็นผู้ออกเอกสารเงินเดือน (DOCUMENT / DOCUMENT_IMPORT) ──
+                    // NextAcc payroll run ออก payslip / ภ.ง.ด.1 / สปส.1-10 / 50ทวิ / GL ให้ครบแล้ว →
+                    // **ห้ามออกใบสำคัญจ่ายภายในระบบ TakeTime** (กันเอกสารซ้ำ). แค่ mark ว่าทำจ่ายแล้ว
+                    // (ไม่สร้าง Account_Payment, ไม่ออกเลขใบ, ไม่ทำ PDF) แล้ว enqueue NextAcc run ทั้งงวด.
+                    // JOURNAL_ONLY = ไม่เข้าเงื่อนไขนี้ (NextAcc โพสต์แค่ GL ไม่ออกเอกสาร → ระบบยังออกใบสำคัญจ่ายเอง).
+                    var docModeCfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                    if (docModeCfg.IsConfigured && docModeCfg.Enabled
+                        && (docModeCfg.IsPayrollDocumentMode || docModeCfg.IsPayrollImportMode))
+                    {
+                        using (SqlCommand markCmd = new SqlCommand(@"
+                            UPDATE Payroll_Records
+                            SET VoucherGenerated = 1,
+                                VoucherNumber = NULL,
+                                VoucherGeneratedDate = GETDATE(),
+                                VoucherGeneratedBy = @CreatedBy
+                            WHERE ID = @RecordID", conn, transaction))
+                        {
+                            markCmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
+                            markCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                            markCmd.ExecuteNonQuery();
+                        }
+
+                        transaction.Commit();
+
+                        try
+                        {
+                            if (payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                            {
+                                int periodId = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                                if (docModeCfg.IsPayrollImportMode)
+                                    sync.EnqueuePayrollRunImport(periodId);
+                                else
+                                    sync.EnqueuePayrollRunSync(periodId);
+                            }
+                        }
+                        catch (Exception accEx)
+                        {
+                            try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll run enqueue (doc-mode) error: record={payrollRecordId} {accEx.Message}", "SYSTEM"); } catch { }
+                        }
+
+                        return (true, "", "ทำจ่ายสำเร็จ — NextAcc เป็นผู้ออกเอกสารเงินเดือน (payslip/ภ.ง.ด.1/สปส) ไม่ออกใบสำคัญจ่ายในระบบ");
+                    }
+
                     // Generate voucher number using DocumentHelper - same running number as Account_Payment
                     // Format: PAYYYMMDDNNN (e.g., PAY2512170001)
                     string voucherNumber = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", DateTime.Now);
@@ -1028,7 +1072,20 @@ public class PayrollService
             }
         }
 
-        return (successCount, failCount, $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ" +
+        // doc-mode (NextAcc ออกเอกสาร) ไม่ออกใบสำคัญจ่ายในระบบ → ข้อความสะท้อนความจริง
+        bool docMode = false;
+        try
+        {
+            var cfgMsg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+            docMode = cfgMsg.IsConfigured && cfgMsg.Enabled
+                && (cfgMsg.IsPayrollDocumentMode || cfgMsg.IsPayrollImportMode);
+        }
+        catch { }
+
+        string okMsg = docMode
+            ? $"ทำจ่ายสำเร็จ {successCount} รายการ (NextAcc ออกเอกสารเงินเดือนให้)"
+            : $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ";
+        return (successCount, failCount, okMsg +
             (failCount > 0 ? $", ล้มเหลว {failCount} รายการ" : ""));
     }
 

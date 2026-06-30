@@ -765,7 +765,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 var result = ProcessSinglePayment(payrollRecordId, "โอน", "ค่าจ้าง", 0);
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    // doc-mode (NextAcc ออกเอกสาร) ไม่มีเลขใบสำคัญจ่ายในระบบ → แสดงข้อความผลลัพธ์แทน
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
@@ -797,7 +800,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
