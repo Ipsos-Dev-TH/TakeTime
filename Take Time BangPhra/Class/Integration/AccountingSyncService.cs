@@ -4130,6 +4130,33 @@ namespace Take_Time_BangPhra.Integration
                 return "SKIPPED_NO_BALANCE";
             }
 
+            // ── SAFEGUARD: ตรวจผ่าน Booking ID ว่ามัดจำถูกบันทึกเป็นหนี้สิน (เงินรับล่วงหน้า) บน NextAcc จริง ──
+            // กันเคส "TakeTime มีมัดจำ แต่ใบมัดจำไม่เคยขึ้น/ไม่อนุมัติบน NextAcc" → ถ้า Dr ADVANCE_DEPOSIT
+            // ทั้งที่ไม่มี Cr ตั้งไว้ บัญชีเงินรับล่วงหน้าจะติดลบ. ตัดได้ไม่เกินยอดที่ booked จริง.
+            var depChk = VerifyDepositBookedOnNextAcc(reservationId);
+            if (depChk.PendingSync)
+            {
+                // ใบมัดจำยังรอ sync/รออนุมัติบน NextAcc → ยังไม่ตัด ให้ queue retry (FIFO จะสร้าง/อนุมัติก่อน)
+                throw new Exception(
+                    $"ProcessDepositClearing: มัดจำของ Booking #{reservationId} ยังรอ sync/อนุมัติบน NextAcc — เลื่อนไปตัดรอบถัดไป");
+            }
+            if (depChk.AnyDeposit && depChk.BookedAmount + 0.01m < depositAmount)
+            {
+                // ส่วนที่ยังไม่ booked บน NextAcc → ไม่ตัดส่วนนั้น (กันติดลบ). แจ้งเลขใบที่ค้าง sync ให้เห็น.
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositClearing: Booking #{reservationId} ตัดเฉพาะมัดจำที่ booked บน NextAcc {depChk.BookedAmount:N2} " +
+                    $"(ขอตัด {depositAmount:N2}); ใบมัดจำที่ยังไม่ขึ้น NextAcc: [{string.Join(", ", depChk.UnsyncedReceipts)}] — โปรด re-sync ใบเหล่านี้",
+                    "SYSTEM");
+                depositAmount = depChk.BookedAmount;
+            }
+            if (depositAmount <= 0.01m)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositClearing: SKIPPED — Booking #{reservationId} ยังไม่พบมัดจำที่บันทึกบน NextAcc " +
+                    $"(กัน ADVANCE_DEPOSIT ติดลบ). ใบมัดจำที่ต้อง re-sync: [{string.Join(", ", depChk.UnsyncedReceipts)}]", "SYSTEM");
+                return "SKIPPED_DEPOSIT_NOT_ON_NEXTACC";
+            }
+
             bool hasVat = LookupBusinessHasVat();
 
             _code.Logs(_connectionString, "AccountingSync",
@@ -4458,6 +4485,88 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupActualDepositPaid failed for resId={reservationId}: {ex.Message}", "SYSTEM");
             }
             return 0m;
+        }
+
+        /// <summary>ผลตรวจว่ามัดจำของ Booking ถูกบันทึกเป็นหนี้สินบน NextAcc แล้วหรือยัง</summary>
+        private struct DepositBookedState
+        {
+            public bool AnyDeposit;                  // มีใบมัดจำใน TakeTime ไหม
+            public decimal BookedAmount;             // ยอดมัดจำที่ sync + อนุมัติบน NextAcc แล้ว
+            public bool PendingSync;                 // ยังมีใบมัดจำรอ sync/รออนุมัติ → ควร retry
+            public System.Collections.Generic.List<string> UnsyncedReceipts;  // ใบที่ sync ไม่สำเร็จ/ไม่เคยเข้าคิว
+        }
+
+        /// <summary>
+        /// SAFEGUARD ตรวจผ่าน Booking ID (Reservation_ID): มัดจำถูกบันทึกเป็นหนี้สิน (เงินรับล่วงหน้า)
+        /// บน NextAcc จริงแค่ไหน — อ่านจาก marker Account_Receipt.Nexaacc_Receipt_Payment_Id
+        ///   APR:/ADJ:/GUID สุดท้าย = อนุมัติ+โพสต์แล้ว (booked) | DOC: = สร้างแล้วรออนุมัติ (pending)
+        ///   null + ยังมีคิวค้าง = pending | null + ไม่มีคิว = ยัง sync ไม่สำเร็จ (unsynced) | VOIDED = ข้าม
+        /// </summary>
+        private DepositBookedState VerifyDepositBookedOnNextAcc(int reservationId)
+        {
+            var state = new DepositBookedState { UnsyncedReceipts = new System.Collections.Generic.List<string>() };
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID, ISNULL(Total_Amount, 0) AS Amt, Nexaacc_Receipt_Payment_Id AS Marker
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status = 'Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt != null)
+                {
+                    foreach (System.Data.DataRow r in dt.Rows)
+                    {
+                        state.AnyDeposit = true;
+                        string num = r["ID"]?.ToString();
+                        decimal amt = r["Amt"] != DBNull.Value ? Convert.ToDecimal(r["Amt"]) : 0m;
+                        string marker = r["Marker"] == DBNull.Value ? null : r["Marker"]?.ToString();
+
+                        if (marker == "VOIDED")
+                        {
+                            // ยกเลิกแล้ว — ไม่มีหนี้สินบน NextAcc
+                        }
+                        else if (!string.IsNullOrEmpty(marker)
+                                 && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:")
+                                     || (!marker.StartsWith("DOC:") && Guid.TryParse(marker, out _))))
+                        {
+                            state.BookedAmount += amt;    // อนุมัติ/โพสต์บน NextAcc แล้ว
+                        }
+                        else if (!string.IsNullOrEmpty(marker) && marker.StartsWith("DOC:"))
+                        {
+                            state.PendingSync = true;     // สร้างแล้วรออนุมัติ
+                        }
+                        else
+                        {
+                            // marker ว่าง → ยังมีคิว sync ค้างไหม
+                            if (HasActiveReceiptQueue(num)) state.PendingSync = true;
+                            else state.UnsyncedReceipts.Add(num);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"VerifyDepositBookedOnNextAcc: Booking #{reservationId} {ex.Message}", "SYSTEM");
+            }
+            return state;
+        }
+
+        /// <summary>ยังมี queue สร้างใบเสร็จ (RECEIPT) ที่รอ/กำลังทำ สำหรับเลขนี้อยู่ไหม (retry ยังไม่หมด)</summary>
+        private bool HasActiveReceiptQueue(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND Status IN ('PENDING', 'PROCESSING') AND Retry_Count < Max_Retries
+                        AND Payload LIKE @p",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
         }
 
         /// <summary>มัดจำที่ถูกหักในใบเสร็จไปแล้ว (sum Deposit_Applied_Amount จากใบเสร็จที่ไม่ใช่มัดจำ)</summary>
