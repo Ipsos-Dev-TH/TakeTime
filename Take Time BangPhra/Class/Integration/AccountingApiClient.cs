@@ -30,6 +30,11 @@ namespace Take_Time_BangPhra.Integration
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             DateFormatString = "yyyy-MM-ddTHH:mm:ss",
+            // สำคัญ: บังคับปฏิทิน "ค.ศ." (Gregorian) เสมอ. ถ้าไม่ตั้ง Culture, Newtonsoft จะ format
+            // DateFormatString ด้วย CurrentCulture — บน thread ที่เป็น th-TH ปฏิทินเริ่มต้นเป็น "พุทธ"
+            // → ทุกวันที่ที่ส่งไป NextAcc จะกลายเป็นปี พ.ศ. (เช่น 2569 แทน 2026) = ใบกำกับภาษี/ใบเสร็จ
+            // มัดจำ ส่งวันที่ผิด. InvariantCulture ทำให้ได้ ค.ศ. เสมอ ไม่ว่า thread จะ culture อะไร.
+            Culture = System.Globalization.CultureInfo.InvariantCulture,
             NullValueHandling = NullValueHandling.Ignore
         };
 

@@ -54,6 +54,46 @@ namespace Take_Time_BangPhra.Integration
         // ใช้เฉพาะ: EnqueueReceipt, EnqueuePaymentVoucher, EnqueueVoidReceipt, EnqueueVoidPaymentVoucher
         // ──────────────────────────────────────────────
 
+        // ══════════════════════════════════════════════════════════════════════
+        //  Date era/culture safety — กันวันที่ พ.ศ./ปีเพี้ยน หลุดไป NextAcc
+        //  ปัญหา: บน thread ที่ CurrentCulture = th-TH ปฏิทินเริ่มต้นเป็น "พุทธ"
+        //         → DateTime.ToString("yyyy-MM-dd") ได้ปี พ.ศ. (2569) ไม่ใช่ ค.ศ. (2026)
+        //         → DateTime.Parse ก็ตีความสตริงเป็น พ.ศ. ด้วย
+        //         → ถ้า enqueue/parse ข้าม thread คนละ culture ปีจะเพี้ยน (2026↔2569↔1483)
+        //  วิธีแก้: ทุกจุดที่ serialize/parse วันที่ของ NextAcc ใช้ InvariantCulture (ค.ศ. เสมอ)
+        //         + era-guard: ปี>2400 → −543 (พ.ศ.→ค.ศ.), ปี<1900 → +543 (คืนค่าที่ถูกลบเกิน)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>บังคับให้ DateTime อยู่ในช่วง ค.ศ. ปกติเสมอ (กัน พ.ศ. 2569 / ค่าเพี้ยน 1483)</summary>
+        internal static DateTime NormalizeEra(DateTime d)
+        {
+            int y = d.Year;
+            if (y > 2400) return d.AddYears(-543);   // พ.ศ. → ค.ศ.
+            if (y < 1900) return d.AddYears(543);    // ค่าที่ถูกลบ 543 เกินไปแล้ว → คืน ค.ศ.
+            return d;
+        }
+
+        /// <summary>serialize วันที่สำหรับ payload/NextAcc: ค.ศ. + culture-invariant เสมอ</summary>
+        internal static string AcctDate(DateTime d, bool withTime = false)
+        {
+            d = NormalizeEra(d);
+            return d.ToString(withTime ? "yyyy-MM-dd HH:mm:ss" : "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>parse วันที่จาก payload: culture-invariant + era-guard (คืน ค.ศ. เสมอ)</summary>
+        internal static DateTime ParseAcctDate(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return NormalizeEra(DateTime.Now);
+            DateTime d;
+            if (!DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out d))
+            {
+                if (!DateTime.TryParse(s, out d)) return NormalizeEra(DateTime.Now);
+            }
+            return NormalizeEra(d);
+        }
+
         /// <summary>
         /// Enqueue payment voucher (expense).
         /// Call after creating voucher in Voucher/Default.aspx.cs
@@ -98,7 +138,7 @@ namespace Take_Time_BangPhra.Integration
                 { "expenseCategory", expenseCategory },
                 { "amount", amount },
                 { "paymentMethod", paymentMethod },
-                { "voucherDate", voucherDate.ToString("yyyy-MM-dd") },
+                { "voucherDate", AcctDate(voucherDate) },
                 { "description", description },
                 { "payeeName", payeeName },
                 { "hasInputVat", hasInputVat },
@@ -150,7 +190,7 @@ namespace Take_Time_BangPhra.Integration
                 { "originalDocumentNumber", originalDocumentNumber },
                 { "amount", amount },
                 { "paymentMethod", paymentMethod },
-                { "paymentDate", paymentDate.ToString("yyyy-MM-dd") },
+                { "paymentDate", AcctDate(paymentDate) },
                 { "vendorName", vendorName ?? "" }
             };
             if (!string.IsNullOrEmpty(paymentAccountId))
@@ -184,7 +224,7 @@ namespace Take_Time_BangPhra.Integration
             var payload = new Dictionary<string, object>
             {
                 { "totalSalary", totalSalary },
-                { "payDate", payDate.ToString("yyyy-MM-dd") },
+                { "payDate", AcctDate(payDate) },
                 { "period", period },
                 { "socialSecurityEmployee", socialSecurityEmployee },
                 { "socialSecurityEmployer", socialSecurityEmployer },
@@ -275,7 +315,7 @@ namespace Take_Time_BangPhra.Integration
                 { "refKey", refKey },
                 { "assetAmount", assetAmount },
                 { "assetName", assetName ?? "สินทรัพย์ถาวร" },
-                { "purchaseDate", purchaseDate.ToString("yyyy-MM-dd") },
+                { "purchaseDate", AcctDate(purchaseDate) },
                 { "voucherDocNumber", voucherDocNumber }
             };
             if (!string.IsNullOrEmpty(expenseAccountId))
@@ -319,7 +359,7 @@ namespace Take_Time_BangPhra.Integration
                 { "receiptNumber", receiptNumber },
                 { "totalAmount", totalAmount },
                 { "vatAmount", vatAmount },
-                { "receiptDate", receiptDate.ToString("yyyy-MM-dd") },
+                { "receiptDate", AcctDate(receiptDate) },
                 { "customerName", customerName },
                 { "isDeposit", isDeposit },
                 { "paymentMethod", paymentMethod ?? "CASH" }
@@ -368,7 +408,7 @@ namespace Take_Time_BangPhra.Integration
                 { "depositAmount", depositAmount },
                 { "damageAmount", damageAmount },
                 { "customerName", customerName ?? "" },
-                { "checkoutDate", checkoutDate.ToString("yyyy-MM-dd") }
+                { "checkoutDate", AcctDate(checkoutDate) }
             };
             return InsertQueue("RESERVATION", reservationId, "CLEAR_DEPOSIT_AT_CHECKOUT", payload);
         }
@@ -394,7 +434,7 @@ namespace Take_Time_BangPhra.Integration
                 { "refundAmount", refundAmount },
                 { "paymentMethod", paymentMethod ?? "CASH" },
                 { "customerName", customerName ?? "" },
-                { "refundDate", refundDate.ToString("yyyy-MM-dd") }
+                { "refundDate", AcctDate(refundDate) }
             };
             return InsertQueue("RESERVATION", reservationId, "REFUND_DEPOSIT", payload);
         }
@@ -419,7 +459,7 @@ namespace Take_Time_BangPhra.Integration
                 { "reservationRef", reservationRef },
                 { "forfeitAmount", forfeitAmount },
                 { "customerName", customerName ?? "" },
-                { "forfeitDate", forfeitDate.ToString("yyyy-MM-dd") },
+                { "forfeitDate", AcctDate(forfeitDate) },
                 { "reason", reason ?? "" }
             };
             return InsertQueue("RESERVATION", reservationId, "FORFEIT_DEPOSIT", payload);
@@ -455,7 +495,7 @@ namespace Take_Time_BangPhra.Integration
                 { "quantity", quantity },
                 { "costPerUnit", costPerUnit },
                 { "totalCost", Math.Round(quantity * costPerUnit, 2) },
-                { "receiveDate", receiveDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "receiveDate", AcctDate(receiveDate, true) },
                 { "supplierName", supplierName ?? "" },
                 { "paymentMethod", paymentMethod ?? "" },
                 { "hasInputVat", hasInputVat }
@@ -487,7 +527,7 @@ namespace Take_Time_BangPhra.Integration
                 { "productName", productName ?? "" },
                 { "quantity", quantity },
                 { "costPerUnit", costPerUnit },
-                { "outDate", outDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "outDate", AcctDate(outDate, true) },
                 { "reason", reason ?? "" }
             };
             EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, outDate, refStr);
@@ -514,7 +554,7 @@ namespace Take_Time_BangPhra.Integration
                 { "productName", productName ?? "" },
                 { "quantity", quantity },
                 { "costPerUnit", costPerUnit },
-                { "reverseDate", reverseDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "reverseDate", AcctDate(reverseDate, true) },
                 { "reason", reason ?? "" }
             };
             EnqueueStockQtyPush(productId, productName, quantity, "IN", costPerUnit, reverseDate, "REV-" + stockRef);
@@ -742,7 +782,7 @@ namespace Take_Time_BangPhra.Integration
                 { "productName", productName ?? "" },
                 { "quantityDiff", quantityDiff },
                 { "costPerUnit", costPerUnit },
-                { "adjustDate", adjustDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "adjustDate", AcctDate(adjustDate, true) },
                 { "reason", reason ?? "" }
             };
             EnqueueStockQtyPush(productId, productName, Math.Abs(quantityDiff), quantityDiff > 0 ? "IN" : "OUT", costPerUnit, adjustDate, refStr);
@@ -770,7 +810,7 @@ namespace Take_Time_BangPhra.Integration
                 { "productName", productName ?? "" },
                 { "quantity", quantity },
                 { "costPerUnit", costPerUnit },
-                { "writeOffDate", writeOffDate.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "writeOffDate", AcctDate(writeOffDate, true) },
                 { "reason", reason ?? "" }
             };
             EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, writeOffDate, refStr);
@@ -803,7 +843,7 @@ namespace Take_Time_BangPhra.Integration
                 { "quantity", qty },
                 { "movementType", movementType },
                 { "unitCost", unitCost },
-                { "moveDate", moveDate.ToString("yyyy-MM-dd HH:mm:ss") }
+                { "moveDate", AcctDate(moveDate, true) }
             };
             InsertQueue("STOCK", productId, "STOCK_QTY_PUSH", payload);
         }
@@ -1885,7 +1925,7 @@ namespace Take_Time_BangPhra.Integration
             int voucherId = Convert.ToInt32(p["voucherId"]);
             string expenseCategory = p["expenseCategory"]?.ToString();
             string paymentMethod = p["paymentMethod"]?.ToString();
-            DateTime voucherDate = DateTime.Parse(p["voucherDate"]?.ToString());
+            DateTime voucherDate = ParseAcctDate(p["voucherDate"]?.ToString());
             string description = p["description"]?.ToString();
             string payeeName = p["payeeName"]?.ToString();
             bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
@@ -2127,7 +2167,7 @@ namespace Take_Time_BangPhra.Integration
             string origDocNum = p["originalDocumentNumber"]?.ToString();
             decimal amount = Convert.ToDecimal(p["amount"]);
             string paymentMethod = p["paymentMethod"]?.ToString();
-            DateTime paymentDate = DateTime.Parse(p["paymentDate"]?.ToString());
+            DateTime paymentDate = ParseAcctDate(p["paymentDate"]?.ToString());
             string vendorName = p.ContainsKey("vendorName") ? p["vendorName"]?.ToString() : "";
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
 
@@ -2727,7 +2767,7 @@ namespace Take_Time_BangPhra.Integration
             if (totalSalary <= 0)
                 throw new ArgumentException($"Cannot create payroll journal: totalSalary is {totalSalary}");
 
-            DateTime payDate = DateTime.Parse(p["payDate"]?.ToString());
+            DateTime payDate = ParseAcctDate(p["payDate"]?.ToString());
             string period = p.ContainsKey("period") ? p["period"]?.ToString() : "";
             decimal ssfEmployee = p.ContainsKey("socialSecurityEmployee") ? Convert.ToDecimal(p["socialSecurityEmployee"]) : 0;
             decimal ssfEmployer = p.ContainsKey("socialSecurityEmployer") ? Convert.ToDecimal(p["socialSecurityEmployer"]) : 0;
@@ -3213,7 +3253,7 @@ namespace Take_Time_BangPhra.Integration
         {
             decimal assetAmount = Convert.ToDecimal(p["assetAmount"]);
             string assetName = p.ContainsKey("assetName") ? p["assetName"]?.ToString() : "สินทรัพย์ถาวร";
-            DateTime purchaseDate = DateTime.Parse(p["purchaseDate"]?.ToString());
+            DateTime purchaseDate = ParseAcctDate(p["purchaseDate"]?.ToString());
             string voucherDocNumber = p["voucherDocNumber"]?.ToString();
             string expenseAccountId = p.ContainsKey("expenseAccountId") ? p["expenseAccountId"]?.ToString() : null;
             string expenseCategory = p.ContainsKey("expenseCategory") ? p["expenseCategory"]?.ToString() : null;
@@ -3282,7 +3322,7 @@ namespace Take_Time_BangPhra.Integration
             bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() : "";
-            DateTime receiptDate = DateTime.Parse(p["receiptDate"]?.ToString());
+            DateTime receiptDate = ParseAcctDate(p["receiptDate"]?.ToString());
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
             string revenueType = p.ContainsKey("revenueType") ? p["revenueType"]?.ToString() : null;
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
@@ -4020,7 +4060,7 @@ namespace Take_Time_BangPhra.Integration
             decimal depositAmount = Convert.ToDecimal(p["depositAmount"]);
             decimal damageAmount = p.ContainsKey("damageAmount") ? Convert.ToDecimal(p["damageAmount"]) : 0m;
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
-            DateTime checkoutDate = DateTime.Parse(p["checkoutDate"]?.ToString());
+            DateTime checkoutDate = ParseAcctDate(p["checkoutDate"]?.ToString());
             string reservationRef = p.ContainsKey("reservationRef") ? p["reservationRef"]?.ToString() : $"RES-{reservationId}-CHK";
 
             if (depositAmount <= 0)
@@ -4074,7 +4114,7 @@ namespace Take_Time_BangPhra.Integration
             decimal refundAmount = Convert.ToDecimal(p["refundAmount"]);
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
-            DateTime refundDate = DateTime.Parse(p["refundDate"]?.ToString());
+            DateTime refundDate = ParseAcctDate(p["refundDate"]?.ToString());
 
             if (refundAmount <= 0)
                 throw new ArgumentException($"ProcessDepositRefund: refundAmount ต้อง > 0 (ได้ {refundAmount}) reservation #{reservationId}");
@@ -4101,7 +4141,7 @@ namespace Take_Time_BangPhra.Integration
             int reservationId = Convert.ToInt32(p["reservationId"]);
             decimal forfeitAmount = Convert.ToDecimal(p["forfeitAmount"]);
             string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
-            DateTime forfeitDate = DateTime.Parse(p["forfeitDate"]?.ToString());
+            DateTime forfeitDate = ParseAcctDate(p["forfeitDate"]?.ToString());
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
 
             if (forfeitAmount <= 0)
@@ -4128,7 +4168,7 @@ namespace Take_Time_BangPhra.Integration
             decimal quantity = Convert.ToDecimal(p["quantity"]);
             decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
             decimal totalCost = p.ContainsKey("totalCost") ? Convert.ToDecimal(p["totalCost"]) : Math.Round(quantity * costPerUnit, 2);
-            DateTime receiveDate = DateTime.Parse(p["receiveDate"]?.ToString());
+            DateTime receiveDate = ParseAcctDate(p["receiveDate"]?.ToString());
             string supplierName = p.ContainsKey("supplierName") ? p["supplierName"]?.ToString() : "";
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : null;
             bool hasInputVat = p.ContainsKey("hasInputVat") && Convert.ToBoolean(p["hasInputVat"]);
@@ -4150,7 +4190,7 @@ namespace Take_Time_BangPhra.Integration
             string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
             decimal quantity = Convert.ToDecimal(p["quantity"]);
             decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
-            DateTime outDate = DateTime.Parse(p["outDate"]?.ToString());
+            DateTime outDate = ParseAcctDate(p["outDate"]?.ToString());
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "ขาย";
             string stockRef = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : null;
 
@@ -4170,7 +4210,7 @@ namespace Take_Time_BangPhra.Integration
             string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
             decimal quantity = Convert.ToDecimal(p["quantity"]);
             decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
-            DateTime reverseDate = DateTime.Parse(p["reverseDate"]?.ToString());
+            DateTime reverseDate = ParseAcctDate(p["reverseDate"]?.ToString());
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "ยกเลิก room charge";
             string stockRef = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : null;
 
@@ -4191,7 +4231,7 @@ namespace Take_Time_BangPhra.Integration
             string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
             decimal quantityDiff = Convert.ToDecimal(p["quantityDiff"]);
             decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
-            DateTime adjustDate = DateTime.Parse(p["adjustDate"]?.ToString());
+            DateTime adjustDate = ParseAcctDate(p["adjustDate"]?.ToString());
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
 
             _code.Logs(_connectionString, "AccountingSync",
@@ -4212,7 +4252,7 @@ namespace Take_Time_BangPhra.Integration
             string productName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "";
             decimal quantity = Convert.ToDecimal(p["quantity"]);
             decimal costPerUnit = Convert.ToDecimal(p["costPerUnit"]);
-            DateTime writeOffDate = DateTime.Parse(p["writeOffDate"]?.ToString());
+            DateTime writeOffDate = ParseAcctDate(p["writeOffDate"]?.ToString());
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "เสียหาย";
 
             _code.Logs(_connectionString, "AccountingSync",
