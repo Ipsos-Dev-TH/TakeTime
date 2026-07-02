@@ -1885,6 +1885,35 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// เฉพาะกรณี "อนุมัติ/ลงรายการไปแล้วจริง" — ใช้ตอน approve เอกสารที่เพิ่งสร้าง.
+        /// ต่างจาก IsAlreadyPostedOrTerminal: **ไม่กลืน 404** (เอกสารหาย = ปัญหาจริง ไม่ใช่สำเร็จ)
+        /// และไม่กลืน "Draft"/validation (อนุมัติไม่ผ่าน ต้องให้ fail เห็นสาเหตุ ไม่ mark สำเร็จลอย ๆ)
+        /// </summary>
+        private static bool IsAlreadyApprovedOrPosted(AccountingApiException ex)
+        {
+            if (ex.StatusCode != 400 && ex.StatusCode != 409) return false;
+            string body = ex.ResponseBody ?? "";
+            return body.Contains("Approved")
+                || body.Contains("Posted")
+                || body.Contains("Sent")
+                || body.Contains("Paid")
+                || body.Contains("Voided")
+                || body.Contains("อนุมัติแล้ว")
+                || body.Contains("ลงรายการแล้ว")
+                || body.Contains("ยกเลิกไปแล้ว");
+        }
+
+        /// <summary>สถานะเอกสารถือว่า "โพสต์แล้วจริง" (ไม่ใช่ Draft/รออนุมัติ/ถูกปฏิเสธ)</summary>
+        private static bool IsPostedStatus(int status)
+        {
+            return status == NexaaccDocumentStatus.Approved
+                || status == NexaaccDocumentStatus.Sent
+                || status == NexaaccDocumentStatus.PartiallyPaid
+                || status == NexaaccDocumentStatus.Paid
+                || status == NexaaccDocumentStatus.Overdue;
+        }
+
+        /// <summary>
         /// Approve เอกสาร — JWT-only endpoint. ปัจจุบันไม่มี caller (Integration invoice/expense
         /// auto-approve อยู่แล้ว) คงไว้สำหรับ flow ในอนาคตที่ใช้ DocumentController แยก
         /// </summary>
@@ -1925,11 +1954,15 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                await _apiClient.ApproveDocumentAsync(documentId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                var apr = await _apiClient.ApproveDocumentAsync(documentId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                // จับเลขเอกสารจริงหลังอนุมัติ (ก่อนอนุมัติ NextAcc คืน "DRAFT-xxxx")
+                string aprNum = apr?.data?.DocumentNumber;
+                if (!string.IsNullOrEmpty(aprNum) && !aprNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                    _lastDocNumber = aprNum;
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"EnsureDocumentApproved: อนุมัติเอกสารร่าง {documentId} ({ctx}) status='{s}'", "SYSTEM");
+                    $"EnsureDocumentApproved: อนุมัติเอกสารร่าง {documentId} ({ctx}) status='{s}' → เลข={aprNum}", "SYSTEM");
             }
-            catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
+            catch (AccountingApiException ex) when (IsAlreadyApprovedOrPosted(ex))
             {
                 // อนุมัติ/ลงรายการไปแล้ว — ถือว่าสำเร็จ
             }
@@ -2539,11 +2572,6 @@ namespace Take_Time_BangPhra.Integration
             // marker "VOIDED" = ใบเสร็จเดิมถูก void แล้ว. ถ้ามี CREATE เข้ามาใหม่ (edit = void→สร้างเลขเดิม,
             // row ถูก reinsert) ให้เริ่มสร้างใหม่ตามปกติ — ไม่บล็อก (delete ปกติไม่ enqueue CREATE)
             if (marker == "VOIDED") marker = null;
-            bool isFinal = !string.IsNullOrEmpty(marker)
-                && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:") && !marker.StartsWith("ADJ:");
-            if (isFinal && Guid.TryParse(marker, out var finalId) && finalId != Guid.Empty)
-                return finalId;   // จบแล้ว
-
             // เฟส: DOC:{id} (สร้างแล้ว) → APR:{id} (อนุมัติแล้ว) → ADJ:{id} (ลงปรับมัดจำแล้ว) → {id} (จบ)
             bool approved = !string.IsNullOrEmpty(marker) && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:"));
             bool adjDone = !string.IsNullOrEmpty(marker) && marker.StartsWith("ADJ:");
@@ -2551,6 +2579,38 @@ namespace Take_Time_BangPhra.Integration
             if (!string.IsNullOrEmpty(marker)
                 && (marker.StartsWith("DOC:") || marker.StartsWith("APR:") || marker.StartsWith("ADJ:")))
                 Guid.TryParse(marker.Substring(4), out docId);
+
+            bool isFinal = !string.IsNullOrEmpty(marker)
+                && !marker.StartsWith("DOC:") && !marker.StartsWith("APR:") && !marker.StartsWith("ADJ:");
+            if (isFinal && Guid.TryParse(marker, out var finalId) && finalId != Guid.Empty)
+            {
+                // marker บอกว่า "จบแล้ว" — แต่ verify ว่าเอกสารโพสต์จริงบน NextAcc (กันเคสเก่าที่ mark สำเร็จ
+                // ทั้งที่ยัง Draft/ไม่มีเอกสาร). ถ้าโพสต์แล้ว → จบ; ถ้ายัง Draft → อนุมัติซ้ำ; ถ้าไม่พบ → สร้างใหม่.
+                try
+                {
+                    var chk = await _apiClient.GetDocumentAsync(finalId);
+                    if (chk?.data != null && IsPostedStatus(chk.data.Status))
+                    {
+                        if (!string.IsNullOrEmpty(chk.data.DocumentNumber) && !chk.data.DocumentNumber.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                            _lastDocNumber = chk.data.DocumentNumber;
+                        _lastDocType = "RECEIPT";
+                        return finalId;   // โพสต์แล้วจริง — จบ
+                    }
+                    // ยัง Draft/รออนุมัติ → ซ่อมด้วยการอนุมัติซ้ำ docId เดิม
+                    // adjDone=true: การปรับมัดจำ (ถ้ามี) ทำไปแล้วตอนถึง final — ไม่ทำซ้ำ (กัน double)
+                    docId = finalId; approved = false; adjDone = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceiptDoc: receipt={receiptNumber} marker=final แต่เอกสารยัง Draft (status={chk?.data?.Status}) → อนุมัติซ้ำ", "SYSTEM");
+                }
+                catch (AccountingApiException gx) when (gx.StatusCode == 404)
+                {
+                    // เอกสารไม่อยู่บน NextAcc → รีเซ็ต marker แล้วสร้างใหม่
+                    SetReceiptPaymentMarker(receiptNumber, null);
+                    docId = Guid.Empty; approved = false; adjDone = false;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceiptDoc: receipt={receiptNumber} marker=final แต่ไม่พบเอกสารบน NextAcc → สร้างใหม่", "SYSTEM");
+                }
+            }
 
             // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
             if (docId == Guid.Empty)
@@ -2561,18 +2621,60 @@ namespace Take_Time_BangPhra.Integration
                 SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
             }
 
-            // 2) อนุมัติ (auto-post GL) — idempotent (กลืน already-approved)
+            // 2) อนุมัติ (auto-post GL)
+            //    ก่อนอนุมัติ NextAcc คืนเลข "DRAFT-xxxx"; หลังอนุมัติจะได้เลขจริง → ต้องจับเลขหลังอนุมัติ
+            //    และตรวจว่าโพสต์จริง — ถ้ายังค้าง Draft/รออนุมัติ หรือ approve หาเอกสารไม่เจอ (404)
+            //    ให้ throw เพื่อให้คิวเป็น FAILED เห็นสาเหตุ (ไม่ mark COMPLETED ทั้งที่ไม่มีเอกสารบน NextAcc)
             if (!approved)
             {
+                bool alreadyPosted = false;
                 try
                 {
-                    await _apiClient.ApproveDocumentAsync(docId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                    var apr = await _apiClient.ApproveDocumentAsync(docId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+
+                    string aprNum = apr?.data?.DocumentNumber;
+                    if (!string.IsNullOrEmpty(aprNum) && !aprNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                        _lastDocNumber = aprNum;   // เลขเอกสารจริงหลังอนุมัติ
+
+                    int st = apr?.data?.Status ?? -1;
+                    if (st == NexaaccDocumentStatus.Draft || st == NexaaccDocumentStatus.WaitingApproval
+                        || st == NexaaccDocumentStatus.Rejected)
+                    {
+                        throw new Exception(
+                            $"อนุมัติไม่สำเร็จ — เอกสารยังเป็นสถานะ {st} (0=Draft/1=รออนุมัติ/8=Rejected) " +
+                            $"receipt={receiptNumber} docId={docId} เลข={aprNum}");
+                    }
                 }
-                catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
+                catch (AccountingApiException ex) when (IsAlreadyApprovedOrPosted(ex))
                 {
+                    alreadyPosted = true;
                     _code.Logs(_connectionString, "AccountingSync",
                         $"SettleReceiptDoc: doc {docId} already approved/posted receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
                 }
+
+                // เลขจริงยังไม่ได้ (เช่น already-posted path) → ดึงเอกสารมาอ่านเลข/สถานะยืนยัน
+                if (string.IsNullOrEmpty(_lastDocNumber) || _lastDocNumber.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase) || alreadyPosted)
+                {
+                    try
+                    {
+                        var got = await _apiClient.GetDocumentAsync(docId);
+                        if (got?.data != null)
+                        {
+                            if (!string.IsNullOrEmpty(got.data.DocumentNumber) && !got.data.DocumentNumber.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                                _lastDocNumber = got.data.DocumentNumber;
+                            if (!IsPostedStatus(got.data.Status))
+                                throw new Exception(
+                                    $"อนุมัติแล้วแต่เอกสารยังไม่โพสต์ (status={got.data.Status}) receipt={receiptNumber} docId={docId}");
+                        }
+                    }
+                    catch (AccountingApiException gx)
+                    {
+                        // อ่านเอกสารไม่ได้/ไม่พบ → ถือว่าไม่สำเร็จจริง (เอกสารไม่อยู่บน NextAcc)
+                        throw new Exception(
+                            $"ยืนยันเอกสารบน NextAcc ไม่ได้หลังอนุมัติ receipt={receiptNumber} docId={docId} ({gx.StatusCode})");
+                    }
+                }
+
                 SetReceiptPaymentMarker(receiptNumber, "APR:" + docId);
             }
 
