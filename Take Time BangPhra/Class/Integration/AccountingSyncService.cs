@@ -1904,6 +1904,42 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>
+        /// กันเอกสารค้างสถานะ "ร่าง" (Draft): ถ้าเอกสารที่เพิ่งสร้าง (invoice/receipt/ใบกำกับ) ยังไม่อนุมัติ
+        /// → อนุมัติทันที (auto-post GL). idempotent — ถ้าอนุมัติ/ลงรายการ/void ไปแล้วจะกลืน error.
+        /// approve เป็น company endpoint → ทำได้ต่อเมื่อ CanUseCompanyEndpoints (int_ ก็ผ่าน X-Api-Key fallback ได้).
+        /// status = ค่าที่ NextAcc คืนมาหลังสร้าง; ว่าง/Draft/WaitingApproval/ร่าง → อนุมัติ.
+        /// </summary>
+        private async Task EnsureDocumentApprovedAsync(Guid documentId, string status, string ctx)
+        {
+            if (documentId == Guid.Empty) return;
+            if (!_config.CanUseCompanyEndpoints) return;   // ไม่มี company endpoint → อนุมัติผ่าน API ไม่ได้
+
+            string s = (status ?? "").Trim();
+            bool alreadyDone = s.IndexOf("Approved", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Posted", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Paid", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Sent", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Void", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (alreadyDone) return;   // ผ่านสถานะร่างไปแล้ว ไม่ต้องทำอะไร
+
+            try
+            {
+                await _apiClient.ApproveDocumentAsync(documentId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureDocumentApproved: อนุมัติเอกสารร่าง {documentId} ({ctx}) status='{s}'", "SYSTEM");
+            }
+            catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
+            {
+                // อนุมัติ/ลงรายการไปแล้ว — ถือว่าสำเร็จ
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureDocumentApproved: อนุมัติเอกสาร {documentId} ({ctx}) ไม่สำเร็จ: {ex.Message}", "SYSTEM");
+            }
+        }
+
         // ──────────────────────────────────────────────
         // Individual Processors
         // ──────────────────────────────────────────────
@@ -3385,6 +3421,8 @@ namespace Take_Time_BangPhra.Integration
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (deposit) receipt={receiptNumber}");
                     _lastDocNumber = result?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";
+                    // กันเอกสารค้าง "ร่าง": อนุมัติทันทีถ้ายังไม่อนุมัติ (ก่อนบันทึกรับเงินปิดลูกหนี้)
+                    await EnsureDocumentApprovedAsync(invDocId, result?.data?.Status, $"deposit invoice receipt={receiptNumber}");
                     // บันทึกรับเงินสดของมัดจำเพื่อปิดลูกหนี้ที่ invoice เปิดไว้ (NextAcc ไม่ auto-pay)
                     await SettleReceiptInNextAcc(invDocId, receiptNumber, totalAmount, 0m,
                         paymentMethod, receiptDate, customerName, depositHasVat, reservationId, paymentAccountId);
@@ -3484,6 +3522,9 @@ namespace Take_Time_BangPhra.Integration
                         result = await _apiClient.CreateInvoiceAsync(invoice);
 
                     Guid invDocId = RequireValidDocId(result?.data?.Id, $"CreateInvoice (payment) receipt={receiptNumber}");
+
+                    // กันเอกสารค้าง "ร่าง": อนุมัติทันทีถ้ายังไม่อนุมัติ (ก่อนบันทึกรับเงินปิดลูกหนี้)
+                    await EnsureDocumentApprovedAsync(invDocId, result?.data?.Status, $"payment invoice receipt={receiptNumber}");
 
                     // ปิดลูกหนี้ที่ invoice เปิดไว้ (NextAcc ไม่ auto-pay): ตัดมัดจำที่หัก (ถ้ามี)
                     // เข้าลูกหนี้ + บันทึกรับเงินสดจริง (= total − depositApplied). idempotent ภายใน.
