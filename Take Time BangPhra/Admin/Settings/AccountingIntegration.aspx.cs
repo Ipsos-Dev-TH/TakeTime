@@ -600,6 +600,26 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
                 var sync = new Integration.AccountingSyncService(ConnStr);
+
+                // Retry บนใบเสร็จที่ COMPLETED แล้ว = "re-post ตามหลักการบัญชีปัจจุบัน":
+                // void เอกสารเก่าบน NextAcc + reset marker + สร้างใหม่เลขเดิม อัตโนมัติใน click เดียว
+                // (NextAcc แก้เอกสารที่โพสต์แล้ว in-place ไม่ได้ — นี่คือวิธี "แก้ JE" ที่ระบบทำให้เองครบ)
+                var rowDt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Status, Action_Type FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                string rowStatus = rowDt?.Rows.Count > 0 ? rowDt.Rows[0]["Status"]?.ToString() : "";
+                string rowAction = rowDt?.Rows.Count > 0 ? rowDt.Rows[0]["Action_Type"]?.ToString() : "";
+
+                if (rowStatus == "COMPLETED" && rowAction == "CREATE_RECEIPT_DOCUMENT")
+                {
+                    long newQid = sync.RepostReceiptWithCurrentLogic(queueId);
+                    if (newQid > 0)
+                        return new Dictionary<string, object> { { "success", true },
+                            { "message", $"Re-post แล้ว: void เอกสารเก่า + สร้างใหม่ตามหลักการปัจจุบัน (queue ใหม่ #{newQid})" } };
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
+                }
+
                 sync.RetryItem(queueId);
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
             }

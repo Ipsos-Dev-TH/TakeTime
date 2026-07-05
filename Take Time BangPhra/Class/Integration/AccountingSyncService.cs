@@ -2596,11 +2596,23 @@ namespace Take_Time_BangPhra.Integration
                         _lastDocType = "RECEIPT";
                         return finalId;   // โพสต์แล้วจริง — จบ
                     }
-                    // ยัง Draft/รออนุมัติ → ซ่อมด้วยการอนุมัติซ้ำ docId เดิม
-                    // adjDone=true: การปรับมัดจำ (ถ้ามี) ทำไปแล้วตอนถึง final — ไม่ทำซ้ำ (กัน double)
-                    docId = finalId; approved = false; adjDone = true;
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"SettleReceiptDoc: receipt={receiptNumber} marker=final แต่เอกสารยัง Draft (status={chk?.data?.Status}) → อนุมัติซ้ำ", "SYSTEM");
+                    int chkStatus = chk?.data?.Status ?? -1;
+                    if (chkStatus == NexaaccDocumentStatus.Voided || chkStatus == NexaaccDocumentStatus.Rejected)
+                    {
+                        // เอกสารถูก void/ปฏิเสธไปแล้ว (เช่น flow re-post void ของเก่า) → สร้างใหม่ทั้งใบ
+                        SetReceiptPaymentMarker(receiptNumber, null);
+                        docId = Guid.Empty; approved = false; adjDone = false;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"SettleReceiptDoc: receipt={receiptNumber} marker=final แต่เอกสารถูก void/reject (status={chkStatus}) → สร้างใหม่", "SYSTEM");
+                    }
+                    else
+                    {
+                        // ยัง Draft/รออนุมัติ → ซ่อมด้วยการอนุมัติซ้ำ docId เดิม
+                        // adjDone=true: การปรับมัดจำ (ถ้ามี) ทำไปแล้วตอนถึง final — ไม่ทำซ้ำ (กัน double)
+                        docId = finalId; approved = false; adjDone = true;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"SettleReceiptDoc: receipt={receiptNumber} marker=final แต่เอกสารยัง Draft (status={chkStatus}) → อนุมัติซ้ำ", "SYSTEM");
+                    }
                 }
                 catch (AccountingApiException gx) when (gx.StatusCode == 404)
                 {
@@ -5836,6 +5848,68 @@ namespace Take_Time_BangPhra.Integration
                   SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
                   WHERE ID = @id",
                 parameters);
+        }
+
+        /// <summary>
+        /// Re-post ใบเสร็จที่ COMPLETED แล้วด้วย "หลักการบันทึกบัญชีปัจจุบัน" ใน click เดียว:
+        /// NextAcc ไม่อนุญาตแก้เอกสาร/JE ที่โพสต์แล้ว (แก้ได้เฉพาะ Draft) → การ "แก้ JE" ที่ทำได้จริง
+        /// คือ void ของเก่า + สร้างใหม่เลขเดิม — เมธอดนี้ทำให้ครบอัตโนมัติ ผู้ใช้ไม่ต้องไป void เอง:
+        ///   1) enqueue VOID_RECEIPT ของเอกสารเก่า (ทำก่อนเสมอ — ไม่ข้ามแม้ DOCUMENT mode
+        ///      เพราะ Receipt doc ผ่าน company /document ไม่มี ReplaceExistingForSource)
+        ///   2) mark คิวเก่า SUPERSEDED + ล้าง PDF cache (ผ่าน PrepareResync)
+        ///   3) reset marker Account_Receipt.Nexaacc_Receipt_Payment_Id → CREATE ใหม่ไม่ถูกบล็อก
+        ///   4) enqueue CREATE ใหม่จาก payload เดิม → processor ยิง JE ตามโค้ด/หลักการล่าสุด
+        /// FIFO ของคิวการันตี VOID ประมวลก่อน CREATE. คืน queueId ของ CREATE ใหม่ (-1 = ไม่สำเร็จ)
+        /// </summary>
+        public long RepostReceiptWithCurrentLogic(long queueId)
+        {
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT ID, Entity_Type, Action_Type, Status, Payload, Nexaacc_Response_Id
+                  FROM Accounting_Sync_Queue WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", queueId } });
+            if (dt == null || dt.Rows.Count == 0) return -1;
+
+            var row = dt.Rows[0];
+            if ((row["Action_Type"]?.ToString()) != "CREATE_RECEIPT_DOCUMENT") return -1;
+
+            Dictionary<string, object> p;
+            try { p = _serializer.Deserialize<Dictionary<string, object>>(row["Payload"]?.ToString() ?? "{}"); }
+            catch { return -1; }
+            string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+            if (string.IsNullOrEmpty(receiptNumber)) return -1;
+
+            // เก็บ id เอกสารเก่าก่อน (PrepareResync จะ mark แถว SUPERSEDED)
+            string oldNexaaccId = row["Nexaacc_Response_Id"]?.ToString();
+            if (string.IsNullOrEmpty(oldNexaaccId) || !Guid.TryParse(oldNexaaccId, out _))
+            {
+                // fallback: marker บน Account_Receipt (เฟส final เป็น GUID เอกสาร)
+                string mk = LookupReceiptPaymentMarker(receiptNumber);
+                if (!string.IsNullOrEmpty(mk) && Guid.TryParse(mk, out var mg) && mg != Guid.Empty)
+                    oldNexaaccId = mk;
+            }
+
+            // 1) void เอกสารเก่า (ถ้ามี) — ProcessVoidReceipt กลืน already-gone เอง + กลับรายการหักมัดจำให้
+            if (!string.IsNullOrEmpty(oldNexaaccId) && Guid.TryParse(oldNexaaccId, out _))
+            {
+                InsertQueue("RECEIPT", 0, "VOID_RECEIPT", new Dictionary<string, object>
+                {
+                    { "documentNumber", receiptNumber },
+                    { "nexaaccId", oldNexaaccId },
+                    { "reason", "Re-post ตามหลักการบัญชีปัจจุบัน" }
+                });
+            }
+
+            // 2) เคลียร์คิวเก่า + ล้าง PDF cache (PrepareResync ในโหมด journal จะ enqueue void ซ้ำ —
+            //    ไม่เป็นไร ProcessVoidReceipt idempotent/กลืนเอกสารที่ void แล้ว)
+            PrepareResync(receiptNumber);
+
+            // 3) reset marker → SettleReceiptDocAsync/SettleReceiptInNextAcc เริ่ม state machine ใหม่
+            SetReceiptPaymentMarker(receiptNumber, null);
+
+            // 4) สร้าง CREATE ใหม่จาก payload เดิม (ตัวเลขต้นทางเดิม — processor ตีความตามหลักการใหม่)
+            return InsertQueue("RECEIPT",
+                p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0,
+                "CREATE_RECEIPT_DOCUMENT", p);
         }
 
         /// <summary>
