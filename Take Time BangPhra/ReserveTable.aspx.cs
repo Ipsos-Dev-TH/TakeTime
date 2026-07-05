@@ -560,6 +560,34 @@ namespace Take_Time_BangPhra
             // Send Telegram notification
             await SendTelegramNotification(reservationId, refund);
 
+            // ── ยกเลิกชาร์จเข้าห้องที่ค้าง (PENDING) ก่อนลบการจอง ──
+            // charge PENDING ตัดสต๊อก + ลง COGS บน NextAcc ไปแล้วตอนชาร์จ — ถ้าปล่อยทิ้งตอนยกเลิกการจอง
+            // ต้นทุนค้างโดยไม่มีวันมีรายได้ (asymmetry). CancelRoomCharge คืนสต๊อก + reverse COGS ให้ครบ
+            try
+            {
+                DataTable pendCharges = DatabaseQuery(conn,
+                    "SELECT ID FROM Reservation_Product_Charges WHERE Reservation_ID = @rid AND Status = 'PENDING'",
+                    new SqlParameter("@rid", reservationId));
+                if (pendCharges != null && pendCharges.Rows.Count > 0)
+                {
+                    var chargeService = new Take_Time_BangPhra.RoomChargeService(conn);
+                    foreach (DataRow pc in pendCharges.Rows)
+                    {
+                        try { chargeService.CancelRoomCharge(Convert.ToInt64(pc["ID"]), null, "ยกเลิกการจอง #" + reservationId); }
+                        catch (Exception cex)
+                        {
+                            code2.Logs(conn, "Accounting Sync", $"CancelReservation: ยกเลิก charge {pc["ID"]} ไม่สำเร็จ: {cex.Message}", "SYSTEM");
+                        }
+                    }
+                    code2.Logs(conn, "Accounting Sync",
+                        $"CancelReservation: ยกเลิกชาร์จค้าง {pendCharges.Rows.Count} รายการของการจอง #{reservationId} (คืนสต๊อก + reverse COGS)", "SYSTEM");
+                }
+            }
+            catch (Exception pcx)
+            {
+                code2.Logs(conn, "Accounting Sync", $"CancelReservation: ตรวจ charge ค้าง #{reservationId} ล้มเหลว: {pcx.Message}", "SYSTEM");
+            }
+
             // Delete related records
             DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId",
                 new SqlParameter("@ReservationId", reservationId));

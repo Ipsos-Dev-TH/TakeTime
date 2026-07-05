@@ -349,16 +349,25 @@ namespace Take_Time_BangPhra
                 }
                 int adminId = Convert.ToInt32(Session["UserID"]);
 
+                // ค่าเสียหาย/ของหาย: อ่านจากช่องกรอกจริง (เดิม hardcode 0 → ค่าเสียหายไม่เคยลงบัญชี)
+                // นับเฉพาะเมื่อ checklist ข้อนั้น "ไม่ผ่าน"; ยอดนี้จะถูกแยกจากมัดจำเข้า DAMAGE/OTHER_INCOME
+                // ตอนตัดมัดจำ (MapCheckoutToJournal) แทนที่จะนับเป็นรายได้ห้องทั้งก้อน
+                decimal damageAmt = 0, missingAmt = 0;
+                if (!chkRoomCondition.Checked) decimal.TryParse(txtDamageAmount.Text?.Trim(), out damageAmt);
+                if (!chkMissingItems.Checked) decimal.TryParse(txtMissingAmount.Text?.Trim(), out missingAmt);
+                if (damageAmt < 0) damageAmt = 0;
+                if (missingAmt < 0) missingAmt = 0;
+
                 // Process checkout with checklist data
                 var result = checkoutService.ProcessCheckout(
                     reservationId,
                     adminId,
                     roomDamage: !chkRoomCondition.Checked,  // ไม่ผ่าน = มีความเสียหาย
                     damageDescription: !chkRoomCondition.Checked ? "ตรวจพบความเสียหาย" : null,
-                    damageCharge: 0,
+                    damageCharge: damageAmt,
                     missingItems: !chkMissingItems.Checked, // ไม่ผ่าน = ของหาย
                     missingItemsDescription: !chkMissingItems.Checked ? "อุปกรณ์ไม่ครบ" : null,
-                    missingItemsCharge: 0,
+                    missingItemsCharge: missingAmt,
                     keyReturned: chkKeyReturn.Checked,
                     cleaningStatus: chkCleaning.Checked ? "GOOD" : "DIRTY",
                     guestSatisfaction: (byte)rating,

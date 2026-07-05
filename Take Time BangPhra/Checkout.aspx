@@ -355,6 +355,11 @@
                         <div class="checklist-description">
                             ตรวจสอบความเสียหายของห้อง อุปกรณ์ และเฟอร์นิเจอร์
                         </div>
+                        <div style="margin-top:6px;">
+                            <label style="font-size:0.85em;color:#c0392b;">ค่าเสียหาย (บาท) — กรอกเมื่อพบความเสียหาย (ไม่ติ๊กช่องนี้):</label>
+                            <asp:TextBox ID="txtDamageAmount" runat="server" TextMode="Number" step="0.01" min="0"
+                                Style="max-width:160px;display:inline-block;" placeholder="0.00" />
+                        </div>
                     </div>
                 </div>
 
@@ -364,6 +369,11 @@
                         <div class="checklist-label">ตรวจนับอุปกรณ์ครบถ้วน</div>
                         <div class="checklist-description">
                             ผ้าเช็ดตัว ผ้าปูที่นอน หมอน ไม้แขวนเสื้อ รีโมท ฯลฯ
+                        </div>
+                        <div style="margin-top:6px;">
+                            <label style="font-size:0.85em;color:#c0392b;">ค่าอุปกรณ์สูญหาย (บาท) — กรอกเมื่อของหาย (ไม่ติ๊กช่องนี้):</label>
+                            <asp:TextBox ID="txtMissingAmount" runat="server" TextMode="Number" step="0.01" min="0"
+                                Style="max-width:160px;display:inline-block;" placeholder="0.00" />
                         </div>
                     </div>
                 </div>
