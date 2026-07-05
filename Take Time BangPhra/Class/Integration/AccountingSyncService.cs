@@ -5861,10 +5861,14 @@ namespace Take_Time_BangPhra.Integration
         ///   4) enqueue CREATE ใหม่จาก payload เดิม → processor ยิง JE ตามโค้ด/หลักการล่าสุด
         /// FIFO ของคิวการันตี VOID ประมวลก่อน CREATE. คืน queueId ของ CREATE ใหม่ (-1 = ไม่สำเร็จ)
         /// </summary>
+        /// <summary>ข้อความผลลัพธ์ล่าสุดจาก RepostReceiptWithCurrentLogic (in-place/reversal/เหตุผล guard) — ให้หน้า UI แสดง</summary>
+        public string LastRepostMessage { get; private set; }
+
         public long RepostReceiptWithCurrentLogic(long queueId)
         {
+            LastRepostMessage = null;
             var dt = _code.DatabaseQuerySafe(_connectionString,
-                @"SELECT ID, Entity_Type, Action_Type, Status, Payload, Nexaacc_Response_Id
+                @"SELECT ID, Entity_Type, Action_Type, Status, Payload, Nexaacc_Response_Id, Nexaacc_Document_Type
                   FROM Accounting_Sync_Queue WHERE ID = @id",
                 new Dictionary<string, object> { { "@id", queueId } });
             if (dt == null || dt.Rows.Count == 0) return -1;
@@ -5877,6 +5881,76 @@ namespace Take_Time_BangPhra.Integration
             catch { return -1; }
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
             if (string.IsNullOrEmpty(receiptNumber)) return -1;
+
+            string docType = row.Table.Columns.Contains("Nexaacc_Document_Type")
+                ? row["Nexaacc_Document_Type"]?.ToString() ?? "" : "";
+
+            // ── ทางที่ 0: Official resync contract (INTEGRATION_RESYNC.md) — เอกสารเดิมเป็น
+            // integration invoice → ส่ง /integration/invoices ซ้ำด้วย externalRef เดิม + resyncUpdate:true
+            // NextAcc จัดการเอง: งวดเปิด+JE เดียว = in-place (เลข JE คงเดิม) / งวดปิด = reversal+post ใหม่
+            // เลขเอกสารคงเดิมเสมอ ไม่มี void. guard (ชำระแล้ว/มี CN-DN/ภ.พ.30 ยื่นแล้ว) → success:false
+            if (docType == "INVOICE")
+            {
+                try
+                {
+                    var invoice = BuildCorrectedReceiptInvoice(p, receiptNumber);
+                    if (invoice != null)
+                    {
+                        ApiResponse<IntegrationDocumentResponse> resp = null;
+                        string guardMsg = null;
+                        try
+                        {
+                            resp = System.Threading.Tasks.Task.Run(() => _apiClient.CreateInvoiceAsync(invoice))
+                                .GetAwaiter().GetResult();
+                        }
+                        catch (AccountingApiException apiEx)
+                        {
+                            // guard อาจตอบเป็น HTTP error — เอาข้อความจริงจาก NextAcc มาแสดง
+                            guardMsg = string.IsNullOrEmpty(apiEx.ResponseBody) ? apiEx.Message : apiEx.ResponseBody;
+                        }
+
+                        string msg = resp?.message ?? "";
+                        if (resp != null && resp.success
+                            && msg.StartsWith("Resync updated", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bool inPlace = msg.IndexOf("(in-place)", StringComparison.OrdinalIgnoreCase) >= 0;
+                            LastRepostMessage = inPlace
+                                ? "✅ แก้ JE เดิม (in-place) — เลข JE/เลขเอกสารคงเดิม"
+                                : "✅ ปรับด้วย reversal (งวดเดิมปิด/มีหลาย JE) — เลขเอกสารคงเดิม";
+                            _code.DatabaseInsertSafe(_connectionString,
+                                "UPDATE Accounting_Sync_Queue SET Error_Message = @m WHERE ID = @id",
+                                new Dictionary<string, object> { { "@m", "Resync: " + msg }, { "@id", queueId } });
+                            ClearReceiptPdfCache(receiptNumber);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RepostReceipt: resyncUpdate สำเร็จ receipt={receiptNumber} → {msg}", "SYSTEM");
+                            return 0;
+                        }
+                        if (resp != null && !resp.success)
+                        {
+                            // ติด guard — NextAcc บอกทางแก้ในข้อความ (เช่น ชำระแล้ว → ต้อง void/CN)
+                            LastRepostMessage = "NextAcc ปฏิเสธการแก้: " + (resp.message ?? "ไม่ทราบสาเหตุ");
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RepostReceipt: resyncUpdate ถูก guard ปฏิเสธ receipt={receiptNumber}: {resp.message}", "SYSTEM");
+                            return -1;
+                        }
+                        if (guardMsg != null)
+                        {
+                            LastRepostMessage = "NextAcc ปฏิเสธการแก้: " + guardMsg;
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RepostReceipt: resyncUpdate error receipt={receiptNumber}: {guardMsg}", "SYSTEM");
+                            return -1;
+                        }
+                        // success + "Already synced" = NextAcc รุ่นเก่ายังไม่รู้จัก resyncUpdate → fallback void→สร้างใหม่
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"RepostReceipt: NextAcc ตอบ '{msg}' (รุ่นเก่า/ไม่เข้าเงื่อนไข resync) receipt={receiptNumber} → fallback void→สร้างใหม่", "SYSTEM");
+                    }
+                }
+                catch (Exception rex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"RepostReceipt: resyncUpdate ล้มเหลว receipt={receiptNumber} ({rex.Message}) → fallback", "SYSTEM");
+                }
+            }
 
             // ── ทางที่ 1: แก้ JE เดิม in-place (ไม่ void) ──
             // NextAcc (เวอร์ชันล่าสุด) อนุญาตแก้ JE ที่โพสต์แล้วโดยตรงเมื่องวดยังเปิด — ลองก่อนเสมอ:
@@ -5912,19 +5986,11 @@ namespace Take_Time_BangPhra.Integration
                 if (inPlaceOk)
                 {
                     // สำเร็จแบบไม่ void: คงคิวเดิม COMPLETED + จดบันทึก, ล้าง PDF cache ให้ดึงยอดใหม่
+                    LastRepostMessage = "✅ แก้ JE เดิม (in-place) — เลข JE คงเดิม";
                     _code.DatabaseInsertSafe(_connectionString,
                         "UPDATE Accounting_Sync_Queue SET Error_Message = N'JE updated in-place (no void)' WHERE ID = @id",
                         new Dictionary<string, object> { { "@id", queueId } });
-                    try
-                    {
-                        string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                        if (!string.IsNullOrEmpty(basePath))
-                        {
-                            string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
-                            if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
-                        }
-                    }
-                    catch { }
+                    ClearReceiptPdfCache(receiptNumber);
                     return 0;   // 0 = แก้ in-place แล้ว ไม่มีคิวใหม่
                 }
             }
@@ -5967,6 +6033,87 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("RECEIPT",
                 p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0,
                 "CREATE_RECEIPT_DOCUMENT", p);
+        }
+
+        /// <summary>ล้าง PDF cache ฝั่ง TakeTime ของเอกสาร → ครั้งต่อไป re-download ยอดใหม่จาก NextAcc</summary>
+        private void ClearReceiptPdfCache(string receiptNumber)
+        {
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (!string.IsNullOrEmpty(basePath))
+                {
+                    string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
+                    if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// สร้าง integration invoice ที่ "ถูกต้องตามหลักการปัจจุบัน" จาก payload คิวเดิม สำหรับ
+        /// official resync (INTEGRATION_RESYNC.md): mapper ชุดเดียวกับ ProcessReceiptDocument
+        /// (int_ invoice branch) + ExternalRef = เลขใบเสร็จ (คีย์ dedup ของ NextAcc) + ResyncUpdate=true
+        /// </summary>
+        private CreateIntegrationInvoiceRequest BuildCorrectedReceiptInvoice(Dictionary<string, object> p, string receiptNumber)
+        {
+            try
+            {
+                int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+                decimal totalAmount = p.ContainsKey("totalAmount") ? Convert.ToDecimal(p["totalAmount"]) : 0m;
+                DateTime receiptDate = ParseAcctDate(p.ContainsKey("receiptDate") ? p["receiptDate"]?.ToString() : null);
+                string customerName = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
+                bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
+                string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() ?? "CASH" : "CASH";
+                string revenueType = p.ContainsKey("revenueType") ? p["revenueType"]?.ToString() : null;
+                string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
+                if (totalAmount <= 0) return null;
+
+                bool hasVat = LookupBusinessHasVat();
+                CreateIntegrationInvoiceRequest invoice;
+
+                if (isDeposit)
+                {
+                    invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
+                        customerName, paymentAccountId: paymentAccountId, hasVat: hasVat,
+                        vatAtReceipt: _config.IsDepositVatAtReceipt);
+                }
+                else
+                {
+                    decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
+                    if (depositApplied <= 0)
+                        depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
+
+                    decimal depositFromLines;
+                    var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+                    if (depositFromLines > 0)
+                    {
+                        depositApplied += depositFromLines;
+                        totalAmount += depositFromLines;   // คืน GROSS (fix มัดจำหักซ้ำ)
+                    }
+
+                    bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
+                    if (useMultiLine)
+                        invoice = _mapper.MapMultiLinePaymentToInvoice(reservationId, lines, paymentMethod, receiptDate,
+                            customerName, hasVat, paymentAccountId, depositApplied, receiptNumber);
+                    else
+                        invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
+                            customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
+                }
+
+                invoice.Reference = receiptNumber;
+                invoice.ExternalRef = receiptNumber;      // 🔑 คีย์ dedup ที่ NextAcc ใช้หาเอกสารเดิม
+                invoice.ExternalId = receiptNumber;
+                invoice.ReplaceExistingForSource = false; // ใช้กลไก resyncUpdate แทน (ไม่ void)
+                invoice.ResyncUpdate = true;
+                return invoice;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"BuildCorrectedReceiptInvoice error: {ex.Message}", "SYSTEM");
+                return null;
+            }
         }
 
         /// <summary>

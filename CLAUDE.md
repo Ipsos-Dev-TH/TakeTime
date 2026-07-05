@@ -106,6 +106,17 @@ when completed. Non-claimable (§82/5: professional fee / personal car / enterta
 bundled into expense. **A plain "ใบเสร็จรับเงิน" (no buyer details) is NOT claimable** — this is
 why uploading a receipt and claiming VAT is wrong; need a proper tax invoice via OCR→§86/4 fields.
 
+#### Official resync contract (docs/NextAcc_Integration_Resync_Contract.md — ก.ค. 2026)
+`POST /api/integration/invoices|expenses` + **`resyncUpdate:true`** + `externalRef` เดิม →
+NextAcc แก้เอกสารเดิมเอง: งวดเปิด+JE เดียว = **in-place (เลข JE คงเดิม)** / งวดปิด-หลาย JE =
+**reversal+post ใหม่** — **เลขเอกสารคงเดิมเสมอ ไม่มี void**. ตรวจผลจาก `message` prefix:
+`"Resync updated (in-place)"` / `"(reversal)"` / `"Already synced"` (รุ่นเก่า → fallback void→create)
+/ `success:false` = ติด guard (ชำระแล้ว/มี CN-DN/เดือนภาษียื่น ภ.พ.30 แล้ว — แสดงข้อความให้ผู้ใช้).
+ไม่รองรับ: credit-notes/debit-notes/payments. TakeTime: `RepostReceiptWithCurrentLogic` ใช้เส้นนี้
+ก่อนเมื่อเอกสารเดิมเป็น INVOICE (`BuildCorrectedReceiptInvoice` + `ResyncUpdate=true`), เอกสาร
+RECEIPT/JOURNAL ใช้ JE in-place (SearchJournals→UpdateJournalEntry) → fallback void→recreate.
+`LastRepostMessage` เก็บผลให้ UI. Return: 0 = แก้แบบไม่ void, >0 = fallback queue id, -1 = guard/fail.
+
 #### JE mutability (AccountingService.UpdateJournalEntryAsync — updated ก.ค. 2026)
 `PUT /api/companies/{cid}/accounting/journals/{entryId}` (`UpdateJournalEntryRequest`:
 EntryDate?/Description?/Reference?/Lines? — Lines != null = แทนที่ทั้งชุด) นโยบาย

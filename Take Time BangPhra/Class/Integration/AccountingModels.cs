@@ -678,6 +678,10 @@ namespace Take_Time_BangPhra.Integration
         public string DocumentType { get; set; }
         public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
+        /// <summary>Resync contract (INTEGRATION_RESYNC.md): true + externalRef ซ้ำ → NextAcc แก้เอกสาร
+        /// เดิมเอง (งวดเปิด+JE เดียว = in-place เลข JE คงเดิม / งวดปิด = reversal+post ใหม่) —
+        /// เลขเอกสารคงเดิมเสมอ ไม่มี void. null/false = พฤติกรรมเดิม (ซ้ำ → "Already synced" skip)</summary>
+        public bool? ResyncUpdate { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
@@ -703,6 +707,8 @@ namespace Take_Time_BangPhra.Integration
         public DateTime? DueDate { get; set; }
         public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
+        /// <summary>Resync contract — เหมือน CreateIntegrationInvoiceRequest.ResyncUpdate</summary>
+        public bool? ResyncUpdate { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }

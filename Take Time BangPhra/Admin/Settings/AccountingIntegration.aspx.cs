@@ -615,12 +615,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                     long newQid = sync.RepostReceiptWithCurrentLogic(queueId);
                     if (newQid == 0)
                         return new Dictionary<string, object> { { "success", true },
-                            { "message", "✅ แก้ JE เดิมบน NextAcc ตามหลักการปัจจุบันแล้ว (in-place — ไม่ void, เลข JE เดิม)" } };
+                            { "message", sync.LastRepostMessage ?? "✅ แก้เอกสาร/JE เดิมบน NextAcc ตามหลักการปัจจุบันแล้ว (ไม่ void)" } };
                     if (newQid > 0)
                         return new Dictionary<string, object> { { "success", true },
-                            { "message", $"Re-post แล้ว: NextAcc ไม่ให้แก้ JE นี้ตรง → void เอกสารเก่า + สร้างใหม่ (queue ใหม่ #{newQid})" } };
+                            { "message", $"Re-post แล้ว: NextAcc ไม่ให้แก้ตรง → void เอกสารเก่า + สร้างใหม่ (queue ใหม่ #{newQid})" } };
                     return new Dictionary<string, object> { { "success", false },
-                        { "message", "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
+                        { "message", sync.LastRepostMessage ?? "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
                 }
 
                 // กัน double-post: Retry ซ้ำบนรายการอื่นที่ COMPLETED แล้ว จะรัน processor ใหม่ →
