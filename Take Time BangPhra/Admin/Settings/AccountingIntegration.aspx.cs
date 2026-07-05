@@ -620,6 +620,16 @@ namespace Take_Time_BangPhra.Admin.Settings
                         { "message", "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
                 }
 
+                // กัน double-post: Retry ซ้ำบนรายการอื่นที่ COMPLETED แล้ว จะรัน processor ใหม่ →
+                // สร้าง JE/เอกสารซ้ำอีกใบบน NextAcc (processor ส่วนใหญ่ไม่ dedupe ระดับ NextAcc)
+                if (rowStatus == "COMPLETED")
+                {
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "รายการนี้โพสต์สำเร็จแล้ว — Retry ซ้ำจะสร้าง JE ซ้ำบน NextAcc\n" +
+                            "ถ้าต้องแก้ตัวเลข: JE ทั่วไป (ตัดมัดจำ/ปรับปรุง/เงินเดือน) แก้ตรงบน NextAcc ได้เลย " +
+                            "(อนุมัติแล้วก็แก้ได้ ถ้างวดบัญชียังไม่ปิด) / เอกสารใบเสร็จ-ใบกำกับ ใช้ปุ่มแก้ไขที่หน้าเอกสาร (void→สร้างใหม่)" } };
+                }
+
                 sync.RetryItem(queueId);
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
             }

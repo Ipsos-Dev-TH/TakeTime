@@ -55,6 +55,20 @@ namespace Take_Time_BangPhra.Integration
         public string Tags { get; set; }
     }
 
+    /// <summary>
+    /// แก้ JE เดิม in-place (PUT /accounting/journals/{id}) — NextAcc UpdateJournalEntryRequest.
+    /// field = null → คงค่าเดิม; Lines != null → แทนที่บรรทัดทั้งชุด (ต้อง balance + ≥2 บรรทัด).
+    /// ใช้ได้แม้ JE เป็น Posted (operator-override) ตราบเท่าที่งวดบัญชียังเปิด และ JE ไม่ใช่
+    /// รายการ auto-generated จากเอกสาร (พวกนั้น NextAcc ปฏิเสธ — ต้อง void เอกสาร+สร้างใหม่)
+    /// </summary>
+    public class UpdateJournalEntryRequest
+    {
+        public DateTime? EntryDate { get; set; }
+        public string Description { get; set; }
+        public string Reference { get; set; }
+        public List<JournalEntryLineRequest> Lines { get; set; }
+    }
+
     public class JournalEntryResponse
     {
         public Guid Id { get; set; }
