@@ -942,8 +942,11 @@ namespace Take_Time_BangPhra.Product
 
                 // ✅ Use discounted total (already calculated above)
                 int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
-                double vat = Math.Round(((total * 100) / (100+vatpercent)), 2);
-                double Total_Amount_Exclude_Vat = total - vat;
+                // total เป็นยอด gross รวม VAT: ฐานก่อน VAT = total*100/(100+p), VAT = total − ฐาน
+                // (เดิมสองค่านี้สลับกัน → Account_Receipt.Vat เก็บ "ฐาน" และ Exclude_Vat เก็บ "VAT"
+                //  แล้วไหลไปผิดใน e-Tax XML: tax_basis/invoice_tax_total สลับข้าง)
+                double Total_Amount_Exclude_Vat = Math.Round(((total * 100) / (100 + vatpercent)), 2);
+                double vat = total - Total_Amount_Exclude_Vat;
                 string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
                 try
                 {
@@ -1544,6 +1547,42 @@ namespace Take_Time_BangPhra.Product
                         "([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Account_Paid_How_ID],[Remark]) " +
                         "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,@ReceiptID,@PaidHowID,N'ขาย')",
                         productOutParams);
+                }
+
+                // ขายแบบออกใบกำกับ (docNum จริง): แถวถูก exclude จาก POS daily rollup
+                // (rollup กรอง Account_Receipt_ID='0') → ต้อง enqueue COGS + ตัด qty ฝั่ง NextAcc ที่นี่เอง
+                // (เดิมไม่มี → รายได้ลงแต่สต๊อก/ต้นทุนไม่ตัด: Inventory เกินจริง, COGS ขาด)
+                if (!string.IsNullOrEmpty(docNum) && docNum != "0")
+                {
+                    try
+                    {
+                        var cogsCfg = new Integration.AccountingConfig(conn);
+                        if (cogsCfg.IsConfigured && cogsCfg.Enabled)
+                        {
+                            var cogsSync = new Integration.AccountingSyncService(conn);
+                            DateTime saleDate = Convert.ToDateTime(TextBox12.Text);
+                            for (int i = 0; i < dtOrder.Rows.Count; i++)
+                            {
+                                int pid = Convert.ToInt32(dtOrder.Rows[i]["ID"]);
+                                decimal qty = Convert.ToDecimal(dtOrder.Rows[i]["Amount"]);
+                                string pname = dtOrder.Rows[i].Table.Columns.Contains("Product_Name")
+                                    ? dtOrder.Rows[i]["Product_Name"]?.ToString() ?? "" : "";
+                                decimal costPrice = 0m;
+                                var costDt = code.DatabaseQuerySafe(conn,
+                                    "SELECT ISNULL(Cost_Price, 0) FROM Product WHERE ID = @pid",
+                                    new Dictionary<string, object> { { "@pid", pid } });
+                                if (costDt != null && costDt.Rows.Count > 0)
+                                    costPrice = Convert.ToDecimal(costDt.Rows[0][0]);
+                                // EnqueueStockOutCogs กัน cost<=0 เองอยู่แล้ว; stockRef ผูกใบเสร็จ+สินค้า → idempotent
+                                cogsSync.EnqueueStockOutCogs(pid, pname, qty, costPrice, saleDate,
+                                    $"ขายหน้าร้าน (ใบกำกับ {docNum})", $"POSINV-{docNum}-{pid}");
+                            }
+                        }
+                    }
+                    catch (Exception cogsEx)
+                    {
+                        code.Logs(conn, "Accounting Sync", $"POS invoiced COGS enqueue error ({docNum}): {cogsEx.Message}", "SYSTEM");
+                    }
                 }
             }
 

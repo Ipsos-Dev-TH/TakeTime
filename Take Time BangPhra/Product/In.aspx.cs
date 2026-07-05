@@ -292,7 +292,9 @@ namespace Take_Time_BangPhra.Product
                             int productId = Convert.ToInt32(row["ID"]);
                             string productName = row["Product_Name"]?.ToString() ?? "";
                             decimal qty = Convert.ToDecimal(row["Amount"]);
-                            decimal cost = Convert.ToDecimal(row["PricePerUnit"]);
+                            // dtOrder ไม่มีคอลัมน์ "PricePerUnit" (schema: ...,Sell_Price,Price_Total,...)
+                            // เดิมอ่าน row["PricePerUnit"] → throw ทุกครั้ง → catch เงียบ → stock-in ไม่เคย sync
+                            decimal cost = Convert.ToDecimal(row["Sell_Price"]);
                             sync.EnqueueStockIn(productId, productName, qty, cost, receiveDate, "ระบบจัดซื้อ TakeTime", null, false,
                                 $"PIN-{productId}-{receiveDate:yyyyMMddHHmmss}");
                         }

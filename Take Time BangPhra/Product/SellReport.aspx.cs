@@ -67,11 +67,38 @@ namespace Take_Time_BangPhra.Product
         {
             if (e.CommandName == "DeleteItem")
             {
-                // SECURE: DELETE with parameterized query
                 var deleteParams = new Dictionary<string, object>
                 {
                     { "@ID", GridView1.Rows[Convert.ToInt32(e.CommandArgument)].Cells[0].Text }
                 };
+
+                // กันลบแถวขายที่ "ลงบัญชี NextAcc ไปแล้ว" — ลบดิบจะทำให้รายได้/สต๊อกบน NextAcc
+                // ค้างเป็น phantom (ไม่มีการ reverse):
+                //   - ขายแบบออกใบกำกับ (Account_Receipt_ID != '0') → ให้ไปยกเลิกใบเสร็จที่หน้าจัดการเอกสาร (void ตาม flow)
+                //   - ขายที่ถูกรวบรายวันแล้ว (Pos_Rollup_Ref มีค่า ไม่ใช่ LEGACY) → รวมอยู่ในใบ POSDAY แล้ว
+                var chk = code.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(Account_Receipt_ID, '0') AS RcptId, Pos_Rollup_Ref
+                      FROM [dbo].[Product_Out] WHERE ID = @ID", deleteParams);
+                if (chk != null && chk.Rows.Count > 0)
+                {
+                    string rcptId = chk.Rows[0]["RcptId"]?.ToString() ?? "0";
+                    string rollupRef = chk.Rows[0].Table.Columns.Contains("Pos_Rollup_Ref")
+                        && chk.Rows[0]["Pos_Rollup_Ref"] != DBNull.Value
+                        ? chk.Rows[0]["Pos_Rollup_Ref"].ToString() : "";
+
+                    if (!string.IsNullOrEmpty(rcptId) && rcptId != "0")
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "delBlocked",
+                            "alert('รายการนี้ออกใบกำกับ/ใบเสร็จแล้ว (" + rcptId + ") — ลบตรงนี้ไม่ได้\\nกรุณายกเลิกใบเสร็จที่หน้าจัดการเอกสาร (จะ void บน NextAcc ให้ด้วย)');", true);
+                        return;
+                    }
+                    if (!string.IsNullOrEmpty(rollupRef) && rollupRef != "LEGACY")
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "delBlocked2",
+                            "alert('รายการนี้ถูกรวบเข้าใบรับเงินสดรายวัน (" + rollupRef + ") และลงบัญชี NextAcc แล้ว — ลบตรงนี้ไม่ได้\\nต้องปรับปรุงผ่านเอกสารบัญชีแทน');", true);
+                        return;
+                    }
+                }
 
                 code.DatabaseInsertSafe(conn,
                     "DELETE FROM [dbo].[Product_Out] WHERE ID = @ID",

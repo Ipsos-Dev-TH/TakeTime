@@ -3565,6 +3565,12 @@ namespace Take_Time_BangPhra.Integration
                 if (depositFromLines > 0)
                 {
                     depositApplied += depositFromLines;
+                    // สำคัญ: ใบเช็คอินที่มี line "ส่วนลด" ติดลบ เก็บ Total_Amount เป็นยอด "สุทธิหลังหักมัดจำ"
+                    // แต่ convention ปลายทาง (SettleReceiptDocAsync / SettleReceiptInNextAcc คิด
+                    // cashNow = totalAmount − depositApplied และ doc/invoice สร้างจาก line บวกยอดเต็ม)
+                    // คาดหวัง totalAmount = ยอดเต็ม (GROSS) → บวกมัดจำกลับคืนก่อน ไม่งั้นมัดจำถูกหักซ้ำ
+                    // (เงินสดบน NextAcc ขาดเท่ายอดมัดจำ + ลูกหนี้ค้างเปิด)
+                    totalAmount += depositFromLines;
                     // Persist depositApplied ลง Account_Receipt เพื่อให้ TryEnqueueDepositClearing เห็น (anti-double-clear)
                     try
                     {

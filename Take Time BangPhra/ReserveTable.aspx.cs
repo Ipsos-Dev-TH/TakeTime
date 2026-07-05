@@ -573,42 +573,50 @@ namespace Take_Time_BangPhra
             }
 
             // Sync cancellation to accounting system
-            try
+            //   ยกเลิกคืนเงิน  → ProcessRefund ด้านบน void ใบเสร็จมัดจำ (กลับรายการ Dr เงินสด/Cr รับล่วงหน้า) แล้ว — ไม่ทำซ้ำ
+            //   ยกเลิกไม่คืนเงิน (ริบมัดจำ/no-show) → ต้องรับรู้รายได้ริบ: Dr เงินรับล่วงหน้า / Cr รายได้ริบมัดจำ
+            //   (เดิมบล็อกนี้ถูกปิดไว้ → มัดจำที่ริบค้างเป็นหนี้สินบน NextAcc ตลอด ไม่เคยลงรายได้)
+            if (!refund)
             {
-                string connStr = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString;
-                if (!string.IsNullOrEmpty(connStr))
+                try
                 {
-                    // Get deposit amount before it was zeroed
-                    decimal depositAmount = 0;
-                    string customerName = "ลูกค้า";
-                    string paymentMethod = "CASH";
-
-                    DataTable resData = DatabaseQuery(conn,
-                        @"SELECT ISNULL(ph.TotalPaid, 0) AS DepositPaid,
-                                 ISNULL(c.Customer_Name, c.NickName) AS Name,
-                                 ISNULL(ph.PaymentMethod, 'CASH') AS PayMethod
-                          FROM Reservation r
-                          LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
-                          LEFT JOIN (SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid,
-                                     MAX(PaymentMethod) AS PaymentMethod
-                                     FROM Payment_History WHERE Status = 'CANCELLED'
-                                     GROUP BY Reservation_ID) ph ON ph.Reservation_ID = r.ID
-                          WHERE r.ID = @id",
-                        new SqlParameter("@id", reservationId));
-
-                    if (resData?.Rows.Count > 0)
+                    var acctCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (acctCfg.IsConfigured && acctCfg.Enabled)
                     {
-                        depositAmount = resData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(resData.Rows[0]["DepositPaid"]) : 0;
-                        customerName = resData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
-                        paymentMethod = resData.Rows[0]["PayMethod"]?.ToString() ?? "CASH";
-                    }
+                        // ยอดริบ = มัดจำที่บันทึกจริง (ใบเสร็จมัดจำ Status='Normal' — แหล่งเดียวกับที่ sync ขึ้น NextAcc)
+                        decimal forfeitAmt = 0;
+                        string custName = "ลูกค้า";
+                        DataTable fData = DatabaseQuery(conn,
+                            @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                             WHERE Reservation_ID = r.ID AND IsDeposit = 1
+                                               AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositPaid,
+                                     ISNULL(c.FullName, c.Name) AS Name
+                              FROM Reservation r
+                              LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                              WHERE r.ID = @id",
+                            new SqlParameter("@id", reservationId));
+                        if (fData?.Rows.Count > 0)
+                        {
+                            forfeitAmt = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                            custName = fData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
+                        }
 
-                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                        if (forfeitAmt > 0)
+                        {
+                            int resIdInt;
+                            int.TryParse(reservationId, out resIdInt);
+                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                            long qid = sync.EnqueueDepositForfeit(resIdInt, forfeitAmt, custName,
+                                DateTime.Now, "ยกเลิกไม่คืนเงิน (ริบมัดจำ)");
+                            code2.Logs(conn, "Accounting Sync",
+                                $"CancelReservation: ริบมัดจำ #{reservationId} จำนวน {forfeitAmt:N2} → enqueue FORFEIT queueId={qid}", "SYSTEM");
+                        }
+                    }
                 }
-            }
-            catch (Exception accEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Accounting sync error: {accEx.Message}");
+                catch (Exception accEx)
+                {
+                    try { code2.Logs(conn, "Accounting Sync", $"CancelReservation forfeit enqueue error #{reservationId}: {accEx.Message}", "SYSTEM"); } catch { }
+                }
             }
         }
 
