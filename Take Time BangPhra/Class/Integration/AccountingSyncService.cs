@@ -3576,7 +3576,10 @@ namespace Take_Time_BangPhra.Integration
                 // เพื่อให้ MapMultiLinePaymentToJournal คิด VAT ถูกและ checkout clearing ไม่ double-debit
                 if (depositFromLines > 0)
                 {
-                    depositApplied += depositFromLines;
+                    // กันบวกซ้ำตอน queue retry: รอบแรกเรา persist Deposit_Applied_Amount (= รวม lines แล้ว)
+                    // → รอบ retry LookupDepositAppliedFromReceipt คืนค่าที่รวม lines ไว้แล้ว ถ้าบวกอีกจะเบิล
+                    if (depositApplied < depositFromLines)
+                        depositApplied += depositFromLines;
                     // สำคัญ: ใบเช็คอินที่มี line "ส่วนลด" ติดลบ เก็บ Total_Amount เป็นยอด "สุทธิหลังหักมัดจำ"
                     // แต่ convention ปลายทาง (SettleReceiptDocAsync / SettleReceiptInNextAcc คิด
                     // cashNow = totalAmount − depositApplied และ doc/invoice สร้างจาก line บวกยอดเต็ม)
@@ -6088,7 +6091,9 @@ namespace Take_Time_BangPhra.Integration
                     var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
                     if (depositFromLines > 0)
                     {
-                        depositApplied += depositFromLines;
+                        // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
+                        if (depositApplied < depositFromLines)
+                            depositApplied += depositFromLines;
                         totalAmount += depositFromLines;   // คืน GROSS (fix มัดจำหักซ้ำ)
                     }
 
@@ -6155,7 +6160,9 @@ namespace Take_Time_BangPhra.Integration
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
                 if (depositFromLines > 0)
                 {
-                    depositApplied += depositFromLines;
+                    // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
+                    if (depositApplied < depositFromLines)
+                        depositApplied += depositFromLines;
                     totalAmount += depositFromLines;   // คืน GROSS (fix มัดจำหักซ้ำ)
                 }
 
