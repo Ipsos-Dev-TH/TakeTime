@@ -555,6 +555,18 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// ค้นหา JE (GET /accounting/journals?search=) — ใช้หา JE ของใบเสร็จจากเลขที่อ้างอิง
+        /// (Reference = เลขใบเสร็จ TakeTime) เพื่อแก้ in-place โดยไม่ต้องรู้ entryId ล่วงหน้า
+        /// </summary>
+        public async Task<ApiResponse<PagedResponse<JournalEntryResponse>>> SearchJournalsAsync(string search, int pageSize = 10)
+        {
+            string qs = $"?page=1&pageSize={pageSize}" +
+                (string.IsNullOrEmpty(search) ? "" : "&search=" + Uri.EscapeDataString(search));
+            return await GetAsync<ApiResponse<PagedResponse<JournalEntryResponse>>>(
+                $"{CompanyPath}/accounting/journals{qs}");
+        }
+
+        /// <summary>
         /// กลับรายการ Journal — ใช้ /api/integration/journals/reverse
         /// </summary>
         public async Task<ApiResponse<JournalEntryResponse>> ReverseJournalAsync(Guid entryId, ReverseJournalEntryRequest request = null)

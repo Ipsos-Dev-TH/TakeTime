@@ -613,9 +613,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (rowStatus == "COMPLETED" && rowAction == "CREATE_RECEIPT_DOCUMENT")
                 {
                     long newQid = sync.RepostReceiptWithCurrentLogic(queueId);
+                    if (newQid == 0)
+                        return new Dictionary<string, object> { { "success", true },
+                            { "message", "✅ แก้ JE เดิมบน NextAcc ตามหลักการปัจจุบันแล้ว (in-place — ไม่ void, เลข JE เดิม)" } };
                     if (newQid > 0)
                         return new Dictionary<string, object> { { "success", true },
-                            { "message", $"Re-post แล้ว: void เอกสารเก่า + สร้างใหม่ตามหลักการปัจจุบัน (queue ใหม่ #{newQid})" } };
+                            { "message", $"Re-post แล้ว: NextAcc ไม่ให้แก้ JE นี้ตรง → void เอกสารเก่า + สร้างใหม่ (queue ใหม่ #{newQid})" } };
                     return new Dictionary<string, object> { { "success", false },
                         { "message", "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
                 }
