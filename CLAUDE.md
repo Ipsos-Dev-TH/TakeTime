@@ -229,6 +229,15 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    queue retries. Void: primary `/documents/void` cascades the payment reversal; the credit-note
    fallback calls `VoidPaymentAsync`; `MapDepositAppliedAdjustmentReverse` now reverses Dr AR / Cr
    ADVANCE_DEPOSIT(+VAT). The จ่าย side already settled AP correctly (PV one-shot / expense+payment).
+6c. **ลูกค้าไม่ประสงค์รับใบกำกับภาษี (NextAcc ก.ค. 2026):** `POST /integration/invoices` รองรับ
+   `buyerDeclinedTaxInvoice:true` (หรือเว้น customerName/TaxId/ExternalId ว่างทั้ง 3) → ผูก contact
+   กลาง "ลูกค้าเงินสด (ไม่ประสงค์รับใบกำกับภาษี)" (`Contact.IsWalkInCustomer` — ยกเว้น gate §86/4),
+   VAT เข้า ภ.พ.30 ครบ. ขอใบเต็มรูปทีหลัง = void+ส่งใหม่ หรือ resyncUpdate (ยังไม่ชำระ/ยังไม่ยื่น).
+   TakeTime: `HasFullBuyerTaxData` (เลขภาษี 13 หลัก + ที่อยู่) เป็นตัวเลือกเส้นทาง —
+   ครบ → company TaxInvoice doc ใบเต็มรูป (forceRefresh contact ก่อนเสมอ) / ไม่ครบ → int_ invoice
+   + `MarkBuyerDeclinedTaxInvoice` (ทั้ง payment, deposit-int_, repost). Error §86/4 ในคิวถูก decode
+   \uXXXX เป็นไทย + แนบวิธีแก้ (`BuildApiErrorHint`).
+
 6b. **ชนิดเอกสารฝั่งรับ (ก.ค. 2026):** ✅ มัดจำ → **Receipt doc (type 3)** ใบเสร็จรับเงิน เงินสดจบในใบ
    (ไม่ออก e-Tax — ใบกำกับออกตอนเช็คเอาท์เต็มยอด ใช้คู่ Deposit_Defer_Output_Vat); รับชำระ/เช็คเอาท์/
    ส่วนต่าง-อัพเกรด → **TaxInvoice doc (type 4)** ใบกำกับภาษี (Dr AR / Cr รายได้ราย line / Cr VAT —

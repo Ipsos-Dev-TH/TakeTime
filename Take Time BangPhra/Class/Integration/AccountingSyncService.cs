@@ -3674,7 +3674,12 @@ namespace Take_Time_BangPhra.Integration
                         invoice.ReplaceExistingForSource = true;
                     }
                     invoice.Attachments = attachments;
-                    ApplyContactToInvoice(invoice, customerContact);
+                    // int_ deposit = TaxInvoice บน NextAcc → โดน gate §86/4 ด้วย: ไม่มีข้อมูลภาษี
+                    // → เคสไม่ประสงค์รับใบกำกับ (contact กลางลูกค้าเงินสด)
+                    if (HasFullBuyerTaxData(customerContact))
+                        ApplyContactToInvoice(invoice, customerContact);
+                    else
+                        MarkBuyerDeclinedTaxInvoice(invoice);
 
                     ApiResponse<IntegrationDocumentResponse> result;
                     var filePaths = ExtractFilePaths(attachments);
@@ -3759,7 +3764,8 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
                     "SYSTEM");
 
-                if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null)
+                if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null
+                    && HasFullBuyerTaxData(customerContact))
                 {
                     // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
                     //    doc → Dr ลูกหนี้ / Cr รายได้ราย line / Cr ภาษีขาย แล้วปิดลูกหนี้ด้วย
@@ -3799,7 +3805,13 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
                     invoice.Attachments = attachments;
-                    ApplyContactToInvoice(invoice, customerContact);
+                    // ลูกค้ามีข้อมูลภาษีครบ → ใบกำกับเต็มรูปผูก contact จริง
+                    // ไม่ครบ (B2C ทั่วไป) → "ไม่ประสงค์รับใบกำกับภาษี": NextAcc ผูก contact กลาง
+                    // ลูกค้าเงินสด (IsWalkInCustomer ยกเว้น §86/4) — VAT ขายเข้า ภ.พ.30 ครบ
+                    if (HasFullBuyerTaxData(customerContact))
+                        ApplyContactToInvoice(invoice, customerContact);
+                    else
+                        MarkBuyerDeclinedTaxInvoice(invoice);
 
                     ApiResponse<IntegrationDocumentResponse> result;
                     var fpay = ExtractFilePaths(attachments);
@@ -5380,6 +5392,28 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>ผู้ซื้อมีข้อมูลใบกำกับเต็มรูป §86/4 ครบไหม (เลขภาษี 13 หลัก + ที่อยู่) —
+        /// ครบ → ออกใบกำกับเต็มรูปผูก contact จริง / ไม่ครบ → เคส "ไม่ประสงค์รับใบกำกับ"
+        /// (BuyerDeclinedTaxInvoice → contact กลางลูกค้าเงินสด, VAT ลง ภ.พ.30 ครบ)</summary>
+        private static bool HasFullBuyerTaxData(ContactInfo c)
+        {
+            return c != null
+                && !string.IsNullOrWhiteSpace(c.TaxId)
+                && System.Text.RegularExpressions.Regex.IsMatch(c.TaxId.Trim(), @"^\d{13}$")
+                && !string.IsNullOrWhiteSpace(c.Address);
+        }
+
+        /// <summary>ตั้งค่า invoice เป็นเคส "ลูกค้าไม่ประสงค์รับใบกำกับภาษี" ตามสัญญา NextAcc:
+        /// flag + ล้างข้อมูลลูกค้าทั้ง 3 field (NextAcc ผูก contact กลางให้เอง)</summary>
+        private static void MarkBuyerDeclinedTaxInvoice(CreateIntegrationInvoiceRequest invoice)
+        {
+            if (invoice == null) return;
+            invoice.BuyerDeclinedTaxInvoice = true;
+            invoice.CustomerName = null;
+            invoice.CustomerTaxId = null;
+            invoice.CustomerExternalId = null;
+        }
+
         /// <summary>Apply ContactInfo to invoice: populate CustomerExternalId/Name/TaxId fields</summary>
         private static void ApplyContactToInvoice(CreateIntegrationInvoiceRequest invoice, ContactInfo info)
         {
@@ -6375,6 +6409,19 @@ namespace Take_Time_BangPhra.Integration
                 invoice.ExternalId = receiptNumber;
                 invoice.ReplaceExistingForSource = false; // ใช้กลไก resyncUpdate แทน (ไม่ void)
                 invoice.ResyncUpdate = true;
+
+                // นโยบายผู้ซื้อเดียวกับ sync ปกติ: ข้อมูลภาษีครบ → ใบเต็มรูป / ไม่ครบ → ไม่ประสงค์รับใบกำกับ
+                var repostContact = LookupCustomerFromReservation(reservationId);
+                if (HasFullBuyerTaxData(repostContact))
+                {
+                    invoice.CustomerExternalId = repostContact.ExternalId;
+                    invoice.CustomerTaxId = repostContact.TaxId;
+                    if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = repostContact.Name;
+                }
+                else
+                {
+                    MarkBuyerDeclinedTaxInvoice(invoice);
+                }
                 return invoice;
             }
             catch (Exception ex)

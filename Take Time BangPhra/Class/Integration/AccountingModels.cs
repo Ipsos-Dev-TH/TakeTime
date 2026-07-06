@@ -682,6 +682,11 @@ namespace Take_Time_BangPhra.Integration
         /// เดิมเอง (งวดเปิด+JE เดียว = in-place เลข JE คงเดิม / งวดปิด = reversal+post ใหม่) —
         /// เลขเอกสารคงเดิมเสมอ ไม่มี void. null/false = พฤติกรรมเดิม (ซ้ำ → "Already synced" skip)</summary>
         public bool? ResyncUpdate { get; set; }
+        /// <summary>ลูกค้าไม่ประสงค์รับใบกำกับภาษี (ขายปลีก B2C ไม่มีเลขภาษี/ที่อยู่): true → NextAcc
+        /// ผูกใบกับ contact กลาง "ลูกค้าเงินสด (ไม่ประสงค์รับใบกำกับภาษี)" (IsWalkInCustomer — ยกเว้น
+        /// gate §86/4), VAT ขายเข้า ภ.พ.30 ครบ. ต้องไม่ส่ง customerName/TaxId/ExternalId ทั้ง 3 field.
+        /// ลูกค้าขอใบเต็มรูปทีหลัง → void+ส่งใหม่พร้อมข้อมูล (หรือ resyncUpdate ถ้ายังไม่ชำระ/ยังไม่ยื่นภาษี)</summary>
+        public bool? BuyerDeclinedTaxInvoice { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
