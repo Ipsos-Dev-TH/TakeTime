@@ -2474,8 +2474,9 @@ namespace Take_Time_BangPhra.Integration
                 //    สำคัญ: payment ลด BalanceDue ของเอกสารด้วย → ใบกำกับปิดยอดสนิท ไม่ค้างชำระ
                 //    เท่ายอดมัดจำ (journal อย่างเดียวลดแค่ GL ไม่ลดยอดค้างของเอกสาร)
                 //    + journal แก้ VAT มัดจำ (ADVANCE เก็บ net) เมื่อ VAT รับรู้ตอนรับมัดจำ
+                Guid advDepId = Guid.Empty;
                 bool depositAsPayment = _config.CanUseCompanyEndpoints
-                    && _mapper.TryGetAccountId("ADVANCE_DEPOSIT", out var advDepId) && advDepId != Guid.Empty;
+                    && _mapper.TryGetAccountId("ADVANCE_DEPOSIT", out advDepId) && advDepId != Guid.Empty;
 
                 if (depositAsPayment)
                 {
