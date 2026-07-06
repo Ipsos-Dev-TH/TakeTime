@@ -611,13 +611,18 @@ namespace Take_Time_BangPhra
                     var acctCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
                     if (acctCfg.IsConfigured && acctCfg.Enabled)
                     {
-                        // ยอดริบ = มัดจำที่บันทึกจริง (ใบเสร็จมัดจำ Status='Normal' — แหล่งเดียวกับที่ sync ขึ้น NextAcc)
+                        // ยอดริบ = มัดจำคงค้างจริง: มัดจำที่จ่าย (ใบเสร็จ IsDeposit=1 Status='Normal')
+                        // − ส่วนที่ถูกหักในใบเสร็จอื่นไปแล้ว (Deposit_Applied_Amount — ส่วนนั้นรับรู้รายได้
+                        // ผ่านใบเสร็จแล้ว ห้ามริบซ้ำ ไม่งั้น Dr เงินรับล่วงหน้าเกิน + รายได้ซ้ำ)
                         decimal forfeitAmt = 0;
                         string custName = "ลูกค้า";
                         DataTable fData = DatabaseQuery(conn,
                             @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
                                              WHERE Reservation_ID = r.ID AND IsDeposit = 1
                                                AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositPaid,
+                                     ISNULL((SELECT SUM(ISNULL(Deposit_Applied_Amount, 0)) FROM Account_Receipt
+                                             WHERE Reservation_ID = r.ID AND ISNULL(IsDeposit, 0) = 0
+                                               AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositApplied,
                                      ISNULL(c.FullName, c.Name) AS Name
                               FROM Reservation r
                               LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
@@ -625,7 +630,9 @@ namespace Take_Time_BangPhra
                             new SqlParameter("@id", reservationId));
                         if (fData?.Rows.Count > 0)
                         {
-                            forfeitAmt = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                            decimal depPaid = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                            decimal depApplied = fData.Rows[0]["DepositApplied"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositApplied"]) : 0;
+                            forfeitAmt = depPaid - depApplied;
                             custName = fData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
                         }
 

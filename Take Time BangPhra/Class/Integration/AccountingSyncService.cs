@@ -4343,6 +4343,26 @@ namespace Take_Time_BangPhra.Integration
             if (forfeitAmount <= 0)
                 throw new ArgumentException($"ProcessDepositForfeit: forfeitAmount ต้อง > 0 (ได้ {forfeitAmount}) reservation #{reservationId}");
 
+            // RE-COMPUTE ณ เวลา process (mirror ProcessDepositClearing): ริบได้ไม่เกิน
+            // "มัดจำคงค้าง" = มัดจำที่จ่ายจริง − ส่วนที่ถูกหักในใบเสร็จไปแล้ว (Deposit_Applied_Amount)
+            // ไม่งั้นเคสมัดจำ 1,070 ใช้ไป 500 แล้วยกเลิกไม่คืนเงิน จะ Dr 21712 ซ้ำ 500 (over-clear)
+            decimal fActualDeposit = LookupActualDepositPaid(reservationId);
+            decimal fAlreadyApplied = LookupDepositAppliedForReservation(reservationId);
+            decimal outstanding = fActualDeposit - fAlreadyApplied;
+            if (forfeitAmount > outstanding)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositForfeit: payload={forfeitAmount} แต่มัดจำคงค้าง={outstanding} " +
+                    $"(จ่ายจริง {fActualDeposit} − หักในใบเสร็จแล้ว {fAlreadyApplied}) — ใช้ค่าคงค้าง", "SYSTEM");
+                forfeitAmount = outstanding;
+            }
+            if (forfeitAmount <= 0.01m)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositForfeit: ไม่มีมัดจำคงค้างให้ริบ — skip reservation #{reservationId}", "SYSTEM");
+                return "SKIPPED_NO_BALANCE";
+            }
+
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositForfeit: resId={reservationId} amount={forfeitAmount} reason={reason}", "SYSTEM");
 
