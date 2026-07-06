@@ -2458,6 +2458,10 @@ namespace Take_Time_BangPhra.Integration
             // edit = void→สร้างเลขเดิม: marker "VOIDED" จาก void ก่อนหน้า ต้องไม่ทำให้ข้าม settle
             // (ใบเสร็จใหม่ถูกสร้างแล้ว ต้องปิดลูกหนี้/บันทึกเงินสดใหม่) → รีเซ็ตเป็นเริ่มใหม่
             if (marker == "VOIDED") marker = null;
+            // เฟส DOC:/APR: มาจากขั้นสร้าง/อนุมัติเอกสาร (EnsureRevenueDocCreatedApprovedAsync —
+            // ใบกำกับ TaxInvoice doc-mode) = ยังไม่เริ่ม settle → มองเป็นว่าง
+            if (!string.IsNullOrEmpty(marker) && (marker.StartsWith("DOC:") || marker.StartsWith("APR:")))
+                marker = null;
             bool payDone = !string.IsNullOrEmpty(marker) && !marker.StartsWith("ADJ:");
             bool adjDone = !string.IsNullOrEmpty(marker);   // "ADJ:" หรือ final → adjustment ลงแล้ว
             if (payDone) return;                            // ปิดลูกหนี้ครบแล้ว
@@ -2709,6 +2713,72 @@ namespace Take_Time_BangPhra.Integration
             _lastDocType = "RECEIPT";
             _code.Logs(_connectionString, "AccountingSync",
                 $"SettleReceiptDoc: เสร็จ receipt={receiptNumber} docId={docId} depositApplied={depositApplied:N2} แหล่งเงิน={(string.IsNullOrEmpty(paymentAccountId) ? "default" : paymentAccountId)}", "SYSTEM");
+            return docId;
+        }
+
+        /// <summary>
+        /// สร้าง + อนุมัติเอกสารรายรับ (TaxInvoice ฯลฯ) แบบ idempotent ผ่าน marker เฟส
+        /// DOC:{id} → APR:{id} แล้ว "หยุดแค่นั้น" — เฟส settle ต่อ (ADJ:/paymentId/NOCASH)
+        /// เป็นของ SettleReceiptInNextAcc. ถ้า marker เลยเฟสอนุมัติไปแล้ว (settle เริ่ม/จบ)
+        /// จะกู้ doc id จาก queue history แทน (ไม่สร้างซ้ำ). อนุมัติ verify แบบเดียวกับ
+        /// SettleReceiptDocAsync: จับเลขเอกสารจริงหลังอนุมัติ + throw ถ้ายังค้าง Draft
+        /// </summary>
+        private async System.Threading.Tasks.Task<Guid> EnsureRevenueDocCreatedApprovedAsync(
+            CreateDocumentRequest doc, string receiptNumber)
+        {
+            string marker = LookupReceiptPaymentMarker(receiptNumber);
+            if (marker == "VOIDED") marker = null;
+
+            Guid docId = Guid.Empty;
+            bool approved = false;
+
+            if (!string.IsNullOrEmpty(marker) && marker.StartsWith("DOC:"))
+            {
+                Guid.TryParse(marker.Substring(4), out docId);
+            }
+            else if (!string.IsNullOrEmpty(marker) && marker.StartsWith("APR:"))
+            {
+                Guid.TryParse(marker.Substring(4), out docId);
+                approved = true;
+            }
+            else if (!string.IsNullOrEmpty(marker))
+            {
+                // เฟส settle เริ่ม/จบแล้ว (ADJ:/NOCASH/paymentId) → เอกสารมีอยู่แล้วแน่นอน
+                docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+                if (docId != Guid.Empty) return docId;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnsureRevenueDoc: marker={marker} แต่หา doc id จาก queue ไม่เจอ receipt={receiptNumber} → สร้างใหม่", "SYSTEM");
+            }
+
+            if (docId == Guid.Empty)
+            {
+                var createResult = await _apiClient.CreateDocumentAsync(doc);
+                docId = RequireValidDocId(createResult?.data?.Id, $"CreateDocument (tax-invoice) receipt={receiptNumber}");
+                _lastDocNumber = createResult?.data?.DocumentNumber;
+                SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
+            }
+
+            if (!approved)
+            {
+                try
+                {
+                    var apr = await _apiClient.ApproveDocumentAsync(docId, new ApproveDocumentRequest { AcknowledgeWarnings = true });
+                    string aprNum = apr?.data?.DocumentNumber;
+                    if (!string.IsNullOrEmpty(aprNum) && !aprNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                        _lastDocNumber = aprNum;
+                    int st = apr?.data?.Status ?? -1;
+                    if (st == NexaaccDocumentStatus.Draft || st == NexaaccDocumentStatus.WaitingApproval
+                        || st == NexaaccDocumentStatus.Rejected)
+                        throw new Exception($"อนุมัติใบกำกับไม่สำเร็จ — สถานะ {st} receipt={receiptNumber} docId={docId}");
+                }
+                catch (AccountingApiException ex) when (IsAlreadyApprovedOrPosted(ex))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnsureRevenueDoc: doc {docId} already approved receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                }
+                SetReceiptPaymentMarker(receiptNumber, "APR:" + docId);
+            }
+
             return docId;
         }
 
@@ -3508,7 +3578,10 @@ namespace Take_Time_BangPhra.Integration
                         isDeposit: true, depositVatAtReceipt: depositVatAtReceipt, deferOutputVat: _config.IsDepositOutputVatDeferred);
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, 0m,
                         paymentMethod, receiptDate, customerName, depositHasVat, paymentAccountId);
-                    await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
+                    // มัดจำ = "ใบเสร็จรับเงิน" เท่านั้น — ไม่ออก e-Tax (ใบกำกับภาษีออกตอนเช็คเอาท์
+                    // เต็มยอดรวมมัดจำ; ใช้คู่กับ Deposit_Defer_Output_Vat เพื่อให้จุด VAT ตรงใบกำกับ)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"Deposit receipt {receiptNumber}: ใบเสร็จรับเงิน (ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์)", "SYSTEM");
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
@@ -3608,13 +3681,20 @@ namespace Take_Time_BangPhra.Integration
 
                 if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null)
                 {
-                    // ✅ แนวทางถูกต้องตามบัญชี: Receipt doc → Dr เงินสด(แหล่งเงิน)/Cr รายได้ราย line/Cr ภาษีขาย
-                    //    ไม่เปิดลูกหนี้; หักมัดจำ (ถ้ามี) ด้วย adjustment Dr รับล่วงหน้า/Cr เงินสด
+                    // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
+                    //    doc → Dr ลูกหนี้ / Cr รายได้ราย line / Cr ภาษีขาย แล้วปิดลูกหนี้ด้วย
+                    //    SettleReceiptInNextAcc (ตัดมัดจำ Dr รับล่วงหน้า/Cr ลูกหนี้ + รับเงินสดจริง
+                    //    Dr เงินสดตามแหล่งเงิน/Cr ลูกหนี้) — รองรับยอดส่วนต่าง/อัพเกรด/โอนตรง
+                    //    (ใบเสร็จที่สร้างด้วยยอดใดก็ได้ จะออกใบกำกับเท่ายอดนั้น). ใบกำกับจริงบน
+                    //    NextAcc → /etax/generate TAX_INVOICE ผ่าน (เดิมเป็น Receipt doc → e-Tax ไม่ออก)
                     var doc = _mapper.MapReceiptToDocument(reservationId, useMultiLine ? lines : null, totalAmount, revenueType,
                         paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
-                        paymentAccountId, hasVat, receiptNumber, isDeposit: false);
-                    Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
-                        paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
+                        paymentAccountId, hasVat, receiptNumber, isDeposit: false,
+                        documentType: NexaaccDocumentType.TaxInvoice);
+                    Guid docId = await EnsureRevenueDocCreatedApprovedAsync(doc, receiptNumber);
+                    await SettleReceiptInNextAcc(docId, receiptNumber, totalAmount, depositApplied,
+                        paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
+                    _lastDocType = "RECEIPT";   // company doc → deep link /documents; repost ใช้เส้น void→สร้างใหม่
                     await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
                     return docId.ToString();
                 }
@@ -6089,19 +6169,23 @@ namespace Take_Time_BangPhra.Integration
                 "CREATE_RECEIPT_DOCUMENT", p);
         }
 
-        /// <summary>ล้าง PDF cache ฝั่ง TakeTime ของเอกสาร → ครั้งต่อไป re-download ยอดใหม่จาก NextAcc</summary>
+        /// <summary>ล้าง PDF cache ฝั่ง TakeTime ของเอกสาร → ครั้งต่อไป re-download ยอดใหม่จาก NextAcc
+        /// (ทั้งโฟลเดอร์ฝั่งจ่าย PaymentFolderPath และฝั่งรับ ReceiptFolderPath)</summary>
         private void ClearReceiptPdfCache(string receiptNumber)
         {
-            try
+            foreach (string key in new[] { "PaymentFolderPath", "ReceiptFolderPath" })
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                if (!string.IsNullOrEmpty(basePath))
+                try
                 {
-                    string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
-                    if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
+                    string basePath = ConfigurationManager.AppSettings[key];
+                    if (!string.IsNullOrEmpty(basePath))
+                    {
+                        string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
+                        if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
+                    }
                 }
+                catch { }
             }
-            catch { }
         }
 
         /// <summary>
@@ -7249,6 +7333,87 @@ namespace Take_Time_BangPhra.Integration
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// ดึง PDF เอกสารฝั่งรับ (ใบเสร็จ/ใบกำกับที่ sync เป็นเอกสาร NextAcc) มา cache ฝั่ง TakeTime
+        /// แล้วคืน relative url — ใช้กับปุ่ม "ดู PDF" หน้า CheckDocument ให้เปิดเอกสารจริงจาก NextAcc
+        /// แทน PDF ที่ระบบเรา render เอง (mirror วิธีของฝั่งจ่าย DownloadVoucherDocumentFromNextAccAsync)
+        /// smart-cache: ใช้ไฟล์เดิมถ้ายังใหม่กว่า sync ล่าสุดของใบนี้ — ดึงใหม่เฉพาะหลัง edit/re-sync
+        /// </summary>
+        public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadReceiptPdfFromNextAccAsync(
+            string receiptNumber, bool isCancelled = false)
+        {
+            var result = new NextAccCachedDocument();
+            if (string.IsNullOrEmpty(receiptNumber)) { result.Message = "ไม่มีเลขที่ใบเสร็จ"; return result; }
+            if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
+
+            string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"];
+            if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า ReceiptFolderPath"; return result; }
+
+            string safeDoc = MakeSafeFileName(receiptNumber);
+            string suffix = isCancelled ? "_Cancel" : "";
+            string folder = Path.Combine(basePath, "NextAcc", safeDoc);
+            string pdfPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
+            string relPrefix = "/Documents/Receipt/NextAcc/" + safeDoc;
+
+            // fast path: cache ยังใหม่ (ไฟล์ใหม่กว่ารายการ sync ล่าสุดของใบนี้)
+            if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+                && !IsReceiptPdfCacheStale(receiptNumber, pdfPath))
+            {
+                result.Found = true;
+                result.PdfLocalPath = pdfPath;
+                result.PdfRelativeUrl = relPrefix + "/" + safeDoc + suffix + ".pdf";
+                return result;
+            }
+
+            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+            if (docId == Guid.Empty) { result.Message = "ใบเสร็จนี้ยังไม่ได้ sync เป็นเอกสาร NextAcc"; return result; }
+
+            try
+            {
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+                byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(docId,
+                    watermark: isCancelled ? "ยกเลิก" : null);
+                if (pdf != null && pdf.Length > 0)
+                {
+                    File.WriteAllBytes(pdfPath, pdf);
+                    result.Found = true;
+                    result.PdfLocalPath = pdfPath;
+                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + suffix + ".pdf";
+                }
+                else
+                {
+                    result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Message = "ดาวน์โหลดเอกสารล้มเหลว: " + ex.Message;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadReceiptPdf: receipt={receiptNumber} {ex.Message}", "SYSTEM");
+            }
+            return result;
+        }
+
+        /// <summary>cache PDF ใบเสร็จเก่ากว่ารายการ sync (CREATE/VOID) ล่าสุดของใบนี้ไหม → stale = ดึงใหม่</summary>
+        private bool IsReceiptPdfCacheStale(string receiptNumber, string pdfPath)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT MAX(Processed_Date) AS LastDone FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Status = 'COMPLETED'
+                        AND Payload LIKE @p",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0]["LastDone"] != DBNull.Value)
+                {
+                    DateTime lastDone = Convert.ToDateTime(dt.Rows[0]["LastDone"]);
+                    return File.GetLastWriteTime(pdfPath) < lastDone;
+                }
+            }
+            catch { }
+            return false;   // ไม่รู้ → ใช้ cache (เร็ว); PrepareResync/repost ล้างโฟลเดอร์ให้อยู่แล้ว
         }
 
         private static string ExtFromContentType(string contentType)

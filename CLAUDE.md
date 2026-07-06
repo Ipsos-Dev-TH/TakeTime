@@ -229,6 +229,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    queue retries. Void: primary `/documents/void` cascades the payment reversal; the credit-note
    fallback calls `VoidPaymentAsync`; `MapDepositAppliedAdjustmentReverse` now reverses Dr AR / Cr
    ADVANCE_DEPOSIT(+VAT). The จ่าย side already settled AP correctly (PV one-shot / expense+payment).
+6b. **ชนิดเอกสารฝั่งรับ (ก.ค. 2026):** ✅ มัดจำ → **Receipt doc (type 3)** ใบเสร็จรับเงิน เงินสดจบในใบ
+   (ไม่ออก e-Tax — ใบกำกับออกตอนเช็คเอาท์เต็มยอด ใช้คู่ Deposit_Defer_Output_Vat); รับชำระ/เช็คเอาท์/
+   ส่วนต่าง-อัพเกรด → **TaxInvoice doc (type 4)** ใบกำกับภาษี (Dr AR / Cr รายได้ราย line / Cr VAT —
+   NextAcc นับ TaxInvoice เป็น AR ตาม BalanceDue) ผ่าน `EnsureRevenueDocCreatedApprovedAsync`
+   (marker DOC:→APR:) แล้วปิดลูกหนี้ด้วย `SettleReceiptInNextAcc` (ADJ:→paymentId/NOCASH — parser
+   มอง DOC:/APR: เป็นยังไม่เริ่ม settle) → e-Tax TAX_INVOICE ใช้ได้จริง. ปุ่ม "ดู PDF" หน้า
+   CheckDocument_New เปิด PDF จาก NextAcc ก่อน (`DownloadReceiptPdfFromNextAccAsync` smart-cache ใต้
+   `ReceiptFolderPath\NextAcc\` + `IsReceiptPdfCacheStale`) fallback local. ใบเก่าที่ออกผิดประเภท
+   (Receipt) → กด Retry ในคิว = void→สร้างใหม่เป็น TaxInvoice อัตโนมัติ.
+
 6. **รับ-side full accounting correctness (DOCUMENT mode, acc_ key):** ✅ DONE. Root cause: NextAcc's
    integration invoice JE credits a **single** `AccountType=Revenue` account for the whole SubTotal and
    ignores per-line `AccountId`, so (a) multi-line revenue was flattened and (b) deposits via `/invoices`

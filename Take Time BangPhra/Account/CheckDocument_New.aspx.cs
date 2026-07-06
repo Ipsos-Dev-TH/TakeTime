@@ -1196,6 +1196,30 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
+                    // ── DOCUMENT mode: เอกสารจริงออกบน NextAcc → เปิด PDF จาก NextAcc ก่อน ──
+                    // (mirror ฝั่งจ่าย CheckPayment_New) — ใบเสร็จ/ใบกำกับที่ sync แล้วต้องแสดงเอกสาร
+                    // ตามที่ NextAcc ออก (เลขที่/ยอด/รูปแบบทางการ) ไม่ใช่ PDF ที่ระบบ render เอง.
+                    // smart-cache ในตัว: ครั้งแรกดึง ครั้งต่อไปเปิด local ทันที; ดึงใหม่หลัง edit/re-sync.
+                    // ถ้ายังไม่ sync/ดึงไม่ได้ → ตกไปใช้ไฟล์ local เดิมด้านล่าง
+                    try
+                    {
+                        var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                        if (naCfg.IsConfigured && naCfg.Enabled && naCfg.IsReceiptDocumentMode)
+                        {
+                            Server.ScriptTimeout = 300;
+                            var naPdf = System.Threading.Tasks.Task.Run(() =>
+                                new Take_Time_BangPhra.Integration.AccountingSyncService(conn)
+                                    .DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel")
+                            ).GetAwaiter().GetResult();
+                            if (naPdf != null && naPdf.Found && !string.IsNullOrEmpty(naPdf.PdfRelativeUrl))
+                            {
+                                Response.Redirect(naPdf.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                    }
+                    catch { /* NextAcc ไม่พร้อม → ใช้ PDF local ด้านล่าง */ }
+
                     // Get receipt UID from database (SECURE)
                     string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
                     var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };

@@ -1840,7 +1840,8 @@ namespace Take_Time_BangPhra.Integration
             int reservationId, List<ReceiptLineSpec> lines, decimal totalAmount, string revenueType,
             string paymentMethod, DateTime paymentDate, string customerName, Guid contactId,
             string paymentAccountId, bool hasVat, string receiptNumber,
-            bool isDeposit = false, bool depositVatAtReceipt = false, bool deferOutputVat = false)
+            bool isDeposit = false, bool depositVatAtReceipt = false, bool deferOutputVat = false,
+            int documentType = NexaaccDocumentType.Receipt)
         {
             var docLines = new List<DocumentLineRequest>();
 
@@ -1879,7 +1880,9 @@ namespace Take_Time_BangPhra.Integration
 
             return new CreateDocumentRequest
             {
-                DocumentType = 3, // Receipt (ใบเสร็จรับเงิน)
+                // Receipt (3) = ใบเสร็จรับเงิน เงินสดจบในใบ (มัดจำ) / TaxInvoice (4) = ใบกำกับภาษี
+                // เปิดลูกหนี้ ปิดด้วย settle (เช็คเอาท์/รับชำระเต็ม) — เลือกจาก caller
+                DocumentType = documentType,
                 DocumentDate = paymentDate,
                 PaymentDate = paymentDate,
                 ContactId = contactId,
