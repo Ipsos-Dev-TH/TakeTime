@@ -3613,7 +3613,9 @@ namespace Take_Time_BangPhra.Integration
                     // บันทึกรับเงินสดของมัดจำเพื่อปิดลูกหนี้ที่ invoice เปิดไว้ (NextAcc ไม่ auto-pay)
                     await SettleReceiptInNextAcc(invDocId, receiptNumber, totalAmount, 0m,
                         paymentMethod, receiptDate, customerName, depositHasVat, reservationId, paymentAccountId);
-                    await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
+                    // มัดจำ = ใบเสร็จรับเงิน ไม่ออก e-Tax (นโยบายเดียวกับ doc-mode — ใบกำกับออกตอนเช็คเอาท์)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"Deposit receipt {receiptNumber} (int_): ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์", "SYSTEM");
                     return invDocId.ToString();
                 }
                 else
