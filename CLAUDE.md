@@ -173,12 +173,23 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `acc_` key is configured; falls back to `/api/integration/payments` (which ignores both) with a
    log line when an `int_` key blocks it. Verified vs Wachira-d/Accounting: `InboundPaymentRequest`
    has neither field; `CreatePaymentRequest` (DocumentController) has both.
-2. **Deposit deferred VAT (มัดจำ → 21913 ภาษีขายรอรับรู้) + realize at check-in:** ✅ DONE (opt-in,
-   journal-based — no native deposit-doc/ContactId dependency). Config `Deposit_Defer_Output_Vat`:
-   when on (RECEIPT mode), deposit receipt CR `OUTPUT_VAT_DEFERRED` (21913) instead of OUTPUT_VAT,
-   and checkout reclassifies Dr 21913 / Cr 21911 so VAT only hits ภ.พ.30 at revenue recognition.
-   Default off = unchanged; unmapped 21913 → falls back to OUTPUT_VAT. Migration PHASE17_05 seeds
-   the config + `OUTPUT_VAT_DEFERRED` mapping; admin toggle on AccountingIntegration page.
+2. **Deposit VAT — 3 โหมด (นโยบายบัญชี ผู้ทำบัญชีเลือก; ทุกโหมด GL สมดุลถูกต้อง):**
+   verified vs NextAcc `CmsBookingService`: PrePayment (มัดจำ) → **Receipt doc + IsDeposit=true →
+   Cr 217xx (ขายรอรับรู้)**; tax point §78/1 รับชำระแล้ว = เกิดทันที (`DepositOutputVatDeferred=false`
+   default ฝั่ง NextAcc) → ภาษีขายเข้า ภ.พ.30 เดือนรับเงิน. Guaranteed → TaxInvoice. ⇒ มัดจำเป็น
+   **"ใบเสร็จรับเงิน/ใบรับเงินมัดจำ (AdvanceReceipt)" ไม่ใช่ TaxInvoice** ตามดีไซน์ NextAcc — โค้ดเราตรง.
+   Config 2 ตัว (`Deposit_Vat_Recognition` = CHECKOUT|RECEIPT, `Deposit_Defer_Output_Vat` = 0|1):
+   - **CHECKOUT (default TakeTime):** มัดจำ Cr 21712 เต็มก้อน ไม่แยก VAT; ใบเสร็จมัดจำ **ไม่โชว์ VAT**;
+     VAT รับรู้ตอนเช็คเอาท์ (ใบกำกับเต็มยอด ใบเดียว). สะอาดสุดฝั่งลูกค้า (ใบกำกับใบเดียว ไม่ซ้อน).
+   - **RECEIPT + defer (Deposit_Defer_Output_Vat=1):** มัดจำ Cr **21913** (พัก); เช็คเอาท์ใบกำกับเต็มยอด
+     + โอน Dr 21913/Cr 21911. VAT ไม่เข้า ภ.พ.30 จนเช็คเอาท์. Migration PHASE17_05 + admin toggle.
+   - **RECEIPT + no-defer (เคร่ง §78/1):** มัดจำ Cr **21911 ทันที** → เข้า ภ.พ.30 เดือนรับมัดจำ.
+     ใบเสร็จมัดจำ = เอกสารภาษี **ควรโชว์ VAT**. เช็คเอาท์ปัจจุบันออกใบกำกับเต็มยอด + VAT correction
+     (Dr 21911/Cr 21712) → **GL ถูก** แต่ลูกค้าได้เอกสารภาษี VAT ซ้อน 2 ใบ; ให้ customer-correct
+     เต็มที่ต้องออกใบกำกับ **เฉพาะยอดคงเหลือ** ตอนเช็คเอาท์ (ยังไม่ทำ — ต้องตัดสินใจ+test Windows).
+   **แนะนำ hotel:** CHECKOUT/defer (ใบกำกับใบเดียวเต็มยอด ตอนเช็คเอาท์ — ตรงเวลา ภ.พ.30 กับวันที่ใบกำกับ,
+   ไม่ซ้อน). §78/1 เคร่งใช้เมื่อผู้ทำบัญชียืนยันว่ามัดจำ = ค่าบริการล่วงหน้า (ไม่ใช่มัดจำประกัน).
+   มัดจำ = ใบเสร็จรับเงิน ไม่ออก e-Tax ทุกโหมด; ลูกค้าไม่มีเลขภาษี → walk-in contact ปกติ (มัดจำไม่ติด §86/4).
 3. **OCR-first ใบสำคัญจ่าย flow:** ✅ DONE (page `Voucher/OcrUpload.aspx`; gated on
    `CanUseCompanyEndpoints`, not key prefix). upload→`ocr/upload`(autoCreate=false)→poll
    `OcrResultResponse`→prefill review (shows OCR `SuggestedAccounts` + quality/role/WHT)→user
