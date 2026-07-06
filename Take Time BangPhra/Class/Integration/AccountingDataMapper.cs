@@ -1878,16 +1878,21 @@ namespace Take_Time_BangPhra.Integration
             // แหล่งเงิน — ใช้นิพจน์เดียวกับฝั่ง adjustment (Cr Cash) เพื่อให้บัญชีตรงกันเสมอ
             Guid cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
 
+            // TaxInvoice = เอกสารเปิดลูกหนี้ ปิดด้วย payment แยก (SettleReceiptInNextAcc) —
+            // ห้ามส่ง PaymentDate/PaymentAccountId (ฟิลด์เงินสดของ Receipt/ReceiptVoucher)
+            // กัน NextAcc ตีความเป็นรับเงินสดในใบ → เงินสดเบิลกับ payment ที่ settle ตามมา
+            bool isArDoc = documentType == NexaaccDocumentType.TaxInvoice;
+
             return new CreateDocumentRequest
             {
                 // Receipt (3) = ใบเสร็จรับเงิน เงินสดจบในใบ (มัดจำ) / TaxInvoice (4) = ใบกำกับภาษี
                 // เปิดลูกหนี้ ปิดด้วย settle (เช็คเอาท์/รับชำระเต็ม) — เลือกจาก caller
                 DocumentType = documentType,
                 DocumentDate = paymentDate,
-                PaymentDate = paymentDate,
+                PaymentDate = isArDoc ? (DateTime?)null : paymentDate,
                 ContactId = contactId,
                 Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}",
-                PaymentAccountId = cashAccountId,
+                PaymentAccountId = isArDoc ? (Guid?)null : cashAccountId,
                 PricesIncludeVat = true,
                 IsDeposit = isDeposit,
                 DepositDeferredAccountCode = isDeposit ? SafeGetAccountCode("ADVANCE_DEPOSIT") : null,
@@ -1906,6 +1911,57 @@ namespace Take_Time_BangPhra.Integration
         ///   Cr เงินสด/ธนาคาร (gross depositApplied)
         /// บัญชีเงินสดใช้นิพจน์เดียวกับ Receipt doc (PaymentAccountId) เพื่อหักล้างพอดี
         /// </summary>
+        /// <summary>
+        /// Journal แก้ VAT มัดจำ คู่กับการตัดมัดจำแบบ "document payment" (Dr ADVANCE gross / Cr AR):
+        /// ADVANCE เก็บเฉพาะ net เมื่อ VAT รับรู้ตอนรับมัดจำ → ย้ายส่วน VAT จากฝั่ง Dr ADVANCE
+        /// ไป Dr บัญชี VAT (21913 ถ้า defer+map แล้ว ไม่งั้น 21911 กัน VAT ซ้ำกับใบกำกับ):
+        ///   ปกติ:   Dr VATacct vat / Cr ADVANCE_DEPOSIT vat
+        ///   reverse: Dr ADVANCE_DEPOSIT vat / Cr VATacct vat (ตอน void)
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositVatCorrection(
+            int reservationId, decimal depositApplied, string receiptNumber,
+            bool deferOutputVat, bool reverse = false)
+        {
+            decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+            decimal depositVat = depositApplied - depositNet;
+            if (depositVat <= 0)
+                throw new ArgumentException("MapDepositVatCorrection: depositVat ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            Guid vatAcc = (deferOutputVat
+                && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var dv) && dv != Guid.Empty)
+                ? dv : GetAccountId("OUTPUT_VAT");
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = reverse ? advanceDepositAccountId : vatAcc,
+                    DebitAmount = depositVat,
+                    CreditAmount = 0,
+                    Description = reverse ? "คืนเงินรับล่วงหน้า (กลับรายการ VAT มัดจำ)" : "รับรู้/ตัด VAT มัดจำ"
+                },
+                new JournalEntryLineRequest
+                {
+                    AccountId = reverse ? vatAcc : advanceDepositAccountId,
+                    DebitAmount = 0,
+                    CreditAmount = depositVat,
+                    Description = reverse ? "กลับรายการ VAT มัดจำ (void)" : "ปรับเงินรับล่วงหน้าเหลือ net"
+                }
+            };
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = DateTime.Now,
+                JournalType = NexaaccJournalType.General,
+                Description = reverse
+                    ? $"กลับรายการ VAT มัดจำ — void ใบกำกับ {receiptNumber} (การจอง #{reservationId})"
+                    : $"ปรับ VAT มัดจำที่ตัดเข้าใบกำกับ {receiptNumber} (การจอง #{reservationId})",
+                Reference = $"{receiptNumber}-DEPVAT" + (reverse ? "-REV" : ""),
+                Lines = lines
+            };
+        }
+
         public CreateJournalEntryRequest MapDepositAppliedReceiptAdjustment(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
             string customerName, string paymentAccountId = null, string receiptNumber = null,

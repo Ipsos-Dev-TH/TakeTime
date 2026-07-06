@@ -2466,18 +2466,63 @@ namespace Take_Time_BangPhra.Integration
             bool adjDone = !string.IsNullOrEmpty(marker);   // "ADJ:" หรือ final → adjustment ลงแล้ว
             if (payDone) return;                            // ปิดลูกหนี้ครบแล้ว
 
-            // 1) ตัดมัดจำที่หักออกจากลูกหนี้ (ถ้ามี) — Dr เงินรับล่วงหน้า / Cr ลูกหนี้
+            // 1) ตัดมัดจำที่หักออกจากลูกหนี้ (ถ้ามี)
             if (depositApplied > 0 && !adjDone)
             {
-                var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
-                    receiptDate, customerName, paymentAccountId, receiptNumber,
-                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
-                var adjResult = await _apiClient.CreateJournalAsync(adj);
-                Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
-                await SafePostJournalAsync(adjId);
-                SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId);
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"SettleReceipt: deposit adjustment posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId}", "SYSTEM");
+                // ✅ ทางหลัก (company endpoints): ตัดมัดจำเป็น "document payment" ของใบกำกับ
+                //    (OverridePaymentAccountId = เงินรับล่วงหน้า → Dr ADVANCE / Cr ลูกหนี้) —
+                //    สำคัญ: payment ลด BalanceDue ของเอกสารด้วย → ใบกำกับปิดยอดสนิท ไม่ค้างชำระ
+                //    เท่ายอดมัดจำ (journal อย่างเดียวลดแค่ GL ไม่ลดยอดค้างของเอกสาร)
+                //    + journal แก้ VAT มัดจำ (ADVANCE เก็บ net) เมื่อ VAT รับรู้ตอนรับมัดจำ
+                bool depositAsPayment = _config.CanUseCompanyEndpoints
+                    && _mapper.TryGetAccountId("ADVANCE_DEPOSIT", out var advDepId) && advDepId != Guid.Empty;
+
+                if (depositAsPayment)
+                {
+                    var depPay = new CreatePaymentRequest
+                    {
+                        DocumentId = invoiceDocId,
+                        PaymentDate = receiptDate,
+                        Amount = depositApplied,
+                        PaymentMethod = "Other",
+                        Reference = $"{receiptNumber}-DEPADJ",
+                        Notes = $"ตัดมัดจำ (เงินรับล่วงหน้า) เข้าใบกำกับ {receiptNumber}",
+                        OverridePaymentAccountId = advDepId
+                    };
+                    var depResult = await _apiClient.CreatePaymentAsync(depPay);
+                    if (depResult?.success != true || depResult.data == null)
+                        throw new Exception($"SettleReceipt: ตัดมัดจำเป็น payment ไม่สำเร็จ receipt={receiptNumber}: {depResult?.message ?? "null response"}");
+                    Guid depPayId = depResult.data.Id;
+
+                    if (hasVat && _config.IsDepositVatAtReceipt)
+                    {
+                        // ADVANCE เก็บเฉพาะ net → ย้ายส่วน VAT: Dr 21913(defer)/21911 / Cr ADVANCE
+                        var vatFix = _mapper.MapDepositVatCorrection(reservationId, depositApplied,
+                            receiptNumber, _config.IsDepositOutputVatDeferred);
+                        var vatResult = await _apiClient.CreateJournalAsync(vatFix);
+                        Guid vatFixId = RequireValidDocId(vatResult?.data?.Id, $"DepositVatCorrection receipt={receiptNumber}");
+                        await SafePostJournalAsync(vatFixId);
+                    }
+
+                    SetReceiptPaymentMarker(receiptNumber, "ADJ:" + depPayId);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceipt: ตัดมัดจำเป็น payment สำเร็จ receipt={receiptNumber} deposit={depositApplied:N2} paymentId={depPayId} (BalanceDue ลดครบ)", "SYSTEM");
+                }
+                else
+                {
+                    // fallback (int_ ไม่มี company endpoint / ยังไม่ map ADVANCE_DEPOSIT):
+                    // journal Dr เงินรับล่วงหน้า / Cr ลูกหนี้ — GL ถูก แต่ BalanceDue ของเอกสาร
+                    // จะค้างเท่ายอดมัดจำ (ข้อจำกัดที่รู้จัก — log ไว้)
+                    var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
+                        receiptDate, customerName, paymentAccountId, receiptNumber,
+                        hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
+                    var adjResult = await _apiClient.CreateJournalAsync(adj);
+                    Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
+                    await SafePostJournalAsync(adjId);
+                    SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceipt: deposit adjustment (journal) posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId} — BalanceDue เอกสารจะค้างเท่ามัดจำ (ไม่มี company endpoint)", "SYSTEM");
+                }
             }
 
             // 2) บันทึกรับเงินสดจริง (= total − depositApplied) → Dr เงินสด / Cr ลูกหนี้
@@ -3978,8 +4023,18 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints)
                 {
-                    // ✅ Receipt-doc path (acc_): void เอกสารผ่าน company endpoint (cascade JE)
-                    //    + กลับรายการหักมัดจำ (Dr เงินสด/Cr รับล่วงหน้า) ถ้ามี
+                    // อ่านชนิดเอกสารก่อน void — ใช้เลือกวิธีกลับรายการหักมัดจำให้ตรงกับที่เคยโพสต์:
+                    //   Receipt (3, ใบเก่า): เคยลง adjustment "Dr ADVANCE / Cr เงินสด" → reverse ด้วย journal เงินสด
+                    //   TaxInvoice (4, ใบใหม่): ตัดมัดจำเป็น document payment → void doc cascade กลับให้เอง
+                    //     เหลือแค่กลับ journal แก้ VAT มัดจำ (ถ้ามี)
+                    int voidedDocType = 0;
+                    try
+                    {
+                        var docInfo = await _apiClient.GetDocumentAsync(docId);
+                        voidedDocType = docInfo?.data?.DocumentType ?? 0;
+                    }
+                    catch { }
+
                     try
                     {
                         await _apiClient.VoidDocumentAsync(docId);
@@ -3987,7 +4042,7 @@ namespace Take_Time_BangPhra.Integration
                     catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt(RECEIPT doc): doc {docId} already voided/terminal receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                            $"ProcessVoidReceipt(doc): doc {docId} already voided/terminal receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
                     }
 
                     if (!string.IsNullOrEmpty(receiptNumber))
@@ -3995,19 +4050,38 @@ namespace Take_Time_BangPhra.Integration
                         decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
                         if (applied > 0)
                         {
-                            var info = LookupReceiptHeaderInfo(receiptNumber);
-                            if (info != null)
+                            if (voidedDocType == NexaaccDocumentType.TaxInvoice)
                             {
-                                var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
-                                    info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
-                                    info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
-                                    hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
-                                    deferOutputVat: _config.IsDepositOutputVatDeferred);
-                                var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                Guid revId = RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt(RECEIPT doc) counter-adj receipt={receiptNumber}");
-                                await SafePostJournalAsync(revId);
-                                _code.Logs(_connectionString, "AccountingSync",
-                                    $"ProcessVoidReceipt(RECEIPT doc): reversed deposit adj applied={applied} receipt={receiptNumber} journalId={revId}", "SYSTEM");
+                                // payment ตัดมัดจำถูก cascade-reverse โดย void doc แล้ว (Cr ADVANCE คืน)
+                                // → กลับเฉพาะ journal แก้ VAT มัดจำ (Dr ADVANCE / Cr 21913-21911)
+                                if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt)
+                                {
+                                    var vatRev = _mapper.MapDepositVatCorrection(
+                                        LookupReceiptHeaderInfo(receiptNumber)?.reservationId ?? 0,
+                                        applied, receiptNumber, _config.IsDepositOutputVatDeferred, reverse: true);
+                                    var vatRevResult = await _apiClient.CreateJournalAsync(vatRev);
+                                    Guid vatRevId = RequireValidDocId(vatRevResult?.data?.Id, $"VoidReceipt vat-correction-rev receipt={receiptNumber}");
+                                    await SafePostJournalAsync(vatRevId);
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt(TAXINV doc): reversed deposit VAT correction applied={applied} receipt={receiptNumber}", "SYSTEM");
+                                }
+                            }
+                            else
+                            {
+                                var info = LookupReceiptHeaderInfo(receiptNumber);
+                                if (info != null)
+                                {
+                                    var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
+                                        info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
+                                        info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
+                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                                        deferOutputVat: _config.IsDepositOutputVatDeferred);
+                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                    Guid revId = RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt(RECEIPT doc) counter-adj receipt={receiptNumber}");
+                                    await SafePostJournalAsync(revId);
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt(RECEIPT doc): reversed deposit adj applied={applied} receipt={receiptNumber} journalId={revId}", "SYSTEM");
+                                }
                             }
                         }
                     }
@@ -6161,6 +6235,7 @@ namespace Take_Time_BangPhra.Integration
             // 2) เคลียร์คิวเก่า + ล้าง PDF cache (PrepareResync ในโหมด journal จะ enqueue void ซ้ำ —
             //    ไม่เป็นไร ProcessVoidReceipt idempotent/กลืนเอกสารที่ void แล้ว)
             PrepareResync(receiptNumber);
+            ClearReceiptPdfCache(receiptNumber);   // PrepareResync ล้างเฉพาะฝั่งจ่าย — ล้างฝั่งรับด้วย
 
             // 3) reset marker → SettleReceiptDocAsync/SettleReceiptInNextAcc เริ่ม state machine ใหม่
             SetReceiptPaymentMarker(receiptNumber, null);
