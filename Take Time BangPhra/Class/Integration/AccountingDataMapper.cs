@@ -2165,7 +2165,8 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapMultiLinePaymentToJournal(
             int reservationId, List<ReceiptLineSpec> lines, string paymentMethod, DateTime paymentDate,
             string customerName, bool hasVat = false, string paymentAccountId = null,
-            decimal depositApplied = 0, string documentNumber = null, bool vatAtReceipt = false)
+            decimal depositApplied = 0, string documentNumber = null, bool vatAtReceipt = false,
+            bool deferOutputVat = false)
         {
             if (lines == null || lines.Count == 0)
                 throw new ArgumentException("MapMultiLinePaymentToJournal: lines ห้ามว่าง");
@@ -2317,6 +2318,30 @@ namespace Take_Time_BangPhra.Integration
                     Description = depositVatAlready > 0
                         ? $"ภาษีขาย 7% (หัก VAT มัดจำ {depositVatAlready:N2} ที่รับรู้แล้ว)"
                         : "ภาษีขาย 7%"
+                });
+            }
+
+            // โหมด deferred: VAT ของมัดจำถูกพักไว้ที่ "ภาษีขายรอเรียกเก็บ" (21913) ตอนรับเงิน —
+            // การหักมัดจำในใบเสร็จนี้ = จุดรับรู้รายได้ → ต้อง realize Dr 21913 / Cr 21911 ที่นี่
+            // (checkout clearing จะถูก SKIP เพราะมัดจำถูกหักครบในใบเสร็จ → ไม่มีใครโอน 21913 ให้
+            //  ถ้าไม่ทำตรงนี้ 21913 จะค้างสะสม + ภ.พ.30 ขาดเท่า VAT มัดจำ)
+            // guard mapping เดียวกับ MapDepositToJournal: 21913 ไม่ได้ map → มัดจำลง 21911 ตรงอยู่แล้ว ไม่ต้องโอน
+            if (hasVat && vatAtReceipt && deferOutputVat && depositVatAlready > 0
+                && TryGetAccountId("OUTPUT_VAT_DEFERRED", out var deferredVatAcc) && deferredVatAcc != Guid.Empty)
+            {
+                journalLines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = deferredVatAcc,
+                    DebitAmount = depositVatAlready,
+                    CreditAmount = 0,
+                    Description = $"โอนภาษีขายรอเรียกเก็บ (มัดจำ) เป็นภาษีขาย - การจอง #{reservationId}"
+                });
+                journalLines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = GetAccountId("OUTPUT_VAT"),
+                    DebitAmount = 0,
+                    CreditAmount = depositVatAlready,
+                    Description = "ภาษีขาย 7% (รับรู้จาก VAT มัดจำรอเรียกเก็บ)"
                 });
             }
 

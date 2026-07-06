@@ -3669,7 +3669,8 @@ namespace Take_Time_BangPhra.Integration
                     {
                         journal = _mapper.MapMultiLinePaymentToJournal(reservationId, lines, paymentMethod, receiptDate,
                             customerName, hasVat, paymentAccountId, depositApplied, receiptNumber,
-                            vatAtReceipt: _config.IsDepositVatAtReceipt);
+                            vatAtReceipt: _config.IsDepositVatAtReceipt,
+                            deferOutputVat: _config.IsDepositOutputVatDeferred);
                     }
                     else
                     {
@@ -4674,10 +4675,10 @@ namespace Take_Time_BangPhra.Integration
                             // ยกเลิกแล้ว — ไม่มีหนี้สินบน NextAcc
                         }
                         else if (!string.IsNullOrEmpty(marker)
-                                 && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:")
+                                 && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:") || marker == "NOCASH"
                                      || (!marker.StartsWith("DOC:") && Guid.TryParse(marker, out _))))
                         {
-                            state.BookedAmount += amt;    // อนุมัติ/โพสต์บน NextAcc แล้ว
+                            state.BookedAmount += amt;    // อนุมัติ/โพสต์บน NextAcc แล้ว (NOCASH = settle ครบด้วยมัดจำ)
                         }
                         else if (!string.IsNullOrEmpty(marker) && marker.StartsWith("DOC:"))
                         {
@@ -6216,7 +6217,8 @@ namespace Take_Time_BangPhra.Integration
                 {
                     return _mapper.MapMultiLinePaymentToJournal(reservationId, lines, paymentMethod, receiptDate,
                         customerName, hasVat, paymentAccountId, depositApplied, receiptNumber,
-                        vatAtReceipt: _config.IsDepositVatAtReceipt);
+                        vatAtReceipt: _config.IsDepositVatAtReceipt,
+                        deferOutputVat: _config.IsDepositOutputVatDeferred);
                 }
                 return _mapper.MapPaymentToJournal(reservationId, totalAmount, paymentMethod, receiptDate,
                     customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId,
