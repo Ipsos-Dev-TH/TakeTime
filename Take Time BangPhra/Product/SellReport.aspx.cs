@@ -76,9 +76,24 @@ namespace Take_Time_BangPhra.Product
                 // ค้างเป็น phantom (ไม่มีการ reverse):
                 //   - ขายแบบออกใบกำกับ (Account_Receipt_ID != '0') → ให้ไปยกเลิกใบเสร็จที่หน้าจัดการเอกสาร (void ตาม flow)
                 //   - ขายที่ถูกรวบรายวันแล้ว (Pos_Rollup_Ref มีค่า ไม่ใช่ LEGACY) → รวมอยู่ในใบ POSDAY แล้ว
-                var chk = code.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(Account_Receipt_ID, '0') AS RcptId, Pos_Rollup_Ref
-                      FROM [dbo].[Product_Out] WHERE ID = @ID", deleteParams);
+                DataTable chk = null;
+                try
+                {
+                    chk = code.DatabaseQuerySafe(conn,
+                        @"SELECT ISNULL(Account_Receipt_ID, '0') AS RcptId, Pos_Rollup_Ref
+                          FROM [dbo].[Product_Out] WHERE ID = @ID", deleteParams);
+                }
+                catch
+                {
+                    // DB ยังไม่มีคอลัมน์ Pos_Rollup_Ref (ยังไม่รัน PHASE18_01) → เช็คเฉพาะใบกำกับ
+                    try
+                    {
+                        chk = code.DatabaseQuerySafe(conn,
+                            @"SELECT ISNULL(Account_Receipt_ID, '0') AS RcptId
+                              FROM [dbo].[Product_Out] WHERE ID = @ID", deleteParams);
+                    }
+                    catch { chk = null; }
+                }
                 if (chk != null && chk.Rows.Count > 0)
                 {
                     string rcptId = chk.Rows[0]["RcptId"]?.ToString() ?? "0";

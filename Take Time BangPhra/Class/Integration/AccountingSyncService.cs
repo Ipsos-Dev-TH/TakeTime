@@ -3554,6 +3554,9 @@ namespace Take_Time_BangPhra.Integration
                     _lastDocNumber = result?.data?.EntryNumber;
                     _lastDocType = "JOURNAL";
                     await SafePostJournalAsync(jrnlDocId);
+                    // ตั้ง marker ให้ VerifyDepositBookedOnNextAcc รู้ว่ามัดจำใบนี้ booked แล้ว
+                    // (เดิมโหมด journal ไม่ตั้ง → safeguard ตัดมัดจำมองเป็น "ยังไม่ sync" แล้วข้ามถาวร)
+                    SetReceiptPaymentMarker(receiptNumber, jrnlDocId.ToString());
                     return jrnlDocId.ToString();
                 }
             }
@@ -3678,6 +3681,8 @@ namespace Take_Time_BangPhra.Integration
                     Guid jrnlDocId = RequireValidDocId(result?.data?.Id, $"CreateJournal (payment) receipt={receiptNumber}");
                     _lastDocNumber = result?.data?.EntryNumber;
                     _lastDocType = "JOURNAL";
+                    if (!string.IsNullOrEmpty(receiptNumber))
+                        SetReceiptPaymentMarker(receiptNumber, jrnlDocId.ToString());   // consistency กับ deposit branch
                     await SafePostJournalAsync(jrnlDocId);
                     return jrnlDocId.ToString();
                 }
@@ -4662,6 +4667,9 @@ namespace Take_Time_BangPhra.Integration
                         {
                             // marker ว่าง → ยังมีคิว sync ค้างไหม
                             if (HasActiveReceiptQueue(num)) state.PendingSync = true;
+                            // ไม่มีคิวค้าง แต่เคย sync สำเร็จ (คิว COMPLETED) = booked
+                            // ครอบคลุมใบเก่าก่อนมี marker และโหมด journal รุ่นก่อน fix
+                            else if (HasCompletedReceiptQueue(num)) state.BookedAmount += amt;
                             else state.UnsyncedReceipts.Add(num);
                         }
                     }
@@ -4685,6 +4693,23 @@ namespace Take_Time_BangPhra.Integration
                     @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
                       WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
                         AND Status IN ('PENDING', 'PROCESSING') AND Retry_Count < Max_Retries
+                        AND Payload LIKE @p",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>เคย sync ใบเสร็จนี้สำเร็จ (คิว COMPLETED) ไหม — ใช้เป็น booked-fallback เมื่อไม่มี marker</summary>
+        private bool HasCompletedReceiptQueue(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND Status = 'COMPLETED'
                         AND Payload LIKE @p",
                     new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
                 return dt != null && dt.Rows.Count > 0;
