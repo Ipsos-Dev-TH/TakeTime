@@ -2537,9 +2537,11 @@ namespace Take_Time_BangPhra.Integration
                         throw new Exception($"SettleReceipt: ตัดมัดจำเป็น payment ไม่สำเร็จ receipt={receiptNumber}: {depResult?.message ?? "null response"}");
                     Guid depPayId = depResult.data.Id;
 
-                    if (hasVat && _config.IsDepositVatAtReceipt)
+                    if (hasVat && _config.IsDepositVatAtReceipt
+                        && !await JournalExistsByReferenceAsync($"RES-{reservationId}-DEPVAT"))
                     {
                         // ADVANCE เก็บเฉพาะ net → ย้ายส่วน VAT: Dr 21913(defer)/21911 / Cr ADVANCE
+                        // guard RES-{id}-DEPVAT กัน post ซ้ำถ้า crash หลังโพสต์ก่อนเขียน marker (idempotent)
                         var vatFix = _mapper.MapDepositVatCorrection(reservationId, depositApplied,
                             receiptNumber, _config.IsDepositOutputVatDeferred);
                         var vatResult = await _apiClient.CreateJournalAsync(vatFix);
@@ -2555,14 +2557,21 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // fallback (int_ ไม่มี company endpoint / ยังไม่ map ADVANCE_DEPOSIT):
                     // journal Dr เงินรับล่วงหน้า / Cr ลูกหนี้ — GL ถูก แต่ BalanceDue ของเอกสาร
-                    // จะค้างเท่ายอดมัดจำ (ข้อจำกัดที่รู้จัก — log ไว้)
-                    var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
-                        receiptDate, customerName, paymentAccountId, receiptNumber,
-                        hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
-                    var adjResult = await _apiClient.CreateJournalAsync(adj);
-                    Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
-                    await SafePostJournalAsync(adjId);
-                    SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId);
+                    // จะค้างเท่ายอดมัดจำ (ข้อจำกัดที่รู้จัก — log ไว้). guard RES-{id}-DEPADJ กัน post ซ้ำ
+                    // MapDepositAppliedAdjustment ใช้ Reference = "{receiptNumber}-DEPADJ"
+                    string adjRef = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ" : $"RES-{reservationId}-DEPADJ";
+                    string adjId2 = "existing";
+                    if (!await JournalExistsByReferenceAsync(adjRef))
+                    {
+                        var adj = _mapper.MapDepositAppliedAdjustment(reservationId, depositApplied, paymentMethod,
+                            receiptDate, customerName, paymentAccountId, receiptNumber,
+                            hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
+                        var adjResult = await _apiClient.CreateJournalAsync(adj);
+                        Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedAdjustment receipt={receiptNumber}");
+                        await SafePostJournalAsync(adjId);
+                        adjId2 = adjId.ToString();
+                    }
+                    SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId2);
                     _code.Logs(_connectionString, "AccountingSync",
                         $"SettleReceipt: deposit adjustment (journal) posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId} — BalanceDue เอกสารจะค้างเท่ามัดจำ (ไม่มี company endpoint)", "SYSTEM");
                 }
@@ -3760,6 +3769,12 @@ namespace Take_Time_BangPhra.Integration
                 else if (_config.IsReceiptDocumentMode)
                 {
                     // int_ key fallback: integration invoice + settle (deposit ถูกรับรู้เป็นรายได้ทันที — ดู caveat)
+                    // ⚠ ข้อจำกัด int_: InboundInvoiceRequest ไม่มีฟิลด์ deposit-defer VAT → VAT มัดจำลง 21911
+                    // ทันที (ไม่เข้า 21913) แม้ตั้ง Deposit_Defer_Output_Vat=1 — GL รวมยังถูก (21911=210)
+                    // แต่ VAT เข้า ภ.พ.30 เร็วไป 1 งวด. ต้องการ defer จริง → ใช้ acc_ (company endpoint)
+                    if (depositHasVat && depositVatAtReceipt && _config.IsDepositOutputVatDeferred)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(int_ deposit): receipt={receiptNumber} ตั้ง defer VAT แต่ int_ endpoint ไม่รองรับ → VAT มัดจำลง 21911 ทันที (ใช้ acc_ เพื่อ defer เข้า 21913)", "SYSTEM");
                     var invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate, customerName,
                         paymentAccountId: paymentAccountId, hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     if (!string.IsNullOrEmpty(receiptNumber))
