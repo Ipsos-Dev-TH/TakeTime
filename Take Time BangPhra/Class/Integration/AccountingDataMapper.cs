@@ -1969,6 +1969,46 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// รับรู้รายได้ของมัดจำตอนเช็คเอาท์ (โหมด §78/1 เคร่ง: มัดจำออกใบกำกับ+VAT ตั้งแต่รับเงิน,
+        /// เช็คเอาท์ออกใบกำกับ "เฉพาะยอดคงเหลือ" → ยอดมัดจำเดิมยังเป็น Cr 21712 net ค้าง ต้องย้ายเป็นรายได้):
+        ///   Dr 21712 เงินรับล่วงหน้า (net) / Cr รายได้ (net) — VAT รับรู้ไปแล้วตอนรับมัดจำ ไม่แตะ
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositRevenueRecognition(
+            int reservationId, decimal depositApplied, string receiptNumber, string revenueType, bool hasVat)
+        {
+            decimal net = hasVat
+                ? Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero)
+                : depositApplied;
+            if (net <= 0)
+                throw new ArgumentException("MapDepositRevenueRecognition: net ต้อง > 0");
+
+            var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
+            var revenueAccountId = !string.IsNullOrEmpty(revenueType) ? GetAccountId(revenueType) : GetAccountId("ROOM_REVENUE");
+
+            var lines = new List<JournalEntryLineRequest>
+            {
+                new JournalEntryLineRequest
+                {
+                    AccountId = advanceDepositAccountId, DebitAmount = net, CreditAmount = 0,
+                    Description = $"รับรู้รายได้จากมัดจำ (net) - การจอง #{reservationId}"
+                },
+                new JournalEntryLineRequest
+                {
+                    AccountId = revenueAccountId, DebitAmount = 0, CreditAmount = net,
+                    Description = $"รายได้ค่าห้องพัก (จากมัดจำ) - การจอง #{reservationId}"
+                }
+            };
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = DateTime.Now,
+                JournalType = NexaaccJournalType.General,
+                Description = $"รับรู้รายได้มัดจำตอนเช็คเอาท์ {receiptNumber} (การจอง #{reservationId})",
+                Reference = $"RES-{reservationId}-DEPREV",
+                Lines = lines
+            };
+        }
+
         public CreateJournalEntryRequest MapDepositAppliedReceiptAdjustment(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
             string customerName, string paymentAccountId = null, string receiptNumber = null,

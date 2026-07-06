@@ -3781,6 +3781,36 @@ namespace Take_Time_BangPhra.Integration
                 if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null
                     && HasFullBuyerTaxData(customerContact))
                 {
+                    // โหมด §78/1 เคร่ง (RECEIPT + ไม่ defer + มีการหักมัดจำ): มัดจำออกใบกำกับ+รับรู้ VAT
+                    // ไปแล้วตอนรับเงิน → เช็คเอาท์ต้องออกใบกำกับ "เฉพาะยอดคงเหลือ" (ไม่ใช่เต็มยอด)
+                    // เพื่อไม่ให้ลูกค้าได้เอกสารภาษี VAT ซ้อน 2 ใบ. โหมดอื่น (CHECKOUT/defer) = เต็มยอดเดิม
+                    bool strictRemainingMode = hasVat && _config.IsDepositVatAtReceipt
+                        && !_config.IsDepositOutputVatDeferred && depositApplied > 0;
+
+                    if (strictRemainingMode)
+                    {
+                        decimal remaining = totalAmount - depositApplied;   // ยอดคงเหลือที่รับตอนนี้
+                        // ใบกำกับ "ยอดคงเหลือ" (single line net remaining) → Dr ลูกหนี้/Cr รายได้/Cr VAT
+                        var docR = _mapper.MapReceiptToDocument(reservationId, null, remaining, revenueType,
+                            paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
+                            paymentAccountId, hasVat, receiptNumber, isDeposit: false,
+                            documentType: NexaaccDocumentType.TaxInvoice);
+                        Guid docRId = await EnsureRevenueDocCreatedApprovedAsync(docR, receiptNumber);
+                        // ปิดลูกหนี้เฉพาะยอดคงเหลือ (ไม่มีการตัดมัดจำในใบนี้ — มัดจำไม่ได้อยู่ในใบกำกับนี้)
+                        await SettleReceiptInNextAcc(docRId, receiptNumber, remaining, 0m,
+                            paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
+                        // ย้ายมัดจำ (net) จาก 21712 → รายได้ (VAT รับรู้ไปแล้วตอนรับมัดจำ)
+                        var depRev = _mapper.MapDepositRevenueRecognition(reservationId, depositApplied, receiptNumber, revenueType, hasVat);
+                        var depRevResult = await _apiClient.CreateJournalAsync(depRev);
+                        Guid depRevId = RequireValidDocId(depRevResult?.data?.Id, $"DepositRevenueRecognition receipt={receiptNumber}");
+                        await SafePostJournalAsync(depRevId);
+                        _lastDocType = "RECEIPT";
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(§78/1): receipt={receiptNumber} ใบกำกับยอดคงเหลือ {remaining:N2} + รับรู้รายได้มัดจำ (มัดจำ {depositApplied:N2} ออกใบกำกับ+VAT ตอนรับเงินแล้ว)", "SYSTEM");
+                        await TryAutoGenerateEtaxAsync(docRId, receiptNumber, reservationId, remaining, customerName);
+                        return docRId.ToString();
+                    }
+
                     // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
                     //    doc → Dr ลูกหนี้ / Cr รายได้ราย line / Cr ภาษีขาย แล้วปิดลูกหนี้ด้วย
                     //    SettleReceiptInNextAcc (ตัดมัดจำ Dr รับล่วงหน้า/Cr ลูกหนี้ + รับเงินสดจริง
@@ -4132,12 +4162,28 @@ namespace Take_Time_BangPhra.Integration
                         {
                             if (voidedDocType == NexaaccDocumentType.TaxInvoice)
                             {
-                                // payment ตัดมัดจำถูก cascade-reverse โดย void doc แล้ว (Cr ADVANCE คืน)
-                                // → กลับเฉพาะ journal แก้ VAT มัดจำ (Dr ADVANCE / Cr 21913-21911)
-                                if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt)
+                                int resIdV = LookupReceiptHeaderInfo(receiptNumber)?.reservationId ?? 0;
+                                if (_config.IsDepositVatAtReceipt && !_config.IsDepositOutputVatDeferred)
                                 {
-                                    var vatRev = _mapper.MapDepositVatCorrection(
-                                        LookupReceiptHeaderInfo(receiptNumber)?.reservationId ?? 0,
+                                    // โหมด §78/1 เคร่ง: ใบกำกับออกเฉพาะยอดคงเหลือ + มี journal รับรู้รายได้มัดจำ
+                                    // (Dr 21712/Cr รายได้) แยกจาก doc → void doc ไม่ cascade → ต้องกลับเอง:
+                                    // Dr รายได้ / Cr 21712 (คืนมัดจำเป็นเงินรับล่วงหน้า)
+                                    var depRevRev = _mapper.MapDepositRevenueRecognition(resIdV, applied, receiptNumber, null, LookupBusinessHasVat());
+                                    foreach (var ln in depRevRev.Lines)   // สลับ Dr↔Cr = กลับรายการ
+                                    { var d = ln.DebitAmount; ln.DebitAmount = ln.CreditAmount; ln.CreditAmount = d; }
+                                    depRevRev.Description = "กลับรายการรับรู้รายได้มัดจำ (void ใบกำกับ " + receiptNumber + ")";
+                                    depRevRev.Reference = $"RES-{resIdV}-DEPREV-REV";
+                                    var rr = await _apiClient.CreateJournalAsync(depRevRev);
+                                    Guid rrId = RequireValidDocId(rr?.data?.Id, $"VoidReceipt dep-rev-recognition-reverse receipt={receiptNumber}");
+                                    await SafePostJournalAsync(rrId);
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessVoidReceipt(TAXINV §78/1): reversed deposit revenue recognition applied={applied} receipt={receiptNumber}", "SYSTEM");
+                                }
+                                else if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt)
+                                {
+                                    // โหมดเต็มยอด: payment ตัดมัดจำถูก cascade-reverse โดย void doc แล้ว (Cr ADVANCE คืน)
+                                    // → กลับเฉพาะ journal แก้ VAT มัดจำ (Dr ADVANCE / Cr 21913-21911)
+                                    var vatRev = _mapper.MapDepositVatCorrection(resIdV,
                                         applied, receiptNumber, _config.IsDepositOutputVatDeferred, reverse: true);
                                     var vatRevResult = await _apiClient.CreateJournalAsync(vatRev);
                                     Guid vatRevId = RequireValidDocId(vatRevResult?.data?.Id, $"VoidReceipt vat-correction-rev receipt={receiptNumber}");
