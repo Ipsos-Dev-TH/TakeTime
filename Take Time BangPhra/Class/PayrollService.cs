@@ -708,6 +708,7 @@ public class PayrollService
                         // Backfill: คนที่กดทำจ่ายไปก่อนหน้านี้ (ก่อนมีโค้ด sync) แล้วยังไม่ได้ขึ้น NextAcc
                         // → กดทำจ่ายซ้ำให้ re-trigger period run อีกครั้ง (idempotent — ถ้า run มีแล้วคืนของเดิม).
                         // โหมด run-based (DOCUMENT_IMPORT/DOCUMENT) sync ทั้งงวด อ่านยอดทุกแถวของงวด.
+                        bool reSynced = false;
                         try
                         {
                             var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
@@ -717,15 +718,17 @@ public class PayrollService
                             {
                                 int pid = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
                                 var s = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                                if (cfg.IsPayrollImportMode) s.EnqueuePayrollRunImport(pid);
-                                else s.EnqueuePayrollRunSync(pid);
+                                if (cfg.IsPayrollImportMode) reSynced = s.EnqueuePayrollRunImport(pid) > 0;
+                                else reSynced = s.EnqueuePayrollRunSync(pid) > 0;
                             }
                         }
                         catch (Exception reEx)
                         {
                             try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll re-sync (already generated) error: voucher={existingVoucher} {reEx.Message}", "SYSTEM"); } catch { }
                         }
-                        return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว (ส่ง sync NextAcc ซ้ำให้แล้ว)");
+                        return (true, existingVoucher, reSynced
+                            ? "ใบสำคัญจ่ายถูกสร้างแล้ว (ส่ง sync NextAcc ซ้ำให้แล้ว)"
+                            : "ใบสำคัญจ่ายถูกสร้างแล้ว");
                     }
 
                     // ── โหมดที่ NextAcc เป็นผู้ออกเอกสารเงินเดือน (DOCUMENT / DOCUMENT_IMPORT) ──
