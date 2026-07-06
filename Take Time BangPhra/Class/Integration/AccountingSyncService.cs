@@ -3686,6 +3686,8 @@ namespace Take_Time_BangPhra.Integration
                         invoice.ReplaceExistingForSource = true;
                     }
                     invoice.Attachments = attachments;
+                    // อ้างอิง = รหัสการจอง (คู่กับใบกำกับสุดท้ายชุดเดียวกัน); externalRef คงเลขใบเสร็จ (dedup)
+                    if (reservationId > 0) invoice.Reference = $"RES-{reservationId}";
                     // int_ deposit = TaxInvoice บน NextAcc → โดน gate §86/4 ด้วย: ไม่มีข้อมูลภาษี
                     // → เคสไม่ประสงค์รับใบกำกับ (contact กลางลูกค้าเงินสด)
                     if (HasFullBuyerTaxData(customerContact))
@@ -3817,6 +3819,10 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
                     invoice.Attachments = attachments;
+                    // อ้างอิง = รหัสการจอง (จับคู่กับใบมัดจำ RES-{id} ชุดเดียวกัน) —
+                    // externalRef คงเป็นเลขใบเสร็จ (คีย์ dedup ราย "ใบ" ห้ามใช้รหัสจอง:
+                    // การจองเดียวอาจมีหลายใบ เช่น มัดจำ+ส่วนต่าง จะชนกันเอง)
+                    if (reservationId > 0) invoice.Reference = $"RES-{reservationId}";
                     // ลูกค้ามีข้อมูลภาษีครบ → ใบกำกับเต็มรูปผูก contact จริง
                     // ไม่ครบ (B2C ทั่วไป) → "ไม่ประสงค์รับใบกำกับภาษี": NextAcc ผูก contact กลาง
                     // ลูกค้าเงินสด (IsWalkInCustomer ยกเว้น §86/4) — VAT ขายเข้า ภ.พ.30 ครบ
@@ -6444,7 +6450,8 @@ namespace Take_Time_BangPhra.Integration
                             customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
                 }
 
-                invoice.Reference = receiptNumber;
+                // Reference = รหัสการจอง (นโยบายเดียวกับ sync ปกติ); externalRef = เลขใบเสร็จ (คีย์ dedup)
+                invoice.Reference = reservationId > 0 ? $"RES-{reservationId}" : receiptNumber;
                 invoice.ExternalRef = receiptNumber;      // 🔑 คีย์ dedup ที่ NextAcc ใช้หาเอกสารเดิม
                 invoice.ExternalId = receiptNumber;
                 invoice.ReplaceExistingForSource = false; // ใช้กลไก resyncUpdate แทน (ไม่ void)
