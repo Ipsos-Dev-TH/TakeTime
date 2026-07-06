@@ -2498,6 +2498,18 @@ namespace Take_Time_BangPhra.Integration
             // 1) ตัดมัดจำที่หักออกจากลูกหนี้ (ถ้ามี)
             if (depositApplied > 0 && !adjDone)
             {
+                // ── GUARD ลำดับ resync: จะ Dr เงินรับล่วงหน้า ได้ก็ต่อเมื่อใบมัดจำของการจองนี้
+                // ถูก booked เป็นหนี้สินบน NextAcc แล้ว (ใบมัดจำรุ่นเก่าที่เคยรับรู้เป็นรายได้ทันที
+                // ต้องถูก resync เป็น "ใบเสร็จมัดจำ" ก่อน) — กัน 21712 ติดลบ + รายได้/VAT ซ้ำ
+                var depState = VerifyDepositBookedOnNextAcc(reservationId);
+                if (depState.PendingSync)
+                    throw new Exception($"SettleReceipt: ใบมัดจำของการจอง #{reservationId} กำลังรอ sync/อนุมัติ — เลื่อนไปรอบถัดไป");
+                if (depState.AnyDeposit && depState.BookedAmount + 0.01m < depositApplied)
+                    throw new Exception(
+                        $"SettleReceipt: มัดจำที่ booked บน NextAcc มี {depState.BookedAmount:N2} แต่ใบนี้จะตัด {depositApplied:N2} — " +
+                        $"กรุณากด Retry ใบมัดจำของการจอง #{reservationId} ให้เป็น 'ใบเสร็จมัดจำ' (ตั้งเงินรับล่วงหน้า) ก่อน แล้วใบนี้จะ settle ต่ออัตโนมัติ" +
+                        (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : ""));
+
                 // ✅ ทางหลัก (company endpoints): ตัดมัดจำเป็น "document payment" ของใบกำกับ
                 //    (OverridePaymentAccountId = เงินรับล่วงหน้า → Dr ADVANCE / Cr ลูกหนี้) —
                 //    สำคัญ: payment ลด BalanceDue ของเอกสารด้วย → ใบกำกับปิดยอดสนิท ไม่ค้างชำระ
@@ -4897,7 +4909,14 @@ namespace Take_Time_BangPhra.Integration
                                  && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:") || marker == "NOCASH"
                                      || (!marker.StartsWith("DOC:") && Guid.TryParse(marker, out _))))
                         {
-                            state.BookedAmount += amt;    // อนุมัติ/โพสต์บน NextAcc แล้ว (NOCASH = settle ครบด้วยมัดจำ)
+                            // ใบมัดจำ "รุ่นเก่า" ที่ sync เป็น integration invoice: NextAcc (int_) ยุบเข้า
+                            // บัญชีรายได้ทันที — ไม่มีหนี้สิน 21712 ให้ตัด แม้ marker จะสำเร็จ
+                            // → ต้อง resync เป็น "ใบเสร็จมัดจำ" ก่อน (เฉพาะ deployment ที่มี company endpoint
+                            // ซึ่งใบใหม่ตั้ง 21712 จริง; ร้าน int_ ล้วนคงพฤติกรรมเดิม)
+                            if (_config.CanUseCompanyEndpoints && LookupReceiptQueueDocType(num) == "INVOICE")
+                                state.UnsyncedReceipts.Add(num + " (ใบกำกับแบบเก่า — กด Retry ให้เป็นใบเสร็จมัดจำ)");
+                            else
+                                state.BookedAmount += amt;    // อนุมัติ/โพสต์บน NextAcc แล้ว (NOCASH = settle ครบด้วยมัดจำ)
                         }
                         else if (!string.IsNullOrEmpty(marker) && marker.StartsWith("DOC:"))
                         {
@@ -4938,6 +4957,27 @@ namespace Take_Time_BangPhra.Integration
                 return dt != null && dt.Rows.Count > 0;
             }
             catch { return false; }
+        }
+
+        /// <summary>ชนิดเอกสาร NextAcc ของใบเสร็จนี้จากคิวล่าสุดที่ COMPLETED ("RECEIPT"/"INVOICE"/"JOURNAL"/null)
+        /// — ใช้แยกใบมัดจำรุ่นเก่า (INVOICE = int_ ยุบเป็นรายได้ ไม่มี 21712) ออกจากใบเสร็จมัดจำจริง</summary>
+        private string LookupReceiptQueueDocType(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Document_Type FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND Status = 'COMPLETED'
+                        AND Payload LIKE @p
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return dt.Rows[0][0].ToString();
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>เคย sync ใบเสร็จนี้สำเร็จ (คิว COMPLETED) ไหม — ใช้เป็น booked-fallback เมื่อไม่มี marker</summary>
