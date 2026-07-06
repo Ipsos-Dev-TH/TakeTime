@@ -1891,14 +1891,20 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 PaymentDate = isArDoc ? (DateTime?)null : paymentDate,
                 ContactId = contactId,
-                Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}",
+                // มัดจำ: รหัสอ้างอิง = รหัสการจอง (ตามที่ผู้ใช้ต้องการ — ตามรอยมัดจำจากใบจองได้ตรง ๆ,
+                // เลขใบเสร็จฝั่งเราเก็บใน Notes; การ match ภายในใช้ sync queue ไม่ใช้ Reference)
+                // ใบกำกับ/รับชำระ: Reference = เลขใบเสร็จฝั่งเรา (คีย์ dedup/ตามรอยของระบบ)
+                Reference = isDeposit
+                    ? $"RES-{reservationId}"
+                    : (!string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}"),
                 PaymentAccountId = isArDoc ? (Guid?)null : cashAccountId,
                 PricesIncludeVat = true,
                 IsDeposit = isDeposit,
                 DepositDeferredAccountCode = isDeposit ? SafeGetAccountCode("ADVANCE_DEPOSIT") : null,
                 DepositOutputVatDeferred = isDeposit && hasVat && depositVatAtReceipt && deferOutputVat,
                 Notes = isDeposit
-                    ? $"รับมัดจำ - การจอง #{reservationId} ({customerName})"
+                    ? $"รับมัดจำ - การจอง #{reservationId} ({customerName})" +
+                      (!string.IsNullOrEmpty(receiptNumber) ? $" [ใบเสร็จ {receiptNumber}]" : "")
                     : $"รับชำระ - การจอง #{reservationId} ({customerName})",
                 Lines = docLines
             };
@@ -1957,7 +1963,7 @@ namespace Take_Time_BangPhra.Integration
                 Description = reverse
                     ? $"กลับรายการ VAT มัดจำ — void ใบกำกับ {receiptNumber} (การจอง #{reservationId})"
                     : $"ปรับ VAT มัดจำที่ตัดเข้าใบกำกับ {receiptNumber} (การจอง #{reservationId})",
-                Reference = $"{receiptNumber}-DEPVAT" + (reverse ? "-REV" : ""),
+                Reference = $"RES-{reservationId}-DEPVAT" + (reverse ? "-REV" : ""),
                 Lines = lines
             };
         }

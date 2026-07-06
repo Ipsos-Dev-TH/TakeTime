@@ -81,6 +81,32 @@ namespace Take_Time_BangPhra.Integration
                 System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        /// <summary>ถอด \uXXXX escape ใน response JSON ให้อ่านเป็นภาษาไทย (ใช้กับ Error_Message ในคิว)</summary>
+        internal static string DecodeUnicodeEscapes(string s)
+        {
+            if (string.IsNullOrEmpty(s) || s.IndexOf("\\u", StringComparison.OrdinalIgnoreCase) < 0) return s;
+            try
+            {
+                return System.Text.RegularExpressions.Regex.Replace(s, @"\\u([0-9a-fA-F]{4})",
+                    m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+            }
+            catch { return s; }
+        }
+
+        /// <summary>เติมคำแนะนำภาษาไทยต่อท้าย error ที่รู้จัก เพื่อให้ผู้ใช้แก้เองได้จากหน้าคิว</summary>
+        private static string BuildApiErrorHint(string body)
+        {
+            string b = body ?? "";
+            if (b.Contains("86/4"))
+                return "\n💡 วิธีแก้: NextAcc เปิดบังคับข้อมูลผู้ซื้อเต็มรูป (§86/4) — " +
+                       "(1) เติม เลขผู้เสียภาษี 13 หลัก + ที่อยู่ ของลูกค้าในระบบ TakeTime แล้วกด Retry " +
+                       "(ระบบจะส่งข้อมูลลูกค้าไปอัปเดต contact ให้เอง) หรือ " +
+                       "(2) ลูกค้าบุคคลทั่วไปไม่มีเลขภาษี → ปิด setting 'บังคับ §86/4 ครบทุก field' ในหน้าตั้งค่า NextAcc";
+            if (b.Contains("งวดบัญชี") && (b.Contains("ปิด") || b.Contains("Closed")))
+                return "\n💡 วิธีแก้: งวดบัญชีเดือนนั้นปิดแล้ว — เปิดงวดชั่วคราวบน NextAcc หรือปรับผ่านใบลดหนี้/เพิ่มหนี้เดือนปัจจุบัน";
+            return "";
+        }
+
         /// <summary>parse วันที่จาก payload: culture-invariant + era-guard (คืน ค.ศ. เสมอ)</summary>
         internal static DateTime ParseAcctDate(string s)
         {
@@ -1679,7 +1705,10 @@ namespace Take_Time_BangPhra.Integration
                 }
                 catch (AccountingApiException ex)
                 {
-                    string errorDetail = $"Queue #{queueId} [{actionType}] API {ex.StatusCode}: {ex.ResponseBody}";
+                    // ถอด \uXXXX ให้อ่านเป็นภาษาไทย + เติมคำแนะนำสำหรับ error ที่รู้จัก (§86/4 ฯลฯ)
+                    string bodyReadable = DecodeUnicodeEscapes(ex.ResponseBody);
+                    string hint = BuildApiErrorHint(bodyReadable);
+                    string errorDetail = $"Queue #{queueId} [{actionType}] API {ex.StatusCode}: {bodyReadable}{hint}";
                     UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
                     IncrementRetry(queueId, _config.MaxRetries);
                     _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
@@ -2486,8 +2515,9 @@ namespace Take_Time_BangPhra.Integration
                         PaymentDate = receiptDate,
                         Amount = depositApplied,
                         PaymentMethod = "Other",
-                        Reference = $"{receiptNumber}-DEPADJ",
-                        Notes = $"ตัดมัดจำ (เงินรับล่วงหน้า) เข้าใบกำกับ {receiptNumber}",
+                        // อ้างรหัสการจอง → ตามรอยได้ทันทีว่า "กลับยอดมัดจำของการจองไหน" เข้าใบกำกับนี้
+                        Reference = $"RES-{reservationId}-DEPADJ",
+                        Notes = $"ตัดมัดจำการจอง #{reservationId} เข้าใบกำกับ {receiptNumber}",
                         OverridePaymentAccountId = advDepId
                     };
                     var depResult = await _apiClient.CreatePaymentAsync(depPay);
@@ -3603,10 +3633,12 @@ namespace Take_Time_BangPhra.Integration
                 attachments = LookupReceiptAttachments(receiptNumber, reservationId);
 
             // Ensure customer exists as Contact in NextAcc (เฉพาะ DOCUMENT mode ที่สร้าง invoice)
+            // ใบกำกับภาษี (ไม่ใช่มัดจำ) → forceRefresh: push เลขผู้เสียภาษี/ที่อยู่ล่าสุดจากระบบเข้า
+            // contact ทุกครั้ง (ผ่านด่าน §86/4 ของ NextAcc — ผู้ใช้เพิ่งเติมข้อมูลแล้วกด Retry ต้องติดทันที)
             ContactInfo customerContact = null;
             if (_config.IsReceiptDocumentMode)
             {
-                customerContact = await EnsureCustomerContactAsync(reservationId);
+                customerContact = await EnsureCustomerContactAsync(reservationId, forceRefresh: !isDeposit);
             }
 
             if (isDeposit)
@@ -4029,10 +4061,17 @@ namespace Take_Time_BangPhra.Integration
                     //   TaxInvoice (4, ใบใหม่): ตัดมัดจำเป็น document payment → void doc cascade กลับให้เอง
                     //     เหลือแค่กลับ journal แก้ VAT มัดจำ (ถ้ามี)
                     int voidedDocType = 0;
+                    bool docAlreadyGone = false;
                     try
                     {
                         var docInfo = await _apiClient.GetDocumentAsync(docId);
                         voidedDocType = docInfo?.data?.DocumentType ?? 0;
+                        if (docInfo?.data != null && docInfo.data.Status == NexaaccDocumentStatus.Voided)
+                            docAlreadyGone = true;   // ถูก void/ลบมือบน NextAcc ไปแล้ว
+                    }
+                    catch (AccountingApiException gx) when (gx.StatusCode == 404)
+                    {
+                        docAlreadyGone = true;       // ถูกลบบน NextAcc ไปแล้ว (workflow เคลียร์มือ)
                     }
                     catch { }
 
@@ -4044,6 +4083,16 @@ namespace Take_Time_BangPhra.Integration
                     {
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt(doc): doc {docId} already voided/terminal receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                    }
+
+                    // เอกสารถูกลบ/void มือบน NextAcc แล้ว → ผู้ใช้เคลียร์เอง (รวม journal ปรับปรุง)
+                    // ห้ามโพสต์กลับรายการซ้ำ — ไม่งั้นได้ reversal ลอยไม่มีคู่
+                    if (docAlreadyGone)
+                    {
+                        SetReceiptPaymentMarker(receiptNumber, "VOIDED");
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidReceipt: doc {docId} ถูกลบ/void บน NextAcc แล้ว receipt={receiptNumber} — ข้ามการกลับรายการ (เคลียร์มือ)", "SYSTEM");
+                        return $"VOIDED:{nexaaccId}";
                     }
 
                     if (!string.IsNullOrEmpty(receiptNumber))
@@ -5203,7 +5252,7 @@ namespace Take_Time_BangPhra.Integration
         /// ถ้าไม่มี/Sync เก่ากว่า 30 วัน → upsert ผ่าน CreateIntegrationCustomerAsync
         /// (NextAcc ใช้ ExternalId เป็น natural key — ส่งซ้ำได้โดย idempotent)
         /// </summary>
-        private async Task<ContactInfo> EnsureCustomerContactAsync(int reservationId)
+        private async Task<ContactInfo> EnsureCustomerContactAsync(int reservationId, bool forceRefresh = false)
         {
             var info = LookupCustomerFromReservation(reservationId);
             if (info == null || string.IsNullOrEmpty(info.ExternalId))
@@ -5222,7 +5271,8 @@ namespace Take_Time_BangPhra.Integration
                     "SYSTEM");
             }
 
-            // Try cache
+            // Try cache — ข้ามเมื่อ forceRefresh (เช่นก่อนออกใบกำกับภาษี §86/4: ผู้ใช้เพิ่งเติม
+            // เลขผู้เสียภาษี/ที่อยู่ในระบบ ต้อง push ไปที่ contact บน NextAcc ทันที ไม่รอ cache 30 วัน)
             try
             {
                 var cached = _code.DatabaseQuerySafe(_connectionString,
@@ -5233,7 +5283,8 @@ namespace Take_Time_BangPhra.Integration
                 {
                     DateTime lastSync = cached.Rows[0]["Last_Synced"] != DBNull.Value
                         ? Convert.ToDateTime(cached.Rows[0]["Last_Synced"]) : DateTime.MinValue;
-                    if (cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
+                    if (!forceRefresh
+                        && cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
                         && (DateTime.Now - lastSync).TotalDays < 30)
                     {
                         info.NexaaccContactId = (Guid)cached.Rows[0]["Nexaacc_Contact_Id"];
