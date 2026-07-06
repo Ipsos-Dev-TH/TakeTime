@@ -4579,7 +4579,8 @@ namespace Take_Time_BangPhra
                 {
                     string paymentType = IsDeposit ? "DEPOSIT" : "FULL";
                     string paymentMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
-                    string paymentNotes = IsDeposit ? "มัดจำ - ออกใบกำกับภาษี" : "ชำระเต็ม - ออกใบกำกับภาษี";
+                    // มัดจำ = ใบเสร็จรับเงิน (ใบกำกับภาษีออกตอนเช็คเอาท์/ชำระเต็ม) — ห้ามระบุว่าออกใบกำกับ
+                    string paymentNotes = IsDeposit ? "มัดจำ - ใบเสร็จรับเงิน" : "ชำระเต็ม - ออกใบกำกับภาษี";
 
                     int? adminId = null;
                     if (!string.IsNullOrEmpty(created_By_ID) && created_By_ID != "0")

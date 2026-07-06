@@ -2870,6 +2870,89 @@ namespace Take_Time_BangPhra.Integration
             return docId;
         }
 
+        /// <summary>มี JE ที่ Reference นี้ (ไม่ถูก void) อยู่บน NextAcc แล้วไหม — ใช้กัน post ซ้ำตอน retry</summary>
+        private async Task<bool> JournalExistsByReferenceAsync(string reference)
+        {
+            if (string.IsNullOrEmpty(reference)) return false;
+            try
+            {
+                var found = await _apiClient.SearchJournalsAsync(reference, 10);
+                if (found?.data?.Items != null)
+                    foreach (var j in found.data.Items)
+                        if (string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase) && j.Status != 2)
+                            return true;
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>รับรู้รายได้มัดจำ (§78/1 checkout) แบบ idempotent — ข้ามถ้า RES-{id}-DEPREV โพสต์แล้ว</summary>
+        private async Task PostDepositRevenueRecognitionAsync(int reservationId, decimal depositApplied, string receiptNumber, string revenueType, bool hasVat)
+        {
+            string reff = $"RES-{reservationId}-DEPREV";
+            if (await JournalExistsByReferenceAsync(reff))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"PostDepositRevenueRecognition: {reff} โพสต์แล้ว — ข้าม (idempotent) receipt={receiptNumber}", "SYSTEM");
+                return;
+            }
+            var depRev = _mapper.MapDepositRevenueRecognition(reservationId, depositApplied, receiptNumber, revenueType, hasVat);
+            var r = await _apiClient.CreateJournalAsync(depRev);
+            Guid id = RequireValidDocId(r?.data?.Id, $"DepositRevenueRecognition receipt={receiptNumber}");
+            await SafePostJournalAsync(id);
+        }
+
+        /// <summary>กลับรายการ DEPREV ตาม "บัญชีจริงที่โพสต์ไป" (แม่นกว่า rebuild) — idempotent, ใช้ตอน void ใบกำกับ §78/1</summary>
+        private async Task ReverseDepositRevenueRecognitionAsync(int reservationId, string receiptNumber)
+        {
+            string reff = $"RES-{reservationId}-DEPREV";
+            string revRef = reff + "-REV";
+            if (await JournalExistsByReferenceAsync(revRef))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ReverseDepositRevenueRecognition: {revRef} กลับรายการแล้ว — ข้าม receipt={receiptNumber}", "SYSTEM");
+                return;
+            }
+            JournalEntryResponse orig = null;
+            try
+            {
+                var found = await _apiClient.SearchJournalsAsync(reff, 10);
+                if (found?.data?.Items != null)
+                    foreach (var j in found.data.Items)
+                        if (string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase) && j.Status != 2)
+                        { orig = j; break; }
+            }
+            catch { }
+            if (orig?.Lines == null || orig.Lines.Count < 2)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ReverseDepositRevenueRecognition: ไม่พบ DEPREV ({reff}) — ข้าม (อาจไม่ใช่โหมด §78/1) receipt={receiptNumber}", "SYSTEM");
+                return;
+            }
+            var lines = new List<JournalEntryLineRequest>();
+            foreach (var l in orig.Lines)   // สลับ Dr↔Cr ตามบัญชีจริง → กลับรายการเป๊ะทุกบัญชี
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = l.AccountId,
+                    DebitAmount = l.CreditAmount,
+                    CreditAmount = l.DebitAmount,
+                    Description = "กลับรายการ: " + (l.Description ?? "")
+                });
+            var rev = new CreateJournalEntryRequest
+            {
+                EntryDate = DateTime.Now,
+                JournalType = NexaaccJournalType.General,
+                Description = $"กลับรายการรับรู้รายได้มัดจำ (void ใบกำกับ {receiptNumber})",
+                Reference = revRef,
+                Lines = lines
+            };
+            var rr = await _apiClient.CreateJournalAsync(rev);
+            Guid rrId = RequireValidDocId(rr?.data?.Id, $"DepositRevenueRecognitionReverse receipt={receiptNumber}");
+            await SafePostJournalAsync(rrId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ReverseDepositRevenueRecognition: กลับรายการ {reff} สำเร็จ receipt={receiptNumber}", "SYSTEM");
+        }
+
         // ──────────────────────────────────────────────
         // PaymentVoucher document (company /document, DocumentType=13) — "จ่ายจริง" = ใบสำคัญจ่าย
         //   Dr ค่าใช้จ่าย/ภาษีซื้อ / Cr แหล่งเงิน (PaymentAccountId) − WHT ; ไม่เปิดเจ้าหนี้หลอก
@@ -3795,20 +3878,28 @@ namespace Take_Time_BangPhra.Integration
                             paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
                             paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                             documentType: NexaaccDocumentType.TaxInvoice);
-                        Guid docRId = await EnsureRevenueDocCreatedApprovedAsync(docR, receiptNumber);
-                        // ปิดลูกหนี้เฉพาะยอดคงเหลือ (ไม่มีการตัดมัดจำในใบนี้ — มัดจำไม่ได้อยู่ในใบกำกับนี้)
-                        await SettleReceiptInNextAcc(docRId, receiptNumber, remaining, 0m,
-                            paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
-                        // ย้ายมัดจำ (net) จาก 21712 → รายได้ (VAT รับรู้ไปแล้วตอนรับมัดจำ)
-                        var depRev = _mapper.MapDepositRevenueRecognition(reservationId, depositApplied, receiptNumber, revenueType, hasVat);
-                        var depRevResult = await _apiClient.CreateJournalAsync(depRev);
-                        Guid depRevId = RequireValidDocId(depRevResult?.data?.Id, $"DepositRevenueRecognition receipt={receiptNumber}");
-                        await SafePostJournalAsync(depRevId);
+                        Guid docRId = Guid.Empty;
+                        if (remaining > 0.01m)
+                        {
+                            docRId = await EnsureRevenueDocCreatedApprovedAsync(docR, receiptNumber);
+                            // ปิดลูกหนี้เฉพาะยอดคงเหลือ (ไม่มีการตัดมัดจำในใบนี้ — มัดจำไม่ได้อยู่ในใบกำกับนี้)
+                            await SettleReceiptInNextAcc(docRId, receiptNumber, remaining, 0m,
+                                paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
+                        }
+                        else
+                        {
+                            // มัดจำครอบคลุมเต็มยอด → ไม่มียอดคงเหลือให้ออกใบกำกับ (ใบมัดจำ = เอกสารภาษีเต็มยอด)
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessReceiptDocument(§78/1): receipt={receiptNumber} มัดจำครอบคลุมเต็มยอด — ไม่ออกใบกำกับคงเหลือ, รับรู้รายได้มัดจำอย่างเดียว", "SYSTEM");
+                        }
+                        // ย้ายมัดจำ (net) จาก 21712 → รายได้ (VAT รับรู้ไปแล้วตอนรับมัดจำ) — idempotent กัน retry ซ้ำ
+                        await PostDepositRevenueRecognitionAsync(reservationId, depositApplied, receiptNumber, revenueType, hasVat);
                         _lastDocType = "RECEIPT";
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessReceiptDocument(§78/1): receipt={receiptNumber} ใบกำกับยอดคงเหลือ {remaining:N2} + รับรู้รายได้มัดจำ (มัดจำ {depositApplied:N2} ออกใบกำกับ+VAT ตอนรับเงินแล้ว)", "SYSTEM");
-                        await TryAutoGenerateEtaxAsync(docRId, receiptNumber, reservationId, remaining, customerName);
-                        return docRId.ToString();
+                        if (docRId != Guid.Empty)
+                            await TryAutoGenerateEtaxAsync(docRId, receiptNumber, reservationId, remaining, customerName);
+                        return docRId != Guid.Empty ? docRId.ToString() : "DEPREV_ONLY";
                     }
 
                     // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
@@ -4166,18 +4257,9 @@ namespace Take_Time_BangPhra.Integration
                                 if (_config.IsDepositVatAtReceipt && !_config.IsDepositOutputVatDeferred)
                                 {
                                     // โหมด §78/1 เคร่ง: ใบกำกับออกเฉพาะยอดคงเหลือ + มี journal รับรู้รายได้มัดจำ
-                                    // (Dr 21712/Cr รายได้) แยกจาก doc → void doc ไม่ cascade → ต้องกลับเอง:
-                                    // Dr รายได้ / Cr 21712 (คืนมัดจำเป็นเงินรับล่วงหน้า)
-                                    var depRevRev = _mapper.MapDepositRevenueRecognition(resIdV, applied, receiptNumber, null, LookupBusinessHasVat());
-                                    foreach (var ln in depRevRev.Lines)   // สลับ Dr↔Cr = กลับรายการ
-                                    { var d = ln.DebitAmount; ln.DebitAmount = ln.CreditAmount; ln.CreditAmount = d; }
-                                    depRevRev.Description = "กลับรายการรับรู้รายได้มัดจำ (void ใบกำกับ " + receiptNumber + ")";
-                                    depRevRev.Reference = $"RES-{resIdV}-DEPREV-REV";
-                                    var rr = await _apiClient.CreateJournalAsync(depRevRev);
-                                    Guid rrId = RequireValidDocId(rr?.data?.Id, $"VoidReceipt dep-rev-recognition-reverse receipt={receiptNumber}");
-                                    await SafePostJournalAsync(rrId);
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt(TAXINV §78/1): reversed deposit revenue recognition applied={applied} receipt={receiptNumber}", "SYSTEM");
+                                    // (Dr 21712/Cr รายได้) แยกจาก doc → void doc ไม่ cascade → กลับตามบัญชีจริง
+                                    // ที่โพสต์ไป (แม่นแม้ revenueType ต่าง) + idempotent
+                                    await ReverseDepositRevenueRecognitionAsync(resIdV, receiptNumber);
                                 }
                                 else if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt)
                                 {
