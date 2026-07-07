@@ -1,0 +1,82 @@
+# คำขอ/ประเด็นค้าง ฝั่ง NextAcc — Deposit & Checkout Document
+
+> สรุปรวมสำหรับทีม NextAcc (Wachira-d/Accounting). TakeTime ฝั่งเราแก้/รองรับครบแล้ว
+> (config-gated, default off) — เหลือ 3 ข้อที่ต้องทำ/ยืนยันฝั่ง NextAcc ก่อนเปิดใช้เต็ม.
+> บริบท: hotel booking → รับมัดจำ (Receipt/ใบเสร็จมัดจำ) → เช็คเอาท์ (ใบกำกับภาษี/ใบเสร็จรับเงิน หักมัดจำ).
+
+TakeTime ส่งบน checkout Receipt (DocumentType=3) แล้ว: `depositAppliedAmount`, `depositAppliedRef`
+(เลขเอกสาร NextAcc ของใบมัดจำ), `depositAppliedDrivesJournal` (config `Nexaacc_Deposit_Drives_Journal`).
+
+---
+
+## 1. [สำคัญสุด] Un-realize ใบมัดจำ ตอน void เอกสารเช็คเอาท์ (drives-journal mode)
+
+**บริบท:** `depositAppliedDrivesJournal=true` (spec §9.1) → ตอน post Receipt เช็คเอาท์ NextAcc ลง JE
+self-contained (Dr เงินสดสุทธิ + Dr 217xx + Dr 21913 กลับใบมัดจำที่ `depositAppliedRef` ชี้) + **mark
+ใบมัดจำ "realized"** กันรับรู้ซ้ำ.
+
+**สิ่งที่ต้องยืนยัน/ทำ:** เมื่อ **void เอกสารเช็คเอาท์** ที่ใช้ drives-journal → NextAcc ต้อง
+1. reverse JE (คืน 217xx/21913) — ปกติ void cascade ทำอยู่แล้ว
+2. **UN-mark "realized" ของใบมัดจำที่อ้างถึง** โดย **ไม่ต้อง void ใบมัดจำเอง**
+
+**ทำไมสำคัญ:** TakeTime resync = **void→สร้างใหม่เฉพาะใบเช็คเอาท์** (ไม่เคยแตะใบมัดจำ — มัดจำเป็น
+ธุรกรรมรับเงินจริงที่จบแล้ว). สถานะ realized ของใบมัดจำจึงต้องคุมด้วย lifecycle ของ "ใบเช็คเอาท์":
+```
+CREATE#1 เช็คเอาท์ → กลับใบมัดจำ + mark realized
+VOID#1   เช็คเอาท์ → reverse JE + UN-mark realized  ← ข้อนี้
+CREATE#2 เช็คเอาท์ (อ้างมัดจำเดิม) → re-realize ได้
+```
+ถ้า void ไม่ un-mark → CREATE#2 เจอ "realized แล้ว" → ข้ามการกลับ 217xx/21913 → ใบใหม่ JE ขาด
+Dr มัดจำ = GL ไม่บาลานซ์.
+
+---
+
+## 2. Page-break ก่อนส่วน "การบันทึกบัญชี" บน PDF เอกสาร
+
+**บริบท:** PDF เอกสาร (Receipt/TaxInvoice) มีส่วน "การบันทึกบัญชี" (JE Dr/Cr) ต่อท้าย.
+
+**ปัญหา:** ส่วน JE ไหลต่อจากเนื้อหาลูกค้า → บรรทัด Dr/Cr **ถูกตัดคนละหน้า** (เช่น Dr อยู่หน้า 1,
+Cr อยู่หน้า 2) อ่านยาก.
+
+**ขอ:** ใส่ **page-break ก่อนส่วน "การบันทึกบัญชี"** ให้ขึ้นหน้าใหม่เสมอ
+→ หน้า 1 = เอกสารลูกค้า (สะอาด) / หน้าถัดไป = การบันทึกบัญชี (ครบในหน้าเดียว ไม่ตัด).
+
+---
+
+## 3. [ทางเลือก] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
+
+**บริบท:** เช็คเอาท์ลูกค้า walk-in ใช้ **DocumentType=Receipt(3)** (จำเป็น — TaxInvoice(4) ติด §86/4
+เพราะ walk-in ไม่มีเลขภาษี+ที่อยู่). Receipt(3)+VAT render เป็น "ใบกำกับภาษี/ใบเสร็จรับเงิน" แต่ได้
+**เลขชุด REC** ปนกับใบเสร็จมัดจำ.
+
+**ขอ (ถ้าทำได้):** running-number **ชุดแยก** สำหรับเอกสาร "ใบกำกับภาษี/ใบเสร็จรับเงิน" (แทนที่จะปน
+ชุด REC เดียวกับใบเสร็จมัดจำ) — เพื่อ audit trail ภาษีขาย.
+
+**หมายเหตุ:** ตามกฎหมายใช้ชุด REC ได้ ไม่ผิด (ความเป็นใบกำกับมาจากเนื้อหา ไม่ใช่ prefix) — ข้อนี้เป็น
+preference ไม่ใช่ blocker. **ห้ามแก้เป็น DocumentType=TaxInvoice(4)** เพราะจะทำให้ walk-in ถูก §86/4
+ปฏิเสธ + เสียคุณสมบัติ "จ่ายจบในใบ + ลายเซ็นผู้จัดทำ".
+
+---
+
+## ยืนยันเพิ่มเติม (confirmation)
+
+- **A.** `depositAppliedDrivesJournal` แยกฐาน (217xx net) vs VAT (21913) **ตามที่ใบมัดจำ book จริง**
+  (แต่ละใบอาจ defer/immediate ต่างกัน) — ยืนยันว่า resolve จาก `depositAppliedRef` แล้วกลับตามบัญชี/
+  ยอดจริงของใบมัดจำนั้น ✔?
+- **B.** โหมด display-only (`depositAppliedDrivesJournal=false`) — ถ้า `depositAppliedRef` ชี้เอกสารที่
+  หาไม่เจอ ต้อง **ไม่ 404** (แค่แสดง text). *(ฝั่ง TakeTime กันไว้แล้ว: ส่ง ref เฉพาะเมื่อใบมัดจำ sync +
+  book แล้ว — แต่ขอ NextAcc ยืนยัน behavior นี้กันเคสตกหล่น).*
+
+---
+
+## สถานะฝั่ง TakeTime (ทำเสร็จแล้ว รอ NextAcc)
+
+| ฟีเจอร์ | สถานะ | Gate |
+|---|---|---|
+| ส่ง `depositAppliedAmount`/`Ref` (display หักมัดจำ/สุทธิ) | ✅ | ส่งเมื่อใบมัดจำ resolve เลข NextAcc |
+| `depositAppliedDrivesJournal` (JE self-contained) | ✅ | config `Nexaacc_Deposit_Drives_Journal` (default off) + checkbox Admin |
+| Auto-backfill ใบมัดจำ legacy ก่อนเช็คเอาท์ | ✅ | อัตโนมัติ (self-heal) |
+| Void guard (ไม่ double-reverse JV) | ✅ | เช็ค JV จริงด้วย reference |
+
+**ลำดับเปิด drives mode:** NextAcc deploy (รองรับ + ข้อ 1 un-realize) → TakeTime rebuild → ติ๊ก
+checkbox / ตั้ง `Nexaacc_Deposit_Drives_Journal=1`. เปิดก่อน NextAcc พร้อม = GL ไม่บาลานซ์.
