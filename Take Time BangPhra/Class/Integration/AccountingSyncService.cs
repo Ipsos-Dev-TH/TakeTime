@@ -2725,6 +2725,31 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            // marker เฟสกลาง (DOC:/APR:/ADJ:) ชี้ docId — verify ว่าเอกสารยังอยู่บน NextAcc จริง
+            // (final marker ถูก verify ด้านบนแล้ว). ถ้าหาย/ถูก void (create รอบก่อนไม่ติดจริง/ถูกลบ/
+            // NextAcc เคลียร์ draft ที่ค้าง) → reset marker → สร้างใหม่ กัน approve/adjust ยิงเอกสารที่ไม่มี
+            // → 404 'ไม่พบเอกสาร' แล้วค้าง FAILED (เคส REC260703001 มัดจำหายแล้วแต่ marker ชี้ doc เก่าที่หาย)
+            if (docId != Guid.Empty && !isFinal)
+            {
+                bool docGone = false;
+                try
+                {
+                    var chk = await _apiClient.GetDocumentAsync(docId);
+                    if (chk?.data == null) docGone = true;
+                    else if (chk.data.Status == NexaaccDocumentStatus.Voided || chk.data.Status == NexaaccDocumentStatus.Rejected)
+                        docGone = true;
+                }
+                catch (AccountingApiException gx) when (gx.StatusCode == 404) { docGone = true; }
+                catch { /* อ่านไม่ได้ชั่วคราว → ปล่อยตาม flow เดิม (approve จะ throw ถ้าหายจริง) */ }
+                if (docGone)
+                {
+                    SetReceiptPaymentMarker(receiptNumber, null);
+                    docId = Guid.Empty; approved = false; adjDone = false;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceiptDoc: receipt={receiptNumber} marker เฟสกลางชี้เอกสารที่ไม่มี/ถูก void บน NextAcc → reset สร้างใหม่", "SYSTEM");
+                }
+            }
+
             // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
             if (docId == Guid.Empty)
             {
