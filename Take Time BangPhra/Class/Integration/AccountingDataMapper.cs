@@ -1903,10 +1903,11 @@ namespace Take_Time_BangPhra.Integration
                 IsDeposit = isDeposit,
                 DepositDeferredAccountCode = isDeposit ? SafeGetAccountCode("ADVANCE_DEPOSIT") : null,
                 DepositOutputVatDeferred = isDeposit && hasVat && depositVatAtReceipt && deferOutputVat,
-                Notes = (isDeposit
+                // ไม่ต่อท้ายเลขใบเสร็จ local (receiptNumber) — เป็น id ภายใน TakeTime ไม่ควรโผล่บนใบลูกค้า
+                // (เอกสารมีเลข NextAcc บนหัวแล้ว, การ match ภายในใช้ Reference=RES-{id} + queue Payload ไม่ใช่ Notes)
+                Notes = isDeposit
                     ? $"รับมัดจำ - การจอง #{reservationId} ({customerName})"
-                    : $"รับชำระ - การจอง #{reservationId} ({customerName})") +
-                      (!string.IsNullOrEmpty(receiptNumber) ? $" [ใบเสร็จ {receiptNumber}]" : ""),
+                    : $"รับชำระ - การจอง #{reservationId} ({customerName})",
                 Lines = docLines
             };
         }
