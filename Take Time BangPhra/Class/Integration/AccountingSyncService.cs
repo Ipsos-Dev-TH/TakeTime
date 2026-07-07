@@ -4042,27 +4042,39 @@ namespace Take_Time_BangPhra.Integration
                                 $" receipt={receiptNumber}");
                         }
 
-                        if (booked && DepositRefsResolvedToNextAcc(reservationId))
+                        else if (booked)
                         {
-                            // (b) book แล้ว + resolve เลขเอกสาร → field/drives (โชว์หักมัดจำ + self-contained JE)
-                            ApplyDepositAppliedFields(doc, reservationId, depositApplied);   // ref = เลข NextAcc เสมอ
-                            if (_config.IsDepositAppliedDrivesJournal)
+                            // มัดจำ booked → "แสดงบรรทัดหักมัดจำ + ยอดชำระสุทธิ" เสมอ (display-only ไม่กระทบ JE).
+                            // สำคัญ: โรงแรมรับเงินจริง = สุทธิ (เต็มยอด − มัดจำ) ไม่ใช่เต็มยอด → ต้องโชว์เสมอ
+                            // ไม่งั้นใบดูเหมือนรับเต็มยอด (เช่น 3,950 ทั้งที่รับจริง 2,950).
+                            doc.DepositAppliedAmount = depositApplied;
+                            if (DepositRefsResolvedToNextAcc(reservationId))
                             {
-                                doc.DepositAppliedDrivesJournal = true;
-                                depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                                // (b) มัดจำ resolve เป็น "เอกสาร Receipt" (REC-) → ใส่เลขเอกสารจริง + drives (ถ้าเปิด)
+                                //     ให้ NextAcc กลับ 217xx/21913 ใน JE ของใบเอง (self-contained)
+                                doc.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
+                                if (_config.IsDepositAppliedDrivesJournal)
+                                {
+                                    doc.DepositAppliedDrivesJournal = true;
+                                    depositForJv = 0m;   // NextAcc ลงหักมัดจำใน JE เอง → ห้ามยิง JV แยกซ้ำ
+                                }
+                            }
+                            else
+                            {
+                                // (c) มัดจำ resolve เป็นเอกสารไม่ได้ (sync เป็น journal JV-INT / เก่าไม่เก็บเลข) →
+                                //     ใส่ label "มัดจำ" (ไม่มีเลขเอกสารให้อ้าง) + drives OFF → NextAcc โชว์
+                                //     "หักเงินมัดจำ (มัดจำ) N / สุทธิ" (display) + GL กลับผ่าน JV adjustment
+                                //     (depositForJv คงเดิม). กัน 400 drives + กันใบโชว์เต็มยอดผิด.
+                                doc.DepositAppliedRef = "มัดจำ";
                             }
                         }
                         else if (!depState.AnyDeposit)
                         {
-                            // (c) legacy ไม่มีเอกสารใบมัดจำ → ไม่ส่ง field (ไม่มี doc ref → กัน 404) แต่ยัง JV
-                            //     กลับมัดจำ (Dr 21510/21913 / Cr เงินสด) กับ "ยอดยกมา" หนี้สินมัดจำ (opening balance).
-                            //     ถ้ายอดยกมาไม่มีหนี้สินนี้ → 21510/21913 ติดลบ (มองเห็น → ผู้ทำบัญชีปรับยอดยกมา).
-                            //     ไม่ค้างคิว. depositForJv คงเดิม → JV ยิง.
+                            // legacy ไม่มีเอกสารใบมัดจำ (ปกติ upstream OTA gate จัดการ book net แล้ว) → JV กับยอดยกมา
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"⚠ เช็คเอาท์ #{reservationId}: depositApplied {depositApplied:N2} ไม่มีใบมัดจำเอกสาร (IsDeposit=1) — " +
-                                $"หักมัดจำผ่าน JV กับยอดยกมา 21510/21913 (ไม่โชว์บรรทัดหักมัดจำบนใบ). โปรดตรวจว่ายอดยกมามีหนี้สินมัดจำก้อนนี้. receipt={receiptNumber}", "SYSTEM");
+                                $"หักมัดจำผ่าน JV กับยอดยกมา 21510/21913. โปรดตรวจว่ายอดยกมามีหนี้สินมัดจำก้อนนี้. receipt={receiptNumber}", "SYSTEM");
                         }
-                        // else: book แล้วแต่ resolve เลขไม่ได้ (sync เก่าไม่เก็บเลข) → depositForJv คงเดิม → JV กลับมัดจำจริง
                     }
                     Guid docId;
                     try
