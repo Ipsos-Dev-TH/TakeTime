@@ -3962,25 +3962,32 @@ namespace Take_Time_BangPhra.Integration
                     //   ให้ sync ก่อน แล้ว defer เช็คเอาท์ (queue รอบถัดไป: มัดจำขึ้น → settle หักมัดจำต่อ).
                     //   กัน 404 'ไม่พบเอกสาร' (depositAppliedRef ชี้เอกสารที่ยังไม่มี) + กัน JV กลับมัดจำที่
                     //   ไม่มีจริง (21510/21913 ติดลบ). booked แล้ว → ส่ง field/drives ถ้า resolve เลขเอกสารได้.
+                    // 3 เคส (ออกแบบให้ "ไม่มีวันค้างคิว"):
+                    //   (a) มีใบมัดจำใน TakeTime (IsDeposit=1) แต่ยังไม่ book บน NextAcc → auto-backfill + defer
+                    //   (b) ใบมัดจำ book แล้ว → ส่ง field/drives (ถ้า resolve เลขเอกสาร) ไม่งั้น JV กลับมัดจำจริง
+                    //   (c) ไม่มีใบมัดจำเอกสารเลย (legacy: มัดจำเป็นยอดหักในใบ/บันทึกที่อื่น) → JV กลับกับ
+                    //       "ยอดยกมา" 21510/21913 + ไม่ส่ง field (กัน 404) + ไม่ defer (ไม่มีอะไรให้ sync)
                     decimal depositForJv = depositApplied;
                     if (depositApplied > 0.005m)
                     {
                         var depState = VerifyDepositBookedOnNextAcc(reservationId);
                         bool booked = depState.AnyDeposit && !depState.PendingSync
                             && depState.BookedAmount + 0.01m >= depositApplied;
-                        if (!booked)
+
+                        if (depState.AnyDeposit && !booked)
                         {
+                            // (a) มีเอกสารใบมัดจำแต่ยังไม่ขึ้น NextAcc → backfill ให้ sync ก่อน แล้ว defer
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
                             throw new Exception(
                                 $"เช็คเอาท์การจอง #{reservationId}: ใบมัดจำยังไม่ขึ้น NextAcc (booked {depState.BookedAmount:N2}, " +
-                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue ใบมัดจำ {enq} ใบให้ sync ก่อน — เช็คเอาท์นี้จะ " +
-                                $"settle หักมัดจำในรอบถัดไปอัตโนมัติ (ถ้ายัง FAILED หลังมัดจำขึ้นแล้ว กด Retry ใบนี้ซ้ำ)" +
+                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue ใบมัดจำ {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป" +
                                 (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : "") +
                                 $" receipt={receiptNumber}");
                         }
-                        // มัดจำ booked แล้ว → ส่ง field/drives ถ้า resolve เลขเอกสาร NextAcc ได้; ไม่งั้น fallback JV
-                        if (DepositRefsResolvedToNextAcc(reservationId))
+
+                        if (booked && DepositRefsResolvedToNextAcc(reservationId))
                         {
+                            // (b) book แล้ว + resolve เลขเอกสาร → field/drives (โชว์หักมัดจำ + self-contained JE)
                             ApplyDepositAppliedFields(doc, reservationId, depositApplied);   // ref = เลข NextAcc เสมอ
                             if (_config.IsDepositAppliedDrivesJournal)
                             {
@@ -3988,8 +3995,17 @@ namespace Take_Time_BangPhra.Integration
                                 depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
                             }
                         }
-                        // else: booked แต่ยัง resolve เลขเอกสารไม่ได้ (sync เก่าไม่เก็บเลข) → depositForJv คงเดิม
-                        //       → SettleReceiptDocAsync ยิง JV กลับมัดจำจริง (GL ถูก, หน้าใบไม่มีบรรทัดหักมัดจำ)
+                        else if (!depState.AnyDeposit)
+                        {
+                            // (c) legacy ไม่มีเอกสารใบมัดจำ → ไม่ส่ง field (ไม่มี doc ref → กัน 404) แต่ยัง JV
+                            //     กลับมัดจำ (Dr 21510/21913 / Cr เงินสด) กับ "ยอดยกมา" หนี้สินมัดจำ (opening balance).
+                            //     ถ้ายอดยกมาไม่มีหนี้สินนี้ → 21510/21913 ติดลบ (มองเห็น → ผู้ทำบัญชีปรับยอดยกมา).
+                            //     ไม่ค้างคิว. depositForJv คงเดิม → JV ยิง.
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"⚠ เช็คเอาท์ #{reservationId}: depositApplied {depositApplied:N2} ไม่มีใบมัดจำเอกสาร (IsDeposit=1) — " +
+                                $"หักมัดจำผ่าน JV กับยอดยกมา 21510/21913 (ไม่โชว์บรรทัดหักมัดจำบนใบ). โปรดตรวจว่ายอดยกมามีหนี้สินมัดจำก้อนนี้. receipt={receiptNumber}", "SYSTEM");
+                        }
+                        // else: book แล้วแต่ resolve เลขไม่ได้ (sync เก่าไม่เก็บเลข) → depositForJv คงเดิม → JV กลับมัดจำจริง
                     }
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
                         paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
