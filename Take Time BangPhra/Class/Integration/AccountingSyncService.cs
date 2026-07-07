@@ -4333,17 +4333,25 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(localReceiptId)) return null;
             try
             {
+                // ต้องเป็น "company Receipt document" (Nexaacc_Document_Type='RECEIPT') เท่านั้น —
+                // depositAppliedRef/drives-journal ให้ NextAcc "ค้นเอกสารใบมัดจำ" มากลับ. ถ้าใบมัดจำถูก sync
+                // เป็น integration journal (เลข JV-INT-...) NextAcc หา "เอกสาร" ไม่เจอ → 400 "หักมัดจำแบบขับ JE:
+                // ไม่พบใบมัดจำ". คืน null สำหรับเคสนั้น → checkout จะ fallback JV adjustment (กลับ GL ได้เหมือนกัน)
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1 Nexaacc_Document_Number FROM Accounting_Sync_Queue
                       WHERE Entity_Type = 'RECEIPT' AND Status = 'COMPLETED'
                         AND Nexaacc_Document_Number IS NOT NULL
+                        AND Nexaacc_Document_Type = 'RECEIPT'
                         AND Payload LIKE @p
                       ORDER BY ID DESC",
                     new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + localReceiptId + "\"%" } });
                 if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
                 {
                     string n = dt.Rows[0][0].ToString();
-                    if (!string.IsNullOrWhiteSpace(n) && !n.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                    // reject DRAFT + เลข journal (JV-) กันส่ง ref ที่ NextAcc หาเป็น "เอกสาร" ไม่ได้
+                    if (!string.IsNullOrWhiteSpace(n)
+                        && !n.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase)
+                        && !n.StartsWith("JV", StringComparison.OrdinalIgnoreCase))
                         return n;
                 }
             }
