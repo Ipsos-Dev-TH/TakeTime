@@ -3846,6 +3846,31 @@ namespace Take_Time_BangPhra.Integration
                 decimal depositFromLines;
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
 
+                // ── มัดจำจริง vs prepaid ที่โรงแรมไม่ได้รับ (OTA/จ่ายที่อื่น) ──────────────────────
+                // negative line ("ส่วนลด" ชดเชยมัดจำ) หรือ Deposit_Applied_Amount = "มัดจำจริง" (ต้อง gross-up
+                // + กลับบัญชี) ก็ต่อเมื่อการจองนี้มี "ใบมัดจำจริง" (Account_Receipt.IsDeposit=1). ถ้าไม่มี →
+                // ยอดที่ถูกหักคือ prepaid ที่จ่ายผ่าน OTA/ที่อื่น (เช่น Agoda จ่ายค่าห้องแล้ว โรงแรมไม่ได้รับเงิน
+                // ก้อนนั้น + ไม่มีหนี้สินมัดจำ) → บันทึกเฉพาะ "ยอดสุทธิที่รับจริง" (totalAmount เดิม) ไม่ gross-up
+                // ไม่กลับมัดจำ. กัน 404 'ไม่พบเอกสาร' + กัน 21510/21913 ติดลบ + ตรงตามความจริง (รับแค่ส่วนเพิ่ม).
+                if ((depositApplied > 0.005m || depositFromLines > 0.005m)
+                    && LookupActualDepositPaid(reservationId) <= 0.005m)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessReceiptDocument: receipt={receiptNumber} #{reservationId} มียอดหัก {System.Math.Max(depositApplied, depositFromLines):N2} " +
+                        $"แต่ไม่มีใบมัดจำจริง (IsDeposit=1) → ถือเป็น prepaid/OTA (โรงแรมไม่ได้รับเงินก้อนนั้น) → บันทึกเฉพาะยอดสุทธิที่รับจริง {totalAmount:N2} ไม่หักมัดจำ", "SYSTEM");
+                    depositApplied = 0m;
+                    depositFromLines = 0m;
+                    lines = null;   // book single-line net (totalAmount) — กัน gross/net mismatch จาก positive lines
+                    // reset ค่าที่เคย persist ผิดจาก retry ก่อนหน้า (กันวนกลับมาเป็น deposit อีก)
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Account_Receipt SET Deposit_Applied_Amount = 0 WHERE ID = @num AND ISNULL(Deposit_Applied_Amount,0) > 0",
+                            new Dictionary<string, object> { { "@num", receiptNumber } });
+                    }
+                    catch { }
+                }
+
                 // Reserve.aspx check-in สร้าง "ส่วนลด" line ติดลบเพื่อชดเชยมัดจำ → แปลงเป็น depositApplied แทน
                 // เพื่อให้ MapMultiLinePaymentToJournal คิด VAT ถูกและ checkout clearing ไม่ double-debit
                 if (depositFromLines > 0)
