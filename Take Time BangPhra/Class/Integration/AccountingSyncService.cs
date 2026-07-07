@@ -4064,8 +4064,27 @@ namespace Take_Time_BangPhra.Integration
                         }
                         // else: book แล้วแต่ resolve เลขไม่ได้ (sync เก่าไม่เก็บเลข) → depositForJv คงเดิม → JV กลับมัดจำจริง
                     }
-                    Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
-                        paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
+                    Guid docId;
+                    try
+                    {
+                        docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
+                            paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
+                    }
+                    catch (AccountingApiException dex) when (IsDrivesDepositResolveError(dex))
+                    {
+                        // SAFETY NET: NextAcc หา "เอกสารใบมัดจำ" สำหรับ drives-journal ไม่เจอ (ใบมัดจำ sync เป็น
+                        // integration journal JV-INT- / เอกสารถูก void / เหตุอื่น) → ปิด drives + field แล้ว
+                        // fallback JV adjustment (depositForJv=depositApplied) กลับ GL ได้เหมือนกัน. reset marker
+                        // กัน draft ค้างจากรอบ drives. ครอบทุกเคสแม้ upfront guard คาดไม่ถึง.
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(B2C): drives-journal หาใบมัดจำไม่เจอ (400) → ปิด drives, fallback JV adjustment receipt={receiptNumber}: {dex.ResponseBody}", "SYSTEM");
+                        doc.DepositAppliedDrivesJournal = false;
+                        doc.DepositAppliedRef = null;
+                        doc.DepositAppliedAmount = null;
+                        SetReceiptPaymentMarker(receiptNumber, null);
+                        docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
+                            paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
+                    }
                     _lastDocType = "RECEIPT";
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
@@ -5287,6 +5306,17 @@ namespace Take_Time_BangPhra.Integration
         /// หาจำนวนมัดจำที่ลูกค้าจ่ายไปทั้งหมด — JOIN Account_Receipt (IsDeposit=1, Status='Normal') กับ Payment_History
         /// ใช้เป็น truth source ของยอดมัดจำ (กันการบันทึกผิด)
         /// </summary>
+        /// <summary>error 400 จาก NextAcc ที่แปลว่า "drives-journal หาเอกสารใบมัดจำ (depositAppliedRef) ไม่เจอ"
+        /// → checkout ควร fallback ปิด drives แล้วใช้ JV adjustment. (เช่น ใบมัดจำเป็น JV-INT journal / doc ถูก void)</summary>
+        private static bool IsDrivesDepositResolveError(AccountingApiException ex)
+        {
+            if (ex == null || ex.StatusCode != 400) return false;
+            string b = (ex.ResponseBody ?? "") + " " + (ex.Message ?? "");
+            return b.IndexOf("depositAppliedRef", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("หักมัดจำแบบขับ", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("ไม่พบใบมัดจำ", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         /// <summary>ช่องทาง OTA ของการจอง (Reservation.OTA_Channel เช่น Agoda/Booking.com) — ว่าง = จองตรง.
         /// ใช้จำแนก "ยอดหักที่ไม่มีใบมัดจำ" ว่าเป็น OTA-prepaid (ชัดเจน) หรือมัดจำไม่ออกใบ/ส่วนลด (ต้องรีวิว).</summary>
         private string LookupOtaChannel(int reservationId)
