@@ -3880,9 +3880,16 @@ namespace Take_Time_BangPhra.Integration
                 if ((depositApplied > 0.005m || depositFromLines > 0.005m)
                     && LookupActualDepositPaid(reservationId) <= 0.005m)
                 {
+                    // ยอดหักมี แต่ไม่มีใบมัดจำจริง (IsDeposit=1) → จำแนกที่มาด้วย Reservation.OTA_Channel:
+                    //   มี OTA_Channel = OTA-prepaid ชัดเจน (Agoda จ่ายค่าห้อง โรงแรมไม่ได้รับ) → book net ถูกต้อง
+                    //   ไม่มี = มัดจำที่ไม่ได้ออกใบเสร็จ / ส่วนลด → book net เหมือนกัน แต่ flag ให้ผู้ทำบัญชีรีวิว
+                    string otaCh = LookupOtaChannel(reservationId);
+                    string kind = !string.IsNullOrEmpty(otaCh)
+                        ? $"OTA-prepaid ({otaCh}) — โรงแรมไม่ได้รับเงินก้อนนี้"
+                        : "⚠ ยอดหักไม่มีใบมัดจำ + ไม่ใช่ OTA (มัดจำไม่ออกใบเสร็จ/ส่วนลด?) — โปรดตรวจ";
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument: receipt={receiptNumber} #{reservationId} มียอดหัก {System.Math.Max(depositApplied, depositFromLines):N2} " +
-                        $"แต่ไม่มีใบมัดจำจริง (IsDeposit=1) → ถือเป็น prepaid/OTA (โรงแรมไม่ได้รับเงินก้อนนั้น) → บันทึกเฉพาะยอดสุทธิที่รับจริง {totalAmount:N2} ไม่หักมัดจำ", "SYSTEM");
+                        $"แต่ไม่มีใบมัดจำจริง (IsDeposit=1) → {kind} → บันทึกเฉพาะยอดสุทธิที่รับจริง {totalAmount:N2} ไม่หักมัดจำ", "SYSTEM");
                     depositApplied = 0m;
                     depositFromLines = 0m;
                     lines = null;   // book single-line net (totalAmount) — กัน gross/net mismatch จาก positive lines
@@ -5272,6 +5279,26 @@ namespace Take_Time_BangPhra.Integration
         /// หาจำนวนมัดจำที่ลูกค้าจ่ายไปทั้งหมด — JOIN Account_Receipt (IsDeposit=1, Status='Normal') กับ Payment_History
         /// ใช้เป็น truth source ของยอดมัดจำ (กันการบันทึกผิด)
         /// </summary>
+        /// <summary>ช่องทาง OTA ของการจอง (Reservation.OTA_Channel เช่น Agoda/Booking.com) — ว่าง = จองตรง.
+        /// ใช้จำแนก "ยอดหักที่ไม่มีใบมัดจำ" ว่าเป็น OTA-prepaid (ชัดเจน) หรือมัดจำไม่ออกใบ/ส่วนลด (ต้องรีวิว).</summary>
+        private string LookupOtaChannel(int reservationId)
+        {
+            if (reservationId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 OTA_Channel FROM Reservation WHERE ID = @rid",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string ch = dt.Rows[0][0].ToString();
+                    return string.IsNullOrWhiteSpace(ch) ? null : ch;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         private decimal LookupActualDepositPaid(int reservationId)
         {
             try
