@@ -251,6 +251,20 @@
                         ⚠ ต้อง map บัญชี OUTPUT_VAT_DEFERRED ก่อนเปิด มิฉะนั้นระบบจะ fallback กลับไปใช้ OUTPUT_VAT
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDrivesJournal" />
+                        ลง JE หักมัดจำไว้ในใบกำกับ/ใบเสร็จเช็คเอาท์ใบเดียว (NextAcc "โหมดขับ JE")
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        เมื่อเปิด: ใบเช็คเอาท์ที่หักมัดจำจะลง JE self-contained ในใบเดียว
+                        (Dr เงินสดสุทธิ + Dr เงินมัดจำ 217xx + Dr ภาษีขายรอเรียกเก็บ 21913 / Cr รายได้ / Cr ภาษีขาย)
+                        แทนการยิง JV หักมัดจำแยกอีกใบ.
+                        <br /><strong style="color:#c0392b;">⚠ เปิดได้เมื่อ NextAcc deploy รองรับ depositAppliedDrivesJournal แล้วเท่านั้น</strong> —
+                        ถ้าเปิดก่อน NextAcc พร้อม บัญชี 217xx/21913 จะไม่ถูกกลับ (GL ไม่บาลานซ์).
+                        ปิดไว้ (default) = โชว์ "หักเงินมัดจำ/ยอดสุทธิ" บนใบ แต่ JE หักมัดจำยังยิงเป็น JV แยก (GL ถูกเหมือนเดิม)
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -803,6 +817,7 @@
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
+                document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -859,6 +874,7 @@
                 attachFiles: document.getElementById('cfgAttachFiles').value,
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
                 depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,
+                depositDrivesJournal: document.getElementById('cfgDepositDrivesJournal').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

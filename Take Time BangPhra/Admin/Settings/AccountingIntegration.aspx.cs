@@ -74,6 +74,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "attachFiles", config.AttachFiles },
                     { "depositVatRecognition", config.DepositVatRecognition },
                     { "depositDeferOutputVat", config.IsDepositOutputVatDeferred },
+                    { "depositDrivesJournal", config.IsDepositAppliedDrivesJournal },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
