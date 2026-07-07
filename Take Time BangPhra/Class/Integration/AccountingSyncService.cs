@@ -4216,8 +4216,34 @@ namespace Take_Time_BangPhra.Integration
             return id.Value;
         }
 
-        /// <summary>เลขใบมัดจำที่อ้างอิง (Account_Receipt.IsDeposit=1) ของการจอง — cross-check ด้วย RES-{id}.
-        /// หลายใบ → join ด้วย ", ". คืน null ถ้าไม่พบ.</summary>
+        /// <summary>เลขเอกสาร NextAcc ของใบมัดจำ (เช่น REC-20260702-0001) จาก Accounting_Sync_Queue
+        /// — map จาก local receipt id (Account_Receipt.ID เช่น REC260702001). คืน null ถ้ายังไม่ sync/
+        /// ยังเป็น DRAFT.</summary>
+        private string LookupNexaaccDocNumberForReceipt(string localReceiptId)
+        {
+            if (string.IsNullOrEmpty(localReceiptId)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Document_Number FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Status = 'COMPLETED'
+                        AND Nexaacc_Document_Number IS NOT NULL
+                        AND Payload LIKE @p
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + localReceiptId + "\"%" } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string n = dt.Rows[0][0].ToString();
+                    if (!string.IsNullOrWhiteSpace(n) && !n.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                        return n;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>เลขใบมัดจำที่อ้างอิง (Account_Receipt.IsDeposit=1) ของการจอง — ใช้ "เลขเอกสาร NextAcc"
+        /// (เช่น REC-20260702-0001) ถ้า sync แล้ว, fallback เป็น local id ถ้ายังไม่มี. หลายใบ → join ", ".</summary>
         private string LookupDepositReceiptRefs(int reservationId)
         {
             if (reservationId <= 0) return null;
@@ -4232,8 +4258,11 @@ namespace Take_Time_BangPhra.Integration
                 var refs = new List<string>();
                 foreach (System.Data.DataRow r in dt.Rows)
                 {
-                    string num = r["ID"]?.ToString();
-                    if (!string.IsNullOrEmpty(num)) refs.Add(num);
+                    string localId = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(localId)) continue;
+                    // แสดงเลขเอกสาร NextAcc ของใบมัดจำ (ไม่ใช่ local id) → ตรงกับที่ลูกค้าเห็นบนใบเสร็จมัดจำ
+                    string nexNum = LookupNexaaccDocNumberForReceipt(localId);
+                    refs.Add(!string.IsNullOrEmpty(nexNum) ? nexNum : localId);
                 }
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
