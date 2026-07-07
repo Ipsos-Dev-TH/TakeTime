@@ -3956,25 +3956,40 @@ namespace Take_Time_BangPhra.Integration
                     // spec §9.1 "โหมดขับ JE": flag → NextAcc ลง JE self-contained ในใบ (กลับ 217xx/21913 จาก
                     // ใบมัดจำที่ depositAppliedRef ชี้) → เลิกส่ง JV แยกพร้อมกัน (depositForJv=0) กัน double-reverse.
                     //
-                    // ⚠ GUARD: ส่ง depositAppliedRef/drives เฉพาะเมื่อใบมัดจำ resolve เป็น "เลขเอกสาร NextAcc"
-                    // ได้จริง (sync แล้ว). ถ้าใบมัดจำยังไม่ sync → ref จะเป็น local id ที่ NextAcc หาไม่เจอ →
-                    // approve/post 404 "ไม่พบเอกสาร" (โดยเฉพาะ drives mode ที่ต้องไปกลับใบมัดจำ) → fallback
-                    // JV แยก (GL ถูก, ไม่ส่ง ref เสีย). ใบมัดจำถูกสร้าง+ sync ก่อนเช็คเอาท์ปกติ → เคสนี้ยาก
-                    // แต่กันไว้ (เช่น คิวยังไม่ทัน/ใบมัดจำ fail).
+                    // ⚠ GUARD + AUTO-BACKFILL (legacy มัดจำยังไม่ขึ้น NextAcc):
+                    //   ตรวจก่อนว่าใบมัดจำของการจองนี้ถูก book บน NextAcc แล้วหรือยัง (marker-based).
+                    //   ถ้ายัง (legacy/รับมัดจำก่อนมี integration หรือคิวยังไม่ทัน) → auto-enqueue ใบมัดจำ
+                    //   ให้ sync ก่อน แล้ว defer เช็คเอาท์ (queue รอบถัดไป: มัดจำขึ้น → settle หักมัดจำต่อ).
+                    //   กัน 404 'ไม่พบเอกสาร' (depositAppliedRef ชี้เอกสารที่ยังไม่มี) + กัน JV กลับมัดจำที่
+                    //   ไม่มีจริง (21510/21913 ติดลบ). booked แล้ว → ส่ง field/drives ถ้า resolve เลขเอกสารได้.
                     decimal depositForJv = depositApplied;
-                    if (depositApplied > 0.005m && DepositRefsResolvedToNextAcc(reservationId))
+                    if (depositApplied > 0.005m)
                     {
-                        ApplyDepositAppliedFields(doc, reservationId, depositApplied);   // ref = เลข NextAcc เสมอ
-                        if (_config.IsDepositAppliedDrivesJournal)
+                        var depState = VerifyDepositBookedOnNextAcc(reservationId);
+                        bool booked = depState.AnyDeposit && !depState.PendingSync
+                            && depState.BookedAmount + 0.01m >= depositApplied;
+                        if (!booked)
                         {
-                            doc.DepositAppliedDrivesJournal = true;
-                            depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                            int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
+                            throw new Exception(
+                                $"เช็คเอาท์การจอง #{reservationId}: ใบมัดจำยังไม่ขึ้น NextAcc (booked {depState.BookedAmount:N2}, " +
+                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue ใบมัดจำ {enq} ใบให้ sync ก่อน — เช็คเอาท์นี้จะ " +
+                                $"settle หักมัดจำในรอบถัดไปอัตโนมัติ (ถ้ายัง FAILED หลังมัดจำขึ้นแล้ว กด Retry ใบนี้ซ้ำ)" +
+                                (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : "") +
+                                $" receipt={receiptNumber}");
                         }
-                    }
-                    else if (depositApplied > 0.005m)
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessReceiptDocument(B2C): ใบมัดจำของการจอง #{reservationId} ยัง resolve เป็นเลข NextAcc ไม่ได้ (ยังไม่ sync?) → ไม่ส่ง depositApplied field/drives, ใช้ JV แยก (กัน 404 'ไม่พบเอกสาร') receipt={receiptNumber}", "SYSTEM");
+                        // มัดจำ booked แล้ว → ส่ง field/drives ถ้า resolve เลขเอกสาร NextAcc ได้; ไม่งั้น fallback JV
+                        if (DepositRefsResolvedToNextAcc(reservationId))
+                        {
+                            ApplyDepositAppliedFields(doc, reservationId, depositApplied);   // ref = เลข NextAcc เสมอ
+                            if (_config.IsDepositAppliedDrivesJournal)
+                            {
+                                doc.DepositAppliedDrivesJournal = true;
+                                depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                            }
+                        }
+                        // else: booked แต่ยัง resolve เลขเอกสารไม่ได้ (sync เก่าไม่เก็บเลข) → depositForJv คงเดิม
+                        //       → SettleReceiptDocAsync ยิง JV กลับมัดจำจริง (GL ถูก, หน้าใบไม่มีบรรทัดหักมัดจำ)
                     }
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
                         paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
@@ -4288,6 +4303,54 @@ namespace Take_Time_BangPhra.Integration
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
             catch { return null; }
+        }
+
+        /// <summary>Auto-backfill: enqueue ใบมัดจำของการจองที่ "ยังไม่ถูก book บน NextAcc" ให้ sync
+        /// (legacy/รับมัดจำก่อนมี integration). อ่านยอด/วันที่จาก Account_Receipt เดิม, ข้ามใบที่ book แล้ว
+        /// (marker APR:/ADJ:/GUID/NOCASH). EnqueueReceipt มี anti-dup กันซ้ำอยู่แล้ว. คืนจำนวนใบที่ enqueue.</summary>
+        private int EnqueueUnsyncedDeposits(int reservationId, string customerName)
+        {
+            if (reservationId <= 0) return 0;
+            int enq = 0;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID, ISNULL(Total_Amount,0) AS Amt, ISNULL(Vat,0) AS Vat, Created_Date,
+                             Nexaacc_Receipt_Payment_Id AS Marker
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)
+                      ORDER BY Created_Date",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt == null) return 0;
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string depId = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(depId)) continue;
+                    string marker = r["Marker"] == DBNull.Value ? null : r["Marker"]?.ToString();
+                    // book แล้ว (APR:/ADJ:/GUID final/NOCASH) → ข้าม; ยังไม่ book (null/DOC:) → enqueue
+                    bool booked = !string.IsNullOrEmpty(marker) && marker != "VOIDED"
+                        && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:") || marker == "NOCASH"
+                            || (!marker.StartsWith("DOC:") && Guid.TryParse(marker, out _)));
+                    if (booked) continue;
+                    decimal amt = r["Amt"] != DBNull.Value ? Convert.ToDecimal(r["Amt"]) : 0m;
+                    decimal vat = r["Vat"] != DBNull.Value ? Convert.ToDecimal(r["Vat"]) : 0m;
+                    DateTime dd = r["Created_Date"] != DBNull.Value ? Convert.ToDateTime(r["Created_Date"]) : DateTime.Now;
+                    if (amt <= 0) continue;
+                    long qid = EnqueueReceipt(reservationId, depId, amt, vat, dd, customerName, isDeposit: true);
+                    if (qid > 0)
+                    {
+                        enq++;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"Auto-backfill: enqueue ใบมัดจำ {depId} ({amt:N2}) การจอง #{reservationId} ให้ sync (queueId={qid})", "SYSTEM");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueUnsyncedDeposits failed resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return enq;
         }
 
         /// <summary>ใบมัดจำ "ทุกใบ" ของการจอง resolve เป็นเลขเอกสาร NextAcc ได้หรือยัง (sync + COMPLETED).
