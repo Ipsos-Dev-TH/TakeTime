@@ -176,6 +176,14 @@ namespace Take_Time_BangPhra.Integration
         public bool DepositOutputVatDeferred { get; set; }
         /// <summary>เลขที่ใบกำกับ/เอกสารของคู่ค้า (ฝั่งซื้อ/ใบสำคัญจ่าย) — แยกจาก DocumentNumber ของเรา</summary>
         public string SupplierInvoiceNumber { get; set; }
+        /// <summary>ยอดมัดจำที่หักในใบรับเงินฉบับสุดท้าย (รวม VAT) — DISPLAY-ONLY, ไม่กระทบ JE.
+        /// NextAcc แสดงบนใบ (PDF+preview): "หักเงินมัดจำ (ref) (amount)" + "ยอดชำระสุทธิ" (ตัวหนา).
+        /// null/0 → แสดง "ยอดรวมสุทธิ" แบบเดิม (backward-compatible). การรับรู้/กลับ 21913 ยังทำผ่าน
+        /// adjustment แยก → GL ไม่เปลี่ยน. NextAcc field: depositAppliedAmount (spec §9).</summary>
+        public decimal? DepositAppliedAmount { get; set; }
+        /// <summary>เลขใบมัดจำที่อ้างอิง (เช่น REC260702001) — แสดงในวงเล็บข้าง "หักเงินมัดจำ".
+        /// NextAcc field: depositAppliedRef.</summary>
+        public string DepositAppliedRef { get; set; }
     }
 
     public class DocumentLineRequest

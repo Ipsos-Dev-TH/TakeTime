@@ -3927,7 +3927,8 @@ namespace Take_Time_BangPhra.Integration
                         paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
                         paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                         documentType: NexaaccDocumentType.TaxInvoice);
-                    AppendDepositNoteToDoc(doc, reservationId, depositApplied);   // โชว์ "หักมัดจำจากใบเสร็จเลขไหน"
+                    // B2B TaxInvoice: มัดจำแสดง/ตัดผ่าน document payment ใน SettleReceiptInNextAcc (ลด BalanceDue)
+                    // — ไม่ตั้ง field §9 (display-only นั้นเพื่อ Receipt; บน AR doc จะซ้อนกับ payment section)
                     Guid docId = await EnsureRevenueDocCreatedApprovedAsync(doc, receiptNumber);
                     await SettleReceiptInNextAcc(docId, receiptNumber, totalAmount, depositApplied,
                         paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
@@ -3951,7 +3952,9 @@ namespace Take_Time_BangPhra.Integration
                         paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
                         paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                         documentType: NexaaccDocumentType.Receipt);
-                    AppendDepositNoteToDoc(doc, reservationId, depositApplied);   // โชว์ "หักมัดจำจากใบเสร็จเลขไหน"
+                    // NextAcc spec §9: field ระดับเอกสาร → แสดง "หักเงินมัดจำ (REC...) (500.00) / ยอดชำระสุทธิ 2,700"
+                    // บนใบ (display-only). GL การหักมัดจำจริงยังทำผ่าน SettleReceiptDocAsync (adjustment แยก).
+                    ApplyDepositAppliedFields(doc, reservationId, depositApplied);
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
                         paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
                     _lastDocType = "RECEIPT";
@@ -4213,18 +4216,15 @@ namespace Take_Time_BangPhra.Integration
             return id.Value;
         }
 
-        /// <summary>
-        /// สร้างข้อความรายละเอียด "หักมัดจำจากใบเสร็จรับเงินเลขไหน" สำหรับแสดงบนใบกำกับ/ใบเสร็จเช็คเอาท์
-        /// — ดึงเลขใบเสร็จมัดจำ (Account_Receipt.IsDeposit=1) ของการจองนี้มาโชว์ + cross-check ด้วย RES-{id}.
-        /// คืน null ถ้าไม่มีมัดจำ/หาไม่พบ (ไม่แนบ note).
-        /// </summary>
-        private string BuildDepositAppliedNote(int reservationId, decimal depositApplied)
+        /// <summary>เลขใบมัดจำที่อ้างอิง (Account_Receipt.IsDeposit=1) ของการจอง — cross-check ด้วย RES-{id}.
+        /// หลายใบ → join ด้วย ", ". คืน null ถ้าไม่พบ.</summary>
+        private string LookupDepositReceiptRefs(int reservationId)
         {
-            if (reservationId <= 0 || depositApplied <= 0.005m) return null;
+            if (reservationId <= 0) return null;
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT ID, ISNULL(Total_Amount,0) AS Amt FROM Account_Receipt
+                    @"SELECT ID FROM Account_Receipt
                       WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)
                       ORDER BY Created_Date",
                     new Dictionary<string, object> { { "@rid", reservationId } });
@@ -4233,24 +4233,21 @@ namespace Take_Time_BangPhra.Integration
                 foreach (System.Data.DataRow r in dt.Rows)
                 {
                     string num = r["ID"]?.ToString();
-                    decimal amt = r["Amt"] != DBNull.Value ? Convert.ToDecimal(r["Amt"]) : 0m;
-                    if (!string.IsNullOrEmpty(num))
-                        refs.Add(amt > 0 ? $"{num} ({amt:N2} บาท)" : num);
+                    if (!string.IsNullOrEmpty(num)) refs.Add(num);
                 }
-                if (refs.Count == 0) return null;
-                return $"หักมัดจำ {depositApplied:N2} บาท จากใบเสร็จรับเงิน {string.Join(", ", refs)} [อ้างอิง RES-{reservationId}]";
+                return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
             catch { return null; }
         }
 
-        /// <summary>แนบข้อความ "หักมัดจำจากใบเสร็จ..." เข้า Notes ของเอกสารเช็คเอาท์ (ถ้ามีมัดจำหัก)
-        /// เพื่อให้บนใบกำกับ/ใบเสร็จเห็นว่าใช้มัดจำใบไหน — ตรวจสอบย้อนได้ด้วยเลขอ้างอิง RES-{id}</summary>
-        private void AppendDepositNoteToDoc(CreateDocumentRequest doc, int reservationId, decimal depositApplied)
+        /// <summary>ตั้ง field ระดับเอกสาร DepositAppliedAmount + DepositAppliedRef (NextAcc spec §9)
+        /// เพื่อให้ NextAcc แสดง "หักเงินมัดจำ (ref) (amount) / ยอดชำระสุทธิ" บนใบ (display-only, ไม่กระทบ JE).
+        /// แทนวิธีเดิมที่ยัดใน Notes. ไม่มีมัดจำ → ไม่ตั้ง (แสดงยอดรวมสุทธิแบบเดิม).</summary>
+        private void ApplyDepositAppliedFields(CreateDocumentRequest doc, int reservationId, decimal depositApplied)
         {
-            if (doc == null) return;
-            string note = BuildDepositAppliedNote(reservationId, depositApplied);
-            if (string.IsNullOrEmpty(note)) return;
-            doc.Notes = string.IsNullOrEmpty(doc.Notes) ? note : doc.Notes + " | " + note;
+            if (doc == null || depositApplied <= 0.005m) return;
+            doc.DepositAppliedAmount = depositApplied;
+            doc.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
         }
 
         /// <summary>หาจำนวนมัดจำที่หักในใบเสร็จ — จาก Account_Receipt.Deposit_Applied_Amount</summary>
