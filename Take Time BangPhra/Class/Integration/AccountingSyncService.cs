@@ -6831,6 +6831,15 @@ namespace Take_Time_BangPhra.Integration
 
                     decimal depositFromLines;
                     var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+                    // OTA/prepaid gate (เหมือน ProcessReceiptDocument): ยอดหัก = "มัดจำจริง" ก็ต่อเมื่อมีใบมัดจำ
+                    // (IsDeposit=1). ไม่มี → prepaid ที่โรงแรมไม่ได้รับ (OTA) → book เฉพาะยอดสุทธิ ไม่ gross-up ไม่กลับมัดจำ
+                    if ((depositApplied > 0.005m || depositFromLines > 0.005m)
+                        && LookupActualDepositPaid(reservationId) <= 0.005m)
+                    {
+                        depositApplied = 0m;
+                        depositFromLines = 0m;
+                        lines = null;
+                    }
                     if (depositFromLines > 0)
                     {
                         // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
