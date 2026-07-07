@@ -452,6 +452,9 @@
     <Content Include="DisplayReserve.aspx" />
     <Content Include="DisplayToday.aspx" />
     <Content Include="favicon.ico" />
+    <Content Include="robots.txt" />
+    <Content Include="sitemap.xml" />
+    <Content Include="llms.txt" />
     <Content Include="fonts\glyphicons-halflings-regular.svg" />
     <Content Include="Gallery.aspx" />
     <Content Include="fonts\glyphicons-halflings-regular.woff2" />

@@ -1,4 +1,4 @@
-﻿<%@ Page MaintainScrollPositionOnPostback="true" Async="true" Title="Home Page" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="Take_Time_BangPhra._Default2" %>
+﻿<%@ Page MaintainScrollPositionOnPostback="true" Async="true" Title="ที่พักบางพระ รีสอร์ท โรงแรม บางแสน ศรีราชา ชลบุรี | Take Time Nature Resort" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="Take_Time_BangPhra._Default2" %>
 
 <asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
     <style type="text/css">
@@ -602,7 +602,19 @@
 
     <div class="jumbotron">
         <div class="ExampleFont">
-            
+
+            <!-- SEO / AEO hero: keyword-rich H1 + intro (crawlable, styled to fit) -->
+            <header class="seo-hero" style="text-align:center; margin:0 auto 14px; max-width:900px;">
+                <h1 style="font-size:1.5em; color:#5D4037; margin:0 0 6px; line-height:1.35;">
+                    Take Time Nature Resort — ที่พัก รีสอร์ท โรงแรม บางพระ ท่ามกลางธรรมชาติ
+                </h1>
+                <p style="color:#6d5c4d; font-size:0.98em; margin:0;">
+                    ที่พักบางพระวิวอ่างเก็บน้ำ วิลล่าและบ้านพักเงียบสงบ ใกล้<strong>บางแสน ศรีราชา ชลบุรี</strong> —
+                    เหมาะพักผ่อน ครอบครัว คู่รัก และหมู่คณะ จองห้องพักออนไลน์ หรือโทร
+                    <a href="tel:+66634161496" style="color:#5D4037; font-weight:600;">063-416-1496</a>
+                </p>
+            </header>
+
             <!-- Main Container with Left and Right Sections -->
             <div class="main-container">
                 <!-- Left Section - Image Slider and Reviews -->
