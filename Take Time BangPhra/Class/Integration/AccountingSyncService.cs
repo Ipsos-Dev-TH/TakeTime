@@ -3934,6 +3934,29 @@ namespace Take_Time_BangPhra.Integration
                     await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
                     return docId.ToString();
                 }
+                else if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints
+                    && customerContact?.NexaaccContactId != null)
+                {
+                    // ✅ ลูกค้า walk-in / B2C (ไม่มีเลขผู้เสียภาษีครบ §86/4) แต่มี company endpoints:
+                    //    เช็คเอาท์ = company Receipt(3) + VAT = "ใบกำกับภาษี/ใบเสร็จรับเงิน" จ่ายจบในใบ
+                    //    (Dr เงินสดตามแหล่งเงิน / Cr รายได้ราย line / Cr ภาษีขาย 21911) — เหมือนใบมัดจำ
+                    //    (Receipt doc) แต่ไม่ IsDeposit → ได้ครบ: เอกสารจ่ายแล้ว (ไม่เปิดลูกหนี้/ไม่ค้าง
+                    //    "รอจ่าย"), ลายเซ็นผู้จัดทำ (Receipt ดึงลายเซ็น NextAcc user), อ้างอิง RES-{id},
+                    //    VAT-inclusive ถูก. หักมัดจำผ่าน SettleReceiptDocAsync (Dr 21510(+21913) / Cr เงินสด
+                    //    ลดเงินสดที่ Dr เกิน). ไม่ออก e-Tax XML — walk-in ไม่มีเลขภาษี/ไม่ประสงค์รับใบกำกับ
+                    //    (ต่างจาก B2B ข้างบนที่ครบ §86/4 → TaxInvoice(4)+e-Tax). แทนเส้น int_ ที่ให้ REC
+                    //    เป็นอ้างอิง + VAT-on-top + ไม่มีลายเซ็น + เปิดลูกหนี้.
+                    var doc = _mapper.MapReceiptToDocument(reservationId, useMultiLine ? lines : null, totalAmount, revenueType,
+                        paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
+                        paymentAccountId, hasVat, receiptNumber, isDeposit: false,
+                        documentType: NexaaccDocumentType.Receipt);
+                    Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
+                        paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
+                    _lastDocType = "RECEIPT";
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) จ่ายจบในใบ docId={docId} depositApplied={depositApplied:N2}", "SYSTEM");
+                    return docId.ToString();
+                }
                 else if (_config.IsReceiptDocumentMode)
                 {
                     // int_ key fallback: integration invoice (revenue ยุบบัญชีเดียว) + settle ปิดลูกหนี้
