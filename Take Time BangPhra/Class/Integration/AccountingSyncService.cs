@@ -4062,10 +4062,13 @@ namespace Take_Time_BangPhra.Integration
                             else
                             {
                                 // (c) มัดจำ resolve เป็นเอกสารไม่ได้ (sync เป็น journal JV-INT / เก่าไม่เก็บเลข) →
-                                //     ใส่ label "มัดจำ" (ไม่มีเลขเอกสารให้อ้าง) + drives OFF → NextAcc โชว์
-                                //     "หักเงินมัดจำ (มัดจำ) N / สุทธิ" (display) + GL กลับผ่าน JV adjustment
-                                //     (depositForJv คงเดิม). กัน 400 drives + กันใบโชว์เต็มยอดผิด.
+                                //     ใส่ label "มัดจำ" (display "หักเงินมัดจำ (มัดจำ) N / สุทธิ") + drives OFF.
+                                //     GL: ลอง "กลับ JE ตัวจริงของใบมัดจำ" (account-for-account) ก่อน — แม่นกว่า raw
+                                //     (ถูกไม่ว่าใบมัดจำลง 21510 หรือรายได้). ถ้ากลับ JE จริงได้ → depositForJv=0
+                                //     (ไม่ต้อง raw ซ้ำ); ถ้าหา JE ไม่เจอ → depositForJv คงเดิม → raw JV (หักแบบดิบๆ).
                                 doc.DepositAppliedRef = "มัดจำ";
+                                if (await TryReverseDepositJournalsAsync(reservationId))
+                                    depositForJv = 0m;
                             }
                         }
                         else if (!depState.AnyDeposit)
@@ -4415,6 +4418,87 @@ namespace Take_Time_BangPhra.Integration
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
             catch { return null; }
+        }
+
+        /// <summary>เลขเอกสาร/JE ของใบมัดจำ (Nexaacc_Document_Number ดิบ — รวม JV-INT journal) ไม่กรองชนิด.
+        /// ใช้หา JE ของใบมัดจำมา reverse (ต่างจาก LookupNexaaccDocNumberForReceipt ที่กรองเฉพาะ RECEIPT doc).</summary>
+        private string LookupNexaaccDepositJournalNumber(string localReceiptId)
+        {
+            if (string.IsNullOrEmpty(localReceiptId)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Nexaacc_Document_Number FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Status = 'COMPLETED'
+                        AND Nexaacc_Document_Number IS NOT NULL
+                        AND Payload LIKE @p
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + localReceiptId + "\"%" } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string n = dt.Rows[0][0].ToString();
+                    if (!string.IsNullOrWhiteSpace(n) && !n.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                        return n;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// กลับ JE "ตัวจริง" ของใบมัดจำ (account-for-account ผ่าน ReverseJournalAsync) — แม่นกว่า raw JV:
+        /// ได้ผลถูกไม่ว่าใบมัดจำจะลง 21510 (หนี้สิน) หรือลงรายได้ทันที (int_ รุ่นเก่า). idempotent ด้วย
+        /// ReversedByEntryId (เคยกลับแล้ว → ข้าม). คืน true = จัดการครบ (กลับ/เคยกลับ) → caller ไม่ต้อง raw JV;
+        /// false = หา JE ไม่เจอ/ล้มเหลว → caller fallback "หักแบบดิบๆ" (raw JV 21510/21913).
+        /// </summary>
+        private async System.Threading.Tasks.Task<bool> TryReverseDepositJournalsAsync(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                bool allHandled = true;
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string localId = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(localId)) { allHandled = false; continue; }
+                    string jnum = LookupNexaaccDepositJournalNumber(localId);
+                    if (string.IsNullOrEmpty(jnum)) { allHandled = false; continue; }
+
+                    var found = await _apiClient.SearchJournalsAsync(jnum, 10);
+                    var je = found?.data?.Items?.FirstOrDefault(j =>
+                        string.Equals(j.EntryNumber, jnum, StringComparison.OrdinalIgnoreCase) && j.OriginalEntryId == null);
+                    if (je == null) { allHandled = false; continue; }
+                    if (je.ReversedByEntryId != null) continue;   // เคยกลับแล้ว (idempotent)
+                    if (je.Status == 2) continue;                 // Voided แล้ว → ไม่ต้องกลับ
+
+                    var rev = await _apiClient.ReverseJournalAsync(je.Id, new ReverseJournalEntryRequest
+                    {
+                        Description = $"กลับมัดจำตอนเช็คเอาท์ — การจอง #{reservationId} (JE เดิม {jnum})"
+                    });
+                    if (rev?.success != true)
+                    {
+                        allHandled = false;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"TryReverseDepositJournals: reverse {jnum} (Id={je.Id}) ล้มเหลว การจอง #{reservationId}: {rev?.message}", "SYSTEM");
+                    }
+                    else
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"TryReverseDepositJournals: reverse JE มัดจำ {jnum} (Id={je.Id}) การจอง #{reservationId} สำเร็จ → กลับตามบัญชีจริงของใบมัดจำ", "SYSTEM");
+                    }
+                }
+                return allHandled;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"TryReverseDepositJournals failed resId={reservationId}: {ex.Message}", "SYSTEM");
+                return false;
+            }
         }
 
         /// <summary>Auto-backfill: enqueue ใบมัดจำของการจองที่ "ยังไม่ถูก book บน NextAcc" ให้ sync
