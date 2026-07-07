@@ -81,6 +81,7 @@ namespace Take_Time_BangPhra
 
                 // 🔄 Google Reviews - ดึงข้อมูลใหม่ทุก 7 วัน
                 string jsonResponse = "";
+                string reviewDiag = "";   // เหตุผลจริงเมื่อรีวิวไม่ขึ้น (status ของ Google) เพื่อ diagnose บนเครื่อง production
                 try
                 {
                     // ดึงข้อมูล review ล่าสุด (TOP 1)
@@ -146,7 +147,8 @@ namespace Take_Time_BangPhra
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API invalid response: {jsonResponse}");
+                            reviewDiag = ExtractGoogleReviewError(jsonResponse);   // เก็บ status/error_message จริงของ Google
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API invalid response ({reviewDiag}): {jsonResponse}");
                             // ใช้ cache เก่าได้เฉพาะถ้ายัง valid — ไม่งั้นปล่อย reviews ว่างให้ frontend แสดง "ไม่มีรีวิว"
                             string oldJson = dtReviews.Rows.Count > 0 ? dtReviews.Rows[0]["json"]?.ToString() ?? "" : "";
                             jsonResponse = IsValidReviewJson(oldJson) ? oldJson : "{\"result\":{\"reviews\":[]}}";
@@ -156,12 +158,17 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception ex)
                 {
+                    reviewDiag = "exception: " + ex.Message;
                     System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ Exception: {ex.Message}");
                     jsonResponse = "{\"error\": \"Unable to load reviews\"}";
                 }
 
                 // Assign the response to a Literal as a JavaScript variable
-                Literal1.Text = $"<script>var jsoninput = {jsonResponse};</script>";
+                // + แนบ diagnostic เมื่อรีวิวโหลดไม่ได้ → เปิดหน้าแรกบน production แล้วดู Console เห็นเหตุผลจริงของ Google
+                string diagScript = string.IsNullOrEmpty(reviewDiag)
+                    ? ""
+                    : $"try{{console.warn('[Google Reviews] '+{Newtonsoft.Json.JsonConvert.SerializeObject(reviewDiag)});}}catch(e){{}}";
+                Literal1.Text = $"<script>var jsoninput = {jsonResponse};{diagScript}</script>";
 
             }
             try
@@ -201,25 +208,62 @@ namespace Take_Time_BangPhra
             catch { return false; }
         }
 
+        /// <summary>
+        /// ดึงเหตุผลจริงจากคำตอบ Google Places (status + error_message) เพื่อบอกว่าทำไมรีวิวไม่ขึ้น
+        /// เช่น REQUEST_DENIED (คีย์ผิด/ถูกจำกัด referrer/ยังไม่เปิด Places API), OVER_QUERY_LIMIT (billing),
+        /// NOT_FOUND/INVALID_REQUEST (place_id ผิด). คืน "" ถ้าแกะไม่ได้.
+        /// </summary>
+        private static string ExtractGoogleReviewError(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return "empty response";
+            try
+            {
+                var o = JObject.Parse(json);
+                if (o["error"] != null) return "error: " + o["error"].ToString();
+                string status = o["status"]?.ToString();
+                string msg = o["error_message"]?.ToString();
+                if (!string.IsNullOrEmpty(status))
+                    return string.IsNullOrEmpty(msg) ? "status=" + status : $"status={status} — {msg}";
+                return "no result/status in response";
+            }
+            catch { return "unparseable response"; }
+        }
+
         private async Task<string> FetchGoogleReviews()
         {
-            string apiUrl = "https://maps.googleapis.com/maps/api/place/details/json?placeid=ChIJvUgTD9nLAjERMgFSAIuRHJw&key=AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U&language=th";
+            // Key + place id อ่านจาก Web.config appSettings ก่อน (แก้/หมุนคีย์ได้โดยไม่ต้อง rebuild)
+            // ถ้าไม่ตั้งใน config จะ fallback เป็นค่าเดิม
+            string apiKey = ConfigurationManager.AppSettings["GooglePlacesApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey)) apiKey = "AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U";
+            string placeId = ConfigurationManager.AppSettings["GooglePlaceId"];
+            if (string.IsNullOrWhiteSpace(placeId)) placeId = "ChIJvUgTD9nLAjERMgFSAIuRHJw";
+
+            // legacy Place Details ต้องระบุ fields (ไม่ระบุ = Google เตือน/คิดเงินเต็ม) — ขอเฉพาะที่ใช้
+            string apiUrl = "https://maps.googleapis.com/maps/api/place/details/json"
+                + "?place_id=" + Uri.EscapeDataString(placeId)
+                + "&fields=name,rating,user_ratings_total,reviews"
+                + "&language=th"
+                + "&key=" + Uri.EscapeDataString(apiKey);
 
             try
             {
                 using (HttpClient client = new HttpClient())
                 {
                     HttpResponseMessage response = await client.GetAsync(apiUrl);
-                    response.EnsureSuccessStatusCode();
-
                     string content = await response.Content.ReadAsStringAsync();
-                    return content; // Return raw JSON response
+
+                    // ไม่ throw ทิ้ง body — คืน JSON ดิบ (มี status/error_message ของ Google) เพื่อให้ diagnose ได้จริง
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] HTTP {(int)response.StatusCode}: {content}");
+                    }
+                    return content; // Return raw JSON response (รวม REQUEST_DENIED/OVER_QUERY_LIMIT ถ้ามี)
                 }
             }
             catch (Exception ex)
             {
                 // Return an error message if API call fails
-                return $"{{\"error\": \"{ex.Message}\"}}";
+                return $"{{\"error\": {Newtonsoft.Json.JsonConvert.SerializeObject(ex.Message)}}}";
             }
         }
 
