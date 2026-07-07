@@ -3953,15 +3953,28 @@ namespace Take_Time_BangPhra.Integration
                         paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                         documentType: NexaaccDocumentType.Receipt);
                     // NextAcc spec §9: field ระดับเอกสาร → แสดง "หักเงินมัดจำ (REC...) (500.00) / ยอดชำระสุทธิ 2,700"
-                    ApplyDepositAppliedFields(doc, reservationId, depositApplied);
-                    // spec §9.1 "โหมดขับ JE": ถ้าเปิด flag → NextAcc ลง JE self-contained ในใบ (กลับ 217xx/21913
-                    // จากใบมัดจำที่ depositAppliedRef ชี้) → ต้อง "เลิกส่ง JV แยก" พร้อมกัน (depositForJv=0)
-                    // กัน double-reverse. flag off (default) → display-only + JV แยกเดิม (GL ถูกเหมือนเดิม).
+                    // spec §9.1 "โหมดขับ JE": flag → NextAcc ลง JE self-contained ในใบ (กลับ 217xx/21913 จาก
+                    // ใบมัดจำที่ depositAppliedRef ชี้) → เลิกส่ง JV แยกพร้อมกัน (depositForJv=0) กัน double-reverse.
+                    //
+                    // ⚠ GUARD: ส่ง depositAppliedRef/drives เฉพาะเมื่อใบมัดจำ resolve เป็น "เลขเอกสาร NextAcc"
+                    // ได้จริง (sync แล้ว). ถ้าใบมัดจำยังไม่ sync → ref จะเป็น local id ที่ NextAcc หาไม่เจอ →
+                    // approve/post 404 "ไม่พบเอกสาร" (โดยเฉพาะ drives mode ที่ต้องไปกลับใบมัดจำ) → fallback
+                    // JV แยก (GL ถูก, ไม่ส่ง ref เสีย). ใบมัดจำถูกสร้าง+ sync ก่อนเช็คเอาท์ปกติ → เคสนี้ยาก
+                    // แต่กันไว้ (เช่น คิวยังไม่ทัน/ใบมัดจำ fail).
                     decimal depositForJv = depositApplied;
-                    if (depositApplied > 0.005m && _config.IsDepositAppliedDrivesJournal)
+                    if (depositApplied > 0.005m && DepositRefsResolvedToNextAcc(reservationId))
                     {
-                        doc.DepositAppliedDrivesJournal = true;
-                        depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                        ApplyDepositAppliedFields(doc, reservationId, depositApplied);   // ref = เลข NextAcc เสมอ
+                        if (_config.IsDepositAppliedDrivesJournal)
+                        {
+                            doc.DepositAppliedDrivesJournal = true;
+                            depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                        }
+                    }
+                    else if (depositApplied > 0.005m)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(B2C): ใบมัดจำของการจอง #{reservationId} ยัง resolve เป็นเลข NextAcc ไม่ได้ (ยังไม่ sync?) → ไม่ส่ง depositApplied field/drives, ใช้ JV แยก (กัน 404 'ไม่พบเอกสาร') receipt={receiptNumber}", "SYSTEM");
                     }
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
                         paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
@@ -4275,6 +4288,30 @@ namespace Take_Time_BangPhra.Integration
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
             catch { return null; }
+        }
+
+        /// <summary>ใบมัดจำ "ทุกใบ" ของการจอง resolve เป็นเลขเอกสาร NextAcc ได้หรือยัง (sync + COMPLETED).
+        /// ใช้เป็น gate ก่อนส่ง depositAppliedRef/drives — ถ้ายังมีใบที่ยังไม่ resolve จะส่ง ref ที่ NextAcc
+        /// หาไม่เจอ → 404 "ไม่พบเอกสาร". คืน false ถ้าไม่มีใบมัดจำ/มีใบยังไม่ resolve.</summary>
+        private bool DepositRefsResolvedToNextAcc(int reservationId)
+        {
+            if (reservationId <= 0) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string localId = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(localId)) return false;
+                    if (string.IsNullOrEmpty(LookupNexaaccDocNumberForReceipt(localId))) return false;
+                }
+                return true;
+            }
+            catch { return false; }
         }
 
         /// <summary>ตั้ง field ระดับเอกสาร DepositAppliedAmount + DepositAppliedRef (NextAcc spec §9)
