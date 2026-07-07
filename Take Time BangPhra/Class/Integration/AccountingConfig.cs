@@ -143,6 +143,16 @@ namespace Take_Time_BangPhra.Integration
         public bool IsDepositOutputVatDeferred => GetConfig("Deposit_Defer_Output_Vat", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
             || GetConfig("Deposit_Defer_Output_Vat", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
+        /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
+        /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:
+        /// NextAcc โชว์ "หักเงินมัดจำ/สุทธิ" แต่ JV หักมัดจำยังยิงแยกฝั่ง TakeTime (พฤติกรรมปัจจุบัน).
+        /// ⚠ เปิด flag นี้ได้ก็ต่อเมื่อ NextAcc deploy รองรับแล้ว — เปิดพร้อมกันในดีพลอยเดียว
+        /// (flag on + เลิก JV) มิฉะนั้น double-reverse (GL พัง).
+        /// </summary>
+        public bool IsDepositAppliedDrivesJournal => GetConfig("Nexaacc_Deposit_Drives_Journal", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────

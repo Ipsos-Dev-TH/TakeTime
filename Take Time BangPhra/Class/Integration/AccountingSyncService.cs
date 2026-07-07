@@ -3953,13 +3953,21 @@ namespace Take_Time_BangPhra.Integration
                         paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                         documentType: NexaaccDocumentType.Receipt);
                     // NextAcc spec §9: field ระดับเอกสาร → แสดง "หักเงินมัดจำ (REC...) (500.00) / ยอดชำระสุทธิ 2,700"
-                    // บนใบ (display-only). GL การหักมัดจำจริงยังทำผ่าน SettleReceiptDocAsync (adjustment แยก).
                     ApplyDepositAppliedFields(doc, reservationId, depositApplied);
-                    Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
+                    // spec §9.1 "โหมดขับ JE": ถ้าเปิด flag → NextAcc ลง JE self-contained ในใบ (กลับ 217xx/21913
+                    // จากใบมัดจำที่ depositAppliedRef ชี้) → ต้อง "เลิกส่ง JV แยก" พร้อมกัน (depositForJv=0)
+                    // กัน double-reverse. flag off (default) → display-only + JV แยกเดิม (GL ถูกเหมือนเดิม).
+                    decimal depositForJv = depositApplied;
+                    if (depositApplied > 0.005m && _config.IsDepositAppliedDrivesJournal)
+                    {
+                        doc.DepositAppliedDrivesJournal = true;
+                        depositForJv = 0m;   // NextAcc ลงการหักมัดจำใน JE ของเอกสารเอง → ห้ามยิง JV แยกซ้ำ
+                    }
+                    Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
                         paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
                     _lastDocType = "RECEIPT";
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) จ่ายจบในใบ docId={docId} depositApplied={depositApplied:N2}", "SYSTEM");
+                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
@@ -4385,16 +4393,31 @@ namespace Take_Time_BangPhra.Integration
                                 var info = LookupReceiptHeaderInfo(receiptNumber);
                                 if (info != null)
                                 {
-                                    var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
-                                        info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
-                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
-                                        deferOutputVat: _config.IsDepositOutputVatDeferred);
-                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                    Guid revId = RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt(RECEIPT doc) counter-adj receipt={receiptNumber}");
-                                    await SafePostJournalAsync(revId);
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt(RECEIPT doc): reversed deposit adj applied={applied} receipt={receiptNumber} journalId={revId}", "SYSTEM");
+                                    // GUARD double-reverse: กลับ JV หักมัดจำแยก "ก็ต่อเมื่อ JV นั้นมีอยู่จริง".
+                                    // display-only mode → มี JV (ref "{receipt}-DEPADJ") → กลับ. โหมดขับ JE
+                                    // (spec §9.1) → ไม่มี JV (การหักมัดจำอยู่ใน JE ของเอกสาร) → void doc
+                                    // cascade กลับให้เอง → ข้าม. เช็คของจริงแทน config → ครอบคลุมช่วง transition
+                                    // (เอกสารเก่าสร้างแบบ display-only แล้ว void หลังสลับ flag ก็ยังกลับ JV เดิมถูก)
+                                    string depadjRef = !string.IsNullOrEmpty(receiptNumber)
+                                        ? $"{receiptNumber}-DEPADJ" : $"RES-{info.Value.reservationId}-DEPADJ";
+                                    if (await JournalExistsByReferenceAsync(depadjRef))
+                                    {
+                                        var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
+                                            info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
+                                            info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
+                                            hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                                            deferOutputVat: _config.IsDepositOutputVatDeferred);
+                                        var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                        Guid revId = RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt(RECEIPT doc) counter-adj receipt={receiptNumber}");
+                                        await SafePostJournalAsync(revId);
+                                        _code.Logs(_connectionString, "AccountingSync",
+                                            $"ProcessVoidReceipt(RECEIPT doc): reversed deposit adj applied={applied} receipt={receiptNumber} journalId={revId}", "SYSTEM");
+                                    }
+                                    else
+                                    {
+                                        _code.Logs(_connectionString, "AccountingSync",
+                                            $"ProcessVoidReceipt(RECEIPT doc): ไม่มี JV หักมัดจำแยก ({depadjRef}) — โหมดขับ JE/ไม่มีมัดจำ → ข้ามการกลับ (void doc cascade JE เอง) receipt={receiptNumber}", "SYSTEM");
+                                    }
                                 }
                             }
                         }

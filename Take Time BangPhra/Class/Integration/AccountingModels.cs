@@ -184,6 +184,11 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>เลขใบมัดจำที่อ้างอิง (เช่น REC260702001) — แสดงในวงเล็บข้าง "หักเงินมัดจำ".
         /// NextAcc field: depositAppliedRef.</summary>
         public string DepositAppliedRef { get; set; }
+        /// <summary>true → NextAcc "โหมดขับ JE" (spec §9.1): ตอน post Receipt ลง JE self-contained ในใบเดียว
+        /// (Dr เงินสดสุทธิ = Total−Applied + กลับ 217xx/21913 ของใบมัดจำที่ depositAppliedRef ชี้) แทน JV แยก.
+        /// ⚠️ เปิด flag นี้ต้อง "เลิกส่ง JV หักมัดจำแยก" พร้อมกัน มิฉะนั้น 217xx/21913 ถูกกลับ 2 รอบ (GL พัง).
+        /// default false = display-only (JV แยกฝั่ง TakeTime ยังทำ GL). NextAcc field: depositAppliedDrivesJournal.</summary>
+        public bool DepositAppliedDrivesJournal { get; set; }
     }
 
     public class DocumentLineRequest
