@@ -2573,7 +2573,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     SetReceiptPaymentMarker(receiptNumber, "ADJ:" + adjId2);
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"SettleReceipt: deposit adjustment (journal) posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId} — BalanceDue เอกสารจะค้างเท่ามัดจำ (ไม่มี company endpoint)", "SYSTEM");
+                        $"SettleReceipt: deposit adjustment (journal) posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId2} — BalanceDue เอกสารจะค้างเท่ามัดจำ (ไม่มี company endpoint)", "SYSTEM");
                 }
             }
 
