@@ -13,12 +13,12 @@
     <%-- Per-page override: หน้าใดต้องการ description/OG เฉพาะ ใส่ใน ContentPlaceHolder "SeoHead"
          ถ้าไม่ override จะใช้ค่า default ของรีสอร์ทด้านล่าง --%>
     <asp:ContentPlaceHolder ID="SeoHead" runat="server">
-        <meta name="description" content="Take Time Nature Resort ที่พักบางพระ วิลล่า รีสอร์ท โรงแรม ท่ามกลางธรรมชาติ วิวอ่างเก็บน้ำบางพระ ใกล้บางแสน ศรีราชา ชลบุรี บ้านพักเงียบสงบ จองห้องพักออนไลน์ ราคาพิเศษ โทร 063-416-1496" />
+        <meta name="description" content="Take Time Nature Resort ที่พักบางพระ วิลล่า รีสอร์ท โรงแรม ท่ามกลางธรรมชาติ ใกล้บางแสน ศรีราชา ชลบุรี บ้านพักเงียบสงบ จองห้องพักออนไลน์ ราคาพิเศษ โทร 063-416-1496" />
         <meta property="og:title" content="Take Time Nature Resort — ที่พัก รีสอร์ท บางพระ ชลบุรี" />
-        <meta property="og:description" content="ที่พักบางพระท่ามกลางธรรมชาติ วิลล่าและบ้านพักวิวอ่างเก็บน้ำ ใกล้บางแสน ศรีราชา ชลบุรี จองออนไลน์ได้เลย" />
+        <meta property="og:description" content="ที่พักบางพระท่ามกลางธรรมชาติ วิลล่าและบ้านพักเงียบสงบ ใกล้บางแสน ศรีราชา ชลบุรี จองออนไลน์ได้เลย" />
     </asp:ContentPlaceHolder>
 
-    <meta name="keywords" content="ที่พักบางพระ, รีสอร์ทบางพระ, โรงแรมบางพระ, ที่พักบางแสน, ที่พักศรีราชา, ที่พักชลบุรี, รีสอร์ทชลบุรี, วิลล่าบางพระ, บ้านพักบางพระ, ที่พักติดอ่างเก็บน้ำบางพระ, Take Time Nature Resort, Take Time BangPhra" />
+    <meta name="keywords" content="ที่พักบางพระ, รีสอร์ทบางพระ, โรงแรมบางพระ, ที่พักบางแสน, ที่พักศรีราชา, ที่พักชลบุรี, รีสอร์ทชลบุรี, วิลล่าบางพระ, บ้านพักบางพระ, Take Time Nature Resort, Take Time BangPhra" />
     <meta name="author" content="Take Time Nature Resort" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="geo.region" content="TH-20" />
@@ -55,7 +55,7 @@
       "@id": "https://taketimebangphra.com/#resort",
       "name": "Take Time Nature Resort บางพระ",
       "alternateName": ["Take Time BangPhra", "ที่พักบางพระ Take Time", "รีสอร์ทบางพระ Take Time"],
-      "description": "ที่พัก รีสอร์ท โรงแรม บางพระ ท่ามกลางธรรมชาติ วิลล่าและบ้านพักวิวอ่างเก็บน้ำบางพระ เงียบสงบ ใกล้บางแสน ศรีราชา จังหวัดชลบุรี เหมาะพักผ่อน ครอบครัว คู่รัก จัดกิจกรรม",
+      "description": "ที่พัก รีสอร์ท โรงแรม บางพระ ท่ามกลางธรรมชาติ วิลล่าและบ้านพักเงียบสงบ ใกล้บางแสน ศรีราชา จังหวัดชลบุรี เหมาะพักผ่อน ครอบครัว คู่รัก จัดกิจกรรม",
       "url": "https://taketimebangphra.com/",
       "telephone": "+66634161496",
       "priceRange": "฿฿",
@@ -82,7 +82,6 @@
       "amenityFeature": [
         { "@type": "LocationFeatureSpecification", "name": "Wi-Fi ฟรี", "value": true },
         { "@type": "LocationFeatureSpecification", "name": "ที่จอดรถฟรี", "value": true },
-        { "@type": "LocationFeatureSpecification", "name": "วิวอ่างเก็บน้ำบางพระ", "value": true },
         { "@type": "LocationFeatureSpecification", "name": "อาหารเช้า", "value": true }
       ],
       "potentialAction": {
@@ -100,7 +99,7 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "Take Time Nature Resort อยู่ที่ไหน", "acceptedAnswer": { "@type": "Answer", "text": "อยู่ที่ 202/24 หมู่ 5 ตำบลบางพระ อำเภอศรีราชา จังหวัดชลบุรี 20110 ใกล้อ่างเก็บน้ำบางพระ ห่างจากบางแสนและตัวเมืองศรีราชาโดยรถยนต์ไม่ไกล" } },
-        { "@type": "Question", "name": "ที่พักบางพระ Take Time มีห้องพักแบบไหนบ้าง", "acceptedAnswer": { "@type": "Answer", "text": "มีวิลล่า บ้านพัก Nordic Cabin, Cozy Cabin, Glass Room และเต็นท์ ท่ามกลางธรรมชาติวิวอ่างเก็บน้ำบางพระ เหมาะทั้งครอบครัว คู่รัก และหมู่คณะ" } },
+        { "@type": "Question", "name": "ที่พักบางพระ Take Time มีห้องพักแบบไหนบ้าง", "acceptedAnswer": { "@type": "Answer", "text": "มีวิลล่า บ้านพัก Nordic Cabin, Cozy Cabin, Glass Room และเต็นท์ ท่ามกลางธรรมชาติ เหมาะทั้งครอบครัว คู่รัก และหมู่คณะ" } },
         { "@type": "Question", "name": "จองห้องพักบางพระได้อย่างไร", "acceptedAnswer": { "@type": "Answer", "text": "จองออนไลน์ได้ที่เว็บไซต์ taketimebangphra.com หรือโทร 063-416-1496 เช็คอิน 14:00 น. เช็คเอาท์ 12:00 น." } },
         { "@type": "Question", "name": "รีสอร์ทบางพระใกล้บางแสนไหม", "acceptedAnswer": { "@type": "Answer", "text": "Take Time Nature Resort ตั้งอยู่ที่ตำบลบางพระ อำเภอศรีราชา ใกล้ชายหาดบางแสนและตัวเมืองศรีราชา จังหวัดชลบุรี เดินทางสะดวก" } }
       ]
