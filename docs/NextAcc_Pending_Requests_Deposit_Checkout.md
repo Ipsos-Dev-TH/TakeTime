@@ -124,7 +124,14 @@ preference ไม่ใช่ blocker. **ห้ามแก้เป็น Docum
 
 **ลำดับ go-live:**
 1. Pull build ล่าสุด (NextAcc: `claude/fix-errors-638kW`) → **rebuild บน Windows** (WebForms build บน Linux ไม่ได้).
-2. รัน migration ค้าง: **PHASE18_05** (deposit-consumed marker) — idempotent.
-3. Deploy → ทดสอบ end-to-end: deposit → checkout (หักมัดจำ) → void → CREATE#2 (re-realize) + CN/DN ผูก booking.
-4. เปิด drives mode: ติ๊ก checkbox / ตั้ง `Nexaacc_Deposit_Drives_Journal=1` (+ `Nexaacc_Drives_Journal_Ref=1`
-   ถ้าใช้ JV-INT ref). ตอนนี้ NextAcc ทำ #1 un-realize on void ครบแล้ว → เปิดได้ปลอดภัย GL บาลานซ์.
+2. Deploy build ล่าสุด (ต้องมีโค้ด drives + safety-net) **ก่อน** รัน migration เปิด drives.
+3. รัน migration ค้าง (idempotent):
+   - **PHASE18_05** (deposit-consumed marker กันใช้มัดจำซ้ำ)
+   - **PHASE18_06** (เปิด drives mode: `Nexaacc_Deposit_Drives_Journal=1` + `Nexaacc_Drives_Journal_Ref=1`)
+4. ทดสอบ end-to-end: deposit → checkout (JE เดียว Dr เงินฝาก = รับจริง ไม่ใช่เต็มยอด) → void → CREATE#2
+   (re-realize) + CN/DN ผูก booking.
+
+**หมายเหตุ drives mode:** ตั้งเป็น "เปิด" ผ่าน PHASE18_06 แล้ว (NextAcc ทำ #1 un-realize on void + journal-ref
+ครบ → ปลอดภัย GL บาลานซ์). เดิม display-only (flags=0) การหักมัดจำแยก 2 JE → เงินฝากสุทธิ 950 ถูก แต่
+"ตัว JE ของเอกสารโชว์เต็มยอด 1,450" (การกลับมัดจำอยู่คนละใบ) → drives รวมเป็น JE เดียว Dr เงินฝาก 950 ตรงตัว.
+ถอยกลับได้ทุกเมื่อ (ตั้ง flags='0' — GL ยังถูกผ่าน JV แยก). safety-net auto-fallback ถ้า NextAcc endpoint พลาด.
