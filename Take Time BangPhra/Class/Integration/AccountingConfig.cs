@@ -179,6 +179,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsPostSyncVerifyEnabled => GetConfig("Nexaacc_Post_Sync_Verify", "1").Equals("1", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// true = AUTO-RECONCILE บัญชีมัดจำ 21510 ที่ "ติดลบ" จาก adjustment ค้าง (orphaned -DEPADJ ที่เหลือจาก
+        /// เช็คเอาท์รอบเก่าที่ drives fail แล้ว void ไม่สมบูรณ์). ทำเฉพาะเมื่อเช็คเอาท์รอบนี้ใช้ drives สำเร็จ
+        /// (การหักมัดจำอยู่ใน JE เดียว → -DEPADJ แยกทุกตัว = orphaned แน่นอน) → reverse -DEPADJ ที่ค้าง
+        /// "เท่าที่จำเป็น" (self-limiting: หยุดเมื่อ net 21510 กลับ ~0 ไม่ over-correct) → re-verify ผลจริง.
+        /// false (default) = ไม่แตะ (booking เสียเคลียร์มือ). opt-in — ควร test + ตรวจ GL ก่อนเปิด.
+        /// </summary>
+        public bool IsAutoReconcileDeposit => GetConfig("Nexaacc_Auto_Reconcile_Deposit", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────

@@ -306,6 +306,20 @@
                         ไม่แก้อะไรบน NextAcc. เปิดไว้ (default) แนะนำ; ปิดเพื่อลด API call ต่อการ sync.
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgAutoReconcileDeposit" />
+                        Auto-reconcile 21510 ติดลบ (ล้าง adjustment มัดจำค้างอัตโนมัติ)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        (ต่อยอดจาก verify) ถ้า verify เจอ <b>บัญชีมัดจำ 21510 ติดลบ</b> + เช็คเอาท์รอบนี้ใช้ drives
+                        สำเร็จ → ระบบ reverse <b>adjustment มัดจำค้าง (-DEPADJ)</b> ที่เหลือจาก churn เท่าที่จำเป็น
+                        (หยุดเมื่อ 21510 กลับ ~0 ไม่ over-correct) แล้ว <b>ตรวจซ้ำ</b> บันทึกผลจริง. ทุก movement เป็น
+                        JE reversal จริง (audit ครบ). ถ้ายังไม่ 0 (สาเหตุอื่น) → คงเตือนให้ตรวจมือ.
+                        <br />ปิดไว้ (default) = verify แจ้งเตือนเฉย ๆ เคลียร์มือ.
+                        <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test</strong> — จัดการเคส churn ช่วง dev; booking ใหม่ปกติไม่ติดลบอยู่แล้ว
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -876,6 +890,7 @@
                 document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
                 document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
                 document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
+                document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -936,6 +951,7 @@
                 depositDrivesJournalRef: document.getElementById('cfgDepositDrivesJournalRef').checked,
                 autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
                 postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
+                autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

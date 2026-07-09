@@ -78,6 +78,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "depositDrivesJournalRef", config.IsDrivesJournalRefEnabled },
                     { "autoRecoverDeposit", config.IsAutoRecoverDeposit },
                     { "postSyncVerify", config.IsPostSyncVerifyEnabled },
+                    { "autoReconcileDeposit", config.IsAutoReconcileDeposit },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -282,6 +283,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("depositDrivesJournalRef")) config.SetConfig("Nexaacc_Drives_Journal_Ref", BoolToFlag(data["depositDrivesJournalRef"]));
                 if (data.ContainsKey("autoRecoverDeposit")) config.SetConfig("Nexaacc_Auto_Recover_Deposit", BoolToFlag(data["autoRecoverDeposit"]));
                 if (data.ContainsKey("postSyncVerify")) config.SetConfig("Nexaacc_Post_Sync_Verify", BoolToFlag(data["postSyncVerify"]));
+                if (data.ContainsKey("autoReconcileDeposit")) config.SetConfig("Nexaacc_Auto_Reconcile_Deposit", BoolToFlag(data["autoReconcileDeposit"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));

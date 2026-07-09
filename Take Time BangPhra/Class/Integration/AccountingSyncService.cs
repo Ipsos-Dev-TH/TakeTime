@@ -29,6 +29,9 @@ namespace Take_Time_BangPhra.Integration
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
         private string _lastDocNumber;
         private string _lastDocType;
+        // เช็คเอาท์ล่าสุดใช้ drives (หักมัดจำใน JE เดียว) สำเร็จไหม — ให้ post-sync verify รู้ว่าปลอดภัยจะ
+        // auto-reconcile -DEPADJ ค้าง (ในโหมด drives ไม่มี -DEPADJ ที่ legit → ทุกตัวเป็น orphaned)
+        private bool _lastReceiptUsedDrives;
 
         public AccountingSyncService()
         {
@@ -1660,6 +1663,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     _lastDocNumber = null;
                     _lastDocType = null;
+                    _lastReceiptUsedDrives = false;
                     string nexaaccId = await ProcessSingleItemAsync(actionType, payload);
 
                     if (nexaaccId == "SKIPPED_ZERO_AMOUNT")
@@ -4215,6 +4219,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company doc
                     _lastDocType = "RECEIPT";
+                    _lastReceiptUsedDrives = doc.DepositAppliedDrivesJournal;   // ให้ post-sync verify รู้ว่า safe จะ reconcile -DEPADJ ค้าง
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
                     return docId.ToString();
@@ -4763,6 +4768,20 @@ namespace Take_Time_BangPhra.Integration
                 bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
 
                 var (status, detail) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+
+                // FINAL GATE: ถ้า verify เจอปัญหา (WARN) + เช็คเอาท์รอบนี้ใช้ drives + เปิด auto-reconcile →
+                // ลองล้าง orphaned -DEPADJ (21510 ค้าง) แล้ว "ตรวจซ้ำ" → บันทึกสถานะจริงหลังแก้ (check→correct→recheck)
+                if (status == "WARN" && _config.IsAutoReconcileDeposit && _lastReceiptUsedDrives)
+                {
+                    string rec = await ReconcileOrphanedDepositAdjustmentsAsync(reservationId, receiptNumber, _lastDocNumber);
+                    if (!string.IsNullOrEmpty(rec))
+                    {
+                        var (status2, detail2) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+                        status = status2;
+                        detail = $"{detail2} | [auto-reconcile] {rec}";
+                    }
+                }
+
                 SetQueueVerifyResult(queueId, status, detail);
                 _code.Logs(_connectionString, "AccountingSync",
                     (status == "WARN" ? "⚠ " : "") + $"PostSyncVerify: receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → {status}: {detail}", "SYSTEM");
@@ -4783,6 +4802,120 @@ namespace Take_Time_BangPhra.Integration
                     new Dictionary<string, object> { { "@s", (object)status ?? DBNull.Value }, { "@d", (object)detail ?? DBNull.Value }, { "@id", queueId } });
             }
             catch { /* คอลัมน์ยังไม่ migrate → ข้าม */ }
+        }
+
+        /// <summary>ค้น JE "ทั้ง family ของการจอง" (มัดจำ + เช็คเอาท์ + adjustment) — key เช็คเอาท์
+        /// (receipt/RES/docNumber) + comprehensive deposit search (RES-{id}-DEP/เลขเอกสารมัดจำ/local id).
+        /// ให้ verify (net 21510) และ reconcile ใช้ร่วมกัน เพื่อคำนวณยอดบัญชีให้ครบทุกขา.</summary>
+        private async System.Threading.Tasks.Task<Dictionary<Guid, JournalEntryResponse>> GetBookingJournalsAsync(
+            int reservationId, string receiptNumber, string docNumber)
+        {
+            var jes = new Dictionary<Guid, JournalEntryResponse>();
+            var keys = new List<string> { receiptNumber, $"RES-{reservationId}", docNumber };
+            foreach (var k in keys.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var f = await _apiClient.SearchJournalsAsync(k, 50);
+                    if (f?.data?.Items != null)
+                        foreach (var j in f.data.Items) if (j.Id != Guid.Empty && !jes.ContainsKey(j.Id)) jes[j.Id] = j;
+                }
+                catch { }
+            }
+            try
+            {
+                var dep = await SearchDepositJournalsAsync(reservationId);
+                foreach (var kv in dep.candidates) if (!jes.ContainsKey(kv.Key)) jes[kv.Key] = kv.Value;
+            }
+            catch { }
+            return jes;
+        }
+
+        /// <summary>ยอดคงเหลือสุทธิของบัญชี (Σ Cr−Dr) จากชุด JE ที่ให้ (ข้าม voided). ใช้เช็ค 21510.</summary>
+        private static decimal SumAccountNet(IEnumerable<JournalEntryResponse> jes, string accountCode)
+        {
+            decimal net = 0m;
+            foreach (var je in jes.Where(j => !IsVoidedStatus(j.Status) && j.Lines != null))
+                foreach (var ln in je.Lines)
+                    if (string.Equals(ln.AccountCode, accountCode, StringComparison.OrdinalIgnoreCase))
+                        net += ln.CreditAmount - ln.DebitAmount;
+            return net;
+        }
+
+        /// <summary>AUTO-RECONCILE (final gate): เมื่อเช็คเอาท์ใช้ drives สำเร็จ (การหักมัดจำอยู่ใน JE เดียว →
+        /// ไม่มี -DEPADJ ที่ legit) แต่บัญชีมัดจำ 21510 "ติดลบ" จาก orphaned -DEPADJ (adjustment Dr 21510 ค้าง
+        /// จากเช็คเอาท์รอบเก่าที่ drives fail แล้ว void ไม่สมบูรณ์) → reverse -DEPADJ ที่ค้าง "เท่าที่จำเป็น"
+        /// (self-limiting: หยุดเมื่อ net กลับ ~0 ไม่ over-correct) → re-verify ผลจริง. คืน summary (null = ไม่ได้ทำ).
+        /// **ปลอดภัย:** reverse เฉพาะ JE ref ลงท้าย "-DEPADJ" (ไม่ใช่ -REV) ที่ยังไม่ถูก reverse + มี Dr บน 21510
+        /// จริง; ทำเฉพาะโหมด drives (ไม่งั้น -DEPADJ ของรอบปัจจุบันอาจ legit); ทุก movement เป็น JE จริงบน NextAcc.</summary>
+        private async System.Threading.Tasks.Task<string> ReconcileOrphanedDepositAdjustmentsAsync(
+            int reservationId, string receiptNumber, string docNumber)
+        {
+            try
+            {
+                string depCode = null;
+                try { depCode = _mapper.GetAccountCode("ADVANCE_DEPOSIT"); } catch { }
+                if (string.IsNullOrEmpty(depCode)) return null;
+
+                var jes = await GetBookingJournalsAsync(reservationId, receiptNumber, docNumber);
+                decimal net0 = SumAccountNet(jes.Values, depCode);
+                if (net0 >= -0.05m) return null;   // 21510 ไม่ติดลบ → ไม่มีอะไรต้องล้าง
+
+                // orphaned -DEPADJ: ref ลงท้าย "-DEPADJ" (ไม่ใช่ "-DEPADJ-REV"), ยังไม่ถูก reverse, ไม่ voided,
+                // มีบรรทัด Dr บน 21510 จริง (ยืนยันเป็น deposit adjustment). เรียง Dr มาก→น้อย (ล้างน้อยใบสุด)
+                Func<JournalEntryResponse, decimal> dr21510 = j => j.Lines == null ? 0m :
+                    j.Lines.Where(l => string.Equals(l.AccountCode, depCode, StringComparison.OrdinalIgnoreCase))
+                           .Sum(l => l.DebitAmount - l.CreditAmount);
+                var orphans = jes.Values.Where(j =>
+                        !IsVoidedStatus(j.Status)
+                        && (j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty)
+                        && !string.IsNullOrEmpty(j.Reference)
+                        && j.Reference.EndsWith("-DEPADJ", StringComparison.OrdinalIgnoreCase)
+                        && dr21510(j) > 0.005m)
+                    .OrderByDescending(dr21510)
+                    .ToList();
+                if (orphans.Count == 0)
+                    return $"⚠ 21510 ติดลบ {net0:N2} แต่ไม่พบ orphaned -DEPADJ ที่ยังไม่ reverse — ตรวจมือ (อาจเกิดจาก double deposit-reversal)";
+
+                decimal running = net0;
+                int reversedCount = 0;
+                foreach (var adj in orphans)
+                {
+                    if (running >= -0.05m) break;   // สมดุลแล้ว หยุด (self-limiting กัน over-correct)
+                    decimal adjDr = dr21510(adj);
+                    var rev = await _apiClient.ReverseJournalAsync(adj.Id, new ReverseJournalEntryRequest
+                    {
+                        Description = $"Auto-reconcile: กลับ adjustment มัดจำค้าง (orphaned {adj.EntryNumber}) การจอง #{reservationId} " +
+                                      $"— 21510 ติดลบจาก churn (drives รอบนี้หักมัดจำใน JE เดียวแล้ว)"
+                    });
+                    if (rev?.success == true)
+                    {
+                        running += adjDr; reversedCount++;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoReconcile: #{reservationId} receipt={receiptNumber} reverse orphaned -DEPADJ {adj.EntryNumber} (Dr21510={adjDr:N2}) → net โดยประมาณ {running:N2}", "SYSTEM");
+                    }
+                    else
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoReconcile: #{reservationId} reverse orphaned {adj.EntryNumber} ล้มเหลว: {rev?.message}", "SYSTEM");
+                    }
+                }
+                if (reversedCount == 0) return null;
+
+                // re-verify ผลจริงจาก NextAcc (ไม่ประมาณ)
+                var jes2 = await GetBookingJournalsAsync(reservationId, receiptNumber, docNumber);
+                decimal net1 = SumAccountNet(jes2.Values, depCode);
+                string outcome = net1 >= -0.05m
+                    ? $"✅ reconcile สำเร็จ: 21510 {net0:N2} → {net1:N2} (กลับ orphaned -DEPADJ {reversedCount} ใบ)"
+                    : $"⚠ reconcile บางส่วน: 21510 {net0:N2} → {net1:N2} (กลับ {reversedCount} ใบ) ยังไม่ 0 — ตรวจมือ (มีสาเหตุอื่นนอก -DEPADJ)";
+                _code.Logs(_connectionString, "AccountingSync", $"AutoReconcile: #{reservationId} receipt={receiptNumber} {outcome}", "SYSTEM");
+                return outcome;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"AutoReconcile failed resId={reservationId}: {ex.Message}", "SYSTEM");
+                return null;
+            }
         }
 
         /// <summary>อ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบความจริงฝั่งเรา. คืน (PASS/WARN, รายละเอียด).
