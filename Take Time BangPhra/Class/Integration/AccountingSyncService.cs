@@ -2835,7 +2835,7 @@ namespace Take_Time_BangPhra.Integration
             SetReceiptPaymentMarker(receiptNumber, docId.ToString());   // final
             _lastDocType = "RECEIPT";
             _code.Logs(_connectionString, "AccountingSync",
-                $"SettleReceiptDoc: เสร็จ receipt={receiptNumber} docId={docId} depositApplied={depositApplied:N2} แหล่งเงิน={(string.IsNullOrEmpty(paymentAccountId) ? "default" : paymentAccountId)}", "SYSTEM");
+                $"SettleReceiptDoc: เสร็จ receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} docId={docId} depositApplied={depositApplied:N2} แหล่งเงิน={(string.IsNullOrEmpty(paymentAccountId) ? "default" : paymentAccountId)}", "SYSTEM");
             return docId;
         }
 
@@ -3791,7 +3791,7 @@ namespace Take_Time_BangPhra.Integration
                     // มัดจำ = "ใบเสร็จรับเงิน" เท่านั้น — ไม่ออก e-Tax (ใบกำกับภาษีออกตอนเช็คเอาท์
                     // เต็มยอดรวมมัดจำ; ใช้คู่กับ Deposit_Defer_Output_Vat เพื่อให้จุด VAT ตรงใบกำกับ)
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"Deposit receipt {receiptNumber}: ใบเสร็จรับเงิน (ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์)", "SYSTEM");
+                        $"Deposit receipt {receiptNumber} (เลขNextAcc={_lastDocNumber ?? "-"}): ใบเสร็จรับเงิน (ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์)", "SYSTEM");
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
@@ -3838,7 +3838,7 @@ namespace Take_Time_BangPhra.Integration
                         paymentMethod, receiptDate, customerName, depositHasVat, reservationId, paymentAccountId);
                     // มัดจำ = ใบเสร็จรับเงิน ไม่ออก e-Tax (นโยบายเดียวกับ doc-mode — ใบกำกับออกตอนเช็คเอาท์)
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"Deposit receipt {receiptNumber} (int_): ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์", "SYSTEM");
+                        $"Deposit receipt {receiptNumber} (int_ เลขNextAcc={_lastDocNumber ?? "-"}): ไม่ออก e-Tax — ใบกำกับภาษีจะออกตอนเช็คเอาท์", "SYSTEM");
                     return invDocId.ToString();
                 }
                 else
@@ -4174,7 +4174,7 @@ namespace Take_Time_BangPhra.Integration
                     await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company doc
                     _lastDocType = "RECEIPT";
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
+                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
