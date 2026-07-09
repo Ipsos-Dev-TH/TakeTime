@@ -82,7 +82,21 @@ Cr อยู่หน้า 2) อ่านยาก.
 
 ---
 
-## 4. [ใหม่ — ต้องการ NextAcc] ช่อง "ผู้รับเงิน/ผู้จัดทำ" บนเอกสาร company `/document` = คนทำจริง (ไม่ใช่ NextAcc user)
+## 4. ✅ [เสร็จ] ช่อง "ผู้รับเงิน/ผู้จัดทำ" บนเอกสาร company `/document` = คนทำจริง (ไม่ใช่ NextAcc user)
+
+> **NextAcc เสร็จแล้ว (commit e6908cb):** company `/document` (CreateDocumentRequest) รับ
+> `preparerName` / `preparerSignatureBase64` (JSON camelCase, string) + PDF ให้ preparer ที่ส่งมา
+> **priority เหนือ CreatedBy** สำหรับช่อง "ผู้รับเงิน" (slot 0) ทั้งชื่อ+ลายเซ็น; "ผู้มีอำนาจลงนาม"
+> (slot 1 = กรรมการ) คงเดิม → ผู้รับเงิน = ชวนพิศ, ผู้มีอำนาจลงนาม = วชิร. ไม่ส่ง field = ignore เงียบ.
+>
+> **TakeTime (commit 1c86a93):** ส่ง preparer บน create ทุกเอกสาร company รับ (`ApplyReceiptPreparer`).
+>
+> **UpdateDocumentRequest (PUT) — NextAcc เพิ่มให้แล้ว + TakeTime wire แล้ว:** เอกสารที่ NextAcc สร้าง
+> จาก **OCR** (`Voucher/OcrUpload`) เราไม่คุมตอน create → ยัดผู้จัดทำผ่าน PUT (`ApplyCurrentUserPreparer`
+> จาก Session["UserID"] → Admin ชื่อ+ลายเซ็น) เพราะ `X-Acting-User` ช่วยเฉพาะเมื่อ staff เป็น NextAcc user.
+> ขอ NextAcc ยืนยันว่า `UpdateDocumentRequest` รับ `preparerName`/`preparerSignatureBase64` + priority เดียวกัน.
+
+<details><summary>รายละเอียดเดิม (audit trail)</summary>
 
 **อาการ:** ใบเสร็จ/ใบกำกับที่ออกจากเช็คเอาท์ (company Receipt DocumentType=3) ช่อง **"ผู้รับเงิน"**
 บน PDF ขึ้นเป็น **NextAcc user เจ้าของ API key (เจ้าของ/กรรมการ เช่น "วชิร ดิลกสัมพันธ์")** ไม่ใช่พนักงาน
@@ -107,6 +121,8 @@ NextAcc `PdfGenerationService` เลย fallback ไปใช้ลายเซ
 **ผลที่ต้องการ:** ผู้รับเงิน = ชวนพิศ (คนทำจริง) / ผู้มีอำนาจลงนาม = วชิร (กรรมการ). ตรงกับใบสำคัญจ่าย
 (integration PV) ที่ส่ง `PreparerName`/`PreparerSignatureBase64` ได้อยู่แล้ว — ขอให้ company document
 รองรับแบบเดียวกัน.
+
+</details>
 
 ---
 

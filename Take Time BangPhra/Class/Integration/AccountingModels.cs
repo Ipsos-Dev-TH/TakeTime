@@ -237,6 +237,12 @@ namespace Take_Time_BangPhra.Integration
         public bool? PricesIncludeVat { get; set; }
         /// <summary>เลขจอง (booking) — NextAcc field "bookingNumber". null = คงเดิม.</summary>
         public string BookingNumber { get; set; }
+        /// <summary>ชื่อผู้ทำเอกสาร/ผู้จัดทำ (พนักงานที่ทำใน TakeTime) — NextAcc field "preparerName".
+        /// ใช้กับเอกสารที่ NextAcc สร้างจาก OCR แล้วเราแก้ผ่าน PUT (เราไม่คุมตอน create) → ยัดผู้จัดทำจริง
+        /// ตรงนี้แทน (X-Acting-User ช่วยได้เฉพาะเมื่อ staff เป็น NextAcc user). null = คงเดิม.</summary>
+        public string PreparerName { get; set; }
+        /// <summary>ลายเซ็นผู้ทำเอกสาร (data-URI/base64) — NextAcc field "preparerSignatureBase64". null = คงเดิม.</summary>
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     public class DocumentResponse

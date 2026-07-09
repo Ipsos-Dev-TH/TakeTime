@@ -667,7 +667,62 @@ namespace Take_Time_BangPhra.Voucher
                 }
             }
 
+            // ผู้จัดทำ = พนักงานที่ทำใน TakeTime (ไม่ใช่ NextAcc user/เจ้าของ). เอกสารนี้ NextAcc สร้างจาก OCR
+            // → เราไม่คุมตอน create → ยัดผู้จัดทำผ่าน PUT ตรงนี้ (NextAcc รับ preparerName/preparerSignatureBase64
+            // บน UpdateDocumentRequest + ให้ priority เหนือ CreatedBy). X-Acting-User ช่วยเฉพาะเมื่อ staff เป็น
+            // NextAcc user — ที่นี่ส่งชื่อ+ลายเซ็นตรง ๆ ครอบทุกเคส. ตั้ง any=true เพื่อให้ push แม้ไม่มีการแก้อื่น.
+            if (ApplyCurrentUserPreparer(upd)) any = true;
+
             return any ? upd : null;
+        }
+
+        /// <summary>ตั้งผู้จัดทำ (ชื่อ+ลายเซ็น) จากพนักงานที่ล็อกอิน (Session["UserID"] → Admin) ลง update request.
+        /// คืน true ถ้าตั้งอย่างน้อยชื่อ. best-effort — ล้มเหลว/ไม่มี = ข้ามเงียบ.</summary>
+        private bool ApplyCurrentUserPreparer(UpdateDocumentRequest upd)
+        {
+            try
+            {
+                if (!short.TryParse(Session["UserID"]?.ToString() ?? "0", out short adminId) || adminId <= 0) return false;
+                var c = new Take_Time_BangPhra.code();
+                var dt = c.DatabaseQuerySafe(Conn,
+                    "SELECT FirstName, LastName FROM Admin WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", adminId } });
+                string name = null;
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    string first = dt.Rows[0]["FirstName"] == DBNull.Value ? "" : dt.Rows[0]["FirstName"].ToString();
+                    string last = dt.Rows[0]["LastName"] == DBNull.Value ? "" : dt.Rows[0]["LastName"].ToString();
+                    name = (first + " " + last).Trim();
+                }
+                if (string.IsNullOrEmpty(name)) name = Session["username"]?.ToString();
+                if (string.IsNullOrEmpty(name)) return false;
+                upd.PreparerName = name;
+
+                string dataUri = LoadSignatureDataUri(adminId);
+                if (!string.IsNullOrEmpty(dataUri) && dataUri.Length <= 256 * 1024)   // cap เท่ากับฝั่ง sync
+                    upd.PreparerSignatureBase64 = dataUri;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>อ่านไฟล์ลายเซ็นของ admin → base64 data URI. คืน null ถ้าไม่มี.</summary>
+        private string LoadSignatureDataUri(short adminId)
+        {
+            try
+            {
+                var sig = new SignatureService();
+                string virtualPath = sig.GetSignaturePath(adminId);
+                if (string.IsNullOrEmpty(virtualPath)) return null;
+                string physical = Server.MapPath(virtualPath);
+                if (string.IsNullOrEmpty(physical) || !File.Exists(physical)) return null;
+                byte[] bytes = File.ReadAllBytes(physical);
+                if (bytes.Length == 0) return null;
+                string ext = Path.GetExtension(physical).ToLowerInvariant();
+                string mime = (ext == ".jpg" || ext == ".jpeg") ? "image/jpeg" : "image/png";
+                return "data:" + mime + ";base64," + Convert.ToBase64String(bytes);
+            }
+            catch { return null; }
         }
 
         private static string JoinAcc(string code, string name)
