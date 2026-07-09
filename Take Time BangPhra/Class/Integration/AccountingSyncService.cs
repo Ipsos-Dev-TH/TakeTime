@@ -4755,36 +4755,55 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 if (!_config.IsPostSyncVerifyEnabled) return;
-                if (actionType != "CREATE_RECEIPT_DOCUMENT") return;           // เฉพาะใบเสร็จ/เช็คเอาท์ (มียอดรับจริง+สลิป)
+                // ครอบทั้งฝั่งรับ (ใบเสร็จ/เช็คเอาท์) และฝั่งจ่าย (ใบสำคัญจ่าย) — ระบบตรวจขั้นสุดท้ายทั้งระบบ
+                if (actionType != "CREATE_RECEIPT_DOCUMENT" && actionType != "CREATE_VOUCHER_JOURNAL") return;
                 if (!Guid.TryParse(nexaaccId, out var docId) || docId == Guid.Empty) return;
 
                 var p = _serializer.Deserialize<Dictionary<string, object>>(payload ?? "{}");
                 if (p == null) return;
-                string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
-                int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
-                decimal totalAmount = p.ContainsKey("totalAmount") ? Convert.ToDecimal(p["totalAmount"]) : 0m;
-                decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
-                if (depositApplied <= 0) depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
-                bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
 
-                var (status, detail) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+                string status, detail, logRef;
 
-                // FINAL GATE: ถ้า verify เจอปัญหา (WARN) + เช็คเอาท์รอบนี้ใช้ drives + เปิด auto-reconcile →
-                // ลองล้าง orphaned -DEPADJ (21510 ค้าง) แล้ว "ตรวจซ้ำ" → บันทึกสถานะจริงหลังแก้ (check→correct→recheck)
-                if (status == "WARN" && _config.IsAutoReconcileDeposit && _lastReceiptUsedDrives)
+                if (actionType == "CREATE_RECEIPT_DOCUMENT")
                 {
-                    string rec = await ReconcileOrphanedDepositAdjustmentsAsync(reservationId, receiptNumber, _lastDocNumber);
-                    if (!string.IsNullOrEmpty(rec))
+                    string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
+                    int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+                    decimal totalAmount = p.ContainsKey("totalAmount") ? Convert.ToDecimal(p["totalAmount"]) : 0m;
+                    decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
+                    if (depositApplied <= 0) depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
+                    bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
+
+                    (status, detail) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+
+                    // FINAL GATE: ถ้า verify เจอปัญหา (WARN) + เช็คเอาท์รอบนี้ใช้ drives + เปิด auto-reconcile →
+                    // ลองล้าง orphaned -DEPADJ (21510 ค้าง) แล้ว "ตรวจซ้ำ" → บันทึกสถานะจริงหลังแก้ (check→correct→recheck)
+                    if (status == "WARN" && _config.IsAutoReconcileDeposit && _lastReceiptUsedDrives)
                     {
-                        var (status2, detail2) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
-                        status = status2;
-                        detail = $"{detail2} | [auto-reconcile] {rec}";
+                        string rec = await ReconcileOrphanedDepositAdjustmentsAsync(reservationId, receiptNumber, _lastDocNumber);
+                        if (!string.IsNullOrEmpty(rec))
+                        {
+                            var (status2, detail2) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+                            status = status2;
+                            detail = $"{detail2} | [auto-reconcile] {rec}";
+                        }
                     }
+                    logRef = $"receipt={receiptNumber}";
+                }
+                else   // CREATE_VOUCHER_JOURNAL (ฝั่งจ่าย)
+                {
+                    string docNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : "";
+                    int voucherId = p.ContainsKey("voucherId") ? Convert.ToInt32(p["voucherId"]) : 0;
+                    decimal amount = p.ContainsKey("amount") ? Convert.ToDecimal(p["amount"]) : 0m;
+                    decimal vatAmount = p.ContainsKey("vatAmount") ? Convert.ToDecimal(p["vatAmount"]) : 0m;
+                    DateTime voucherDate = p.ContainsKey("voucherDate") ? ParseAcctDate(p["voucherDate"]?.ToString()) : DateTime.Now;
+
+                    (status, detail) = await VerifyVoucherPostingAsync(docId, docNumber, voucherId, amount, vatAmount, voucherDate);
+                    logRef = $"voucher={docNumber}";
                 }
 
                 SetQueueVerifyResult(queueId, status, detail);
                 _code.Logs(_connectionString, "AccountingSync",
-                    (status == "WARN" ? "⚠ " : "") + $"PostSyncVerify: receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → {status}: {detail}", "SYSTEM");
+                    (status == "WARN" ? "⚠ " : "") + $"PostSyncVerify: {logRef} เลขNextAcc={_lastDocNumber ?? "-"} → {status}: {detail}", "SYSTEM");
             }
             catch (Exception ex)
             {
@@ -5011,6 +5030,86 @@ namespace Take_Time_BangPhra.Integration
 
                 string st = warns.Count > 0 ? "WARN" : "PASS";
                 string detail = warns.Count > 0 ? string.Join(" | ", warns) : string.Join(", ", oks);
+                return (st, detail);
+            }
+            catch (Exception ex)
+            {
+                return ("WARN", "verify error: " + ex.Message);
+            }
+        }
+
+        /// <summary>Post-sync verify ฝั่งจ่าย (ใบสำคัญจ่าย): อ่านเอกสาร/JE/ไฟล์แนบกลับจาก NextAcc มาตรวจ.
+        /// เช็ค (conservative — เลี่ยง false-positive เพราะ voucher หลากหลาย PV/expense/journal + WHT):
+        /// (1) เอกสารโพสต์จริง (ถ้าเป็น company doc) (2) ยอดรวม ≈ ฐาน/ฐาน+VAT (3) JE บาลานซ์ (Dr=Cr — สำคัญสุด)
+        /// (4) ไฟล์แนบครบ (ถ้าเรามี local). read-only. ไม่ throw.</summary>
+        private async System.Threading.Tasks.Task<(string status, string detail)> VerifyVoucherPostingAsync(
+            Guid docId, string docNumber, int voucherId, decimal amount, decimal vatAmount, DateTime voucherDate)
+        {
+            var warns = new List<string>();
+            var oks = new List<string>();
+            try
+            {
+                // เอกสาร (ถ้าเป็น company doc — PV type 13 / expense). journal-only (integration) → doc=null, เช็คแค่ JE
+                DocumentResponse doc = null;
+                try { doc = (await _apiClient.GetDocumentAsync(docId))?.data; } catch { }
+
+                // ค้น JE ที่เกี่ยวข้อง (docNumber ของเรา + เลข NextAcc)
+                var jes = new Dictionary<Guid, JournalEntryResponse>();
+                var keys = new List<string> { docNumber, _lastDocNumber };
+                if (doc != null && !string.IsNullOrEmpty(doc.DocumentNumber)) keys.Add(doc.DocumentNumber);
+                foreach (var k in keys.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var f = await _apiClient.SearchJournalsAsync(k, 50);
+                        if (f?.data?.Items != null)
+                            foreach (var j in f.data.Items) if (j.Id != Guid.Empty && !jes.ContainsKey(j.Id)) jes[j.Id] = j;
+                    }
+                    catch { }
+                }
+
+                if (doc != null)
+                {
+                    if (!IsPostedStatus(doc.Status)) warns.Add($"เอกสารยังไม่โพสต์ (status={doc.Status})");
+                    else oks.Add("โพสต์แล้ว");
+                    // ยอดเอกสาร: ยอมรับทั้งฐาน (amount) และ ฐาน+VAT (gross) — voucher มี VAT/WHT หลายแบบ
+                    decimal gross = amount + vatAmount;
+                    bool totalOk = Math.Abs(doc.TotalAmount - amount) <= 0.05m || Math.Abs(doc.TotalAmount - gross) <= 0.05m;
+                    if (amount > 0 && !totalOk)
+                        warns.Add($"ยอดรวมไม่ตรง: NextAcc {doc.TotalAmount:N2} vs คาด {amount:N2} (ฐาน) / {gross:N2} (ฐาน+VAT)");
+                    else if (amount > 0)
+                        oks.Add($"ยอดรวม {doc.TotalAmount:N2}");
+                }
+
+                // JE ของเอกสารนี้บาลานซ์ (สำคัญสุด — ดักโพสต์เพี้ยน). doc มี → filter ตาม source; ไม่มี → ใช้ที่เจอ
+                var vjes = doc != null
+                    ? jes.Values.Where(j => !IsVoidedStatus(j.Status)
+                        && (j.SourceDocumentId == docId
+                            || (!string.IsNullOrEmpty(doc.DocumentNumber) && string.Equals(j.SourceDocumentNumber, doc.DocumentNumber, StringComparison.OrdinalIgnoreCase)))).ToList()
+                    : jes.Values.Where(j => !IsVoidedStatus(j.Status)).ToList();
+
+                bool anyUnbalanced = false;
+                foreach (var je in vjes)
+                    if (Math.Abs(je.TotalDebit - je.TotalCredit) > 0.05m)
+                    { warns.Add($"JE {je.EntryNumber} ไม่บาลานซ์ (Dr {je.TotalDebit:N2}/Cr {je.TotalCredit:N2})"); anyUnbalanced = true; }
+                if (vjes.Count > 0 && !anyUnbalanced) oks.Add("JE บาลานซ์");
+                else if (vjes.Count == 0 && doc != null) warns.Add("ไม่พบ JE ของเอกสารนี้บน NextAcc (อาจยังไม่ post GL)");
+
+                // ไฟล์แนบครบ (เฉพาะ company doc + เรามีไฟล์ local)
+                if (doc != null)
+                {
+                    var localFiles = LookupVoucherAttachments(voucherId, docNumber, voucherDate);
+                    if (localFiles != null && localFiles.Count > 0)
+                    {
+                        int nexCount = 0;
+                        try { nexCount = (await _apiClient.GetAttachmentsAsync("Document", docId))?.data?.Count ?? 0; } catch { }
+                        if (nexCount <= 0) warns.Add($"ไฟล์แนบไม่ขึ้นบน NextAcc (เรามี {localFiles.Count} ไฟล์)");
+                        else oks.Add($"ไฟล์แนบ {nexCount} ไฟล์");
+                    }
+                }
+
+                string st = warns.Count > 0 ? "WARN" : "PASS";
+                string detail = warns.Count > 0 ? string.Join(" | ", warns) : (oks.Count > 0 ? string.Join(", ", oks) : "ไม่มีข้อมูลให้ตรวจ");
                 return (st, detail);
             }
             catch (Exception ex)
