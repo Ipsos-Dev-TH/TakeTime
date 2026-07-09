@@ -280,6 +280,20 @@
                         ถ้าเปิดก่อน NextAcc พร้อม เอกสารจะค้าง draft (approve ไม่ผ่าน; มี auto-fallback แต่ควรเปิดตามลำดับ)
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgAutoRecoverDeposit" />
+                        Auto-recover มัดจำเก่าที่ถูกกลับค้าง (un-reverse → drives ทำ JE เดียว)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        booking เก่าที่รับมัดจำสมัย drives ปิด แล้ว void+sync ใหม่หลายรอบ → มัดจำถูก reverse ค้าง
+                        → drives กลับซ้ำไม่ได้ (NextAcc "ไม่พบใบมัดจำ"). เปิดตัวนี้: ตอนเช็คเอาท์จะ un-reverse
+                        (กลับตัว reversal) คืนมัดจำให้ active → drives ทำ JE เดียว (Dr เงินสดสุทธิ) ได้. idempotent.
+                        <br />ปิดไว้ (default) = ใช้ guard เดิม (2 JE, ยอดสุทธิถูก, ปลอดภัยสุด).
+                        <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test + ตรวจ GL 1-2 ใบ</strong> — booking ที่ churn
+                        หนักควรดู GL ด้วยตา (un-reverse คืนเฉพาะ JE มัดจำ ไม่แตะ adjustment ค้างอื่น)
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -847,6 +861,7 @@
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
                 document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
                 document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
+                document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -905,6 +920,7 @@
                 depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,
                 depositDrivesJournal: document.getElementById('cfgDepositDrivesJournal').checked,
                 depositDrivesJournalRef: document.getElementById('cfgDepositDrivesJournalRef').checked,
+                autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

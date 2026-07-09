@@ -162,6 +162,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsDrivesJournalRefEnabled => GetConfig("Nexaacc_Drives_Journal_Ref", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// true = AUTO-RECOVER มัดจำ legacy: ถ้าใบมัดจำถูก reverse ค้าง (จากเช็คเอาท์รอบก่อน drives ปิด แล้ว
+        /// void+sync ใหม่หลายรอบ) → ตอนเช็คเอาท์ใหม่จะ "un-reverse" (กลับตัว reversal) คืนหนี้สินมัดจำให้ active
+        /// → drives ทำ single-JE (Dr เงินสดสุทธิ) ได้. idempotent (เคย recover แล้วข้าม). false (default) = ใช้
+        /// guard เดิม (มัดจำ reverse แล้ว → ไม่ drives/ไม่กลับซ้ำ, book Dr เต็ม, net ถูก). เปิดเมื่อต้องการ
+        /// single-JE กับ booking เก่าที่ผ่าน churn — ควร test บน Windows + ตรวจ GL 1-2 ใบก่อนเปิดกว้าง.
+        /// </summary>
+        public bool IsAutoRecoverDeposit => GetConfig("Nexaacc_Auto_Recover_Deposit", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────

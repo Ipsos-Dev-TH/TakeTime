@@ -4070,6 +4070,19 @@ namespace Take_Time_BangPhra.Integration
                         // + โชว์ "หักเงินมัดจำ/ยอดสุทธิ" ตามเดิม. (ไม่ใช่ single-JE เพราะมัดจำถูกกลับนอกใบไปแล้ว —
                         // ต้องการ single-JE ต้อง un-reverse มัดจำก่อน ซึ่งเป็นงานแยก/manual).
                         bool depReversed = booked && await IsDepositAlreadyReversedAsync(reservationId);
+
+                        // AUTO-RECOVER (opt-in): ถ้ามัดจำถูก reverse ค้าง + เปิด flag → ลอง un-reverse คืนมัดจำ
+                        // ให้ active → drives ทำ single-JE ได้ (ไม่ตก guard). สำเร็จ → depReversed=false ปล่อย drives ต่อ.
+                        if (depReversed && _config.IsAutoRecoverDeposit)
+                        {
+                            if (await TryRecoverReversedDepositAsync(reservationId, receiptNumber))
+                            {
+                                depReversed = false;   // มัดจำ active อีกครั้ง → เข้าเส้น drives ปกติ (case b/c)
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"ProcessReceiptDocument(auto-recover): #{reservationId} receipt={receiptNumber} คืนมัดจำสำเร็จ → เข้าเส้น drives ทำ single-JE", "SYSTEM");
+                            }
+                        }
+
                         if (depReversed)
                         {
                             doc.DepositAppliedAmount = depositApplied;   // display หักมัดจำ/ยอดสุทธิ
@@ -4078,7 +4091,7 @@ namespace Take_Time_BangPhra.Integration
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"⚠ ProcessReceiptDocument(guard): #{reservationId} receipt={receiptNumber} มัดจำ {depositApplied:N2} " +
                                 $"ถูกกลับ (reverse) ไปแล้วบน NextAcc (จากเช็คเอาท์รอบก่อน+void) → ไม่ drives/ไม่กลับซ้ำ, " +
-                                $"book Dr เงินสดเต็ม (net ถูก). กัน churn/double-reverse. ต้องการ single-JE ต้อง un-reverse ใบมัดจำก่อน", "SYSTEM");
+                                $"book Dr เงินสดเต็ม (net ถูก). กัน churn/double-reverse. เปิด Nexaacc_Auto_Recover_Deposit เพื่อ un-reverse อัตโนมัติ", "SYSTEM");
                         }
                         else if (depState.AnyDeposit && !booked)
                         {
@@ -4645,23 +4658,15 @@ namespace Take_Time_BangPhra.Integration
             catch { /* คอลัมน์ยังไม่มี = ยังไม่ migrate → ข้าม */ }
         }
 
-        /// <summary>
-        /// กลับ JE "ตัวจริง" ของใบมัดจำ (account-for-account ผ่าน ReverseJournalAsync) — แม่นกว่า raw JV:
-        /// ได้ผลถูกไม่ว่าใบมัดจำจะลง 21510 (หนี้สิน) หรือลงรายได้ทันที (int_ รุ่นเก่า). idempotent ด้วย
-        /// ReversedByEntryId (เคยกลับแล้ว → ข้าม). คืน true = จัดการครบ (กลับ/เคยกลับ) → caller ไม่ต้อง raw JV;
-        /// false = หา JE ไม่เจอ/ล้มเหลว → caller fallback "หักแบบดิบๆ" (raw JV 21510/21913).
-        /// </summary>
-        /// <summary>ค้น "JE ใบมัดจำ" ตัวจริงของการจองบน NextAcc (ทุกทาง: reservation id / ref RES-{id}-DEP /
-        /// เลขเอกสาร / เลข JE / local id) แล้ว match เฉพาะ JE มัดจำจริง (ไม่ใช่ reversal/voided/JE เช็คเอาท์).
-        /// ใช้ร่วมกันระหว่าง TryReverse (กลับมัดจำ) และ IsDepositAlreadyReversed (ตรวจสถานะกัน churn/double).</summary>
-        private async System.Threading.Tasks.Task<List<JournalEntryResponse>> FindDepositJournalsAsync(int reservationId)
+        /// <summary>ค้น journal ทั้งหมดที่เกี่ยวกับใบมัดจำของการจอง (ทุกทาง: reservation id / ref RES-{id}-DEP /
+        /// เลขเอกสาร / เลข JE / local id) → คืน candidate dict "ทั้งชุด" (รวม reversal) + ตัวระบุมัดจำ + depRef.
+        /// ให้ FindDepositJournals (filter เฉพาะ JE มัดจำ) และ recover (เข้าถึง reversal ด้วย) ใช้ร่วมกัน.</summary>
+        private async System.Threading.Tasks.Task<(Dictionary<Guid, JournalEntryResponse> candidates, HashSet<string> depIds, string depRef)>
+            SearchDepositJournalsAsync(int reservationId)
         {
-            var empty = new List<JournalEntryResponse>();
-            // ── รวบ "ตัวระบุใบมัดจำ" ทุกแบบ เพื่อค้น JE ให้เจอทุกทาง ──────────────────────────
-            // ใบมัดจำอาจ sync มา 2 แบบ: (ก) ใบเสร็จรับเงินมัดจำ (company Receipt, เลข REC-, Reference RES-{id})
-            // (ข) JE อย่างเดียว รุ่นก่อน (int_, EntryNumber JV-INT-, Reference RES-{id}-DEP).
             string depRef = $"RES-{reservationId}-DEP";
             var depIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // local id + เลขเอกสาร NextAcc ของใบมัดจำ
+            var candidates = new Dictionary<Guid, JournalEntryResponse>();
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT ID FROM Account_Receipt
                   WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
@@ -4678,8 +4683,6 @@ namespace Take_Time_BangPhra.Integration
 
             var searchKeys = new List<string> { depRef, $"RES-{reservationId}" };
             searchKeys.AddRange(depIds);
-
-            var candidates = new Dictionary<Guid, JournalEntryResponse>();
             foreach (var key in searchKeys.Where(k => !string.IsNullOrWhiteSpace(k))
                                           .Distinct(StringComparer.OrdinalIgnoreCase))
             {
@@ -4692,17 +4695,26 @@ namespace Take_Time_BangPhra.Integration
                 }
                 catch { }
             }
-            if (candidates.Count == 0) return empty;
+            return (candidates, depIds, depRef);
+        }
 
-            // match เฉพาะ "JE ใบมัดจำ" จริง (กันไปโดน JE เช็คเอาท์/adjustment): ตรง depRef, หรือ Reference/
-            // EntryNumber/SourceDocumentNumber ตรงกับตัวระบุมัดจำ. ไม่ใช่ตัว reversal (OriginalEntryId==null) + ไม่ voided
-            return candidates.Values.Where(j =>
-                j.OriginalEntryId == null && j.Status != 2 &&
+        /// <summary>true ถ้า JE เป็น "ใบมัดจำจริง" ของการจอง (ไม่ใช่ reversal/voided/JE เช็คเอาท์).</summary>
+        private static bool IsDepositEntry(JournalEntryResponse j, HashSet<string> depIds, string depRef)
+        {
+            return j.OriginalEntryId == null && j.Status != 2 &&
                 (string.Equals(j.Reference, depRef, StringComparison.OrdinalIgnoreCase)
                  || (!string.IsNullOrEmpty(j.Reference) && depIds.Contains(j.Reference))
                  || (!string.IsNullOrEmpty(j.EntryNumber) && depIds.Contains(j.EntryNumber))
-                 || (!string.IsNullOrEmpty(j.SourceDocumentNumber) && depIds.Contains(j.SourceDocumentNumber)))
-                ).ToList();
+                 || (!string.IsNullOrEmpty(j.SourceDocumentNumber) && depIds.Contains(j.SourceDocumentNumber)));
+        }
+
+        /// <summary>ค้น "JE ใบมัดจำ" ตัวจริงของการจอง (filter จาก candidate ทั้งชุด). ใช้โดย TryReverse +
+        /// IsDepositAlreadyReversed.</summary>
+        private async System.Threading.Tasks.Task<List<JournalEntryResponse>> FindDepositJournalsAsync(int reservationId)
+        {
+            var (candidates, depIds, depRef) = await SearchDepositJournalsAsync(reservationId);
+            if (candidates.Count == 0) return new List<JournalEntryResponse>();
+            return candidates.Values.Where(j => IsDepositEntry(j, depIds, depRef)).ToList();
         }
 
         /// <summary>ใบมัดจำของการจองถูก "กลับ (reverse)" ไปแล้วบน NextAcc รึยัง (ReversedByEntryId ตั้ง) —
@@ -4716,6 +4728,72 @@ namespace Take_Time_BangPhra.Integration
                 return depJEs.Any(j => j.ReversedByEntryId != null && j.ReversedByEntryId != Guid.Empty);
             }
             catch { return false; }
+        }
+
+        /// <summary>AUTO-RECOVER (legacy): ใบมัดจำที่ถูก reverse ค้างจากการ void+sync ใหม่หลายรอบ (drives ปิด
+        /// สมัยก่อน) → "un-reverse" (กลับตัว reversal) เพื่อคืนหนี้สินมัดจำ 21510 ให้ active อีกครั้ง → drives
+        /// ในเช็คเอาท์ใบใหม่กลับมัดจำใน JE เดียวได้ (single-JE, Dr เงินสดสุทธิ). idempotent: ถ้า reversal ถูก
+        /// กลับไปแล้ว (recovered) หรือ voided → ข้าม; หา reversal entry ไม่เจอใน candidate → ไม่ทำ (กัน double).
+        /// คืน true = มัดจำ active พร้อม drives แล้ว (recover สำเร็จ/เคย recover); false = ทำไม่ได้ → caller ใช้ guard เดิม.
+        /// GL: deposit + reversal(เดิม) + un-reversal = deposit เดี่ยว (reversal/un-reversal หักล้าง) → 21510 กลับมา 500.</summary>
+        private async System.Threading.Tasks.Task<bool> TryRecoverReversedDepositAsync(int reservationId, string receiptNumber)
+        {
+            try
+            {
+                var (candidates, depIds, depRef) = await SearchDepositJournalsAsync(reservationId);
+                if (candidates.Count == 0) return false;
+                var depJEs = candidates.Values.Where(j => IsDepositEntry(j, depIds, depRef)).ToList();
+                var reversedDeps = depJEs.Where(j => j.ReversedByEntryId != null && j.ReversedByEntryId != Guid.Empty).ToList();
+                if (reversedDeps.Count == 0) return true;   // ไม่มีตัวถูก reverse → active อยู่แล้ว (พร้อม drives)
+
+                bool allActive = true;
+                foreach (var dep in reversedDeps)
+                {
+                    Guid revId = dep.ReversedByEntryId.Value;
+                    candidates.TryGetValue(revId, out var reversal);
+
+                    // reversal ถูกกลับ/void ไปแล้ว = เคย recover แล้ว → มัดจำ active (idempotent, ไม่ทำซ้ำ)
+                    bool reversalUndone = reversal != null &&
+                        (reversal.Status == 2 || (reversal.ReversedByEntryId != null && reversal.ReversedByEntryId != Guid.Empty));
+                    if (reversalUndone) continue;
+
+                    if (reversal == null)
+                    {
+                        // หา reversal entry ไม่เจอใน candidate → verify สถานะไม่ได้ → ไม่ un-reverse (กัน double-reverse)
+                        allActive = false;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecoverDeposit: #{reservationId} receipt={receiptNumber} JE มัดจำ {dep.EntryNumber} ถูก reverse (revId={revId}) " +
+                            $"แต่หา reversal entry ใน candidate ไม่เจอ → ไม่ un-reverse (กัน double). ใช้ guard เดิม", "SYSTEM");
+                        continue;
+                    }
+
+                    // un-reverse: กลับตัว reversal → คืนมัดจำ (idempotent ฝั่ง NextAcc ผ่าน ReversedByEntryId ของ reversal)
+                    var rev = await _apiClient.ReverseJournalAsync(revId, new ReverseJournalEntryRequest
+                    {
+                        Description = $"Auto-recover: คืนใบมัดจำ (un-reverse {reversal.EntryNumber}) การจอง #{reservationId} " +
+                                      $"เพื่อให้เช็คเอาท์ drives กลับมัดจำใน JE เดียว — JE มัดจำ {dep.EntryNumber}"
+                    });
+                    if (rev?.success == true)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"✅ AutoRecoverDeposit: #{reservationId} receipt={receiptNumber} un-reverse {reversal.EntryNumber} (Id={revId}) สำเร็จ → " +
+                            $"มัดจำ {dep.EntryNumber} active อีกครั้ง (21510 คืน) → drives พร้อมทำ single-JE", "SYSTEM");
+                    }
+                    else
+                    {
+                        allActive = false;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"AutoRecoverDeposit: #{reservationId} un-reverse {reversal.EntryNumber} ล้มเหลว: {rev?.message} → ใช้ guard เดิม", "SYSTEM");
+                    }
+                }
+                return allActive;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"AutoRecoverDeposit failed resId={reservationId}: {ex.Message}", "SYSTEM");
+                return false;
+            }
         }
 
         private async System.Threading.Tasks.Task<bool> TryReverseDepositJournalsAsync(int reservationId)
