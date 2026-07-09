@@ -4801,10 +4801,17 @@ namespace Take_Time_BangPhra.Integration
                 if (doc == null) return ("WARN", "อ่านเอกสารกลับจาก NextAcc ไม่ได้ (อาจถูกลบ/ยังไม่ sync)");
                 if (!IsPostedStatus(doc.Status)) warns.Add($"เอกสารยังไม่โพสต์ (status={doc.Status})");
                 else oks.Add("โพสต์แล้ว");
-                if (expectedTotal > 0 && Math.Abs(doc.TotalAmount - expectedTotal) > 0.05m)
-                    warns.Add($"ยอดรวมไม่ตรง: NextAcc {doc.TotalAmount:N2} vs รับจริง {expectedTotal:N2}");
+                // doc.TotalAmount = ยอดเต็ม (gross ค่าห้องพัก). expectedTotal จาก payload อาจเป็น "สุทธิหลังหักมัดจำ"
+                // (net = เต็ม − มัดจำ) เพราะเช็คเอาท์ที่มี line ส่วนลดมัดจำเก็บ Total_Amount เป็นสุทธิ → doc ถูก gross-up.
+                // ⟹ ยอมรับทั้ง net (expectedTotal) และ gross (expectedTotal + depositApplied) กัน false-positive
+                // (เดิมเทียบ doc gross 1450 กับ net 950 → WARN ผิด ทั้งที่ทั้งคู่ถูก).
+                decimal grossWithDep = expectedTotal + depositApplied;
+                bool totalOk = Math.Abs(doc.TotalAmount - expectedTotal) <= 0.05m
+                    || Math.Abs(doc.TotalAmount - grossWithDep) <= 0.05m;
+                if (expectedTotal > 0 && !totalOk)
+                    warns.Add($"ยอดรวมไม่ตรง: NextAcc {doc.TotalAmount:N2} vs คาด {expectedTotal:N2} (net) / {grossWithDep:N2} (เต็ม+มัดจำ)");
                 else if (expectedTotal > 0)
-                    oks.Add($"ยอดรวมตรง {doc.TotalAmount:N2}");
+                    oks.Add($"ยอดรวม {doc.TotalAmount:N2} (รับจริง {expectedTotal:N2} + หักมัดจำ {depositApplied:N2})");
 
                 // 2) ค้น JE ที่เกี่ยวข้อง (ทุกทาง) → เช็ค JE ของเอกสารนี้บาลานซ์ + รวมบัญชีมัดจำทั้งการจอง
                 var jeKeys = new List<string> { receiptNumber, $"RES-{reservationId}", doc.DocumentNumber };
