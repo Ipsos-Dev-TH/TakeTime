@@ -9,25 +9,34 @@ TakeTime ส่งบน checkout Receipt (DocumentType=3) แล้ว: `deposi
 
 ---
 
-## 1. [สำคัญสุด] Un-realize ใบมัดจำ ตอน void เอกสารเช็คเอาท์ (drives-journal mode)
+## ✅ เสร็จแล้ว (NextAcc)
+- **drives รับ journal ref (JV-INT):** cb55e3b — depositAppliedRef เป็น JournalEntry.EntryNumber ได้
+  → กลับ deferred (217xx/21913) จากบรรทัด Cr ของ journal ใน JE ใบเดียว (self-contained). TakeTime
+  รองรับแล้ว (config `Nexaacc_Drives_Journal_Ref`, commit 4c34f5c/72b37b1).
+- **confirmation A** (แยกฐาน/VAT ตามใบมัดจำจริง): ✅ cb55e3b กลับจากบรรทัด Cr จริง.
+- **double-reverse guard:** ✅ NextAcc มี `DepositAppliedToDocumentId`.
 
-**บริบท:** `depositAppliedDrivesJournal=true` (spec §9.1) → ตอน post Receipt เช็คเอาท์ NextAcc ลง JE
-self-contained (Dr เงินสดสุทธิ + Dr 217xx + Dr 21913 กลับใบมัดจำที่ `depositAppliedRef` ชี้) + **mark
-ใบมัดจำ "realized"** กันรับรู้ซ้ำ.
+---
+
+## 1. [สำคัญสุด — ยังต้องยืนยัน] Un-realize ใบมัดจำ ตอน void เอกสารเช็คเอาท์ (ทั้ง Document REC- และ journal JV-INT)
+
+**บริบท:** drives-journal (REC- หรือ JV-INT) → post เช็คเอาท์ ลง JE self-contained + **mark ใบมัดจำ/JV
+"realized/applied"** (`DepositAppliedToDocumentId`) กันรับรู้ซ้ำ.
 
 **สิ่งที่ต้องยืนยัน/ทำ:** เมื่อ **void เอกสารเช็คเอาท์** ที่ใช้ drives-journal → NextAcc ต้อง
 1. reverse JE (คืน 217xx/21913) — ปกติ void cascade ทำอยู่แล้ว
-2. **UN-mark "realized" ของใบมัดจำที่อ้างถึง** โดย **ไม่ต้อง void ใบมัดจำเอง**
+2. **UN-mark "realized" / clear `DepositAppliedToDocumentId`** ของใบมัดจำ **หรือ JV-INT** ที่อ้างถึง
+   โดย **ไม่ต้อง void ใบมัดจำ/JV เอง**
 
-**ทำไมสำคัญ:** TakeTime resync = **void→สร้างใหม่เฉพาะใบเช็คเอาท์** (ไม่เคยแตะใบมัดจำ — มัดจำเป็น
-ธุรกรรมรับเงินจริงที่จบแล้ว). สถานะ realized ของใบมัดจำจึงต้องคุมด้วย lifecycle ของ "ใบเช็คเอาท์":
+**ทำไมสำคัญ:** TakeTime resync/edit = **void→สร้างใหม่เฉพาะใบเช็คเอาท์** (ไม่แตะใบมัดจำ/JV — เป็น
+ธุรกรรมรับเงินจริงที่จบแล้ว). สถานะ realized จึงต้องคุมด้วย lifecycle ของ "ใบเช็คเอาท์":
 ```
-CREATE#1 เช็คเอาท์ → กลับใบมัดจำ + mark realized
-VOID#1   เช็คเอาท์ → reverse JE + UN-mark realized  ← ข้อนี้
-CREATE#2 เช็คเอาท์ (อ้างมัดจำเดิม) → re-realize ได้
+CREATE#1 เช็คเอาท์ → กลับมัดจำ/JV + mark realized (DepositAppliedToDocumentId)
+VOID#1   เช็คเอาท์ → reverse JE + UN-mark realized / clear DepositAppliedToDocumentId  ← ข้อนี้
+CREATE#2 เช็คเอาท์ (อ้างมัดจำ/JV เดิม) → re-realize ได้
 ```
-ถ้า void ไม่ un-mark → CREATE#2 เจอ "realized แล้ว" → ข้ามการกลับ 217xx/21913 → ใบใหม่ JE ขาด
-Dr มัดจำ = GL ไม่บาลานซ์.
+ถ้า void ไม่ un-mark → CREATE#2 เจอ "realized/applied แล้ว" → guard บล็อก → ข้ามการกลับ 217xx/21913
+→ ใบใหม่ JE ขาด Dr มัดจำ = GL ไม่บาลานซ์. **ต้องรองรับทั้ง Document ref และ journal ref (JV-INT)**.
 
 ---
 
