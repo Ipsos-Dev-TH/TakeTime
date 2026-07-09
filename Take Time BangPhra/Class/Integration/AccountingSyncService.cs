@@ -3785,6 +3785,7 @@ namespace Take_Time_BangPhra.Integration
                         isDeposit: true, depositVatAtReceipt: depositVatAtReceipt, deferOutputVat: _config.IsDepositOutputVatDeferred);
                     Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, 0m,
                         paymentMethod, receiptDate, customerName, depositHasVat, paymentAccountId);
+                    await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปมัดจำเข้า company doc
                     // มัดจำ = "ใบเสร็จรับเงิน" เท่านั้น — ไม่ออก e-Tax (ใบกำกับภาษีออกตอนเช็คเอาท์
                     // เต็มยอดรวมมัดจำ; ใช้คู่กับ Deposit_Defer_Output_Vat เพื่อให้จุด VAT ตรงใบกำกับ)
                     _code.Logs(_connectionString, "AccountingSync",
@@ -3989,6 +3990,7 @@ namespace Take_Time_BangPhra.Integration
                     Guid docId = await EnsureRevenueDocCreatedApprovedAsync(doc, receiptNumber);
                     await SettleReceiptInNextAcc(docId, receiptNumber, totalAmount, depositApplied,
                         paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
+                    await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company TaxInvoice doc
                     _lastDocType = "RECEIPT";   // company doc → deep link /documents; repost ใช้เส้น void→สร้างใหม่
                     await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
                     return docId.ToString();
@@ -4094,12 +4096,12 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessReceiptDocument(B2C): drives-journal หาใบมัดจำไม่เจอ (400) → ปิด drives, fallback JV adjustment receipt={receiptNumber}: {dex.ResponseBody}", "SYSTEM");
                         doc.DepositAppliedDrivesJournal = false;
-                        doc.DepositAppliedRef = null;
-                        doc.DepositAppliedAmount = null;
+                        // KEEP DepositAppliedAmount + Ref (display "หักเงินมัดจำ/สุทธิ" ต้องโชว์เสมอ — display-only ไม่ 400)
                         SetReceiptPaymentMarker(receiptNumber, null);
                         docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
                             paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
                     }
+                    await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company doc
                     _lastDocType = "RECEIPT";
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
@@ -4455,43 +4457,37 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
-                var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT ID FROM Account_Receipt
-                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
-                    new Dictionary<string, object> { { "@rid", reservationId } });
-                if (dt == null || dt.Rows.Count == 0) return false;
-                bool allHandled = true;
-                foreach (System.Data.DataRow r in dt.Rows)
+                // JE ของใบมัดจำใช้ Reference = "RES-{id}-DEP" (MapDepositToInvoice/MapDepositToJournal) —
+                // NextAcc SearchJournals แมตช์ "Reference" ไม่ใช่ EntryNumber → ต้องค้นด้วย reference นี้
+                // (เดิมค้นด้วย EntryNumber JV-INT-... → หาไม่เจอ → fallback raw เสมอ)
+                string depRef = $"RES-{reservationId}-DEP";
+                var found = await _apiClient.SearchJournalsAsync(depRef, 20);
+                var depJEs = found?.data?.Items?
+                    .Where(j => j.OriginalEntryId == null   // ไม่ใช่ตัว reversal เอง
+                        && string.Equals(j.Reference, depRef, StringComparison.OrdinalIgnoreCase)
+                        && j.Status != 2 /* not voided */)
+                    .ToList();
+                if (depJEs == null || depJEs.Count == 0) return false;   // ไม่พบ JE มัดจำ → caller fallback raw
+
+                bool anyHandled = false;
+                foreach (var je in depJEs)
                 {
-                    string localId = r["ID"]?.ToString();
-                    if (string.IsNullOrEmpty(localId)) { allHandled = false; continue; }
-                    string jnum = LookupNexaaccDepositJournalNumber(localId);
-                    if (string.IsNullOrEmpty(jnum)) { allHandled = false; continue; }
-
-                    var found = await _apiClient.SearchJournalsAsync(jnum, 10);
-                    var je = found?.data?.Items?.FirstOrDefault(j =>
-                        string.Equals(j.EntryNumber, jnum, StringComparison.OrdinalIgnoreCase) && j.OriginalEntryId == null);
-                    if (je == null) { allHandled = false; continue; }
-                    if (je.ReversedByEntryId != null) continue;   // เคยกลับแล้ว (idempotent)
-                    if (je.Status == 2) continue;                 // Voided แล้ว → ไม่ต้องกลับ
-
+                    if (je.ReversedByEntryId != null) { anyHandled = true; continue; }   // เคยกลับแล้ว (idempotent)
                     var rev = await _apiClient.ReverseJournalAsync(je.Id, new ReverseJournalEntryRequest
                     {
-                        Description = $"กลับมัดจำตอนเช็คเอาท์ — การจอง #{reservationId} (JE เดิม {jnum})"
+                        Description = $"กลับมัดจำตอนเช็คเอาท์ — การจอง #{reservationId} (JE เดิม {je.EntryNumber})"
                     });
                     if (rev?.success != true)
                     {
-                        allHandled = false;
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"TryReverseDepositJournals: reverse {jnum} (Id={je.Id}) ล้มเหลว การจอง #{reservationId}: {rev?.message}", "SYSTEM");
+                            $"TryReverseDepositJournals: reverse {je.EntryNumber} (Id={je.Id}) ล้มเหลว การจอง #{reservationId}: {rev?.message}", "SYSTEM");
+                        return false;   // ล้มเหลว → fallback raw
                     }
-                    else
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"TryReverseDepositJournals: reverse JE มัดจำ {jnum} (Id={je.Id}) การจอง #{reservationId} สำเร็จ → กลับตามบัญชีจริงของใบมัดจำ", "SYSTEM");
-                    }
+                    anyHandled = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"TryReverseDepositJournals: reverse JE มัดจำ {je.EntryNumber} (Id={je.Id}) การจอง #{reservationId} สำเร็จ → กลับตามบัญชีจริงของใบมัดจำ", "SYSTEM");
                 }
-                return allHandled;
+                return anyHandled;
             }
             catch (Exception ex)
             {
@@ -7541,6 +7537,37 @@ namespace Take_Time_BangPhra.Integration
                     paths.Add(a.FilePath);
             }
             return paths.Count > 0 ? paths : null;
+        }
+
+        /// <summary>แนบสลิป/ไฟล์ของใบเสร็จเข้า "company document" (Receipt/TaxInvoice) หลังสร้าง/อนุมัติ.
+        /// เส้น company /document ไม่รับ attachments ใน CreateDocumentRequest (ต่างจาก int_ invoice) →
+        /// ต้อง UploadAttachmentAsync แยกหลังได้ docId. กันซ้ำด้วย GetAttachments (มีไฟล์แล้ว → ข้าม).</summary>
+        private async System.Threading.Tasks.Task UploadReceiptSlipsAsync(Guid docId, List<IntegrationAttachment> attachments, string receiptNumber)
+        {
+            if (docId == Guid.Empty) return;
+            var paths = ExtractFilePaths(attachments);
+            if (paths == null || paths.Count == 0) return;
+            try
+            {
+                // กันแนบซ้ำ (retry) — ถ้าเอกสารมีไฟล์แนบแล้ว ข้าม
+                var existing = await _apiClient.GetAttachmentsAsync("Document", docId);
+                if (existing?.data != null && existing.data.Count > 0) return;
+            }
+            catch { /* อ่านไม่ได้ → ลองแนบต่อ (ดีกว่าไม่แนบ) */ }
+            foreach (var p in paths)
+            {
+                try
+                {
+                    var up = await _apiClient.UploadAttachmentAsync("Document", docId, p);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"UploadReceiptSlips: แนบสลิปเข้าเอกสาร doc={docId} receipt={receiptNumber} ไฟล์={System.IO.Path.GetFileName(p)} → {(up?.success == true ? "สำเร็จ" : "ล้มเหลว: " + up?.message)}", "SYSTEM");
+                }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"UploadReceiptSlips: แนบสลิป {p} ล้มเหลว receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                }
+            }
         }
 
         // ══════════════════════════════════════════════
