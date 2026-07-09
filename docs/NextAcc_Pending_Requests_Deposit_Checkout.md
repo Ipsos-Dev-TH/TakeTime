@@ -52,6 +52,23 @@ Cr อยู่หน้า 2) อ่านยาก.
 
 ---
 
+## 2b. [ทางเลือก] `bookingNumber` บน Credit Note / Debit Note DTO
+
+**บริบท:** NextAcc เพิ่ม `bookingNumber` (เลขการจอง `RES-{id}`) ให้ **integration invoice** แล้ว
+(commit 8ed90ba) — TakeTime ส่งครบทุก invoice/document ที่อิงการจอง. ตอนนี้ TakeTime **ส่ง
+`bookingNumber` มาบน `/api/integration/credit-notes` และ `/debit-notes` ด้วย** (mapper คืนเงิน/
+ยกเลิกใบเสร็จ/ค่าเสียหาย: `MapRefundToCreditNote` / `MapReceiptVoidToCreditNote` /
+`MapDamageChargeToDebitNote`).
+
+**ขอ (ถ้าทำได้):** เพิ่มฟิลด์ `bookingNumber` (string, camelCase) ใน `InboundCreditNoteRequest` /
+`InboundDebitNoteRequest` DTO ฝั่ง NextAcc (mirror invoice 8ed90ba) → เพื่อ **group ทุกเอกสารของ
+การจองด้วยคีย์เดียว** (ใบกำกับ + CN + DN) filter/ค้นตาม booking ได้เหมือน invoice.
+
+**หมายเหตุ:** ไม่ใช่ blocker — ถ้า DTO ยังไม่มีฟิลด์นี้ NextAcc จะ **ignore** เฉย (record ไม่ error).
+CN/DN โยงการจองได้อยู่แล้วผ่าน `externalRef` (`CN-RES-{id}` / `DN-DMG-{id}`) + `originalInvoiceRef`.
+
+---
+
 ## 3. [ทางเลือก] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
 
 **บริบท:** เช็คเอาท์ลูกค้า walk-in ใช้ **DocumentType=Receipt(3)** (จำเป็น — TaxInvoice(4) ติด §86/4

@@ -2969,6 +2969,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 ExternalRef = $"CN-RES-{reservationId}",
                 OriginalInvoiceRef = originalReceiptRef,
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 CustomerName = customerName,
                 DocumentDate = refundDate,
                 Reason = reason ?? "คืนเงิน",
@@ -3000,6 +3001,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 ExternalRef = $"CN-{receiptNumber}",
                 OriginalInvoiceRef = receiptNumber,
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 CustomerName = customerName,
                 DocumentDate = voidDate,
                 Reason = reason ?? $"ยกเลิกใบเสร็จ {receiptNumber}",
@@ -3033,6 +3035,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 ExternalRef = $"DN-DMG-{reservationId}",
                 OriginalInvoiceRef = originalReceiptRef,
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 CustomerName = customerName,
                 DocumentDate = chargeDate,
                 Reason = description ?? "ค่าเสียหาย/ของหาย",

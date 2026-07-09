@@ -1075,6 +1075,9 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+        // เลขการจอง (RES-{id}) — group ทุกเอกสารของการจอง (invoice + CN + DN) ด้วยคีย์เดียว
+        // NextAcc ยัง ignore ได้ถ้า DTO ยังไม่มีฟิลด์นี้ (forward-compatible, mirror invoice 8ed90ba)
+        public string BookingNumber { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -1094,6 +1097,9 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+        // เลขการจอง (RES-{id}) — group ทุกเอกสารของการจอง (invoice + CN + DN) ด้วยคีย์เดียว
+        // NextAcc ยัง ignore ได้ถ้า DTO ยังไม่มีฟิลด์นี้ (forward-compatible, mirror invoice 8ed90ba)
+        public string BookingNumber { get; set; }
     }
 
     // ──────────────────────────────────────────────
