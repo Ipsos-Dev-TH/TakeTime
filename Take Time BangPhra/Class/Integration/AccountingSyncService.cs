@@ -4085,6 +4085,9 @@ namespace Take_Time_BangPhra.Integration
                                     doc.DepositAppliedDrivesJournal = true;
                                     depositForJv = 0m;   // NextAcc ลงหักมัดจำใน JE เอง → ห้ามยิง JV แยกซ้ำ
                                 }
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"ProcessReceiptDocument(drives-resolve): #{reservationId} receipt={receiptNumber} → เคส(b) มัดจำ=เอกสาร REC- " +
+                                    $"ref={doc.DepositAppliedRef} drives={(doc.DepositAppliedDrivesJournal ? "ON (JE เดียว Dr เงินสดสุทธิ)" : $"OFF (flag Nexaacc_Deposit_Drives_Journal={( _config.IsDepositAppliedDrivesJournal ? 1 : 0)}) → JV แยก")}", "SYSTEM");
                             }
                             else
                             {
@@ -4103,14 +4106,28 @@ namespace Take_Time_BangPhra.Integration
                                     doc.DepositAppliedRef = jeRef;                 // JV-INT-... ตรงตัว → NextAcc resolve เป็น JournalEntry
                                     doc.DepositAppliedDrivesJournal = true;
                                     depositForJv = 0m;                             // ห้ามส่ง reverse-JE/raw แยก
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"ProcessReceiptDocument(drives-resolve): #{reservationId} receipt={receiptNumber} → เคส(c) มัดจำ=journal " +
+                                        $"ref={jeRef} drives=ON (JE เดียว Dr เงินสดสุทธิ)", "SYSTEM");
                                 }
                                 else
                                 {
                                     // drives ปิด / มัดจำหลายใบ / หาเลข JE ไม่ได้ → display "มัดจำ" + กลับ JE จริงแยก
                                     // (account-for-account) ก่อน; หาไม่เจอ → raw JV (หักแบบดิบๆ)
                                     doc.DepositAppliedRef = "มัดจำ";
-                                    if (await TryReverseDepositJournalsAsync(reservationId))
+                                    // DIAGNOSTIC: บอกเหตุที่ drives ไม่ทำงาน (ref="(มัดจำ)" บนใบ = ตกเคสนี้ → JE เอกสารโชว์เต็มยอด,
+                                    // การกลับมัดจำอยู่ใน JV แยก). เหตุที่พบบ่อย: มัดจำ sync เป็น invoice/หลายใบ/ยังไม่ COMPLETED (jeRef ว่าง)
+                                    // หรือ flag ปิด. ใช้เจาะว่าทำไมใบ ๆ นี้ไม่เข้า drives.
+                                    string why = string.IsNullOrEmpty(jeRef)
+                                        ? "หาเลขอ้างอิงใบมัดจำบน NextAcc ไม่เจอ (มัดจำอาจ sync เป็นใบกำกับ int_ / มีมัดจำหลายใบ / ใบมัดจำยังไม่ COMPLETED)"
+                                        : $"flag ยังไม่เปิดครบ (Nexaacc_Deposit_Drives_Journal={(_config.IsDepositAppliedDrivesJournal ? 1 : 0)}, Nexaacc_Drives_Journal_Ref={(_config.IsDrivesJournalRefEnabled ? 1 : 0)})";
+                                    bool reversed = await TryReverseDepositJournalsAsync(reservationId);
+                                    if (reversed)
                                         depositForJv = 0m;
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"⚠ ProcessReceiptDocument(drives-resolve): #{reservationId} receipt={receiptNumber} → เคส(c-fallback) drives ไม่ทำงาน " +
+                                        $"(ref='มัดจำ', JE เอกสารจะโชว์เต็มยอด) เหตุ: {why}. กลับมัดจำผ่าน {(reversed ? "reverse-JE จริงแยก" : "JV adjustment แยก (SettleReceiptDoc)")} → GL net ถูก แต่ไม่ใช่ JE เดียว. " +
+                                        $"แก้: resync ใบมัดจำให้เป็น 'ใบเสร็จมัดจำ (RECEIPT doc)' แล้ว Retry เช็คเอาท์", "SYSTEM");
                                 }
                             }
                         }
