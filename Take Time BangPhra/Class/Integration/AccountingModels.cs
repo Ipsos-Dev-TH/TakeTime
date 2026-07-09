@@ -664,9 +664,15 @@ namespace Take_Time_BangPhra.Integration
             // Also support journal-specific status names
             { "Posted", 1 },
             // Journal ที่ถูกกลับรายการ — ยังอยู่ใน GL (ไม่ใช่ voided). map เป็นค่า distinct (9) เพื่อให้
-            // logic void-exclude (Status != 2/6) นับรวม → net GL 21510 ถูก (ตรงกับ NextAcc Posted||Reversed).
+            // logic void-exclude (IsVoidedStatus = 2/6) นับรวม → net GL 21510 ถูก (ตรงกับ NextAcc Posted||Reversed).
             // ⚠ ก่อนหน้านี้ "Reversed" ไม่อยู่ใน dict → ReadJson throw → deserialize SearchJournals ทั้ง response พัง
             // (กระทบ deposit-reverse detection / auto-recover / post-sync verify ที่ใช้ SearchJournals)
+            //
+            // NextAcc enum จริง (ยืนยัน): JournalEntryStatus Draft=0/Posted=1/Voided=2/Reversed=3 — **serialize เป็น
+            // string เสมอ** (JsonStringEnumConverter) → เรา key off string ("Reversed") ตรง ๆ (ทางที่เชื่อถือได้สุด).
+            // 9 เป็น "ค่า internal ของ TakeTime" เท่านั้น (ไม่มีโค้ดไหนคาด NextAcc ส่ง 9; ไม่มี hard-code == 9).
+            // ถ้าเลข NextAcc จริงมาทาง int-token (ไม่เกิดเพราะเป็น string เสมอ): 2=Voided → IsVoidedStatus จับได้,
+            // 3=Reversed → not-voided → นับใน GL (ถูก). ทั้ง 9 และ 3 ปฏิบัติเหมือนกัน (in-GL, not voided).
             { "Reversed", 9 },
             { "Reversal", 9 }
         };
