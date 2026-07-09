@@ -4839,6 +4839,16 @@ namespace Take_Time_BangPhra.Integration
                 // 3) บัญชีมัดจำ 21510 ไม่ติดลบ (double-reverse) — เมื่อมีมัดจำเกี่ยวข้อง
                 if (depositApplied > 0.005m || isDeposit)
                 {
+                    // ⚠ สำคัญ: net 21510 ต้องนับ "ทั้งขา Cr ฝั่งใบมัดจำ + ขา Dr ฝั่งเช็คเอาท์". search ด้วย key
+                    // เช็คเอาท์ (receipt/RES/doc) อาจไม่เจอ JE ฝั่งมัดจำ (คนละเลขเอกสาร) → เห็นแต่ Dr → ติดลบ false.
+                    // เติม JE ใบมัดจำผ่าน comprehensive deposit search (RES-{id}-DEP / เลขเอกสารมัดจำ / local id).
+                    try
+                    {
+                        var dep = await SearchDepositJournalsAsync(reservationId);
+                        foreach (var kv in dep.candidates) if (!jes.ContainsKey(kv.Key)) jes[kv.Key] = kv.Value;
+                    }
+                    catch { }
+
                     string depCode = null;
                     try { depCode = _mapper.GetAccountCode("ADVANCE_DEPOSIT"); } catch { }
                     if (!string.IsNullOrEmpty(depCode))
