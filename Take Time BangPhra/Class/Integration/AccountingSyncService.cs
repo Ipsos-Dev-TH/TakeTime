@@ -4060,7 +4060,27 @@ namespace Take_Time_BangPhra.Integration
                         bool booked = depState.AnyDeposit && !depState.PendingSync
                             && depState.BookedAmount + 0.01m >= depositApplied;
 
-                        if (depState.AnyDeposit && !booked)
+                        // ── GUARD กัน churn + double-reverse (จาก void+sync ใหม่หลายรอบ) ──────────────
+                        // ถ้า "JE มัดจำถูกกลับ (reverse) ไปแล้ว" บน NextAcc (เช็คเอาท์รอบก่อนใช้ TryReverse ตอน
+                        // drives ปิด → แล้ว void+สร้างใหม่) → หนี้สินมัดจำ 21510 เคลียร์ไปแล้ว. ถ้าปล่อยให้ drives
+                        // ยิงต่อ → NextAcc reject "ไม่พบใบมัดจำเลขที่ JV-INT-..." (กลับ 2 รอบไม่ได้) → วน void→
+                        // drives→fail ไม่จบ; ถ้า fallback กลับซ้ำอีก → 21510 ติดลบ (double-reverse). ⟹ ตรวจก่อน:
+                        // มัดจำ reverse แล้ว → ห้าม drives + ห้ามกลับซ้ำ (depositForJv=0) → book Dr เงินสด "เต็มยอด"
+                        // (การ reverse ก่อนหน้าคืน bank 500 ไปแล้ว → เงินสดสุทธิของทั้งการจอง = ยอดจริง, GL ถูก)
+                        // + โชว์ "หักเงินมัดจำ/ยอดสุทธิ" ตามเดิม. (ไม่ใช่ single-JE เพราะมัดจำถูกกลับนอกใบไปแล้ว —
+                        // ต้องการ single-JE ต้อง un-reverse มัดจำก่อน ซึ่งเป็นงานแยก/manual).
+                        bool depReversed = booked && await IsDepositAlreadyReversedAsync(reservationId);
+                        if (depReversed)
+                        {
+                            doc.DepositAppliedAmount = depositApplied;   // display หักมัดจำ/ยอดสุทธิ
+                            doc.DepositAppliedRef = "มัดจำ (กลับแล้ว)";
+                            depositForJv = 0m;                            // ไม่กลับซ้ำ กัน 21510 ติดลบ
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"⚠ ProcessReceiptDocument(guard): #{reservationId} receipt={receiptNumber} มัดจำ {depositApplied:N2} " +
+                                $"ถูกกลับ (reverse) ไปแล้วบน NextAcc (จากเช็คเอาท์รอบก่อน+void) → ไม่ drives/ไม่กลับซ้ำ, " +
+                                $"book Dr เงินสดเต็ม (net ถูก). กัน churn/double-reverse. ต้องการ single-JE ต้อง un-reverse ใบมัดจำก่อน", "SYSTEM");
+                        }
+                        else if (depState.AnyDeposit && !booked)
                         {
                             // (a) มีเอกสารใบมัดจำแต่ยังไม่ขึ้น NextAcc → backfill ให้ sync ก่อน แล้ว defer
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
@@ -4631,59 +4651,78 @@ namespace Take_Time_BangPhra.Integration
         /// ReversedByEntryId (เคยกลับแล้ว → ข้าม). คืน true = จัดการครบ (กลับ/เคยกลับ) → caller ไม่ต้อง raw JV;
         /// false = หา JE ไม่เจอ/ล้มเหลว → caller fallback "หักแบบดิบๆ" (raw JV 21510/21913).
         /// </summary>
+        /// <summary>ค้น "JE ใบมัดจำ" ตัวจริงของการจองบน NextAcc (ทุกทาง: reservation id / ref RES-{id}-DEP /
+        /// เลขเอกสาร / เลข JE / local id) แล้ว match เฉพาะ JE มัดจำจริง (ไม่ใช่ reversal/voided/JE เช็คเอาท์).
+        /// ใช้ร่วมกันระหว่าง TryReverse (กลับมัดจำ) และ IsDepositAlreadyReversed (ตรวจสถานะกัน churn/double).</summary>
+        private async System.Threading.Tasks.Task<List<JournalEntryResponse>> FindDepositJournalsAsync(int reservationId)
+        {
+            var empty = new List<JournalEntryResponse>();
+            // ── รวบ "ตัวระบุใบมัดจำ" ทุกแบบ เพื่อค้น JE ให้เจอทุกทาง ──────────────────────────
+            // ใบมัดจำอาจ sync มา 2 แบบ: (ก) ใบเสร็จรับเงินมัดจำ (company Receipt, เลข REC-, Reference RES-{id})
+            // (ข) JE อย่างเดียว รุ่นก่อน (int_, EntryNumber JV-INT-, Reference RES-{id}-DEP).
+            string depRef = $"RES-{reservationId}-DEP";
+            var depIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // local id + เลขเอกสาร NextAcc ของใบมัดจำ
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT ID FROM Account_Receipt
+                  WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
+                new Dictionary<string, object> { { "@rid", reservationId } });
+            if (dt != null)
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string localId = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(localId)) continue;
+                    depIds.Add(localId);
+                    string num = LookupNexaaccDepositJournalNumber(localId);   // REC-/JV-INT (raw)
+                    if (!string.IsNullOrEmpty(num)) depIds.Add(num);
+                }
+
+            var searchKeys = new List<string> { depRef, $"RES-{reservationId}" };
+            searchKeys.AddRange(depIds);
+
+            var candidates = new Dictionary<Guid, JournalEntryResponse>();
+            foreach (var key in searchKeys.Where(k => !string.IsNullOrWhiteSpace(k))
+                                          .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var found = await _apiClient.SearchJournalsAsync(key, 30);
+                    if (found?.data?.Items != null)
+                        foreach (var j in found.data.Items)
+                            if (j.Id != Guid.Empty && !candidates.ContainsKey(j.Id)) candidates[j.Id] = j;
+                }
+                catch { }
+            }
+            if (candidates.Count == 0) return empty;
+
+            // match เฉพาะ "JE ใบมัดจำ" จริง (กันไปโดน JE เช็คเอาท์/adjustment): ตรง depRef, หรือ Reference/
+            // EntryNumber/SourceDocumentNumber ตรงกับตัวระบุมัดจำ. ไม่ใช่ตัว reversal (OriginalEntryId==null) + ไม่ voided
+            return candidates.Values.Where(j =>
+                j.OriginalEntryId == null && j.Status != 2 &&
+                (string.Equals(j.Reference, depRef, StringComparison.OrdinalIgnoreCase)
+                 || (!string.IsNullOrEmpty(j.Reference) && depIds.Contains(j.Reference))
+                 || (!string.IsNullOrEmpty(j.EntryNumber) && depIds.Contains(j.EntryNumber))
+                 || (!string.IsNullOrEmpty(j.SourceDocumentNumber) && depIds.Contains(j.SourceDocumentNumber)))
+                ).ToList();
+        }
+
+        /// <summary>ใบมัดจำของการจองถูก "กลับ (reverse)" ไปแล้วบน NextAcc รึยัง (ReversedByEntryId ตั้ง) —
+        /// เกิดจากเช็คเอาท์รอบก่อนที่ใช้ TryReverse (drives ปิด) แล้ว void+สร้างใหม่. ถ้า true → หนี้สินมัดจำ
+        /// เคลียร์ไปแล้ว → ห้าม drives (NextAcc reject "ไม่พบใบมัดจำ") + ห้ามกลับซ้ำ (21510 ติดลบ). กัน churn.</summary>
+        private async System.Threading.Tasks.Task<bool> IsDepositAlreadyReversedAsync(int reservationId)
+        {
+            try
+            {
+                var depJEs = await FindDepositJournalsAsync(reservationId);
+                return depJEs.Any(j => j.ReversedByEntryId != null && j.ReversedByEntryId != Guid.Empty);
+            }
+            catch { return false; }
+        }
+
         private async System.Threading.Tasks.Task<bool> TryReverseDepositJournalsAsync(int reservationId)
         {
             try
             {
-                // ── รวบ "ตัวระบุใบมัดจำ" ทุกแบบ เพื่อค้น JE ให้เจอทุกทาง ──────────────────────────
-                // ใบมัดจำอาจ sync มา 2 แบบ: (ก) ใบเสร็จรับเงินมัดจำ (company Receipt, เลข REC-, Reference RES-{id})
-                // (ข) JE อย่างเดียว รุ่นก่อน (int_, EntryNumber JV-INT-, Reference RES-{id}-DEP).
-                // NextAcc SearchJournals แมตช์ได้หลายฟิลด์ (Reference/EntryNumber/SourceDocumentNumber) แต่แต่ละ
-                // deployment ไม่เท่ากัน → ค้น "หลายคีย์" แล้ว match ด้วยตัวระบุมัดจำที่เรารู้ (กันไปโดน JE เช็คเอาท์)
-                string depRef = $"RES-{reservationId}-DEP";
-                var depIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // local id + เลขเอกสาร NextAcc ของใบมัดจำ
-                var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT ID FROM Account_Receipt
-                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
-                    new Dictionary<string, object> { { "@rid", reservationId } });
-                if (dt != null)
-                    foreach (System.Data.DataRow r in dt.Rows)
-                    {
-                        string localId = r["ID"]?.ToString();
-                        if (string.IsNullOrEmpty(localId)) continue;
-                        depIds.Add(localId);
-                        string num = LookupNexaaccDepositJournalNumber(localId);   // REC-/JV-INT (raw)
-                        if (!string.IsNullOrEmpty(num)) depIds.Add(num);
-                    }
-
-                // คีย์ค้นหา: reservation id, ref มัดจำ, และตัวระบุทุกตัว (เลขเอกสาร/เลข JE/local)
-                var searchKeys = new List<string> { depRef, $"RES-{reservationId}" };
-                searchKeys.AddRange(depIds);
-
-                var candidates = new Dictionary<Guid, JournalEntryResponse>();
-                foreach (var key in searchKeys.Where(k => !string.IsNullOrWhiteSpace(k))
-                                              .Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        var found = await _apiClient.SearchJournalsAsync(key, 30);
-                        if (found?.data?.Items != null)
-                            foreach (var j in found.data.Items)
-                                if (j.Id != Guid.Empty && !candidates.ContainsKey(j.Id)) candidates[j.Id] = j;
-                    }
-                    catch { }
-                }
-                if (candidates.Count == 0) return false;
-
-                // match เฉพาะ "JE ใบมัดจำ" จริง (กันไปโดน JE เช็คเอาท์/adjustment): ตรง depRef, หรือ Reference/
-                // EntryNumber/SourceDocumentNumber ตรงกับตัวระบุมัดจำ. ไม่ใช่ตัว reversal (OriginalEntryId==null) + ไม่ voided
-                var depJEs = candidates.Values.Where(j =>
-                    j.OriginalEntryId == null && j.Status != 2 &&
-                    (string.Equals(j.Reference, depRef, StringComparison.OrdinalIgnoreCase)
-                     || (!string.IsNullOrEmpty(j.Reference) && depIds.Contains(j.Reference))
-                     || (!string.IsNullOrEmpty(j.EntryNumber) && depIds.Contains(j.EntryNumber))
-                     || (!string.IsNullOrEmpty(j.SourceDocumentNumber) && depIds.Contains(j.SourceDocumentNumber)))
-                    ).ToList();
+                var depJEs = await FindDepositJournalsAsync(reservationId);
                 if (depJEs.Count == 0) return false;   // ค้นทุกทางแล้วไม่พบ JE มัดจำ → caller fallback raw (หักดิบๆ)
 
                 bool anyHandled = false;
