@@ -91,10 +91,17 @@ Cr อยู่หน้า 2) อ่านยาก.
 >
 > **TakeTime (commit 1c86a93):** ส่ง preparer บน create ทุกเอกสาร company รับ (`ApplyReceiptPreparer`).
 >
-> **UpdateDocumentRequest (PUT) — NextAcc เพิ่มให้แล้ว + TakeTime wire แล้ว:** เอกสารที่ NextAcc สร้าง
-> จาก **OCR** (`Voucher/OcrUpload`) เราไม่คุมตอน create → ยัดผู้จัดทำผ่าน PUT (`ApplyCurrentUserPreparer`
-> จาก Session["UserID"] → Admin ชื่อ+ลายเซ็น) เพราะ `X-Acting-User` ช่วยเฉพาะเมื่อ staff เป็น NextAcc user.
-> ขอ NextAcc ยืนยันว่า `UpdateDocumentRequest` รับ `preparerName`/`preparerSignatureBase64` + priority เดียวกัน.
+> **UpdateDocumentRequest (PUT) — ✅ NextAcc เสร็จ (commit a30525e) + TakeTime wire แล้ว:** เอกสารที่
+> NextAcc สร้างจาก **OCR** (`Voucher/OcrUpload`) เราไม่คุมตอน create → ยัดผู้จัดทำผ่าน PUT
+> (`ApplyCurrentUserPreparer` จาก Session["UserID"] → Admin ชื่อ+ลายเซ็น) เพราะ `X-Acting-User` ช่วยเฉพาะ
+> เมื่อ staff เป็น NextAcc user. PUT รับ `preparerName`/`preparerSignatureBase64` + priority เดียวกับ create
+> (slot 0 ชนะ CreatedBy; null=ไม่แตะ, ""=ล้าง, ค่า=ตั้ง).
+>
+> **edge case (NextAcc flag):** ถ้า OCR สร้างเป็น **Approved** (ไม่ใช่ Draft) PUT จะติด "แก้ได้เฉพาะ Draft".
+> **flow เราไม่เข้าเคสนี้:** `CreateDocumentFromOcrAsync` สร้าง **Draft เสมอ** → PUT ตอน Draft → approve
+> ทีหลัง. ทางเดียวที่ resume แล้วเจอ Approved = approve สำเร็จแต่ response หลุด → รอบนั้น preparer ถูกตั้ง
+> ใน PUT ตอน Draft ไปแล้ว (ไม่เสียข้อมูล). NextAcc เตรียม carve-out (preparer แก้ได้ทุกสถานะ เพราะ display-only)
+> ไว้เป็น safety-net — ไม่ต้องเปิดสำหรับ flow ปัจจุบัน.
 
 <details><summary>รายละเอียดเดิม (audit trail)</summary>
 
