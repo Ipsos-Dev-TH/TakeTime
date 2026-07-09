@@ -192,6 +192,14 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>เลขจอง (booking) ของการจองห้องพัก — NextAcc field "bookingNumber" (string). ผูกเอกสาร
         /// ชุดเดียวกันของการจอง (มัดจำ→ใบกำกับ→ใบเสร็จ) + auto-suggest หักมัดจำ. TakeTime ส่ง "RES-{id}".</summary>
         public string BookingNumber { get; set; }
+        /// <summary>ชื่อผู้ทำเอกสาร/ผู้รับเงิน (พนักงานที่สร้างใบในระบบ TakeTime เช่น "ชวนพิศ …") —
+        /// เพื่อให้ช่อง "ผู้รับเงิน/ผู้จัดทำ" บน PDF เป็นคนทำจริง ไม่ใช่ NextAcc user (เจ้าของ/กรรมการ).
+        /// NextAcc field "preparerName". ⚠ NextAcc ต้องรองรับ + ให้ priority เหนือ CreatedBy user
+        /// (ดู docs/NextAcc_Pending_Requests). ตอนนี้ส่งไปก่อนแบบ forward-compatible (record ignore ได้).</summary>
+        public string PreparerName { get; set; }
+        /// <summary>ลายเซ็นผู้ทำเอกสาร/ผู้รับเงิน (data-URI หรือ base64) — NextAcc field
+        /// "preparerSignatureBase64". คู่กับ PreparerName สำหรับช่อง "ผู้รับเงิน/ผู้จัดทำ".</summary>
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     public class DocumentLineRequest

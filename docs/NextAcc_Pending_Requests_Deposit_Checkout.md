@@ -82,6 +82,34 @@ Cr อยู่หน้า 2) อ่านยาก.
 
 ---
 
+## 4. [ใหม่ — ต้องการ NextAcc] ช่อง "ผู้รับเงิน/ผู้จัดทำ" บนเอกสาร company `/document` = คนทำจริง (ไม่ใช่ NextAcc user)
+
+**อาการ:** ใบเสร็จ/ใบกำกับที่ออกจากเช็คเอาท์ (company Receipt DocumentType=3) ช่อง **"ผู้รับเงิน"**
+บน PDF ขึ้นเป็น **NextAcc user เจ้าของ API key (เจ้าของ/กรรมการ เช่น "วชิร ดิลกสัมพันธ์")** ไม่ใช่พนักงาน
+ที่สร้างใบจริงในระบบ TakeTime (เช่น "ชวนพิศ …").
+
+**เหตุ (verified):** `CreateDocumentRequest` (company `/document`) **ไม่มีฟิลด์ preparer/ผู้รับเงิน** →
+NextAcc `PdfGenerationService` เลย fallback ไปใช้ลายเซ็น `CreatedBy` user (= เจ้าของ API key). แม้จะมี
+`Document.PreparerSignatureBase64` ฝั่ง NextAcc ก็ priority **ต่ำกว่า** `CreatedBy.SignatureImageBase64`
+(ใช้ก็ต่อเมื่อ CreatedBy user ไม่มีลายเซ็น) → เจ้าของมีลายเซ็น เลยชนะเสมอ.
+
+**TakeTime ทำแล้ว (forward-compatible):** เพิ่ม `PreparerName` + `PreparerSignatureBase64` ใน
+`CreateDocumentRequest` (JSON `preparerName` / `preparerSignatureBase64`) + wire จากพนักงานที่สร้างใบ
+(`Account_Receipt.Created_By_ID → Admin` ชื่อ + ลายเซ็น) เข้าทุกเอกสาร company (ใบเสร็จมัดจำ/เช็คเอาท์/
+ใบกำกับ) ผ่าน `ApplyReceiptPreparer`. NextAcc record ignore ได้ถ้ายังไม่รองรับ.
+
+**ขอ NextAcc (2 อย่าง):**
+1. รับฟิลด์ `preparerName` + `preparerSignatureBase64` บน `CreateDocumentRequest` (company `/document`).
+2. **ให้ priority เอกสารที่ส่ง preparer มา "เหนือ" `CreatedBy` user** สำหรับช่อง "ผู้รับเงิน/ผู้จัดทำ"
+   บน Receipt/TaxInvoice — คือถ้า request มี `preparerName`/`preparerSignatureBase64` → ใช้ตัวนี้ก่อน
+   (ไม่ fallback ไป CreatedBy user แม้เจ้าของมีลายเซ็น). ช่อง "ผู้มีอำนาจลงนาม" คงเป็นเจ้าของ/กรรมการเหมือนเดิม.
+
+**ผลที่ต้องการ:** ผู้รับเงิน = ชวนพิศ (คนทำจริง) / ผู้มีอำนาจลงนาม = วชิร (กรรมการ). ตรงกับใบสำคัญจ่าย
+(integration PV) ที่ส่ง `PreparerName`/`PreparerSignatureBase64` ได้อยู่แล้ว — ขอให้ company document
+รองรับแบบเดียวกัน.
+
+---
+
 ## 3. ✅ [ปิด — คงเดิม] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
 
 > **ตัดสินใจ:** NextAcc คงเลข series เดิม (REC ร่วมกับใบเสร็จมัดจำ, gap-free §86/4) — ไม่แยกชุด.

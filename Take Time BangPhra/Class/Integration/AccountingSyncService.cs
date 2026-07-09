@@ -2669,6 +2669,7 @@ namespace Take_Time_BangPhra.Integration
             CreateDocumentRequest doc, string receiptNumber, int reservationId, decimal depositApplied,
             string paymentMethod, DateTime receiptDate, string customerName, bool hasVat, string paymentAccountId)
         {
+            ApplyReceiptPreparer(doc, receiptNumber);   // ผู้รับเงิน/ผู้จัดทำ = คนที่สร้างใบในระบบ (ไม่ใช่ NextAcc user)
             string marker = LookupReceiptPaymentMarker(receiptNumber);
             // marker "VOIDED" = ใบเสร็จเดิมถูก void แล้ว. ถ้ามี CREATE เข้ามาใหม่ (edit = void→สร้างเลขเดิม,
             // row ถูก reinsert) ให้เริ่มสร้างใหม่ตามปกติ — ไม่บล็อก (delete ปกติไม่ enqueue CREATE)
@@ -2848,6 +2849,7 @@ namespace Take_Time_BangPhra.Integration
         private async System.Threading.Tasks.Task<Guid> EnsureRevenueDocCreatedApprovedAsync(
             CreateDocumentRequest doc, string receiptNumber)
         {
+            ApplyReceiptPreparer(doc, receiptNumber);   // ผู้รับเงิน/ผู้จัดทำ = คนที่สร้างใบในระบบ (ไม่ใช่ NextAcc user)
             string marker = LookupReceiptPaymentMarker(receiptNumber);
             if (marker == "VOIDED") marker = null;
 
@@ -6343,6 +6345,56 @@ namespace Take_Time_BangPhra.Integration
             {
                 voucher.PreparerSignatureBase64 = info.Value.dataUri;
                 voucher.PayerSignatureBase64 = info.Value.dataUri;
+            }
+        }
+
+        /// <summary>ตั้งชื่อ+ลายเซ็น "ผู้รับเงิน/ผู้จัดทำ" บนเอกสาร company /document (Receipt/TaxInvoice)
+        /// จากพนักงานที่สร้างใบในระบบ (Account_Receipt.Created_By_ID → Admin) — เพื่อให้ช่องผู้รับเงินบน PDF
+        /// เป็นคนทำจริง (เช่น ชวนพิศ) ไม่ใช่ NextAcc user (เจ้าของ/กรรมการ). forward-compatible: ส่งไปก่อน
+        /// แม้ NextAcc ยังไม่รองรับฟิลด์ (record ignore) — เห็นผลจริงเมื่อ NextAcc accept + prioritize.</summary>
+        private void ApplyReceiptPreparer(CreateDocumentRequest doc, string receiptNumber)
+        {
+            if (doc == null || string.IsNullOrEmpty(receiptNumber)) return;
+            var info = LookupReceiptPreparerInfo(receiptNumber);
+            if (info == null) return;
+            if (!string.IsNullOrEmpty(info.Value.name)) doc.PreparerName = info.Value.name;
+            if (!string.IsNullOrEmpty(info.Value.dataUri) && info.Value.dataUri.Length <= SignatureMaxBytes)
+                doc.PreparerSignatureBase64 = info.Value.dataUri;
+            else if (!string.IsNullOrEmpty(info.Value.dataUri))
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ApplyReceiptPreparer: receipt={receiptNumber} ลายเซ็น {info.Value.dataUri.Length} bytes > {SignatureMaxBytes} — ส่งเฉพาะชื่อ (บีบรูปให้เล็กลง)", "SYSTEM");
+        }
+
+        /// <summary>ผู้ทำใบเสร็จ/ใบกำกับ (Account_Receipt.Created_By_ID → Admin) ชื่อ + ลายเซ็น data-URI.</summary>
+        private (string name, string dataUri)? LookupReceiptPreparerInfo(string receiptNumber)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT a.ID AS AdminId, a.FirstName, a.LastName, a.SignaturePath
+                      FROM Account_Receipt ar
+                      LEFT JOIN Admin a ON ar.Created_By_ID = a.ID
+                      WHERE ar.ID = @ID",
+                    new Dictionary<string, object> { { "@ID", receiptNumber } });
+                if (dt == null || dt.Rows.Count == 0 || dt.Rows[0]["AdminId"] == DBNull.Value) return null;
+
+                var row = dt.Rows[0];
+                string first = row["FirstName"] == DBNull.Value ? "" : row["FirstName"].ToString();
+                string last = row["LastName"] == DBNull.Value ? "" : row["LastName"].ToString();
+                string name = (first + " " + last).Trim();
+
+                short adminId = Convert.ToInt16(row["AdminId"]);
+                string dataUri = LoadSignatureDataUri(adminId);
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ApplyReceiptPreparer: receipt={receiptNumber} preparer='{name}' signature={(dataUri != null ? "แนบแล้ว" : "ไม่พบไฟล์ลายเซ็น")}", "SYSTEM");
+                return (name, dataUri);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ApplyReceiptPreparer: receipt={receiptNumber} ล้มเหลว: {ex.Message}", "SYSTEM");
+                return null;
             }
         }
 
