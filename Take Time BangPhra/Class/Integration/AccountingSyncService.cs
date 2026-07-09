@@ -4069,7 +4069,11 @@ namespace Take_Time_BangPhra.Integration
                                 //     (self-contained). ⚠ ต้อง "เลิกส่ง reverse-JE/raw แยก" (depositForJv=0) กัน
                                 //     double-reverse. ใช้ได้เมื่อ drives เปิด + มีใบมัดจำใบเดียว (ref เดียว).
                                 string jeRef = LookupSingleDepositJournalRef(reservationId);   // JV-INT EntryNumber
-                                if (!string.IsNullOrEmpty(jeRef) && _config.IsDepositAppliedDrivesJournal)
+                                // ⚠ PREVENTION: ส่ง drives+JV-INT ref เฉพาะเมื่อเปิด Nexaacc_Drives_Journal_Ref
+                                // (ยืนยัน NextAcc deploy cb55e3b แล้ว) — กันเอกสารค้าง draft ถ้า NextAcc ยังไม่พร้อม.
+                                // ปิด (default) → ใช้ reverse-JE แยก (ปลอดภัย, GL ถูก, approve ผ่าน)
+                                if (!string.IsNullOrEmpty(jeRef) && _config.IsDepositAppliedDrivesJournal
+                                    && _config.IsDrivesJournalRefEnabled)
                                 {
                                     doc.DepositAppliedRef = jeRef;                 // JV-INT-... ตรงตัว → NextAcc resolve เป็น JournalEntry
                                     doc.DepositAppliedDrivesJournal = true;
@@ -4099,18 +4103,28 @@ namespace Take_Time_BangPhra.Integration
                         docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositForJv,
                             paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
                     }
-                    catch (AccountingApiException dex) when (IsDrivesDepositResolveError(dex))
+                    catch (Exception dex) when (doc.DepositAppliedDrivesJournal && IsDrivesRelatedFailure(dex))
                     {
-                        // SAFETY NET: NextAcc หา "เอกสารใบมัดจำ" สำหรับ drives-journal ไม่เจอ (ใบมัดจำ sync เป็น
-                        // integration journal JV-INT- / เอกสารถูก void / เหตุอื่น) → ปิด drives + field แล้ว
-                        // fallback JV adjustment (depositForJv=depositApplied) กลับ GL ได้เหมือนกัน. reset marker
-                        // กัน draft ค้างจากรอบ drives. ครอบทุกเคสแม้ upfront guard คาดไม่ถึง.
+                        // SAFETY NET (กว้าง): drives-journal ล้มเหลว — ครอบทั้ง 400 "หาใบมัดจำไม่เจอ" และ
+                        // "ค้าง draft / approve ไม่ผ่าน" (เช่น NextAcc cb55e3b ยังไม่ deploy → resolve JV-INT ref
+                        // ไม่ได้ → เอกสารค้าง draft + Dr เต็ม). → ปิด drives, void draft ค้าง (กัน orphan),
+                        // fallback: กลับ JE จริงแยก (reverse-JE) ถ้าได้ ไม่งั้น raw JV → doc ใหม่ approve ผ่าน
+                        // (GL net ถูก). KEEP DepositAppliedAmount (display "หักเงินมัดจำ/สุทธิ" ต้องโชว์).
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessReceiptDocument(B2C): drives-journal หาใบมัดจำไม่เจอ (400) → ปิด drives, fallback JV adjustment receipt={receiptNumber}: {dex.ResponseBody}", "SYSTEM");
+                            $"ProcessReceiptDocument(B2C): drives-journal ล้มเหลว → ปิด drives + fallback receipt={receiptNumber}: {dex.Message}", "SYSTEM");
+                        // best-effort void draft ค้างจากรอบ drives (marker DOC:/APR:) กัน orphan บน NextAcc
+                        string stuckMk = LookupReceiptPaymentMarker(receiptNumber);
+                        if (!string.IsNullOrEmpty(stuckMk) && (stuckMk.StartsWith("DOC:") || stuckMk.StartsWith("APR:"))
+                            && Guid.TryParse(stuckMk.Substring(4), out var stuckId) && stuckId != Guid.Empty)
+                        {
+                            try { await _apiClient.VoidDocumentAsync(stuckId); } catch { }
+                        }
                         doc.DepositAppliedDrivesJournal = false;
-                        // KEEP DepositAppliedAmount + Ref (display "หักเงินมัดจำ/สุทธิ" ต้องโชว์เสมอ — display-only ไม่ 400)
+                        doc.DepositAppliedRef = "มัดจำ";   // display ref (JV-INT resolve ไม่ได้ → ใช้ label)
                         SetReceiptPaymentMarker(receiptNumber, null);
-                        docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, depositApplied,
+                        decimal fbJv = depositApplied;
+                        if (await TryReverseDepositJournalsAsync(reservationId)) fbJv = 0m;   // กลับ JE จริงแยกถ้าได้
+                        docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, fbJv,
                             paymentMethod, receiptDate, customerName, hasVat, paymentAccountId);
                     }
                     await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company doc
@@ -5477,6 +5491,22 @@ namespace Take_Time_BangPhra.Integration
             return b.IndexOf("depositAppliedRef", StringComparison.OrdinalIgnoreCase) >= 0
                 || b.IndexOf("หักมัดจำแบบขับ", StringComparison.OrdinalIgnoreCase) >= 0
                 || b.IndexOf("ไม่พบใบมัดจำ", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>drives-journal ล้มเหลวแบบที่ควร fallback (ปิด drives) — ครอบทั้ง 400 หา JE ไม่เจอ และ
+        /// "ค้าง draft / approve ไม่ผ่าน" (NextAcc ยังไม่รองรับ journal ref / resolve ไม่ได้). ไม่ครอบ error
+        /// transient (network/timeout) — พวกนั้นให้ retry ปกติ.</summary>
+        private static bool IsDrivesRelatedFailure(Exception ex)
+        {
+            if (ex == null) return false;
+            if (ex is AccountingApiException aex && IsDrivesDepositResolveError(aex)) return true;
+            string m = ex.Message ?? "";
+            return m.IndexOf("อนุมัติไม่สำเร็จ", StringComparison.OrdinalIgnoreCase) >= 0   // ค้าง draft/approve
+                || m.IndexOf("ยังเป็นสถานะ", StringComparison.OrdinalIgnoreCase) >= 0
+                || m.IndexOf("ยังไม่โพสต์", StringComparison.OrdinalIgnoreCase) >= 0
+                || m.IndexOf("depositAppliedRef", StringComparison.OrdinalIgnoreCase) >= 0
+                || m.IndexOf("หักมัดจำแบบขับ", StringComparison.OrdinalIgnoreCase) >= 0
+                || m.IndexOf("ไม่พบใบมัดจำ", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         /// <summary>ช่องทาง OTA ของการจอง (Reservation.OTA_Channel เช่น Agoda/Booking.com) — ว่าง = จองตรง.

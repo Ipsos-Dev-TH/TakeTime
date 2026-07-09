@@ -153,6 +153,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsDepositAppliedDrivesJournal => GetConfig("Nexaacc_Deposit_Drives_Journal", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// true = ส่ง "JV-INT EntryNumber" เป็น depositAppliedRef + drives สำหรับมัดจำที่เป็น journal (NextAcc
+        /// cb55e3b resolve journal ref → กลับ deferred ในใบเดียว, self-contained). **เปิดได้เมื่อ NextAcc
+        /// deploy cb55e3b แล้วเท่านั้น** — ถ้าเปิดก่อน NextAcc พร้อม เอกสารจะค้าง draft (approve ไม่ผ่าน).
+        /// false (default) = มัดจำ JV-INT ใช้ reverse-JE แยก (GL ถูก, ปลอดภัย ไม่ค้าง draft). ต้องใช้คู่กับ
+        /// Nexaacc_Deposit_Drives_Journal=1. (มี safety-net auto-fallback ถ้าเผลอเปิดก่อน NextAcc พร้อม)
+        /// </summary>
+        public bool IsDrivesJournalRefEnabled => GetConfig("Nexaacc_Drives_Journal_Ref", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────
