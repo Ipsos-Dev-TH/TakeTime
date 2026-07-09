@@ -3928,7 +3928,32 @@ namespace Take_Time_BangPhra.Integration
                     catch { }
                 }
 
+                // ── GUARD กันเรียกใช้มัดจำซ้ำ (double-use) ────────────────────────────────────
+                // เช็คว่ามัดจำของการจองนี้ถูก "เอกสารเช็คเอาท์ใบอื่น" (คนละ receiptNumber) เรียกใช้ไปแล้วรึยัง.
+                // ถ้าใช่ → บล็อกการหักซ้ำ (ไม่งั้นกลับหนี้สินมัดจำเกิน 21510/21913 ติดลบ + เงินสดหาย 2 เท่า)
+                // → บันทึกเป็นยอดเต็ม ไม่หักมัดจำ + log ดังให้ผู้ทำบัญชีตรวจ. retry/edit ใบเดิม (receiptNumber
+                // เดียวกัน) ไม่ถือเป็น conflict (ล้างตอน void แล้วมาร์คใหม่). marker บนตัวใบมัดจำ (PHASE18_05).
+                if (depositApplied > 0.005m)
+                {
+                    string consumedByOther = GetDepositConsumedByOther(reservationId, receiptNumber);
+                    if (!string.IsNullOrEmpty(consumedByOther))
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠ ProcessReceiptDocument: receipt={receiptNumber} #{reservationId} จะหักมัดจำ {depositApplied:N2} " +
+                            $"แต่มัดจำของการจองนี้ถูกเรียกใช้โดยเอกสารเช็คเอาท์ใบอื่นแล้ว ({consumedByOther}) → " +
+                            $"บล็อกการหักซ้ำ บันทึกเฉพาะยอดที่รับจริง {totalAmount:N2} ไม่หักมัดจำ (โปรดตรวจ — อาจซ้ำ/ต้องแก้)", "SYSTEM");
+                        depositApplied = 0m;
+                        lines = null;   // book single-line net — กัน gross/net mismatch
+                    }
+                }
+
                 bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
+
+                // มัดจำถูกเรียกใช้จริงในเอกสารนี้ → มาร์คบนตัวใบมัดจำว่า consumed โดย receiptNumber นี้
+                // (idempotent; ล้างตอน void). ทำหลังผ่าน guard เพื่อกันซ้ำ ก่อนสร้างเอกสาร (retry เข้ามาซ้ำ
+                // มาร์คเดิม ไม่ conflict). ยอดเต็มไม่มีมัดจำ = ไม่มาร์ค.
+                if (depositApplied > 0.005m)
+                    MarkDepositConsumed(reservationId, receiptNumber, depositApplied);
 
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
@@ -4492,6 +4517,95 @@ namespace Take_Time_BangPhra.Integration
             catch { return null; }
         }
 
+        // ══════════════════════════════════════════════════════════════════════
+        // Deposit-consumed marker (กันเรียกใช้มัดจำซ้ำ / double-use)
+        // มาร์คบน "แถวใบมัดจำ" (Account_Receipt.IsDeposit=1) ว่าถูกเรียกใช้โดยเอกสารเช็คเอาท์ใบไหน.
+        // ตั้งตอนหักมัดจำสำเร็จ, ล้างตอน void, เช็คก่อนหักกันซ้ำ. migration PHASE18_05.
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// คืน "เลขเอกสารเช็คเอาท์ใบอื่น" ที่เรียกใช้มัดจำของการจองนี้ไปแล้ว (ไม่ใช่ใบปัจจุบัน) —
+        /// ใช้เป็น guard กันหักมัดจำก้อนเดิมซ้ำจากเอกสารคนละใบ. คืน null = ยังไม่ถูกใช้ / ถูกใช้โดยใบเดียวกันนี้
+        /// (retry/edit ปกติ) → หักได้. คอลัมน์ยังไม่มี (ยังไม่ migrate) → คืน null (ไม่บล็อก).
+        /// </summary>
+        private string GetDepositConsumedByOther(int reservationId, string currentReceiptNumber)
+        {
+            if (reservationId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Deposit_Consumed_By_Receipt FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1
+                        AND (Status='Normal' OR Status IS NULL)
+                        AND Deposit_Consumed_By_Receipt IS NOT NULL
+                        AND Deposit_Consumed_By_Receipt <> ISNULL(@cur, '')",
+                    new Dictionary<string, object>
+                    {
+                        { "@rid", reservationId },
+                        { "@cur", (object)currentReceiptNumber ?? DBNull.Value }
+                    });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string other = dt.Rows[0][0].ToString();
+                    if (!string.IsNullOrWhiteSpace(other)) return other;
+                }
+            }
+            catch { /* คอลัมน์ยังไม่มี = ยังไม่ migrate → ไม่บล็อก */ }
+            return null;
+        }
+
+        /// <summary>
+        /// มาร์คใบมัดจำ (IsDeposit=1) ของการจองว่าถูกเรียกใช้โดยเอกสารเช็คเอาท์นี้แล้ว. idempotent —
+        /// ตั้งเฉพาะแถวที่ยังว่าง หรือเป็นของใบเดียวกัน (retry ไม่เปลี่ยนแปลง). อัปเดตวัน/ยอดล่าสุด.
+        /// </summary>
+        private void MarkDepositConsumed(int reservationId, string receiptNumber, decimal amount)
+        {
+            if (reservationId <= 0 || string.IsNullOrEmpty(receiptNumber)) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Account_Receipt
+                      SET Deposit_Consumed_By_Receipt = @rcpt,
+                          Deposit_Consumed_Date = GETDATE(),
+                          Deposit_Consumed_Amount = @amt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1
+                        AND (Status='Normal' OR Status IS NULL)
+                        AND (Deposit_Consumed_By_Receipt IS NULL OR Deposit_Consumed_By_Receipt = @rcpt)",
+                    new Dictionary<string, object>
+                    {
+                        { "@rid", reservationId },
+                        { "@rcpt", receiptNumber },
+                        { "@amt", amount }
+                    });
+            }
+            catch { /* คอลัมน์ยังไม่มี = ยังไม่ migrate → ข้าม (behavior เดิม) */ }
+        }
+
+        /// <summary>
+        /// ล้างมาร์คเรียกใช้มัดจำเมื่อ void เอกสารเช็คเอาท์ (คืนมัดจำให้ว่างพร้อมใช้ใหม่). ล้างเฉพาะแถวที่
+        /// ถูกมาร์คโดยใบนี้ (กันไปล้างมัดจำที่ใบอื่นใช้อยู่). edit=void→สร้างใหม่เลขเดิม → มาร์คใหม่ได้.
+        /// </summary>
+        private void ClearDepositConsumed(int reservationId, string receiptNumber)
+        {
+            if (reservationId <= 0 || string.IsNullOrEmpty(receiptNumber)) return;
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Account_Receipt
+                      SET Deposit_Consumed_By_Receipt = NULL,
+                          Deposit_Consumed_Date = NULL,
+                          Deposit_Consumed_Amount = NULL
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1
+                        AND Deposit_Consumed_By_Receipt = @rcpt",
+                    new Dictionary<string, object>
+                    {
+                        { "@rid", reservationId },
+                        { "@rcpt", receiptNumber }
+                    });
+            }
+            catch { /* คอลัมน์ยังไม่มี = ยังไม่ migrate → ข้าม */ }
+        }
+
         /// <summary>
         /// กลับ JE "ตัวจริง" ของใบมัดจำ (account-for-account ผ่าน ReverseJournalAsync) — แม่นกว่า raw JV:
         /// ได้ผลถูกไม่ว่าใบมัดจำจะลง 21510 (หนี้สิน) หรือลงรายได้ทันที (int_ รุ่นเก่า). idempotent ด้วย
@@ -4692,6 +4806,13 @@ namespace Take_Time_BangPhra.Integration
             Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+
+            // ล้างมาร์คเรียกใช้มัดจำ (PHASE18_05): void เอกสารเช็คเอาท์ = คืนมัดจำให้ว่างพร้อมใช้ใหม่
+            // (edit=void→สร้างใหม่เลขเดิม → มาร์คใหม่ตอน create). ล้างเฉพาะแถวที่ใบนี้มาร์คไว้ → กันไปแตะใบอื่น.
+            // ทำต้นทางครอบทุก return path ของ void. ยอดจริงกลับผ่าน JV/void-cascade ด้านล่างเหมือนเดิม.
+            int voidResId = LookupReceiptHeaderInfo(receiptNumber)?.reservationId ?? 0;
+            if (voidResId > 0 && !string.IsNullOrEmpty(receiptNumber))
+                ClearDepositConsumed(voidResId, receiptNumber);
 
             try
             {

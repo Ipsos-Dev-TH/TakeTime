@@ -1067,6 +1067,7 @@ namespace Take_Time_BangPhra.Integration
                 ContactId = contactId,
                 DocumentDate = receiptDate,
                 Reference = $"RES-{reservationId}-{receiptNumber}",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 Notes = description,
                 Lines = new List<DocumentLineRequest>
                 {
@@ -2672,6 +2673,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = chargeDate,
                 CustomerName = $"ลูกค้า - การจอง #{reservationId}",
                 Reference = $"RC-{reservationId}",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 Description = $"ชาร์จสินค้าเข้าห้อง - #{reservationId} - {description}",
                 Lines = new List<IntegrationLineRequest>
                 {
@@ -2696,6 +2698,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = cancelDate,
                 CustomerName = customerName,
                 Reference = $"CANCEL-NR-{reservationId}",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 Description = $"ยกเลิกการจอง (ไม่คืนเงิน) - {customerName} - #{reservationId}",
                 Lines = new List<IntegrationLineRequest>
                 {
@@ -2722,6 +2725,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = chargeDate,
                 CustomerName = customerName,
                 Reference = $"DMG-{reservationId}",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 Description = $"ค่าเสียหาย/ของหาย - {customerName} - #{reservationId}",
                 Lines = new List<IntegrationLineRequest>
                 {
