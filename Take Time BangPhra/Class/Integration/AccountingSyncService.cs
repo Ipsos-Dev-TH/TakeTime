@@ -4063,14 +4063,26 @@ namespace Take_Time_BangPhra.Integration
                             }
                             else
                             {
-                                // (c) มัดจำ resolve เป็นเอกสารไม่ได้ (sync เป็น journal JV-INT / เก่าไม่เก็บเลข) →
-                                //     ใส่ label "มัดจำ" (display "หักเงินมัดจำ (มัดจำ) N / สุทธิ") + drives OFF.
-                                //     GL: ลอง "กลับ JE ตัวจริงของใบมัดจำ" (account-for-account) ก่อน — แม่นกว่า raw
-                                //     (ถูกไม่ว่าใบมัดจำลง 21510 หรือรายได้). ถ้ากลับ JE จริงได้ → depositForJv=0
-                                //     (ไม่ต้อง raw ซ้ำ); ถ้าหา JE ไม่เจอ → depositForJv คงเดิม → raw JV (หักแบบดิบๆ).
-                                doc.DepositAppliedRef = "มัดจำ";
-                                if (await TryReverseDepositJournalsAsync(reservationId))
-                                    depositForJv = 0m;
+                                // (c) มัดจำเป็น journal (JV-INT) resolve เป็นเอกสารไม่ได้ →
+                                //     NextAcc cb55e3b: drives-journal รับ "JV-INT EntryNumber" เป็น depositAppliedRef
+                                //     ได้แล้ว → กลับ deferred (217xx/21913) จากบรรทัด Cr ของ JV เอง ใน JE ของใบเดียว
+                                //     (self-contained). ⚠ ต้อง "เลิกส่ง reverse-JE/raw แยก" (depositForJv=0) กัน
+                                //     double-reverse. ใช้ได้เมื่อ drives เปิด + มีใบมัดจำใบเดียว (ref เดียว).
+                                string jeRef = LookupSingleDepositJournalRef(reservationId);   // JV-INT EntryNumber
+                                if (!string.IsNullOrEmpty(jeRef) && _config.IsDepositAppliedDrivesJournal)
+                                {
+                                    doc.DepositAppliedRef = jeRef;                 // JV-INT-... ตรงตัว → NextAcc resolve เป็น JournalEntry
+                                    doc.DepositAppliedDrivesJournal = true;
+                                    depositForJv = 0m;                             // ห้ามส่ง reverse-JE/raw แยก
+                                }
+                                else
+                                {
+                                    // drives ปิด / มัดจำหลายใบ / หาเลข JE ไม่ได้ → display "มัดจำ" + กลับ JE จริงแยก
+                                    // (account-for-account) ก่อน; หาไม่เจอ → raw JV (หักแบบดิบๆ)
+                                    doc.DepositAppliedRef = "มัดจำ";
+                                    if (await TryReverseDepositJournalsAsync(reservationId))
+                                        depositForJv = 0m;
+                                }
                             }
                         }
                         else if (!depState.AnyDeposit)
@@ -4445,6 +4457,25 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { }
             return null;
+        }
+
+        /// <summary>เลข JE (JV-INT EntryNumber) ของใบมัดจำ "ใบเดียว" ของการจอง — ใช้เป็น depositAppliedRef
+        /// สำหรับ drives-journal (NextAcc cb55e3b resolve journal ref แล้วกลับ deferred ในใบเดียว).
+        /// คืน null ถ้ามัดจำ 0 หรือ >1 ใบ (drives ref รับได้ใบเดียว) หรือหาเลข JE ไม่ได้.</summary>
+        private string LookupSingleDepositJournalRef(int reservationId)
+        {
+            if (reservationId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status='Normal' OR Status IS NULL)",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt == null || dt.Rows.Count != 1) return null;   // ใบเดียวเท่านั้น
+                string localId = dt.Rows[0]["ID"]?.ToString();
+                return string.IsNullOrEmpty(localId) ? null : LookupNexaaccDepositJournalNumber(localId);
+            }
+            catch { return null; }
         }
 
         /// <summary>
