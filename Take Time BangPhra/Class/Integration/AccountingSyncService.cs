@@ -1677,6 +1677,8 @@ namespace Take_Time_BangPhra.Integration
                     else
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", null, nexaaccId, _lastDocNumber, _lastDocType);
+                        // Post-sync verify: อ่าน GL กลับมาเทียบความจริง (ยอดรับจริง+สลิป) เก็บผลลงคิว (read-only)
+                        await RunPostSyncVerifyIfEnabled(queueId, actionType, payload, nexaaccId);
                     }
                     processed++;
                 }
@@ -4728,6 +4730,136 @@ namespace Take_Time_BangPhra.Integration
                 return depJEs.Any(j => j.ReversedByEntryId != null && j.ReversedByEntryId != Guid.Empty);
             }
             catch { return false; }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // Post-sync verify (ตรวจย้อนกลับว่าลงข้อมูลถูกบน NextAcc) — migration PHASE18_08
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>เรียกหลัง sync ใบเสร็จ/เช็คเอาท์สำเร็จ (ใน ProcessQueueAsync) — ถ้าเปิด flag + เป็น
+        /// CREATE_RECEIPT_DOCUMENT → อ่าน GL กลับมาเทียบ เก็บผลลงคิว + log. best-effort ไม่กระทบสถานะ sync.</summary>
+        private async System.Threading.Tasks.Task RunPostSyncVerifyIfEnabled(long queueId, string actionType, string payload, string nexaaccId)
+        {
+            try
+            {
+                if (!_config.IsPostSyncVerifyEnabled) return;
+                if (actionType != "CREATE_RECEIPT_DOCUMENT") return;           // เฉพาะใบเสร็จ/เช็คเอาท์ (มียอดรับจริง+สลิป)
+                if (!Guid.TryParse(nexaaccId, out var docId) || docId == Guid.Empty) return;
+
+                var p = _serializer.Deserialize<Dictionary<string, object>>(payload ?? "{}");
+                if (p == null) return;
+                string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : "";
+                int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+                decimal totalAmount = p.ContainsKey("totalAmount") ? Convert.ToDecimal(p["totalAmount"]) : 0m;
+                decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
+                if (depositApplied <= 0) depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
+                bool isDeposit = p.ContainsKey("isDeposit") && Convert.ToBoolean(p["isDeposit"]);
+
+                var (status, detail) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
+                SetQueueVerifyResult(queueId, status, detail);
+                _code.Logs(_connectionString, "AccountingSync",
+                    (status == "WARN" ? "⚠ " : "") + $"PostSyncVerify: receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → {status}: {detail}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"PostSyncVerify error queue={queueId}: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        private void SetQueueVerifyResult(long queueId, string status, string detail)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(detail) && detail.Length > 990) detail = detail.Substring(0, 990);
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Accounting_Sync_Queue SET Verify_Status = @s, Verify_Detail = @d WHERE ID = @id",
+                    new Dictionary<string, object> { { "@s", (object)status ?? DBNull.Value }, { "@d", (object)detail ?? DBNull.Value }, { "@id", queueId } });
+            }
+            catch { /* คอลัมน์ยังไม่ migrate → ข้าม */ }
+        }
+
+        /// <summary>อ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบความจริงฝั่งเรา. คืน (PASS/WARN, รายละเอียด).
+        /// เช็ค: (1) เอกสารโพสต์จริง (2) ยอดรวมตรง (3) JE บาลานซ์ (4) บัญชีมัดจำ 21510 ไม่ติดลบ (double-reverse)
+        /// (5) สลิปแนบครบ (ถ้าเรามีสลิป). read-only — ไม่แก้อะไรบน NextAcc. ไม่ throw.</summary>
+        private async System.Threading.Tasks.Task<(string status, string detail)> VerifyReceiptPostingAsync(
+            Guid docId, string receiptNumber, int reservationId, decimal expectedTotal, decimal depositApplied, bool isDeposit)
+        {
+            var warns = new List<string>();
+            var oks = new List<string>();
+            try
+            {
+                // 1) เอกสารโพสต์จริง + ยอดรวมตรง
+                DocumentResponse doc = null;
+                try { doc = (await _apiClient.GetDocumentAsync(docId))?.data; } catch { }
+                if (doc == null) return ("WARN", "อ่านเอกสารกลับจาก NextAcc ไม่ได้ (อาจถูกลบ/ยังไม่ sync)");
+                if (!IsPostedStatus(doc.Status)) warns.Add($"เอกสารยังไม่โพสต์ (status={doc.Status})");
+                else oks.Add("โพสต์แล้ว");
+                if (expectedTotal > 0 && Math.Abs(doc.TotalAmount - expectedTotal) > 0.05m)
+                    warns.Add($"ยอดรวมไม่ตรง: NextAcc {doc.TotalAmount:N2} vs รับจริง {expectedTotal:N2}");
+                else if (expectedTotal > 0)
+                    oks.Add($"ยอดรวมตรง {doc.TotalAmount:N2}");
+
+                // 2) ค้น JE ที่เกี่ยวข้อง (ทุกทาง) → เช็ค JE ของเอกสารนี้บาลานซ์ + รวมบัญชีมัดจำทั้งการจอง
+                var jeKeys = new List<string> { receiptNumber, $"RES-{reservationId}", doc.DocumentNumber };
+                var jes = new Dictionary<Guid, JournalEntryResponse>();
+                foreach (var k in jeKeys.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var f = await _apiClient.SearchJournalsAsync(k, 50);
+                        if (f?.data?.Items != null)
+                            foreach (var j in f.data.Items) if (j.Id != Guid.Empty && !jes.ContainsKey(j.Id)) jes[j.Id] = j;
+                    }
+                    catch { }
+                }
+
+                var docJes = jes.Values.Where(j => j.Status != 2 &&
+                    (j.SourceDocumentId == docId
+                     || (!string.IsNullOrEmpty(doc.DocumentNumber) && string.Equals(j.SourceDocumentNumber, doc.DocumentNumber, StringComparison.OrdinalIgnoreCase)))).ToList();
+                bool anyUnbalanced = false;
+                foreach (var je in docJes)
+                    if (Math.Abs(je.TotalDebit - je.TotalCredit) > 0.05m)
+                    { warns.Add($"JE {je.EntryNumber} ไม่บาลานซ์ (Dr {je.TotalDebit:N2}/Cr {je.TotalCredit:N2})"); anyUnbalanced = true; }
+                if (docJes.Count > 0 && !anyUnbalanced) oks.Add("JE บาลานซ์");
+
+                // 3) บัญชีมัดจำ 21510 ไม่ติดลบ (double-reverse) — เมื่อมีมัดจำเกี่ยวข้อง
+                if (depositApplied > 0.005m || isDeposit)
+                {
+                    string depCode = null;
+                    try { depCode = _mapper.GetAccountCode("ADVANCE_DEPOSIT"); } catch { }
+                    if (!string.IsNullOrEmpty(depCode))
+                    {
+                        decimal net = 0m; bool sawLine = false;
+                        foreach (var je in jes.Values.Where(j => j.Status != 2 && j.Lines != null))
+                            foreach (var ln in je.Lines)
+                                if (string.Equals(ln.AccountCode, depCode, StringComparison.OrdinalIgnoreCase))
+                                { net += ln.CreditAmount - ln.DebitAmount; sawLine = true; }   // Cr = หนี้สินเพิ่ม, Dr = ตัด
+                        if (sawLine)
+                        {
+                            if (net < -0.05m) warns.Add($"บัญชีมัดจำ {depCode} ยอดติดลบ {net:N2} (อาจกลับมัดจำซ้ำ/double-reverse — ตรวจ)");
+                            else oks.Add($"บัญชีมัดจำ {depCode} คงเหลือ {net:N2}");
+                        }
+                    }
+                }
+
+                // 4) สลิปแนบครบ (เฉพาะเมื่อเรามีสลิป local)
+                var localSlips = LookupReceiptAttachments(receiptNumber, reservationId);
+                if (localSlips != null && localSlips.Count > 0)
+                {
+                    int nexCount = 0;
+                    try { nexCount = (await _apiClient.GetAttachmentsAsync("Document", docId))?.data?.Count ?? 0; } catch { }
+                    if (nexCount <= 0) warns.Add($"สลิปไม่แนบบน NextAcc (เรามี {localSlips.Count} ไฟล์)");
+                    else oks.Add($"สลิปแนบ {nexCount} ไฟล์");
+                }
+
+                string st = warns.Count > 0 ? "WARN" : "PASS";
+                string detail = warns.Count > 0 ? string.Join(" | ", warns) : string.Join(", ", oks);
+                return (st, detail);
+            }
+            catch (Exception ex)
+            {
+                return ("WARN", "verify error: " + ex.Message);
+            }
         }
 
         /// <summary>AUTO-RECOVER (legacy): ใบมัดจำที่ถูก reverse ค้างจากการ void+sync ใหม่หลายรอบ (drives ปิด

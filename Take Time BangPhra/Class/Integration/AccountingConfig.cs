@@ -171,6 +171,14 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsAutoRecoverDeposit => GetConfig("Nexaacc_Auto_Recover_Deposit", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// true (default) = หลัง sync ใบเสร็จ/เช็คเอาท์สำเร็จ อ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบ
+        /// กับความจริงฝั่งเรา (ยอดรับจริง+สลิป) → เก็บผล Verify_Status/Verify_Detail บนคิว. ดัก: ยอดไม่ตรง,
+        /// JE ไม่บาลานซ์, บัญชีมัดจำ 21510 ติดลบ (double-reverse), สลิปไม่แนบ, เอกสารไม่โพสต์. read-only (ไม่แก้
+        /// อะไรบน NextAcc). false = ปิด (ลด API call ต่อการ sync). migration PHASE18_08.
+        /// </summary>
+        public bool IsPostSyncVerifyEnabled => GetConfig("Nexaacc_Post_Sync_Verify", "1").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         // ──────────────────────────────────────────────
         // E-Tax Invoice automation
         // ──────────────────────────────────────────────

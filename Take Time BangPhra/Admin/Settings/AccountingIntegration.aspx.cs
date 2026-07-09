@@ -77,6 +77,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "depositDrivesJournal", config.IsDepositAppliedDrivesJournal },
                     { "depositDrivesJournalRef", config.IsDrivesJournalRefEnabled },
                     { "autoRecoverDeposit", config.IsAutoRecoverDeposit },
+                    { "postSyncVerify", config.IsPostSyncVerifyEnabled },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -280,6 +281,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // ⚠ เปิดได้เมื่อ NextAcc deploy cb55e3b แล้วเท่านั้น (มัดจำ JV-INT → self-contained JE)
                 if (data.ContainsKey("depositDrivesJournalRef")) config.SetConfig("Nexaacc_Drives_Journal_Ref", BoolToFlag(data["depositDrivesJournalRef"]));
                 if (data.ContainsKey("autoRecoverDeposit")) config.SetConfig("Nexaacc_Auto_Recover_Deposit", BoolToFlag(data["autoRecoverDeposit"]));
+                if (data.ContainsKey("postSyncVerify")) config.SetConfig("Nexaacc_Post_Sync_Verify", BoolToFlag(data["postSyncVerify"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
@@ -484,10 +486,20 @@ namespace Take_Time_BangPhra.Admin.Settings
                     ? ", Nexaacc_Document_Number, Nexaacc_Document_Type"
                     : ", CAST(NULL AS NVARCHAR(50)) AS Nexaacc_Document_Number, CAST(NULL AS NVARCHAR(30)) AS Nexaacc_Document_Type";
 
+                // Detect optional post-sync-verify columns (PHASE18 Migration 08)
+                DataTable verifyColCheck = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT name FROM sys.columns
+                      WHERE object_id = OBJECT_ID('Accounting_Sync_Queue')
+                        AND name IN ('Verify_Status','Verify_Detail')", null);
+                bool hasVerify = verifyColCheck != null && verifyColCheck.Rows.Count >= 2;
+                string verifyCols = hasVerify
+                    ? ", Verify_Status, Verify_Detail"
+                    : ", CAST(NULL AS NVARCHAR(10)) AS Verify_Status, CAST(NULL AS NVARCHAR(1000)) AS Verify_Detail";
+
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
                     $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
                               Retry_Count, Max_Retries, Error_Message, Created_Date, Payload,
-                              Nexaacc_Response_Id{docCacheCols}
+                              Nexaacc_Response_Id{docCacheCols}{verifyCols}
                        FROM Accounting_Sync_Queue
                        {whereClause}
                        ORDER BY Created_Date DESC
@@ -559,6 +571,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "nexaaccDocNumber", mask ? "🔒" : nexaaccDocNum },
                             { "nexaaccDocType", mask ? "" : nexaaccDocType },
                             { "nexaaccUrl", mask ? "" : nexaaccUrl },
+                            { "verifyStatus", mask ? "" : (row.Table.Columns.Contains("Verify_Status") && row["Verify_Status"] != DBNull.Value ? row["Verify_Status"].ToString() : "") },
+                            { "verifyDetail", mask ? "" : (row.Table.Columns.Contains("Verify_Detail") && row["Verify_Detail"] != DBNull.Value ? row["Verify_Detail"].ToString() : "") },
                             { "sensitive", isSensitive }
                         });
                     }

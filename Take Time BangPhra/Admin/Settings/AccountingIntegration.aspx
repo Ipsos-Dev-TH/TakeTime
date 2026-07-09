@@ -294,6 +294,18 @@
                         หนักควรดู GL ด้วยตา (un-reverse คืนเฉพาะ JE มัดจำ ไม่แตะ adjustment ค้างอื่น)
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgPostSyncVerify" />
+                        ตรวจย้อนกลับหลัง sync (Post-sync verify) — make sure ลงถูกบน NextAcc
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #27ae60; padding-left:8px;">
+                        หลัง sync ใบเสร็จ/เช็คเอาท์สำเร็จ ระบบอ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบกับ
+                        ยอดรับจริง+สลิปของเรา: <b>ยอดรวมตรง / JE บาลานซ์ / บัญชีมัดจำ 21510 ไม่ติดลบ / สลิปแนบครบ</b>
+                        → แสดง ✅/⚠ คอลัมน์ "ตรวจสอบ" ในคิว (⚠ = พบผิดปกติ, ชี้เมาส์ดูรายละเอียด). read-only
+                        ไม่แก้อะไรบน NextAcc. เปิดไว้ (default) แนะนำ; ปิดเพื่อลด API call ต่อการ sync.
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -651,6 +663,7 @@
                             <th>Action</th>
                             <th>Status</th>
                             <th>NextAcc Doc</th>
+                            <th>ตรวจสอบ</th>
                             <th>Retry</th>
                             <th>Error</th>
                             <th>Created</th>
@@ -658,7 +671,7 @@
                         </tr>
                     </thead>
                     <tbody id="queueBody">
-                        <tr><td colspan="9" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
+                        <tr><td colspan="11" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -862,6 +875,7 @@
                 document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
                 document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
                 document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
+                document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -921,6 +935,7 @@
                 depositDrivesJournal: document.getElementById('cfgDepositDrivesJournal').checked,
                 depositDrivesJournalRef: document.getElementById('cfgDepositDrivesJournalRef').checked,
                 autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
+                postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
@@ -1230,7 +1245,7 @@
 
             if (!items.length) {
                 var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#999;">' + msg + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999;">' + msg + '</td></tr>';
                 return;
             }
             var html = '';
@@ -1262,6 +1277,16 @@
                     }
                 } else {
                     html += '-';
+                }
+                html += '</td>';
+                // ตรวจสอบ (post-sync verify) ✅ PASS / ⚠ WARN — tooltip = รายละเอียด
+                html += '<td style="text-align:center;">';
+                if (item.verifyStatus === 'PASS') {
+                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#2E7D32; cursor:help;">✅</span>';
+                } else if (item.verifyStatus === 'WARN') {
+                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#C62828; cursor:help; font-weight:600;">⚠</span>';
+                } else {
+                    html += '<span style="color:#ccc;">–</span>';
                 }
                 html += '</td>';
                 html += '<td>' + item.retryCount + '/' + item.maxRetries + '</td>';
