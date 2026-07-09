@@ -24,6 +24,15 @@ TakeTime ส่งบน checkout Receipt (DocumentType=3) แล้ว: `deposi
   TakeTime ส่งครบแล้ว (commit c255a03). ครบทั้ง 3 endpoint: invoice / credit-note / debit-note (ดู §2b).
 - **#3 แยกเลขมัดจำ:** คงเลข series เดิม (REC ร่วม, gap-free §86/4) — ตัดสินใจไม่แยก (ดู §3).
 - **confirmation A + B (display-only missing-ref ไม่ 404):** ✅ ยืนยันแล้ว.
+- **drives-resolve net-balance + closure (c74eaed → f13f4af):** ✅ NextAcc เลิกพึ่ง `ReversedByEntryId`
+  → คำนวณ **net GL จริง = Σ(Cr−Dr) บนบัญชีมัดจำของทั้ง reverse-family** (transitive closure ตาม
+  `OriginalEntryId` ทุกชั้น, นับเฉพาะ Posted + ไม่ถูกลบ). รองรับ un-reverse ทุกวิธี (reversal-of-reversal /
+  void reversal / delete reversal) → net กลับ live → drives หักได้.
+  **กลไก TakeTime (ยืนยัน — อยู่ในเคสที่ครอบคลุมครบ):** auto-recover un-reverse ผ่าน `ReverseJournalAsync`
+  → `POST /api/integration/journals/reverse` ตั้ง `OriginalJournalEntryId` = ตัว reversal → NextAcc post
+  **reversal-of-reversal JE จริง ที่ link กลับ family** (`OriginalEntryId` ชี้ตัว reversal) → closure เห็น →
+  net live. **ไม่เข้า edge** (เราไม่ได้ post JV ใหม่แบบไม่ link / ไม่ได้ลบ-void ฝั่งเดียว) → ไม่ต้องใช้ fallback
+  bookingNumber/reference. (feature `Nexaacc_Auto_Recover_Deposit`, commit b92b232.)
 
 **เหลือฝั่ง TakeTime:** pull build ล่าสุด → rebuild (Windows) → deploy → ทดสอบ end-to-end
 (deposit → checkout → void + CN/DN ผูก booking) → เปิด drives mode (ดู "ลำดับเปิด drives mode" ท้ายไฟล์).
