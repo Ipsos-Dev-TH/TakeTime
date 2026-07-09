@@ -4898,10 +4898,14 @@ namespace Take_Time_BangPhra.Integration
 
                 decimal running = net0;
                 int reversedCount = 0;
+                int skippedTooBig = 0;
                 foreach (var adj in orphans)
                 {
-                    if (running >= -0.05m) break;   // สมดุลแล้ว หยุด (self-limiting กัน over-correct)
+                    if (running >= -0.05m) break;   // สมดุลแล้ว หยุด (self-limiting)
                     decimal adjDr = dr21510(adj);
+                    // ⚠ กัน OVER-CORRECT: ถ้ากลับตัวนี้แล้ว 21510 จะ "เกินเป็นบวก" (สร้าง error ใหม่) → ข้าม
+                    // (orphans เรียง Dr มาก→น้อย → ตัวถัดไปเล็กกว่า อาจพอดี). ยอมเหลือติดลบนิด + WARN ดีกว่าเกินบวก
+                    if (running + adjDr > 0.05m) { skippedTooBig++; continue; }
                     var rev = await _apiClient.ReverseJournalAsync(adj.Id, new ReverseJournalEntryRequest
                     {
                         Description = $"Auto-reconcile: กลับ adjustment มัดจำค้าง (orphaned {adj.EntryNumber}) การจอง #{reservationId} " +
@@ -4919,14 +4923,18 @@ namespace Take_Time_BangPhra.Integration
                             $"AutoReconcile: #{reservationId} reverse orphaned {adj.EntryNumber} ล้มเหลว: {rev?.message}", "SYSTEM");
                     }
                 }
-                if (reversedCount == 0) return null;
+                if (reversedCount == 0)
+                    return skippedTooBig > 0
+                        ? $"⚠ 21510 ติดลบ {net0:N2} — มี orphaned -DEPADJ แต่ยอดใหญ่กว่าที่ขาด (กลับแล้วจะเกินเป็นบวก) → ไม่แตะ, ตรวจมือ"
+                        : null;
 
                 // re-verify ผลจริงจาก NextAcc (ไม่ประมาณ)
                 var jes2 = await GetBookingJournalsAsync(reservationId, receiptNumber, docNumber);
                 decimal net1 = SumAccountNet(jes2.Values, depCode);
+                string tail = skippedTooBig > 0 ? $" (ข้าม {skippedTooBig} ใบที่ยอดใหญ่เกิน)" : "";
                 string outcome = net1 >= -0.05m
-                    ? $"✅ reconcile สำเร็จ: 21510 {net0:N2} → {net1:N2} (กลับ orphaned -DEPADJ {reversedCount} ใบ)"
-                    : $"⚠ reconcile บางส่วน: 21510 {net0:N2} → {net1:N2} (กลับ {reversedCount} ใบ) ยังไม่ 0 — ตรวจมือ (มีสาเหตุอื่นนอก -DEPADJ)";
+                    ? $"✅ reconcile สำเร็จ: 21510 {net0:N2} → {net1:N2} (กลับ orphaned -DEPADJ {reversedCount} ใบ){tail}"
+                    : $"⚠ reconcile บางส่วน: 21510 {net0:N2} → {net1:N2} (กลับ {reversedCount} ใบ){tail} ยังไม่ 0 — ตรวจมือ";
                 _code.Logs(_connectionString, "AccountingSync", $"AutoReconcile: #{reservationId} receipt={receiptNumber} {outcome}", "SYSTEM");
                 return outcome;
             }
