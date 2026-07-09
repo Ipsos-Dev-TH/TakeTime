@@ -189,6 +189,9 @@ namespace Take_Time_BangPhra.Integration
         /// ⚠️ เปิด flag นี้ต้อง "เลิกส่ง JV หักมัดจำแยก" พร้อมกัน มิฉะนั้น 217xx/21913 ถูกกลับ 2 รอบ (GL พัง).
         /// default false = display-only (JV แยกฝั่ง TakeTime ยังทำ GL). NextAcc field: depositAppliedDrivesJournal.</summary>
         public bool DepositAppliedDrivesJournal { get; set; }
+        /// <summary>เลขจอง (booking) ของการจองห้องพัก — NextAcc field "bookingNumber" (string). ผูกเอกสาร
+        /// ชุดเดียวกันของการจอง (มัดจำ→ใบกำกับ→ใบเสร็จ) + auto-suggest หักมัดจำ. TakeTime ส่ง "RES-{id}".</summary>
+        public string BookingNumber { get; set; }
     }
 
     public class DocumentLineRequest
@@ -224,6 +227,8 @@ namespace Take_Time_BangPhra.Integration
         public string SupplierInvoiceNumber { get; set; }
         public DateTime? SupplierTaxInvoiceDate { get; set; }
         public bool? PricesIncludeVat { get; set; }
+        /// <summary>เลขจอง (booking) — NextAcc field "bookingNumber". null = คงเดิม.</summary>
+        public string BookingNumber { get; set; }
     }
 
     public class DocumentResponse
@@ -708,6 +713,9 @@ namespace Take_Time_BangPhra.Integration
         public string Currency { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        /// <summary>เลขจอง (booking) — NextAcc field "bookingNumber" (int_ InboundInvoiceRequest, commit 8ed90ba).
+        /// TakeTime ส่ง "RES-{id}" → ผูก booking เดียวกันของการจอง. NextAcc build เก่าจะ ignore field นี้.</summary>
+        public string BookingNumber { get; set; }
         public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
         public string PreparerName { get; set; }

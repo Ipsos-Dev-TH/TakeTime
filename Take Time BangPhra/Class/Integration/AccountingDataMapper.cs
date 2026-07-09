@@ -1735,6 +1735,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-DEP",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 IncludeVat = splitVat,
                 Description = $"รับมัดจำ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = NormalizePaymentMethod(paymentMethod),
@@ -1778,6 +1779,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-PAY",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 IncludeVat = true,
                 Description = $"รับชำระ - การจอง #{reservationId} ({customerName})",
                 PaymentMethod = NormalizePaymentMethod(paymentMethod),
@@ -1898,6 +1900,8 @@ namespace Take_Time_BangPhra.Integration
                 Reference = reservationId > 0
                     ? $"RES-{reservationId}"
                     : (!string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}"),
+                // เลขจอง (booking) → NextAcc ผูกเอกสารชุดเดียวกันของการจอง + auto-suggest หักมัดจำ
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 PaymentAccountId = isArDoc ? (Guid?)null : cashAccountId,
                 PricesIncludeVat = true,
                 IsDeposit = isDeposit,
@@ -2250,6 +2254,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
                 Reference = refStr,
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 ExternalRef = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
                 ReplaceExistingForSource = !string.IsNullOrEmpty(receiptNumber),
                 IncludeVat = hasVat,
@@ -2617,6 +2622,7 @@ namespace Take_Time_BangPhra.Integration
                 DocumentDate = checkoutDate,
                 CustomerName = customerName,
                 Reference = $"RES-{reservationId}-CHK",
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 Description = $"รับรู้รายได้ Checkout - การจอง #{reservationId} ({customerName})",
                 Lines = new List<IntegrationLineRequest>
                 {
