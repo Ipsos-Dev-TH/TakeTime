@@ -32,6 +32,8 @@
         .btn-success:hover { background: #388E3C; }
         .btn-warning { padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
         .btn-warning:hover { background: #F57C00; }
+        .btn-secondary { padding: 10px 20px; background: #607D8B; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
+        .btn-secondary:hover { background: #455A64; }
         .btn-danger { padding: 10px 20px; background: #E53935; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
         .btn-danger:hover { background: #C62828; }
 
@@ -650,6 +652,19 @@
             <div class="pagination" id="queuePagination" style="margin-top:15px; justify-content:center;"></div>
         </div>
 
+        <!-- Log Detail Modal (ดู log AccountingSync เต็ม ไม่ตัด) -->
+        <div id="logModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999;" onclick="if(event.target===this)closeLogModal()">
+            <div style="max-width:900px; margin:40px auto; background:#fff; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.3); max-height:85vh; display:flex; flex-direction:column;">
+                <div style="padding:14px 18px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                    <strong id="logModalTitle" style="font-size:15px;"><i class="fas fa-file-alt"></i> Log รายละเอียด</strong>
+                    <button type="button" onclick="closeLogModal()" style="border:none; background:none; font-size:22px; cursor:pointer; color:#888;">&times;</button>
+                </div>
+                <div id="logModalBody" style="padding:16px 18px; overflow:auto;">
+                    <div style="text-align:center; color:#999;">กำลังโหลด...</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Account Mapping Management -->
         <div class="journey-card">
             <h3><i class="fas fa-exchange-alt"></i> Account Mapping (TakeTime &harr; Nexaacc)</h3>
@@ -1244,13 +1259,70 @@
                         html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
                     }
                     if (item.status === 'COMPLETED' || item.status === 'FAILED') {
-                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
+                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';
                     }
+                    html += '<button type="button" class="btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.id + ')" title="ดู log ละเอียด (เต็ม ไม่ตัด)"><i class="fas fa-file-alt"></i> Log</button>';
                 }
                 html += '</td>';
                 html += '</tr>';
             });
             tbody.innerHTML = html;
+        }
+
+        function escapeHtml(s) {
+            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function showItemLogs(queueId) {
+            var modal = document.getElementById('logModal');
+            var body = document.getElementById('logModalBody');
+            var title = document.getElementById('logModalTitle');
+            title.innerHTML = '<i class="fas fa-file-alt"></i> Log รายละเอียด — คิว #' + queueId;
+            body.innerHTML = '<div style="text-align:center; color:#999;">กำลังโหลด...</div>';
+            modal.style.display = 'block';
+
+            fetch(pageUrl + '?action=itemLogs&queueId=' + queueId + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message) + '</div>';
+                        return;
+                    }
+                    var html = '';
+                    // Key identifiers
+                    if (data.keys) {
+                        html += '<div style="font-size:12px; color:#666; margin-bottom:10px;">ค้นจาก: <code>' + escapeHtml(data.keys) + '</code></div>';
+                    }
+                    // Full error (untruncated)
+                    if (data.error) {
+                        html += '<div style="margin-bottom:14px;"><div style="font-weight:600; margin-bottom:4px; color:#C62828;">Error (เต็ม):</div>'
+                              + '<pre style="white-space:pre-wrap; word-break:break-word; background:#FFF5F5; border:1px solid #FFCDD2; border-radius:6px; padding:10px; font-size:12px; margin:0;">' + escapeHtml(data.error) + '</pre></div>';
+                    }
+                    // Log lines
+                    html += '<div style="font-weight:600; margin-bottom:6px;">AccountingSync log (' + (data.logs ? data.logs.length : 0) + ' บรรทัด):</div>';
+                    if (!data.logs || !data.logs.length) {
+                        html += '<div style="color:#999; font-size:13px;">ไม่พบ log ที่เกี่ยวข้อง (ลองกด Retry ก่อนเพื่อให้เกิด log ใหม่ หรือค้นจากเลขใบเสร็จโดยตรง)</div>';
+                    } else {
+                        html += '<div style="border:1px solid #eee; border-radius:6px; overflow:hidden;">';
+                        data.logs.forEach(function(lg, i) {
+                            var bg = i % 2 ? '#fafafa' : '#fff';
+                            var isWarn = (lg.detail || '').indexOf('⚠') >= 0 || /ล้มเหลว|ไม่สำเร็จ|error/i.test(lg.detail || '');
+                            html += '<div style="padding:8px 10px; background:' + bg + '; border-bottom:1px solid #f0f0f0;">'
+                                  + '<div style="font-size:11px; color:#999; margin-bottom:2px;">' + escapeHtml(lg.time) + '</div>'
+                                  + '<div style="font-size:12.5px; white-space:pre-wrap; word-break:break-word;' + (isWarn ? ' color:#C62828;' : '') + '">' + escapeHtml(lg.detail) + '</div></div>';
+                        });
+                        html += '</div>';
+                    }
+                    body.innerHTML = html;
+                })
+                .catch(function(err) {
+                    body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
+        function closeLogModal() {
+            document.getElementById('logModal').style.display = 'none';
         }
 
         function toggleSelectAll(el) {

@@ -128,6 +128,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "retryItem":
                     result = RetryQueueItem();
                     break;
+                case "itemLogs":
+                    result = GetItemLogs();
+                    break;
                 case "resyncItem":
                     result = ResyncCompletedItem();
                     break;
@@ -642,6 +645,80 @@ namespace Take_Time_BangPhra.Admin.Settings
 
                 sync.RetryItem(queueId);
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>ดึง log AccountingSync ที่เกี่ยวข้องกับคิวนี้ (เต็ม ไม่ตัด) + Error_Message เต็ม —
+        /// ค้นจากตัวระบุใน Payload (receiptNumber/documentNumber/reservationId) + Entity_ID.</summary>
+        private Dictionary<string, object> GetItemLogs()
+        {
+            try
+            {
+                long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
+                if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดูรายการเงินเดือน" } };
+
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Payload, Entity_ID, Entity_Type, Error_Message FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                if (dt == null || dt.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบรายการคิวนี้" } };
+
+                var row = dt.Rows[0];
+                string payload = row["Payload"]?.ToString() ?? "";
+                string entityId = row["Entity_ID"]?.ToString() ?? "";
+                string errorMsg = row["Error_Message"]?.ToString() ?? "";
+
+                // ── ดึงตัวระบุจาก payload เพื่อค้น log ─────────────────────────────
+                var tokens = new List<string>();
+                foreach (string field in new[] { "receiptNumber", "documentNumber", "reservationId" })
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(
+                        payload, "\"" + field + "\"\\s*:\\s*\"?([^\",}]+)");
+                    if (m.Success)
+                    {
+                        string v = m.Groups[1].Value.Trim();
+                        if (!string.IsNullOrEmpty(v) && v != "0" && !tokens.Contains(v)) tokens.Add(v);
+                    }
+                }
+
+                var logs = new List<Dictionary<string, object>>();
+                if (tokens.Count > 0)
+                {
+                    // WHERE LogAction='AccountingSync' AND (LogDetail LIKE '%tok0%' OR ...) — เต็ม ไม่ตัด
+                    var whereOr = new List<string>();
+                    var pars = new Dictionary<string, object>();
+                    for (int i = 0; i < tokens.Count; i++)
+                    {
+                        whereOr.Add($"LogDetail LIKE @t{i}");
+                        pars.Add($"@t{i}", "%" + tokens[i] + "%");
+                    }
+                    var logDt = _code.DatabaseQuerySafe(ConnStr,
+                        $@"SELECT TOP 300 LogDateTime, LogDetail
+                           FROM Logs
+                           WHERE LogAction = 'AccountingSync' AND ({string.Join(" OR ", whereOr)})
+                           ORDER BY LogDateTime DESC",
+                        pars);
+                    if (logDt != null)
+                        foreach (DataRow lr in logDt.Rows)
+                            logs.Add(new Dictionary<string, object>
+                            {
+                                { "time", lr["LogDateTime"] != DBNull.Value ? Convert.ToDateTime(lr["LogDateTime"]).ToString("dd/MM/yyyy HH:mm:ss") : "" },
+                                { "detail", lr["LogDetail"]?.ToString() ?? "" }
+                            });
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "keys", tokens.Count > 0 ? string.Join(", ", tokens) : ("Entity #" + entityId) },
+                    { "error", errorMsg },
+                    { "logs", logs }
+                };
             }
             catch (Exception ex)
             {
