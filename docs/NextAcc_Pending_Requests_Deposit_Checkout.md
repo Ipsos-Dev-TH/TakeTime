@@ -1,24 +1,36 @@
 # คำขอ/ประเด็นค้าง ฝั่ง NextAcc — Deposit & Checkout Document
 
-> สรุปรวมสำหรับทีม NextAcc (Wachira-d/Accounting). TakeTime ฝั่งเราแก้/รองรับครบแล้ว
-> (config-gated, default off) — เหลือ 3 ข้อที่ต้องทำ/ยืนยันฝั่ง NextAcc ก่อนเปิดใช้เต็ม.
+> **สถานะ (ก.ค. 2026): ✅ ปิดครบทุก request — NextAcc ยืนยันเสร็จทั้งหมด.** เหลือแค่ฝั่ง TakeTime
+> rebuild (Windows) → deploy → ทดสอบ end-to-end + เปิด drives mode ด้วย config/checkbox.
 > บริบท: hotel booking → รับมัดจำ (Receipt/ใบเสร็จมัดจำ) → เช็คเอาท์ (ใบกำกับภาษี/ใบเสร็จรับเงิน หักมัดจำ).
+> เอกสารนี้เก็บไว้เป็น audit trail ของสัญญา/การตัดสินใจ (ไม่ใช่ backlog ที่ค้างแล้ว).
 
 TakeTime ส่งบน checkout Receipt (DocumentType=3) แล้ว: `depositAppliedAmount`, `depositAppliedRef`
 (เลขเอกสาร NextAcc ของใบมัดจำ), `depositAppliedDrivesJournal` (config `Nexaacc_Deposit_Drives_Journal`).
 
 ---
 
-## ✅ เสร็จแล้ว (NextAcc)
+## ✅ เสร็จแล้ว (NextAcc — ยืนยันครบ)
 - **drives รับ journal ref (JV-INT):** cb55e3b — depositAppliedRef เป็น JournalEntry.EntryNumber ได้
   → กลับ deferred (217xx/21913) จากบรรทัด Cr ของ journal ใน JE ใบเดียว (self-contained). TakeTime
   รองรับแล้ว (config `Nexaacc_Drives_Journal_Ref`, commit 4c34f5c/72b37b1).
 - **confirmation A** (แยกฐาน/VAT ตามใบมัดจำจริง): ✅ cb55e3b กลับจากบรรทัด Cr จริง.
 - **double-reverse guard:** ✅ NextAcc มี `DepositAppliedToDocumentId`.
+- **#1 Un-realize on void:** ✅ เสร็จ (NextAcc ยืนยัน) — void เช็คเอาท์ → clear `DepositAppliedToDocumentId`
+  ทั้ง Document ref และ journal ref (JV-INT) โดยไม่ void ใบมัดจำ → CREATE#2 re-realize ได้ (ดู §1).
+- **#2 PDF page-break:** ✅ เสร็จ — ส่วน "การบันทึกบัญชี" ขึ้นหน้าใหม่เสมอ (ดู §2).
+- **#2b bookingNumber บน CN/DN:** ✅ เสร็จ (NextAcc commit 40ed760) — `InboundCreditNoteRequest` +
+  `InboundDebitNoteRequest` รับ JSON key `bookingNumber` (string) → `Document.BookingNumber` เหมือน invoice.
+  TakeTime ส่งครบแล้ว (commit c255a03). ครบทั้ง 3 endpoint: invoice / credit-note / debit-note (ดู §2b).
+- **#3 แยกเลขมัดจำ:** คงเลข series เดิม (REC ร่วม, gap-free §86/4) — ตัดสินใจไม่แยก (ดู §3).
+- **confirmation A + B (display-only missing-ref ไม่ 404):** ✅ ยืนยันแล้ว.
+
+**เหลือฝั่ง TakeTime:** pull build ล่าสุด → rebuild (Windows) → deploy → ทดสอบ end-to-end
+(deposit → checkout → void + CN/DN ผูก booking) → เปิด drives mode (ดู "ลำดับเปิด drives mode" ท้ายไฟล์).
 
 ---
 
-## 1. [สำคัญสุด — ยังต้องยืนยัน] Un-realize ใบมัดจำ ตอน void เอกสารเช็คเอาท์ (ทั้ง Document REC- และ journal JV-INT)
+## 1. ✅ [เสร็จ] Un-realize ใบมัดจำ ตอน void เอกสารเช็คเอาท์ (ทั้ง Document REC- และ journal JV-INT)
 
 **บริบท:** drives-journal (REC- หรือ JV-INT) → post เช็คเอาท์ ลง JE self-contained + **mark ใบมัดจำ/JV
 "realized/applied"** (`DepositAppliedToDocumentId`) กันรับรู้ซ้ำ.
@@ -40,7 +52,7 @@ CREATE#2 เช็คเอาท์ (อ้างมัดจำ/JV เดิ�
 
 ---
 
-## 2. Page-break ก่อนส่วน "การบันทึกบัญชี" บน PDF เอกสาร
+## 2. ✅ [เสร็จ] Page-break ก่อนส่วน "การบันทึกบัญชี" บน PDF เอกสาร
 
 **บริบท:** PDF เอกสาร (Receipt/TaxInvoice) มีส่วน "การบันทึกบัญชี" (JE Dr/Cr) ต่อท้าย.
 
@@ -52,24 +64,29 @@ Cr อยู่หน้า 2) อ่านยาก.
 
 ---
 
-## 2b. [ทางเลือก] `bookingNumber` บน Credit Note / Debit Note DTO
+## 2b. ✅ [เสร็จ] `bookingNumber` บน Credit Note / Debit Note DTO
 
-**บริบท:** NextAcc เพิ่ม `bookingNumber` (เลขการจอง `RES-{id}`) ให้ **integration invoice** แล้ว
-(commit 8ed90ba) — TakeTime ส่งครบทุก invoice/document ที่อิงการจอง. ตอนนี้ TakeTime **ส่ง
-`bookingNumber` มาบน `/api/integration/credit-notes` และ `/debit-notes` ด้วย** (mapper คืนเงิน/
-ยกเลิกใบเสร็จ/ค่าเสียหาย: `MapRefundToCreditNote` / `MapReceiptVoidToCreditNote` /
-`MapDamageChargeToDebitNote`).
+**บริบท:** NextAcc เพิ่ม `bookingNumber` (เลขการจอง `RES-{id}`) ให้ **integration invoice** ก่อน
+(commit 8ed90ba) แล้ว **ขยายไป CN/DN ด้วย (commit 40ed760):** `InboundCreditNoteRequest` +
+`InboundDebitNoteRequest` รับ JSON key `bookingNumber` (string) → wire เข้า `Document.BookingNumber`
+เหมือน invoice ทุกประการ.
 
-**ขอ (ถ้าทำได้):** เพิ่มฟิลด์ `bookingNumber` (string, camelCase) ใน `InboundCreditNoteRequest` /
-`InboundDebitNoteRequest` DTO ฝั่ง NextAcc (mirror invoice 8ed90ba) → เพื่อ **group ทุกเอกสารของ
-การจองด้วยคีย์เดียว** (ใบกำกับ + CN + DN) filter/ค้นตาม booking ได้เหมือน invoice.
+**TakeTime (commit c255a03):** ส่ง `bookingNumber = RES-{id}` บน `/api/integration/credit-notes`
+และ `/debit-notes` ครบทุก mapper ที่อิงการจอง — `MapRefundToCreditNote` (คืนเงิน) /
+`MapReceiptVoidToCreditNote` (ยกเลิกใบเสร็จ) / `MapDamageChargeToDebitNote` (ค่าเสียหาย).
+(`MapVoucherVoidToDebitNote` อิงใบสำคัญจ่าย ไม่ใช่การจอง → ไม่ส่ง.)
 
-**หมายเหตุ:** ไม่ใช่ blocker — ถ้า DTO ยังไม่มีฟิลด์นี้ NextAcc จะ **ignore** เฉย (record ไม่ error).
-CN/DN โยงการจองได้อยู่แล้วผ่าน `externalRef` (`CN-RES-{id}` / `DN-DMG-{id}`) + `originalInvoiceRef`.
+**ผล:** ครบทั้ง 3 endpoint — invoice / credit-note / debit-note — group ทุกเอกสารของการจองด้วยคีย์
+เดียว (`bookingNumber`) filter/ค้นตาม booking ได้. (ก่อนหน้านี้ CN/DN ก็โยงได้ผ่าน `externalRef`
+`CN-RES-{id}`/`DN-DMG-{id}` + `originalInvoiceRef` — bookingNumber ทำให้เป็นฟิลด์ dedicated เหมือน invoice.)
 
 ---
 
-## 3. [ทางเลือก] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
+## 3. ✅ [ปิด — คงเดิม] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
+
+> **ตัดสินใจ:** NextAcc คงเลข series เดิม (REC ร่วมกับใบเสร็จมัดจำ, gap-free §86/4) — ไม่แยกชุด.
+> ตามกฎหมายใช้ชุด REC ได้ ไม่ผิด. รายละเอียดเดิมด้านล่างเก็บไว้เป็น audit trail.
+
 
 **บริบท:** เช็คเอาท์ลูกค้า walk-in ใช้ **DocumentType=Receipt(3)** (จำเป็น — TaxInvoice(4) ติด §86/4
 เพราะ walk-in ไม่มีเลขภาษี+ที่อยู่). Receipt(3)+VAT render เป็น "ใบกำกับภาษี/ใบเสร็จรับเงิน" แต่ได้
@@ -84,18 +101,17 @@ preference ไม่ใช่ blocker. **ห้ามแก้เป็น Docum
 
 ---
 
-## ยืนยันเพิ่มเติม (confirmation)
+## ยืนยันเพิ่มเติม (confirmation) — ✅ ยืนยันครบ
 
 - **A.** `depositAppliedDrivesJournal` แยกฐาน (217xx net) vs VAT (21913) **ตามที่ใบมัดจำ book จริง**
-  (แต่ละใบอาจ defer/immediate ต่างกัน) — ยืนยันว่า resolve จาก `depositAppliedRef` แล้วกลับตามบัญชี/
-  ยอดจริงของใบมัดจำนั้น ✔?
+  (แต่ละใบอาจ defer/immediate ต่างกัน) — ✅ resolve จาก `depositAppliedRef` แล้วกลับตามบัญชี/ยอดจริง.
 - **B.** โหมด display-only (`depositAppliedDrivesJournal=false`) — ถ้า `depositAppliedRef` ชี้เอกสารที่
-  หาไม่เจอ ต้อง **ไม่ 404** (แค่แสดง text). *(ฝั่ง TakeTime กันไว้แล้ว: ส่ง ref เฉพาะเมื่อใบมัดจำ sync +
-  book แล้ว — แต่ขอ NextAcc ยืนยัน behavior นี้กันเคสตกหล่น).*
+  หาไม่เจอ **ไม่ 404** (แค่แสดง text). ✅ ยืนยัน. (ฝั่ง TakeTime กันไว้แล้ว: ส่ง ref เฉพาะเมื่อใบมัดจำ
+  sync + book แล้ว.)
 
 ---
 
-## สถานะฝั่ง TakeTime (ทำเสร็จแล้ว รอ NextAcc)
+## สถานะฝั่ง TakeTime — ✅ พร้อม (เหลือ rebuild + deploy + test)
 
 | ฟีเจอร์ | สถานะ | Gate |
 |---|---|---|
@@ -103,6 +119,12 @@ preference ไม่ใช่ blocker. **ห้ามแก้เป็น Docum
 | `depositAppliedDrivesJournal` (JE self-contained) | ✅ | config `Nexaacc_Deposit_Drives_Journal` (default off) + checkbox Admin |
 | Auto-backfill ใบมัดจำ legacy ก่อนเช็คเอาท์ | ✅ | อัตโนมัติ (self-heal) |
 | Void guard (ไม่ double-reverse JV) | ✅ | เช็ค JV จริงด้วย reference |
+| Deposit-consumed marker (กันเรียกใช้มัดจำซ้ำ) | ✅ | migration PHASE18_05 (auto no-op ก่อน migrate) |
+| `bookingNumber` บน invoice + CN + DN | ✅ | อัตโนมัติ (RES-{id} ทุกเอกสารที่อิงการจอง) |
 
-**ลำดับเปิด drives mode:** NextAcc deploy (รองรับ + ข้อ 1 un-realize) → TakeTime rebuild → ติ๊ก
-checkbox / ตั้ง `Nexaacc_Deposit_Drives_Journal=1`. เปิดก่อน NextAcc พร้อม = GL ไม่บาลานซ์.
+**ลำดับ go-live:**
+1. Pull build ล่าสุด (NextAcc: `claude/fix-errors-638kW`) → **rebuild บน Windows** (WebForms build บน Linux ไม่ได้).
+2. รัน migration ค้าง: **PHASE18_05** (deposit-consumed marker) — idempotent.
+3. Deploy → ทดสอบ end-to-end: deposit → checkout (หักมัดจำ) → void → CREATE#2 (re-realize) + CN/DN ผูก booking.
+4. เปิด drives mode: ติ๊ก checkbox / ตั้ง `Nexaacc_Deposit_Drives_Journal=1` (+ `Nexaacc_Drives_Journal_Ref=1`
+   ถ้าใช้ JV-INT ref). ตอนนี้ NextAcc ทำ #1 un-realize on void ครบแล้ว → เปิดได้ปลอดภัย GL บาลานซ์.
