@@ -6474,19 +6474,15 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // ใช้ SignatureService.GetSignatureUrl (คืน base64 data URI) — กลไก MapPath เดียวกับที่เอกสาร
+                // local ใช้ (รองรับทั้ง StaffSignatureFolderPath แบบ physical C:\ และ virtual ~/ + fallback
+                // ไฟล์ตามชื่อพนักงาน). เดิมโค้ดนี้เอา path มา HostingEnvironment.MapPath ซ้ำ → physical path
+                // ถูก map ผิด → File.Exists=false → "ไม่พบไฟล์ลายเซ็น" ทั้งที่ local เจอ.
                 var sigService = new SignatureService();
-                string virtualPath = sigService.GetSignaturePath(adminId);   // เช่น ~/Documents/Staff/Signature/sig_1_xxx.png
-                if (string.IsNullOrEmpty(virtualPath)) return null;
-
-                string physical = System.Web.Hosting.HostingEnvironment.MapPath(virtualPath);
-                if (string.IsNullOrEmpty(physical) || !File.Exists(physical)) return null;
-
-                byte[] bytes = File.ReadAllBytes(physical);
-                if (bytes.Length == 0) return null;
-
-                string ext = Path.GetExtension(physical).ToLowerInvariant();
-                string mime = ext == ".jpg" || ext == ".jpeg" ? "image/jpeg" : "image/png";
-                return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                string dataUri = sigService.GetSignatureUrl(adminId);
+                if (!string.IsNullOrEmpty(dataUri) && dataUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                    return dataUri;
+                return null;
             }
             catch { return null; }
         }

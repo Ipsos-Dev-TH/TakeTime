@@ -706,21 +706,16 @@ namespace Take_Time_BangPhra.Voucher
             catch { return false; }
         }
 
-        /// <summary>อ่านไฟล์ลายเซ็นของ admin → base64 data URI. คืน null ถ้าไม่มี.</summary>
+        /// <summary>อ่านลายเซ็นของ admin → base64 data URI ผ่าน SignatureService.GetSignatureUrl
+        /// (กลไก MapPath เดียวกับเอกสาร local — รองรับ physical/virtual path + fallback ตามชื่อ). คืน null ถ้าไม่มี.</summary>
         private string LoadSignatureDataUri(short adminId)
         {
             try
             {
-                var sig = new SignatureService();
-                string virtualPath = sig.GetSignaturePath(adminId);
-                if (string.IsNullOrEmpty(virtualPath)) return null;
-                string physical = Server.MapPath(virtualPath);
-                if (string.IsNullOrEmpty(physical) || !File.Exists(physical)) return null;
-                byte[] bytes = File.ReadAllBytes(physical);
-                if (bytes.Length == 0) return null;
-                string ext = Path.GetExtension(physical).ToLowerInvariant();
-                string mime = (ext == ".jpg" || ext == ".jpeg") ? "image/jpeg" : "image/png";
-                return "data:" + mime + ";base64," + Convert.ToBase64String(bytes);
+                string dataUri = new SignatureService().GetSignatureUrl(adminId);
+                if (!string.IsNullOrEmpty(dataUri) && dataUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                    return dataUri;
+                return null;
             }
             catch { return null; }
         }
