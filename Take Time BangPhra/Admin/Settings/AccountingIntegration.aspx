@@ -265,6 +265,19 @@
                         ปิดไว้ (default) = โชว์ "หักเงินมัดจำ/ยอดสุทธิ" บนใบ แต่ JE หักมัดจำยังยิงเป็น JV แยก (GL ถูกเหมือนเดิม)
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDrivesJournalRef" />
+                        รองรับมัดจำที่เป็น JV-INT journal ในโหมดขับ JE (NextAcc cb55e3b)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        (ใช้คู่กับตัวบน) เมื่อเปิด: มัดจำที่ sync มาเป็น "journal (JV-INT-…)" ไม่ใช่ใบเสร็จ (REC-)
+                        จะส่งเลข JE ให้ NextAcc กลับ deferred ในใบเดียว (self-contained). ปิดไว้ (default) =
+                        มัดจำ JV-INT ใช้ reverse-JE แยก (GL ถูก ไม่ค้าง draft).
+                        <br /><strong style="color:#c0392b;">⚠ เปิดได้เมื่อ NextAcc deploy cb55e3b แล้วเท่านั้น</strong> —
+                        ถ้าเปิดก่อน NextAcc พร้อม เอกสารจะค้าง draft (approve ไม่ผ่าน; มี auto-fallback แต่ควรเปิดตามลำดับ)
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -818,6 +831,7 @@
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
                 document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
+                document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -875,6 +889,7 @@
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
                 depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,
                 depositDrivesJournal: document.getElementById('cfgDepositDrivesJournal').checked,
+                depositDrivesJournalRef: document.getElementById('cfgDepositDrivesJournalRef').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

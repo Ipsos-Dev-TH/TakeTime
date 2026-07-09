@@ -75,6 +75,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "depositVatRecognition", config.DepositVatRecognition },
                     { "depositDeferOutputVat", config.IsDepositOutputVatDeferred },
                     { "depositDrivesJournal", config.IsDepositAppliedDrivesJournal },
+                    { "depositDrivesJournalRef", config.IsDrivesJournalRefEnabled },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -272,6 +273,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // ⚠ เปิดได้เมื่อ NextAcc deploy รองรับ depositAppliedDrivesJournal แล้วเท่านั้น (spec §9.1) —
                 //   เปิด flag = ส่ง drives=true + เลิกส่ง JV แยกพร้อมกัน; เปิดก่อน NextAcc พร้อม = GL พัง
                 if (data.ContainsKey("depositDrivesJournal")) config.SetConfig("Nexaacc_Deposit_Drives_Journal", BoolToFlag(data["depositDrivesJournal"]));
+                // ⚠ เปิดได้เมื่อ NextAcc deploy cb55e3b แล้วเท่านั้น (มัดจำ JV-INT → self-contained JE)
+                if (data.ContainsKey("depositDrivesJournalRef")) config.SetConfig("Nexaacc_Drives_Journal_Ref", BoolToFlag(data["depositDrivesJournalRef"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
