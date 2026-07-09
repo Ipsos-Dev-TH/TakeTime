@@ -1944,6 +1944,13 @@ namespace Take_Time_BangPhra.Integration
                 || status == NexaaccDocumentStatus.Overdue;
         }
 
+        /// <summary>JE/เอกสารถูก void แล้วรึยัง — รองรับทั้ง journal (int 2) และ mapping ผ่าน string
+        /// ("Voided" → NexaaccDocumentStatus.Voided=6). "Reversed" (=9) ไม่ใช่ void (ยังอยู่ใน GL) → false.</summary>
+        private static bool IsVoidedStatus(int status)
+        {
+            return status == 2 || status == NexaaccDocumentStatus.Voided;   // 2 = journal int, 6 = doc/string
+        }
+
         /// <summary>
         /// Approve เอกสาร — JWT-only endpoint. ปัจจุบันไม่มี caller (Integration invoice/expense
         /// auto-approve อยู่แล้ว) คงไว้สำหรับ flow ในอนาคตที่ใช้ DocumentController แยก
@@ -2917,7 +2924,7 @@ namespace Take_Time_BangPhra.Integration
                 var found = await _apiClient.SearchJournalsAsync(reference, 10);
                 if (found?.data?.Items != null)
                     foreach (var j in found.data.Items)
-                        if (string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase) && j.Status != 2)
+                        if (string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase) && !IsVoidedStatus(j.Status))
                             return true;
             }
             catch { }
@@ -2957,7 +2964,7 @@ namespace Take_Time_BangPhra.Integration
                 var found = await _apiClient.SearchJournalsAsync(reff, 10);
                 if (found?.data?.Items != null)
                     foreach (var j in found.data.Items)
-                        if (string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase) && j.Status != 2)
+                        if (string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase) && !IsVoidedStatus(j.Status))
                         { orig = j; break; }
             }
             catch { }
@@ -4703,7 +4710,7 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>true ถ้า JE เป็น "ใบมัดจำจริง" ของการจอง (ไม่ใช่ reversal/voided/JE เช็คเอาท์).</summary>
         private static bool IsDepositEntry(JournalEntryResponse j, HashSet<string> depIds, string depRef)
         {
-            return j.OriginalEntryId == null && j.Status != 2 &&
+            return j.OriginalEntryId == null && !IsVoidedStatus(j.Status) &&
                 (string.Equals(j.Reference, depRef, StringComparison.OrdinalIgnoreCase)
                  || (!string.IsNullOrEmpty(j.Reference) && depIds.Contains(j.Reference))
                  || (!string.IsNullOrEmpty(j.EntryNumber) && depIds.Contains(j.EntryNumber))
@@ -4813,7 +4820,7 @@ namespace Take_Time_BangPhra.Integration
                     catch { }
                 }
 
-                var docJes = jes.Values.Where(j => j.Status != 2 &&
+                var docJes = jes.Values.Where(j => !IsVoidedStatus(j.Status) &&
                     (j.SourceDocumentId == docId
                      || (!string.IsNullOrEmpty(doc.DocumentNumber) && string.Equals(j.SourceDocumentNumber, doc.DocumentNumber, StringComparison.OrdinalIgnoreCase)))).ToList();
                 bool anyUnbalanced = false;
@@ -4830,7 +4837,7 @@ namespace Take_Time_BangPhra.Integration
                     if (!string.IsNullOrEmpty(depCode))
                     {
                         decimal net = 0m; bool sawLine = false;
-                        foreach (var je in jes.Values.Where(j => j.Status != 2 && j.Lines != null))
+                        foreach (var je in jes.Values.Where(j => !IsVoidedStatus(j.Status) && j.Lines != null))
                             foreach (var ln in je.Lines)
                                 if (string.Equals(ln.AccountCode, depCode, StringComparison.OrdinalIgnoreCase))
                                 { net += ln.CreditAmount - ln.DebitAmount; sawLine = true; }   // Cr = หนี้สินเพิ่ม, Dr = ตัด
@@ -4886,7 +4893,7 @@ namespace Take_Time_BangPhra.Integration
 
                     // reversal ถูกกลับ/void ไปแล้ว = เคย recover แล้ว → มัดจำ active (idempotent, ไม่ทำซ้ำ)
                     bool reversalUndone = reversal != null &&
-                        (reversal.Status == 2 || (reversal.ReversedByEntryId != null && reversal.ReversedByEntryId != Guid.Empty));
+                        (IsVoidedStatus(reversal.Status) || (reversal.ReversedByEntryId != null && reversal.ReversedByEntryId != Guid.Empty));
                     if (reversalUndone) continue;
 
                     if (reversal == null)
@@ -7420,7 +7427,7 @@ namespace Take_Time_BangPhra.Integration
                     var found = await _apiClient.SearchJournalsAsync(receiptNumber, 10);
                     var je = found?.data?.Items?.FirstOrDefault(j =>
                         string.Equals(j.Reference, receiptNumber, StringComparison.OrdinalIgnoreCase)
-                        && j.Status != 2 /* Voided */ && j.OriginalEntryId == null);
+                        && !IsVoidedStatus(j.Status) /* Voided */ && j.OriginalEntryId == null);
                     if (je == null) return false;
 
                     var upd = await _apiClient.UpdateJournalEntryAsync(je.Id, new UpdateJournalEntryRequest

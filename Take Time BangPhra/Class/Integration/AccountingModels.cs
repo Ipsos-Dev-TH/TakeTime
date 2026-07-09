@@ -662,8 +662,18 @@ namespace Take_Time_BangPhra.Integration
             { "Overdue", NexaaccDocumentStatus.Overdue },
             { "Rejected", NexaaccDocumentStatus.Rejected },
             // Also support journal-specific status names
-            { "Posted", 1 }
+            { "Posted", 1 },
+            // Journal ที่ถูกกลับรายการ — ยังอยู่ใน GL (ไม่ใช่ voided). map เป็นค่า distinct (9) เพื่อให้
+            // logic void-exclude (Status != 2/6) นับรวม → net GL 21510 ถูก (ตรงกับ NextAcc Posted||Reversed).
+            // ⚠ ก่อนหน้านี้ "Reversed" ไม่อยู่ใน dict → ReadJson throw → deserialize SearchJournals ทั้ง response พัง
+            // (กระทบ deposit-reverse detection / auto-recover / post-sync verify ที่ใช้ SearchJournals)
+            { "Reversed", 9 },
+            { "Reversal", 9 }
         };
+
+        /// <summary>ค่า sentinel สำหรับ status ที่ NextAcc ส่งมาแต่ยังไม่ map (กัน throw ทำ deserialize พังทั้ง
+        /// response เมื่อ NextAcc เพิ่ม status ใหม่). ไม่ตรงกับ Posted/Voided ใด ๆ → logic เดิมปฏิบัติแบบ conservative.</summary>
+        public const int UnknownStatus = -1;
 
         public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
         {
@@ -679,8 +689,12 @@ namespace Take_Time_BangPhra.Integration
                 if (int.TryParse(str, out int parsed))
                     return parsed;
 
-                throw new JsonSerializationException($"Unknown Status value: '{str}'");
+                // ไม่รู้จัก → คืน sentinel แทน throw (forward-compatible: NextAcc เพิ่ม status ใหม่ ไม่ทำ response พัง)
+                return UnknownStatus;
             }
+
+            if (reader.TokenType == JsonToken.Null)
+                return UnknownStatus;
 
             throw new JsonSerializationException($"Unexpected token type {reader.TokenType} for Status");
         }
