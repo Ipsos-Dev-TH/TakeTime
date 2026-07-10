@@ -2838,13 +2838,34 @@ namespace Take_Time_BangPhra.Integration
                 SetReceiptPaymentMarker(receiptNumber, "APR:" + docId);
             }
 
-            // 3) หักมัดจำ (ถ้ามี): Dr รับล่วงหน้า(+VAT) / Cr เงินสด — ลดเงินสดที่ใบเสร็จ Dr เกิน
+            // 3) หักมัดจำ (ถ้ามี): Dr ขาที่ใบมัดจำลงจริง / Cr เงินสด — ลดเงินสดที่ใบเสร็จ Dr เกิน
+            //    หลักการ "อ่านตามที่ book จริง": เจอ JE ใบมัดจำ → mirror ขา Cr จริง (มัดจำล้วน/แยก 21913/แยก 21911)
+            //    ไม่ force ตาม config ปัจจุบัน (config อาจสลับหลังรับมัดจำ → adjustment คนละโหมดซ้อน → 21510 เพี้ยน
+            //    เคส 148968 -967.29 = 500 gross + 467.29 net). หาไม่เจอจริง ๆ → fallback gross ไม่มีขา VAT + log ตรวจ.
             //    CreateJournalAsync ไม่ dedupe → marker เฟส ADJ: กันโพสต์ซ้ำตอน retry
             if (depositApplied > 0 && !adjDone)
             {
-                var adj = _mapper.MapDepositAppliedReceiptAdjustment(reservationId, depositApplied, paymentMethod,
-                    receiptDate, customerName, paymentAccountId, receiptNumber,
-                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt, deferOutputVat: _config.IsDepositOutputVatDeferred);
+                CreateJournalEntryRequest adj;
+                var mirror = await GetDepositMirrorLegsAsync(reservationId);
+                if (mirror != null && Math.Abs(mirror.Value.total - depositApplied) <= 1.00m)
+                {
+                    adj = _mapper.MapDepositAdjustmentFromActualLegs(reservationId, receiptNumber,
+                        mirror.Value.legs, paymentMethod, receiptDate, paymentAccountId);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceiptDoc: หักมัดจำแบบ mirror ขาจริงจาก JE ใบมัดจำ ({mirror.Value.source}) — " +
+                        $"{string.Join(" + ", mirror.Value.legs.Select(l => $"Dr {l.accountName} {l.amount:N2}"))} / Cr เงินสด {mirror.Value.total:N2} receipt={receiptNumber}", "SYSTEM");
+                }
+                else
+                {
+                    // ไม่เจอ JE ใบมัดจำ (หรือยอดไม่ตรงผิดปกติ) → หัก gross ไม่มีขา VAT (21913) ตามหลัก fallback
+                    // ที่ตกลง — แล้วให้ post-sync verify เช็ค/ปรับ/เตือนต่อ (ไม่เดาโหมดจาก config)
+                    adj = _mapper.MapDepositAppliedReceiptAdjustment(reservationId, depositApplied, paymentMethod,
+                        receiptDate, customerName, paymentAccountId, receiptNumber,
+                        hasVat: false, vatAtReceipt: false, deferOutputVat: false);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"⚠ SettleReceiptDoc: หา JE ใบมัดจำไม่เจอ{(mirror != null ? $" (ยอด mirror {mirror.Value.total:N2} ≠ มัดจำ {depositApplied:N2})" : "")} → " +
+                        $"หักมัดจำแบบ gross (Dr 21510 เต็ม ไม่มีขา VAT) ตามหลัก fallback — verify จะตรวจ/ปรับต่อ receipt={receiptNumber}", "SYSTEM");
+                }
                 var adjResult = await _apiClient.CreateJournalAsync(adj);
                 Guid adjId = RequireValidDocId(adjResult?.data?.Id, $"DepositAppliedReceiptAdjustment receipt={receiptNumber}");
                 await SafePostJournalAsync(adjId);
@@ -2928,6 +2949,62 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>มี JE ที่ Reference นี้ (ไม่ถูก void) อยู่บน NextAcc แล้วไหม — ใช้กัน post ซ้ำตอน retry</summary>
+        /// <summary>อ่าน "ขาจริง" ที่ใบมัดจำ book บน NextAcc — หลักการ: เจอเอกสาร/JE แล้ว → ดึงค่าตามที่ลงจริง
+        /// มาใช้เลย (มัดจำล้วน gross / แยก 21913 defer / แยก 21911 immediate) **อย่า force ตาม config ปัจจุบัน**
+        /// (config อาจสลับหลังรับมัดจำ → ขาไม่ตรง → 21510/21913 เพี้ยนซ้อน). รวม Cr−Dr ต่อบัญชีจาก JE ใบมัดจำ
+        /// ทุกใบ (ฝั่งเงินสดเป็น Dr → net ติดลบ → ถูกกรองออกเอง). คืน null = หา JE ไม่เจอ →
+        /// caller fallback หักแบบ gross ไม่มีขา VAT (ตามหลักที่ตกลง) + ให้ verify ปรับ/เตือนต่อ.</summary>
+        private async System.Threading.Tasks.Task<(List<(Guid accountId, decimal amount, string accountName)> legs, decimal total, string source)?>
+            GetDepositMirrorLegsAsync(int reservationId)
+        {
+            try
+            {
+                var depJes = await FindDepositJournalsAsync(reservationId);
+                if (depJes.Count == 0) return null;
+                var byAcc = new Dictionary<Guid, KeyValuePair<decimal, string>>();
+                var sources = new List<string>();
+                foreach (var je in depJes.Where(j => j.Lines != null && j.Lines.Count > 0))
+                {
+                    sources.Add(je.EntryNumber ?? je.Id.ToString().Substring(0, 8));
+                    foreach (var ln in je.Lines)
+                    {
+                        if (ln.AccountId == Guid.Empty) continue;
+                        decimal net = ln.CreditAmount - ln.DebitAmount;   // ขา Cr ของใบมัดจำ = สิ่งที่ต้องตัดคืนตอนเช็คเอาท์
+                        if (byAcc.TryGetValue(ln.AccountId, out var cur))
+                            byAcc[ln.AccountId] = new KeyValuePair<decimal, string>(cur.Key + net, cur.Value);
+                        else
+                            byAcc[ln.AccountId] = new KeyValuePair<decimal, string>(net, ((ln.AccountCode ?? "") + " " + (ln.AccountName ?? "")).Trim());
+                    }
+                }
+                var legs = byAcc.Where(kv => kv.Value.Key > 0.005m)
+                    .Select(kv => (accountId: kv.Key, amount: Math.Round(kv.Value.Key, 2), accountName: kv.Value.Value))
+                    .ToList();
+                if (legs.Count == 0) return null;
+                decimal total = Math.Round(legs.Sum(l => l.amount), 2);
+                return (legs, total, string.Join(", ", sources.Distinct()));
+            }
+            catch { return null; }
+        }
+
+        /// <summary>กลับ JV ตาม reference แบบ "account-for-account" (ReverseJournalAsync บนตัวจริง) —
+        /// undo ขาที่ลงจริงทุกบรรทัด ไม่ต้องเดาโหมด. idempotent (เคยกลับแล้ว → true). false = หาไม่เจอ/ล้มเหลว.</summary>
+        private async Task<bool> TryReverseJournalByReferenceAsync(string reference, string description)
+        {
+            if (string.IsNullOrEmpty(reference)) return false;
+            try
+            {
+                var found = await _apiClient.SearchJournalsAsync(reference, 10);
+                var je = found?.data?.Items?.FirstOrDefault(j =>
+                    string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase)
+                    && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null);
+                if (je == null) return false;
+                if (je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty) return true;   // เคยกลับแล้ว
+                var rev = await _apiClient.ReverseJournalAsync(je.Id, new ReverseJournalEntryRequest { Description = description });
+                return rev?.success == true;
+            }
+            catch { return false; }
+        }
+
         private async Task<bool> JournalExistsByReferenceAsync(string reference)
         {
             if (string.IsNullOrEmpty(reference)) return false;
@@ -5526,8 +5603,18 @@ namespace Take_Time_BangPhra.Integration
                                     // (เอกสารเก่าสร้างแบบ display-only แล้ว void หลังสลับ flag ก็ยังกลับ JV เดิมถูก)
                                     string depadjRef = !string.IsNullOrEmpty(receiptNumber)
                                         ? $"{receiptNumber}-DEPADJ" : $"RES-{info.Value.reservationId}-DEPADJ";
-                                    if (await JournalExistsByReferenceAsync(depadjRef))
+                                    // หลัก "อ่านตามที่ลงจริง": กลับ JV -DEPADJ "ตัวจริง" (account-for-account) —
+                                    // undo ขาที่โพสต์จริงทุกบรรทัด (mirror/gross/config เก่า แบบไหนก็ undo ตรงตามนั้น)
+                                    // ไม่สร้าง counter จาก config ปัจจุบัน (config อาจสลับไปแล้ว → ขาไม่ตรง → เพี้ยนซ้อน)
+                                    if (await TryReverseJournalByReferenceAsync(depadjRef,
+                                        $"Void ใบเสร็จ {receiptNumber} — กลับ JV หักมัดจำตามที่ลงจริง (การจอง #{info.Value.reservationId})"))
                                     {
+                                        _code.Logs(_connectionString, "AccountingSync",
+                                            $"ProcessVoidReceipt(RECEIPT doc): reversed actual -DEPADJ ({depadjRef}) account-for-account receipt={receiptNumber}", "SYSTEM");
+                                    }
+                                    else if (await JournalExistsByReferenceAsync(depadjRef))
+                                    {
+                                        // reverse ตัวจริงไม่ได้ (NextAcc เก่า/งวดปิด) → counter จาก config (พฤติกรรมเดิม)
                                         var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
                                             info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
                                             info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
@@ -5537,7 +5624,7 @@ namespace Take_Time_BangPhra.Integration
                                         Guid revId = RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt(RECEIPT doc) counter-adj receipt={receiptNumber}");
                                         await SafePostJournalAsync(revId);
                                         _code.Logs(_connectionString, "AccountingSync",
-                                            $"ProcessVoidReceipt(RECEIPT doc): reversed deposit adj applied={applied} receipt={receiptNumber} journalId={revId}", "SYSTEM");
+                                            $"⚠ ProcessVoidReceipt(RECEIPT doc): reverse ตัวจริงไม่ได้ → counter-adj จาก config applied={applied} receipt={receiptNumber} journalId={revId} — ตรวจขาให้ตรงกับ JV เดิม", "SYSTEM");
                                     }
                                     else
                                     {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
+using System.Linq;
 
 namespace Take_Time_BangPhra.Integration
 {
@@ -2107,6 +2108,55 @@ namespace Take_Time_BangPhra.Integration
                 EntryDate = entryDate,
                 JournalType = NexaaccJournalType.General,
                 Description = $"ปรับปรุง — หักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId})",
+                Reference = refStr,
+                Lines = lines
+            };
+        }
+
+        /// <summary>
+        /// JV หักมัดจำแบบ "mirror ขาจริง" — หลักการ: เจอ JE ใบมัดจำแล้ว → ดึงขา Cr ตามที่ลงจริงมาใช้เลย
+        /// (มัดจำล้วน gross 21510 / แยก net+21913 defer / แยก net+21911 immediate — แบบไหนก็ตามนั้น)
+        /// **อย่า force ตาม config ปัจจุบัน** เพราะ config อาจถูกสลับหลังรับมัดจำ (เคส 148968: adjustment
+        /// หลายรอบคนละโหมดซ้อนกัน → 21510 ติดลบ -967.29 = 500 gross + 467.29 net). legs มาจาก
+        /// GetDepositMirrorLegsAsync (อ่าน GL จริง). JV: Dr แต่ละขาตามยอดจริง / Cr เงินสด gross.
+        /// Reference {receipt}-DEPADJ (คงเดิม — void path หาเจอ).
+        /// </summary>
+        public CreateJournalEntryRequest MapDepositAdjustmentFromActualLegs(
+            int reservationId, string receiptNumber,
+            List<(Guid accountId, decimal amount, string accountName)> legs,
+            string paymentMethod, DateTime entryDate, string paymentAccountId = null)
+        {
+            if (legs == null || legs.Count == 0)
+                throw new ArgumentException("MapDepositAdjustmentFromActualLegs: legs ว่าง");
+            decimal gross = Math.Round(legs.Sum(l => l.amount), 2);
+            if (gross <= 0)
+                throw new ArgumentException("MapDepositAdjustmentFromActualLegs: ยอดรวม legs ต้อง > 0");
+
+            var cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            string refStr = !string.IsNullOrEmpty(receiptNumber) ? $"{receiptNumber}-DEPADJ" : $"RES-{reservationId}-DEPADJ";
+
+            var lines = new List<JournalEntryLineRequest>();
+            foreach (var leg in legs)
+                lines.Add(new JournalEntryLineRequest
+                {
+                    AccountId = leg.accountId,
+                    DebitAmount = leg.amount,
+                    CreditAmount = 0,
+                    Description = $"ตัด {leg.accountName} ตามที่ใบมัดจำลงจริง (หักมัดจำในใบเสร็จ)"
+                });
+            lines.Add(new JournalEntryLineRequest
+            {
+                AccountId = cashAccountId,
+                DebitAmount = 0,
+                CreditAmount = gross,
+                Description = "ลดเงินสดที่ใบเสร็จบันทึกเกิน (ส่วนที่จ่ายด้วยมัดจำ)"
+            });
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ปรับปรุง — หักมัดจำในใบเสร็จ {receiptNumber} (การจอง #{reservationId}, mirror ตามใบมัดจำจริง)",
                 Reference = refStr,
                 Lines = lines
             };

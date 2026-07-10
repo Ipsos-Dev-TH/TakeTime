@@ -177,6 +177,18 @@ Dr เงินฝาก 2,850.00 + Dr 21510 1,448.60 + Dr 21913 101.40
 `{receipt}-DEPVATFIX`, gate `Nexaacc_Auto_Reconcile_Deposit`). เมื่อ NextAcc แก้ต้นเหตุแล้ว auto-fix
 จะไม่มีอะไรให้ทำเอง (stuck=0 → ข้าม).
 
+**หลักการร่วม 2 ฝั่ง (สัญญา — "อ่านตามที่ลงจริง อย่า force โหมด"):** ทุกจุดที่ต้องหักมัดจำ/กลับมัดจำ —
+เมื่อ **เจอ** เอกสารใบมัดจำ/JE → **อ่านขาที่ลงจริง** (มัดจำล้วน gross / แยก net+21913 defer / แยก net+21911
+immediate) แล้วใช้ค่าตามนั้น; เมื่อ **หาไม่เจอจริง ๆ** เท่านั้น → หักแบบ gross ไม่มีขา VAT + ให้ verify
+ตรวจ/ปรับต่อ. TakeTime บังคับใช้ครบแล้ว:
+- JV หักมัดจำ (SettleReceiptDoc step 3): `GetDepositMirrorLegsAsync` อ่านขา Cr จริงจาก JE ใบมัดจำ →
+  `MapDepositAdjustmentFromActualLegs` mirror ทุกขา (ไม่ใช้ config) — fallback gross เมื่อหาไม่เจอ.
+- Void: `TryReverseJournalByReferenceAsync` กลับ JV -DEPADJ **ตัวจริง** account-for-account
+  (undo ตรงตามที่โพสต์ ไม่สร้าง counter จาก config) — fallback counter เดิมเมื่อ reverse ไม่ได้.
+- TryReverseDepositJournals (กลับใบมัดจำ) ใช้ ReverseJournalAsync บนตัวจริงอยู่แล้ว.
+เหตุ: config สลับได้กลางทาง (เคส 148968: adjustment คนละโหมดซ้อน → 21510 = −967.29 = 500 gross +
+467.29 net). **ขอ NextAcc ใช้หลักเดียวกันกับ drives ทุกเคส (ข้อ 5 ด้านบน).**
+
 ---
 
 ## 3. ✅ [ปิด — คงเดิม] เลข running-number ชุดแยกสำหรับ "ใบกำกับภาษี/ใบเสร็จรับเงิน"
