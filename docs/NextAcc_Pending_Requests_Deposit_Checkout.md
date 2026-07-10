@@ -24,6 +24,15 @@ TakeTime ส่งบน checkout Receipt (DocumentType=3) แล้ว: `deposi
   TakeTime ส่งครบแล้ว (commit c255a03). ครบทั้ง 3 endpoint: invoice / credit-note / debit-note (ดู §2b).
 - **#3 แยกเลขมัดจำ:** คงเลข series เดิม (REC ร่วม, gap-free §86/4) — ตัดสินใจไม่แยก (ดู §3).
 - **confirmation A + B (display-only missing-ref ไม่ 404):** ✅ ยืนยันแล้ว.
+- **un-realize ครอบ DELETE + self-heal stale mark (84cdd29):** ✅ ปิด gap สุดท้ายของ #1 — เดิม un-realize
+  ทำเฉพาะตอน **void** แต่เอกสารเช็คเอาท์ที่ถูก **ลบ (hard delete/purge)** ไม่ปลดมาร์ค
+  `DepositAppliedToDocumentId` → มัดจำค้างสถานะ "ถูกหักกับเอกสารอื่นแล้ว" กับผีเอกสาร → เช็คเอาท์ใหม่
+  โดน 400 "ถูกนำไปหักกับเอกสารอื่นแล้ว (กัน reverse ซ้ำ)" (เคส 148968 ที่ลบ+สร้างซ้ำ ~10 รอบ).
+  NextAcc แก้ทั้ง 2 ทาง: **(1) self-heal** — guard เช็คว่าเอกสารที่อ้างยังมีชีวิตก่อน throw; ถูกลบ/void →
+  มาร์คโมฆะ → อนุญาตหักซ้ำ (ครอบ delete/purge/void ทุกเส้นทาง) **(2) proactive** — purge un-mark JV
+  ที่เอกสารหักไว้ กันสะสม stale. net-balance guard ยังคุมยอด (ปลดแค่ธง ไม่หักเกิน).
+  TakeTime ฝั่งเรา: error hint (891fce0) คงไว้เป็น diagnostic; ไม่ต้อง manual clear อีก — Retry แล้ว
+  self-heal ปลดเอง → drives ผ่าน single-JE.
 - **drives-resolve net-balance + closure (c74eaed → f13f4af):** ✅ NextAcc เลิกพึ่ง `ReversedByEntryId`
   → คำนวณ **net GL จริง = Σ(Cr−Dr) บนบัญชีมัดจำของทั้ง reverse-family** (transitive closure ตาม
   `OriginalEntryId` ทุกชั้น, นับเฉพาะ Posted + ไม่ถูกลบ). รองรับ un-reverse ทุกวิธี (reversal-of-reversal /
