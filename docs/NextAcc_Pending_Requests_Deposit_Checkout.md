@@ -151,7 +151,16 @@ NextAcc `PdfGenerationService` เลย fallback ไปใช้ลายเซ
 
 ---
 
-## 5. [ใหม่ — BUG ต้องแก้] drives เคส document-deposit + deferred VAT: JE ขาดขา Dr 21913
+## 5. ✅ [แก้แล้ว — NextAcc d7ee4d3] drives เคส document-deposit + deferred VAT: JE ขาดขา Dr 21913
+
+> **NextAcc แก้ต้นเหตุแล้ว (d7ee4d3):** drives เคส document อ่าน "ขา VAT จริงจาก GL ของใบมัดจำ"
+> (GL-first ตาม confirmation A เหมือน JV-INT) — มัดจำ Cr 21913 → เช็คเอาท์ Dr 21913 + Cr 21911 เต็ม /
+> มัดจำ Cr 21911 → แบบเดิม. verify กับ REC-20260707-0002: JE ใหม่รวม 4,400 ตรงเอกสาร.
+>
+> **⚠ operational — REC-20260707-0002:** GL ถูกแล้วด้วย JV DEPVATFIX → **คงไว้ อย่า void+สร้างใหม่
+> โดยไม่กลับ DEPVATFIX** (JE ใหม่จาก drives ที่แก้แล้วมี Dr 21913 ในตัว → double-fix). TakeTime กันแล้ว:
+> `ProcessVoidReceipt` กลับ `{receipt}-DEPVATFIX` ตัวจริงตอน void เสมอ (idempotent, ไม่มี = ข้าม) →
+> void→recreate ปลอดภัยอัตโนมัติ. หลัง deploy d7ee4d3 auto-fix ฝั่งเราจะไม่มีอะไรให้ทำ (stuck=0).
 
 **เคสจริง (REC-20260707-0002, booking 149025):** ใบมัดจำเป็น **เอกสาร REC-20260707-0001** (เคส b)
 book แบบ defer VAT (`DepositOutputVatDeferred=true` → Cr 21510 1,448.60 + **Cr 21913 101.40**).

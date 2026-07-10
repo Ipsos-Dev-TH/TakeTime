@@ -5634,6 +5634,15 @@ namespace Take_Time_BangPhra.Integration
                                 }
                             }
                         }
+
+                        // กัน DOUBLE-FIX (คำเตือน NextAcc): ใบที่เคยถูกซ่อม VAT มัดจำ (JV {receipt}-DEPVATFIX
+                        // โอน 21913→21911) แล้วถูก void→สร้างใหม่บน NextAcc รุ่นแก้ drives แล้ว (d7ee4d3 —
+                        // JE ใหม่มี Dr 21913 ในตัว) → ถ้า DEPVATFIX เดิมค้างอยู่ 21913 จะโดนตัดซ้ำ.
+                        // → void ต้องกลับ DEPVATFIX ตัวจริงด้วย (account-for-account, idempotent, ไม่มี = ข้ามเงียบ)
+                        if (await TryReverseJournalByReferenceAsync($"{receiptNumber}-DEPVATFIX",
+                            $"Void ใบเสร็จ {receiptNumber} — กลับ JV ซ่อม VAT มัดจำ (กัน double-fix ตอนสร้างใหม่)"))
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidReceipt: reversed {receiptNumber}-DEPVATFIX — กัน 21913 โดนตัดซ้ำเมื่อสร้างใหม่ด้วย drives ที่แก้แล้ว", "SYSTEM");
                     }
 
                     SetReceiptPaymentMarker(receiptNumber, "VOIDED");
