@@ -4784,15 +4784,20 @@ namespace Take_Time_BangPhra.Integration
                     (status, detail) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
 
                     // FINAL GATE: ถ้า verify เจอปัญหา (WARN) + เช็คเอาท์รอบนี้ใช้ drives + เปิด auto-reconcile →
-                    // ลองล้าง orphaned -DEPADJ (21510 ค้าง) แล้ว "ตรวจซ้ำ" → บันทึกสถานะจริงหลังแก้ (check→correct→recheck)
+                    // แก้อัตโนมัติ (1) orphaned -DEPADJ ทำ 21510 ติดลบ (2) ขา VAT มัดจำค้างใน 21913 (drives ลืมโอน)
+                    // แล้ว "ตรวจซ้ำ" → บันทึกสถานะจริงหลังแก้ (check→correct→recheck)
                     if (status == "WARN" && _config.IsAutoReconcileDeposit && _lastReceiptUsedDrives)
                     {
+                        var fixes = new List<string>();
                         string rec = await ReconcileOrphanedDepositAdjustmentsAsync(reservationId, receiptNumber, _lastDocNumber);
-                        if (!string.IsNullOrEmpty(rec))
+                        if (!string.IsNullOrEmpty(rec)) fixes.Add(rec);
+                        string vatFix = await FixStuckDeferredVatAsync(reservationId, receiptNumber, _lastDocNumber, depositApplied);
+                        if (!string.IsNullOrEmpty(vatFix)) fixes.Add(vatFix);
+                        if (fixes.Count > 0)
                         {
                             var (status2, detail2) = await VerifyReceiptPostingAsync(docId, receiptNumber, reservationId, totalAmount, depositApplied, isDeposit);
                             status = status2;
-                            detail = $"{detail2} | [auto-reconcile] {rec}";
+                            detail = $"{detail2} | [auto-reconcile] {string.Join(" ; ", fixes)}";
                         }
                     }
                     logRef = $"receipt={receiptNumber}";
@@ -4953,6 +4958,51 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>AUTO-FIX ขา VAT มัดจำค้าง (final gate): เมื่อ drives ของ NextAcc หักมัดจำ deferred-VAT แต่
+        /// "ลืมโอนขา VAT" (JE ขาด Dr 21913 → 21913 ค้าง Cr + 21911 ขาดเท่ากัน — เคส REC-20260707-0002) →
+        /// โพสต์ JV โอน Dr 21913 / Cr 21911 = "ยอดค้างที่วัดจริง" → VAT เข้า ภ.พ.30 ครบ + JE ชุดรวม = ยอดเอกสาร.
+        /// **ปลอดภัย:** ยอดจากการวัด GL จริง (ไม่คำนวณใหม่) + ต้อง ≈ VAT มัดจำที่คาด (±1) กันแก้ผิดใบ +
+        /// idempotent ผ่าน reference {receipt}-DEPVATFIX (มีแล้วไม่โพสต์ซ้ำ). คืน summary (null = ไม่ได้ทำ).</summary>
+        private async System.Threading.Tasks.Task<string> FixStuckDeferredVatAsync(
+            int reservationId, string receiptNumber, string docNumber, decimal depositApplied)
+        {
+            try
+            {
+                string vatDefCode = null;
+                try { vatDefCode = _mapper.GetAccountCode("OUTPUT_VAT_DEFERRED"); } catch { }
+                if (string.IsNullOrEmpty(vatDefCode)) return null;   // ไม่ได้ map 21913 → ไม่ใช่โหมด defer
+
+                // idempotent: เคยซ่อมใบนี้แล้ว → ข้าม
+                string fixRef = $"{receiptNumber}-DEPVATFIX";
+                if (await JournalExistsByReferenceAsync(fixRef)) return null;
+
+                // วัดยอด 21913 ค้างจริงจากคู่ JE (เอกสารเช็คเอาท์ + ใบมัดจำ)
+                var jes = await GetBookingJournalsAsync(reservationId, receiptNumber, docNumber);
+                decimal stuck = SumAccountNet(jes.Values, vatDefCode);   // Cr ค้าง = บวก
+                if (stuck <= 0.05m) return null;                          // ไม่ค้าง → ไม่ต้องซ่อม
+
+                // กันแก้ผิดใบ: ยอดค้างต้อง ≈ VAT ของมัดจำที่หัก (7/107) ภายใน ±1 บาท — เกินนั้นให้คนตรวจ
+                decimal expectedDepVat = Math.Round(depositApplied * 7m / 107m, 2, MidpointRounding.AwayFromZero);
+                if (depositApplied > 0.005m && Math.Abs(stuck - expectedDepVat) > 1.00m)
+                    return $"⚠ 21913 ค้าง {stuck:N2} แต่ไม่ตรง VAT มัดจำที่คาด {expectedDepVat:N2} — ไม่ auto-fix, ตรวจมือ";
+
+                var fix = _mapper.MapDeferredVatRealization(reservationId, stuck, receiptNumber);
+                var res = await _apiClient.CreateJournalAsync(fix);
+                Guid fixId = RequireValidDocId(res?.data?.Id, $"DeferredVatRealization receipt={receiptNumber}");
+                await SafePostJournalAsync(fixId);
+                string outcome = $"✅ โอน VAT มัดจำค้างเข้า ภ.พ.30 แล้ว {stuck:N2} (Dr {vatDefCode}/Cr ภาษีขาย, JV {fixRef})";
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"FixStuckDeferredVat: #{reservationId} receipt={receiptNumber} {outcome} — NextAcc drives ไม่ได้โอนขา VAT (แจ้ง NextAcc แก้ต้นเหตุแล้ว)", "SYSTEM");
+                return outcome;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"FixStuckDeferredVat failed resId={reservationId}: {ex.Message}", "SYSTEM");
+                return null;
+            }
+        }
+
         /// <summary>อ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบความจริงฝั่งเรา. คืน (PASS/WARN, รายละเอียด).
         /// เช็ค: (1) เอกสารโพสต์จริง (2) ยอดรวมตรง (3) JE บาลานซ์ (4) บัญชีมัดจำ 21510 ไม่ติดลบ (double-reverse)
         /// (5) สลิปแนบครบ (ถ้าเรามีสลิป). read-only — ไม่แก้อะไรบน NextAcc. ไม่ throw.</summary>
@@ -5032,6 +5082,45 @@ namespace Take_Time_BangPhra.Integration
                             else oks.Add($"บัญชีมัดจำ {depCode} คงเหลือ {net:N2}");
                         }
                     }
+                }
+
+                // 3b) ขา VAT ครบถ้วน (บทเรียน REC-20260707-0002: JE บาลานซ์+21510 เคลียร์ แต่ "ขา VAT ผิด" —
+                //     drives ลืม Dr 21913 → deferred VAT ค้างตลอดกาล + 21911 ขาด + JE รวม ≠ ยอดเอกสาร).
+                //     invariant (จริงทุกโหมด CHECKOUT/defer/no-defer): สำหรับคู่ ใบมัดจำ+ใบเช็คเอาท์ —
+                //       (ก) Σ(Cr−Dr) 21911 ทั้งคู่ = VAT เต็มของเอกสาร (doc.VatAmount)
+                //       (ข) Σ(Cr−Dr) 21913 ทั้งคู่ = 0 (deferred VAT ต้องถูกโอนออกหมดตอนเช็คเอาท์)
+                //     ใช้ชุด JE แม่น (JE ของเอกสารนี้ + JE ใบมัดจำเท่านั้น) — ไม่ใช้ candidate กว้าง
+                //     กัน JE ใบเสร็จอื่นของ booking เดียวกันปนแล้ว VAT เกิน (false positive)
+                if (depositApplied > 0.005m && !isDeposit && doc.VatAmount > 0.005m)
+                {
+                    try
+                    {
+                        var depJes = await FindDepositJournalsAsync(reservationId);
+                        var pair = new Dictionary<Guid, JournalEntryResponse>();
+                        foreach (var j in docJes) pair[j.Id] = j;
+                        foreach (var j in depJes) if (!pair.ContainsKey(j.Id)) pair[j.Id] = j;
+
+                        string vatCode = null, vatDefCode = null;
+                        try { vatCode = _mapper.GetAccountCode("OUTPUT_VAT"); } catch { }
+                        try { vatDefCode = _mapper.GetAccountCode("OUTPUT_VAT_DEFERRED"); } catch { }
+
+                        if (!string.IsNullOrEmpty(vatCode))
+                        {
+                            decimal vat21911 = SumAccountNet(pair.Values, vatCode);
+                            if (Math.Abs(vat21911 - doc.VatAmount) > 0.05m)
+                                warns.Add($"VAT เข้า {vatCode} ไม่ครบ: {vat21911:N2} vs ที่ต้องเป็น {doc.VatAmount:N2} " +
+                                          $"(ขาด {doc.VatAmount - vat21911:N2} — น่าจะเป็น VAT มัดจำที่ไม่ถูกโอนจาก 21913)");
+                            else oks.Add($"VAT {vatCode} ครบ {vat21911:N2}");
+                        }
+                        if (!string.IsNullOrEmpty(vatDefCode))
+                        {
+                            decimal vat21913 = SumAccountNet(pair.Values, vatDefCode);
+                            if (Math.Abs(vat21913) > 0.05m)
+                                warns.Add($"ภาษีขายรอเรียกเก็บ {vatDefCode} ค้าง {vat21913:N2} — deferred VAT มัดจำไม่ถูกโอนเข้า ภ.พ.30 ตอนเช็คเอาท์ (JE ขาด Dr {vatDefCode})");
+                            else oks.Add($"{vatDefCode} เคลียร์ครบ");
+                        }
+                    }
+                    catch { /* best-effort */ }
                 }
 
                 // 4) สลิปแนบครบ (เฉพาะเมื่อเรามีสลิป local)

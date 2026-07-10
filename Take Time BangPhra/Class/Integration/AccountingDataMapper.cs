@@ -1976,6 +1976,36 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// โอน "ภาษีขายรอเรียกเก็บ" (21913) ที่ค้าง → "ภาษีขาย ภ.พ.30" (21911): Dr 21913 / Cr 21911.
+        /// ใช้ซ่อมเคส drives ของ NextAcc ที่หักมัดจำ deferred-VAT แล้ว "ลืมโอนขา VAT" (JE ขาด Dr 21913 +
+        /// Cr 21911 ขาดเท่ากัน — GL บาลานซ์แต่ VAT ไม่เข้า ภ.พ.30, เคส REC-20260707-0002). amount = ยอดค้าง
+        /// ที่วัดจริงจาก GL (ไม่คำนวณใหม่ — self-limiting). ต้อง map ทั้ง OUTPUT_VAT_DEFERRED และ OUTPUT_VAT.
+        /// </summary>
+        public CreateJournalEntryRequest MapDeferredVatRealization(
+            int reservationId, decimal amount, string receiptNumber)
+        {
+            if (amount <= 0)
+                throw new ArgumentException("MapDeferredVatRealization: amount ต้อง > 0");
+            Guid defAcc = GetAccountId("OUTPUT_VAT_DEFERRED");
+            Guid vatAcc = GetAccountId("OUTPUT_VAT");
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = DateTime.Now,
+                JournalType = NexaaccJournalType.General,
+                Description = $"โอนภาษีขายรอเรียกเก็บเข้า ภ.พ.30 — VAT มัดจำที่รับรู้ตอนเช็คเอาท์ {receiptNumber} (การจอง #{reservationId})",
+                Reference = $"{receiptNumber}-DEPVATFIX",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest { AccountId = defAcc, DebitAmount = amount, CreditAmount = 0,
+                        Description = "ตัดภาษีขายรอเรียกเก็บ (VAT มัดจำถึงกำหนดรับรู้)" },
+                    new JournalEntryLineRequest { AccountId = vatAcc, DebitAmount = 0, CreditAmount = amount,
+                        Description = "ภาษีขาย ภ.พ.30 (VAT มัดจำ)" }
+                }
+            };
+        }
+
+        /// <summary>
         /// รับรู้รายได้ของมัดจำตอนเช็คเอาท์ (โหมด §78/1 เคร่ง: มัดจำออกใบกำกับ+VAT ตั้งแต่รับเงิน,
         /// เช็คเอาท์ออกใบกำกับ "เฉพาะยอดคงเหลือ" → ยอดมัดจำเดิมยังเป็น Cr 21712 net ค้าง ต้องย้ายเป็นรายได้):
         ///   Dr 21712 เงินรับล่วงหน้า (net) / Cr รายได้ (net) — VAT รับรู้ไปแล้วตอนรับมัดจำ ไม่แตะ
