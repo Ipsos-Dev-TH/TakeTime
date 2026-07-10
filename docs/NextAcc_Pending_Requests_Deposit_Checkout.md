@@ -151,11 +151,15 @@ NextAcc `PdfGenerationService` เลย fallback ไปใช้ลายเซ
 
 ---
 
-## 5. ✅ [แก้แล้ว — NextAcc d7ee4d3] drives เคส document-deposit + deferred VAT: JE ขาดขา Dr 21913
+## 5. ✅ [แก้แล้ว — NextAcc bab17cc] drives เคส document-deposit: อ่านขา Cr จริงครบทุกโหมด
 
-> **NextAcc แก้ต้นเหตุแล้ว (d7ee4d3):** drives เคส document อ่าน "ขา VAT จริงจาก GL ของใบมัดจำ"
-> (GL-first ตาม confirmation A เหมือน JV-INT) — มัดจำ Cr 21913 → เช็คเอาท์ Dr 21913 + Cr 21911 เต็ม /
-> มัดจำ Cr 21911 → แบบเดิม. verify กับ REC-20260707-0002: JE ใหม่รวม 4,400 ตรงเอกสาร.
+> **NextAcc แก้ต้นเหตุครบแล้ว — deploy ที่ `bab17cc` (tip ของ `claude/fix-errors-638kW`):**
+> ลำดับ commit: `84cdd29` (self-heal void/delete) → `d7ee4d3` (ขา VAT deferred GL-first) →
+> **`bab17cc` (§5 เต็มรูป)**: drives เคส document อ่าน "ขา Cr จริง" ครบ 3 โหมด —
+> **gross → Dr 217xx เต็ม / net+21913 → Dr ทั้งคู่ + Cr 21911 เต็ม / net+21911 → แบบเดิม** —
+> และ **Dr กลับ AccountId เดิมที่ถูกเครดิต** (ไม่ใช่ resolve จาก mapping ใหม่) = หลัก "อ่านตามที่ลงจริง"
+> ตรงกับฝั่ง TakeTime (`GetDepositMirrorLegsAsync`) ทุกประการ. verify กับ REC-20260707-0002:
+> JE ใหม่รวม 4,400 ตรงเอกสาร. **pull tip เดียว (`bab17cc`) ได้ครบหมด.**
 >
 > **⚠ operational — REC-20260707-0002:** GL ถูกแล้วด้วย JV DEPVATFIX → **คงไว้ อย่า void+สร้างใหม่
 > โดยไม่กลับ DEPVATFIX** (JE ใหม่จาก drives ที่แก้แล้วมี Dr 21913 ในตัว → double-fix). TakeTime กันแล้ว:
