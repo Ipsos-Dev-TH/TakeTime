@@ -6808,9 +6808,11 @@ namespace Take_Time_BangPhra.Integration
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1
                          C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
-                         C.TaxID, C.Email, C.Address
+                         C.TaxID, C.Email, C.Address, C.Address1,
+                         A.SubDistrict, A.District, A.Province, A.PostalCode
                       FROM Reservation R
                       LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
+                      LEFT JOIN Address A ON A.ID = C.Address_ID
                       WHERE R.ID = @id",
                     new Dictionary<string, object> { { "@id", reservationId } });
                 if (dt?.Rows.Count > 0)
@@ -6825,7 +6827,9 @@ namespace Take_Time_BangPhra.Integration
                         TaxId = row["TaxID"]?.ToString(),
                         Email = row["Email"]?.ToString(),
                         Phone = phone,
-                        Address = row["Address"]?.ToString()
+                        // รวมที่อยู่เต็ม(บ้านเลขที่+หมู่+ตำบล/อำเภอ/จังหวัด+ไปรษณีย์) — เดิมส่งเฉพาะ
+                        // Customer.Address (บ้านเลขที่) ทำให้ใบกำกับบน NextAcc มีที่อยู่แค่ "55"
+                        Address = ComposeCustomerAddress(row)
                     };
                 }
             }
@@ -6835,6 +6839,54 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupCustomerFromReservation failed for resId={reservationId}: {ex.Message}", "SYSTEM");
             }
             return null;
+        }
+
+        /// <summary>
+        /// รวมที่อยู่ลูกค้าเป็นสตริงเดียวสำหรับส่งเข้า NextAcc (contact address ที่โชว์บนใบกำกับ §86/4).
+        /// เดิม sync ส่งเฉพาะ Customer.Address (บ้านเลขที่) → เอกสารมีที่อยู่แค่ "55".
+        /// รูปแบบตรงกับที่หน้า Receipt.aspx สร้างลง PDF: กรุงเทพฯ = แขวง/เขต, ต่างจังหวัด = ต./อ./จ.
+        /// </summary>
+        private static string ComposeCustomerAddress(System.Data.DataRow row)
+        {
+            string Val(string col) =>
+                row.Table.Columns.Contains(col) && row[col] != DBNull.Value
+                    ? row[col].ToString().Trim() : "";
+
+            string addr = Val("Address");
+            string addr1 = Val("Address1");
+            string sub = Val("SubDistrict");
+            string dist = Val("District");
+            string prov = Val("Province");
+            string zip = Val("PostalCode");
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(addr)) parts.Add(addr);
+            if (!string.IsNullOrEmpty(addr1)) parts.Add(addr1);
+
+            if (!string.IsNullOrEmpty(prov))
+            {
+                if (prov.Contains("กรุงเทพ"))
+                {
+                    if (!string.IsNullOrEmpty(sub)) parts.Add("แขวง " + sub);
+                    if (!string.IsNullOrEmpty(dist)) parts.Add("เขต " + dist);
+                    parts.Add(prov);
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(sub)) parts.Add("ต." + sub);
+                    if (!string.IsNullOrEmpty(dist)) parts.Add("อ." + dist);
+                    parts.Add("จ." + prov);
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(sub)) parts.Add(sub);
+                if (!string.IsNullOrEmpty(dist)) parts.Add(dist);
+            }
+            if (!string.IsNullOrEmpty(zip)) parts.Add(zip);
+
+            string full = string.Join(" ", parts).Trim();
+            return string.IsNullOrEmpty(full) ? addr : full;
         }
 
         /// <summary>
