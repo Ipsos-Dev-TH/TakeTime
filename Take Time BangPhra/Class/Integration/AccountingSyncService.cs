@@ -411,6 +411,69 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
         }
 
+        /// <summary>
+        /// Enqueue sync ข้อมูลลูกค้า → NextAcc contact (upsert by เบอร์โทร, idempotent).
+        /// เรียกจาก hook กลางทุกจุดที่แก้ข้อมูลลูกค้า (จอง/เช็คอิน/เช็คเอาท์/ใบเสร็จ/แอดมิน/API)
+        /// ผ่าน background queue — ไม่บล็อก/ไม่ล้มการบันทึกหน้าเว็บ. dedup รายเบอร์ขณะยัง PENDING.
+        /// </summary>
+        public long EnqueueCustomerContactSync(string mobilePhone)
+        {
+            if (!_config.IsConfigured || !_config.Enabled) return -1;
+            if (string.IsNullOrWhiteSpace(mobilePhone)) return -1;
+            mobilePhone = mobilePhone.Trim();
+
+            // dedup: มีคิวค้างของเบอร์นี้อยู่แล้ว → ใช้ตัวเดิม (processor อ่านข้อมูลสดจาก DB ตอนประมวลผล
+            // อยู่แล้ว การกดบันทึกซ้ำหลายรอบจึงไม่ต้องเข้าคิวซ้ำ)
+            long existing = FindPendingEntry("CUSTOMER", "SYNC_CUSTOMER_CONTACT", "mobilePhone", mobilePhone);
+            if (existing > 0) return existing;
+
+            return InsertQueue("CUSTOMER", 0, "SYNC_CUSTOMER_CONTACT", new Dictionary<string, object>
+            {
+                { "mobilePhone", mobilePhone }
+            });
+        }
+
+        /// <summary>
+        /// Hook แบบสถิต ปลอดภัย 100% สำหรับเรียกจากจุดบันทึกข้อมูลลูกค้า (Code.cs/CustomerService/API)
+        /// — ห้ามให้การ sync บัญชีทำให้การบันทึกลูกค้าล้มเด็ดขาด: กลืน error ทุกชนิด (log อย่างเดียว)
+        /// </summary>
+        public static void TryEnqueueCustomerContactSync(string connectionString, string mobilePhone)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(connectionString) || string.IsNullOrWhiteSpace(mobilePhone)) return;
+                var svc = new AccountingSyncService(connectionString);
+                svc.EnqueueCustomerContactSync(mobilePhone);
+            }
+            catch
+            {
+                // เงียบ — จุดเรียกคือการเซฟลูกค้าบนหน้าเว็บ ห้ามพังเพราะบัญชี
+            }
+        }
+
+        /// <summary>ประมวลผลคิว SYNC_CUSTOMER_CONTACT: อ่านข้อมูลลูกค้า "สด" จาก DB ณ เวลาประมวลผล
+        /// → push ขึ้น NextAcc contact ผ่านตัวกลางเดียวกับเส้นออกเอกสาร (PushCustomerContactAsync)</summary>
+        private async Task<string> ProcessCustomerContactSync(Dictionary<string, object> p)
+        {
+            string phone = p.ContainsKey("mobilePhone") ? p["mobilePhone"]?.ToString() : null;
+            if (string.IsNullOrWhiteSpace(phone))
+                throw new ArgumentException("SYNC_CUSTOMER_CONTACT: ไม่มี mobilePhone ใน payload");
+
+            var info = LookupCustomerByPhone(phone);
+            if (info == null)
+            {
+                // ลูกค้าถูกลบ/เบอร์เปลี่ยนไปแล้ว — ไม่มีอะไรให้ sync ถือว่าจบงาน
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessCustomerContactSync: ไม่พบลูกค้าเบอร์ {phone} ใน DB → ข้าม", "SYSTEM");
+                return "SKIPPED_NOT_FOUND";
+            }
+
+            string err = await PushCustomerContactAsync(info, "ProcessCustomerContactSync");
+            if (err != null)
+                throw new Exception($"sync contact เบอร์ {phone} ล้มเหลว: {err}");   // throw → queue retry ตามกลไกปกติ
+            return info.NexaaccContactId?.ToString() ?? "SYNCED";
+        }
+
         // ──────────────────────────────────────────────
         // Deposit Lifecycle Enqueue Methods (ตัดมัดจำ)
         // ──────────────────────────────────────────────
@@ -1818,6 +1881,9 @@ namespace Take_Time_BangPhra.Integration
 
                 case "STOCK_QTY_PUSH":
                     return await ProcessStockQtyPush(payload);
+
+                case "SYNC_CUSTOMER_CONTACT":
+                    return await ProcessCustomerContactSync(payload);
 
                 case "VOID_RECEIPT":
                     return await ProcessVoidReceipt(payload);
@@ -6803,63 +6869,112 @@ namespace Take_Time_BangPhra.Integration
             public string District { get; set; }         // อำเภอ/เขต
             public string Province { get; set; }         // จังหวัด
             public string PostalCode { get; set; }       // รหัสไปรษณีย์
+            /// <summary>นิติบุคคล/บุคคลธรรมดา จากที่ผู้ใช้เลือกในระบบ (Customer_Type.Customer_Code == "TXID"
+            /// = นิติบุคคล — สัญญาเดียวกับ e-Tax buyer_taxtype). null = ไม่ทราบ → fallback ดูเลขภาษีขึ้นต้น 0</summary>
+            public bool? IsJuristic { get; set; }
+
+            /// <summary>ชนิดผู้ติดต่อสรุปสุดท้าย: ยึดที่ผู้ใช้เลือกในระบบก่อน แล้วค่อย fallback เลขภาษี</summary>
+            public bool ResolveIsJuristic()
+            {
+                return IsJuristic ?? AccountingDataMapper.IsJuristicPerson(TaxId);
+            }
         }
 
         /// <summary>
         /// ดึงข้อมูลลูกค้าจาก Reservation → Customer table.
         /// ใช้ MobilePhone เป็น External ID (natural key) ของ NextAcc contact.
         /// </summary>
+        // คอลัมน์ลูกค้าชุดเดียวที่ใช้ทุกเส้นทาง (การจอง/เช็คอิน/เช็คเอาท์/ใบเสร็จ/คิว sync ผู้ติดต่อ)
+        // — เลขผู้เสียภาษีผู้ซื้ออยู่ใน Customer.IDNumber (หน้า Receipt เซฟ TextBox12 → IDNumber และ
+        //   e-Tax XML ใช้ IDNumber เป็น buyer_taxid); คอลัมน์ TaxID เป็นแค่ fallback
+        // — Customer_Type.Customer_Code = 'TXID' = นิติบุคคล (สัญญาเดียวกับ e-Tax buyer_taxtype)
+        private const string CustomerContactSelectColumns = @"
+                         C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
+                         ISNULL(NULLIF(LTRIM(RTRIM(C.IDNumber)), ''), C.TaxID) AS TaxID,
+                         C.Email, C.Address, C.Address1, C.Branch_Number,
+                         A.SubDistrict, A.District, A.Province, A.PostalCode,
+                         CT.Customer_Code";
+
+        /// <summary>แปลงแถวลูกค้า (คอลัมน์ชุด CustomerContactSelectColumns) → ContactInfo
+        /// จุดเดียวที่กำหนดว่า "ข้อมูลอะไรถูกส่งไป NextAcc" — ทุกเส้นทางได้ค่าตรงกันเสมอ</summary>
+        private static ContactInfo BuildContactInfoFromCustomerRow(System.Data.DataRow row)
+        {
+            string phone = row["MobilePhone"]?.ToString();
+            if (string.IsNullOrEmpty(phone)) return null;
+            string ColVal(string col) =>
+                row.Table.Columns.Contains(col) && row[col] != DBNull.Value
+                    ? row[col].ToString().Trim() : "";
+            string custCode = ColVal("Customer_Code");
+            return new ContactInfo
+            {
+                ExternalId = phone,
+                Name = row["Name"]?.ToString() ?? phone,
+                TaxId = row["TaxID"]?.ToString(),
+                Email = row["Email"]?.ToString(),
+                Phone = phone,
+                // รวมที่อยู่เต็ม(บ้านเลขที่+หมู่+ตำบล/อำเภอ/จังหวัด+ไปรษณีย์) — เดิมส่งเฉพาะ
+                // Customer.Address (บ้านเลขที่) ทำให้ใบกำกับบน NextAcc มีที่อยู่แค่ "55"
+                Address = ComposeCustomerAddress(row),
+                // โครงสร้างที่อยู่ + สาขา ให้ NextAcc render ใบกำกับ §86/4 ครบ
+                BuildingNumber = ColVal("Address"),
+                Moo = ColVal("Address1"),
+                SubDistrict = ColVal("SubDistrict"),
+                District = ColVal("District"),
+                Province = ColVal("Province"),
+                PostalCode = ColVal("PostalCode"),
+                BranchCode = ColVal("Branch_Number"),
+                // นิติ/บุคคล จากที่ผู้ใช้เลือก (dropdown ชนิดลูกค้า → Customer_Type_ID) — สัญญาเดียวกับ
+                // e-Tax: TXID = นิติบุคคล / NIDN = บุคคลธรรมดา. ไม่ทราบ (ไม่มีแถว type) → null = fallback เลขภาษี
+                IsJuristic = string.IsNullOrEmpty(custCode) ? (bool?)null
+                    : string.Equals(custCode, "TXID", StringComparison.OrdinalIgnoreCase)
+            };
+        }
+
         private ContactInfo LookupCustomerFromReservation(int reservationId)
         {
             try
             {
-                // เลขผู้เสียภาษีผู้ซื้ออยู่ในคอลัมน์ Customer.IDNumber (หน้า Receipt โหลด/เซฟ TextBox12 →
-                // IDNumber และ e-Tax XML ใช้ IDNumber เป็น buyer_taxid). คอลัมน์ TaxID ไม่ถูกเติมจาก flow นี้
-                // → เดิมอ่าน C.TaxID เลยได้ค่าว่างเสมอ ทำให้ NextAcc ออกเป็นใบเสร็จ ไม่ใช่ใบกำกับภาษี
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1
-                         C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
-                         ISNULL(NULLIF(LTRIM(RTRIM(C.IDNumber)), ''), C.TaxID) AS TaxID,
-                         C.Email, C.Address, C.Address1, C.Branch_Number,
-                         A.SubDistrict, A.District, A.Province, A.PostalCode
+                    @"SELECT TOP 1 " + CustomerContactSelectColumns + @"
                       FROM Reservation R
                       LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                       LEFT JOIN Address A ON A.ID = C.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = C.Customer_Type_ID
                       WHERE R.ID = @id",
                     new Dictionary<string, object> { { "@id", reservationId } });
                 if (dt?.Rows.Count > 0)
-                {
-                    var row = dt.Rows[0];
-                    string phone = row["MobilePhone"]?.ToString();
-                    if (string.IsNullOrEmpty(phone)) return null;
-                    string ColVal(string col) =>
-                        row.Table.Columns.Contains(col) && row[col] != DBNull.Value
-                            ? row[col].ToString().Trim() : "";
-                    return new ContactInfo
-                    {
-                        ExternalId = phone,
-                        Name = row["Name"]?.ToString() ?? phone,
-                        TaxId = row["TaxID"]?.ToString(),
-                        Email = row["Email"]?.ToString(),
-                        Phone = phone,
-                        // รวมที่อยู่เต็ม(บ้านเลขที่+หมู่+ตำบล/อำเภอ/จังหวัด+ไปรษณีย์) — เดิมส่งเฉพาะ
-                        // Customer.Address (บ้านเลขที่) ทำให้ใบกำกับบน NextAcc มีที่อยู่แค่ "55"
-                        Address = ComposeCustomerAddress(row),
-                        // โครงสร้างที่อยู่ + สาขา ให้ NextAcc render ใบกำกับ §86/4 ครบ
-                        BuildingNumber = ColVal("Address"),
-                        Moo = ColVal("Address1"),
-                        SubDistrict = ColVal("SubDistrict"),
-                        District = ColVal("District"),
-                        Province = ColVal("Province"),
-                        PostalCode = ColVal("PostalCode"),
-                        BranchCode = ColVal("Branch_Number")
-                    };
-                }
+                    return BuildContactInfoFromCustomerRow(dt.Rows[0]);
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"LookupCustomerFromReservation failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>ดึงข้อมูลลูกค้าจากเบอร์โทรตรง ๆ (ใช้กับคิว SYNC_CUSTOMER_CONTACT ที่ hook จากทุกจุด
+        /// ที่แก้ข้อมูลลูกค้า: จอง/เช็คอิน/เช็คเอาท์/ใบเสร็จ/แอดมิน/API) — คอลัมน์ชุดเดียวกับ
+        /// LookupCustomerFromReservation เป๊ะ เพื่อให้ contact บน NextAcc ตรงกันทุกเส้นทาง</summary>
+        private ContactInfo LookupCustomerByPhone(string mobilePhone)
+        {
+            if (string.IsNullOrWhiteSpace(mobilePhone)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 " + CustomerContactSelectColumns + @"
+                      FROM Customer C
+                      LEFT JOIN Address A ON A.ID = C.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = C.Customer_Type_ID
+                      WHERE C.MobilePhone = @phone",
+                    new Dictionary<string, object> { { "@phone", mobilePhone.Trim() } });
+                if (dt?.Rows.Count > 0)
+                    return BuildContactInfoFromCustomerRow(dt.Rows[0]);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupCustomerByPhone failed for phone={mobilePhone}: {ex.Message}", "SYSTEM");
             }
             return null;
         }
@@ -6963,21 +7078,43 @@ namespace Take_Time_BangPhra.Integration
                     $"EnsureCustomerContactAsync cache lookup failed: {ex.Message}", "SYSTEM");
             }
 
+            // push ผ่านตัวกลางเดียวกับคิว SYNC_CUSTOMER_CONTACT — ข้อมูล/กติกาชุดเดียว ตรงกันทุกเส้นทาง
+            // ไม่ throw — invoice ยังส่งได้โดยใช้ ExternalId+Name+TaxId
+            await PushCustomerContactAsync(info, "EnsureCustomerContactAsync");
+
+            return info;
+        }
+
+        /// <summary>
+        /// จุดเดียวที่ push ข้อมูลลูกค้าขึ้น NextAcc contact (upsert by ExternalId = เบอร์โทร, idempotent)
+        /// ใช้ร่วมกันทั้งเส้นออกเอกสาร (EnsureCustomerContactAsync) และคิว SYNC_CUSTOMER_CONTACT ที่ hook
+        /// จากทุกจุดแก้ข้อมูลลูกค้า → กติกานิติ/บุคคล, สาขา, ที่อยู่ ตรงกันทั้งหมดแน่นอน.
+        /// คืน null = สำเร็จ / ข้อความ error = ล้มเหลว (ผู้เรียกตัดสินใจเองว่า retry หรือกลืน)
+        /// </summary>
+        private async Task<string> PushCustomerContactAsync(ContactInfo info, string logPrefix)
+        {
             // ตรวจความครบถ้วนของข้อมูลผู้ซื้อก่อน upsert — เลขภาษี 13 หลัก + ที่อยู่ = ออกใบกำกับ §86/4 ได้
             // (log ให้ผู้ใช้เห็นชัดว่าดึงอะไรไป contact ก่อนออกเอกสาร)
             bool taxIdOk = !string.IsNullOrWhiteSpace(info.TaxId)
                 && System.Text.RegularExpressions.Regex.IsMatch(info.TaxId.Trim(), @"^\d{13}$");
             bool addressOk = !string.IsNullOrWhiteSpace(info.Address);
-            bool isJuristic = AccountingDataMapper.IsJuristicPerson(info.TaxId);
+            // นิติ/บุคคล: ยึดชนิดที่ผู้ใช้เลือกในระบบ (Customer_Type TXID) ก่อน แล้ว fallback เลขภาษีขึ้นต้น 0
+            bool isJuristic = info.ResolveIsJuristic();
             _code.Logs(_connectionString, "AccountingSync",
-                $"EnsureCustomerContactAsync: completeness check {info.ExternalId} → name={(!string.IsNullOrWhiteSpace(info.Name) ? "✓" : "✗")} " +
+                $"{logPrefix}: completeness check {info.ExternalId} → name={(!string.IsNullOrWhiteSpace(info.Name) ? "✓" : "✗")} " +
                 $"taxId={(taxIdOk ? info.TaxId : "✗(" + (info.TaxId ?? "-") + ")")} address={(addressOk ? "✓" : "✗")} " +
-                $"type={(isJuristic ? "JuristicPerson" : "Individual")} → {(taxIdOk && addressOk ? "ออกใบกำกับภาษีได้" : "ข้อมูลไม่ครบ → จะออกเป็นใบเสร็จ")}",
+                $"type={(isJuristic ? "JuristicPerson" : "Individual")}{(info.IsJuristic.HasValue ? "(จากชนิดลูกค้าในระบบ)" : "(จากเลขภาษี)")} " +
+                $"→ {(taxIdOk && addressOk ? "ออกใบกำกับภาษีได้" : "ข้อมูลไม่ครบ → จะออกเป็นใบเสร็จ")}",
                 "SYSTEM");
 
-            // Upsert via NextAcc API
             try
             {
+                // สาขา §86/4: นิติบุคคลต้องมีรหัสสาขา 5 หลัก (00000 = สำนักงานใหญ่); ค่าที่ไม่ใช่ตัวเลข
+                // 5 หลัก → ใช้ 00000 (กันค่าขยะจากช่องกรอกไปโผล่บนใบกำกับ)
+                string branch = (info.BranchCode ?? "").Trim();
+                if (!System.Text.RegularExpressions.Regex.IsMatch(branch, @"^\d{5}$"))
+                    branch = isJuristic ? "00000" : null;
+
                 var req = new InboundCustomerRequest
                 {
                     ExternalId = info.ExternalId,
@@ -6986,19 +7123,16 @@ namespace Take_Time_BangPhra.Integration
                     Email = info.Email,
                     Phone = info.Phone,
                     Address = info.Address,
-                    // โครงสร้างที่อยู่ + สาขา → NextAcc render ใบกำกับ §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
+                    // โครงสร้างที่อยู่ → NextAcc render ใบกำกับ §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
                     BuildingNumber = info.BuildingNumber,
                     Moo = info.Moo,
                     SubDistrict = info.SubDistrict,
                     District = info.District,
                     Province = info.Province,
                     PostalCode = info.PostalCode,
-                    // สาขา §86/4: นิติบุคคลต้องมีรหัสสาขา (00000 = สำนักงานใหญ่); บุคคลธรรมดาเว้นได้
-                    BranchCode = isJuristic ? (string.IsNullOrWhiteSpace(info.BranchCode) ? "00000" : info.BranchCode) : info.BranchCode,
+                    BranchCode = branch,
                     IsCustomer = true,
                     IsSupplier = false,
-                    // นิติบุคคล (taxId 13 หลักขึ้นต้น 0) → JuristicPerson / บุคคลธรรมดา → Individual
-                    // เดิม hardcode INDIVIDUAL ทำให้ contact บริษัทผิดชนิด (mirror ฝั่ง supplier ที่ทำถูกแล้ว)
                     ContactType = isJuristic ? "JuristicPerson" : "Individual"
                 };
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
@@ -7007,25 +7141,23 @@ namespace Take_Time_BangPhra.Integration
                     info.NexaaccContactId = resp.data.Id;
                     UpsertContactMap(info, "CUSTOMER", "SYNCED", null);
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"EnsureCustomerContactAsync: upserted {info.Name} ({info.ExternalId}) taxId={(taxIdOk ? info.TaxId : "-")} → {info.NexaaccContactId}",
+                        $"{logPrefix}: upserted {info.Name} ({info.ExternalId}) taxId={(taxIdOk ? info.TaxId : "-")} → {info.NexaaccContactId}",
                         "SYSTEM");
+                    return null;
                 }
-                else
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"EnsureCustomerContactAsync: API returned empty Id for {info.ExternalId} — invoice will fall back to ExternalId+Name",
-                        "SYSTEM");
-                }
+
+                string msg = $"API returned empty Id for {info.ExternalId}" +
+                    (string.IsNullOrEmpty(resp?.message) ? "" : $" ({resp.message})");
+                _code.Logs(_connectionString, "AccountingSync", $"{logPrefix}: {msg}", "SYSTEM");
+                return msg;
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"EnsureCustomerContactAsync upsert failed for {info.ExternalId}: {ex.Message}", "SYSTEM");
+                    $"{logPrefix} upsert failed for {info.ExternalId}: {ex.Message}", "SYSTEM");
                 UpsertContactMap(info, "CUSTOMER", "FAILED", ex.Message);
-                // ไม่ throw — invoice ยังส่งได้โดยใช้ ExternalId+Name+TaxId
+                return ex.Message;
             }
-
-            return info;
         }
 
         /// <summary>Upsert/Insert Accounting_Contact_Map entry (cache table)</summary>

@@ -607,6 +607,10 @@ namespace Take_Time_BangPhra.API
                           Address = CASE WHEN @address = '' THEN Address ELSE @address END
                           WHERE MobilePhone = @phone",
                         updateParams);
+
+                    // แก้ข้อมูลลูกค้าผ่าน API → sync ผู้ติดต่อไป NextAcc ด้วย (background, กลืน error)
+                    Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(
+                        _connectionString, customer.Phone);
                 }
 
                 return dt.Rows[0]["ID"].ToString();
@@ -627,6 +631,10 @@ namespace Take_Time_BangPhra.API
                 @"INSERT INTO Customer (MobilePhone, FullName, Email, IDNumber, Address, Customer_Type_ID)
                   VALUES (@phone, @name, @email, @idNumber, @address, @customerType)",
                 insertParams);
+
+            // ลูกค้าใหม่จาก API → sync ผู้ติดต่อไป NextAcc ด้วย (background, กลืน error)
+            Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(
+                _connectionString, customer.Phone);
 
             // ดึง ID ของลูกค้าที่สร้าง
             DataTable dtNew = _code.DatabaseQuerySafe(_connectionString,
