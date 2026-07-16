@@ -8771,6 +8771,22 @@ namespace Take_Time_BangPhra.Integration
             { "CertificateInLieu", "ใบรับรองแทนใบเสร็จ" }
         };
 
+        /// <summary>ชนิดเอกสารฝั่งรับ (ใบเสร็จ/ใบกำกับ) สำหรับดึงมาแสดงในหน้า CheckDocument</summary>
+        private static readonly Dictionary<string, string> ReceiptDocTypeLabels = new Dictionary<string, string>
+        {
+            { "Receipt", "ใบเสร็จรับเงิน" },
+            { "TaxInvoice", "ใบกำกับภาษี" }
+        };
+
+        /// <summary>หา label ไทยของชนิดเอกสารจากทั้งฝั่งจ่ายและฝั่งรับ (fallback = ชื่อชนิดดิบ)</summary>
+        private static string DocTypeLabel(string docType)
+        {
+            if (string.IsNullOrEmpty(docType)) return docType;
+            if (PaymentDocTypeLabels.TryGetValue(docType, out var pl)) return pl;
+            if (ReceiptDocTypeLabels.TryGetValue(docType, out var rl)) return rl;
+            return docType;
+        }
+
         /// <summary>
         /// ดึงเอกสารฝั่งจ่ายทั้งหมดที่ออกจาก NextAcc พร้อมไฟล์แนบ มาแสดงในระบบ TakeTime
         /// ยกเว้นเอกสารเงินเดือน (payroll) ตามที่กำหนด
@@ -8821,7 +8837,7 @@ namespace Take_Time_BangPhra.Integration
                             Id = d.Id,
                             DocumentNumber = d.DocumentNumber,
                             DocumentType = d.DocumentType,
-                            DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                            DocumentTypeLabel = DocTypeLabel(d.DocumentType ?? ""),
                             Status = d.Status,
                             DocumentDate = d.DocumentDate,
                             DueDate = d.DueDate,
@@ -8847,6 +8863,105 @@ namespace Take_Time_BangPhra.Integration
                     page++;
                 }
             }
+
+            return result.OrderByDescending(x => x.DocumentDate).ThenByDescending(x => x.DocumentNumber).ToList();
+        }
+
+        /// <summary>
+        /// ดึงเอกสารฝั่งรับ (ใบเสร็จ/ใบกำกับ) ที่ออกจาก NextAcc ในช่วงวันที่ — **รวมเอกสารที่ยกเลิก/void แล้ว**
+        /// (ต่างจากฝั่งจ่ายที่กรอง void ออก) เพื่อให้หน้า CheckDocument เห็นเอกสารที่ถูก void ตอนแก้ไข
+        /// → ดาวน์โหลด PDF ส่งบัญชีได้ครบ เลขที่เอกสารไม่ขาดช่วง. metadata อย่างเดียว (ไม่ดึงไฟล์แนบ) เพื่อความเร็ว;
+        /// PDF เปิดตอนกดดูผ่าน DownloadNextAccDocumentByIdAsync (by GUID). LastRangeFetchInfo เก็บผลดึงล่าสุด.
+        /// </summary>
+        public async System.Threading.Tasks.Task<List<NextAccPaymentDoc>> FetchNextAccReceiptDocumentsAsync(
+            DateTime fromDate, DateTime toDate)
+        {
+            var result = new List<NextAccPaymentDoc>();
+            LastRangeFetchInfo = null;
+            if (!_config.IsConfigured || !_config.Enabled)
+            {
+                LastRangeFetchInfo = "NextAcc ยังไม่เปิด/ตั้งค่า";
+                return result;
+            }
+
+            var seen = new HashSet<Guid>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var errors = new List<string>();
+            int rawTotal = 0, voided = 0;
+
+            async System.Threading.Tasks.Task<(string type, List<OutboundDocumentResponse> items, string error)> FetchTypeAsync(string typeName)
+            {
+                var items = new List<OutboundDocumentResponse>();
+                int page = 1;
+                while (true)
+                {
+                    PagedResponse<OutboundDocumentResponse> resp;
+                    try
+                    {
+                        resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
+                        { FromDate = fromDate, ToDate = toDate, Type = typeName, Page = page, PageSize = 200 });
+                    }
+                    catch (Exception ex)
+                    {
+                        return (typeName, items, ex.Message);
+                    }
+                    if (resp?.Items == null || resp.Items.Count == 0) break;
+                    items.AddRange(resp.Items);
+                    if (resp.Items.Count < 200 || (resp.TotalPages > 0 && page >= resp.TotalPages)) break;
+                    page++;
+                }
+                return (typeName, items, null);
+            }
+
+            // bound แต่ละชนิด ~10 วิ (race กับ delay) กัน NextAcc list ช้าค้างทั้งหน้า
+            async System.Threading.Tasks.Task<(string type, List<OutboundDocumentResponse> items, string error)> FetchTypeBoundedAsync(string typeName)
+            {
+                var fetch = FetchTypeAsync(typeName);
+                var winner = await System.Threading.Tasks.Task.WhenAny(fetch, System.Threading.Tasks.Task.Delay(10000));
+                if (winner == fetch) return await fetch;
+                return (typeName, new List<OutboundDocumentResponse>(), "timeout 10 วิ");
+            }
+
+            var typeResults = await System.Threading.Tasks.Task.WhenAll(
+                ReceiptDocTypeLabels.Keys.Select(FetchTypeBoundedAsync));
+
+            foreach (var tr in typeResults)
+            {
+                if (tr.error != null) { errors.Add($"{tr.type}: {tr.error}"); continue; }
+                rawTotal += tr.items.Count;
+                foreach (var d in tr.items)
+                {
+                    if (d == null || seen.Contains(d.Id)) continue;
+                    if (IsPayrollDocument(d)) continue;
+                    seen.Add(d.Id);
+                    bool isVoid = IsVoidedDocument(d);
+                    if (isVoid) voided++;
+                    result.Add(new NextAccPaymentDoc
+                    {
+                        Id = d.Id,
+                        DocumentNumber = d.DocumentNumber,
+                        DocumentType = d.DocumentType,
+                        DocumentTypeLabel = DocTypeLabel(d.DocumentType ?? ""),
+                        Status = d.Status,
+                        DocumentDate = d.DocumentDate,
+                        ContactName = d.ContactName,
+                        ContactTaxId = d.ContactTaxId,
+                        SubTotal = d.SubTotal,
+                        VatAmount = d.VatAmount,
+                        TotalAmount = d.TotalAmount,
+                        Reference = d.Reference,
+                        Notes = d.Notes,
+                        DocumentUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "RECEIPT")
+                    });
+                }
+            }
+
+            sw.Stop();
+            LastRangeFetchInfo = errors.Count > 0
+                ? $"API ล้มเหลว: {string.Join("; ", errors)} | ได้ {result.Count} ใบ | {sw.ElapsedMilliseconds}ms"
+                : $"API คืน {rawTotal} ใบ → แสดง {result.Count} (ยกเลิก {voided}) | {sw.ElapsedMilliseconds}ms";
+            _code.Logs(_connectionString, "AccountingSync",
+                $"FetchNextAccReceiptDocuments: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} {LastRangeFetchInfo}", "SYSTEM");
 
             return result.OrderByDescending(x => x.DocumentDate).ThenByDescending(x => x.DocumentNumber).ToList();
         }
@@ -9574,7 +9689,7 @@ namespace Take_Time_BangPhra.Integration
                 NextAccId = d.Id,
                 Reference = d.Reference,
                 DocumentNumber = d.DocumentNumber,
-                DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                DocumentTypeLabel = DocTypeLabel(d.DocumentType ?? ""),
                 DocumentDate = d.DocumentDate,
                 ContactName = d.ContactName,
                 ContactTaxId = d.ContactTaxId,
@@ -9637,7 +9752,7 @@ namespace Take_Time_BangPhra.Integration
                 NextAccId = d.Id,
                 Reference = d.Reference,
                 DocumentNumber = d.DocumentNumber,
-                DocumentTypeLabel = PaymentDocTypeLabels.TryGetValue(d.DocumentType ?? "", out var lbl) ? lbl : d.DocumentType,
+                DocumentTypeLabel = DocTypeLabel(d.DocumentType ?? ""),
                 DocumentDate = d.DocumentDate,
                 ContactName = d.ContactName,
                 ContactTaxId = d.ContactTaxId,
