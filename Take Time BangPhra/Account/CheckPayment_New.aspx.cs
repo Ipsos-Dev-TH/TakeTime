@@ -886,9 +886,12 @@ namespace Take_Time_BangPhra.Account
                     return res;
                 }
 
-                // timeout (>18s) → แสดง last-known จากแคชแทนตารางว่าง. task ที่ทิ้งไปยังวิ่งต่อ + เขียนแคชเองเมื่อเสร็จ
-                // (WriteRangeListCacheToDisk ในตัว service) → กดค้นหารอบถัดไปจะอ่านแคชเจอแม้ NextAcc ช้าเกิน 18 วิ
-                ShowNextAccDiag("ดึงรายการไม่ทันใน 18 วิ (NextAcc list API ช้า) — ระบบกำลังดึงต่อเบื้องหลัง+เขียนแคช; กดค้นหาอีกครั้งอีก ~10-20 วิ จะขึ้นจากแคช");
+                // timeout (>18s) → แสดง last-known จากแคชแทนตารางว่าง. task ที่ทิ้งไปยังวิ่งต่อ + เขียนแคช+status เองเมื่อเสร็จ
+                // → โชว์ "ผลดึง background ล่าสุด" ที่ service เขียนไว้ → เห็นว่าดึงได้จริงไหม/พังตรงไหน แม้ตัวนี้ timeout
+                ShowNextAccDiag("ดึงรายการไม่ทันใน 18 วิ (NextAcc list API ช้า) — กำลังดึงต่อเบื้องหลัง; กดค้นหาอีกครั้งอีก ~10-20 วิ จะขึ้นจากแคช");
+                string bgStatus = ReadNextAccStatus(fromDate, toDate);
+                if (!string.IsNullOrEmpty(bgStatus))
+                    lblDateRange.Text += $"<br/><span style='color:#8e44ad; font-size:12px;'>🕓 <b>ผลดึง background ล่าสุด:</b> {Server.HtmlEncode(bgStatus)}</span>";
                 var cached = ReadNextAccListCache(listCache);
                 if (cached != null && cached.Count > 0)
                 {
@@ -923,6 +926,19 @@ namespace Take_Time_BangPhra.Account
                 lblDateRange.Text += $"<br/><span style='color:#555; font-size:12px;'>🔎 <b>ตรวจการดึง NextAcc:</b> {Server.HtmlEncode(info)}</span>";
             }
             catch { }
+        }
+
+        /// <summary>อ่านสถานะผลดึงล่าสุด (ที่ service เขียนไว้ตอนดึงเสร็จ) — โชว์แม้ foreground timeout.</summary>
+        private string ReadNextAccStatus(DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return null;
+                string file = Path.Combine(basePath, "NextAcc", "_list", $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.status.txt");
+                return File.Exists(file) ? File.ReadAllText(file) : null;
+            }
+            catch { return null; }
         }
 
         /// <summary>ไฟล์แคช "รายการเอกสาร NextAcc" ต่อช่วงวันที่ — {PaymentFolderPath}\NextAcc\_list\{from}_{to}.json.

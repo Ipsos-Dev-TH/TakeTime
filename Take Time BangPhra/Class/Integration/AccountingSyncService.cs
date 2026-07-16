@@ -9376,11 +9376,14 @@ namespace Take_Time_BangPhra.Integration
                 ? $"API ล้มเหลว: {string.Join("; ", errors)} | ได้ {list.Count} ใบ | {sw.ElapsedMilliseconds}ms"
                 : $"API คืน {rawTotal} ใบ → แสดง {list.Count}{filt} | {(typeInfo.Count > 0 ? string.Join(", ", typeInfo) : "ทุกชนิด 0")} | {sw.ElapsedMilliseconds}ms";
 
-            // เขียน "list cache" ลงดิสก์เมื่อดึงได้จริง (ทุกผู้เรียก รวม background ที่ไม่มี timeout 12 วิ) →
-            // แม้หน้า foreground จะ timeout ทิ้งผลไป task นี้ (โดยเฉพาะ background) ก็จะเขียนแคชให้ → กดรอบถัดไป
-            // อ่านแคชเจอ แสดงเอกสารได้แม้ NextAcc list ช้าเกิน 12 วิ. path ตรงกับที่หน้า CheckPayment อ่าน.
+            // เขียน "list cache" ลงดิสก์เมื่อดึงได้จริง (ทุกผู้เรียก รวม background ที่ไม่มี timeout) → แม้หน้า
+            // foreground จะ timeout ทิ้งผลไป task นี้ก็เขียนแคชให้ → กดรอบถัดไปอ่านแคชเจอ แม้ NextAcc list ช้า.
             if (list.Count > 0)
                 WriteRangeListCacheToDisk(fromDate, toDate, list);
+
+            // เขียน "status" ผลดึงล่าสุด (สำเร็จ/error/จำนวน/เวลา) เสมอ → หน้าอ่านมาโชว์ได้ต่อให้ foreground timeout
+            // → เห็นว่า background ดึงได้จริงไหม/พังตรงไหน โดยไม่ต้องรอ task จบใน budget
+            WriteRangeStatusToDisk(fromDate, toDate, LastRangeFetchInfo, cacheFiles, list.Count);
 
             _code.Logs(_connectionString, "AccountingSync",
                 $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} {LastRangeFetchInfo} (cacheFiles={cacheFiles})", "SYSTEM");
@@ -9401,6 +9404,23 @@ namespace Take_Time_BangPhra.Integration
                 string file = Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.json");
                 var ser = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
                 File.WriteAllText(file, ser.Serialize(list));   // default UTF-8 (หน้าอ่านด้วย UTF8 เข้ากันได้)
+            }
+            catch { }
+        }
+
+        /// <summary>เขียนสถานะผลดึงล่าสุดต่อช่วงวันที่ ({..}\NextAcc\_list\{from}_{to}.status.txt) — บรรทัดเดียว
+        /// "HH:mm:ss dd/MM | {info} | โหมด={cache/meta} | ได้ {count} ใบ". ให้หน้าอ่านมาโชว์แม้ตัวเอง timeout.</summary>
+        private void WriteRangeStatusToDisk(DateTime fromDate, DateTime toDate, string info, bool cacheFiles, int count)
+        {
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return;
+                string dir = Path.Combine(basePath, "NextAcc", "_list");
+                Directory.CreateDirectory(dir);
+                string file = Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.status.txt");
+                string line = $"{DateTime.Now:HH:mm:ss dd/MM} | {info} | โหมด={(cacheFiles ? "cache-files" : "metadata")} | ได้ {count} ใบ";
+                File.WriteAllText(file, line);
             }
             catch { }
         }
