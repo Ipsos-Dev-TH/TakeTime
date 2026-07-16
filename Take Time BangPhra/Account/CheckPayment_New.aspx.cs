@@ -834,6 +834,7 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private List<NextAccCachedDocument> PrefetchNextAccDocuments(DateTime fromDate, DateTime toDate)
         {
+            string listCache = GetNextAccListCacheFile(fromDate, toDate);
             try
             {
                 var config = new AccountingConfig(conn);
@@ -842,11 +843,22 @@ namespace Take_Time_BangPhra.Account
                 string cn = conn;
 
                 // 1) รันเบื้องหลัง (fire-and-forget): โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บดิสก์ไว้ใช้รอบถัดไป
-                System.Threading.Tasks.Task.Run(() =>
+                //    ⚠ THROTTLE: เดิมรันทุกครั้งที่โหลดหน้า → กด "ค้นหา" ซ้ำ ๆ ทำให้ background หลายตัวซ้อนกัน
+                //    ถล่ม API/connection pool → list fetch (ข้อ 2) timeout ยิ่งขึ้นทุกครั้ง. จำกัดให้รันครั้งเดียว
+                //    ต่อช่วงวันที่ทุก 2 นาที (marker บนดิสก์) — กด retry ถี่ ๆ ไม่ทับซ้อน
+                string bgMarker = string.IsNullOrEmpty(listCache) ? null : listCache + ".bg";
+                bool bgDue = bgMarker == null
+                    || !File.Exists(bgMarker)
+                    || (DateTime.Now - File.GetLastWriteTime(bgMarker)) > TimeSpan.FromMinutes(2);
+                if (bgDue)
                 {
-                    try { new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: true).Wait(); }
-                    catch { }
-                });
+                    try { if (bgMarker != null) { Directory.CreateDirectory(Path.GetDirectoryName(bgMarker)); File.WriteAllText(bgMarker, DateTime.Now.ToString("o")); } } catch { }
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        try { new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: true).Wait(); }
+                        catch { }
+                    });
+                }
 
                 // 2) แสดงผลเร็ว: ดึงเฉพาะ "รายการเอกสาร" (metadata) + ไฟล์ที่ cache ไว้บนดิสก์ — ไม่ยิง API ต่อเอกสาร
                 //    → เอกสารที่สร้างบน NextAcc โดยตรง (เช่น PV-202606-0003) จะโผล่ในตารางทันทีพร้อมลิงก์เปิดดู
@@ -854,17 +866,83 @@ namespace Take_Time_BangPhra.Account
                     new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
 
                 if (task.Wait(TimeSpan.FromSeconds(12)))
-                    return task.Result ?? new List<NextAccCachedDocument>();
+                {
+                    var res = task.Result ?? new List<NextAccCachedDocument>();
+                    if (res.Count > 0)
+                    {
+                        WriteNextAccListCache(listCache, res);   // เก็บ last-known list กัน timeout รอบหน้า
+                        return res;
+                    }
+                    // API คืน 0 — อาจ blip/ช้า → ถ้ามี cache last-known ให้แสดงแทนตารางว่าง (เอกสารยังอยู่บน NextAcc)
+                    var cached0 = ReadNextAccListCache(listCache);
+                    if (cached0 != null && cached0.Count > 0)
+                    {
+                        lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: API คืน 0 รายการรอบนี้ — แสดงรายการล่าสุดจากแคช; ลองค้นหาอีกครั้ง)</span>";
+                        return cached0;
+                    }
+                    return res;
+                }
 
-                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: แสดงจากแคช — กำลังดึงรายการเบื้องหลัง ลองค้นหาอีกครั้ง)</span>";
+                // timeout (>12s) → แสดง last-known จากแคชแทนตารางว่าง (background กำลังดึงต่อ)
+                var cached = ReadNextAccListCache(listCache);
+                if (cached != null && cached.Count > 0)
+                {
+                    lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: ดึงไม่ทัน — แสดงรายการล่าสุดจากแคช, กำลังดึงเบื้องหลัง)</span>";
+                    return cached;
+                }
+                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: ดึงรายการไม่ทันใน 12 วิ — กำลังดึงเบื้องหลัง ลองค้นหาอีกครั้ง)</span>";
                 return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("PrefetchNextAccDocuments error: " + ex.Message);
+                // error → พยายามแสดง last-known จากแคชก่อน (ไม่ปล่อยตารางว่าง)
+                var cached = ReadNextAccListCache(listCache);
+                if (cached != null && cached.Count > 0)
+                {
+                    lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)} — แสดงรายการล่าสุดจากแคช)</span>";
+                    return cached;
+                }
                 lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)})</span>";
                 return new List<NextAccCachedDocument>();
             }
+        }
+
+        /// <summary>ไฟล์แคช "รายการเอกสาร NextAcc" ต่อช่วงวันที่ — {PaymentFolderPath}\NextAcc\_list\{from}_{to}.json.
+        /// ให้หน้าโชว์รายการล่าสุดได้แม้ดึงสดไม่สำเร็จ (timeout/error/API คืน 0) — กันตารางว่างทั้งที่เอกสารยังอยู่.</summary>
+        private string GetNextAccListCacheFile(DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return null;
+                string dir = Path.Combine(basePath, "NextAcc", "_list");
+                return Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.json");
+            }
+            catch { return null; }
+        }
+
+        private void WriteNextAccListCache(string file, List<NextAccCachedDocument> list)
+        {
+            if (string.IsNullOrEmpty(file) || list == null) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
+                File.WriteAllText(file, ser.Serialize(list), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private List<NextAccCachedDocument> ReadNextAccListCache(string file)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(file) || !File.Exists(file)) return null;
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
+                return ser.Deserialize<List<NextAccCachedDocument>>(File.ReadAllText(file, Encoding.UTF8));
+            }
+            catch { return null; }
         }
 
         /// <summary>
