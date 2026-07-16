@@ -2181,20 +2181,29 @@ namespace Take_Time_BangPhra.Integration
                 string supplierTaxId = p.ContainsKey("supplierTaxId") ? p["supplierTaxId"]?.ToString() : null;
                 if (!string.IsNullOrEmpty(supplierExternalId))
                 {
-                    // Explicit vendor info from the Account_Payment voucher flow (voucherId == 0).
-                    // Include the vendor Address so NextAcc creates the contact with full
-                    // address (not name-only). Address comes from the payload when supplied,
-                    // otherwise it is looked up from the Vendor table via the "VENDOR-{id}" id.
-                    string supplierAddress = p.ContainsKey("supplierAddress") ? p["supplierAddress"]?.ToString() : null;
-                    if (string.IsNullOrEmpty(supplierAddress))
-                        supplierAddress = LookupVendorAddressByExternalId(supplierExternalId);
-                    supplierContact = await EnsureSupplierContactAsync(new ContactInfo
+                    // Account_Payment voucher flow (voucherId == 0). ดึงผู้ขายแบบเต็ม (ที่อยู่มีโครงสร้าง
+                    // +สาขา+ชนิดนิติ/บุคคล) จาก Vendor ผ่าน "VENDOR-{id}" ให้ contact ครบเท่าฝั่งลูกค้า;
+                    // ถ้า resolve ไม่ได้ (ไม่ใช่ VENDOR-/ไม่พบ) → สร้างจากค่าใน payload ตามเดิม
+                    var vendorContact = LookupVendorContactByExternalId(supplierExternalId, payeeName);
+                    if (vendorContact != null)
                     {
-                        ExternalId = supplierExternalId,
-                        Name = payeeName,
-                        TaxId = supplierTaxId,
-                        Address = supplierAddress
-                    });
+                        if (string.IsNullOrEmpty(vendorContact.TaxId) && !string.IsNullOrEmpty(supplierTaxId))
+                            vendorContact.TaxId = supplierTaxId;
+                        supplierContact = await EnsureSupplierContactAsync(vendorContact);
+                    }
+                    else
+                    {
+                        string supplierAddress = p.ContainsKey("supplierAddress") ? p["supplierAddress"]?.ToString() : null;
+                        if (string.IsNullOrEmpty(supplierAddress))
+                            supplierAddress = LookupVendorAddressByExternalId(supplierExternalId);
+                        supplierContact = await EnsureSupplierContactAsync(new ContactInfo
+                        {
+                            ExternalId = supplierExternalId,
+                            Name = payeeName,
+                            TaxId = supplierTaxId,
+                            Address = supplierAddress
+                        });
+                    }
                 }
                 else
                 {
@@ -7109,32 +7118,7 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                // สาขา §86/4: นิติบุคคลต้องมีรหัสสาขา 5 หลัก (00000 = สำนักงานใหญ่); ค่าที่ไม่ใช่ตัวเลข
-                // 5 หลัก → ใช้ 00000 (กันค่าขยะจากช่องกรอกไปโผล่บนใบกำกับ)
-                string branch = (info.BranchCode ?? "").Trim();
-                if (!System.Text.RegularExpressions.Regex.IsMatch(branch, @"^\d{5}$"))
-                    branch = isJuristic ? "00000" : null;
-
-                var req = new InboundCustomerRequest
-                {
-                    ExternalId = info.ExternalId,
-                    Name = info.Name,
-                    TaxId = info.TaxId,
-                    Email = info.Email,
-                    Phone = info.Phone,
-                    Address = info.Address,
-                    // โครงสร้างที่อยู่ → NextAcc render ใบกำกับ §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
-                    BuildingNumber = info.BuildingNumber,
-                    Moo = info.Moo,
-                    SubDistrict = info.SubDistrict,
-                    District = info.District,
-                    Province = info.Province,
-                    PostalCode = info.PostalCode,
-                    BranchCode = branch,
-                    IsCustomer = true,
-                    IsSupplier = false,
-                    ContactType = isJuristic ? "JuristicPerson" : "Individual"
-                };
+                var req = BuildInboundContactRequest(info, isSupplier: false);
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
                 if (resp?.data != null && resp.data.Id != Guid.Empty)
                 {
@@ -7158,6 +7142,44 @@ namespace Take_Time_BangPhra.Integration
                 UpsertContactMap(info, "CUSTOMER", "FAILED", ex.Message);
                 return ex.Message;
             }
+        }
+
+        /// <summary>
+        /// จุดเดียวที่ประกอบ payload contact ส่ง NextAcc — ใช้ทั้งฝั่งลูกค้าและผู้ขาย เพื่อให้กติกา
+        /// (ชนิดนิติ/บุคคล, รหัสสาขา §86/4, ที่อยู่แบบมีโครงสร้าง) ตรงกันทุกเส้นทางแน่นอน.
+        /// </summary>
+        private InboundCustomerRequest BuildInboundContactRequest(ContactInfo info, bool isSupplier)
+        {
+            // นิติ/บุคคล: ยึดชนิดที่ผู้ใช้เลือกในระบบ (Customer_Type/Vendor_Type = TXID) ก่อน
+            // แล้ว fallback เลขภาษีขึ้นต้น 0. ผู้ขายนิติบุคคล → NextAcc หัก ภ.ง.ด.53 / บุคคล → ภ.ง.ด.3
+            bool isJuristic = info.ResolveIsJuristic();
+
+            // สาขา §86/4: นิติบุคคลต้องมีรหัสสาขา 5 หลัก (00000 = สำนักงานใหญ่); ค่าที่ไม่ใช่ตัวเลข
+            // 5 หลัก → ใช้ 00000 (กันค่าขยะจากช่องกรอกไปโผล่บนใบกำกับ)
+            string branch = (info.BranchCode ?? "").Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(branch, @"^\d{5}$"))
+                branch = isJuristic ? "00000" : null;
+
+            return new InboundCustomerRequest
+            {
+                ExternalId = info.ExternalId,
+                Name = info.Name,
+                TaxId = info.TaxId,
+                Email = info.Email,
+                Phone = info.Phone,
+                Address = info.Address,
+                // โครงสร้างที่อยู่ → NextAcc render เอกสาร §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
+                BuildingNumber = info.BuildingNumber,
+                Moo = info.Moo,
+                SubDistrict = info.SubDistrict,
+                District = info.District,
+                Province = info.Province,
+                PostalCode = info.PostalCode,
+                BranchCode = branch,
+                IsCustomer = !isSupplier,
+                IsSupplier = isSupplier,
+                ContactType = isJuristic ? "JuristicPerson" : "Individual"
+            };
         }
 
         /// <summary>Upsert/Insert Accounting_Contact_Map entry (cache table)</summary>
@@ -7393,28 +7415,53 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Lookup supplier (Vendor) จาก Payment_Voucher.Vendor_ID — ใช้ Vendor.ID เป็น External ID
         /// </summary>
+        // คอลัมน์ผู้ขายชุดเดียว — parity กับฝั่งลูกค้า: เลขภาษี (IDNumber), ที่อยู่มีโครงสร้าง (Address+Address1
+        // +Address table), สาขา (Branch_Number), ชนิดนิติ/บุคคล (Vendor_Type_ID → Customer_Type.Customer_Code)
+        private const string VendorContactSelectColumns = @"
+                         V.ID, V.Name, V.IDNumber AS TaxId, V.Address, V.Address1, V.Branch_Number,
+                         A.SubDistrict, A.District, A.Province, A.PostalCode,
+                         CT.Customer_Code";
+
+        /// <summary>แปลงแถวผู้ขาย (คอลัมน์ชุด VendorContactSelectColumns) → ContactInfo (โครงสร้างเดียวกับลูกค้า)</summary>
+        private static ContactInfo BuildContactInfoFromVendorRow(System.Data.DataRow row, string fallbackName)
+        {
+            string ColVal(string col) =>
+                row.Table.Columns.Contains(col) && row[col] != DBNull.Value
+                    ? row[col].ToString().Trim() : "";
+            string custCode = ColVal("Customer_Code");
+            return new ContactInfo
+            {
+                ExternalId = "VENDOR-" + row["ID"].ToString(),
+                Name = ColVal("Name").Length > 0 ? ColVal("Name") : fallbackName,
+                TaxId = ColVal("TaxId"),
+                Address = ComposeCustomerAddress(row),
+                BuildingNumber = ColVal("Address"),
+                Moo = ColVal("Address1"),
+                SubDistrict = ColVal("SubDistrict"),
+                District = ColVal("District"),
+                Province = ColVal("Province"),
+                PostalCode = ColVal("PostalCode"),
+                BranchCode = ColVal("Branch_Number"),
+                // Vendor_Type = TXID = นิติบุคคล (เดียวกับ e-Tax) → ภ.ง.ด.53 / อื่น = บุคคล → ภ.ง.ด.3
+                IsJuristic = string.IsNullOrEmpty(custCode) ? (bool?)null
+                    : string.Equals(custCode, "TXID", StringComparison.OrdinalIgnoreCase)
+            };
+        }
+
         private ContactInfo LookupSupplierFromVoucher(int voucherId, string fallbackName)
         {
             try
             {
-                // Vendor schema: ID, Name, IDNumber (Tax), Address, Vendor_Group, Status (no MobilePhone/Email columns)
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1 V.ID, V.Name, V.IDNumber AS TaxId, V.Address
+                    @"SELECT TOP 1 " + VendorContactSelectColumns + @"
                       FROM Payment_Voucher PV
                       LEFT JOIN Vendor V ON V.ID = PV.Vendor_ID
+                      LEFT JOIN Address A ON A.ID = V.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = V.Vendor_Type_ID
                       WHERE PV.ID = @id",
                     new Dictionary<string, object> { { "@id", voucherId } });
                 if (dt?.Rows.Count > 0 && dt.Rows[0]["ID"] != DBNull.Value)
-                {
-                    var row = dt.Rows[0];
-                    return new ContactInfo
-                    {
-                        ExternalId = "VENDOR-" + row["ID"].ToString(),
-                        Name = row["Name"]?.ToString() ?? fallbackName,
-                        TaxId = row["TaxId"]?.ToString(),
-                        Address = row["Address"]?.ToString()
-                    };
-                }
+                    return BuildContactInfoFromVendorRow(dt.Rows[0], fallbackName);
             }
             catch (Exception ex)
             {
@@ -7429,6 +7476,33 @@ namespace Take_Time_BangPhra.Integration
                     ExternalId = "PAYEE-" + fallbackName.GetHashCode().ToString("X"),
                     Name = fallbackName
                 };
+            }
+            return null;
+        }
+
+        /// <summary>ดึงผู้ขายแบบเต็ม (โครงสร้างที่อยู่+สาขา+ชนิด) จาก ExternalId "VENDOR-{id}" — ใช้เส้น
+        /// Account_Payment (voucherId==0) ให้ contact ผู้ขายครบเท่าฝั่งลูกค้า</summary>
+        private ContactInfo LookupVendorContactByExternalId(string externalId, string fallbackName)
+        {
+            if (string.IsNullOrEmpty(externalId) || !externalId.StartsWith("VENDOR-")) return null;
+            string vendorId = externalId.Substring("VENDOR-".Length);
+            if (string.IsNullOrEmpty(vendorId)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 " + VendorContactSelectColumns + @"
+                      FROM Vendor V
+                      LEFT JOIN Address A ON A.ID = V.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = V.Vendor_Type_ID
+                      WHERE V.ID = @id",
+                    new Dictionary<string, object> { { "@id", vendorId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["ID"] != DBNull.Value)
+                    return BuildContactInfoFromVendorRow(dt.Rows[0], fallbackName);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupVendorContactByExternalId failed for {externalId}: {ex.Message}", "SYSTEM");
             }
             return null;
         }
@@ -7470,18 +7544,10 @@ namespace Take_Time_BangPhra.Integration
             if (vendorId <= 0) return null;
             try
             {
-                var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 ID, Name, IDNumber, Address FROM Vendor WHERE ID = @id",
-                    new Dictionary<string, object> { { "@id", vendorId } });
-                if (dt == null || dt.Rows.Count == 0) return null;
-                var row = dt.Rows[0];
-                var info = await EnsureSupplierContactAsync(new ContactInfo
-                {
-                    ExternalId = "VENDOR-" + row["ID"],
-                    Name = row["Name"]?.ToString(),
-                    TaxId = row["IDNumber"]?.ToString(),
-                    Address = row["Address"]?.ToString()
-                });
+                // ดึงผู้ขายแบบเต็ม (โครงสร้างที่อยู่+สาขา+ชนิดนิติ/บุคคล) ให้ contact ครบเท่าฝั่งลูกค้า
+                var info = LookupVendorContactByExternalId("VENDOR-" + vendorId, null);
+                if (info == null) return null;
+                info = await EnsureSupplierContactAsync(info);
                 return info?.NexaaccContactId;
             }
             catch (Exception ex)
@@ -7530,27 +7596,18 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                var req = new InboundCustomerRequest
-                {
-                    ExternalId = info.ExternalId,
-                    Name = info.Name,
-                    TaxId = info.TaxId,
-                    Email = info.Email,
-                    Phone = info.Phone,
-                    Address = info.Address,
-                    IsCustomer = false,
-                    IsSupplier = true,
-                    // นิติบุคคล (taxId 13 หลักขึ้นต้น 0) → JuristicPerson เพื่อให้ NextAcc หัก ภ.ง.ด.53
-                    // / บุคคลธรรมดา → Individual (ภ.ง.ด.3). อย่าใช้ความยาว 13 หลักตัดสิน (เท่ากันทั้งคู่)
-                    ContactType = AccountingDataMapper.IsJuristicPerson(info.TaxId) ? "JuristicPerson" : "Individual"
-                };
+                // ใช้ตัวประกอบ payload เดียวกับฝั่งลูกค้า (โครงสร้างที่อยู่+สาขา+ชนิดนิติ/บุคคล ตรงกัน)
+                bool isJuristic = info.ResolveIsJuristic();
+                var req = BuildInboundContactRequest(info, isSupplier: true);
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
                 if (resp?.data != null && resp.data.Id != Guid.Empty)
                 {
                     info.NexaaccContactId = resp.data.Id;
                     UpsertContactMap(info, "SUPPLIER", "SYNCED", null);
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"EnsureSupplierContactAsync: upserted {info.Name} ({info.ExternalId}) → {info.NexaaccContactId}",
+                        $"EnsureSupplierContactAsync: upserted {info.Name} ({info.ExternalId}) " +
+                        $"type={(isJuristic ? "JuristicPerson(ภ.ง.ด.53)" : "Individual(ภ.ง.ด.3)")}" +
+                        $"{(info.IsJuristic.HasValue ? "(จากชนิดผู้ขายในระบบ)" : "(จากเลขภาษี)")} → {info.NexaaccContactId}",
                         "SYSTEM");
                 }
             }
