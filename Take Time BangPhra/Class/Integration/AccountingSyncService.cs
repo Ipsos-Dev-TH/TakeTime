@@ -2189,7 +2189,7 @@ namespace Take_Time_BangPhra.Integration
                     {
                         if (string.IsNullOrEmpty(vendorContact.TaxId) && !string.IsNullOrEmpty(supplierTaxId))
                             vendorContact.TaxId = supplierTaxId;
-                        supplierContact = await EnsureSupplierContactAsync(vendorContact);
+                        supplierContact = await EnsureSupplierContactAsync(vendorContact, forceRefresh: true);
                     }
                     else
                     {
@@ -2202,7 +2202,7 @@ namespace Take_Time_BangPhra.Integration
                             Name = payeeName,
                             TaxId = supplierTaxId,
                             Address = supplierAddress
-                        });
+                        }, forceRefresh: true);
                     }
                 }
                 else
@@ -7547,7 +7547,7 @@ namespace Take_Time_BangPhra.Integration
                 // ดึงผู้ขายแบบเต็ม (โครงสร้างที่อยู่+สาขา+ชนิดนิติ/บุคคล) ให้ contact ครบเท่าฝั่งลูกค้า
                 var info = LookupVendorContactByExternalId("VENDOR-" + vendorId, null);
                 if (info == null) return null;
-                info = await EnsureSupplierContactAsync(info);
+                info = await EnsureSupplierContactAsync(info, forceRefresh: true);
                 return info?.NexaaccContactId;
             }
             catch (Exception ex)
@@ -7561,7 +7561,9 @@ namespace Take_Time_BangPhra.Integration
         private async Task<ContactInfo> EnsureSupplierContactAsync(int voucherId, string payeeName)
         {
             var info = LookupSupplierFromVoucher(voucherId, payeeName);
-            return await EnsureSupplierContactAsync(info);
+            // forceRefresh: ก่อนออกเอกสารจ่าย ต้อง push ข้อมูลผู้ขายล่าสุด (เลขภาษี/ที่อยู่/สาขา/ชนิด)
+            // เข้า contact ทันที ไม่รอ cache 30 วัน — parity กับฝั่งลูกค้า (แก้ vendor แล้วสะท้อนทันที)
+            return await EnsureSupplierContactAsync(info, forceRefresh: true);
         }
 
         /// <summary>
@@ -7569,8 +7571,9 @@ namespace Take_Time_BangPhra.Integration
         /// Account_Payment-based PaymentVoucher flow where voucherId is 0 and the vendor's
         /// ExternalId/TaxId are supplied directly through the queue payload (the voucherId
         /// lookup queries the legacy Payment_Voucher table and can't resolve this flow).
+        /// forceRefresh=true → ข้ามแคช 30 วัน push ข้อมูลล่าสุดเสมอ (ใช้ตอนออกเอกสารจ่าย)
         /// </summary>
-        private async Task<ContactInfo> EnsureSupplierContactAsync(ContactInfo info)
+        private async Task<ContactInfo> EnsureSupplierContactAsync(ContactInfo info, bool forceRefresh = false)
         {
             if (info == null || string.IsNullOrEmpty(info.ExternalId)) return null;
 
@@ -7584,7 +7587,8 @@ namespace Take_Time_BangPhra.Integration
                 {
                     DateTime lastSync = cached.Rows[0]["Last_Synced"] != DBNull.Value
                         ? Convert.ToDateTime(cached.Rows[0]["Last_Synced"]) : DateTime.MinValue;
-                    if (cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
+                    if (!forceRefresh
+                        && cached.Rows[0]["Nexaacc_Contact_Id"] != DBNull.Value
                         && (DateTime.Now - lastSync).TotalDays < 30)
                     {
                         info.NexaaccContactId = (Guid)cached.Rows[0]["Nexaacc_Contact_Id"];
