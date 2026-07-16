@@ -9291,21 +9291,34 @@ namespace Take_Time_BangPhra.Integration
         /// วิธีนี้ไม่พึ่ง Nexaacc_Response_Id ใน Sync Queue — จึงเจอเอกสารที่ออกบน NextAcc เสมอ
         /// แม้ generate-pdf จะไม่มี template (จะยังมี DeepLinkUrl + ไฟล์แนบให้เปิดดู)
         /// </summary>
+        /// <summary>diagnostic ของการดึงรายการรอบล่าสุด (โชว์บนหน้า CheckPayment ได้) — API คืนกี่ใบต่อชนิด,
+        /// error อะไร, ใช้เวลาเท่าไร, ถูกกรองออกกี่ใบ (void/payroll). ตั้งค่าโดย DownloadVoucherDocumentsForRangeAsync.</summary>
+        public string LastRangeFetchInfo { get; private set; }
+
         public async System.Threading.Tasks.Task<List<NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
             DateTime fromDate, DateTime toDate, bool includeAttachments = true, bool cacheFiles = true)
         {
             var list = new List<NextAccCachedDocument>();
-            if (!_config.IsConfigured || !_config.Enabled) return list;
+            LastRangeFetchInfo = null;
+            if (!_config.IsConfigured || !_config.Enabled)
+            {
+                LastRangeFetchInfo = "NextAcc ยังไม่เปิด/ตั้งค่า (IsConfigured/Enabled = false)";
+                return list;
+            }
 
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-            if (string.IsNullOrEmpty(basePath)) return list;
+            if (string.IsNullOrEmpty(basePath)) { LastRangeFetchInfo = "ไม่ได้ตั้ง PaymentFolderPath"; return list; }
             string baseUrl = _config.RawBaseUrl.TrimEnd('/');
 
             var seen = new HashSet<Guid>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var typeInfo = new List<string>();      // ผลต่อชนิดเอกสาร (raw จาก API + หลังกรอง)
+            var errors = new List<string>();
+            int filteredVoid = 0, filteredPayroll = 0, rawTotal = 0;
 
             foreach (var typeName in PaymentDocTypeLabels.Keys)
             {
-                int page = 1;
+                int page = 1, typeRaw = 0, typeKept = 0;
                 while (true)
                 {
                     PagedResponse<OutboundDocumentResponse> resp;
@@ -9322,18 +9335,20 @@ namespace Take_Time_BangPhra.Integration
                     }
                     catch (Exception ex)
                     {
+                        errors.Add($"{typeName}: {ex.Message}");
                         _code.Logs(_connectionString, "AccountingSync",
                             $"DownloadVoucherDocumentsForRange: type={typeName} page={page} ล้มเหลว: {ex.Message}", "SYSTEM");
                         break;
                     }
 
                     if (resp?.Items == null || resp.Items.Count == 0) break;
+                    typeRaw += resp.Items.Count; rawTotal += resp.Items.Count;
 
                     foreach (var d in resp.Items)
                     {
                         if (d == null || seen.Contains(d.Id)) continue;
-                        if (IsPayrollDocument(d)) continue;       // ยกเว้นเงินเดือน
-                        if (IsVoidedDocument(d)) continue;        // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
+                        if (IsPayrollDocument(d)) { filteredPayroll++; continue; }   // ยกเว้นเงินเดือน
+                        if (IsVoidedDocument(d)) { filteredVoid++; continue; }       // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
                         seen.Add(d.Id);
 
                         // cacheFiles=false → แสดงผลเร็ว (metadata + อ่านไฟล์จากดิสก์ที่เคย cache ไว้ ไม่ยิง API ต่อเอกสาร)
@@ -9341,16 +9356,23 @@ namespace Take_Time_BangPhra.Integration
                         var cached = cacheFiles
                             ? await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments)
                             : BuildDiskOnlyCachedDoc(d, basePath);
-                        list.Add(cached);
+                        list.Add(cached); typeKept++;
                     }
 
                     if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
                     page++;
                 }
+                if (typeRaw > 0) typeInfo.Add($"{typeName}={typeKept}/{typeRaw}");
             }
 
+            sw.Stop();
+            string filt = (filteredVoid + filteredPayroll) > 0 ? $" (กรองออก void {filteredVoid}, payroll {filteredPayroll})" : "";
+            LastRangeFetchInfo = errors.Count > 0
+                ? $"API ล้มเหลว: {string.Join("; ", errors)} | ได้ {list.Count} ใบ | {sw.ElapsedMilliseconds}ms"
+                : $"API คืน {rawTotal} ใบ → แสดง {list.Count}{filt} | {(typeInfo.Count > 0 ? string.Join(", ", typeInfo) : "ทุกชนิด 0")} | {sw.ElapsedMilliseconds}ms";
+
             _code.Logs(_connectionString, "AccountingSync",
-                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} พบ {list.Count} เอกสาร (cacheFiles={cacheFiles})", "SYSTEM");
+                $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} {LastRangeFetchInfo} (cacheFiles={cacheFiles})", "SYSTEM");
             return list;
         }
 

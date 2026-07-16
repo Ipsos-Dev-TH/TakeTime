@@ -862,11 +862,14 @@ namespace Take_Time_BangPhra.Account
 
                 // 2) แสดงผลเร็ว: ดึงเฉพาะ "รายการเอกสาร" (metadata) + ไฟล์ที่ cache ไว้บนดิสก์ — ไม่ยิง API ต่อเอกสาร
                 //    → เอกสารที่สร้างบน NextAcc โดยตรง (เช่น PV-202606-0003) จะโผล่ในตารางทันทีพร้อมลิงก์เปิดดู
+                //    เก็บ instance ไว้อ่าน diagnostic (API คืนกี่ใบ/error/เวลา) มาโชว์บนหน้า
+                var svc = new AccountingSyncService(cn);
                 var task = System.Threading.Tasks.Task.Run(() =>
-                    new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
+                    svc.DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
 
                 if (task.Wait(TimeSpan.FromSeconds(12)))
                 {
+                    ShowNextAccDiag(svc.LastRangeFetchInfo);   // โชว์ผลดึงจริงบนหน้า
                     var res = task.Result ?? new List<NextAccCachedDocument>();
                     if (res.Count > 0)
                     {
@@ -877,20 +880,21 @@ namespace Take_Time_BangPhra.Account
                     var cached0 = ReadNextAccListCache(listCache);
                     if (cached0 != null && cached0.Count > 0)
                     {
-                        lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: API คืน 0 รายการรอบนี้ — แสดงรายการล่าสุดจากแคช; ลองค้นหาอีกครั้ง)</span>";
+                        lblDateRange.Text += $" <span style='color:#e67e22;'>(แสดง {cached0.Count} รายการล่าสุดจากแคชแทน)</span>";
                         return cached0;
                     }
                     return res;
                 }
 
                 // timeout (>12s) → แสดง last-known จากแคชแทนตารางว่าง (background กำลังดึงต่อ)
+                ShowNextAccDiag("ดึงรายการไม่ทันใน 12 วิ (API ช้า/ถูกถล่มจาก background) — กำลังดึงต่อเบื้องหลัง");
                 var cached = ReadNextAccListCache(listCache);
                 if (cached != null && cached.Count > 0)
                 {
-                    lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: ดึงไม่ทัน — แสดงรายการล่าสุดจากแคช, กำลังดึงเบื้องหลัง)</span>";
+                    lblDateRange.Text += $" <span style='color:#e67e22;'>(แสดง {cached.Count} รายการล่าสุดจากแคชแทน, กำลังดึงเบื้องหลัง)</span>";
                     return cached;
                 }
-                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: ดึงรายการไม่ทันใน 12 วิ — กำลังดึงเบื้องหลัง ลองค้นหาอีกครั้ง)</span>";
+                lblDateRange.Text += " <span style='color:#e67e22;'>(ยังไม่มีแคช — กดค้นหาอีกครั้งหลัง background ดึงเสร็จ)</span>";
                 return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
@@ -906,6 +910,18 @@ namespace Take_Time_BangPhra.Account
                 lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)})</span>";
                 return new List<NextAccCachedDocument>();
             }
+        }
+
+        /// <summary>โชว์ผลการดึงรายการ NextAcc บนหน้า (ใต้ช่วงวันที่) — API คืนกี่ใบ/error/เวลา ให้เห็นทันที
+        /// ไม่ต้องเปิด log. ตัวอย่าง: "API คืน 5 ใบ → แสดง 5 | EXPENSE=5/5 | 3200ms" หรือ "API ล้มเหลว: timeout".</summary>
+        private void ShowNextAccDiag(string info)
+        {
+            if (string.IsNullOrEmpty(info)) return;
+            try
+            {
+                lblDateRange.Text += $"<br/><span style='color:#555; font-size:12px;'>🔎 <b>ตรวจการดึง NextAcc:</b> {Server.HtmlEncode(info)}</span>";
+            }
+            catch { }
         }
 
         /// <summary>ไฟล์แคช "รายการเอกสาร NextAcc" ต่อช่วงวันที่ — {PaymentFolderPath}\NextAcc\_list\{from}_{to}.json.
