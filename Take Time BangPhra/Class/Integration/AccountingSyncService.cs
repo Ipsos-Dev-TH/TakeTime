@@ -9316,53 +9316,58 @@ namespace Take_Time_BangPhra.Integration
             var errors = new List<string>();
             int filteredVoid = 0, filteredPayroll = 0, rawTotal = 0;
 
-            foreach (var typeName in PaymentDocTypeLabels.Keys)
+            // ยิง list API "4 ชนิดเอกสารพร้อมกัน (parallel)" — เดิม sequential × 4 ชนิด → NextAcc list ช้า
+            // ทำให้เกิน 12 วิเสมอ (timeout, ตารางว่าง). parallel → เหลือ ≈ ชนิดที่ช้าสุดตัวเดียว. GET อย่างเดียว
+            // (read-only) ปลอดภัยต่อ concurrent. ประมวลผลต่อเอกสาร (disk/PDF) ทำ sequential หลังรวมผล.
+            async System.Threading.Tasks.Task<(string type, List<OutboundDocumentResponse> items, string error)> FetchTypeAsync(string typeName)
             {
-                int page = 1, typeRaw = 0, typeKept = 0;
+                var items = new List<OutboundDocumentResponse>();
+                int page = 1;
                 while (true)
                 {
                     PagedResponse<OutboundDocumentResponse> resp;
                     try
                     {
                         resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
-                        {
-                            FromDate = fromDate,
-                            ToDate = toDate,
-                            Type = typeName,
-                            Page = page,
-                            PageSize = 50
-                        });
+                        { FromDate = fromDate, ToDate = toDate, Type = typeName, Page = page, PageSize = 50 });
                     }
                     catch (Exception ex)
                     {
-                        errors.Add($"{typeName}: {ex.Message}");
                         _code.Logs(_connectionString, "AccountingSync",
                             $"DownloadVoucherDocumentsForRange: type={typeName} page={page} ล้มเหลว: {ex.Message}", "SYSTEM");
-                        break;
+                        return (typeName, items, ex.Message);
                     }
-
                     if (resp?.Items == null || resp.Items.Count == 0) break;
-                    typeRaw += resp.Items.Count; rawTotal += resp.Items.Count;
-
-                    foreach (var d in resp.Items)
-                    {
-                        if (d == null || seen.Contains(d.Id)) continue;
-                        if (IsPayrollDocument(d)) { filteredPayroll++; continue; }   // ยกเว้นเงินเดือน
-                        if (IsVoidedDocument(d)) { filteredVoid++; continue; }       // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
-                        seen.Add(d.Id);
-
-                        // cacheFiles=false → แสดงผลเร็ว (metadata + อ่านไฟล์จากดิสก์ที่เคย cache ไว้ ไม่ยิง API ต่อเอกสาร)
-                        // cacheFiles=true  → โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บ (ใช้รันเบื้องหลัง)
-                        var cached = cacheFiles
-                            ? await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments)
-                            : BuildDiskOnlyCachedDoc(d, basePath);
-                        list.Add(cached); typeKept++;
-                    }
-
+                    items.AddRange(resp.Items);
                     if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
                     page++;
                 }
-                if (typeRaw > 0) typeInfo.Add($"{typeName}={typeKept}/{typeRaw}");
+                return (typeName, items, null);
+            }
+
+            var typeResults = await System.Threading.Tasks.Task.WhenAll(
+                PaymentDocTypeLabels.Keys.Select(FetchTypeAsync));
+
+            foreach (var tr in typeResults)
+            {
+                if (tr.error != null) { errors.Add($"{tr.type}: {tr.error}"); continue; }
+                int typeRaw = tr.items.Count, typeKept = 0;
+                rawTotal += typeRaw;
+                foreach (var d in tr.items)
+                {
+                    if (d == null || seen.Contains(d.Id)) continue;
+                    if (IsPayrollDocument(d)) { filteredPayroll++; continue; }   // ยกเว้นเงินเดือน
+                    if (IsVoidedDocument(d)) { filteredVoid++; continue; }       // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
+                    seen.Add(d.Id);
+
+                    // cacheFiles=false → แสดงผลเร็ว (metadata + อ่านไฟล์จากดิสก์ที่เคย cache ไว้ ไม่ยิง API ต่อเอกสาร)
+                    // cacheFiles=true  → โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บ (ใช้รันเบื้องหลัง)
+                    var cached = cacheFiles
+                        ? await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments)
+                        : BuildDiskOnlyCachedDoc(d, basePath);
+                    list.Add(cached); typeKept++;
+                }
+                if (typeRaw > 0) typeInfo.Add($"{tr.type}={typeKept}/{typeRaw}");
             }
 
             sw.Stop();
