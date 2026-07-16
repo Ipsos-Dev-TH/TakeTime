@@ -1169,6 +1169,15 @@ namespace Take_Time_BangPhra.Account
             catch { }
         }
 
+        protected void gvDetails_RowEditing(object sender, GridViewEditEventArgs e)
+        {
+            // CommandName="edit" เป็นชื่อสงวนของ GridView → fire RowEditing เสมอ ควบคู่กับ RowCommand.
+            // การแก้ไข (redirect ไปหน้า PaymentVoucher หรือ ShowError สำหรับเอกสาร NextAcc-only)
+            // ถูกจัดการใน gvDetails_RowCommand แล้ว → ที่นี่แค่ยกเลิก edit mode กัน error
+            // "The GridView 'gvDetails' fired event RowEditing which wasn't handled"
+            e.Cancel = true;
+        }
+
         protected void gvDetails_RowDataBound(object sender, GridViewRowEventArgs e)
         {
             if (e.Row.RowType != DataControlRowType.DataRow) return;

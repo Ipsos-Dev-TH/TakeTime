@@ -480,6 +480,7 @@
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"
+                OnRowEditing="gvDetails_RowEditing"
                 OnRowDataBound="gvDetails_RowDataBound">
                 <Columns>
                     <asp:CommandField ButtonType="Button" HeaderText="ยกเลิก" DeleteText="🚫 ยกเลิก" ShowDeleteButton="True" />
