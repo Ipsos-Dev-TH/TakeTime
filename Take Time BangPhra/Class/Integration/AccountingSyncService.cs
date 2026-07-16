@@ -6805,10 +6805,14 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // เลขผู้เสียภาษีผู้ซื้ออยู่ในคอลัมน์ Customer.IDNumber (หน้า Receipt โหลด/เซฟ TextBox12 →
+                // IDNumber และ e-Tax XML ใช้ IDNumber เป็น buyer_taxid). คอลัมน์ TaxID ไม่ถูกเติมจาก flow นี้
+                // → เดิมอ่าน C.TaxID เลยได้ค่าว่างเสมอ ทำให้ NextAcc ออกเป็นใบเสร็จ ไม่ใช่ใบกำกับภาษี
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1
                          C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
-                         C.TaxID, C.Email, C.Address, C.Address1,
+                         ISNULL(NULLIF(LTRIM(RTRIM(C.IDNumber)), ''), C.TaxID) AS TaxID,
+                         C.Email, C.Address, C.Address1,
                          A.SubDistrict, A.District, A.Province, A.PostalCode
                       FROM Reservation R
                       LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
@@ -6940,6 +6944,18 @@ namespace Take_Time_BangPhra.Integration
                     $"EnsureCustomerContactAsync cache lookup failed: {ex.Message}", "SYSTEM");
             }
 
+            // ตรวจความครบถ้วนของข้อมูลผู้ซื้อก่อน upsert — เลขภาษี 13 หลัก + ที่อยู่ = ออกใบกำกับ §86/4 ได้
+            // (log ให้ผู้ใช้เห็นชัดว่าดึงอะไรไป contact ก่อนออกเอกสาร)
+            bool taxIdOk = !string.IsNullOrWhiteSpace(info.TaxId)
+                && System.Text.RegularExpressions.Regex.IsMatch(info.TaxId.Trim(), @"^\d{13}$");
+            bool addressOk = !string.IsNullOrWhiteSpace(info.Address);
+            bool isJuristic = AccountingDataMapper.IsJuristicPerson(info.TaxId);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"EnsureCustomerContactAsync: completeness check {info.ExternalId} → name={(!string.IsNullOrWhiteSpace(info.Name) ? "✓" : "✗")} " +
+                $"taxId={(taxIdOk ? info.TaxId : "✗(" + (info.TaxId ?? "-") + ")")} address={(addressOk ? "✓" : "✗")} " +
+                $"type={(isJuristic ? "JuristicPerson" : "Individual")} → {(taxIdOk && addressOk ? "ออกใบกำกับภาษีได้" : "ข้อมูลไม่ครบ → จะออกเป็นใบเสร็จ")}",
+                "SYSTEM");
+
             // Upsert via NextAcc API
             try
             {
@@ -6953,7 +6969,9 @@ namespace Take_Time_BangPhra.Integration
                     Address = info.Address,
                     IsCustomer = true,
                     IsSupplier = false,
-                    ContactType = "INDIVIDUAL"
+                    // นิติบุคคล (taxId 13 หลักขึ้นต้น 0) → JuristicPerson / บุคคลธรรมดา → Individual
+                    // เดิม hardcode INDIVIDUAL ทำให้ contact บริษัทผิดชนิด (mirror ฝั่ง supplier ที่ทำถูกแล้ว)
+                    ContactType = isJuristic ? "JuristicPerson" : "Individual"
                 };
                 var resp = await _apiClient.CreateIntegrationCustomerAsync(req);
                 if (resp?.data != null && resp.data.Id != Guid.Empty)
@@ -6961,7 +6979,7 @@ namespace Take_Time_BangPhra.Integration
                     info.NexaaccContactId = resp.data.Id;
                     UpsertContactMap(info, "CUSTOMER", "SYNCED", null);
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"EnsureCustomerContactAsync: upserted {info.Name} ({info.ExternalId}) → {info.NexaaccContactId}",
+                        $"EnsureCustomerContactAsync: upserted {info.Name} ({info.ExternalId}) taxId={(taxIdOk ? info.TaxId : "-")} → {info.NexaaccContactId}",
                         "SYSTEM");
                 }
                 else
