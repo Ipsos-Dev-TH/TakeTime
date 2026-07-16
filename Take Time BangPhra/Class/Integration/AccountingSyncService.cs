@@ -8215,8 +8215,14 @@ namespace Take_Time_BangPhra.Integration
                 string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
                 if (!string.IsNullOrEmpty(basePath))
                 {
-                    string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(documentNumber));
+                    string naRoot = Path.Combine(basePath, "NextAcc");
+                    string safe = MakeSafeFileName(documentNumber);
+                    string naFolder = Path.Combine(naRoot, safe);
                     if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
+                    // โฟลเดอร์แบบใหม่ผูก GUID ({doc}_{guid8}) — ล้างทุกชุดของเลขเอกสารนี้ด้วย
+                    if (Directory.Exists(naRoot))
+                        foreach (var dir in Directory.GetDirectories(naRoot, safe + "_*"))
+                            try { Directory.Delete(dir, true); } catch { }
                 }
             }
             catch { }
@@ -8830,6 +8836,17 @@ namespace Take_Time_BangPhra.Integration
             return name;
         }
 
+        /// <summary>คีย์โฟลเดอร์ cache ของเอกสาร NextAcc: "{ref/เลขเอกสาร}_{guid8}" — ต้องผูก GUID เสมอ.
+        /// เหตุ (บั๊กจริง): Reference มาจากผู้ใช้/OCR ซ้ำกันได้ข้ามใบ — OCR อ่าน "บ้านเลขที่ผู้ขาย 82/6" เป็น
+        /// เลขที่เอกสารหลายใบ → ทุกใบแชร์โฟลเดอร์ NextAcc/82_6 → PDF ทับกัน/fast-path เสิร์ฟใบอื่น
+        /// (กด PV-20260715 ได้ PDF ของ PV-20260709). GUID ใน key ทำให้ (ก) ไม่ชนข้ามใบ
+        /// (ข) void→สร้างใหม่ = GUID ใหม่ = URL ใหม่ → browser ไม่เสิร์ฟไฟล์รุ่นเก่า.</summary>
+        private static string NextAccDocCacheKey(string refOrNum, Guid docId)
+        {
+            string baseName = MakeSafeFileName(string.IsNullOrEmpty(refOrNum) ? docId.ToString() : refOrNum);
+            return baseName + "_" + docId.ToString("N").Substring(0, 8);
+        }
+
         /// <summary>true ถ้า PDF cache บนดิสก์ "เก่ากว่า" การ sync ล่าสุดของเอกสาร (ถูกแก้/re-sync หลัง cache)
         /// → ควรดึงใหม่. ปกติ PDF ถูกโหลดหลัง sync เสร็จ (ไฟล์ใหม่กว่า) จึงคืน false (ใช้ cache, เร็ว)</summary>
         private bool IsVoucherPdfCacheStale(string documentNumber, string pdfPath)
@@ -9066,12 +9083,13 @@ namespace Take_Time_BangPhra.Integration
             string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
-            string safeDoc = MakeSafeFileName(string.IsNullOrEmpty(docNumber) ? nextAccId.ToString() : docNumber);
+            // key ต้องผูก GUID — docNumber ที่ส่งมาคือ Reference/เลขอ้างอิง ซึ่งซ้ำข้ามใบได้ (เคส "82/6")
+            string safeDoc = NextAccDocCacheKey(docNumber, nextAccId);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
             string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
 
-            // fast path: มี cache อยู่แล้ว
+            // fast path: มี cache อยู่แล้ว (โฟลเดอร์ผูก GUID → ไม่มีทางเสิร์ฟใบอื่น)
             if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
             {
                 result.Found = true;
@@ -9358,7 +9376,8 @@ namespace Take_Time_BangPhra.Integration
             };
             try
             {
-                string safeDoc = MakeSafeFileName(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber);
+                // key ผูก GUID — Reference ซ้ำข้ามใบได้ (เคส "82/6") ห้ามใช้เดี่ยว ๆ
+                string safeDoc = NextAccDocCacheKey(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber, d.Id);
                 string folder = Path.Combine(basePath, "NextAcc", safeDoc);
                 string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
 
@@ -9419,9 +9438,10 @@ namespace Take_Time_BangPhra.Integration
                 Status = d.Status
             };
 
-            // โฟลเดอร์ cache: ใช้ Reference (เลขใบสำคัญจ่ายฝั่ง TakeTime) ถ้ามี ไม่งั้นใช้เลขเอกสาร NextAcc
-            // → เอกสารที่ sync จาก TakeTime ใช้โฟลเดอร์เดียวกับปุ่ม "ดู PDF", เอกสารที่สร้างบน NextAcc ใช้เลข NextAcc
-            string safeDoc = MakeSafeFileName(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber);
+            // โฟลเดอร์ cache: {Reference/เลขเอกสาร}_{guid8} — ต้องผูก GUID ของเอกสาร NextAcc เสมอ.
+            // เดิมใช้ Reference เดี่ยว ๆ → เอกสารคนละใบที่ Reference ซ้ำ (OCR อ่านบ้านเลขที่ "82/6" เป็นเลขที่
+            // เอกสารหลายใบ) เขียนทับโฟลเดอร์เดียวกัน → PDF/marker/ไฟล์แนบสลับใบ + amt marker เด้งทุกรอบ listing
+            string safeDoc = NextAccDocCacheKey(!string.IsNullOrEmpty(d.Reference) ? d.Reference : d.DocumentNumber, d.Id);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
             string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
             string noPdfMarker = Path.Combine(folder, "_nopdf.marker");
