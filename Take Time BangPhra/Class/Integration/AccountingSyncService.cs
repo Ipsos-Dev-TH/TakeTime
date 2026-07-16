@@ -6795,6 +6795,14 @@ namespace Take_Time_BangPhra.Integration
             public string Phone { get; set; }
             public string Address { get; set; }
             public Guid? NexaaccContactId { get; set; }
+            // โครงสร้างที่อยู่ + สาขา สำหรับใบกำกับภาษี §86/4 (ส่งเข้า NextAcc contact เพื่อ render ที่อยู่ถูกต้อง)
+            public string BranchCode { get; set; }
+            public string BuildingNumber { get; set; }   // บ้านเลขที่ (Customer.Address)
+            public string Moo { get; set; }              // หมู่ (Customer.Address1)
+            public string SubDistrict { get; set; }      // ตำบล/แขวง
+            public string District { get; set; }         // อำเภอ/เขต
+            public string Province { get; set; }         // จังหวัด
+            public string PostalCode { get; set; }       // รหัสไปรษณีย์
         }
 
         /// <summary>
@@ -6812,7 +6820,7 @@ namespace Take_Time_BangPhra.Integration
                     @"SELECT TOP 1
                          C.MobilePhone, ISNULL(C.FullName, C.Name) AS Name,
                          ISNULL(NULLIF(LTRIM(RTRIM(C.IDNumber)), ''), C.TaxID) AS TaxID,
-                         C.Email, C.Address, C.Address1,
+                         C.Email, C.Address, C.Address1, C.Branch_Number,
                          A.SubDistrict, A.District, A.Province, A.PostalCode
                       FROM Reservation R
                       LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
@@ -6824,6 +6832,9 @@ namespace Take_Time_BangPhra.Integration
                     var row = dt.Rows[0];
                     string phone = row["MobilePhone"]?.ToString();
                     if (string.IsNullOrEmpty(phone)) return null;
+                    string ColVal(string col) =>
+                        row.Table.Columns.Contains(col) && row[col] != DBNull.Value
+                            ? row[col].ToString().Trim() : "";
                     return new ContactInfo
                     {
                         ExternalId = phone,
@@ -6833,7 +6844,15 @@ namespace Take_Time_BangPhra.Integration
                         Phone = phone,
                         // รวมที่อยู่เต็ม(บ้านเลขที่+หมู่+ตำบล/อำเภอ/จังหวัด+ไปรษณีย์) — เดิมส่งเฉพาะ
                         // Customer.Address (บ้านเลขที่) ทำให้ใบกำกับบน NextAcc มีที่อยู่แค่ "55"
-                        Address = ComposeCustomerAddress(row)
+                        Address = ComposeCustomerAddress(row),
+                        // โครงสร้างที่อยู่ + สาขา ให้ NextAcc render ใบกำกับ §86/4 ครบ
+                        BuildingNumber = ColVal("Address"),
+                        Moo = ColVal("Address1"),
+                        SubDistrict = ColVal("SubDistrict"),
+                        District = ColVal("District"),
+                        Province = ColVal("Province"),
+                        PostalCode = ColVal("PostalCode"),
+                        BranchCode = ColVal("Branch_Number")
                     };
                 }
             }
@@ -6967,6 +6986,15 @@ namespace Take_Time_BangPhra.Integration
                     Email = info.Email,
                     Phone = info.Phone,
                     Address = info.Address,
+                    // โครงสร้างที่อยู่ + สาขา → NextAcc render ใบกำกับ §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
+                    BuildingNumber = info.BuildingNumber,
+                    Moo = info.Moo,
+                    SubDistrict = info.SubDistrict,
+                    District = info.District,
+                    Province = info.Province,
+                    PostalCode = info.PostalCode,
+                    // สาขา §86/4: นิติบุคคลต้องมีรหัสสาขา (00000 = สำนักงานใหญ่); บุคคลธรรมดาเว้นได้
+                    BranchCode = isJuristic ? (string.IsNullOrWhiteSpace(info.BranchCode) ? "00000" : info.BranchCode) : info.BranchCode,
                     IsCustomer = true,
                     IsSupplier = false,
                     // นิติบุคคล (taxId 13 หลักขึ้นต้น 0) → JuristicPerson / บุคคลธรรมดา → Individual
