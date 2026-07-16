@@ -747,6 +747,11 @@ namespace Take_Time_BangPhra.Account
                     throw;
                 }
 
+                // ── รวมเอกสารจาก NextAcc (รวมใบที่ยกเลิก/void) เข้าตาราง ──
+                // ใบที่ถูก void ตอนแก้ไขไม่มีแถวใน local → ดึงจาก NextAcc มาแสดงเป็นแถว "NextAcc-only"
+                // เพื่อดาวน์โหลด PDF ส่งบัญชีได้ครบ เลขที่เอกสารไม่ขาดช่วง. ล้มเหลว = คงตาราง local เดิม.
+                if (dt != null) MergeNextAccReceiptDocs(dt, startDate, endDate);
+
                 // Debug: Add message to date range label (ALWAYS execute this)
                 if (dt != null && dt.Rows.Count > 0)
                 {
@@ -813,6 +818,96 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch { }
             }
+        }
+
+        /// <summary>
+        /// รวมเอกสารฝั่งรับจาก NextAcc (รวมใบที่ยกเลิก/void) เข้าตาราง local:
+        /// - เพิ่มคอลัมน์ IsNextAccOnly / NextAccId / NextAccViewUrl (ใช้เป็น DataKey ตอนกดดู PDF)
+        /// - ใบที่ยกเลิกบน NextAcc → เพิ่มเป็นแถวสถานะ "Cancel" (เอกสารที่ถูก void ตอนแก้ไข = ดาวน์โหลดส่งบัญชีได้)
+        /// - ใบที่สร้างบน NextAcc โดยตรง (ไม่มีคู่ใน local) → เพิ่มเป็นแถว "NextAcc"
+        /// การกดดู PDF ของแถวเหล่านี้เปิดจาก NextAcc ด้วย GUID (gvDetails_SelectedIndexChanging)
+        /// ล้มเหลว/timeout → คงตาราง local เดิม (คอลัมน์ที่เพิ่มยังอยู่ครบ เพื่อ DataKeyNames ไม่พัง)
+        /// </summary>
+        private void MergeNextAccReceiptDocs(DataTable dt, DateTime startDate, DateTime endDate)
+        {
+            // เพิ่มคอลัมน์ที่ DataKeyNames อ้าง — ต้องมีเสมอแม้ดึง NextAcc ไม่สำเร็จ
+            if (!dt.Columns.Contains("IsNextAccOnly")) dt.Columns.Add("IsNextAccOnly", typeof(string));
+            if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
+            if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
+
+            var localIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow r in dt.Rows)
+            {
+                r["IsNextAccOnly"] = "0";
+                r["NextAccId"] = "";
+                r["NextAccViewUrl"] = "";
+                string lid = r["ID"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(lid)) localIds.Add(lid);
+            }
+
+            System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
+            try
+            {
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!cfg.IsConfigured || !cfg.Enabled) return;
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                var task = System.Threading.Tasks.Task.Run(() => svc.FetchNextAccReceiptDocumentsAsync(startDate, endDate));
+                if (task.Wait(20000)) naDocs = task.Result;
+                else
+                {
+                    try { codeInstance.Logs(conn, "AccountingSync", "CheckDocument: ดึงเอกสาร NextAcc ไม่ทันใน 20 วิ → แสดง local อย่างเดียว", "SYSTEM"); }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { codeInstance.Logs(conn, "AccountingSync", $"CheckDocument: ดึงเอกสาร NextAcc ล้มเหลว ({ex.Message}) → แสดง local อย่างเดียว", "SYSTEM"); }
+                catch { }
+                return;
+            }
+
+            if (naDocs == null || naDocs.Count == 0) return;
+
+            int added = 0;
+            foreach (var nd in naDocs)
+            {
+                bool isVoid = string.Equals(nd.Status, "Voided", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(nd.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(nd.Status, "Canceled", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(nd.Status, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+                // จับคู่กับใบ local จาก Reference (รูปแบบ "RES-{resId}-{receiptNumber}" หรือ = receiptNumber)
+                string reff = nd.Reference ?? "";
+                bool matchedLocal = false;
+                foreach (var id in localIds)
+                {
+                    if (reff.IndexOf(id, StringComparison.OrdinalIgnoreCase) >= 0) { matchedLocal = true; break; }
+                }
+
+                // ใบปกติที่มีคู่ local แล้ว → ข้าม (แถว local แสดงแทน); ใบ void หรือใบที่ไม่มีคู่ → เพิ่มแถว
+                if (!isVoid && matchedLocal) continue;
+
+                var nr = dt.NewRow();
+                nr["ID"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : nd.Id.ToString();
+                nr["Created_Date"] = nd.DocumentDate;
+                if (dt.Columns.Contains("CustomerName")) nr["CustomerName"] = string.IsNullOrEmpty(nd.ContactName) ? "-" : nd.ContactName;
+                if (dt.Columns.Contains("Paid_Type")) nr["Paid_Type"] = nd.DocumentTypeLabel ?? "";
+                nr["Total_Amount"] = nd.TotalAmount;
+                nr["Vat"] = nd.VatAmount;
+                nr["Status"] = isVoid ? "Cancel" : "NextAcc";
+                if (dt.Columns.Contains("Remark")) nr["Remark"] = nd.Notes ?? "";
+                if (dt.Columns.Contains("Created_By")) nr["Created_By"] = "NextAcc";
+                if (dt.Columns.Contains("HasSlip")) nr["HasSlip"] = 0;
+                nr["IsNextAccOnly"] = "1";
+                nr["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
+                nr["NextAccViewUrl"] = "";
+                dt.Rows.Add(nr);
+                added++;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"   ➕ MergeNextAccReceiptDocs: added {added} NextAcc row(s) from {naDocs.Count} doc(s)");
+            lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc +{added})</span>";
         }
 
         private void ValidateTotal()
@@ -941,6 +1036,14 @@ namespace Take_Time_BangPhra.Account
 
             try
             {
+                // เอกสาร NextAcc-only (รวมใบยกเลิก) — ลบจากที่นี่ไม่ได้ (แก้/ลบที่ระบบ NextAcc)
+                var dkDel = gvDetails.DataKeys[e.RowIndex];
+                if (dkDel != null && dkDel["IsNextAccOnly"]?.ToString() == "1")
+                {
+                    ShowError("เอกสารนี้อยู่บน NextAcc (รวมใบที่ยกเลิก) — ลบจากหน้านี้ไม่ได้");
+                    return;
+                }
+
                 // ✅ FIX: Get document number from correct column (Cells[4], not Cells[3])
                 // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร
                 string docNum = gvDetails.Rows[e.RowIndex].Cells[4].Text;
@@ -1179,6 +1282,36 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
+                // เอกสาร NextAcc-only (รวมใบที่ยกเลิก/void) → เปิด PDF จาก NextAcc ด้วย GUID โดยตรง
+                // (ต้องเช็คก่อน parser เลขเอกสารด้านล่าง เพราะเลข NextAcc เช่น REC-20260716-0005 จะ parse ไม่ได้)
+                var dk = gvDetails.DataKeys[e.NewSelectedIndex];
+                if (dk != null && (dk["IsNextAccOnly"]?.ToString() == "1"))
+                {
+                    string naId = dk["NextAccId"]?.ToString() ?? "";
+                    string naDocNum = dk["ID"]?.ToString() ?? "";
+                    if (Guid.TryParse(naId, out var gid) && gid != Guid.Empty)
+                    {
+                        try
+                        {
+                            Server.ScriptTimeout = 300;
+                            var svc = new AccountingSyncService(conn);
+                            var na = System.Threading.Tasks.Task.Run(() =>
+                                svc.DownloadNextAccDocumentByIdAsync(gid, naDocNum, false)).GetAwaiter().GetResult();
+                            if (na != null && na.Found && !string.IsNullOrEmpty(na.PdfRelativeUrl))
+                            {
+                                Response.Redirect(na.PdfRelativeUrl);
+                                return;
+                            }
+                            ShowError("NextAcc ไม่มี PDF สำหรับเอกสารนี้: " + (na?.Message ?? "ไม่ทราบสาเหตุ"));
+                        }
+                        catch (System.Threading.ThreadAbortException) { throw; }
+                        catch (Exception nex) { ShowError("เปิด PDF จาก NextAcc ไม่สำเร็จ: " + nex.Message); }
+                        return;
+                    }
+                    ShowError("เอกสาร NextAcc นี้ไม่มีรหัสสำหรับเปิด PDF");
+                    return;
+                }
+
                 string docStatus = gvDetails.Rows[e.NewSelectedIndex].Cells[14].Text; // Status column
                 string docNum = gvDetails.Rows[e.NewSelectedIndex].Cells[4].Text; // ID column
 
@@ -1405,6 +1538,15 @@ namespace Take_Time_BangPhra.Account
                 try
                 {
                     int rowIndex = Convert.ToInt32(e.CommandArgument);
+
+                    // เอกสาร NextAcc-only (รวมใบยกเลิก) — แก้ไขที่ระบบ NextAcc
+                    var dkEdit = gvDetails.DataKeys[rowIndex];
+                    if (dkEdit != null && dkEdit["IsNextAccOnly"]?.ToString() == "1")
+                    {
+                        ShowError("เอกสารนี้อยู่บน NextAcc (รวมใบที่ยกเลิก) — แก้ไขที่ระบบ NextAcc");
+                        return;
+                    }
+
                     string docNum = gvDetails.Rows[rowIndex].Cells[4].Text; // Column index: ลบ(0), ดูPDF(1), แก้ไข(2), ดูสลิป(3), เลขที่เอกสาร(4)
 
                     System.Diagnostics.Debug.WriteLine($"📝 Edit document: {docNum}, RowIndex: {rowIndex}");
@@ -1711,6 +1853,28 @@ namespace Take_Time_BangPhra.Account
 
             string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
             string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
+
+            // แถวเอกสาร NextAcc-only (รวมใบยกเลิก) — คงปุ่ม "ดู PDF" ไว้ แต่ซ่อน ลบ/แก้ไข/sync
+            string isNaOnly = DataBinder.Eval(e.Row.DataItem, "IsNextAccOnly")?.ToString() ?? "0";
+            if (isNaOnly == "1")
+            {
+                bool voided = docStatus == "Cancel";
+                lblSync.Text = voided
+                    ? "<span class='sync-badge failed' title='เอกสารถูกยกเลิกบน NextAcc'>❌ ยกเลิก (NextAcc)</span>"
+                    : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
+                btnSync.Visible = false;
+                try
+                {
+                    if (e.Row.Cells.Count > 0)
+                        foreach (Control c in e.Row.Cells[0].Controls)
+                            if (c is Button bDel) bDel.Visible = false;   // ปุ่มลบ
+                    var bEdit = e.Row.FindControl("btnEdit") as Button;
+                    if (bEdit != null) bEdit.Visible = false;             // ปุ่มแก้ไข
+                }
+                catch { }
+                if (voided) e.Row.Attributes["style"] = "background-color:#fff3f3;color:#a00;";
+                return;
+            }
 
             if (docStatus == "Cancel")
             {
