@@ -867,7 +867,7 @@ namespace Take_Time_BangPhra.Account
                 var task = System.Threading.Tasks.Task.Run(() =>
                     svc.DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
 
-                if (task.Wait(TimeSpan.FromSeconds(12)))
+                if (task.Wait(TimeSpan.FromSeconds(18)))
                 {
                     ShowNextAccDiag(svc.LastRangeFetchInfo);   // โชว์ผลดึงจริงบนหน้า
                     var res = task.Result ?? new List<NextAccCachedDocument>();
@@ -886,8 +886,9 @@ namespace Take_Time_BangPhra.Account
                     return res;
                 }
 
-                // timeout (>12s) → แสดง last-known จากแคชแทนตารางว่าง (background กำลังดึงต่อ)
-                ShowNextAccDiag("ดึงรายการไม่ทันใน 12 วิ (API ช้า/ถูกถล่มจาก background) — กำลังดึงต่อเบื้องหลัง");
+                // timeout (>18s) → แสดง last-known จากแคชแทนตารางว่าง. task ที่ทิ้งไปยังวิ่งต่อ + เขียนแคชเองเมื่อเสร็จ
+                // (WriteRangeListCacheToDisk ในตัว service) → กดค้นหารอบถัดไปจะอ่านแคชเจอแม้ NextAcc ช้าเกิน 18 วิ
+                ShowNextAccDiag("ดึงรายการไม่ทันใน 18 วิ (NextAcc list API ช้า) — ระบบกำลังดึงต่อเบื้องหลัง+เขียนแคช; กดค้นหาอีกครั้งอีก ~10-20 วิ จะขึ้นจากแคช");
                 var cached = ReadNextAccListCache(listCache);
                 if (cached != null && cached.Count > 0)
                 {

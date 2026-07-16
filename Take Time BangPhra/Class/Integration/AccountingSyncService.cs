@@ -9376,9 +9376,33 @@ namespace Take_Time_BangPhra.Integration
                 ? $"API ล้มเหลว: {string.Join("; ", errors)} | ได้ {list.Count} ใบ | {sw.ElapsedMilliseconds}ms"
                 : $"API คืน {rawTotal} ใบ → แสดง {list.Count}{filt} | {(typeInfo.Count > 0 ? string.Join(", ", typeInfo) : "ทุกชนิด 0")} | {sw.ElapsedMilliseconds}ms";
 
+            // เขียน "list cache" ลงดิสก์เมื่อดึงได้จริง (ทุกผู้เรียก รวม background ที่ไม่มี timeout 12 วิ) →
+            // แม้หน้า foreground จะ timeout ทิ้งผลไป task นี้ (โดยเฉพาะ background) ก็จะเขียนแคชให้ → กดรอบถัดไป
+            // อ่านแคชเจอ แสดงเอกสารได้แม้ NextAcc list ช้าเกิน 12 วิ. path ตรงกับที่หน้า CheckPayment อ่าน.
+            if (list.Count > 0)
+                WriteRangeListCacheToDisk(fromDate, toDate, list);
+
             _code.Logs(_connectionString, "AccountingSync",
                 $"DownloadVoucherDocumentsForRange: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} {LastRangeFetchInfo} (cacheFiles={cacheFiles})", "SYSTEM");
             return list;
+        }
+
+        /// <summary>เขียนแคชรายการเอกสาร NextAcc ต่อช่วงวันที่ลงดิสก์ (path เดียวกับที่หน้า CheckPayment_New อ่าน:
+        /// {PaymentFolderPath}\NextAcc\_list\{from}_{to}.json). ให้ background task เขียนได้เอง (ไม่ต้องพึ่งหน้า).</summary>
+        private void WriteRangeListCacheToDisk(DateTime fromDate, DateTime toDate, List<NextAccCachedDocument> list)
+        {
+            try
+            {
+                if (list == null || list.Count == 0) return;
+                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                if (string.IsNullOrEmpty(basePath)) return;
+                string dir = Path.Combine(basePath, "NextAcc", "_list");
+                Directory.CreateDirectory(dir);
+                string file = Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.json");
+                var ser = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
+                File.WriteAllText(file, ser.Serialize(list));   // default UTF-8 (หน้าอ่านด้วย UTF8 เข้ากันได้)
+            }
+            catch { }
         }
 
         /// <summary>
