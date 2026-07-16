@@ -9328,8 +9328,10 @@ namespace Take_Time_BangPhra.Integration
                     PagedResponse<OutboundDocumentResponse> resp;
                     try
                     {
+                        // PageSize = 200 (= cap ฝั่ง NextAcc) ลด round-trip → ปกติเดือนเดียวจบใน 1 หน้า/ชนิด
+                        // (NextAcc แก้ endpoint: AsNoTracking + split query + cap 200; ตอบเป็นหลักร้อย ms/หน้า)
                         resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
-                        { FromDate = fromDate, ToDate = toDate, Type = typeName, Page = page, PageSize = 50 });
+                        { FromDate = fromDate, ToDate = toDate, Type = typeName, Page = page, PageSize = 200 });
                     }
                     catch (Exception ex)
                     {
@@ -9339,7 +9341,7 @@ namespace Take_Time_BangPhra.Integration
                     }
                     if (resp?.Items == null || resp.Items.Count == 0) break;
                     items.AddRange(resp.Items);
-                    if (resp.Items.Count < 50 || page >= resp.TotalPages) break;
+                    if (resp.Items.Count < 200 || (resp.TotalPages > 0 && page >= resp.TotalPages)) break;
                     page++;
                 }
                 return (typeName, items, null);
