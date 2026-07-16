@@ -1204,7 +1204,10 @@ namespace Take_Time_BangPhra.Account
                     try
                     {
                         var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
-                        if (naCfg.IsConfigured && naCfg.Enabled && naCfg.IsReceiptDocumentMode)
+                        // ลอง NextAcc "ถ้าเปิดใช้ NextAcc" — ไม่ผูกกับ IsReceiptDocumentMode (โหมดปัจจุบัน) เพราะ
+                        // เอกสารที่ sync ไปแล้วต้องแสดง PDF ทางการเสมอ แม้ config โหมดจะถูกสลับภายหลัง.
+                        // DownloadReceiptPdfFromNextAccAsync คืน Found=false เองถ้าใบนี้ไม่มีเอกสาร NextAcc → ตก local
+                        if (naCfg.IsConfigured && naCfg.Enabled)
                         {
                             Server.ScriptTimeout = 300;
                             var naPdf = System.Threading.Tasks.Task.Run(() =>
