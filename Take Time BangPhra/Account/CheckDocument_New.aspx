@@ -478,7 +478,7 @@
                             <%# GetSlipLinkButton(Eval("SlipFileURL"), Eval("HasSlip")) %>
                         </ItemTemplate>
                     </asp:TemplateField>
-                    <asp:BoundField DataField="ID" HeaderText="เลขที่เอกสาร" />
+                    <asp:BoundField DataField="DisplayDoc" HeaderText="เลขที่เอกสาร" />
                     <asp:BoundField DataField="Reservation_ID" HeaderText="รหัสจอง" />
                     <asp:BoundField DataField="Created_Date" HeaderText="วันที่สร้าง" DataFormatString="{0:dd/MM/yyyy HH:mm}" />
                     <asp:BoundField DataField="CustomerName" HeaderText="ชื่อลูกค้า" />

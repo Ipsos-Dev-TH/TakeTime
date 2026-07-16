@@ -1169,6 +1169,29 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Void เอกสารรับที่อยู่บน NextAcc โดยตรง (ไม่มีใบ local — แถว NextAcc-only ในหน้า CheckDocument)
+        /// ระบุ GUID เอกสารตรง ๆ. ProcessVoidReceipt กลืน already-voided เอง + NextAcc void cascade
+        /// (JE/payment) ให้ครบ. receiptNumber ใน payload = เลขเอกสาร NextAcc (ไม่มีใบ local ให้อ้าง —
+        /// ขั้นกลับรายการมัดจำ/มาร์คฝั่ง local จะหาไม่เจอและข้ามไปเอง ซึ่งถูกต้องเพราะไม่มีข้อมูล local)
+        /// </summary>
+        public long EnqueueVoidReceiptByNexaaccId(string nexaaccId, string documentNumber, string reason)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (string.IsNullOrEmpty(nexaaccId) || !Guid.TryParse(nexaaccId, out _)) return -1;
+
+            long existing = FindPendingEntry("RECEIPT", "VOID_RECEIPT", "nexaaccId", nexaaccId);
+            if (existing > 0) return existing;
+
+            return InsertQueue("RECEIPT", 0, "VOID_RECEIPT", new Dictionary<string, object>
+            {
+                { "receiptNumber", documentNumber ?? "" },
+                { "documentNumber", documentNumber ?? "" },
+                { "nexaaccId", nexaaccId },
+                { "reason", reason ?? "ยกเลิกจากหน้าเอกสาร (NextAcc-only)" }
+            });
+        }
+
+        /// <summary>
         /// Enqueue void for a payment voucher that was deleted or cancelled.
         /// </summary>
         public long EnqueueVoidPaymentVoucher(string documentNumber)

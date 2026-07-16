@@ -798,8 +798,16 @@ namespace Take_Time_BangPhra.Account
                     ShowError($"ไม่พบเอกสารในช่วง {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}{diagInfo}\n\nกรุณาตรวจสอบ:\n1. เลือกช่วงวันที่ที่มีเอกสาร\n2. วันที่ที่เลือกถูกต้องหรือไม่\n3. ตรวจสอบ Debug Output สำหรับรายละเอียดเพิ่มเติม");
                 }
 
-                // Bind to GridView
-                gvDetails.DataSource = dt;
+                // Bind to GridView — เรียงตามเลขที่ที่แสดง (DisplayDoc) ให้เอกสาร NextAcc/local อ่านต่อเนื่อง
+                if (dt != null && dt.Columns.Contains("DisplayDoc"))
+                {
+                    dt.DefaultView.Sort = "DisplayDoc ASC";
+                    gvDetails.DataSource = dt.DefaultView;
+                }
+                else
+                {
+                    gvDetails.DataSource = dt;
+                }
                 gvDetails.DataBind();
                 System.Diagnostics.Debug.WriteLine($"   ✅ GridView.DataBind() completed");
             }
@@ -830,19 +838,20 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private void MergeNextAccReceiptDocs(DataTable dt, DateTime startDate, DateTime endDate)
         {
-            // เพิ่มคอลัมน์ที่ DataKeyNames อ้าง — ต้องมีเสมอแม้ดึง NextAcc ไม่สำเร็จ
+            // เพิ่มคอลัมน์ที่ DataKeyNames/grid อ้าง — ต้องมีเสมอแม้ดึง NextAcc ไม่สำเร็จ
+            // DisplayDoc = เลขที่ที่แสดงในตาราง (เลข NextAcc ถ้า sync แล้ว, เลข local ถ้ายัง) —
+            // เลขเดียวต่อเอกสาร ไม่ซ้อนกัน; ปุ่มแก้ไข/ลบ/ดู PDF ใช้เลข local จาก DataKeys["ID"] เสมอ
+            if (!dt.Columns.Contains("DisplayDoc")) dt.Columns.Add("DisplayDoc", typeof(string));
             if (!dt.Columns.Contains("IsNextAccOnly")) dt.Columns.Add("IsNextAccOnly", typeof(string));
             if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
 
-            var localIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (DataRow r in dt.Rows)
             {
+                r["DisplayDoc"] = r["ID"]?.ToString() ?? "";
                 r["IsNextAccOnly"] = "0";
                 r["NextAccId"] = "";
                 r["NextAccViewUrl"] = "";
-                string lid = r["ID"]?.ToString() ?? "";
-                if (!string.IsNullOrEmpty(lid)) localIds.Add(lid);
             }
 
             System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
@@ -869,27 +878,71 @@ namespace Take_Time_BangPhra.Account
 
             if (naDocs == null || naDocs.Count == 0) return;
 
+            bool IsVoidStatus(string s) =>
+                string.Equals(s, "Voided", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Canceled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+            // index เอกสาร NextAcc: ตาม GUID และตามเลขเอกสาร (ใช้จับคู่ผ่าน sync queue)
+            var byId = new Dictionary<Guid, Take_Time_BangPhra.Integration.NextAccPaymentDoc>();
+            var byNum = new Dictionary<string, Take_Time_BangPhra.Integration.NextAccPaymentDoc>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in naDocs)
+            {
+                if (d.Id != Guid.Empty && !byId.ContainsKey(d.Id)) byId[d.Id] = d;
+                if (!string.IsNullOrEmpty(d.DocumentNumber) && !byNum.ContainsKey(d.DocumentNumber)) byNum[d.DocumentNumber] = d;
+            }
+
+            if (_syncStatusCache == null) LoadSyncStatusCache();
+            var matched = new HashSet<Take_Time_BangPhra.Integration.NextAccPaymentDoc>();
+
+            // จับคู่แถว local → เอกสาร NextAcc: (1) sync queue (GUID/เลขเอกสารที่บันทึกไว้ตอน sync —
+            // แม่นสุด ครอบคลุมเคส Reference = "RES-{resId}" ที่ไม่มีเลข local), (2) Reference มีเลข local
+            // (เอกสาร active ก่อน — ใบ voided จากการแก้ไขต้องแสดงเป็นแถวยกเลิกแยกต่างหาก)
+            foreach (DataRow r in dt.Rows)
+            {
+                string lid = r["ID"]?.ToString() ?? "";
+                if (string.IsNullOrEmpty(lid)) continue;
+
+                Take_Time_BangPhra.Integration.NextAccPaymentDoc nd = null;
+                if (_syncStatusCache != null && _syncStatusCache.TryGetValue(lid, out var qrow))
+                {
+                    string respId = qrow.Table.Columns.Contains("Nexaacc_Response_Id") ? qrow["Nexaacc_Response_Id"]?.ToString() : null;
+                    if (Guid.TryParse(respId, out var g)) byId.TryGetValue(g, out nd);
+                    if (nd == null)
+                    {
+                        string qnum = qrow.Table.Columns.Contains("Nexaacc_Document_Number") ? qrow["Nexaacc_Document_Number"]?.ToString() : null;
+                        if (!string.IsNullOrEmpty(qnum)) byNum.TryGetValue(qnum, out nd);
+                    }
+                }
+                if (nd == null)
+                {
+                    foreach (var d in naDocs)   // active ก่อน — ใบ voided คงไว้เป็นแถวประวัติแยก
+                    {
+                        if (IsVoidStatus(d.Status)) continue;
+                        if ((d.Reference ?? "").IndexOf(lid, StringComparison.OrdinalIgnoreCase) >= 0) { nd = d; break; }
+                    }
+                }
+
+                if (nd != null)
+                {
+                    matched.Add(nd);
+                    r["DisplayDoc"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : lid;
+                    r["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
+                }
+            }
+
+            // เอกสารที่ไม่มีคู่ local (สร้างบน NextAcc โดยตรง / ใบเก่าที่ถูก void ตอนแก้ไข) → เพิ่มแถวใหม่
             int added = 0;
             foreach (var nd in naDocs)
             {
-                bool isVoid = string.Equals(nd.Status, "Voided", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(nd.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(nd.Status, "Canceled", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(nd.Status, "Rejected", StringComparison.OrdinalIgnoreCase);
-
-                // จับคู่กับใบ local จาก Reference (รูปแบบ "RES-{resId}-{receiptNumber}" หรือ = receiptNumber)
-                string reff = nd.Reference ?? "";
-                bool matchedLocal = false;
-                foreach (var id in localIds)
-                {
-                    if (reff.IndexOf(id, StringComparison.OrdinalIgnoreCase) >= 0) { matchedLocal = true; break; }
-                }
-
-                // ใบปกติที่มีคู่ local แล้ว → ข้าม (แถว local แสดงแทน); ใบ void หรือใบที่ไม่มีคู่ → เพิ่มแถว
-                if (!isVoid && matchedLocal) continue;
+                if (matched.Contains(nd)) continue;
+                bool isVoid = IsVoidStatus(nd.Status);
+                string naNum = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : nd.Id.ToString();
 
                 var nr = dt.NewRow();
-                nr["ID"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : nd.Id.ToString();
+                nr["ID"] = naNum;
+                nr["DisplayDoc"] = naNum;
                 nr["Created_Date"] = nd.DocumentDate;
                 if (dt.Columns.Contains("CustomerName")) nr["CustomerName"] = string.IsNullOrEmpty(nd.ContactName) ? "-" : nd.ContactName;
                 if (dt.Columns.Contains("Paid_Type")) nr["Paid_Type"] = nd.DocumentTypeLabel ?? "";
@@ -906,8 +959,8 @@ namespace Take_Time_BangPhra.Account
                 added++;
             }
 
-            System.Diagnostics.Debug.WriteLine($"   ➕ MergeNextAccReceiptDocs: added {added} NextAcc row(s) from {naDocs.Count} doc(s)");
-            lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc +{added})</span>";
+            System.Diagnostics.Debug.WriteLine($"   ➕ MergeNextAccReceiptDocs: matched {matched.Count}, added {added} NextAcc-only row(s) from {naDocs.Count} doc(s)");
+            lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc: จับคู่ {matched.Count}, เพิ่ม {added})</span>";
         }
 
         private void ValidateTotal()
@@ -1036,17 +1089,36 @@ namespace Take_Time_BangPhra.Account
 
             try
             {
-                // เอกสาร NextAcc-only (รวมใบยกเลิก) — ลบจากที่นี่ไม่ได้ (แก้/ลบที่ระบบ NextAcc)
+                // เอกสาร NextAcc-only: ใบที่ยัง active → ยกเลิกได้ (enqueue void ไป NextAcc ด้วย GUID)
+                // ใบที่ยกเลิกแล้ว → ไม่มีอะไรให้ทำ
                 var dkDel = gvDetails.DataKeys[e.RowIndex];
                 if (dkDel != null && dkDel["IsNextAccOnly"]?.ToString() == "1")
                 {
-                    ShowError("เอกสารนี้อยู่บน NextAcc (รวมใบที่ยกเลิก) — ลบจากหน้านี้ไม่ได้");
+                    string naStatus = dkDel["Status"]?.ToString() ?? "";
+                    string naId = dkDel["NextAccId"]?.ToString() ?? "";
+                    string naDocNum = dkDel["ID"]?.ToString() ?? "";
+                    if (naStatus == "Cancel")
+                    {
+                        ShowError("เอกสารนี้ถูกยกเลิกบน NextAcc แล้ว");
+                        return;
+                    }
+                    if (!Guid.TryParse(naId, out _))
+                    {
+                        ShowError("เอกสารนี้ไม่มีรหัส NextAcc สำหรับยกเลิก");
+                        return;
+                    }
+                    var syncNa = new AccountingSyncService(conn);
+                    long qid = syncNa.EnqueueVoidReceiptByNexaaccId(naId, naDocNum, "ยกเลิกจากหน้าเอกสาร TakeTime");
+                    if (qid > 0)
+                        ShowError($"✅ ส่งคำสั่งยกเลิก {naDocNum} เข้าคิวแล้ว (#{qid}) — สถานะจะเปลี่ยนเป็นยกเลิกเมื่อประมวลผลเสร็จ กดค้นหาใหม่เพื่อตรวจสอบ");
+                    else
+                        ShowError("ส่งคำสั่งยกเลิกไม่สำเร็จ — ตรวจสอบการตั้งค่า NextAcc");
                     return;
                 }
 
-                // ✅ FIX: Get document number from correct column (Cells[4], not Cells[3])
-                // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร
-                string docNum = gvDetails.Rows[e.RowIndex].Cells[4].Text;
+                // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร(DisplayDoc)
+                string docNum = dkDel?["ID"]?.ToString() ?? gvDetails.Rows[e.RowIndex].Cells[4].Text;
 
                 System.Diagnostics.Debug.WriteLine($"🗑️ Attempting to delete document: {docNum}");
 
@@ -1312,8 +1384,9 @@ namespace Take_Time_BangPhra.Account
                     return;
                 }
 
-                string docStatus = gvDetails.Rows[e.NewSelectedIndex].Cells[14].Text; // Status column
-                string docNum = gvDetails.Rows[e.NewSelectedIndex].Cells[4].Text; // ID column
+                // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                string docStatus = dk?["Status"]?.ToString() ?? gvDetails.Rows[e.NewSelectedIndex].Cells[14].Text;
+                string docNum = dk?["ID"]?.ToString() ?? gvDetails.Rows[e.NewSelectedIndex].Cells[4].Text;
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
 
@@ -1539,15 +1612,16 @@ namespace Take_Time_BangPhra.Account
                 {
                     int rowIndex = Convert.ToInt32(e.CommandArgument);
 
-                    // เอกสาร NextAcc-only (รวมใบยกเลิก) — แก้ไขที่ระบบ NextAcc
+                    // เอกสาร NextAcc-only (สร้างบน NextAcc โดยตรง/ใบยกเลิก) — ไม่มีใบ local ให้แก้
                     var dkEdit = gvDetails.DataKeys[rowIndex];
                     if (dkEdit != null && dkEdit["IsNextAccOnly"]?.ToString() == "1")
                     {
-                        ShowError("เอกสารนี้อยู่บน NextAcc (รวมใบที่ยกเลิก) — แก้ไขที่ระบบ NextAcc");
+                        ShowError("เอกสารนี้อยู่บน NextAcc (ไม่มีใบในระบบ) — แก้ไขรายละเอียดที่ระบบ NextAcc");
                         return;
                     }
 
-                    string docNum = gvDetails.Rows[rowIndex].Cells[4].Text; // Column index: ลบ(0), ดูPDF(1), แก้ไข(2), ดูสลิป(3), เลขที่เอกสาร(4)
+                    // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                    string docNum = dkEdit?["ID"]?.ToString() ?? gvDetails.Rows[rowIndex].Cells[4].Text;
 
                     System.Diagnostics.Debug.WriteLine($"📝 Edit document: {docNum}, RowIndex: {rowIndex}");
 
@@ -1854,7 +1928,8 @@ namespace Take_Time_BangPhra.Account
             string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
             string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
 
-            // แถวเอกสาร NextAcc-only (รวมใบยกเลิก) — คงปุ่ม "ดู PDF" ไว้ แต่ซ่อน ลบ/แก้ไข/sync
+            // แถวเอกสาร NextAcc-only — คงปุ่ม "ดู PDF"; ใบ active คงปุ่มลบไว้เป็นปุ่ม "ยกเลิก" (enqueue
+            // void ไป NextAcc); ใบที่ยกเลิกแล้วซ่อนปุ่มลบ; ซ่อนแก้ไข/sync เสมอ (ไม่มีใบ local)
             string isNaOnly = DataBinder.Eval(e.Row.DataItem, "IsNextAccOnly")?.ToString() ?? "0";
             if (isNaOnly == "1")
             {
@@ -1867,9 +1942,13 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (e.Row.Cells.Count > 0)
                         foreach (Control c in e.Row.Cells[0].Controls)
-                            if (c is Button bDel) bDel.Visible = false;   // ปุ่มลบ
+                            if (c is Button bDel)
+                            {
+                                if (voided) bDel.Visible = false;         // ยกเลิกแล้ว — ไม่มีอะไรให้ทำ
+                                else bDel.Text = "🚫 ยกเลิก";             // active → ยกเลิกบน NextAcc ได้
+                            }
                     var bEdit = e.Row.FindControl("btnEdit") as Button;
-                    if (bEdit != null) bEdit.Visible = false;             // ปุ่มแก้ไข
+                    if (bEdit != null) bEdit.Visible = false;             // ปุ่มแก้ไข (ไม่มีใบ local)
                 }
                 catch { }
                 if (voided) e.Row.Attributes["style"] = "background-color:#fff3f3;color:#a00;";
