@@ -9345,8 +9345,19 @@ namespace Take_Time_BangPhra.Integration
                 return (typeName, items, null);
             }
 
+            // bound การดึงแต่ละชนิดที่ ~10 วิ (race กับ delay) — HttpClient timeout 60 วิ + retry ทำให้ call
+            // ค้างได้เป็นนาทีเมื่อ NextAcc ช้า → fetch ไม่เคยจบใน 18 วิ + status ไม่ทันเขียน. bound → จบ ~10 วิ
+            // เสมอ, ชนิดที่ไม่ตอบทันขึ้น "timeout" ใน status (เห็นว่าชนิดไหนช้า) ชนิดที่ตอบทันแสดงได้ปกติ.
+            async System.Threading.Tasks.Task<(string type, List<OutboundDocumentResponse> items, string error)> FetchTypeBoundedAsync(string typeName)
+            {
+                var fetch = FetchTypeAsync(typeName);
+                var winner = await System.Threading.Tasks.Task.WhenAny(fetch, System.Threading.Tasks.Task.Delay(10000));
+                if (winner == fetch) return await fetch;
+                return (typeName, new List<OutboundDocumentResponse>(), "ไม่ตอบใน 10 วิ (timeout)");
+            }
+
             var typeResults = await System.Threading.Tasks.Task.WhenAll(
-                PaymentDocTypeLabels.Keys.Select(FetchTypeAsync));
+                PaymentDocTypeLabels.Keys.Select(FetchTypeBoundedAsync));
 
             foreach (var tr in typeResults)
             {
