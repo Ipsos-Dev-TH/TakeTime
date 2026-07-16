@@ -1524,6 +1524,10 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
+                // ใช้ Payload LIKE (เหมือนฝั่งจ่าย LookupVoucherActionResponse ที่ดึง NextAcc ได้) แทน JSON_VALUE —
+                // JSON_VALUE คืน null เงียบ ๆ ถ้า SQL parse payload ไม่ผ่าน (อักขระบางตัว/รุ่น SQL) → หา GUID ไม่เจอ
+                // → ปุ่มดู PDF ตก local ทั้งที่ sync แล้ว. LIKE เป็น string match ทนกว่า. escape [, %, _ กัน pattern เพี้ยน
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1 q.Nexaacc_Response_Id
                       FROM Accounting_Sync_Queue q
@@ -1531,14 +1535,16 @@ namespace Take_Time_BangPhra.Integration
                         AND q.Nexaacc_Response_Id IS NOT NULL
                         AND q.Nexaacc_Response_Id <> 'SKIPPED_LOCAL_MODE'
                         AND (q.Action_Type LIKE 'CREATE_RECEIPT%' OR q.Action_Type LIKE 'CREATE_DEPOSIT%' OR q.Action_Type LIKE 'CREATE_PAYMENT%')
-                        AND ISNULL(JSON_VALUE(q.Payload, '$.receiptNumber'), '') = @num
+                        AND q.Payload LIKE @pattern
                       ORDER BY q.ID DESC",
-                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                    new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
 
                 if (dt?.Rows.Count > 0)
                 {
                     string idStr = dt.Rows[0]["Nexaacc_Response_Id"]?.ToString();
-                    if (Guid.TryParse(idStr, out Guid id)) return id;
+                    // Response_Id อาจมี prefix (เช่น "DEBIT_NOTE:{guid}") → ดึง GUID ตัวแรก
+                    Guid id = ExtractGuid(idStr);
+                    if (id != Guid.Empty) return id;
                 }
             }
             catch (Exception ex)

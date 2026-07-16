@@ -1216,9 +1216,21 @@ namespace Take_Time_BangPhra.Account
                                 Response.Redirect(naPdf.PdfRelativeUrl);
                                 return;
                             }
+                            // ดึง NextAcc ไม่สำเร็จ → log เหตุผล (แทนกลืนเงียบ) เพื่อรู้ว่าทำไมตก local
+                            try
+                            {
+                                codeInstance.Logs(conn, "AccountingSync",
+                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({naPdf?.Message ?? "unknown"}) → ใช้ไฟล์ local", "SYSTEM");
+                            }
+                            catch { }
                         }
                     }
-                    catch { /* NextAcc ไม่พร้อม → ใช้ PDF local ด้านล่าง */ }
+                    catch (System.Threading.ThreadAbortException) { throw; }   // อย่ากลืน redirect
+                    catch (Exception naEx)
+                    {
+                        try { codeInstance.Logs(conn, "AccountingSync", $"CheckDocument ดู PDF: receipt={docNum} NextAcc error: {naEx.Message} → ใช้ไฟล์ local", "SYSTEM"); }
+                        catch { }
+                    }
 
                     // Get receipt UID from database (SECURE)
                     string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
