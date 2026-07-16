@@ -1632,7 +1632,9 @@ namespace Take_Time_BangPhra.Account.Report
                         int.TryParse(reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text, out resId);
                         decimal totalAmt = Convert.ToDecimal(TextBox6.Text);
                         decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
-                        string custName = TextBox16.Text;
+                        // TextBox10 = ชื่อลูกค้า (เดิมส่ง TextBox16 ซึ่งเป็นรหัสไปรษณีย์ → CustomerName ผิด
+                        // บนเส้น int_/walk-in ที่ resolve contact ด้วยชื่อ)
+                        string custName = TextBox10.Text;
 
                         if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {

@@ -7861,6 +7861,26 @@ namespace Take_Time_BangPhra.Integration
             {
                 try
                 {
+                    // refresh contact ก่อน resync: ที่อยู่/เลขภาษี/ชื่อล่าสุดต้องขึ้น NextAcc ก่อน
+                    // (invoice อ้าง contact ด้วย ExternalId — ไม่ push address inline) มิฉะนั้น resync
+                    // ใช้ที่อยู่ contact เดิมที่ค้างอยู่บน NextAcc
+                    if (!p.ContainsKey("isDeposit") || !Convert.ToBoolean(p["isDeposit"]))
+                    {
+                        int resId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+                        if (resId > 0)
+                        {
+                            try
+                            {
+                                System.Threading.Tasks.Task.Run(() =>
+                                    EnsureCustomerContactAsync(resId, forceRefresh: true)).GetAwaiter().GetResult();
+                            }
+                            catch (Exception cx)
+                            {
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"RepostReceiptWithCurrentLogic: refresh contact ก่อน resync ล้มเหลว (ดำเนินต่อ): {cx.Message}", "SYSTEM");
+                            }
+                        }
+                    }
                     var invoice = BuildCorrectedReceiptInvoice(p, receiptNumber);
                     if (invoice != null)
                     {
