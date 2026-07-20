@@ -8476,6 +8476,7 @@ namespace Take_Time_BangPhra.Integration
                 bool hasVat = LookupBusinessHasVat();
                 CreateIntegrationInvoiceRequest invoice;
                 bool cashSaleEligible = false;   // set ในเส้น non-deposit ตาม flag + ไม่มีหักมัดจำ
+                decimal cashSaleDepositApplied = 0m;   // ยอดมัดจำสำหรับ field cash-sale (set หลังเช็คภาษีผู้ซื้อ)
 
                 if (isDeposit)
                 {
@@ -8520,13 +8521,7 @@ namespace Take_Time_BangPhra.Integration
                     cashSaleEligible = _config.IsTaxReceiptSingleDoc
                         && (depositApplied <= 0.005m
                             || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId)));
-                    if (cashSaleEligible && depositApplied > 0.005m)
-                    {
-                        invoice.DepositAppliedAmount = depositApplied;
-                        invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
-                        if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
-                            invoice.DepositOutputVatDeferred = true;
-                    }
+                    cashSaleDepositApplied = depositApplied;   // ใช้ set field มัดจำ "หลังผ่านเช็คข้อมูลภาษีผู้ซื้อ" เท่านั้น
                 }
 
                 // Reference = รหัสการจอง (นโยบายเดียวกับ sync ปกติ); externalRef = เลขใบเสร็จ (คีย์ dedup)
@@ -8544,13 +8539,21 @@ namespace Take_Time_BangPhra.Integration
                     invoice.CustomerTaxId = repostContact.TaxId;
                     if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = repostContact.Name;
 
-                    // resync แบบขายสดใบเดียว: คงรูปแบบ isCashSale (เฉพาะ B2B มีเลขภาษี + ไม่มีหักมัดจำ)
+                    // resync แบบขายสดใบเดียว: คงรูปแบบ isCashSale — field มัดจำต้องมากับ IsCashSale
+                    // เท่านั้น (ห้ามหลุดไปใบ declined-buyer: contract ครึ่งเดียว NextAcc ตีความไม่ได้)
                     if (cashSaleEligible)
                     {
                         invoice.DocumentType = "TaxInvoice";
                         invoice.IsCashSale = true;
                         invoice.PaymentDate = receiptDate;
                         // PaymentAccountId/PaymentMethod ถูก set โดย mapper แล้ว
+                        if (cashSaleDepositApplied > 0.005m)
+                        {
+                            invoice.DepositAppliedAmount = cashSaleDepositApplied;
+                            invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
+                            if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
+                                invoice.DepositOutputVatDeferred = true;
+                        }
                     }
                 }
                 else
