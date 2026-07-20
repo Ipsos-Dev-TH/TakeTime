@@ -2830,15 +2830,48 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={paymentId} แหล่งเงิน={(overrideAccId.HasValue && _config.CanUseCompanyEndpoints ? "บังคับ "+paymentAccountId : "default ตาม PaymentMethod")}", "SYSTEM");
 
-                // ── VERIFY หลัง settle: ยอดชำระรวมต้องไม่เกินยอดเอกสาร (invariant สุดท้ายกันรับเงินซ้อน) ──
-                // ถ้าเกิน = มี payment ซ้อนหลุดเข้ามา (ไม่ว่าจากฝั่งไหน) → ร้องดัง ๆ ใน log ให้เห็นทันที
+                // ── VERIFY หลัง settle (2 ชั้น): ──
+                // (1) ยอดชำระรวมต้องไม่เกินยอดเอกสาร (invariant กันรับเงินซ้อน)
+                // (2) แหล่งเงินลง GL ตรงตามที่สั่ง — JE ที่โพสต์ของเอกสารต้องมี Dr บัญชีแหล่งเงิน
+                //     (OverridePaymentAccountId) ครบยอดเงินสด. กันเคส NextAcc ตกไปใช้บัญชีเงินสด default
+                //     (เช่น จ่ายเงินโอนกสิกร แต่ GL ลง 11110 เงินสด) — ใบเสร็จ NextAcc โชว์ preview
+                //     ด้วยบัญชี default อยู่แล้ว ต้องพิสูจน์จาก JE จริงเท่านั้น
                 try
                 {
                     var docChk = await _apiClient.GetDocumentAsync(invoiceDocId);
-                    if (docChk?.data != null && docChk.data.PaidAmount > docChk.data.TotalAmount + 0.01m)
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"⚠⚠ SettleReceipt: เอกสาร {docChk.data.DocumentNumber} ชำระเกินยอด! Paid={docChk.data.PaidAmount:N2} > Total={docChk.data.TotalAmount:N2} " +
-                            $"(receipt={receiptNumber}) — รับเงินซ้อน ตรวจสอบ/void payment ส่วนเกินบน NextAcc ด่วน", "SYSTEM");
+                    if (docChk?.data != null)
+                    {
+                        if (docChk.data.PaidAmount > docChk.data.TotalAmount + 0.01m)
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"⚠⚠ SettleReceipt: เอกสาร {docChk.data.DocumentNumber} ชำระเกินยอด! Paid={docChk.data.PaidAmount:N2} > Total={docChk.data.TotalAmount:N2} " +
+                                $"(receipt={receiptNumber}) — รับเงินซ้อน ตรวจสอบ/void payment ส่วนเกินบน NextAcc ด่วน", "SYSTEM");
+
+                        if (overrideAccId.HasValue && _config.CanUseCompanyEndpoints
+                            && !string.IsNullOrEmpty(docChk.data.DocumentNumber))
+                        {
+                            var jr = await _apiClient.SearchJournalsAsync(docChk.data.DocumentNumber, 10);
+                            var posted = jr?.data?.Items?
+                                .Where(j => j != null && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null
+                                    && string.Equals(j.Reference, docChk.data.DocumentNumber, StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+                            if (posted != null && posted.Count > 0)
+                            {
+                                decimal drOnSource = posted.Where(j => j.Lines != null)
+                                    .SelectMany(j => j.Lines)
+                                    .Where(l => l.AccountId == overrideAccId.Value)
+                                    .Sum(l => l.DebitAmount);
+                                if (drOnSource + 0.01m < cashNow)
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"⚠⚠ SettleReceipt: แหล่งเงินลง GL ไม่ตรง! receipt={receiptNumber} doc={docChk.data.DocumentNumber} " +
+                                        $"สั่ง Dr บัญชี {paymentAccountId} = {cashNow:N2} แต่ JE ({string.Join(",", posted.Select(j => j.EntryNumber))}) " +
+                                        $"มี Dr บัญชีนี้เพียง {drOnSource:N2} — เงินอาจลงบัญชีเงินสด default ตรวจ/แก้ JE บน NextAcc", "SYSTEM");
+                                else
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"SettleReceipt: ✓ แหล่งเงินตรง receipt={receiptNumber} doc={docChk.data.DocumentNumber} " +
+                                        $"Dr {paymentAccountId} = {drOnSource:N2}", "SYSTEM");
+                            }
+                        }
+                    }
                 }
                 catch { }
             }
