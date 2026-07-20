@@ -515,21 +515,21 @@ namespace Take_Time_BangPhra.Integration
 
             var lines = new List<JournalEntryLineRequest>();
 
-            // โหมด RECEIPT (มัดจำแยก VAT ตอนรับเงิน): 21510 ถือแค่ net — Dr เต็ม gross จะทำ 21510 ติดลบ
-            // + VAT ที่แยกไว้ (21913/21911) ค้าง. แยกขาให้ตรงกับที่ book ตอนรับมัดจำ:
-            //   no-defer: VAT ลง 21911 (ยื่น ภ.พ.30) ไปแล้ว — ริบเงิน tax point คงเดิม (ม.78/1 รับชำระแล้ว)
-            //             → Dr 21510 net / Cr รายได้ริบ net (VAT จ่ายแล้ว ถูกต้อง)
-            //   defer:    VAT พักที่ 21913 — ริบ = เงินถูกเก็บจริง → VAT ถึงกำหนด: โอน Dr 21913 / Cr 21911
-            // โหมด CHECKOUT (default): มัดจำ book gross เข้า 21510 ไม่แยก VAT (เงินประกัน — ริบ = ค่าเสียหาย
-            // ไม่ใช่ค่าตอบแทนบริการ ไม่มี VAT) → Dr gross / Cr รายได้ gross ตามเดิม
-            Guid deferredVatId = Guid.Empty;
+            // นโยบาย: ริบมัดจำ = "ค่าเสียหาย/เบี้ยปรับ" อยู่นอกขอบเขต VAT (ไม่มีการให้บริการเกิดขึ้น —
+            // ไม่ใช่ค่าตอบแทนบริการ) → กลับภาษีขายที่ตั้งไว้ตอนรับมัดจำ + รับรู้รายได้ริบเต็มจำนวน (ไม่มี VAT).
+            // สอดคล้องกับเส้นคืนเงิน (MapRefundToJournal) ที่กลับ VAT อยู่แล้ว — ต่างกันแค่ขา Cr (เงินสด vs รายได้ริบ).
+            //
+            // โหมด RECEIPT (มัดจำแยก VAT ตอนรับเงิน): 21510 ถือแค่ net — Dr เต็ม gross จะทำ 21510 ติดลบ.
+            //   defer   : VAT พักที่ 21913 (ยังไม่เข้า ภ.พ.30) → Dr 21913 ล้างทิ้ง (ไม่ต้องนำส่ง — ไม่มี supply)
+            //   no-defer: VAT ลง 21911 (ยื่น ภ.พ.30 แล้ว) → Dr 21911 = ผลใบลดหนี้ §82/10 ลดภาษีขายงวดที่ริบ
+            // โหมด CHECKOUT (default): มัดจำ book gross เข้า 21510 ไม่แยก VAT (เงินประกัน) → ริบ = ค่าเสียหาย
+            // ไม่มี VAT ตั้งแต่ต้น → Dr gross / Cr รายได้ริบ gross ตามเดิม.
             bool splitVat = hasVat && vatAtReceipt;
-            bool hasDeferred = splitVat && deferOutputVat
-                && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty;
             if (splitVat)
             {
                 decimal netAmount = Math.Round(depositAmount * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal vatAmount = depositAmount - netAmount;
+                // Dr 21510 (net) — ตัดหนี้สินมัดจำเท่าที่ book ไว้ (net)
                 lines.Add(new JournalEntryLineRequest
                 {
                     AccountId = advanceDepositAccountId,
@@ -537,32 +537,29 @@ namespace Take_Time_BangPhra.Integration
                     CreditAmount = 0,
                     Description = "ตัดเงินรับล่วงหน้า (net)"
                 });
+                // Dr VAT — กลับภาษีขายมัดจำ (defer→21913 ล้างทิ้ง / no-defer→21911 ผลใบลดหนี้)
+                if (vatAmount > 0)
+                {
+                    Guid deferredVatId = Guid.Empty;
+                    Guid vatBackAccountId = (deferOutputVat
+                        && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty)
+                        ? deferredVatId : GetAccountId("OUTPUT_VAT");
+                    lines.Add(new JournalEntryLineRequest
+                    {
+                        AccountId = vatBackAccountId,
+                        DebitAmount = vatAmount,
+                        CreditAmount = 0,
+                        Description = "กลับภาษีขายมัดจำ (ริบ = ค่าเสียหาย นอก VAT)"
+                    });
+                }
+                // Cr รายได้ริบ = เต็มจำนวน (ค่าเสียหาย ไม่มี VAT แฝง)
                 lines.Add(new JournalEntryLineRequest
                 {
                     AccountId = forfeitIncomeAccountId,
                     DebitAmount = 0,
-                    CreditAmount = netAmount,
-                    Description = $"รายได้จากการริบมัดจำ - การจอง #{reservationId}"
+                    CreditAmount = depositAmount,
+                    Description = $"รายได้จากการริบมัดจำ (ค่าเสียหาย) - การจอง #{reservationId}"
                 });
-                if (hasDeferred && vatAmount > 0)
-                {
-                    // defer: ภาษีขายรอรับรู้ → ถึงกำหนด (เงินถูกริบ = รับชำระถาวร)
-                    lines.Add(new JournalEntryLineRequest
-                    {
-                        AccountId = deferredVatId,
-                        DebitAmount = vatAmount,
-                        CreditAmount = 0,
-                        Description = "โอนภาษีขายรอรับรู้ (มัดจำถูกริบ)"
-                    });
-                    lines.Add(new JournalEntryLineRequest
-                    {
-                        AccountId = GetAccountId("OUTPUT_VAT"),
-                        DebitAmount = 0,
-                        CreditAmount = vatAmount,
-                        Description = "ภาษีขายถึงกำหนด (ริบมัดจำ)"
-                    });
-                }
-                // no-defer (หรือ 21913 ไม่ได้ map → มัดจำลง 21911 ไปแล้ว): VAT รับรู้/ยื่นแล้ว — ไม่แตะ
             }
             else
             {
