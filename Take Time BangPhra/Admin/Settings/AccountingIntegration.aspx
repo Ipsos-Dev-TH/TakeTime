@@ -349,21 +349,21 @@
                         โหมด §78/1 เคร่ง (RECEIPT+ไม่ defer) ยังใช้เส้นเดิม.
                     </div>
                 </div>
-                <div class="config-item" style="opacity:.6;">
+                <div class="config-item">
                     <label>
-                        <input type="checkbox" id="cfgCashSaleDepositNativeA" disabled="disabled" />
-                        🔒 └└ ใช้ NextAcc native (JE เดียว ไม่มี JV แยก) — <b>Option A, ล็อกไว้ (รอ NextAcc)</b>
+                        <input type="checkbox" id="cfgCashSaleDepositNativeA" onchange="syncCashSaleToggles()" />
+                        └└ ใช้ NextAcc native (JE เดียว ไม่มี JV แยก) — <b>Option A</b>
                     </label>
-                    <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
                         เปลี่ยนจาก B (TakeTime โพสต์ JV) → <b>A</b>: ส่ง <code>drives=true</code> ให้ NextAcc ลง Dr 21510
                         ใน JE ของใบเอง (สะอาดกว่า JE เดียว ไม่มี JV แยก) — NextAcc กลับมัดจำผ่าน
                         <code>ApplyDepositToInvoiceAsync</code> (สืบทอด guard over-apply / one-shot / deferred-VAT).
-                        <br /><strong style="color:#27ae60;">✓ NextAcc ต่อสายแล้ว (CI ผ่านฝั่ง dev)</strong> — เหลือ gate เดียว:
-                        <strong style="color:#c0392b;">🔒 ยังล็อกไว้จนกว่าจะ rebuild บน Windows + test GL เคสมัดจำผ่าน</strong>
+                        <br /><strong style="color:#27ae60;">✓ NextAcc ต่อสายแล้ว (CI ผ่านฝั่ง dev) — ปลดล็อกแล้ว</strong>.
+                        <br /><strong style="color:#c0392b;">⚠ เปิดเฉพาะหลัง rebuild บน Windows + test GL เคสมัดจำผ่านแล้วเท่านั้น</strong>
                         (ตรวจ checklist: cash sale + มัดจำ → 217xx/21510 <b>balanced กลับเป็น 0</b>). drives ต้อง resolve
-                        ใบมัดจำเป็นเอกสาร IsDeposit จริงจาก <code>depositAppliedRef</code> ไม่งั้น fail-soft (21510 ไม่กลับ →
-                        ระบบ gate ด้วย <code>DepositRefsResolvedToNextAcc</code> อยู่แล้ว). ปิดไว้ = ใช้ Option B (default, ใช้ได้เลย).
-                        แจ้งผล test ผ่าน → ปลดล็อก (เอา disabled ออก) ได้ทันที.
+                        ใบมัดจำเป็นเอกสาร IsDeposit จริงจาก <code>depositAppliedRef</code> ไม่งั้น fail-soft (21510 ไม่กลับ —
+                        ระบบ gate ด้วย <code>DepositRefsResolvedToNextAcc</code> อยู่แล้ว แต่ยังควร test ก่อนเปิดจริง).
+                        ปิดไว้ = ใช้ Option B (default, TakeTime โพสต์ JV เอง ไม่พึ่ง NextAcc).
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
@@ -975,15 +975,16 @@
             } catch (e) { console.error(e); }
         }
 
-        // เคส "หักมัดจำในใบเดียว" ต้องเปิด "ออกใบเดียว" ก่อนเสมอ (โค้ด backend gate อยู่แล้ว
-        // แต่บังคับใน UI ให้ชัด กันติ๊กหลอกตา); Option A ยังล็อกไว้ (disabled คงเดิม).
+        // ลำดับชั้น: ออกใบเดียว → หักมัดจำ (Option B) → native (Option A).
+        // แต่ละชั้นต้องเปิดชั้นบนก่อน (โค้ด backend gate อยู่แล้ว แต่บังคับใน UI ให้ชัด กันติ๊กหลอกตา).
         function syncCashSaleToggles() {
             var single = document.getElementById('cfgTaxReceiptSingleDoc').checked;
             var dep = document.getElementById('cfgCashSaleDeposit');
             var nativeA = document.getElementById('cfgCashSaleDepositNativeA');
             dep.disabled = !single;
             if (!single) { dep.checked = false; }
-            // Option A ขึ้นกับทั้ง single + deposit — และยังล็อก (disabled) รอ NextAcc
+            // Option A ขึ้นกับ single + deposit (ปลดล็อกแล้ว — ควบคุมด้วย dependency ไม่ใช่ hard-lock)
+            nativeA.disabled = !(single && dep.checked);
             if (!single || !dep.checked) { nativeA.checked = false; }
         }
 
