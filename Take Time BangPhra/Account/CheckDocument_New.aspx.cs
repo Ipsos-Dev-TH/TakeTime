@@ -1361,6 +1361,8 @@ namespace Take_Time_BangPhra.Account
                 {
                     string naId = dk["NextAccId"]?.ToString() ?? "";
                     string naDocNum = dk["ID"]?.ToString() ?? "";
+                    // ใบยกเลิก → ขอ PDF ที่ประทับ "ยกเลิก" จาก NextAcc (ไม่งั้นได้ PDF รุ่น active เดิม)
+                    bool naCancelled = (dk["Status"]?.ToString() == "Cancel");
                     if (Guid.TryParse(naId, out var gid) && gid != Guid.Empty)
                     {
                         try
@@ -1368,7 +1370,7 @@ namespace Take_Time_BangPhra.Account
                             Server.ScriptTimeout = 300;
                             var svc = new AccountingSyncService(conn);
                             var na = System.Threading.Tasks.Task.Run(() =>
-                                svc.DownloadNextAccDocumentByIdAsync(gid, naDocNum, false)).GetAwaiter().GetResult();
+                                svc.DownloadNextAccDocumentByIdAsync(gid, naDocNum, false, naCancelled)).GetAwaiter().GetResult();
                             if (na != null && na.Found && !string.IsNullOrEmpty(na.PdfRelativeUrl))
                             {
                                 Response.Redirect(na.PdfRelativeUrl);

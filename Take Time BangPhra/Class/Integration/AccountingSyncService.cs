@@ -9529,7 +9529,7 @@ namespace Take_Time_BangPhra.Integration
         /// smart-cache: ถ้ามีไฟล์อยู่แล้ว + ไม่ force → คืนเลย (ไม่ยิง API ซ้ำ ไม่ช้า).
         /// </summary>
         public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadNextAccDocumentByIdAsync(
-            Guid nextAccId, string docNumber, bool forceRefresh = false)
+            Guid nextAccId, string docNumber, bool forceRefresh = false, bool isCancelled = false)
         {
             var result = new NextAccCachedDocument();
             if (nextAccId == Guid.Empty) { result.Message = "ไม่มี NextAcc document id"; return result; }
@@ -9541,7 +9541,10 @@ namespace Take_Time_BangPhra.Integration
             // key ต้องผูก GUID — docNumber ที่ส่งมาคือ Reference/เลขอ้างอิง ซึ่งซ้ำข้ามใบได้ (เคส "82/6")
             string safeDoc = NextAccDocCacheKey(docNumber, nextAccId);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
-            string pdfPath = Path.Combine(folder, safeDoc + ".pdf");
+            // เอกสารยกเลิก → cache แยกไฟล์ "_Cancel" + ขอ PDF ที่ประทับ "ยกเลิก" จาก NextAcc
+            // (ไม่งั้น fast-path เสิร์ฟ PDF รุ่น active ที่ cache ไว้ก่อน void → ไม่มีตราประทับยกเลิก)
+            string pdfFileName = isCancelled ? safeDoc + "_Cancel.pdf" : safeDoc + ".pdf";
+            string pdfPath = Path.Combine(folder, pdfFileName);
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
 
             // fast path: มี cache อยู่แล้ว (โฟลเดอร์ผูก GUID → ไม่มีทางเสิร์ฟใบอื่น)
@@ -9549,7 +9552,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 result.Found = true;
                 result.PdfLocalPath = pdfPath;
-                result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                result.PdfRelativeUrl = relPrefix + "/" + pdfFileName;
                 try
                 {
                     foreach (var f in Directory.GetFiles(folder, "att*"))
@@ -9568,10 +9571,11 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
-                // 1) PDF อย่างเป็นทางการจาก NextAcc (ตาม document id)
+                // 1) PDF อย่างเป็นทางการจาก NextAcc (ตาม document id) — ประทับ "ยกเลิก" ถ้าเอกสารถูก void
                 if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
                 {
-                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(nextAccId);
+                    byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(nextAccId,
+                        watermark: isCancelled ? "ยกเลิก" : null);
                     if (pdf != null && pdf.Length > 0)
                         File.WriteAllBytes(pdfPath, pdf);
                 }
@@ -9579,7 +9583,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
-                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + ".pdf";
+                    result.PdfRelativeUrl = relPrefix + "/" + pdfFileName;
                 }
                 else
                 {
