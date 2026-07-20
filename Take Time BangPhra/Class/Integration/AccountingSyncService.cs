@@ -8551,6 +8551,7 @@ namespace Take_Time_BangPhra.Integration
                         {
                             invoice.DepositAppliedAmount = cashSaleDepositApplied;
                             invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
+                            invoice.DepositAppliedDrivesJournal = true;   // บังคับ: amount เดี่ยว = display-only, drives ถึงกลับ 21510
                             if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
                                 invoice.DepositOutputVatDeferred = true;
                         }

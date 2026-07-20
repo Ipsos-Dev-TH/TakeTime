@@ -128,3 +128,32 @@ Dr เงินมัดจำรับล่วงหน้า 21510          =
 
 **ลำดับเปิดใช้:** NextAcc deploy → ติ๊ก toggle "รวมเคสหักมัดจำ" ใน Admin → test เช็คเอาท์มัดจำ 1 รายการ
 (ตรวจ: ใบเดียว, JE: Dr แหล่งเงินสุทธิ + Dr 21510 / Cr รายได้ / Cr VAT, บรรทัด "หักเงินมัดจำ" บนใบ, e-Tax ออก)
+
+---
+
+## ✅✅ NextAcc พร้อมรับแล้ว (contract ยืนยัน) — TakeTime sync ครบ
+
+**สัญญาสุดท้าย NextAcc (ตามที่ dev ยืนยัน):**
+- ขายสด B2B ใบเดียว: `documentType:"TaxInvoice"` + `isCashSale:true` + `paymentAccountId` (+`paymentMethod` optional)
+  → ใบเดียว, VAT §86/4 เข้า ภ.พ.30 เต็ม, รับชำระเต็มอัตโนมัติ, หัว "ใบเสร็จรับเงิน/ใบกำกับภาษี", e-Tax = **T03**
+- Deposit: รับ 4 field — `depositAppliedAmount`, `depositAppliedRef`, `depositOutputVatDeferred`,
+  **`depositAppliedDrivesJournal`**. ⚠ **`depositAppliedAmount` เดี่ยว = display-only** (จ่ายเต็ม BalanceDue);
+  ต้อง **`depositAppliedDrivesJournal=true`** ถึงจะกลับ 217xx/21913 ในใบ (Dr 21510) → GL สมดุล.
+  resyncUpdate พา field ไปด้วยกับ isCashSale docs.
+- แก้ความเข้าใจผิด: Receipt(3)→e-Tax T03 **ทำได้อยู่แล้ว**; ใบขายสดรวมออก T03 ผ่าน flag `IssuedAsCashReceipt`
+  ที่ NextAcc persist — ไม่ต้อง staging/แยกใบ. โมเดล = AR โผล่แล้วสุทธิศูนย์วันเดียว (JE คู่เดียว books สะอาด)
+- fail-soft: ถ้า auto-pay ล้ม → ใบกำกับยังอยู่ (ค้างชำระ) sync ไม่ล้ม operator บันทึกรับเงินเองได้
+
+**TakeTime แก้ตาม contract (commit นี้):**
+- เพิ่ม `DepositAppliedDrivesJournal` ใน `CreateIntegrationInvoiceRequest`
+- `MapReceiptToCashSaleTaxInvoice` + เส้น resync ตั้ง `DepositAppliedDrivesJournal=true` เสมอเมื่อมีมัดจำ
+  (เดิมส่งแค่ amount/ref = display-only → มัดจำไม่ถูกล้าง; นี่คือ gap ที่ contract ชี้)
+- NextAcc มี schema change (`IssuedAsCashReceipt` ADD COLUMN IF NOT EXISTS) รันตอน startup — TakeTime ไม่เกี่ยว
+
+**Verify หลัง Windows build (ทั้ง int_ + company endpoint):**
+1. ขายสด B2B ไม่มีมัดจำ → ใบเดียว T03, JE: Dr แหล่งเงิน / Cr รายได้ / Cr VAT, log `✓ แหล่งเงินตรง`
+2. ขายสด B2B **มีมัดจำ** (เปิด `Nexaacc_CashSale_Deposit`) → ใบเดียว + บรรทัดหักมัดจำ,
+   JE: **Dr แหล่งเงินสุทธิ + Dr 21510 / Cr รายได้ / Cr VAT** (สมดุล, 21510 ล้างเกลี้ยง)
+3. แก้ไข/ยกเลิกใบ cash-sale → resyncUpdate in-place / void cascade
+4. ปุ่ม "ตรวจยอดชำระ" ทั้งเดือน → ไม่มีชำระเกิน/ค้าง
+→ ยืนยันกลับ dev NextAcc ว่า T03 ใบเดียวถูกต้อง

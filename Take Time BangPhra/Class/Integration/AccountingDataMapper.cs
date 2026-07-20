@@ -2398,8 +2398,11 @@ namespace Take_Time_BangPhra.Integration
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
                 // หักมัดจำในใบเดียว: NextAcc ลง Dr แหล่งเงิน (Total−มัดจำ) + Dr 21510 (มัดจำ)
                 // + แสดง "หักเงินมัดจำ (ref) / ยอดชำระสุทธิ" — caller gate ด้วย Nexaacc_CashSale_Deposit
+                // ⚠ DrivesJournal=true บังคับเมื่อมีมัดจำ: บน cash-sale amount เดี่ยว ๆ = display-only
+                //    ต้องมี drives ถึงจะกลับ 217xx/21913 (Dr 21510) ในใบ ไม่งั้นเงินสดเต็มยอด GL พัง
                 DepositAppliedAmount = depositApplied > 0.005m ? depositApplied : (decimal?)null,
                 DepositAppliedRef = depositApplied > 0.005m ? depositRef : null,
+                DepositAppliedDrivesJournal = depositApplied > 0.005m ? true : (bool?)null,
                 DepositOutputVatDeferred = depositApplied > 0.005m && deferOutputVat ? true : (bool?)null,
                 Description = depositApplied > 0.005m
                     ? $"ใบกำกับภาษี/ใบเสร็จรับเงิน (ขายสด) — การจอง #{reservationId} ({customerName}) | หักมัดจำ {depositApplied:N2}"

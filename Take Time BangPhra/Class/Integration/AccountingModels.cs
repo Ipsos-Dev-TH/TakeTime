@@ -762,6 +762,11 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>true = VAT มัดจำพักที่ 21913 (defer) → NextAcc ทำ Dr 21913 / Cr 21911 ส่วน VAT มัดจำด้วย.
         /// NextAcc field "depositOutputVatDeferred"</summary>
         public bool? DepositOutputVatDeferred { get; set; }
+        /// <summary>⚠ สำคัญต่อ GL: บน cash-sale invoice **`depositAppliedAmount` เดี่ยว ๆ = display-only**
+        /// (NextAcc จ่ายเต็ม BalanceDue → เงินสดเต็มยอด มัดจำ 21510 ไม่ถูกล้าง). ต้องตั้ง true คู่กันเสมอ
+        /// เมื่อมีหักมัดจำ → NextAcc ลง JE self-contained กลับ 217xx/21913 ในใบเดียว (Dr 21510 = มัดจำ).
+        /// NextAcc field "depositAppliedDrivesJournal" (ยืนยันสัญญา NextAcc พร้อมรับ)</summary>
+        public bool? DepositAppliedDrivesJournal { get; set; }
         public decimal? VatRate { get; set; }
         public string Currency { get; set; }
         public string Notes { get; set; }
