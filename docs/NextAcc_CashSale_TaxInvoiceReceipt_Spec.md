@@ -173,3 +173,29 @@ Dr เงินมัดจำรับล่วงหน้า 21510          =
 3. resync ก็ไม่ set isCashSale/deposit fields เมื่อ flag ปิด
 
 **ปลดล็อกเมื่อ:** NextAcc ต่อสาย deposit-reversal (route ผ่าน AutoPost / post correction JE) + test GL บน Windows ผ่าน → แจ้งร่วมกัน → เอา `disabled` ออกจาก toggle + rebuild.
+
+---
+
+## ✅ Option B implemented (deposit single-doc — ไม่ต้องรอ NextAcc)
+
+TakeTime ทำ Option B แล้ว: เคสหักมัดจำออก **ใบเดียว** โดย TakeTime โพสต์ JV กลับมัดจำเอง
+(ไม่พึ่ง NextAcc reverse 21510):
+
+- ใบขายสด (isCashSale) ส่ง `depositAppliedAmount`/`depositAppliedRef` = **display เท่านั้น** +
+  **`depositAppliedDrivesJournal=false`** → NextAcc auto-pay เต็มยอด (Dr แหล่งเงินเต็ม / Cr รายได้+VAT)
+- TakeTime โพสต์ JV: **Dr 21510 (+Dr ภาษีขาย ถ้า RECEIPT) / Cr แหล่งเงิน** = depositApplied
+  (`MapDepositCashSaleReversal`, ref `-CSDEPADJ`, idempotent)
+- สุทธิ: Dr แหล่งเงิน (Total−มัดจำ) + Dr 21510 (มัดจำ) / Cr รายได้+VAT ✓ 21510 ล้างเกลี้ยง
+- void → `MapDepositCashSaleReversalUndo` (Dr แหล่งเงิน / Cr 21510) ผ่าน `TryReverseCashSaleDepositOnVoidAsync`
+  (ตรวจ ref `-CSDEPADJ` → รู้ว่าเป็น Option B); resync ส่ง drives=false ไม่แตะ JV
+- gate: `Nexaacc_TaxReceipt_SingleDoc` + `Nexaacc_CashSale_Deposit` (ปลดล็อก toggle แล้ว, default off)
+  + ใบมัดจำต้อง resolve เป็นเอกสาร NextAcc; §78/1 strict ใช้เส้นเดิม
+
+### 🔔 NextAcc ต้องเตรียมอะไร → **ไม่ต้อง** (สำหรับ Option B)
+
+Option B ทำงานด้วยของที่ NextAcc มีอยู่แล้ว (isCashSale no-deposit + CreateJournal). ไม่ต้องแก้ NextAcc.
+
+**(ทางเลือกอนาคต) Option A native** — ถ้า NextAcc ต่อสาย reverse 21510/21913 ใน JE ของใบ isCashSale
+(ตามที่แจ้งว่ากำลังทำ) → จะได้ JE เดียวไม่มี JV แยก (สะอาดกว่า). เมื่อ NextAcc พร้อม แค่สลับ TakeTime
+ให้ส่ง drives=true + ไม่โพสต์ JV. **ไม่เร่ง** — Option B ใช้ได้แล้ว GL ถูก. ถ้า NextAcc ทำเสร็จค่อยแจ้ง
+TakeTime มาสลับ (จุดแก้จุดเดียว: csInv.DepositAppliedDrivesJournal + block โพสต์ JV).

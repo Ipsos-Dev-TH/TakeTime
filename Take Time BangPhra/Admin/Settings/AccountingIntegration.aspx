@@ -335,18 +335,18 @@
                         เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ) จนกว่าจะเปิดตัวเลือกด้านล่าง.
                     </div>
                 </div>
-                <div class="config-item" style="opacity:.6;">
+                <div class="config-item">
                     <label>
-                        <input type="checkbox" id="cfgCashSaleDeposit" disabled="disabled" />
-                        🔒 └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย — <b>ล็อกไว้ (รอ NextAcc)</b>
+                        <input type="checkbox" id="cfgCashSaleDeposit" />
+                        └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย (Option B — TakeTime โพสต์ JV เอง)
                     </label>
-                    <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
-                        ส่ง <code>depositAppliedAmount/Ref/DrivesJournal</code> บนใบขายสด → NextAcc ลง
-                        <b>Dr แหล่งเงิน (ยอดสุทธิ) + Dr มัดจำ 21510</b> ในใบเดียว.
-                        <br /><strong style="color:#c0392b;">🔒 ล็อกไว้: NextAcc รับ field แล้วแต่ JE ฝั่ง integration
-                        ยังไม่ต่อสายกลับ 21510/21913</strong> (ยืนยัน dev NextAcc) — เปิดตอนนี้ = เงินสดลงเต็มยอด
-                        มัดจำไม่ถูกล้าง <b>GL พัง</b>. จะปลดล็อกเมื่อ NextAcc ต่อสาย deposit-reversal + test GL ผ่าน.
-                        เคสมัดจำใช้เส้นเดิม (TIV + settle แยก, GL ถูก) ไปก่อนอัตโนมัติ.
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        เช็คเอาท์ที่หักมัดจำ → ออก <b>ใบเดียว</b> (ใบกำกับ/ใบเสร็จ แสดง "หักมัดจำ (REC-xxx) / ยอดชำระสุทธิ")
+                        + TakeTime โพสต์ JV กลับมัดจำเอง (<b>Dr 21510 / Cr แหล่งเงิน</b>) → 21510 ล้างเกลี้ยง
+                        <b>ไม่ต้องรอ NextAcc</b> (ไม่พึ่ง drives ฝั่ง NextAcc). GL รวม: Dr แหล่งเงินสุทธิ + Dr 21510 / Cr รายได้+VAT.
+                        <br /><strong style="color:#c0392b;">⚠ ต้องเปิด "ออกใบเดียว" ด้านบนก่อน + ทดสอบ GL เคสมัดจำ 1 รายการบน Windows ก่อนใช้จริง</strong>
+                        (ตรวจ JE: Dr 21510 เท่ายอดมัดจำ + 21510 กลับเป็น 0). ใบมัดจำที่ยังไม่ sync เป็นเอกสาร → ตกเส้นเดิมอัตโนมัติ.
+                        โหมด §78/1 เคร่ง (RECEIPT+ไม่ defer) ยังใช้เส้นเดิม.
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">

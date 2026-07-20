@@ -4439,12 +4439,17 @@ namespace Take_Time_BangPhra.Integration
                         || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId));
                     if (_config.IsTaxReceiptSingleDoc && csDepositOk)
                     {
-                        string csDepositRef = depositApplied > 0.005m ? LookupDepositReceiptRefs(reservationId) : null;
+                        bool csHasDeposit = depositApplied > 0.005m;
+                        string csDepositRef = csHasDeposit ? LookupDepositReceiptRefs(reservationId) : null;
                         var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
                             totalAmount, revenueType, paymentMethod, receiptDate, customerName,
                             customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
                             depositApplied: depositApplied, depositRef: csDepositRef,
                             deferOutputVat: hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred);
+                        // Option B: หักมัดจำ = TakeTime โพสต์ JV เอง (Dr 21510 / Cr แหล่งเงิน) → drives=false
+                        //   (ไม่พึ่ง NextAcc reverse 21510) NextAcc จึง auto-pay เต็มยอด (Dr แหล่งเงินเต็ม)
+                        //   แล้ว JV ของเราลดแหล่งเงิน + ล้าง 21510. amount/ref ที่ส่งไป = display บนใบเท่านั้น
+                        csInv.DepositAppliedDrivesJournal = csHasDeposit ? false : (bool?)null;
                         ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
                         csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
                         var csFilePaths = ExtractFilePaths(attachments);
@@ -4454,12 +4459,30 @@ namespace Take_Time_BangPhra.Integration
                         Guid csId = RequireValidDocId(csRes?.data?.Id, $"CashSaleTaxInvoice receipt={receiptNumber}");
                         _lastDocNumber = csRes?.data?.DocumentNumber;
                         _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
+
+                        // Option B: หักมัดจำในใบเดียว — โพสต์ JV กลับมัดจำ (Dr 21510 / Cr แหล่งเงิน) idempotent ด้วย ref
+                        if (csHasDeposit)
+                        {
+                            string csAdjRef = $"{receiptNumber}-CSDEPADJ";
+                            if (!await JournalExistsByReferenceAsync(csAdjRef))
+                            {
+                                var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
+                                    receiptDate, customerName, paymentAccountId, receiptNumber,
+                                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
+                                var csAdjRes = await _apiClient.CreateJournalAsync(csAdj);
+                                Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
+                                await SafePostJournalAsync(csAdjId);
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"ProcessReceiptDocument(cash-sale deposit JV): receipt={receiptNumber} Dr 21510 {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
+                            }
+                        }
+
                         // ปิดจบในใบเดียว: mark final (ไม่เรียก SettleReceiptInNextAcc — ไม่มี payment แยก)
                         SetReceiptPaymentMarker(receiptNumber, csId.ToString());
                         await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessReceiptDocument(cash-sale single doc): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
-                            $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} (ไม่มีใบเสร็จรับชำระแยก)", "SYSTEM");
+                            $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} (ไม่มีใบเสร็จรับชำระแยก)", "SYSTEM");
                         return csId.ToString();
                     }
 
@@ -4985,6 +5008,26 @@ namespace Take_Time_BangPhra.Integration
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
             catch { return null; }
+        }
+
+        /// <summary>ถ้าใบนี้ใช้ Option B (cash-sale JV หักมัดจำ ref "-CSDEPADJ") → โพสต์ undo
+        /// (Dr แหล่งเงิน / Cr 21510) คืน true = จัดการแล้ว (ผู้เรียกข้าม reverse แบบ AR).
+        /// idempotent ด้วย ref "-CSDEPADJ-REV". ไม่ใช่ Option B → คืน false ให้ไปใช้ AR reverse เดิม</summary>
+        private async Task<bool> TryReverseCashSaleDepositOnVoidAsync(
+            int resId, decimal applied, string paymentMethod, string paymentAccountId, string custName, string receiptNumber)
+        {
+            if (applied <= 0.005m || string.IsNullOrEmpty(receiptNumber)) return false;
+            if (!await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")) return false;   // ไม่ใช่ Option B
+            if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV")) return true; // กลับแล้ว
+            var undo = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
+                custName, paymentAccountId, receiptNumber,
+                hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
+            var res = await _apiClient.CreateJournalAsync(undo);
+            Guid id = RequireValidDocId(res?.data?.Id, $"CashSaleDepositReversalUndo receipt={receiptNumber}");
+            await SafePostJournalAsync(id);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessVoidReceipt: cash-sale deposit JV กลับแล้ว (Dr แหล่งเงิน / Cr 21510) receipt={receiptNumber} JE={id}", "SYSTEM");
+            return true;
         }
 
         /// <summary>เลขเอกสาร/JE ของใบมัดจำ (Nexaacc_Document_Number ดิบ — รวม JV-INT journal) ไม่กรองชนิด.
@@ -6039,15 +6082,19 @@ namespace Take_Time_BangPhra.Integration
                                 {
                                     int resId = info.Value.reservationId;
                                     string custName = info.Value.customerName ?? "";
-                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        custName, info.Value.paymentAccountId, receiptNumber,
-                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
-                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                    RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
-                                        "SYSTEM");
+                                    // Option B (cash-sale JV) → กลับ Dr แหล่งเงิน/Cr 21510; ไม่ใช่ → AR reverse เดิม
+                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber))
+                                    {
+                                        var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                            resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                            custName, info.Value.paymentAccountId, receiptNumber,
+                                            hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
+                                        var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                        RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
+                                        _code.Logs(_connectionString, "AccountingSync",
+                                            $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                            "SYSTEM");
+                                    }
                                 }
                             }
                         }
@@ -6085,15 +6132,19 @@ namespace Take_Time_BangPhra.Integration
                                 decimal applied = LookupDepositAppliedFromReceipt(receiptNumber);
                                 if (applied > 0 && info != null)
                                 {
-                                    var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
-                                        resId, applied, info.Value.paymentMethod, DateTime.Now,
-                                        custName, info.Value.paymentAccountId, receiptNumber,
-                                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
-                                    var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
-                                    RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
-                                    _code.Logs(_connectionString, "AccountingSync",
-                                        $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
-                                        "SYSTEM");
+                                    // Option B (cash-sale JV) → กลับ Dr แหล่งเงิน/Cr 21510; ไม่ใช่ → AR reverse เดิม
+                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber))
+                                    {
+                                        var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
+                                            resId, applied, info.Value.paymentMethod, DateTime.Now,
+                                            custName, info.Value.paymentAccountId, receiptNumber,
+                                            hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
+                                        var counterResult = await _apiClient.CreateJournalAsync(counterAdj);
+                                        RequireValidDocId(counterResult?.data?.Id, $"VoidReceipt counter-adj receipt={receiptNumber}");
+                                        _code.Logs(_connectionString, "AccountingSync",
+                                            $"ProcessVoidReceipt: counter-adj for depositApplied={applied} on receipt={receiptNumber}",
+                                            "SYSTEM");
+                                    }
                                 }
 
                                 // credit-note fallback ไม่ cascade payment → ต้อง void payment ที่บันทึกรับชำระเอง
@@ -8676,7 +8727,9 @@ namespace Take_Time_BangPhra.Integration
                         {
                             invoice.DepositAppliedAmount = cashSaleDepositApplied;
                             invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
-                            invoice.DepositAppliedDrivesJournal = true;   // บังคับ: amount เดี่ยว = display-only, drives ถึงกลับ 21510
+                            // Option B: display-only (drives=false) — TakeTime โพสต์ JV กลับ 21510 เอง (โพสต์ตอน
+                            // create แล้ว idempotent ด้วย ref -CSDEPADJ; resync แค่แก้เนื้อใบ ไม่แตะ JV)
+                            invoice.DepositAppliedDrivesJournal = false;
                             if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
                                 invoice.DepositOutputVatDeferred = true;
                         }
