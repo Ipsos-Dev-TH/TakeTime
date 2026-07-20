@@ -2620,7 +2620,44 @@ namespace Take_Time_BangPhra.Integration
             bool adjDone = !string.IsNullOrEmpty(marker);   // "ADJ:" หรือ final → adjustment ลงแล้ว
             if (payDone) return;                            // ปิดลูกหนี้ครบแล้ว
 
+            // ── GUARD รับเงินซ้อน (document-level, เชื่อสถานะจริงบน NextAcc) ──
+            // marker ฝั่งเรากัน retry ของเราเองได้ แต่กันไม่ได้เมื่อ (ก) marker หาย/ถูกรีเซ็ตจาก
+            // void→recreate ที่ผิดจังหวะ (ข) มีคนบันทึกรับชำระเองบน NextAcc → อ่านยอดชำระจริง
+            // จากเอกสารก่อนโพสต์ทุกครั้ง — ยอดค้าง (BalanceDue) คือความจริงเดียวที่ห้ามจ่ายเกิน
+            decimal docBalance = decimal.MinValue;
+            try
+            {
+                var docNow = await _apiClient.GetDocumentAsync(invoiceDocId);
+                if (docNow?.data != null)
+                {
+                    docBalance = docNow.data.BalanceDue;
+                    if (docBalance <= 0.005m)
+                    {
+                        SetReceiptPaymentMarker(receiptNumber, "PAID_EXTERNAL");
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"SettleReceipt: receipt={receiptNumber} เอกสารชำระครบแล้วบน NextAcc (Paid={docNow.data.PaidAmount:N2}/{docNow.data.TotalAmount:N2}) " +
+                            "— ข้าม settle ทั้งหมด กันรับเงินซ้อน", "SYSTEM");
+                        return;
+                    }
+                }
+            }
+            catch (Exception gx)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SettleReceipt: อ่านสถานะชำระของเอกสารไม่ได้ ({gx.Message}) — ใช้ marker ฝั่งเราต่อ", "SYSTEM");
+            }
+
             // 1) ตัดมัดจำที่หักออกจากลูกหนี้ (ถ้ามี)
+            // ยอดค้างเอกสารน้อยกว่ายอดมัดจำที่จะตัด = มีการชำระอื่นบันทึกไปแล้วบางส่วน → ห้ามโพสต์ซ้ำ
+            if (depositApplied > 0 && !adjDone
+                && docBalance != decimal.MinValue && docBalance + 0.01m < depositApplied)
+            {
+                SetReceiptPaymentMarker(receiptNumber, "ADJ:EXTERNAL");
+                adjDone = true;
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"⚠ SettleReceipt: receipt={receiptNumber} ยอดค้างเอกสาร {docBalance:N2} < มัดจำที่จะตัด {depositApplied:N2} " +
+                    "— มีการชำระบันทึกไว้แล้ว (คน/ระบบอื่น) ข้ามการตัดมัดจำ กันรับเงินซ้อน — ตรวจสอบเอกสารบน NextAcc", "SYSTEM");
+            }
             if (depositApplied > 0 && !adjDone)
             {
                 // ── GUARD ลำดับ resync: จะ Dr เงินรับล่วงหน้า ได้ก็ต่อเมื่อใบมัดจำของการจองนี้
@@ -2704,11 +2741,27 @@ namespace Take_Time_BangPhra.Integration
 
             // 2) บันทึกรับเงินสดจริง (= total − depositApplied) → Dr เงินสด / Cr ลูกหนี้
             decimal cashNow = totalAmount - depositApplied;
+
+            // GUARD รับเงินซ้อน (ขาเงินสด): อ่านยอดค้างล่าสุดหลังตัดมัดจำ — จ่ายเกินยอดค้างเอกสารไม่ได้
+            // เด็ดขาด (เคส: มีคนรับชำระเองบน NextAcc / marker หาย / จังหวะ void→recreate) → cap ที่ยอดค้าง
+            try
+            {
+                var docNow2 = await _apiClient.GetDocumentAsync(invoiceDocId);
+                if (docNow2?.data != null && docNow2.data.BalanceDue < cashNow - 0.005m)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"⚠ SettleReceipt: receipt={receiptNumber} เงินสดที่จะบันทึก {cashNow:N2} > ยอดค้างจริง {docNow2.data.BalanceDue:N2} " +
+                        "— ปรับลดเท่ายอดค้าง กันรับเงินซ้อน (มีการชำระอื่นบันทึกไว้แล้ว)", "SYSTEM");
+                    cashNow = docNow2.data.BalanceDue;
+                }
+            }
+            catch { /* อ่านไม่ได้ → ใช้ยอดคำนวณเดิม (marker ยังกัน retry ฝั่งเรา) */ }
+
             if (cashNow <= 0.005m)
             {
                 SetReceiptPaymentMarker(receiptNumber, "NOCASH");
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"SettleReceipt: receipt={receiptNumber} ไม่มีเงินสดรับเพิ่ม (หักมัดจำหมด) — ปิดลูกหนี้ด้วยมัดจำอย่างเดียว", "SYSTEM");
+                    $"SettleReceipt: receipt={receiptNumber} ไม่มีเงินสดรับเพิ่ม (หักมัดจำหมด/ชำระครบแล้ว) — ไม่บันทึกเงินสดเพิ่ม", "SYSTEM");
                 return;
             }
 
@@ -2776,6 +2829,18 @@ namespace Take_Time_BangPhra.Integration
                 SetReceiptPaymentMarker(receiptNumber, paymentId);
                 _code.Logs(_connectionString, "AccountingSync",
                     $"SettleReceipt: รับชำระสำเร็จ receipt={receiptNumber} cash={cashNow:N2} paymentId={paymentId} แหล่งเงิน={(overrideAccId.HasValue && _config.CanUseCompanyEndpoints ? "บังคับ "+paymentAccountId : "default ตาม PaymentMethod")}", "SYSTEM");
+
+                // ── VERIFY หลัง settle: ยอดชำระรวมต้องไม่เกินยอดเอกสาร (invariant สุดท้ายกันรับเงินซ้อน) ──
+                // ถ้าเกิน = มี payment ซ้อนหลุดเข้ามา (ไม่ว่าจากฝั่งไหน) → ร้องดัง ๆ ใน log ให้เห็นทันที
+                try
+                {
+                    var docChk = await _apiClient.GetDocumentAsync(invoiceDocId);
+                    if (docChk?.data != null && docChk.data.PaidAmount > docChk.data.TotalAmount + 0.01m)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠⚠ SettleReceipt: เอกสาร {docChk.data.DocumentNumber} ชำระเกินยอด! Paid={docChk.data.PaidAmount:N2} > Total={docChk.data.TotalAmount:N2} " +
+                            $"(receipt={receiptNumber}) — รับเงินซ้อน ตรวจสอบ/void payment ส่วนเกินบน NextAcc ด่วน", "SYSTEM");
+                }
+                catch { }
             }
             else
             {
