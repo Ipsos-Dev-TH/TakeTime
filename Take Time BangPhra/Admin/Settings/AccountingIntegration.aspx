@@ -321,6 +321,20 @@
                         <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test</strong> — จัดการเคส churn ช่วง dev; booking ใหม่ปกติไม่ติดลบอยู่แล้ว
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgTaxReceiptSingleDoc" />
+                        ออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" (ขายสด B2B)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        เช็คเอาท์/รับชำระ <b>ลูกค้ามีเลขภาษี</b> ที่จ่ายเต็ม (ไม่หักมัดจำ) → NextAcc ออก
+                        <b>ใบเดียว</b> (payment ฝังในใบ Dr แหล่งเงิน / Cr รายได้ / Cr VAT) แทนใบกำกับ +
+                        ใบเสร็จรับชำระแยกหลายใบ. e-Tax TAX_INVOICE ออกได้เหมือนเดิม, GL ไม่เปลี่ยน.
+                        <br />ปิดไว้ (default) = พฤติกรรมเดิม (ใบกำกับ AR + ใบเสร็จรับชำระแยก).
+                        <br /><strong style="color:#c0392b;">⚠ ต้องใช้ NextAcc รุ่นรองรับ isCashSale + เปิดหลัง test เช็คเอาท์ 1 รายการ</strong>.
+                        เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ).
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -892,6 +906,7 @@
                 document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
                 document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
+                document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -953,6 +968,7 @@
                 autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
                 postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
                 autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
+                taxReceiptSingleDoc: document.getElementById('cfgTaxReceiptSingleDoc').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
