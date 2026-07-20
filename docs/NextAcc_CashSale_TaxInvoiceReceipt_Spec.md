@@ -157,3 +157,19 @@ Dr เงินมัดจำรับล่วงหน้า 21510          =
 3. แก้ไข/ยกเลิกใบ cash-sale → resyncUpdate in-place / void cascade
 4. ปุ่ม "ตรวจยอดชำระ" ทั้งเดือน → ไม่มีชำระเกิน/ค้าง
 → ยืนยันกลับ dev NextAcc ว่า T03 ใบเดียวถูกต้อง
+
+---
+
+## 🚦 สถานะสุดท้าย (ยืนยันร่วม NextAcc ↔ TakeTime)
+
+| เคส | NextAcc | TakeTime | flag | เปิดได้? |
+|---|---|---|---|---|
+| **ขายสด ไม่มีมัดจำ** | ✅ verified, CI ผ่าน (Dr เงินสด/Cr รายได้+VAT, T03) | ✅ ส่ง isCashSale ครบ | `Nexaacc_TaxReceipt_SingleDoc` | ✅ **เปิดได้เลย** (toggle "ออกใบเดียว") |
+| **มีมัดจำ** | ⚠️ รับ+persist field แล้ว แต่ JE integration ยัง**ไม่ต่อสาย reverse 21510/21913** (logic อยู่ใน AutoPost ที่ integration ไม่เรียก) → เปิด = เงินสดเกิน+21510 ค้าง | ✅ โค้ดพร้อม (ส่ง 4 field + drives) แต่ **gate ปิด** | `Nexaacc_CashSale_Deposit` | 🔒 **ล็อก** — toggle disable ในหน้า Admin จนกว่า NextAcc ต่อสาย + test GL ผ่าน |
+
+**การ์ดกันพลาดฝั่ง TakeTime (เคสมัดจำ):**
+1. `Nexaacc_CashSale_Deposit` default off + **toggle ถูก disable ในหน้า Admin** (กดเปิดพลาดไม่ได้)
+2. เคสมัดจำเมื่อ flag ปิด → `csDepositOk=false` → **ตกเส้นเดิม (TIV + settle แยก) อัตโนมัติ GL ถูก**
+3. resync ก็ไม่ set isCashSale/deposit fields เมื่อ flag ปิด
+
+**ปลดล็อกเมื่อ:** NextAcc ต่อสาย deposit-reversal (route ผ่าน AutoPost / post correction JE) + test GL บน Windows ผ่าน → แจ้งร่วมกัน → เอา `disabled` ออกจาก toggle + rebuild.

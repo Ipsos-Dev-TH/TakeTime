@@ -335,17 +335,18 @@
                         เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ) จนกว่าจะเปิดตัวเลือกด้านล่าง.
                     </div>
                 </div>
-                <div class="config-item">
+                <div class="config-item" style="opacity:.6;">
                     <label>
-                        <input type="checkbox" id="cfgCashSaleDeposit" />
-                        └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย (ต้องเปิดตัวบนก่อน)
+                        <input type="checkbox" id="cfgCashSaleDeposit" disabled="disabled" />
+                        🔒 └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย — <b>ล็อกไว้ (รอ NextAcc)</b>
                     </label>
                     <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
-                        ส่ง <code>depositAppliedAmount/Ref</code> บนใบขายสด → NextAcc ลง
-                        <b>Dr แหล่งเงิน (ยอดสุทธิ) + Dr มัดจำ 21510</b> ในใบเดียว + แสดง "หักเงินมัดจำ/ยอดชำระสุทธิ".
-                        <br /><strong style="color:#c0392b;">⚠⚠ เปิดได้เมื่อ NextAcc deploy รุ่นรองรับ deposit fields
-                        บน isCashSale แล้วเท่านั้น</strong> — เปิดก่อน NextAcc พร้อม = เงินสดลงเต็มยอด
-                        มัดจำไม่ถูกล้าง <b>GL พัง</b>. ใบมัดจำที่ยังไม่ sync เป็นเอกสาร → ตกไปเส้นเดิมอัตโนมัติ (ปลอดภัย).
+                        ส่ง <code>depositAppliedAmount/Ref/DrivesJournal</code> บนใบขายสด → NextAcc ลง
+                        <b>Dr แหล่งเงิน (ยอดสุทธิ) + Dr มัดจำ 21510</b> ในใบเดียว.
+                        <br /><strong style="color:#c0392b;">🔒 ล็อกไว้: NextAcc รับ field แล้วแต่ JE ฝั่ง integration
+                        ยังไม่ต่อสายกลับ 21510/21913</strong> (ยืนยัน dev NextAcc) — เปิดตอนนี้ = เงินสดลงเต็มยอด
+                        มัดจำไม่ถูกล้าง <b>GL พัง</b>. จะปลดล็อกเมื่อ NextAcc ต่อสาย deposit-reversal + test GL ผ่าน.
+                        เคสมัดจำใช้เส้นเดิม (TIV + settle แยก, GL ถูก) ไปก่อนอัตโนมัติ.
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
