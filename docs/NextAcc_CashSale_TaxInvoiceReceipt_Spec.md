@@ -77,3 +77,42 @@ Config flag ใหม่ (migration) — default off เพื่อ backward-co
 - GL ปัจจุบัน**ถูกต้อง ไม่ซ้อน** — ใบเสร็จแยกเป็นแค่บันทึกการรับชำระ (JE "ก่อนอนุมัติ" ไม่โพสต์)
 - การออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" **ต้องรอ NextAcc** ทำ A หรือ B ก่อน แล้ว TakeTime เปิด flag
 - ระหว่างรอ: เอกสารยังใช้ได้ถูกต้องตามกฎหมาย (ใบกำกับ TIV = ใบภาษีตัวจริง; REC = ใบเสร็จรับชำระ)
+
+---
+
+## ⚠ ส่วนขยายที่ต้องทำเพิ่ม (Option B ยังไม่ครบ): หักมัดจำบน cash-sale invoice
+
+**อาการหลัง deploy Option B รอบแรก:** เช็คเอาท์ B2B ที่**มีหักมัดจำ** (โรงแรมเก็บมัดจำแทบทุกใบ)
+**ยังไม่รวมใบ** — เพราะ TakeTime gate ไว้ (`depositApplied <= 0`) เนื่องจาก integration invoice +
+`isCashSale` **ไม่มี field หักมัดจำ**. ถ้าส่งเคสมัดจำโดยไม่มี field → NextAcc Dr เงินสดเต็มยอด
+ไม่ Dr 21510 → มัดจำไม่ถูกล้าง + เงินสดเกิน = **GL พัง** ⟹ ต้องกันไว้.
+
+⟹ **ผลคือ Option B ช่วยได้เฉพาะเคสจ่ายเต็มไม่มีมัดจำ (ส่วนน้อย)** — ต้องรองรับหักมัดจำถึงจะใช้จริงได้.
+
+### สิ่งที่ขอ NextAcc เพิ่ม: `/integration/invoices` + `isCashSale` รับ field หักมัดจำ
+
+เพิ่ม field (ชื่อเทียบ `CreateDocumentRequest` company ที่มีอยู่แล้ว):
+- **`depositAppliedAmount`** (decimal) — ยอดมัดจำที่หัก (รวม VAT)
+- **`depositAppliedRef`** (string) — เลขใบมัดจำ (เช่น REC260718003) เพื่อกลับ 217xx/21913 ของใบนั้น
+- (ทางเลือก) **`depositOutputVatDeferred`** — ถ้ามัดจำพัก VAT ที่ 21913
+
+**พฤติกรรมที่ต้องการ** (เหมือน company Receipt(3) ที่ทำได้แล้ว แต่บน cash-sale TaxInvoice + e-Tax):
+```
+Dr แหล่งเงิน (PaymentAccountId)      = ยอดรับจริง = Total − depositApplied   (เช่น 6,400)
+Dr เงินมัดจำรับล่วงหน้า 21510          = depositApplied                       (เช่น 3,500)
+[+ ถ้า defer: Dr 21913 / Cr 21911 ส่วน VAT มัดจำ]
+   Cr รายได้ราย line
+   Cr ภาษีขาย 21911
+```
+= ใบเดียว (ใบกำกับภาษี/ใบเสร็จรับเงิน) หักมัดจำในใบ + e-Tax TAX_INVOICE + GL สมดุล
+(อ้างอิง: company Receipt(3) ทำ pattern นี้ได้แล้วผ่าน DepositAppliedAmount/Ref — ขอ port มา cash-sale invoice)
+
+### จุดแก้ TakeTime (พร้อมทันทีที่ NextAcc ยืนยัน)
+
+- `CreateIntegrationInvoiceRequest`: เพิ่ม `DepositAppliedAmount`/`DepositAppliedRef`/`DepositOutputVatDeferred`
+- `MapReceiptToCashSaleTaxInvoice`: รับ depositApplied + depositRef → set field
+- `ProcessReceiptDocument`: **เอา gate `depositApplied <= 0.005m` ออก** (รับเคสมัดจำ) + resolve `depositAppliedRef`
+  จากใบมัดจำ (เหมือน SettleReceiptInNextAcc / MapReceiptToDocument deposit path ที่มีอยู่)
+- `BuildCorrectedReceiptInvoice`: ส่ง deposit field บนเส้น resync ด้วย
+
+**จนกว่าจะเพิ่ม:** เคสมัดจำใช้เส้นเดิม (TIV + settle payments แยก) — GL ถูก แต่ยังหลายใบ.
