@@ -9230,6 +9230,8 @@ namespace Take_Time_BangPhra.Integration
                         SubTotal = d.SubTotal,
                         VatAmount = d.VatAmount,
                         TotalAmount = d.TotalAmount,
+                        PaidAmount = d.PaidAmount,
+                        BalanceDue = d.BalanceDue,
                         Reference = d.Reference,
                         Notes = d.Notes,
                         DocumentUrl = BuildNexaaccDocumentUrl(d.Id.ToString(), "RECEIPT")
@@ -9245,6 +9247,67 @@ namespace Take_Time_BangPhra.Integration
                 $"FetchNextAccReceiptDocuments: {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd} {LastRangeFetchInfo}", "SYSTEM");
 
             return result.OrderByDescending(x => x.DocumentDate).ThenByDescending(x => x.DocumentNumber).ToList();
+        }
+
+        /// <summary>
+        /// ตรวจสุขภาพยอดชำระของเอกสารฝั่งรับทั้งช่วงวันที่ (ใช้แก้ "เอกสารเดิม"):
+        ///   • ชำระเกินยอด (Paid > Total) = รับเงินซ้อน → ต้อง void payment ส่วนเกิน/กด Retry สร้างใหม่
+        ///   • ค้างชำระ (BalanceDue > 0) = settle ไม่ครบ → กด Retry/Sync ให้ปิดยอด (guard ใหม่กันจ่ายเกินแล้ว)
+        /// คืนรายงานภาษาไทยพร้อมจำนวนใบต่อประเภทปัญหา — แสดงบนหน้า CheckDocument ได้ทันที
+        /// </summary>
+        public async System.Threading.Tasks.Task<string> AuditNextAccReceiptPaymentsAsync(DateTime fromDate, DateTime toDate)
+        {
+            var docs = await FetchNextAccReceiptDocumentsAsync(fromDate, toDate);
+            if (docs == null || docs.Count == 0)
+                return $"ไม่พบเอกสาร NextAcc ในช่วง {fromDate:dd/MM/yyyy} - {toDate:dd/MM/yyyy} ({LastRangeFetchInfo})";
+
+            bool IsVoidStatus(string s) =>
+                string.Equals(s, "Voided", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Canceled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+            var overpaid = new List<string>();
+            var unpaid = new List<string>();
+            int active = 0, voidedCount = 0;
+            foreach (var d in docs)
+            {
+                if (IsVoidStatus(d.Status)) { voidedCount++; continue; }
+                active++;
+                if (d.PaidAmount > d.TotalAmount + 0.01m)
+                    overpaid.Add($"{d.DocumentNumber} ({d.ContactName}): ชำระ {d.PaidAmount:N2} > ยอด {d.TotalAmount:N2} (เกิน {d.PaidAmount - d.TotalAmount:N2})");
+                else if (d.BalanceDue > 0.01m)
+                    unpaid.Add($"{d.DocumentNumber} ({d.ContactName}): ค้าง {d.BalanceDue:N2}/{d.TotalAmount:N2}");
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"ผลตรวจยอดชำระ {fromDate:dd/MM/yyyy} - {toDate:dd/MM/yyyy}: เอกสาร {active} ใบ (ยกเลิก {voidedCount})");
+            if (overpaid.Count == 0 && unpaid.Count == 0)
+            {
+                sb.AppendLine("✅ ทุกใบยอดชำระถูกต้อง — ไม่พบรับเงินซ้อน/ค้างชำระ");
+            }
+            else
+            {
+                if (overpaid.Count > 0)
+                {
+                    sb.AppendLine($"⚠⚠ ชำระเกินยอด (รับเงินซ้อน) {overpaid.Count} ใบ — void payment ส่วนเกินบน NextAcc หรือกด Retry ในคิว:");
+                    foreach (var s in overpaid.Take(12)) sb.AppendLine("  • " + s);
+                    if (overpaid.Count > 12) sb.AppendLine($"  ...และอีก {overpaid.Count - 12} ใบ (ดู log)");
+                }
+                if (unpaid.Count > 0)
+                {
+                    sb.AppendLine($"⚠ ค้างชำระ {unpaid.Count} ใบ — กด Retry/Sync ใบนั้นให้ settle ปิดยอด:");
+                    foreach (var s in unpaid.Take(12)) sb.AppendLine("  • " + s);
+                    if (unpaid.Count > 12) sb.AppendLine($"  ...และอีก {unpaid.Count - 12} ใบ (ดู log)");
+                }
+            }
+
+            string report = sb.ToString();
+            _code.Logs(_connectionString, "AccountingSync",
+                $"AuditReceiptPayments {fromDate:yyyy-MM-dd}..{toDate:yyyy-MM-dd}: over={overpaid.Count} unpaid={unpaid.Count} active={active}"
+                + (overpaid.Count > 0 ? " | " + string.Join(" ; ", overpaid) : "")
+                + (unpaid.Count > 0 ? " | " + string.Join(" ; ", unpaid) : ""), "SYSTEM");
+            return report;
         }
 
         /// <summary>เอกสารเงินเดือน = Reference ขึ้นต้น PAYROLL- หรือชื่อผู้ติดต่อมีคำว่า "เงินเดือน"</summary>

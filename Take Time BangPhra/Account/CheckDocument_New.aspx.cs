@@ -963,6 +963,48 @@ namespace Take_Time_BangPhra.Account
             lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc: จับคู่ {matched.Count}, เพิ่ม {added})</span>";
         }
 
+        /// <summary>ปุ่ม "🔍 ตรวจยอดชำระ NextAcc" — ตรวจทุกใบในช่วงวันที่ที่เลือก: รับเงินซ้อน (ชำระเกินยอด)
+        /// และค้างชำระ (settle ไม่ครบ) แล้วรายงานเป็นรายใบ พร้อมวิธีแก้ (ใช้เคลียร์ "เอกสารเดิม")</summary>
+        protected void btnAuditPayments_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // ช่วงวันที่: ใช้กติกาเดียวกับปุ่มค้นหา (เดือน/ปี ก่อน แล้วค่อยช่วงวันที่)
+                DateTime startDate, endDate;
+                if (ddlMonth.SelectedIndex > 0 && !string.IsNullOrEmpty(ddlYear.SelectedValue))
+                {
+                    int month = Convert.ToInt32(ddlMonth.SelectedValue);
+                    int year = Convert.ToInt32(ddlYear.SelectedValue);
+                    startDate = new DateTime(year, month, 1);
+                    endDate = startDate.AddMonths(1).AddDays(-1);
+                }
+                else
+                {
+                    startDate = Convert.ToDateTime(txtStartDate.Text);
+                    endDate = Convert.ToDateTime(txtEndDate.Text);
+                }
+
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!cfg.IsConfigured || !cfg.Enabled)
+                {
+                    ShowError("ยังไม่ได้เปิดใช้ NextAcc — ตรวจยอดชำระไม่ได้");
+                    return;
+                }
+
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                string report = null;
+                var task = System.Threading.Tasks.Task.Run(() => svc.AuditNextAccReceiptPaymentsAsync(startDate, endDate));
+                if (task.Wait(60000)) report = task.Result;
+
+                ShowError(report ?? "NextAcc ตอบช้า — ลองกดตรวจอีกครั้งในสักครู่ (ผลถูกบันทึกใน log ด้วย)");
+            }
+            catch (Exception ex)
+            {
+                ShowError("ตรวจยอดชำระไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
         private void ValidateTotal()
         {
             // Validate that sum of categories equals grand total

@@ -357,6 +357,10 @@
             <div class="search-row">
                 <asp:Button ID="btnSearch" runat="server" Text="🔍 ค้นหา" CssClass="btn-search" OnClick="btnSearch_Click" />
                 <asp:Button ID="btnExport" runat="server" Text="📄 Export CSV" CssClass="btn-export" OnClick="btnExport_Click" />
+                <asp:Button ID="btnAuditPayments" runat="server" Text="🔍 ตรวจยอดชำระ NextAcc" CssClass="btn-export"
+                    OnClick="btnAuditPayments_Click" CausesValidation="false"
+                    ToolTip="ตรวจทุกใบในช่วงวันที่: รับเงินซ้อน (ชำระเกินยอด) / ค้างชำระ (settle ไม่ครบ)"
+                    OnClientClick="this.disabled=true; this.value='⏳ กำลังตรวจ...';" UseSubmitBehavior="false" />
             </div>
         </div>
 
