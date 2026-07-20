@@ -9663,24 +9663,30 @@ namespace Take_Time_BangPhra.Integration
             string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"];
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า ReceiptFolderPath"; return result; }
 
+            // resolve doc GUID ก่อน — cache ต้องผูก GUID ด้วย ไม่ใช่แค่เลขใบเสร็จ.
+            // เหตุ (บั๊กจริง): แก้ไข = void→สร้างใหม่ "เลขใบเดิม แต่ GUID ใหม่". cache เดิมผูกเลขใบอย่างเดียว
+            // → กดดู PDF หลังแก้ยังเสิร์ฟไฟล์รุ่นก่อนแก้ (ชื่อ/รายการเดิม) ทั้งที่ NextAcc มีใบใหม่แล้ว.
+            // ผูก GUID → เอกสารใหม่ = ไฟล์ใหม่ = ดึงสดเสมอ (ไฟล์เก่าไม่ถูกเสิร์ฟอีก)
+            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+            if (docId == Guid.Empty) { result.Message = "ใบเสร็จนี้ยังไม่ได้ sync เป็นเอกสาร NextAcc"; return result; }
+
             string safeDoc = MakeSafeFileName(receiptNumber);
             string suffix = isCancelled ? "_Cancel" : "";
+            string guid8 = docId.ToString("N").Substring(0, 8);
             string folder = Path.Combine(basePath, "NextAcc", safeDoc);
-            string pdfPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
+            string fileName = safeDoc + "_" + guid8 + suffix + ".pdf";
+            string pdfPath = Path.Combine(folder, fileName);
             string relPrefix = "/Documents/Receipt/NextAcc/" + safeDoc;
 
-            // fast path: cache ยังใหม่ (ไฟล์ใหม่กว่ารายการ sync ล่าสุดของใบนี้)
+            // fast path: cache ของ GUID นี้ยังใหม่ (ไฟล์ใหม่กว่ารายการ sync ล่าสุดของใบนี้)
             if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
                 && !IsReceiptPdfCacheStale(receiptNumber, pdfPath))
             {
                 result.Found = true;
                 result.PdfLocalPath = pdfPath;
-                result.PdfRelativeUrl = relPrefix + "/" + safeDoc + suffix + ".pdf";
+                result.PdfRelativeUrl = relPrefix + "/" + fileName;
                 return result;
             }
-
-            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
-            if (docId == Guid.Empty) { result.Message = "ใบเสร็จนี้ยังไม่ได้ sync เป็นเอกสาร NextAcc"; return result; }
 
             try
             {
@@ -9692,7 +9698,7 @@ namespace Take_Time_BangPhra.Integration
                     File.WriteAllBytes(pdfPath, pdf);
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
-                    result.PdfRelativeUrl = relPrefix + "/" + safeDoc + suffix + ".pdf";
+                    result.PdfRelativeUrl = relPrefix + "/" + fileName;
                 }
                 else
                 {
