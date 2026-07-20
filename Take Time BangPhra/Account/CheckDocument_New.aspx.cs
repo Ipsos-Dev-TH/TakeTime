@@ -1409,6 +1409,7 @@ namespace Take_Time_BangPhra.Account
                     // ตามที่ NextAcc ออก (เลขที่/ยอด/รูปแบบทางการ) ไม่ใช่ PDF ที่ระบบ render เอง.
                     // smart-cache ในตัว: ครั้งแรกดึง ครั้งต่อไปเปิด local ทันที; ดึงใหม่หลัง edit/re-sync.
                     // ถ้ายังไม่ sync/ดึงไม่ได้ → ตกไปใช้ไฟล์ local เดิมด้านล่าง
+                    bool naTimedOut = false;
                     try
                     {
                         var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
@@ -1419,9 +1420,13 @@ namespace Take_Time_BangPhra.Account
                         {
                             Server.ScriptTimeout = 300;
                             var naSvc = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
-                            var naPdf = System.Threading.Tasks.Task.Run(() =>
-                                naSvc.DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel")
-                            ).GetAwaiter().GetResult();
+                            // bound 25 วิ — NextAcc ช้าต้องไม่ทำให้ผู้ใช้ค้าง; task ดึงต่อเบื้องหลัง
+                            // จนจบและเขียน cache เอง → กดใหม่รอบหน้าเปิดได้ทันที
+                            Take_Time_BangPhra.Integration.NextAccCachedDocument naPdf = null;
+                            var naTask = System.Threading.Tasks.Task.Run(() =>
+                                naSvc.DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel"));
+                            if (naTask.Wait(25000)) naPdf = naTask.Result;
+                            else naTimedOut = true;
                             if (naPdf != null && naPdf.Found && !string.IsNullOrEmpty(naPdf.PdfRelativeUrl))
                             {
                                 Response.Redirect(naPdf.PdfRelativeUrl);
@@ -1430,13 +1435,16 @@ namespace Take_Time_BangPhra.Account
 
                             // fallback ชั้น 2: การจับคู่ตอนโหลดตาราง (merge) เก็บ GUID เอกสาร NextAcc ไว้ใน
                             // DataKeys["NextAccId"] แล้ว → ดึง PDF ตรงด้วย GUID (ไม่พึ่งการ lookup จากคิว
-                            // ที่อาจหาไม่เจอ เช่น payload คนละรูปแบบ/คิวถูกล้าง)
+                            // ที่อาจหาไม่เจอ เช่น payload คนละรูปแบบ/คิวถูกล้าง). ข้ามถ้าชั้นแรก timeout
+                            // (NextAcc ช้าทั้งระบบ — ยิงซ้ำมีแต่รอเพิ่ม)
                             string rowNaId = dk?["NextAccId"]?.ToString() ?? "";
-                            if (Guid.TryParse(rowNaId, out var rowGid) && rowGid != Guid.Empty)
+                            if (!naTimedOut && Guid.TryParse(rowNaId, out var rowGid) && rowGid != Guid.Empty)
                             {
-                                var byId = System.Threading.Tasks.Task.Run(() =>
-                                    naSvc.DownloadNextAccDocumentByIdAsync(rowGid, docNum, false, docStatus == "Cancel")
-                                ).GetAwaiter().GetResult();
+                                Take_Time_BangPhra.Integration.NextAccCachedDocument byId = null;
+                                var byIdTask = System.Threading.Tasks.Task.Run(() =>
+                                    naSvc.DownloadNextAccDocumentByIdAsync(rowGid, docNum, false, docStatus == "Cancel"));
+                                if (byIdTask.Wait(15000)) byId = byIdTask.Result;
+                                else naTimedOut = true;
                                 if (byId != null && byId.Found && !string.IsNullOrEmpty(byId.PdfRelativeUrl))
                                 {
                                     Response.Redirect(byId.PdfRelativeUrl);
@@ -1448,7 +1456,7 @@ namespace Take_Time_BangPhra.Account
                             try
                             {
                                 codeInstance.Logs(conn, "AccountingSync",
-                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({naPdf?.Message ?? "unknown"}, byId={rowNaId}) → ใช้ไฟล์ local", "SYSTEM");
+                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({(naTimedOut ? "timeout" : naPdf?.Message ?? "unknown")}, byId={rowNaId}) → ใช้ไฟล์ local", "SYSTEM");
                             }
                             catch { }
                         }
@@ -1528,7 +1536,9 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    // If no file found, show error
+                    // If no file found, show error — แยกเคส NextAcc ช้า (ไฟล์กำลังเตรียมเบื้องหลัง กดใหม่ได้)
+                    if (naTimedOut)
+                        throw new Exception($"NextAcc ตอบช้า — ระบบกำลังเตรียมไฟล์ {docNum} อยู่เบื้องหลัง กรุณากดดูอีกครั้งใน 15-30 วินาที");
                     throw new Exception($"ไม่พบไฟล์ PDF สำหรับเอกสาร {docNum}\n\nตรวจสอบแล้ว:\n{string.Join("\n", filesToCheck)}");
                 }
                 else if (docType == "PAY")

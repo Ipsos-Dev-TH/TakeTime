@@ -9718,6 +9718,26 @@ namespace Take_Time_BangPhra.Integration
                 return result;
             }
 
+            // ยกระดับ cache รุ่นเก่า (ชื่อไฟล์ก่อนผูก GUID: "{safeDoc}{suffix}.pdf"): ถ้ายังไม่ stale
+            // (ใบไม่ถูกแก้/re-sync หลัง cache) = เนื้อหายังตรงกับเอกสารปัจจุบัน → copy เป็นชื่อ GUID
+            // แล้วเสิร์ฟทันที ไม่ยิง NextAcc — กันเหตุ "เปลี่ยนรูปแบบชื่อ cache แล้วทั้งระบบต้องดึงใหม่หมด"
+            // (คลิกแรกหลัง deploy จะช้า/ล้มถ้า NextAcc ช้า ทั้งที่ไฟล์เดิมยังถูกต้องอยู่บนดิสก์)
+            try
+            {
+                string legacyPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
+                if (!File.Exists(pdfPath) && File.Exists(legacyPath) && new FileInfo(legacyPath).Length > 0
+                    && !IsReceiptPdfCacheStale(receiptNumber, legacyPath))
+                {
+                    try { File.Copy(legacyPath, pdfPath, false); } catch { }
+                    string serve = File.Exists(pdfPath) ? fileName : safeDoc + suffix + ".pdf";
+                    result.Found = true;
+                    result.PdfLocalPath = Path.Combine(folder, serve);
+                    result.PdfRelativeUrl = relPrefix + "/" + serve;
+                    return result;
+                }
+            }
+            catch { }
+
             try
             {
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
@@ -9729,11 +9749,9 @@ namespace Take_Time_BangPhra.Integration
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
                     result.PdfRelativeUrl = relPrefix + "/" + fileName;
+                    return result;
                 }
-                else
-                {
-                    result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
-                }
+                result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
             }
             catch (Exception ex)
             {
@@ -9741,6 +9759,30 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"DownloadReceiptPdf: receipt={receiptNumber} {ex.Message}", "SYSTEM");
             }
+
+            // ดึงสดล้มเหลว → last-known-good: เสิร์ฟไฟล์ cache ล่าสุดของใบนี้ที่มีบนดิสก์ (ตรงชนิด
+            // ปกติ/ยกเลิก) ดีกว่าไม่แสดงอะไร — เอกสารรุ่นก่อนหน้ายังเป็นเอกสารจริงที่ NextAcc เคยออก
+            try
+            {
+                if (Directory.Exists(folder))
+                {
+                    var candidates = Directory.GetFiles(folder, safeDoc + "*.pdf")
+                        .Where(f => isCancelled == f.EndsWith("_Cancel.pdf", StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(File.GetLastWriteTime)
+                        .ToList();
+                    if (candidates.Count > 0 && new FileInfo(candidates[0]).Length > 0)
+                    {
+                        result.Found = true;
+                        result.PdfLocalPath = candidates[0];
+                        result.PdfRelativeUrl = relPrefix + "/" + Path.GetFileName(candidates[0]);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"DownloadReceiptPdf: receipt={receiptNumber} ดึงสดไม่สำเร็จ ({result.Message}) → เสิร์ฟ cache ล่าสุด {Path.GetFileName(candidates[0])}", "SYSTEM");
+                        result.Message += " (แสดงไฟล์ cache ล่าสุดแทน)";
+                        return result;
+                    }
+                }
+            }
+            catch { }
             return result;
         }
 
