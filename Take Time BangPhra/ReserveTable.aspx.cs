@@ -36,6 +36,9 @@ namespace Take_Time_BangPhra
                         Calendar1.SelectedDate = DateTime.Today;
                         Calendar1.VisibleDate = DateTime.Today;
 
+                        // เติมตัวเลือกบัญชีจ่ายคืน (modal ยกเลิกคืนเงิน) — ViewState คงค่าข้าม postback
+                        LoadRefundAccountOptions();
+
                         // Trigger the selection changed event to load today's reservations
                         Calendar1_SelectionChanged(sender, e);
                     }
@@ -523,7 +526,9 @@ namespace Take_Time_BangPhra
             Context.ApplicationInstance.CompleteRequest();
         }
 
-        private async Task CancelReservation(string reservationId, bool refund)
+        // refundPaidHowId: null/ว่าง = คืนอัตโนมัติบัญชีเดิม (void ใบเสร็จมัดจำ) / มีค่า = คืนออกบัญชีที่เลือก
+        // (คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยก) — รองรับรับธนาคารแล้วคืนเงินสด
+        private async Task CancelReservation(string reservationId, bool refund, string refundPaidHowId = null)
         {
             string status = refund ? "ยกเลิกคืนเงิน" : "ยกเลิกไม่คืนเงิน";
 
@@ -597,7 +602,10 @@ namespace Take_Time_BangPhra
 
             if (refund)
             {
-                ProcessRefund(reservationId);
+                if (string.IsNullOrEmpty(refundPaidHowId))
+                    ProcessRefund(reservationId);                       // อัตโนมัติ: void ใบเสร็จมัดจำ → กลับบัญชีเดิม
+                else
+                    ProcessRefundToChosenAccount(reservationId, refundPaidHowId);  // คืนออกบัญชีที่เลือก (ไม่ void)
             }
 
             // Sync cancellation to accounting system
@@ -770,6 +778,111 @@ namespace Take_Time_BangPhra
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"]);
 
                 ProcessReceiptFile(path, Imagespath, receiptId, uid, createdDate);
+            }
+        }
+
+        // เติมตัวเลือกบัญชีจ่ายคืนใน modal: ตัวแรก = อัตโนมัติ (บัญชีเดิม) / ที่เหลือ = Account_Paid_How
+        private void LoadRefundAccountOptions()
+        {
+            try
+            {
+                ddlRefundAccountModal.Items.Clear();
+                ddlRefundAccountModal.Items.Add(new ListItem("อัตโนมัติ (บัญชีเดิมที่รับมัดจำเข้ามา)", ""));
+                DataTable dt = DatabaseQuery(conn,
+                    "SELECT ID, Paid_How FROM Account_Paid_How ORDER BY ID");
+                if (dt != null)
+                {
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        string id = r["ID"]?.ToString();
+                        string name = r["Paid_How"]?.ToString();
+                        if (!string.IsNullOrEmpty(id))
+                            ddlRefundAccountModal.Items.Add(new ListItem($"คืนออก: {name}", id));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Accounting Sync", $"LoadRefundAccountOptions error: {ex.Message}", "SYSTEM"); } catch { }
+            }
+        }
+
+        // ยืนยันจาก modal: อ่านรหัสจอง + บัญชีที่เลือก แล้วยกเลิกคืนเงิน
+        protected async void btnConfirmRefund_Click(object sender, EventArgs e)
+        {
+            string resId = hfRefundResId.Value;
+            string paidHowId = ddlRefundAccountModal.SelectedValue;   // "" = อัตโนมัติ
+            if (string.IsNullOrEmpty(resId)) return;
+            await CancelReservation(resId, true, string.IsNullOrEmpty(paidHowId) ? null : paidHowId);
+            // รีเฟรชรายการวันที่เลือกอยู่
+            Calendar1_SelectionChanged(sender, e);
+        }
+
+        // คืนเงินออกบัญชีที่เลือก (ไม่ใช่บัญชีเดิม): คงใบเสร็จมัดจำไว้บน NextAcc (mark 'Refunded' ในระบบ)
+        // + โพสต์รายการคืนเงินแยก (Dr 21510 + กลับ VAT / Cr บัญชีที่เลือก) ผ่าน EnqueueDepositRefund.
+        // ต่างจาก ProcessRefund (auto) ที่ void ใบเสร็จ → กลับบัญชีเดิม.
+        private void ProcessRefundToChosenAccount(string reservationId, string paidHowId)
+        {
+            try
+            {
+                // แหล่งเงินที่เลือก → Nexaacc_AccountId + ชนิดวิธีจ่าย (สำหรับ label/fallback)
+                string refundAccountNexaaccId = null, paidHowName = null;
+                DataTable ph = DatabaseQuery(conn,
+                    "SELECT Paid_How, Nexaacc_AccountId FROM Account_Paid_How WHERE ID = @id",
+                    new SqlParameter("@id", paidHowId));
+                if (ph?.Rows.Count > 0)
+                {
+                    paidHowName = ph.Rows[0]["Paid_How"]?.ToString();
+                    refundAccountNexaaccId = ph.Rows[0]["Nexaacc_AccountId"]?.ToString();
+                }
+
+                // ยอดคืน = มัดจำคงค้าง (จ่ายจริง − หักในใบเสร็จแล้ว)
+                decimal refundAmt = 0; string custName = "ลูกค้า";
+                DataTable fData = DatabaseQuery(conn,
+                    @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                     WHERE Reservation_ID = r.ID AND IsDeposit = 1
+                                       AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositPaid,
+                             ISNULL((SELECT SUM(ISNULL(Deposit_Applied_Amount, 0)) FROM Account_Receipt
+                                     WHERE Reservation_ID = r.ID AND ISNULL(IsDeposit, 0) = 0
+                                       AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositApplied,
+                             ISNULL(c.FullName, c.Name) AS Name
+                      FROM Reservation r
+                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                      WHERE r.ID = @id",
+                    new SqlParameter("@id", reservationId));
+                if (fData?.Rows.Count > 0)
+                {
+                    decimal depPaid = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                    decimal depApplied = fData.Rows[0]["DepositApplied"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositApplied"]) : 0;
+                    refundAmt = depPaid - depApplied;
+                    custName = fData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
+                }
+
+                // mark ใบมัดจำเป็น 'Refunded' (ไม่ใช่ 'Cancel' → ไม่ void บน NextAcc, ใบเสร็จยังใช้ได้)
+                DatabaseInsert(conn,
+                    @"UPDATE Account_Receipt SET Status = 'Refunded'
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status = 'Normal' OR Status IS NULL)",
+                    new SqlParameter("@rid", reservationId));
+
+                if (refundAmt > 0)
+                {
+                    int resIdInt; int.TryParse(reservationId, out resIdInt);
+                    var acctCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (acctCfg.IsConfigured && acctCfg.Enabled)
+                    {
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                        long qid = sync.EnqueueDepositRefund(resIdInt, refundAmt,
+                            string.IsNullOrEmpty(paidHowName) ? "CASH" : paidHowName, custName, DateTime.Now,
+                            refundAccountNexaaccId);
+                        code2.Logs(conn, "Accounting Sync",
+                            $"CancelReservation(คืนบัญชีที่เลือก): #{reservationId} คืน {refundAmt:N2} ออกบัญชี '{paidHowName}' " +
+                            $"(nexaacc={refundAccountNexaaccId ?? "-"}) → enqueue REFUND queueId={qid} (คงใบเสร็จมัดจำ ไม่ void)", "SYSTEM");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Accounting Sync", $"ProcessRefundToChosenAccount error #{reservationId}: {ex.Message}", "SYSTEM"); } catch { }
             }
         }
 

@@ -595,10 +595,18 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapRefundToJournal(
             int reservationId, decimal refundAmount, string paymentMethod, DateTime refundDate, string customerName,
-            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false,
+            string refundAccountNexaaccId = null)
         {
             var advanceDepositAccountId = GetAccountId("ADVANCE_DEPOSIT");
-            var cashAccountId = GetPaymentMethodAccountId(paymentMethod);
+            // บัญชีจ่ายคืน (Cr): override เจาะจง (แหล่งเงินเดิม/ช่องทางที่ผู้ใช้เลือก) มาก่อน generic method mapping.
+            // ไม่ล็อก — รับผ่านธนาคารแล้วคืนเป็นเงินสดได้ (ส่ง Nexaacc_AccountId ของเงินสดมาแทน)
+            Guid cashAccountId;
+            if (!string.IsNullOrWhiteSpace(refundAccountNexaaccId)
+                && Guid.TryParse(refundAccountNexaaccId.Trim(), out var overrideAcc) && overrideAcc != Guid.Empty)
+                cashAccountId = overrideAcc;
+            else
+                cashAccountId = GetPaymentMethodAccountId(paymentMethod);
 
             var lines = new List<JournalEntryLineRequest>();
 

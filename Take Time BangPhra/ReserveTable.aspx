@@ -568,9 +568,8 @@
                                                 onclientclick="return confirm('ยืนยันการยกเลิกไม่คืนเงินหรือไม่');"/>
                                             
                                             <asp:Button ID="Button4" runat="server" Text="ยกเลิกคืนเงิน"
-                                                CommandArgument='<%# Eval("ID") %>' CommandName="CancelRefund"
                                                 CssClass="btn btn-secondary btn-sm mb-1"
-                                                onclientclick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');"/>
+                                                OnClientClick='<%# "showRefundModal(" + Eval("ID") + "); return false;" %>'/>
 
                                             <asp:Button ID="btnCheckout" runat="server" Text="เช็คเอาท์"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="Checkout"
@@ -897,5 +896,44 @@
                 }
             }, 1000);
         }
+
+        // ── ยกเลิกคืนเงิน: เลือกบัญชีที่จ่ายคืน (auto = บัญชีเดิม / เลือกช่องทางอื่นได้) ──
+        function showRefundModal(resId) {
+            document.getElementById('<%= hfRefundResId.ClientID %>').value = resId;
+            var lbl = document.getElementById('refundModalResIdLabel');
+            if (lbl) lbl.textContent = resId;
+            if (window.jQuery) { jQuery('#refundAccountModal').modal('show'); }
+            else { document.getElementById('refundAccountModal').style.display = 'block'; }
+        }
     </script>
+
+    <!-- Modal: เลือกบัญชีจ่ายคืนมัดจำ -->
+    <div class="modal fade" id="refundAccountModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header" style="background:#6d4c41; color:#fff;">
+                    <h5 class="modal-title">ยกเลิกคืนเงิน — การจอง #<span id="refundModalResIdLabel"></span></h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color:#fff;">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom:8px;">เลือกบัญชีที่ <b>จ่ายเงินคืน</b> ออก:</p>
+                    <asp:DropDownList ID="ddlRefundAccountModal" runat="server" CssClass="form-control" />
+                    <div class="help-block" style="font-size:12px; color:#777; margin-top:8px;">
+                        <b>อัตโนมัติ (บัญชีเดิม)</b> = กลับรายการใบเสร็จมัดจำ เงินคืนออกบัญชีเดิมที่รับเข้ามา (แนะนำ).<br />
+                        เลือกบัญชีเจาะจง = คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยกออกบัญชีที่เลือก
+                        (เช่น รับผ่านธนาคาร คืนเป็นเงินสด).
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <asp:HiddenField ID="hfRefundResId" runat="server" />
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">ปิด</button>
+                    <asp:Button ID="btnConfirmRefund" runat="server" Text="ยืนยันยกเลิกคืนเงิน"
+                        CssClass="btn btn-danger" OnClick="btnConfirmRefund_Click"
+                        OnClientClick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');" />
+                </div>
+            </div>
+        </div>
+    </div>
 </asp:Content>

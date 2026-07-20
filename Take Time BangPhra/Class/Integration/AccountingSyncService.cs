@@ -513,9 +513,12 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("RESERVATION", reservationId, "CLEAR_DEPOSIT_AT_CHECKOUT", payload);
         }
 
-        /// <summary>คืนเงินมัดจำ (DR ADVANCE_DEPOSIT, CR Cash/Bank) — กรณียกเลิกแล้วคืนเงิน</summary>
+        /// <summary>คืนเงินมัดจำ (DR ADVANCE_DEPOSIT, CR Cash/Bank) — กรณียกเลิกแล้วคืนเงิน.
+        /// refundAccountNexaaccId (optional): บัญชีเงินที่จ่ายคืนออกจริง (Account_Paid_How.Nexaacc_AccountId).
+        /// null/ว่าง → ProcessDepositRefund จะ auto-derive แหล่งเงินเดิมที่รับมัดจำเข้ามา (default).
+        /// ระบุ = ผู้ใช้เลือกคืนต่างช่องทาง (เช่น รับผ่านธนาคาร คืนเป็นเงินสด).</summary>
         public long EnqueueDepositRefund(int reservationId, decimal refundAmount, string paymentMethod,
-            string customerName, DateTime refundDate)
+            string customerName, DateTime refundDate, string refundAccountNexaaccId = null)
         {
             if (!_config.IsConfigured) return -1;
             if (refundAmount <= 0) return -1;
@@ -536,6 +539,8 @@ namespace Take_Time_BangPhra.Integration
                 { "customerName", customerName ?? "" },
                 { "refundDate", AcctDate(refundDate) }
             };
+            if (!string.IsNullOrEmpty(refundAccountNexaaccId))
+                payload["refundAccountId"] = refundAccountNexaaccId;
             return InsertQueue("RESERVATION", reservationId, "REFUND_DEPOSIT", payload);
         }
 
@@ -6491,13 +6496,25 @@ namespace Take_Time_BangPhra.Integration
                 return "ALREADY_POSTED";
             }
 
+            // บัญชีจ่ายคืน (Cr): เลือกอัตโนมัติ = แหล่งเงินเดิมที่รับมัดจำเข้ามา (ไม่ล็อก — ผู้ใช้ override ได้)
+            //   1) payload refundAccountId (ผู้ใช้เลือกช่องทางอื่น เช่น รับธนาคาร คืนสด) → ใช้ตัวนั้น
+            //   2) ไม่ระบุ → auto-derive จากใบมัดจำ (Account_Paid_How.Nexaacc_AccountId) → เงินออกบัญชีเดิม
+            //   3) หาไม่เจอ → fallback generic method mapping (พฤติกรรมเดิม)
+            string refundAccountId = p.ContainsKey("refundAccountId") ? p["refundAccountId"]?.ToString() : null;
+            string resolvedRefundAccount = !string.IsNullOrWhiteSpace(refundAccountId)
+                ? refundAccountId.Trim()
+                : LookupDepositSourceAccountId(reservationId);
+
             _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessDepositRefund: resId={reservationId} amount={refundAmount} method={paymentMethod}", "SYSTEM");
+                $"ProcessDepositRefund: resId={reservationId} amount={refundAmount} method={paymentMethod} " +
+                $"refundAccount={(resolvedRefundAccount ?? "(generic method mapping)")}" +
+                $"{(!string.IsNullOrWhiteSpace(refundAccountId) ? " [override เลือกช่องทางอื่น]" : " [auto=แหล่งเงินเดิม]")}", "SYSTEM");
 
             // ส่งโหมด VAT มัดจำปัจจุบัน (CHECKOUT = gross / RECEIPT = แยก net+VAT) ให้ mapper กลับขาให้ตรง
             var journal = _mapper.MapRefundToJournal(reservationId, refundAmount, paymentMethod, refundDate, customerName,
                 hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
-                deferOutputVat: _config.IsDepositOutputVatDeferred);
+                deferOutputVat: _config.IsDepositOutputVatDeferred,
+                refundAccountNexaaccId: resolvedRefundAccount);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid refundId = RequireValidDocId(result?.data?.Id, $"DepositRefund resId={reservationId}");
             await SafePostJournalAsync(refundId);
@@ -6876,6 +6893,41 @@ namespace Take_Time_BangPhra.Integration
             return 0m;
         }
 
+        /// <summary>แหล่งเงิน (Nexaacc_AccountId) ที่รับมัดจำเข้ามาจริง — ดึงจาก Paid_Type ของใบมัดจำล่าสุด
+        /// (Account_Receipt เก็บชื่อวิธีรับเงินใน Paid_Type ไม่ใช่ FK) แล้ว resolve ผ่าน Account_Paid_How.
+        /// ใช้เป็น default บัญชีจ่ายคืน (Cr) ตอนคืนเงินมัดจำ ให้เงินออกจากบัญชีเดิมที่รับเข้ามา
+        /// (แทน generic method mapping). ไม่พบ/ไม่ได้ map → null (ปล่อย mapper ใช้ generic).</summary>
+        private string LookupDepositSourceAccountId(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Paid_Type
+                      FROM Account_Receipt
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1
+                        AND (Status = 'Normal' OR Status IS NULL)
+                        AND Paid_Type IS NOT NULL AND LTRIM(RTRIM(Paid_Type)) <> ''
+                      ORDER BY Created_Date DESC",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt?.Rows.Count > 0)
+                {
+                    string paidType = dt.Rows[0]["Paid_Type"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(paidType))
+                    {
+                        // resolve ชื่อวิธีรับเงิน → Account_Paid_How.Nexaacc_AccountId (บัญชีเจาะจง)
+                        string acc = LookupPaidHowAccountId(paidType.Trim());
+                        if (!string.IsNullOrWhiteSpace(acc)) return acc.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupDepositSourceAccountId failed resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
         /// <summary>ผลตรวจว่ามัดจำของ Booking ถูกบันทึกเป็นหนี้สินบน NextAcc แล้วหรือยัง</summary>
         private struct DepositBookedState
         {
@@ -6902,7 +6954,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 string statusFilter = includeCancelled
-                    ? "(Status IN ('Normal','Cancel','Forfeit') OR Status IS NULL)"
+                    ? "(Status IN ('Normal','Cancel','Forfeit','Refunded') OR Status IS NULL)"
                     : "(Status = 'Normal' OR Status IS NULL)";
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ID, ISNULL(Total_Amount, 0) AS Amt, Nexaacc_Receipt_Payment_Id AS Marker
