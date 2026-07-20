@@ -323,7 +323,7 @@
                 </div>
                 <div class="config-item">
                     <label>
-                        <input type="checkbox" id="cfgTaxReceiptSingleDoc" />
+                        <input type="checkbox" id="cfgTaxReceiptSingleDoc" onchange="syncCashSaleToggles()" />
                         ออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" (ขายสด B2B)
                     </label>
                     <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
@@ -337,7 +337,7 @@
                 </div>
                 <div class="config-item">
                     <label>
-                        <input type="checkbox" id="cfgCashSaleDeposit" />
+                        <input type="checkbox" id="cfgCashSaleDeposit" onchange="syncCashSaleToggles()" />
                         └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย (Option B — TakeTime โพสต์ JV เอง)
                     </label>
                     <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
@@ -941,6 +941,7 @@
                 document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
                 document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
                 document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
+                syncCashSaleToggles();
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -968,6 +969,18 @@
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
+        }
+
+        // เคส "หักมัดจำในใบเดียว" ต้องเปิด "ออกใบเดียว" ก่อนเสมอ (โค้ด backend gate อยู่แล้ว
+        // แต่บังคับใน UI ให้ชัด กันติ๊กหลอกตา); Option A ยังล็อกไว้ (disabled คงเดิม).
+        function syncCashSaleToggles() {
+            var single = document.getElementById('cfgTaxReceiptSingleDoc').checked;
+            var dep = document.getElementById('cfgCashSaleDeposit');
+            var nativeA = document.getElementById('cfgCashSaleDepositNativeA');
+            dep.disabled = !single;
+            if (!single) { dep.checked = false; }
+            // Option A ขึ้นกับทั้ง single + deposit — และยังล็อก (disabled) รอ NextAcc
+            if (!single || !dep.checked) { nativeA.checked = false; }
         }
 
         function saveConfig() {
