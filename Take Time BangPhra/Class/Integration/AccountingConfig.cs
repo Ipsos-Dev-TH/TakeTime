@@ -242,6 +242,11 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>แนบ XML E-Tax ในอีเมล (ลูกค้าธุรกิจอาจต้องการ)</summary>
         public bool EtaxEmailAttachXml => GetConfig("Etax_EmailAttachXml", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>สำเนา (CC) เริ่มต้นของอีเมล E-Tax (คั่นหลายอีเมลด้วย , หรือ ;) — เติมในหน้าส่งให้ผู้ใช้แก้ได้.
+        /// ว่าง → fallback ไป Email_CC ใน AppSettings (CC กลางของระบบ)</summary>
+        public string EtaxEmailCc => GetConfig("Etax_EmailCc",
+            System.Configuration.ConfigurationManager.AppSettings["Email_CC"] ?? "");
+
         /// <summary>
         /// ถ้าส่งอีเมลผ่าน NextAcc ไม่สำเร็จ → ดาวน์โหลด PDF/XML จาก URL ของ NextAcc แล้วส่งผ่าน SMTP ของ TakeTime
         /// </summary>

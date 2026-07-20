@@ -390,6 +390,11 @@
                     <div class="help-text">ตัวแปร: {ReceiptNumber}, {GuestName}, {Amount}, {Date}</div>
                 </div>
                 <div class="config-item">
+                    <label>สำเนา (CC) เริ่มต้น — อีเมล E-Tax</label>
+                    <input type="text" id="cfgEtaxEmailCc" placeholder="acc@company.com, boss@company.com" />
+                    <div class="help-text">เติมอัตโนมัติในหน้าส่ง e-Tax (แก้รายใบได้) — คั่นหลายอีเมลด้วย , หรือ ;</div>
+                </div>
+                <div class="config-item">
                     <label>เนื้อหาอีเมล E-Tax</label>
                     <textarea id="cfgEtaxEmailBody" rows="4" style="width:100%;" placeholder="เรียน {GuestName}&#10;&#10;กรุณาดาวน์โหลดใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}..."></textarea>
                 </div>
@@ -926,6 +931,7 @@
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSendEmail').value = cfg.etaxAutoSendEmail ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailSubject').value = cfg.etaxEmailSubject || '';
+                document.getElementById('cfgEtaxEmailCc').value = cfg.etaxEmailCc || '';
                 document.getElementById('cfgEtaxEmailBody').value = cfg.etaxEmailBody || '';
                 document.getElementById('cfgEtaxEmailAttachPdf').value = cfg.etaxEmailAttachPdf ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
@@ -989,6 +995,7 @@
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
                 etaxAutoSendEmail: document.getElementById('cfgEtaxAutoSendEmail').value,
                 etaxEmailSubject: document.getElementById('cfgEtaxEmailSubject').value,
+                etaxEmailCc: document.getElementById('cfgEtaxEmailCc').value,
                 etaxEmailBody: document.getElementById('cfgEtaxEmailBody').value,
                 etaxEmailAttachPdf: document.getElementById('cfgEtaxEmailAttachPdf').value,
                 etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value,

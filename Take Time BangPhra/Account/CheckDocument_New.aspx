@@ -516,6 +516,16 @@
                                 UseSubmitBehavior="false" />
                         </ItemTemplate>
                     </asp:TemplateField>
+                    <asp:TemplateField HeaderText="e-Tax">
+                        <ItemTemplate>
+                            <asp:Button ID="btnSendEtax" runat="server" Text="📧 ส่ง e-Tax"
+                                CommandName="sendetax"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ส่งใบกำกับภาษีอิเล็กทรอนิกส์ทางอีเมล (เปิดหน้าตรวจก่อนส่ง)"
+                                Visible="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
                 </Columns>
             </asp:GridView>
         </div>

@@ -752,6 +752,13 @@ namespace Take_Time_BangPhra.Account
                 // เพื่อดาวน์โหลด PDF ส่งบัญชีได้ครบ เลขที่เอกสารไม่ขาดช่วง. ล้มเหลว = คงตาราง local เดิม.
                 if (dt != null) MergeNextAccReceiptDocs(dt, startDate, endDate);
 
+                // โหลด set ใบเสร็จที่มี e-Tax แล้ว (โชว์ปุ่ม "ส่ง e-Tax" เฉพาะใบพวกนี้)
+                try
+                {
+                    _etaxReceipts = new AccountingSyncService(conn).GetReceiptsWithEtax(startDate, endDate);
+                }
+                catch { _etaxReceipts = new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+
                 // Debug: Add message to date range label (ALWAYS execute this)
                 if (dt != null && dt.Rows.Count > 0)
                 {
@@ -1677,6 +1684,22 @@ namespace Take_Time_BangPhra.Account
                 return;
             }
 
+            // ปุ่ม "📧 ส่ง e-Tax" — เปิดหน้าตรวจ/ส่งอีเมล (pre-fill ผู้รับ/CC/หัวข้อ/เนื้อหา)
+            if (e.CommandName == "sendetax")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    var dkE = gvDetails.DataKeys[rowIndex];
+                    string docNum = dkE?["ID"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสาร"); return; }
+                    Response.Redirect("/Account/SendEtax?receipt=" + Server.UrlEncode(docNum));
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception ex) { ShowError("เปิดหน้าส่ง e-Tax ไม่สำเร็จ: " + ex.Message); }
+                return;
+            }
+
             // ปุ่ม "🔄 ดึงล่าสุด" — บังคับดึง PDF สดจาก NextAcc ข้าม cache ทุกชั้น (ใช้หลังแก้ไข/
             // ยกเลิกเอกสารแล้วอยากได้ไฟล์รุ่นปัจจุบันทันที ไม่รอ cache หมดอายุ)
             if (e.CommandName == "refreshpdf")
@@ -2015,6 +2038,7 @@ namespace Take_Time_BangPhra.Account
         // ──────────────────────────────────────────────
 
         private Dictionary<string, DataRow> _syncStatusCache;
+        private HashSet<string> _etaxReceipts;   // เลขใบเสร็จที่มี e-Tax แล้ว (ในช่วงวันที่) → โชว์ปุ่มส่ง e-Tax
 
         private void LoadSyncStatusCache()
         {
@@ -2151,6 +2175,11 @@ namespace Take_Time_BangPhra.Account
                 lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
                 btnSync.Visible = true;
             }
+
+            // ปุ่ม "📧 ส่ง e-Tax" — โชว์เฉพาะใบที่มี e-Tax แล้ว (local rows; NextAcc-only ไม่มีใบในระบบ return ไปก่อนแล้ว)
+            var btnEtax = e.Row.FindControl("btnSendEtax") as Button;
+            if (btnEtax != null)
+                btnEtax.Visible = _etaxReceipts != null && !string.IsNullOrEmpty(docId) && _etaxReceipts.Contains(docId);
         }
 
         private void HandleSyncDocument(string docId)

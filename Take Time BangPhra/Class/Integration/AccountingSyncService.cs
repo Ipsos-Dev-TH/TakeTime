@@ -1606,6 +1606,131 @@ namespace Take_Time_BangPhra.Integration
             return (false, $"ส่งอีเมลไม่สำเร็จ: {msg}");
         }
 
+        /// <summary>ข้อมูลสำหรับหน้า "ส่ง e-Tax" — เติมผู้รับ/CC/หัวข้อ/เนื้อหา (template แทนค่าแล้ว) ให้ผู้ใช้ตรวจก่อนส่ง</summary>
+        public class EtaxComposeInfo
+        {
+            public bool HasEtax { get; set; }
+            public string Message { get; set; }
+            public string ReceiptNumber { get; set; }
+            public string ToEmail { get; set; }
+            public string CcEmail { get; set; }
+            public string Subject { get; set; }
+            public string Body { get; set; }
+            public bool AttachPdf { get; set; }
+            public bool AttachXml { get; set; }
+            public string GuestName { get; set; }
+            public decimal Amount { get; set; }
+            public string PdfUrl { get; set; }   // ลิงก์ดูใบ (จาก log) — เผื่อกดพรีวิวก่อนส่ง
+        }
+
+        /// <summary>เตรียมข้อมูลหน้าส่ง e-Tax ของใบเสร็จ — คืน HasEtax=false ถ้ายังไม่มี e-Tax</summary>
+        public EtaxComposeInfo GetEtaxComposeInfo(string receiptNumber)
+        {
+            var info = new EtaxComposeInfo { ReceiptNumber = receiptNumber, AttachPdf = _config.EtaxEmailAttachPdf, AttachXml = _config.EtaxEmailAttachXml, CcEmail = _config.EtaxEmailCc };
+            if (string.IsNullOrEmpty(receiptNumber)) { info.Message = "ไม่มีเลขที่ใบเสร็จ"; return info; }
+
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1 Nexaacc_Etax_Id, Reservation_ID, Pdf_Url FROM Accounting_ETax_Log
+                  WHERE Receipt_Number = @num AND Nexaacc_Etax_Id IS NOT NULL
+                  ORDER BY ID DESC",
+                new Dictionary<string, object> { { "@num", receiptNumber } });
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                info.Message = "ใบนี้ยังไม่มี e-Tax (ยังไม่สร้าง/ยังไม่สำเร็จ)";
+                return info;
+            }
+
+            int resId = dt.Rows[0]["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Reservation_ID"]) : 0;
+            info.HasEtax = true;
+            info.GuestName = LookupGuestName(resId);
+            info.Amount = LookupReceiptAmount(receiptNumber);
+            info.ToEmail = LookupCustomerEmail(resId);
+            info.Subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, info.GuestName, info.Amount);
+            info.Body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, info.GuestName, info.Amount);
+            if (dt.Table.Columns.Contains("Pdf_Url") && dt.Rows[0]["Pdf_Url"] != DBNull.Value)
+                info.PdfUrl = dt.Rows[0]["Pdf_Url"].ToString();
+            return info;
+        }
+
+        /// <summary>ส่ง e-Tax ตามที่ผู้ใช้ตรวจ/แก้ในหน้าส่ง (ผู้รับ + CC + หัวข้อ + เนื้อหา + ตัวเลือกแนบ) —
+        /// ผ่าน SMTP ของ TakeTime (รองรับ CC ที่ NextAcc endpoint ไม่มี) พร้อมแนบ PDF/XML จาก NextAcc</summary>
+        public async Task<(bool success, string message)> SendEtaxEmailComposedAsync(
+            string receiptNumber, string toEmail, string ccEmail, string subject, string body,
+            bool attachPdf, bool attachXml)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return (false, "ไม่มีเลขที่ใบเสร็จ");
+            if (string.IsNullOrWhiteSpace(toEmail) || !toEmail.Contains("@")) return (false, "อีเมลผู้รับไม่ถูกต้อง");
+
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1 ID, Nexaacc_Etax_Id FROM Accounting_ETax_Log
+                  WHERE Receipt_Number = @num AND Nexaacc_Etax_Id IS NOT NULL ORDER BY ID DESC",
+                new Dictionary<string, object> { { "@num", receiptNumber } });
+            if (dt == null || dt.Rows.Count == 0) return (false, "ใบนี้ยังไม่มี e-Tax");
+            long logId = Convert.ToInt64(dt.Rows[0]["ID"]);
+            Guid etaxId = (Guid)dt.Rows[0]["Nexaacc_Etax_Id"];
+
+            try
+            {
+                var attachments = new List<System.Net.Mail.Attachment>();
+                var streams = new List<MemoryStream>();
+                EtaxInvoiceResponse etax = null;
+                try { etax = (await _apiClient.GetEtaxAsync(etaxId))?.data; } catch { }
+
+                if (etax != null && attachPdf && !string.IsNullOrEmpty(etax.PdfUrl))
+                {
+                    byte[] pdf = await _apiClient.DownloadFileAsync(etax.PdfUrl);
+                    if (pdf != null && pdf.Length > 0)
+                    { var ms = new MemoryStream(pdf); streams.Add(ms); attachments.Add(new System.Net.Mail.Attachment(ms, $"{receiptNumber}_etax.pdf", "application/pdf")); }
+                }
+                if (etax != null && attachXml && !string.IsNullOrEmpty(etax.XmlUrl))
+                {
+                    byte[] xml = await _apiClient.DownloadFileAsync(etax.XmlUrl);
+                    if (xml != null && xml.Length > 0)
+                    { var ms = new MemoryStream(xml); streams.Add(ms); attachments.Add(new System.Net.Mail.Attachment(ms, $"{receiptNumber}_etax.xml", "application/xml")); }
+                }
+
+                string htmlBody = (body ?? "").Replace("\r\n", "\n").Replace("\n", "<br/>");
+                var smtp = new Take_Time_BangPhra.Services.EmailService();
+                smtp.SendEmail(toEmail.Trim(), ccEmail, subject ?? "", htmlBody, attachments.Count > 0 ? attachments.ToArray() : null);
+                foreach (var ms in streams) ms.Dispose();
+
+                MarkEtaxEmailSent(logId, $"{toEmail}{(string.IsNullOrWhiteSpace(ccEmail) ? "" : " cc:" + ccEmail)} via MANUAL_SMTP");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SendEtaxComposed: receipt={receiptNumber} → {toEmail} cc={ccEmail} แนบ {attachments.Count} ไฟล์", "SYSTEM");
+                return (true, $"ส่งอีเมลไปยัง {toEmail}{(string.IsNullOrWhiteSpace(ccEmail) ? "" : " (CC " + ccEmail + ")")} สำเร็จ — แนบ {attachments.Count} ไฟล์");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"SendEtaxComposed failed receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                return (false, "ส่งอีเมลไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
+        /// <summary>คืน set ของเลขใบเสร็จที่มี e-Tax แล้ว (ในช่วงวันที่) — หน้า CheckDocument ใช้โชว์ปุ่ม "ส่ง e-Tax"</summary>
+        public HashSet<string> GetReceiptsWithEtax(DateTime fromDate, DateTime toDate)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT DISTINCT Receipt_Number FROM Accounting_ETax_Log
+                      WHERE Nexaacc_Etax_Id IS NOT NULL
+                        AND CAST(Created_Date AS DATE) BETWEEN CAST(@f AS DATE) AND CAST(@t AS DATE)",
+                    new Dictionary<string, object> { { "@f", fromDate }, { "@t", toDate } });
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        string n = r["Receipt_Number"]?.ToString();
+                        if (!string.IsNullOrEmpty(n)) set.Add(n);
+                    }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"GetReceiptsWithEtax failed: {ex.Message}", "SYSTEM");
+            }
+            return set;
+        }
+
         private Guid LookupNexaaccDocIdByReceipt(string receiptNumber)
         {
             try

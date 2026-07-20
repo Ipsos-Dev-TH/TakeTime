@@ -86,6 +86,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
                     { "etaxAutoSendEmail", config.IsEtaxAutoSendEmail },
                     { "etaxEmailSubject", config.EtaxEmailSubject },
+                    { "etaxEmailCc", config.EtaxEmailCc },
                     { "etaxEmailBody", config.EtaxEmailBody },
                     { "etaxEmailAttachPdf", config.EtaxEmailAttachPdf },
                     { "etaxEmailAttachXml", config.EtaxEmailAttachXml },
@@ -295,6 +296,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
                 if (data.ContainsKey("etaxAutoSendEmail")) config.SetConfig("Etax_AutoSendEmail", BoolToFlag(data["etaxAutoSendEmail"]));
                 if (data.ContainsKey("etaxEmailSubject")) config.SetConfig("Etax_EmailSubject", data["etaxEmailSubject"]?.ToString() ?? "");
+                if (data.ContainsKey("etaxEmailCc")) config.SetConfig("Etax_EmailCc", data["etaxEmailCc"]?.ToString() ?? "");
                 if (data.ContainsKey("etaxEmailBody")) config.SetConfig("Etax_EmailBody", data["etaxEmailBody"]?.ToString() ?? "");
                 if (data.ContainsKey("etaxEmailAttachPdf")) config.SetConfig("Etax_EmailAttachPdf", data["etaxEmailAttachPdf"]?.ToString() ?? "true");
                 if (data.ContainsKey("etaxEmailAttachXml")) config.SetConfig("Etax_EmailAttachXml", data["etaxEmailAttachXml"]?.ToString() ?? "false");

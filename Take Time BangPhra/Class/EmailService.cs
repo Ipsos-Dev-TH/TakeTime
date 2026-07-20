@@ -29,6 +29,12 @@ namespace Take_Time_BangPhra.Services
 
         public void SendEmail(string to, string subject, string body, Attachment[] attachments = null)
         {
+            SendEmail(to, null, subject, body, attachments);
+        }
+
+        /// <summary>ส่งอีเมลพร้อมระบุ CC เอง (คั่นหลายอีเมลด้วย , หรือ ;). null/ว่าง → ใช้ CC จาก AppSettings เดิม</summary>
+        public void SendEmail(string to, string cc, string subject, string body, Attachment[] attachments = null)
+        {
             using (MailMessage mail = new MailMessage(_fromEmail, to))
             using (SmtpClient client = new SmtpClient(_smtpServer, _port))
             {
@@ -36,9 +42,16 @@ namespace Take_Time_BangPhra.Services
                 client.UseDefaultCredentials = _useDefaultCredentials;
                 client.Credentials = new NetworkCredential(_fromEmail, _password);
 
-                if (!string.IsNullOrEmpty(_ccEmail))
+                // CC ที่ระบุมาเอง (หน้าส่ง e-Tax) — ถ้าไม่ระบุ fallback CC กลางจาก AppSettings
+                string ccToUse = !string.IsNullOrWhiteSpace(cc) ? cc : _ccEmail;
+                if (!string.IsNullOrWhiteSpace(ccToUse))
                 {
-                    mail.CC.Add(_ccEmail);
+                    foreach (var addr in ccToUse.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string a = addr.Trim();
+                        if (a.Length > 0 && a.Contains("@"))
+                            try { mail.CC.Add(a); } catch { }
+                    }
                 }
 
                 mail.Subject = subject;
