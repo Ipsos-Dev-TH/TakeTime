@@ -6459,10 +6459,45 @@ namespace Take_Time_BangPhra.Integration
             if (refundAmount <= 0)
                 throw new ArgumentException($"ProcessDepositRefund: refundAmount ต้อง > 0 (ได้ {refundAmount}) reservation #{reservationId}");
 
+            // RE-COMPUTE ณ เวลา process: คืนได้ไม่เกิน "หนี้สินมัดจำที่ยังค้างบน NextAcc"
+            // = ยอด booked จริง (marker-based, รวมใบที่ถูกตั้ง Cancel ตอนยกเลิก — ReservationService
+            // ตั้งสถานะก่อนคิวรัน) − ส่วนที่หักในใบเสร็จไปแล้ว. กัน 21510 ติดลบจากคืนเกิน/คืนซ้ำ/
+            // คืนมัดจำที่ไม่เคย sync ขึ้น NextAcc (ไม่มีหนี้สินให้กลับ). ใบ marker='VOIDED' ไม่นับ
+            // (void cascade กลับ 21510 แล้ว).
+            var rBooked = VerifyDepositBookedOnNextAcc(reservationId, includeCancelled: true);
+            decimal rAlreadyApplied = LookupDepositAppliedForReservation(reservationId);
+            decimal rOutstanding = rBooked.BookedAmount - rAlreadyApplied;
+            if (refundAmount > rOutstanding)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositRefund: payload={refundAmount} แต่หนี้สินมัดจำค้างบน NextAcc={rOutstanding} " +
+                    $"(booked {rBooked.BookedAmount} − หักในใบเสร็จแล้ว {rAlreadyApplied}) — ใช้ค่าคงค้าง", "SYSTEM");
+                refundAmount = rOutstanding;
+            }
+            if (refundAmount <= 0.01m)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositRefund: ไม่มีหนี้สินมัดจำค้างบน NextAcc ให้กลับ — skip reservation #{reservationId} " +
+                    $"(booked={rBooked.BookedAmount}, applied={rAlreadyApplied}, unsynced={rBooked.UnsyncedReceipts.Count})", "SYSTEM");
+                return "SKIPPED_NO_BALANCE";
+            }
+
+            // idempotent: JE คืนเงินใช้ Reference RES-{id}-REF คงที่ — retry หลัง create สำเร็จแต่ post fail
+            // จะไม่สร้าง JE ซ้ำ (CreateJournalAsync ไม่ dedupe เอง)
+            if (await JournalExistsByReferenceAsync($"RES-{reservationId}-REF"))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositRefund: JE คืนเงิน RES-{reservationId}-REF มีอยู่แล้วบน NextAcc — skip (idempotent)", "SYSTEM");
+                return "ALREADY_POSTED";
+            }
+
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositRefund: resId={reservationId} amount={refundAmount} method={paymentMethod}", "SYSTEM");
 
-            var journal = _mapper.MapRefundToJournal(reservationId, refundAmount, paymentMethod, refundDate, customerName);
+            // ส่งโหมด VAT มัดจำปัจจุบัน (CHECKOUT = gross / RECEIPT = แยก net+VAT) ให้ mapper กลับขาให้ตรง
+            var journal = _mapper.MapRefundToJournal(reservationId, refundAmount, paymentMethod, refundDate, customerName,
+                hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                deferOutputVat: _config.IsDepositOutputVatDeferred);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid refundId = RequireValidDocId(result?.data?.Id, $"DepositRefund resId={reservationId}");
             await SafePostJournalAsync(refundId);
@@ -6487,30 +6522,45 @@ namespace Take_Time_BangPhra.Integration
             if (forfeitAmount <= 0)
                 throw new ArgumentException($"ProcessDepositForfeit: forfeitAmount ต้อง > 0 (ได้ {forfeitAmount}) reservation #{reservationId}");
 
-            // RE-COMPUTE ณ เวลา process (mirror ProcessDepositClearing): ริบได้ไม่เกิน
-            // "มัดจำคงค้าง" = มัดจำที่จ่ายจริง − ส่วนที่ถูกหักในใบเสร็จไปแล้ว (Deposit_Applied_Amount)
-            // ไม่งั้นเคสมัดจำ 1,070 ใช้ไป 500 แล้วยกเลิกไม่คืนเงิน จะ Dr 21712 ซ้ำ 500 (over-clear)
-            decimal fActualDeposit = LookupActualDepositPaid(reservationId);
+            // RE-COMPUTE ณ เวลา process: ริบได้ไม่เกิน "หนี้สินมัดจำที่ยังค้างบน NextAcc"
+            // = ยอด booked จริง (marker-based) − ส่วนที่ถูกหักในใบเสร็จไปแล้ว (Deposit_Applied_Amount)
+            // กัน over-clear (มัดจำ 1,070 ใช้ไป 500 → ริบได้แค่ 570) และกันริบมัดจำที่ไม่เคยขึ้น NextAcc.
+            // ⚠ ต้อง includeCancelled: CancelReservationWithoutRefund ตั้ง Status='Forfeit' บนใบมัดจำ
+            // "ก่อน" enqueue → LookupActualDepositPaid (กรอง Normal) เห็น 0 → เดิม skip ทุกครั้ง
+            // → JE ริบไม่เคยโพสต์ → 21510 ค้างบน NextAcc ถาวร (บั๊กที่แก้ในรอบนี้)
+            var fBooked = VerifyDepositBookedOnNextAcc(reservationId, includeCancelled: true);
             decimal fAlreadyApplied = LookupDepositAppliedForReservation(reservationId);
-            decimal outstanding = fActualDeposit - fAlreadyApplied;
+            decimal outstanding = fBooked.BookedAmount - fAlreadyApplied;
             if (forfeitAmount > outstanding)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositForfeit: payload={forfeitAmount} แต่มัดจำคงค้าง={outstanding} " +
-                    $"(จ่ายจริง {fActualDeposit} − หักในใบเสร็จแล้ว {fAlreadyApplied}) — ใช้ค่าคงค้าง", "SYSTEM");
+                    $"ProcessDepositForfeit: payload={forfeitAmount} แต่หนี้สินมัดจำค้างบน NextAcc={outstanding} " +
+                    $"(booked {fBooked.BookedAmount} − หักในใบเสร็จแล้ว {fAlreadyApplied}) — ใช้ค่าคงค้าง", "SYSTEM");
                 forfeitAmount = outstanding;
             }
             if (forfeitAmount <= 0.01m)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessDepositForfeit: ไม่มีมัดจำคงค้างให้ริบ — skip reservation #{reservationId}", "SYSTEM");
+                    $"ProcessDepositForfeit: ไม่มีหนี้สินมัดจำค้างบน NextAcc ให้ริบ — skip reservation #{reservationId} " +
+                    $"(booked={fBooked.BookedAmount}, applied={fAlreadyApplied}, unsynced={fBooked.UnsyncedReceipts.Count})", "SYSTEM");
                 return "SKIPPED_NO_BALANCE";
+            }
+
+            // idempotent: JE ริบใช้ Reference RES-{id}-FORFEIT คงที่ — retry ไม่สร้างซ้ำ
+            if (await JournalExistsByReferenceAsync($"RES-{reservationId}-FORFEIT"))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessDepositForfeit: JE ริบ RES-{reservationId}-FORFEIT มีอยู่แล้วบน NextAcc — skip (idempotent)", "SYSTEM");
+                return "ALREADY_POSTED";
             }
 
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessDepositForfeit: resId={reservationId} amount={forfeitAmount} reason={reason}", "SYSTEM");
 
-            var journal = _mapper.MapForfeitDepositToJournal(reservationId, forfeitAmount, customerName, forfeitDate, reason);
+            // ส่งโหมด VAT มัดจำปัจจุบัน: RECEIPT → 21510 ถือ net (แยกขา VAT ให้ตรง), CHECKOUT → gross เดิม
+            var journal = _mapper.MapForfeitDepositToJournal(reservationId, forfeitAmount, customerName, forfeitDate, reason,
+                hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                deferOutputVat: _config.IsDepositOutputVatDeferred);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid forfeitId = RequireValidDocId(result?.data?.Id, $"DepositForfeit resId={reservationId}");
             await SafePostJournalAsync(forfeitId);
@@ -6841,15 +6891,23 @@ namespace Take_Time_BangPhra.Integration
         ///   APR:/ADJ:/GUID สุดท้าย = อนุมัติ+โพสต์แล้ว (booked) | DOC: = สร้างแล้วรออนุมัติ (pending)
         ///   null + ยังมีคิวค้าง = pending | null + ไม่มีคิว = ยัง sync ไม่สำเร็จ (unsynced) | VOIDED = ข้าม
         /// </summary>
-        private DepositBookedState VerifyDepositBookedOnNextAcc(int reservationId)
+        private DepositBookedState VerifyDepositBookedOnNextAcc(int reservationId, bool includeCancelled = false)
         {
+            // includeCancelled: ใช้โดย refund/forfeit — ตอนยกเลิกการจอง ReservationService ตั้ง
+            // Status='Cancel'/'Forfeit' บนใบมัดจำ "ก่อน" คิวประมวลผล → ถ้ากรองเฉพาะ Normal จะเห็น
+            // มัดจำ = 0 ทั้งที่หนี้สิน 21510 ยังค้างบน NextAcc (การยกเลิกไม่ได้ enqueue VOID_RECEIPT —
+            // ตัวกลับคือ JE refund/forfeit นี่แหละ). marker 'VOIDED' ยังถูกข้ามเสมอ (void จริงบน NextAcc
+            // = cascade กลับ 21510 ให้แล้ว ห้ามนับซ้ำ)
             var state = new DepositBookedState { UnsyncedReceipts = new System.Collections.Generic.List<string>() };
             try
             {
+                string statusFilter = includeCancelled
+                    ? "(Status IN ('Normal','Cancel','Forfeit') OR Status IS NULL)"
+                    : "(Status = 'Normal' OR Status IS NULL)";
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT ID, ISNULL(Total_Amount, 0) AS Amt, Nexaacc_Receipt_Payment_Id AS Marker
                       FROM Account_Receipt
-                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status = 'Normal' OR Status IS NULL)",
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND " + statusFilter,
                     new Dictionary<string, object> { { "@rid", reservationId } });
                 if (dt != null)
                 {
