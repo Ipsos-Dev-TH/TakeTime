@@ -81,6 +81,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "autoReconcileDeposit", config.IsAutoReconcileDeposit },
                     { "taxReceiptSingleDoc", config.IsTaxReceiptSingleDoc },
                     { "cashSaleDeposit", config.IsCashSaleDepositEnabled },
+                    { "cashSaleDepositNativeA", config.IsCashSaleDepositNativeA },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -291,6 +292,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("taxReceiptSingleDoc")) config.SetConfig("Nexaacc_TaxReceipt_SingleDoc", BoolToFlag(data["taxReceiptSingleDoc"]));
                 // ⚠⚠ เปิดได้เมื่อ NextAcc รองรับ deposit fields บน isCashSale แล้วเท่านั้น (หักมัดจำในใบเดียว)
                 if (data.ContainsKey("cashSaleDeposit")) config.SetConfig("Nexaacc_CashSale_Deposit", BoolToFlag(data["cashSaleDeposit"]));
+                // ⚠⚠ Option A (NextAcc native drives) — เปิดได้เมื่อ NextAcc ต่อสาย reverse 21510 แล้วเท่านั้น
+                if (data.ContainsKey("cashSaleDepositNativeA")) config.SetConfig("Nexaacc_CashSale_Deposit_NativeA", BoolToFlag(data["cashSaleDepositNativeA"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));

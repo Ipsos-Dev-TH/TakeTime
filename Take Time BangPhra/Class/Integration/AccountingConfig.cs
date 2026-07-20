@@ -164,6 +164,17 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_CashSale_Deposit", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// โหมดหักมัดจำบนใบขายสด (เมื่อ IsCashSaleDepositEnabled):
+        ///   true (Option A, NextAcc native) = ส่ง depositAppliedDrivesJournal=true → NextAcc ลง Dr 21510
+        ///     ใน JE ของใบเอง (JE เดียว ไม่มี JV แยก สะอาดกว่า). ⚠ ต้องใช้ NextAcc รุ่นที่ต่อสาย reverse
+        ///     21510/21913 ใน AutoPost ของ integration invoice แล้วเท่านั้น — ไม่งั้น 21510 ไม่ล้าง GL พัง.
+        ///   false (Option B, default) = TakeTime โพสต์ JV กลับมัดจำเอง (Dr 21510 / Cr แหล่งเงิน) —
+        ///     ทำงานได้เลยไม่ต้องรอ NextAcc.
+        /// </summary>
+        public bool IsCashSaleDepositNativeA => GetConfig("Nexaacc_CashSale_Deposit_NativeA", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_CashSale_Deposit_NativeA", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
         /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
         /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:

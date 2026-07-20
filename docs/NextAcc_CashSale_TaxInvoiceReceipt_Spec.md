@@ -199,3 +199,35 @@ Option B ทำงานด้วยของที่ NextAcc มีอยู�
 (ตามที่แจ้งว่ากำลังทำ) → จะได้ JE เดียวไม่มี JV แยก (สะอาดกว่า). เมื่อ NextAcc พร้อม แค่สลับ TakeTime
 ให้ส่ง drives=true + ไม่โพสต์ JV. **ไม่เร่ง** — Option B ใช้ได้แล้ว GL ถูก. ถ้า NextAcc ทำเสร็จค่อยแจ้ง
 TakeTime มาสลับ (จุดแก้จุดเดียว: csInv.DepositAppliedDrivesJournal + block โพสต์ JV).
+
+---
+
+## ✅ Option A implemented (เลือกได้ผ่าน toggle, ล็อกจนกว่า NextAcc พร้อม)
+
+TakeTime ทำ Option A ไว้แล้ว (โหมดเลือกได้ A/B):
+- config `Nexaacc_CashSale_Deposit_NativeA` (default off = B). เปิด = A.
+- A: ใบขายสดส่ง `depositAppliedDrivesJournal=true` → **ไม่โพสต์ JV ฝั่ง TakeTime** (ให้ NextAcc ลง Dr 21510 ในใบ)
+  + marker `CSNATIVE:` → void ไม่โพสต์ counter-adj (NextAcc void cascade กลับ JE ให้เอง)
+- B (default): drives=false + TakeTime โพสต์ JV (ใช้ได้เลย)
+- Admin toggle "└└ ใช้ NextAcc native" — **ล็อกไว้** จนกว่า NextAcc ยืนยัน
+
+### 🔔 NextAcc ต้องเตรียมอะไรสำหรับ Option A
+
+ที่ dev แจ้งว่ายังไม่เสร็จ: **JE ฝั่ง integration invoice ต้องต่อสาย reverse 21510/21913 เมื่อ
+`isCashSale=true` + `depositAppliedDrivesJournal=true`** (logic นี้อยู่ใน AutoPost path ที่ integration
+ยังไม่เรียก). ผลที่ต้องการเมื่อ TakeTime ส่ง isCashSale + depositAppliedAmount + drives=true:
+
+```
+Dr แหล่งเงิน (PaymentAccountId)  = Total − depositAppliedAmount   ← auto-pay หักมัดจำออก
+Dr เงินรับล่วงหน้า 21510          = depositAppliedAmount
+[+ ถ้า depositOutputVatDeferred: Dr 21913 / Cr 21911 ส่วน VAT มัดจำ]
+   Cr รายได้ราย line
+   Cr ภาษีขาย 21911
+```
+(depositAppliedRef ชี้ใบมัดจำ REC-xxx เพื่อกลับ 217xx/21913 ของใบนั้น — semantics เดียวกับ
+company Receipt(3) DepositAppliedRef).
+
+**เมื่อ NextAcc ต่อสายเสร็จ + test GL ผ่าน** → แจ้ง TakeTime → ปลดล็อก toggle "ใช้ NextAcc native"
+→ สลับเป็น A (จุดแก้: เอา `disabled` ออกจาก toggle; โค้ด runtime พร้อมอยู่แล้ว ไม่ต้อง rebuild logic).
+
+**ระหว่างนี้ใช้ Option B ได้เลย** (GL ถูก, ผลลูกค้าเหมือนกัน — ต่างแค่มี JV เบื้องหลัง 1 รายการ).

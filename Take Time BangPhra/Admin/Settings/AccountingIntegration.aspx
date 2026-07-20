@@ -349,6 +349,19 @@
                         โหมด §78/1 เคร่ง (RECEIPT+ไม่ defer) ยังใช้เส้นเดิม.
                     </div>
                 </div>
+                <div class="config-item" style="opacity:.6;">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleDepositNativeA" disabled="disabled" />
+                        🔒 └└ ใช้ NextAcc native (JE เดียว ไม่มี JV แยก) — <b>Option A, ล็อกไว้ (รอ NextAcc)</b>
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
+                        เปลี่ยนจาก B (TakeTime โพสต์ JV) → <b>A</b>: ส่ง <code>drives=true</code> ให้ NextAcc ลง Dr 21510
+                        ใน JE ของใบเอง (สะอาดกว่า JE เดียว ไม่มี JV แยก).
+                        <br /><strong style="color:#c0392b;">🔒 ล็อกไว้: ต้องใช้ NextAcc รุ่นที่ต่อสาย reverse 21510/21913
+                        ใน AutoPost ของ integration invoice แล้วเท่านั้น</strong> — เปิดก่อน NextAcc พร้อม = 21510 ไม่ล้าง
+                        <b>GL พัง</b>. จะปลดล็อกเมื่อ dev NextAcc ยืนยัน + test GL ผ่าน. ปิดไว้ = ใช้ Option B (default, ใช้ได้เลย).
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -927,6 +940,7 @@
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
                 document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
                 document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
+                document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -991,6 +1005,7 @@
                 autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
                 taxReceiptSingleDoc: document.getElementById('cfgTaxReceiptSingleDoc').checked,
                 cashSaleDeposit: document.getElementById('cfgCashSaleDeposit').checked,
+                cashSaleDepositNativeA: document.getElementById('cfgCashSaleDepositNativeA').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

@@ -4446,10 +4446,10 @@ namespace Take_Time_BangPhra.Integration
                             customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
                             depositApplied: depositApplied, depositRef: csDepositRef,
                             deferOutputVat: hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred);
-                        // Option B: หักมัดจำ = TakeTime โพสต์ JV เอง (Dr 21510 / Cr แหล่งเงิน) → drives=false
-                        //   (ไม่พึ่ง NextAcc reverse 21510) NextAcc จึง auto-pay เต็มยอด (Dr แหล่งเงินเต็ม)
-                        //   แล้ว JV ของเราลดแหล่งเงิน + ล้าง 21510. amount/ref ที่ส่งไป = display บนใบเท่านั้น
-                        csInv.DepositAppliedDrivesJournal = csHasDeposit ? false : (bool?)null;
+                        // โหมดหักมัดจำ: A (native, drives=true → NextAcc ลง Dr 21510 ในใบ) / B (default, TakeTime JV)
+                        bool csNativeA = csHasDeposit && _config.IsCashSaleDepositNativeA;
+                        //   A: drives=true (NextAcc reverse 21510 ในใบ) / B: drives=false + TakeTime โพสต์ JV
+                        csInv.DepositAppliedDrivesJournal = csHasDeposit ? csNativeA : (bool?)null;
                         ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
                         csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
                         var csFilePaths = ExtractFilePaths(attachments);
@@ -4460,8 +4460,9 @@ namespace Take_Time_BangPhra.Integration
                         _lastDocNumber = csRes?.data?.DocumentNumber;
                         _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
 
-                        // Option B: หักมัดจำในใบเดียว — โพสต์ JV กลับมัดจำ (Dr 21510 / Cr แหล่งเงิน) idempotent ด้วย ref
-                        if (csHasDeposit)
+                        // Option B เท่านั้น: TakeTime โพสต์ JV กลับมัดจำ (Dr 21510 / Cr แหล่งเงิน) idempotent ด้วย ref.
+                        //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
+                        if (csHasDeposit && !csNativeA)
                         {
                             string csAdjRef = $"{receiptNumber}-CSDEPADJ";
                             if (!await JournalExistsByReferenceAsync(csAdjRef))
@@ -4473,12 +4474,13 @@ namespace Take_Time_BangPhra.Integration
                                 Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
                                 await SafePostJournalAsync(csAdjId);
                                 _code.Logs(_connectionString, "AccountingSync",
-                                    $"ProcessReceiptDocument(cash-sale deposit JV): receipt={receiptNumber} Dr 21510 {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
+                                    $"ProcessReceiptDocument(cash-sale deposit JV, B): receipt={receiptNumber} Dr 21510 {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
                             }
                         }
 
-                        // ปิดจบในใบเดียว: mark final (ไม่เรียก SettleReceiptInNextAcc — ไม่มี payment แยก)
-                        SetReceiptPaymentMarker(receiptNumber, csId.ToString());
+                        // ปิดจบในใบเดียว: mark final. Option A ใช้ prefix "CSNATIVE:" ให้ void รู้ว่า 21510 reversal
+                        //   อยู่ใน JE ของใบ (void cascade กลับให้เอง) → ไม่ต้องโพสต์ counter-adj
+                        SetReceiptPaymentMarker(receiptNumber, (csNativeA ? "CSNATIVE:" : "") + csId.ToString());
                         await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessReceiptDocument(cash-sale single doc): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
@@ -5017,6 +5019,17 @@ namespace Take_Time_BangPhra.Integration
             int resId, decimal applied, string paymentMethod, string paymentAccountId, string custName, string receiptNumber)
         {
             if (applied <= 0.005m || string.IsNullOrEmpty(receiptNumber)) return false;
+
+            // Option A (native): marker "CSNATIVE:" → 21510 reversal อยู่ใน JE ของใบ → void cascade กลับให้แล้ว
+            //   → ไม่ต้องโพสต์ counter-adj (คืน true = จัดการแล้ว กัน AR reverse ผิด)
+            string mk = LookupReceiptPaymentMarker(receiptNumber);
+            if (!string.IsNullOrEmpty(mk) && mk.StartsWith("CSNATIVE:"))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidReceipt: cash-sale native (A) receipt={receiptNumber} — 21510 reversal อยู่ใน JE ของใบ, void cascade กลับให้แล้ว → ไม่โพสต์ counter-adj", "SYSTEM");
+                return true;
+            }
+
             if (!await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")) return false;   // ไม่ใช่ Option B
             if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV")) return true; // กลับแล้ว
             var undo = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
@@ -8727,9 +8740,9 @@ namespace Take_Time_BangPhra.Integration
                         {
                             invoice.DepositAppliedAmount = cashSaleDepositApplied;
                             invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
-                            // Option B: display-only (drives=false) — TakeTime โพสต์ JV กลับ 21510 เอง (โพสต์ตอน
-                            // create แล้ว idempotent ด้วย ref -CSDEPADJ; resync แค่แก้เนื้อใบ ไม่แตะ JV)
-                            invoice.DepositAppliedDrivesJournal = false;
+                            // A: drives=true (NextAcc reverse ในใบ) / B: drives=false (TakeTime JV โพสต์ตอน create
+                            // แล้ว idempotent ด้วย ref -CSDEPADJ; resync แค่แก้เนื้อใบ ไม่แตะ JV)
+                            invoice.DepositAppliedDrivesJournal = _config.IsCashSaleDepositNativeA;
                             if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
                                 invoice.DepositOutputVatDeferred = true;
                         }
