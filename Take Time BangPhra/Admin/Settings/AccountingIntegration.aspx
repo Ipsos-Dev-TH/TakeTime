@@ -356,10 +356,14 @@
                     </label>
                     <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
                         เปลี่ยนจาก B (TakeTime โพสต์ JV) → <b>A</b>: ส่ง <code>drives=true</code> ให้ NextAcc ลง Dr 21510
-                        ใน JE ของใบเอง (สะอาดกว่า JE เดียว ไม่มี JV แยก).
-                        <br /><strong style="color:#c0392b;">🔒 ล็อกไว้: ต้องใช้ NextAcc รุ่นที่ต่อสาย reverse 21510/21913
-                        ใน AutoPost ของ integration invoice แล้วเท่านั้น</strong> — เปิดก่อน NextAcc พร้อม = 21510 ไม่ล้าง
-                        <b>GL พัง</b>. จะปลดล็อกเมื่อ dev NextAcc ยืนยัน + test GL ผ่าน. ปิดไว้ = ใช้ Option B (default, ใช้ได้เลย).
+                        ใน JE ของใบเอง (สะอาดกว่า JE เดียว ไม่มี JV แยก) — NextAcc กลับมัดจำผ่าน
+                        <code>ApplyDepositToInvoiceAsync</code> (สืบทอด guard over-apply / one-shot / deferred-VAT).
+                        <br /><strong style="color:#27ae60;">✓ NextAcc ต่อสายแล้ว (CI ผ่านฝั่ง dev)</strong> — เหลือ gate เดียว:
+                        <strong style="color:#c0392b;">🔒 ยังล็อกไว้จนกว่าจะ rebuild บน Windows + test GL เคสมัดจำผ่าน</strong>
+                        (ตรวจ checklist: cash sale + มัดจำ → 217xx/21510 <b>balanced กลับเป็น 0</b>). drives ต้อง resolve
+                        ใบมัดจำเป็นเอกสาร IsDeposit จริงจาก <code>depositAppliedRef</code> ไม่งั้น fail-soft (21510 ไม่กลับ →
+                        ระบบ gate ด้วย <code>DepositRefsResolvedToNextAcc</code> อยู่แล้ว). ปิดไว้ = ใช้ Option B (default, ใช้ได้เลย).
+                        แจ้งผล test ผ่าน → ปลดล็อก (เอา disabled ออก) ได้ทันที.
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
