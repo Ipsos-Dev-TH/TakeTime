@@ -2357,7 +2357,8 @@ namespace Take_Time_BangPhra.Integration
         public CreateIntegrationInvoiceRequest MapReceiptToCashSaleTaxInvoice(
             int reservationId, List<ReceiptLineSpec> lines, decimal totalAmount, string revenueType,
             string paymentMethod, DateTime paymentDate, string customerName, string customerExternalId,
-            string customerTaxId, string paymentAccountId, bool hasVat, string receiptNumber)
+            string customerTaxId, string paymentAccountId, bool hasVat, string receiptNumber,
+            decimal depositApplied = 0, string depositRef = null, bool deferOutputVat = false)
         {
             var integrationLines = (lines != null && lines.Count > 0)
                 ? BuildIntegrationLines(lines, hasVat)
@@ -2395,7 +2396,14 @@ namespace Take_Time_BangPhra.Integration
                 PaymentDate = paymentDate,
                 PaymentMethod = NormalizePaymentMethod(paymentMethod),
                 PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
-                Description = $"ใบกำกับภาษี/ใบเสร็จรับเงิน (ขายสด) — การจอง #{reservationId} ({customerName})",
+                // หักมัดจำในใบเดียว: NextAcc ลง Dr แหล่งเงิน (Total−มัดจำ) + Dr 21510 (มัดจำ)
+                // + แสดง "หักเงินมัดจำ (ref) / ยอดชำระสุทธิ" — caller gate ด้วย Nexaacc_CashSale_Deposit
+                DepositAppliedAmount = depositApplied > 0.005m ? depositApplied : (decimal?)null,
+                DepositAppliedRef = depositApplied > 0.005m ? depositRef : null,
+                DepositOutputVatDeferred = depositApplied > 0.005m && deferOutputVat ? true : (bool?)null,
+                Description = depositApplied > 0.005m
+                    ? $"ใบกำกับภาษี/ใบเสร็จรับเงิน (ขายสด) — การจอง #{reservationId} ({customerName}) | หักมัดจำ {depositApplied:N2}"
+                    : $"ใบกำกับภาษี/ใบเสร็จรับเงิน (ขายสด) — การจอง #{reservationId} ({customerName})",
                 Lines = integrationLines
             };
         }

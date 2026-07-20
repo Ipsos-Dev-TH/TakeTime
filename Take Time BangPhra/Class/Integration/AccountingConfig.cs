@@ -154,6 +154,16 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_TaxReceipt_SingleDoc", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// true = ใบเดียวขายสด (IsTaxReceiptSingleDoc) รองรับ "เคสหักมัดจำ" ด้วย — ส่ง
+        /// depositAppliedAmount/Ref บน cash-sale invoice ให้ NextAcc ลง Dr แหล่งเงิน(สุทธิ) + Dr 21510(มัดจำ)
+        /// ในใบเดียว. ⚠ เปิดได้เมื่อ NextAcc deploy รุ่นรองรับ deposit fields บน isCashSale แล้วเท่านั้น —
+        /// เปิดก่อน NextAcc พร้อม = NextAcc ignore field → เงินสดลงเต็มยอด มัดจำไม่ถูกล้าง GL พัง.
+        /// default off; ปิดอยู่ = เคสมัดจำใช้เส้นเดิม (TIV + settle แยก, GL ถูก).
+        /// </summary>
+        public bool IsCashSaleDepositEnabled => GetConfig("Nexaacc_CashSale_Deposit", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_CashSale_Deposit", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
         /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
         /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:

@@ -4307,11 +4307,19 @@ namespace Take_Time_BangPhra.Integration
                     //    Nexaacc_TaxReceipt_SingleDoc=1 + ต้องเป็นยอดเต็มไม่มีหักมัดจำ (มัดจำยังใช้เส้นเดิม
                     //    จนกว่า NextAcc ยืนยัน contract หักมัดจำบน cash-sale invoice). ยิง integration invoice
                     //    เดียว → NextAcc โพสต์ Dr แหล่งเงิน / Cr รายได้ราย line / Cr VAT + e-Tax TAX_INVOICE.
-                    if (_config.IsTaxReceiptSingleDoc && depositApplied <= 0.005m)
+                    // เคสหักมัดจำรวมใบได้เมื่อ (ก) เปิด Nexaacc_CashSale_Deposit (NextAcc รองรับ deposit fields
+                    // บน isCashSale แล้ว) และ (ข) ใบมัดจำ resolve เป็นเอกสาร NextAcc แล้ว (มี ref ให้กลับ 217xx)
+                    // — ไม่ครบ → ตกไปเส้นเดิม (TIV + settle, GL ถูกแน่นอน)
+                    bool csDepositOk = depositApplied <= 0.005m
+                        || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId));
+                    if (_config.IsTaxReceiptSingleDoc && csDepositOk)
                     {
+                        string csDepositRef = depositApplied > 0.005m ? LookupDepositReceiptRefs(reservationId) : null;
                         var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
                             totalAmount, revenueType, paymentMethod, receiptDate, customerName,
-                            customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber);
+                            customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
+                            depositApplied: depositApplied, depositRef: csDepositRef,
+                            deferOutputVat: hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred);
                         ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
                         csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
                         var csFilePaths = ExtractFilePaths(attachments);
@@ -8508,7 +8516,17 @@ namespace Take_Time_BangPhra.Integration
                         invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
                             customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
                     // ขายสดใบเดียว (Option B): resync ต้องคงรูปแบบ isCashSale ไม่งั้น Retry กลับไปเป็นหลายใบ
-                    cashSaleEligible = _config.IsTaxReceiptSingleDoc && depositApplied <= 0.005m;
+                    // (รวมเคสหักมัดจำเมื่อเปิด Nexaacc_CashSale_Deposit + ใบมัดจำ resolve แล้ว)
+                    cashSaleEligible = _config.IsTaxReceiptSingleDoc
+                        && (depositApplied <= 0.005m
+                            || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId)));
+                    if (cashSaleEligible && depositApplied > 0.005m)
+                    {
+                        invoice.DepositAppliedAmount = depositApplied;
+                        invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
+                        if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
+                            invoice.DepositOutputVatDeferred = true;
+                    }
                 }
 
                 // Reference = รหัสการจอง (นโยบายเดียวกับ sync ปกติ); externalRef = เลขใบเสร็จ (คีย์ dedup)

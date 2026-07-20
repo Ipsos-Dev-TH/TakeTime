@@ -116,3 +116,15 @@ Dr เงินมัดจำรับล่วงหน้า 21510          =
 - `BuildCorrectedReceiptInvoice`: ส่ง deposit field บนเส้น resync ด้วย
 
 **จนกว่าจะเพิ่ม:** เคสมัดจำใช้เส้นเดิม (TIV + settle payments แยก) — GL ถูก แต่ยังหลายใบ.
+
+### ✅ อัพเดทสถานะ TakeTime: เคสหักมัดจำ "พร้อมแล้ว" (pre-implemented หลัง flag)
+
+ฝั่ง TakeTime implement ครบแล้ว (ไม่ต้อง rebuild อีกรอบเมื่อ NextAcc พร้อม):
+- `CreateIntegrationInvoiceRequest` มี `DepositAppliedAmount` / `DepositAppliedRef` / `DepositOutputVatDeferred` แล้ว
+- เส้นสร้าง + เส้น resync ส่ง field เมื่อเปิด flag `Nexaacc_CashSale_Deposit` (toggle ในหน้า Admin)
+  + guard: ใบมัดจำต้อง resolve เป็นเอกสาร NextAcc แล้ว (`DepositRefsResolvedToNextAcc`) ไม่งั้นตกเส้นเดิมอัตโนมัติ
+- `depositAppliedRef` ที่ส่ง = ค่าจาก `LookupDepositReceiptRefs(reservationId)` — **ชุดเดียวกับที่ส่งบน
+  company Receipt(3) `DepositAppliedRef` อยู่แล้ว** ⟹ ขอให้ NextAcc ใช้ semantics การ resolve เดียวกัน
+
+**ลำดับเปิดใช้:** NextAcc deploy → ติ๊ก toggle "รวมเคสหักมัดจำ" ใน Admin → test เช็คเอาท์มัดจำ 1 รายการ
+(ตรวจ: ใบเดียว, JE: Dr แหล่งเงินสุทธิ + Dr 21510 / Cr รายได้ / Cr VAT, บรรทัด "หักเงินมัดจำ" บนใบ, e-Tax ออก)

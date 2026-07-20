@@ -751,6 +751,17 @@ namespace Take_Time_BangPhra.Integration
         public bool? IsCashSale { get; set; }
         /// <summary>วันที่รับชำระ (คู่กับ IsCashSale) — NextAcc field "paymentDate"</summary>
         public DateTime? PaymentDate { get; set; }
+        /// <summary>ยอดมัดจำที่หักในใบ (รวม VAT) — คู่กับ IsCashSale: NextAcc ลง Dr แหล่งเงิน (Total−มัดจำ)
+        /// + Dr 21510 (มัดจำ) ในใบเดียว + แสดง "หักเงินมัดจำ/ยอดชำระสุทธิ" บนใบ.
+        /// NextAcc field "depositAppliedAmount" (ส่วนขยาย Option B — รุ่นเก่า ignore = ห้ามส่งเคสมัดจำ
+        /// จนกว่า NextAcc ยืนยัน มิฉะนั้นเงินสดลงเต็มยอด GL พัง → gate ด้วย Nexaacc_CashSale_Deposit)</summary>
+        public decimal? DepositAppliedAmount { get; set; }
+        /// <summary>เลขใบมัดจำที่อ้าง (เช่น REC260718003) — NextAcc กลับ 217xx/21913 ของใบนั้น.
+        /// NextAcc field "depositAppliedRef"</summary>
+        public string DepositAppliedRef { get; set; }
+        /// <summary>true = VAT มัดจำพักที่ 21913 (defer) → NextAcc ทำ Dr 21913 / Cr 21911 ส่วน VAT มัดจำด้วย.
+        /// NextAcc field "depositOutputVatDeferred"</summary>
+        public bool? DepositOutputVatDeferred { get; set; }
         public decimal? VatRate { get; set; }
         public string Currency { get; set; }
         public string Notes { get; set; }

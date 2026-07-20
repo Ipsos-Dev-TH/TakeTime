@@ -332,7 +332,20 @@
                         ใบเสร็จรับชำระแยกหลายใบ. e-Tax TAX_INVOICE ออกได้เหมือนเดิม, GL ไม่เปลี่ยน.
                         <br />ปิดไว้ (default) = พฤติกรรมเดิม (ใบกำกับ AR + ใบเสร็จรับชำระแยก).
                         <br /><strong style="color:#c0392b;">⚠ ต้องใช้ NextAcc รุ่นรองรับ isCashSale + เปิดหลัง test เช็คเอาท์ 1 รายการ</strong>.
-                        เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ).
+                        เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ) จนกว่าจะเปิดตัวเลือกด้านล่าง.
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleDeposit" />
+                        └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย (ต้องเปิดตัวบนก่อน)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #c0392b; padding-left:8px;">
+                        ส่ง <code>depositAppliedAmount/Ref</code> บนใบขายสด → NextAcc ลง
+                        <b>Dr แหล่งเงิน (ยอดสุทธิ) + Dr มัดจำ 21510</b> ในใบเดียว + แสดง "หักเงินมัดจำ/ยอดชำระสุทธิ".
+                        <br /><strong style="color:#c0392b;">⚠⚠ เปิดได้เมื่อ NextAcc deploy รุ่นรองรับ deposit fields
+                        บน isCashSale แล้วเท่านั้น</strong> — เปิดก่อน NextAcc พร้อม = เงินสดลงเต็มยอด
+                        มัดจำไม่ถูกล้าง <b>GL พัง</b>. ใบมัดจำที่ยังไม่ sync เป็นเอกสาร → ตกไปเส้นเดิมอัตโนมัติ (ปลอดภัย).
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
@@ -907,6 +920,7 @@
                 document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
                 document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
+                document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -969,6 +983,7 @@
                 postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
                 autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
                 taxReceiptSingleDoc: document.getElementById('cfgTaxReceiptSingleDoc').checked,
+                cashSaleDeposit: document.getElementById('cfgCashSaleDeposit').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
