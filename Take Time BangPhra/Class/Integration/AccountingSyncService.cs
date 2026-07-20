@@ -4269,6 +4269,34 @@ namespace Take_Time_BangPhra.Integration
                         return docRId != Guid.Empty ? docRId.ToString() : "DEPREV_ONLY";
                     }
 
+                    // ✅ ขายสด "ใบเดียว" (Option B, isCashSale): ใบกำกับภาษี/ใบเสร็จรับเงิน จ่ายจบในใบ
+                    //    ไม่เปิดลูกหนี้ ไม่มีใบเสร็จรับชำระแยก (เดิมได้ TIV + REC หลายใบ). เปิดด้วย config
+                    //    Nexaacc_TaxReceipt_SingleDoc=1 + ต้องเป็นยอดเต็มไม่มีหักมัดจำ (มัดจำยังใช้เส้นเดิม
+                    //    จนกว่า NextAcc ยืนยัน contract หักมัดจำบน cash-sale invoice). ยิง integration invoice
+                    //    เดียว → NextAcc โพสต์ Dr แหล่งเงิน / Cr รายได้ราย line / Cr VAT + e-Tax TAX_INVOICE.
+                    if (_config.IsTaxReceiptSingleDoc && depositApplied <= 0.005m)
+                    {
+                        var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
+                            totalAmount, revenueType, paymentMethod, receiptDate, customerName,
+                            customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber);
+                        ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
+                        csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
+                        var csFilePaths = ExtractFilePaths(attachments);
+                        ApiResponse<IntegrationDocumentResponse> csRes = (csFilePaths != null && csFilePaths.Count > 0)
+                            ? await _apiClient.CreateInvoiceMultipartAsync(csInv, csFilePaths)
+                            : await _apiClient.CreateInvoiceAsync(csInv);
+                        Guid csId = RequireValidDocId(csRes?.data?.Id, $"CashSaleTaxInvoice receipt={receiptNumber}");
+                        _lastDocNumber = csRes?.data?.DocumentNumber;
+                        _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
+                        // ปิดจบในใบเดียว: mark final (ไม่เรียก SettleReceiptInNextAcc — ไม่มี payment แยก)
+                        SetReceiptPaymentMarker(receiptNumber, csId.ToString());
+                        await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(cash-sale single doc): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
+                            $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} (ไม่มีใบเสร็จรับชำระแยก)", "SYSTEM");
+                        return csId.ToString();
+                    }
+
                     // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
                     //    doc → Dr ลูกหนี้ / Cr รายได้ราย line / Cr ภาษีขาย แล้วปิดลูกหนี้ด้วย
                     //    SettleReceiptInNextAcc (ตัดมัดจำ Dr รับล่วงหน้า/Cr ลูกหนี้ + รับเงินสดจริง
@@ -7417,6 +7445,17 @@ namespace Take_Time_BangPhra.Integration
                     $"ApplyReceiptPreparer: receipt={receiptNumber} ลายเซ็น {info.Value.dataUri.Length} bytes > {SignatureMaxBytes} — ส่งเฉพาะชื่อ (บีบรูปให้เล็กลง)", "SYSTEM");
         }
 
+        /// <summary>overload สำหรับ integration invoice (ขายสดใบเดียว) — ผู้รับเงิน/ผู้จัดทำ = คนสร้างใบในระบบ</summary>
+        private void ApplyReceiptPreparer(CreateIntegrationInvoiceRequest invoice, string receiptNumber)
+        {
+            if (invoice == null || string.IsNullOrEmpty(receiptNumber)) return;
+            var info = LookupReceiptPreparerInfo(receiptNumber);
+            if (info == null) return;
+            if (!string.IsNullOrEmpty(info.Value.name)) invoice.PreparerName = info.Value.name;
+            if (!string.IsNullOrEmpty(info.Value.dataUri) && info.Value.dataUri.Length <= SignatureMaxBytes)
+                invoice.PreparerSignatureBase64 = info.Value.dataUri;
+        }
+
         /// <summary>ผู้ทำใบเสร็จ/ใบกำกับ (Account_Receipt.Created_By_ID → Admin) ชื่อ + ลายเซ็น data-URI.</summary>
         private (string name, string dataUri)? LookupReceiptPreparerInfo(string receiptNumber)
         {
@@ -8395,6 +8434,7 @@ namespace Take_Time_BangPhra.Integration
 
                 bool hasVat = LookupBusinessHasVat();
                 CreateIntegrationInvoiceRequest invoice;
+                bool cashSaleEligible = false;   // set ในเส้น non-deposit ตาม flag + ไม่มีหักมัดจำ
 
                 if (isDeposit)
                 {
@@ -8434,6 +8474,8 @@ namespace Take_Time_BangPhra.Integration
                     else
                         invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
                             customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
+                    // ขายสดใบเดียว (Option B): resync ต้องคงรูปแบบ isCashSale ไม่งั้น Retry กลับไปเป็นหลายใบ
+                    cashSaleEligible = _config.IsTaxReceiptSingleDoc && depositApplied <= 0.005m;
                 }
 
                 // Reference = รหัสการจอง (นโยบายเดียวกับ sync ปกติ); externalRef = เลขใบเสร็จ (คีย์ dedup)
@@ -8450,6 +8492,15 @@ namespace Take_Time_BangPhra.Integration
                     invoice.CustomerExternalId = repostContact.ExternalId;
                     invoice.CustomerTaxId = repostContact.TaxId;
                     if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = repostContact.Name;
+
+                    // resync แบบขายสดใบเดียว: คงรูปแบบ isCashSale (เฉพาะ B2B มีเลขภาษี + ไม่มีหักมัดจำ)
+                    if (cashSaleEligible)
+                    {
+                        invoice.DocumentType = "TaxInvoice";
+                        invoice.IsCashSale = true;
+                        invoice.PaymentDate = receiptDate;
+                        // PaymentAccountId/PaymentMethod ถูก set โดย mapper แล้ว
+                    }
                 }
                 else
                 {

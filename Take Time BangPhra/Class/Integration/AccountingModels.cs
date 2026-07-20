@@ -743,6 +743,14 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
         public Guid? PaymentAccountId { get; set; }
+        /// <summary>ขายสด: true → NextAcc ออก "ใบเดียว" (ใบกำกับภาษี/ใบเสร็จรับเงิน) — โพสต์ payment
+        /// ฝังในใบ (Dr แหล่งเงิน PaymentAccountId / Cr รายได้ / Cr VAT) ไม่เปิดลูกหนี้ ไม่สร้าง
+        /// ใบเสร็จรับชำระแยก. คู่กับ PaymentAccountId + PaymentDate + PaymentMethod + DocumentType=TaxInvoice.
+        /// null/false = พฤติกรรมเดิม (เปิดลูกหนี้ + ปิดด้วย payment แยก = ใบกำกับ + ใบเสร็จหลายใบ).
+        /// NextAcc field "isCashSale" (Option B, CI 34e50ba). รุ่นเก่า ignore field นี้ = พฤติกรรมเดิม.</summary>
+        public bool? IsCashSale { get; set; }
+        /// <summary>วันที่รับชำระ (คู่กับ IsCashSale) — NextAcc field "paymentDate"</summary>
+        public DateTime? PaymentDate { get; set; }
         public decimal? VatRate { get; set; }
         public string Currency { get; set; }
         public string Notes { get; set; }

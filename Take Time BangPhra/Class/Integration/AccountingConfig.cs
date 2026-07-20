@@ -144,6 +144,16 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Deposit_Defer_Output_Vat", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// true = เช็คเอาท์/รับชำระ B2B (ลูกค้ามีเลขภาษี) ออก "ใบเดียว" ใบกำกับภาษี/ใบเสร็จรับเงิน
+        /// (ขายสด isCashSale) แทนการเปิดลูกหนี้ + ใบเสร็จรับชำระแยก (เดิมได้ 3 ใบต่อการขาย).
+        /// ต้องใช้ NextAcc รุ่นที่รองรับ isCashSale (Option B) — default off เพื่อ backward-compatible;
+        /// เปิดหลัง deploy + ทดสอบเช็คเอาท์ 1 รายการ. ปัจจุบันใช้กับ "ขายสดยอดเต็มไม่มีหักมัดจำ" เท่านั้น
+        /// (เคสหักมัดจำยังใช้เส้นเดิมจนกว่า NextAcc ยืนยัน contract หักมัดจำบน cash-sale invoice).
+        /// </summary>
+        public bool IsTaxReceiptSingleDoc => GetConfig("Nexaacc_TaxReceipt_SingleDoc", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_TaxReceipt_SingleDoc", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
         /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
         /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:

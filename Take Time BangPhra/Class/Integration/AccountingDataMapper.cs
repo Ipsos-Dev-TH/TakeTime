@@ -2349,6 +2349,58 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// ใบกำกับภาษี/ใบเสร็จรับเงิน "ใบเดียว" แบบขายสด (Option B, isCashSale) —
+        /// เช็คเอาท์/รับชำระ B2B (ลูกค้ามีเลขภาษี) จ่ายจบในใบ: NextAcc โพสต์ payment ฝังในใบ
+        /// (Dr แหล่งเงิน PaymentAccountId / Cr รายได้ราย line / Cr VAT) ไม่เปิดลูกหนี้ ไม่มีใบเสร็จรับชำระแยก.
+        /// ใช้เฉพาะยอดเต็มไม่มีหักมัดจำ (caller gate). e-Tax TAX_INVOICE ออกได้ (DocumentType=TaxInvoice).
+        /// </summary>
+        public CreateIntegrationInvoiceRequest MapReceiptToCashSaleTaxInvoice(
+            int reservationId, List<ReceiptLineSpec> lines, decimal totalAmount, string revenueType,
+            string paymentMethod, DateTime paymentDate, string customerName, string customerExternalId,
+            string customerTaxId, string paymentAccountId, bool hasVat, string receiptNumber)
+        {
+            var integrationLines = (lines != null && lines.Count > 0)
+                ? BuildIntegrationLines(lines, hasVat)
+                : new List<IntegrationLineRequest>();
+            if (integrationLines.Count == 0)
+            {
+                string revCode = !string.IsNullOrEmpty(revenueType) ? revenueType : "ROOM_REVENUE";
+                integrationLines.Add(new IntegrationLineRequest
+                {
+                    ItemName = $"รายได้ - การจอง #{reservationId}",
+                    Quantity = 1,
+                    UnitPrice = totalAmount,
+                    VatRate = hasVat ? 7 : 0,
+                    AccountId = GetAccountId(revCode)
+                });
+            }
+
+            string refStr = reservationId > 0 ? $"RES-{reservationId}"
+                : (!string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}");
+
+            return new CreateIntegrationInvoiceRequest
+            {
+                DocumentType = "TaxInvoice",
+                DocumentDate = paymentDate,
+                CustomerExternalId = customerExternalId,
+                CustomerName = customerName,
+                CustomerTaxId = customerTaxId,
+                Reference = refStr,
+                BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
+                ExternalRef = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
+                ReplaceExistingForSource = !string.IsNullOrEmpty(receiptNumber),
+                IncludeVat = hasVat,
+                // ขายสดใบเดียว: payment ฝังในใบ (Dr แหล่งเงิน) — NextAcc render หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน"
+                IsCashSale = true,
+                PaymentDate = paymentDate,
+                PaymentMethod = NormalizePaymentMethod(paymentMethod),
+                PaymentAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod),
+                Description = $"ใบกำกับภาษี/ใบเสร็จรับเงิน (ขายสด) — การจอง #{reservationId} ({customerName})",
+                Lines = integrationLines
+            };
+        }
+
+        /// <summary>
         /// Compound journal สำหรับใบเสร็จที่มี:
         ///   - หลาย revenue lines (รายได้แยกบัญชี)
         ///   - หักมัดจำ (DR Advance Deposit)
