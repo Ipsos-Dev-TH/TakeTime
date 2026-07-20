@@ -1418,20 +1418,37 @@ namespace Take_Time_BangPhra.Account
                         if (naCfg.IsConfigured && naCfg.Enabled)
                         {
                             Server.ScriptTimeout = 300;
+                            var naSvc = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
                             var naPdf = System.Threading.Tasks.Task.Run(() =>
-                                new Take_Time_BangPhra.Integration.AccountingSyncService(conn)
-                                    .DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel")
+                                naSvc.DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel")
                             ).GetAwaiter().GetResult();
                             if (naPdf != null && naPdf.Found && !string.IsNullOrEmpty(naPdf.PdfRelativeUrl))
                             {
                                 Response.Redirect(naPdf.PdfRelativeUrl);
                                 return;
                             }
+
+                            // fallback ชั้น 2: การจับคู่ตอนโหลดตาราง (merge) เก็บ GUID เอกสาร NextAcc ไว้ใน
+                            // DataKeys["NextAccId"] แล้ว → ดึง PDF ตรงด้วย GUID (ไม่พึ่งการ lookup จากคิว
+                            // ที่อาจหาไม่เจอ เช่น payload คนละรูปแบบ/คิวถูกล้าง)
+                            string rowNaId = dk?["NextAccId"]?.ToString() ?? "";
+                            if (Guid.TryParse(rowNaId, out var rowGid) && rowGid != Guid.Empty)
+                            {
+                                var byId = System.Threading.Tasks.Task.Run(() =>
+                                    naSvc.DownloadNextAccDocumentByIdAsync(rowGid, docNum, false, docStatus == "Cancel")
+                                ).GetAwaiter().GetResult();
+                                if (byId != null && byId.Found && !string.IsNullOrEmpty(byId.PdfRelativeUrl))
+                                {
+                                    Response.Redirect(byId.PdfRelativeUrl);
+                                    return;
+                                }
+                            }
+
                             // ดึง NextAcc ไม่สำเร็จ → log เหตุผล (แทนกลืนเงียบ) เพื่อรู้ว่าทำไมตก local
                             try
                             {
                                 codeInstance.Logs(conn, "AccountingSync",
-                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({naPdf?.Message ?? "unknown"}) → ใช้ไฟล์ local", "SYSTEM");
+                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({naPdf?.Message ?? "unknown"}, byId={rowNaId}) → ใช้ไฟล์ local", "SYSTEM");
                             }
                             catch { }
                         }
@@ -1753,7 +1770,11 @@ namespace Take_Time_BangPhra.Account
 
         private void ShowError(string message)
         {
-            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{message}');", true);
+            // ต้อง escape ก่อนฝังใน alert('...') — ข้อความมี \n / ' / \ (เช่น รายการ path ที่ตรวจ)
+            // จะทำให้ JS พังเงียบ ๆ → ผู้ใช้เห็นแค่หน้ารีโหลดเด้งขึ้นบนโดยไม่มีข้อความอะไรเลย
+            // (หน้า CheckPayment_New ใช้วิธีเดียวกันอยู่แล้ว)
+            string safe = System.Web.HttpUtility.JavaScriptStringEncode(message ?? "");
+            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{safe}');", true);
         }
 
         /// <summary>

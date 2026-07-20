@@ -9668,7 +9668,37 @@ namespace Take_Time_BangPhra.Integration
             // → กดดู PDF หลังแก้ยังเสิร์ฟไฟล์รุ่นก่อนแก้ (ชื่อ/รายการเดิม) ทั้งที่ NextAcc มีใบใหม่แล้ว.
             // ผูก GUID → เอกสารใหม่ = ไฟล์ใหม่ = ดึงสดเสมอ (ไฟล์เก่าไม่ถูกเสิร์ฟอีก)
             Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
-            if (docId == Guid.Empty) { result.Message = "ใบเสร็จนี้ยังไม่ได้ sync เป็นเอกสาร NextAcc"; return result; }
+            if (docId == Guid.Empty)
+            {
+                // lookup จากคิวไม่เจอ (payload คนละรูปแบบ/คิวถูกล้าง) — อย่าตอบ "ไม่พบ" ทันที:
+                // ถ้ามีไฟล์ cache ของใบนี้อยู่แล้ว (รุ่นก่อนที่เคยดึงได้) เสิร์ฟไฟล์ล่าสุดไปก่อน
+                // ดีกว่าเด้งผู้ใช้กลับโดยไม่มีอะไรให้ดู (caller มี fallback by-GUID + local ต่ออยู่แล้ว)
+                try
+                {
+                    string fbDoc = MakeSafeFileName(receiptNumber);
+                    string fbFolder = Path.Combine(basePath, "NextAcc", fbDoc);
+                    string fbSuffix = isCancelled ? "_Cancel" : "";
+                    if (Directory.Exists(fbFolder))
+                    {
+                        var candidates = Directory.GetFiles(fbFolder, fbDoc + "*" + fbSuffix + ".pdf")
+                            .Where(f => isCancelled == f.EndsWith("_Cancel.pdf", StringComparison.OrdinalIgnoreCase))
+                            .OrderByDescending(File.GetLastWriteTime)
+                            .ToList();
+                        if (candidates.Count > 0 && new FileInfo(candidates[0]).Length > 0)
+                        {
+                            result.Found = true;
+                            result.PdfLocalPath = candidates[0];
+                            result.PdfRelativeUrl = "/Documents/Receipt/NextAcc/" + fbDoc + "/" + Path.GetFileName(candidates[0]);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"DownloadReceiptPdf: receipt={receiptNumber} lookup GUID ไม่เจอ → เสิร์ฟ cache ล่าสุด {Path.GetFileName(candidates[0])}", "SYSTEM");
+                            return result;
+                        }
+                    }
+                }
+                catch { }
+                result.Message = "ใบเสร็จนี้ยังไม่ได้ sync เป็นเอกสาร NextAcc";
+                return result;
+            }
 
             string safeDoc = MakeSafeFileName(receiptNumber);
             string suffix = isCancelled ? "_Cancel" : "";
