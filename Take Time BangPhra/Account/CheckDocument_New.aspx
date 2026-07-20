@@ -501,6 +501,17 @@
                                 Visible="false" />
                         </ItemTemplate>
                     </asp:TemplateField>
+                    <asp:TemplateField HeaderText="อัพเดทไฟล์">
+                        <ItemTemplate>
+                            <asp:Button ID="btnRefreshPdf" runat="server" Text="🔄 ดึงล่าสุด"
+                                CommandName="refreshpdf"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ดึง PDF ล่าสุดจาก NextAcc (ข้าม cache)"
+                                OnClientClick="this.disabled=true; this.value='⏳ กำลังดึง...'; "
+                                UseSubmitBehavior="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
                 </Columns>
             </asp:GridView>
         </div>

@@ -1635,6 +1635,72 @@ namespace Take_Time_BangPhra.Account
                 return;
             }
 
+            // ปุ่ม "🔄 ดึงล่าสุด" — บังคับดึง PDF สดจาก NextAcc ข้าม cache ทุกชั้น (ใช้หลังแก้ไข/
+            // ยกเลิกเอกสารแล้วอยากได้ไฟล์รุ่นปัจจุบันทันที ไม่รอ cache หมดอายุ)
+            if (e.CommandName == "refreshpdf")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    var dkR = gvDetails.DataKeys[rowIndex];
+                    string docNum = dkR?["ID"]?.ToString() ?? "";
+                    bool cancelled = (dkR?["Status"]?.ToString() ?? "") == "Cancel";
+                    bool isNaOnly = dkR?["IsNextAccOnly"]?.ToString() == "1";
+                    string naId = dkR?["NextAccId"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                    var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (!naCfg.IsConfigured || !naCfg.Enabled)
+                    {
+                        ShowError("ยังไม่ได้เปิดใช้ NextAcc — ดึงไฟล์ล่าสุดไม่ได้");
+                        return;
+                    }
+
+                    Server.ScriptTimeout = 300;
+                    var svc = new AccountingSyncService(conn);
+                    Take_Time_BangPhra.Integration.NextAccCachedDocument fresh = null;
+                    bool timedOut = false;
+
+                    if (isNaOnly && Guid.TryParse(naId, out var gNa) && gNa != Guid.Empty)
+                    {
+                        // แถว NextAcc-only → ดึงตรงด้วย GUID (forceRefresh)
+                        var t = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadNextAccDocumentByIdAsync(gNa, docNum, true, cancelled));
+                        if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+                    }
+                    else
+                    {
+                        // ใบ local ที่ sync แล้ว → เส้นทางเลขใบเสร็จ (forceRefresh) → fallback GUID จากตาราง
+                        var t = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadReceiptPdfFromNextAccAsync(docNum, cancelled, forceRefresh: true));
+                        if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+
+                        if (!timedOut && (fresh == null || !fresh.Found)
+                            && Guid.TryParse(naId, out var g2) && g2 != Guid.Empty)
+                        {
+                            var t2 = System.Threading.Tasks.Task.Run(() =>
+                                svc.DownloadNextAccDocumentByIdAsync(g2, docNum, true, cancelled));
+                            if (t2.Wait(30000)) fresh = t2.Result; else timedOut = true;
+                        }
+                    }
+
+                    if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
+                    {
+                        Response.Redirect(fresh.PdfRelativeUrl);
+                        return;
+                    }
+                    ShowError(timedOut
+                        ? $"NextAcc ตอบช้า — ระบบกำลังดึงไฟล์ {docNum} ต่อเบื้องหลัง กรุณากดดู PDF อีกครั้งใน 15-30 วินาที"
+                        : $"ดึงไฟล์ล่าสุดไม่สำเร็จ: {fresh?.Message ?? "ไม่ทราบสาเหตุ"}");
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception rex)
+                {
+                    ShowError("ดึงไฟล์ล่าสุดไม่สำเร็จ: " + rex.Message);
+                }
+                return;
+            }
+
             if (e.CommandName == "edit")
             {
                 try

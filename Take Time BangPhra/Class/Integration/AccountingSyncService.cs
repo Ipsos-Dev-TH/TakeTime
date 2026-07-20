@@ -9654,7 +9654,7 @@ namespace Take_Time_BangPhra.Integration
         /// smart-cache: ใช้ไฟล์เดิมถ้ายังใหม่กว่า sync ล่าสุดของใบนี้ — ดึงใหม่เฉพาะหลัง edit/re-sync
         /// </summary>
         public async System.Threading.Tasks.Task<NextAccCachedDocument> DownloadReceiptPdfFromNextAccAsync(
-            string receiptNumber, bool isCancelled = false)
+            string receiptNumber, bool isCancelled = false, bool forceRefresh = false)
         {
             var result = new NextAccCachedDocument();
             if (string.IsNullOrEmpty(receiptNumber)) { result.Message = "ไม่มีเลขที่ใบเสร็จ"; return result; }
@@ -9709,7 +9709,8 @@ namespace Take_Time_BangPhra.Integration
             string relPrefix = "/Documents/Receipt/NextAcc/" + safeDoc;
 
             // fast path: cache ของ GUID นี้ยังใหม่ (ไฟล์ใหม่กว่ารายการ sync ล่าสุดของใบนี้)
-            if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+            // forceRefresh (ปุ่ม "ดึงล่าสุด") → ข้าม cache ทุกชั้น ดึงสดจาก NextAcc เท่านั้น
+            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
                 && !IsReceiptPdfCacheStale(receiptNumber, pdfPath))
             {
                 result.Found = true;
@@ -9722,6 +9723,7 @@ namespace Take_Time_BangPhra.Integration
             // (ใบไม่ถูกแก้/re-sync หลัง cache) = เนื้อหายังตรงกับเอกสารปัจจุบัน → copy เป็นชื่อ GUID
             // แล้วเสิร์ฟทันที ไม่ยิง NextAcc — กันเหตุ "เปลี่ยนรูปแบบชื่อ cache แล้วทั้งระบบต้องดึงใหม่หมด"
             // (คลิกแรกหลัง deploy จะช้า/ล้มถ้า NextAcc ช้า ทั้งที่ไฟล์เดิมยังถูกต้องอยู่บนดิสก์)
+            if (!forceRefresh)
             try
             {
                 string legacyPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
@@ -9762,9 +9764,11 @@ namespace Take_Time_BangPhra.Integration
 
             // ดึงสดล้มเหลว → last-known-good: เสิร์ฟไฟล์ cache ล่าสุดของใบนี้ที่มีบนดิสก์ (ตรงชนิด
             // ปกติ/ยกเลิก) ดีกว่าไม่แสดงอะไร — เอกสารรุ่นก่อนหน้ายังเป็นเอกสารจริงที่ NextAcc เคยออก
+            // (ยกเว้น forceRefresh: ผู้ใช้สั่ง "ดึงล่าสุด" ชัดเจน → ต้องรายงานเหตุล้มเหลวจริง
+            // ไม่เสิร์ฟไฟล์เก่าให้เข้าใจผิดว่าเป็นรุ่นล่าสุด)
             try
             {
-                if (Directory.Exists(folder))
+                if (!forceRefresh && Directory.Exists(folder))
                 {
                     var candidates = Directory.GetFiles(folder, safeDoc + "*.pdf")
                         .Where(f => isCancelled == f.EndsWith("_Cancel.pdf", StringComparison.OrdinalIgnoreCase))
