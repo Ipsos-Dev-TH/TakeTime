@@ -8788,13 +8788,24 @@ namespace Take_Time_BangPhra.Integration
                     $"CleanupDepositGlDebrisJvs: กลับ JV ของ TakeTime {reversed} รายการ (ครบทุกอันที่ซ้อน), เหลือซากเอกสารถูกลบ {docLinkedDebris} บรรทัด (NextAcc กวาดตอนลบ)", "SYSTEM");
 
                 if (reversed == 0 && docLinkedDebris == 0 && seen.Count == 0)
-                    return (0, "ไม่พบซาก GL มัดจำ (215xx/217xx/21913) ที่ค้าง");
+                    return (0, "ℹ️ NextAcc ตอบว่า 'ไม่มีซาก JV ที่เข้าเกณฑ์' — ถ้าคุณเห็น 21510/21913 ติดลบจริง " +
+                        "อาจเพราะ (ก) endpoint นี้กับ isCashSale ยังไม่ deploy บน env นี้ (ต้อง deploy ก่อน), " +
+                        "หรือ (ข) ซากเป็น 'payment ตัดมัดจำ' ที่ผูกเอกสาร (ไม่ใช่ JV) → ต้องลบเอกสารให้ NextAcc กวาด. " +
+                        "ตรวจ GL 21510/21913 บน NextAcc มือเพื่อยืนยัน");
 
                 string msg = $"กลับ JV มัดจำของ TakeTime ที่ค้าง (churn) ครบทุกอันที่ซ้อน — {reversed} รายการ.";
                 if (docLinkedDebris > 0)
                     msg += $" ยังมีซากจาก 'เอกสารที่ถูกลบ' อีก {docLinkedDebris} บรรทัด → NextAcc จะกวาดเองตอนลบเอกสารครั้งถัดไป (ไม่ใช่ JV ของเรา).";
                 msg += " ⚠ ยอดที่เหลือหลังกลับ (ถ้ามี) เกิดจาก churn — ให้นักบัญชีตรวจ/ออก correcting JV ยืนยันให้เป็น 0";
                 return (reversed, msg);
+            }
+            catch (AccountingApiException apiEx) when (apiEx.StatusCode == 404 || apiEx.StatusCode == 405)
+            {
+                // endpoint ไม่มีบน env นี้ = branch cleanup/isCashSale ยังไม่ deploy → ต้องแยกจาก "ไม่มีซาก"
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CleanupDepositGlDebrisJvs: endpoint /cleanup/deposit-gl-debris ตอบ {apiEx.StatusCode} — ยังไม่ deploy บน env นี้", "SYSTEM");
+                return (-1, $"❌ endpoint /cleanup/deposit-gl-debris ยังไม่มีบน NextAcc env นี้ (ตอบ {apiEx.StatusCode}) — " +
+                    "มันอยู่ branch เดียวกับ isCashSale ที่ยังไม่ deploy. ต้องให้ dev deploy branch เข้า env (ตาม Base URL) ก่อน ปุ่มนี้ถึงจะทำงาน (และ AR ถึงจะหาย)");
             }
             catch (Exception ex)
             {
