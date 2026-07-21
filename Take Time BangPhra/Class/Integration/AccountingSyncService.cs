@@ -9277,9 +9277,8 @@ namespace Take_Time_BangPhra.Integration
                         invoice.DocumentType = "TaxInvoice";
                         invoice.IsCashSale = true;
                         invoice.PaymentDate = receiptDate;
-                        // dedup key ราย "ใบ" ให้ตรงกับตอน create (MapReceiptToCashSaleTaxInvoice) —
-                        // กัน Reference=RES-{resId} ที่ใช้ร่วมทุกใบทำให้ resync จับผิดใบ/เบิ้ลเลขเอกสาร
-                        if (!string.IsNullOrEmpty(receiptNumber)) invoice.Reference = receiptNumber;
+                        // Reference (อ้างอิง display) = RES-{id} คงตามที่ BuildCorrectedReceiptInvoice ตั้ง —
+                        // dedup ราย ใบใช้ ExternalRef/ExternalId (=receiptNumber) อยู่แล้ว ไม่ต้อง override
                         // PaymentAccountId/PaymentMethod ถูก set โดย mapper แล้ว
                         if (cashSaleDepositApplied > 0.005m)
                         {
@@ -10685,11 +10684,21 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var idChk = await _apiClient.GetDocumentAsync(docId);
-                string docRef = idChk?.data?.Reference;
-                if (!string.IsNullOrWhiteSpace(docRef))
-                    mismatch = !string.Equals(docRef.Trim(), receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase);
-                else
+                string docRef = idChk?.data?.Reference?.Trim();
+                if (string.IsNullOrWhiteSpace(docRef))
                     mismatch = IsDocGuidClaimedByOtherReceipt(docId, receiptNumber);   // เอกสารเก่าไม่มี reference → ดูคิว
+                else if (string.Equals(docRef, receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+                    mismatch = false;   // ตรงเลขใบเสร็จ (externalRef) = ใบนี้แน่นอน
+                else if (docRef.StartsWith("RES-", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Reference (display) = รหัสการจอง — ใช้แยก "ใบไหน" ของการจองเดียวกันไม่ได้:
+                    //   คนละการจอง → ชนแน่นอน / การจองเดียวกัน → ยังกำกวม (หลายใบ) → ตัดสินด้วยคิว
+                    int rid = LookupReservationIdByReceipt(receiptNumber);
+                    mismatch = (rid <= 0 || !string.Equals(docRef, $"RES-{rid}", StringComparison.OrdinalIgnoreCase))
+                        || IsDocGuidClaimedByOtherReceipt(docId, receiptNumber);
+                }
+                else
+                    mismatch = true;   // reference เป็นเลขใบเสร็จอื่น = เอกสารของใบอื่นชัดเจน
             }
             catch { mismatch = IsDocGuidClaimedByOtherReceipt(docId, receiptNumber); }   // อ่านไม่ได้ → ดูคิว
 

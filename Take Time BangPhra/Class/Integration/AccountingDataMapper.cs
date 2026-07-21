@@ -2479,12 +2479,12 @@ namespace Take_Time_BangPhra.Integration
                 CustomerExternalId = customerExternalId,
                 CustomerName = customerName,
                 CustomerTaxId = customerTaxId,
-                // ⚠ dedup key ต้อง "ราย ใบ" (receiptNumber) — เดิม Reference/BookingNumber = RES-{resId}
-                // ใช้ร่วมกันทุกใบของการจอง + ReplaceExistingForSource=true + ไม่ตั้ง ExternalId →
-                // ใบที่ 2 ของการจองเดียวถูก NextAcc "replace existing for source" ทับใบแรก (เลขเอกสารเบิ้ล).
-                // ตั้ง Reference + ExternalRef + ExternalId = receiptNumber (unique) → แต่ละใบเป็นเอกสารของตัวเอง.
-                // BookingNumber คง RES-{resId} ไว้เป็น metadata เชื่อมการจอง (ไม่ใช่คีย์ dedup).
-                Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : refStr,
+                // คีย์ 2 ชั้น (บทเรียนจากเลขเอกสารเบิ้ล + อ้างอิงผิด):
+                //   dedup (กันใบชนกัน) = ExternalRef + ExternalId = receiptNumber (unique ราย ใบ — ห้ามใช้ RES-{id}
+                //     เพราะการจองเดียวมีหลายใบ จะถูก ReplaceExistingForSource ทับกัน)
+                //   display "อ้างอิง" (Reference) = RES-{reservationId} รหัสการจอง — ตามที่ผู้ใช้/บัญชีใช้ตามรอย
+                //     (เดิมเผลอเปลี่ยนเป็นเลขใบเสร็จตอนแก้เลขเบิ้ล → อ้างอิงบนเอกสารผิดความหมาย)
+                Reference = refStr,
                 BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 ExternalRef = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
                 ExternalId = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
