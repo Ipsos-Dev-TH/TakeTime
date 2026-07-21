@@ -9255,6 +9255,8 @@ namespace Take_Time_BangPhra.Integration
             public decimal BalanceDue { get; set; }
             public int JeCount { get; set; }             // JE ตัวจริงที่ผูกกับใบนี้
             public string QueueStatus { get; set; }      // สถานะคิวล่าสุดของใบนี้
+            public string DocType { get; set; }          // INVOICE/RECEIPT/JOURNAL (จากคิว) — บอกว่า resync คงเลขได้ไหม
+            public bool ResyncKeepsNumber { get; set; }  // true = resync แก้ in-place คงเลขเอกสารเดิม (INVOICE/JOURNAL)
         }
         public class ReservationSyncOverview
         {
@@ -9267,21 +9269,23 @@ namespace Take_Time_BangPhra.Integration
             public List<ReservationReceiptSyncInfo> Receipts { get; set; }
         }
 
-        /// <summary>สถานะคิวล่าสุดของใบเสร็จ (CREATE_*) — คืน null ถ้าไม่เคยเข้าคิว</summary>
-        private string LookupLatestQueueStatusByReceipt(string receiptNumber)
+        /// <summary>คิว CREATE ล่าสุดของใบเสร็จ: สถานะ + Nexaacc_Document_Type — คืน (null,null) ถ้าไม่เคยเข้าคิว</summary>
+        private (string status, string docType) LookupLatestCreateQueueInfoByReceipt(string receiptNumber)
         {
             try
             {
                 string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1 Status FROM Accounting_Sync_Queue
+                    @"SELECT TOP 1 Status, Nexaacc_Document_Type FROM Accounting_Sync_Queue
                       WHERE Action_Type LIKE 'CREATE_RECEIPT%' AND Payload LIKE @pattern
                       ORDER BY ID DESC",
                     new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
-                if (dt?.Rows.Count > 0) return dt.Rows[0]["Status"]?.ToString();
+                if (dt?.Rows.Count > 0)
+                    return (dt.Rows[0]["Status"]?.ToString(),
+                            dt.Rows[0]["Nexaacc_Document_Type"] == DBNull.Value ? null : dt.Rows[0]["Nexaacc_Document_Type"]?.ToString());
             }
             catch { }
-            return null;
+            return (null, null);
         }
 
         /// <summary>📋 ภาพรวมสถานะ sync ของ "การจองเดียว" — จำแนกใบเสร็จแต่ละใบว่าอยู่บน NextAcc แบบไหน:
@@ -9360,7 +9364,12 @@ namespace Take_Time_BangPhra.Integration
                     if (!info.IsDeposit && info.LocalStatus == "Normal") ov.DepositAppliedTotal += info.DepositApplied;
 
                     try { info.SlipCount = LookupReceiptAttachments(rn, reservationId)?.Count ?? 0; } catch { }
-                    info.QueueStatus = LookupLatestQueueStatusByReceipt(rn);
+                    var qInfo = LookupLatestCreateQueueInfoByReceipt(rn);
+                    info.QueueStatus = qInfo.status;
+                    info.DocType = qInfo.docType;
+                    // resync แก้ in-place คงเลขเดิมได้เฉพาะ INVOICE (integration invoice, resyncUpdate) / JOURNAL
+                    // — company RECEIPT/TaxInvoice ต้อง void→สร้างใหม่ (เลขเปลี่ยน)
+                    info.ResyncKeepsNumber = info.DocType == "INVOICE" || info.DocType == "JOURNAL";
 
                     // ── จำแนกสถานะบน NextAcc ──
                     Guid docId = LookupNexaaccDocIdByReceipt(rn);
@@ -9575,7 +9584,15 @@ namespace Take_Time_BangPhra.Integration
             if (rc == 0)
                 return (0, $"✅ แก้เอกสารเดิมสำเร็จ — เลขเอกสาร NextAcc คงเดิม. {detail}", "INPLACE");
             if (rc > 0)
+            {
+                // >0 = มีคิว CREATE ใหม่ — แยก 2 กรณีจากข้อความจริงของ repost:
+                //   (ก) เอกสารเดิมถูกลบบน NextAcc ไปแล้ว → สร้างใหม่สะอาด (คาดหวัง เลขใหม่ ถูกต้อง)
+                //   (ข) NextAcc ไม่ให้แก้ in-place (รุ่นเก่า/ไม่เข้าเงื่อนไข) → void→สร้างใหม่ (เลขเปลี่ยน)
+                bool wasDeleted = detail.IndexOf("ถูกลบ", StringComparison.Ordinal) >= 0;
+                if (wasDeleted)
+                    return (rc, $"🔄 เอกสารเดิมถูกลบบน NextAcc → เข้าคิวสร้างใหม่ (#{rc}, เลขใหม่) ยอด/JE ถูกต้อง — sync ใน ~1-2 นาที. {detail}", "RECREATE");
                 return (rc, $"⚠ NextAcc ไม่ให้แก้ in-place → void เอกสารเดิมแล้วเข้าคิวสร้างใหม่ (#{rc}) — เลขเอกสารจะเปลี่ยน. {detail}", "FALLBACK");
+            }
             return (-1, string.IsNullOrEmpty(detail) ? "Resync ไม่สำเร็จ (ติด guard/ผิดพลาด)" : detail, "FAIL");
         }
 
@@ -9595,7 +9612,7 @@ namespace Take_Time_BangPhra.Integration
                 new Dictionary<string, object> { { "@rid", reservationId } });
             if (dt == null || dt.Rows.Count == 0) return (0, "การจองนี้ไม่มีใบเสร็จให้ resync");
 
-            int inPlace = 0, fallback = 0, firstSync = 0, failed = 0;
+            int inPlace = 0, fallback = 0, firstSync = 0, recreate = 0, failed = 0;
             var lines = new List<string>();
             foreach (System.Data.DataRow r in dt.Rows)
             {
@@ -9606,6 +9623,7 @@ namespace Take_Time_BangPhra.Integration
                     var (rc, msg, kind) = ResyncSingleReceipt(rn);
                     if (kind == "INPLACE") inPlace++;
                     else if (kind == "FIRST") firstSync++;
+                    else if (kind == "RECREATE") recreate++;
                     else if (kind == "FALLBACK") fallback++;
                     else failed++;
                     lines.Add($"{rn}: {msg}");
@@ -9617,14 +9635,16 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            int ok = inPlace + firstSync + recreate + fallback;
             string summary = $"Resync การจอง #{reservationId}: แก้ in-place (เลขเดิม) {inPlace} ใบ" +
                 (firstSync > 0 ? $", สร้างครั้งแรก {firstSync} ใบ" : "") +
+                (recreate > 0 ? $", เอกสารเดิมถูกลบ→สร้างใหม่ {recreate} ใบ" : "") +
                 (fallback > 0 ? $", ⚠ void→สร้างใหม่ (เลขเปลี่ยน) {fallback} ใบ" : "") +
                 (failed > 0 ? $", ❌ ไม่สำเร็จ {failed} ใบ" : "") +
                 "\n" + string.Join("\n", lines);
             _code.Logs(_connectionString, "AccountingSync",
-                $"ResyncReservationDocuments #{reservationId}: inPlace={inPlace} first={firstSync} fallback={fallback} failed={failed}", "SYSTEM");
-            return (failed > 0 && inPlace + firstSync + fallback == 0 ? -1 : inPlace + firstSync + fallback, summary);
+                $"ResyncReservationDocuments #{reservationId}: inPlace={inPlace} first={firstSync} recreate={recreate} fallback={fallback} failed={failed}", "SYSTEM");
+            return (failed > 0 && ok == 0 ? -1 : ok, summary);
         }
 
         /// <summary>กลับ JV ตาม EntryNumber (native ReverseJournalAsync, idempotent). true = กลับแล้ว/สำเร็จ.</summary>

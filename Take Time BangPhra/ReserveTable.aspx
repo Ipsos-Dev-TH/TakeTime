@@ -926,6 +926,7 @@
 
         function showNaModal(resId) {
             naCurrentResId = resId;
+            naLastResult = null;   // เคลียร์ผลลัพธ์ของการจองก่อนหน้า
             var lbl = document.getElementById('naModalResIdLabel');
             if (lbl) lbl.textContent = resId;
             if (window.jQuery) { jQuery('#naModal').modal('show'); }
@@ -987,7 +988,12 @@
                 html += '<td style="text-align:center;">' + (rc.JeCount || 0) + '</td>';
                 html += '<td style="white-space:nowrap;">';
                 if (!cancelled) {
-                    html += '<button type="button" class="btn btn-warning btn-xs btn-sm" style="margin-right:4px;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place)">🔁 Resync (คงเลขเดิม)</button>';
+                    var keeps = rc.ResyncKeepsNumber;
+                    var rLabel = keeps ? '🔁 Resync (คงเลขเดิม)' : '🔁 Resync (เลขเปลี่ยน)';
+                    var rTitle = keeps
+                        ? 'แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place resyncUpdate)'
+                        : 'เอกสารนี้เป็น company doc (RECEIPT) — resync ต้อง void แล้วสร้างใหม่ เลขเอกสารจะเปลี่ยน';
+                    html += '<button type="button" class="btn btn-warning btn-xs btn-sm" style="margin-right:4px;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
                     if (rc.State === 'DOCUMENT')
                         html += '<button type="button" class="btn btn-danger btn-xs btn-sm" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
                 }
@@ -995,15 +1001,15 @@
             });
             html += '</tbody></table></div>';
 
-            html += '<div id="naActionResult" style="margin-top:6px;"></div>';
+            html += '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
             return html;
         }
 
         function naShowResult(ok, msg) {
-            var el = document.getElementById('naActionResult') || document.getElementById('naModalBody');
-            var box = '<div class="alert ' + (ok ? 'alert-success' : 'alert-danger') + '" style="margin-top:8px;">'
+            naLastResult = '<div class="alert ' + (ok ? 'alert-success' : 'alert-danger') + '" style="margin-top:8px;">'
                     + (ok ? '✅ ' : '⚠ ') + naEsc(msg).replace(/\n/g, '<br/>') + '</div>';
-            if (el.id === 'naActionResult') el.innerHTML = box; else el.innerHTML += box;
+            var el = document.getElementById('naActionResult') || document.getElementById('naModalBody');
+            if (el.id === 'naActionResult') el.innerHTML = naLastResult; else el.innerHTML += naLastResult;
         }
 
         function naReceiptAction(action, doc) {
@@ -1015,8 +1021,20 @@
             if (el0) el0.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ...</div>';
             fetch(naPageUrl + '?naAction=' + action + '&doc=' + encodeURIComponent(doc) + '&resId=' + naCurrentResId + '&_=' + Date.now())
                 .then(function (r) { return r.json(); })
-                .then(function (d) { naShowResult(d.Success, d.Message); })
+                .then(function (d) {
+                    naShowResult(d.Success, d.Message);
+                    // in-place resync เห็นผลทันที → refresh เลย; void ผ่านคิว → หน่วง 3 วิให้คิวประมวลก่อน
+                    if (d.Success) naScheduleRefresh(action === 'voidReceipt' ? 3500 : 800);
+                })
                 .catch(function (err) { naShowResult(false, err.message); });
+        }
+
+        // ข้อความผลลัพธ์ล่าสุด — คงไว้ข้ามการ refresh ตาราง (naRenderOverview จะแสดงต่อท้าย)
+        var naLastResult = null;
+        var naRefreshTimer = null;
+        function naScheduleRefresh(ms) {
+            if (naRefreshTimer) clearTimeout(naRefreshTimer);
+            naRefreshTimer = setTimeout(function () { naLoadOverview(); }, ms || 800);
         }
 
         function naReservationAction(action) {
@@ -1028,7 +1046,11 @@
             if (el) el.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ (อาจใช้เวลาถึง 1-2 นาที)...</div>';
             fetch(naPageUrl + '?naAction=' + (action === 'resyncAll' ? 'resyncAll' : 'reset') + '&resId=' + naCurrentResId + '&_=' + Date.now())
                 .then(function (r) { return r.json(); })
-                .then(function (d) { naShowResult(d.Success, d.Message); })
+                .then(function (d) {
+                    naShowResult(d.Success, d.Message);
+                    // resyncAll = in-place เห็นผลทันที; reset ผ่านการ void ตรง → refresh ได้เลย
+                    if (d.Success) naScheduleRefresh(action === 'resyncAll' ? 1500 : 1500);
+                })
                 .catch(function (err) { naShowResult(false, err.message); });
         }
     </script>
