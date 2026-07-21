@@ -8839,6 +8839,9 @@ namespace Take_Time_BangPhra.Integration
                         invoice.DocumentType = "TaxInvoice";
                         invoice.IsCashSale = true;
                         invoice.PaymentDate = receiptDate;
+                        // dedup key ราย "ใบ" ให้ตรงกับตอน create (MapReceiptToCashSaleTaxInvoice) —
+                        // กัน Reference=RES-{resId} ที่ใช้ร่วมทุกใบทำให้ resync จับผิดใบ/เบิ้ลเลขเอกสาร
+                        if (!string.IsNullOrEmpty(receiptNumber)) invoice.Reference = receiptNumber;
                         // PaymentAccountId/PaymentMethod ถูก set โดย mapper แล้ว
                         if (cashSaleDepositApplied > 0.005m)
                         {
