@@ -1652,7 +1652,7 @@ namespace Take_Time_BangPhra.Integration
             info.ToEmail = LookupCustomerEmail(resId);
             info.Subject = FormatEmailTemplate(_config.EtaxEmailSubject, receiptNumber, info.GuestName, info.Amount);
             info.Body = FormatEmailTemplate(_config.EtaxEmailBody, receiptNumber, info.GuestName, info.Amount);
-            if (dt.Table.Columns.Contains("Pdf_Url") && dt.Rows[0]["Pdf_Url"] != DBNull.Value)
+            if (dt.Columns.Contains("Pdf_Url") && dt.Rows[0]["Pdf_Url"] != DBNull.Value)
                 info.PdfUrl = dt.Rows[0]["Pdf_Url"].ToString();
             return info;
         }

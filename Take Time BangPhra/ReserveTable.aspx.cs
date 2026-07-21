@@ -787,7 +787,7 @@ namespace Take_Time_BangPhra
             try
             {
                 ddlRefundAccountModal.Items.Clear();
-                ddlRefundAccountModal.Items.Add(new ListItem("อัตโนมัติ (บัญชีเดิมที่รับมัดจำเข้ามา)", ""));
+                ddlRefundAccountModal.Items.Add(new System.Web.UI.WebControls.ListItem("อัตโนมัติ (บัญชีเดิมที่รับมัดจำเข้ามา)", ""));
                 DataTable dt = DatabaseQuery(conn,
                     "SELECT ID, Paid_How FROM Account_Paid_How ORDER BY ID");
                 if (dt != null)
@@ -797,7 +797,7 @@ namespace Take_Time_BangPhra
                         string id = r["ID"]?.ToString();
                         string name = r["Paid_How"]?.ToString();
                         if (!string.IsNullOrEmpty(id))
-                            ddlRefundAccountModal.Items.Add(new ListItem($"คืนออก: {name}", id));
+                            ddlRefundAccountModal.Items.Add(new System.Web.UI.WebControls.ListItem($"คืนออก: {name}", id));
                     }
                 }
             }
