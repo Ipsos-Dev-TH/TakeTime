@@ -9529,56 +9529,102 @@ namespace Take_Time_BangPhra.Integration
             return InsertQueue("RECEIPT", resId, "CREATE_RECEIPT_DOCUMENT", payload);
         }
 
-        /// <summary>🔁 Resync การจองทั้งชุด "กดทีเดียวจบ": (1) รีเซ็ต — กลับทุก JE + void ทุกเอกสารของการจอง
-        /// + reset marker (idempotent) → (2) เข้าคิวสร้างใหม่ทุกใบ Normal เรียงตามวันที่ (มัดจำก่อนเช็คเอาท์
-        /// โดยลำดับคิว + guard VerifyDepositBookedOnNextAcc กันหักมัดจำก่อนมัดจำขึ้น) → เอกสาร+JE ใหม่ถูกต้อง
-        /// ตาม logic ปัจจุบัน พร้อมแนบสลิปอัตโนมัติ (LookupReceiptAttachments ใน CREATE path).</summary>
-        public (int enqueued, string message) ResyncReservationDocuments(int reservationId)
+        /// <summary>คิว COMPLETED CREATE_RECEIPT_DOCUMENT ล่าสุดของใบเสร็จ — จุดเข้า RepostReceiptWithCurrentLogic</summary>
+        private long LookupLatestCompletedCreateQueueId(string receiptNumber)
+        {
+            try
+            {
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Status = 'COMPLETED'
+                        AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (dt?.Rows.Count > 0) return Convert.ToInt64(dt.Rows[0]["ID"]);
+            }
+            catch { }
+            return 0;
+        }
+
+        /// <summary>🔁 Resync ใบเดียว "คงเลขเอกสาร NextAcc เดิม": ใช้ RepostReceiptWithCurrentLogic —
+        /// (1) เอกสารเดิมเป็น INVOICE → resyncUpdate (official contract: แก้ in-place, เลขเอกสารคงเดิมเสมอ
+        /// ไม่ void), (2) RECEIPT/JOURNAL → แก้ JE in-place, (3) เอกสารเดิมถูกลบบน NextAcc → สร้างใหม่สะอาด
+        /// (reset marker + purge orphan REC), (4) NextAcc ปฏิเสธ (ชำระแล้ว/งวดปิด) → fallback void→สร้างใหม่
+        /// (เลขเปลี่ยน — แจ้งชัดในข้อความ). ใบที่ไม่เคย sync → เข้าคิวสร้างครั้งแรกปกติ.</summary>
+        public (long result, string message, string kind) ResyncSingleReceipt(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return (-1, "ไม่ระบุเลขที่ใบเสร็จ", "FAIL");
+            if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc", "FAIL");
+
+            long qid = LookupLatestCompletedCreateQueueId(receiptNumber);
+            if (qid <= 0)
+            {
+                // ไม่เคย sync สำเร็จ → ไม่มีเอกสาร/เลขให้คง — เข้าคิวสร้างครั้งแรกตามปกติ
+                long createQ = EnqueueReceiptResyncInternal(receiptNumber);
+                return createQ > 0
+                    ? (createQ, $"ใบ {receiptNumber} ยังไม่เคย sync สำเร็จ → เข้าคิวสร้างเอกสารครั้งแรก (#{createQ}) — sync ใน ~1-2 นาที", "FIRST")
+                    : (-1, "เข้าคิวสร้างไม่สำเร็จ (ใบยอด 0/ไม่พบใบเสร็จ?)", "FAIL");
+            }
+
+            long rc = RepostReceiptWithCurrentLogic(qid);
+            string detail = LastRepostMessage ?? "";
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ResyncSingleReceipt {receiptNumber}: repost queue #{qid} → rc={rc} {detail}", "SYSTEM");
+
+            if (rc == 0)
+                return (0, $"✅ แก้เอกสารเดิมสำเร็จ — เลขเอกสาร NextAcc คงเดิม. {detail}", "INPLACE");
+            if (rc > 0)
+                return (rc, $"⚠ NextAcc ไม่ให้แก้ in-place → void เอกสารเดิมแล้วเข้าคิวสร้างใหม่ (#{rc}) — เลขเอกสารจะเปลี่ยน. {detail}", "FALLBACK");
+            return (-1, string.IsNullOrEmpty(detail) ? "Resync ไม่สำเร็จ (ติด guard/ผิดพลาด)" : detail, "FAIL");
+        }
+
+        /// <summary>🔁 Resync การจองทั้งชุด "คงเลขเอกสารเดิม": วน Repost ทุกใบ Normal เรียงตามวันที่
+        /// (มัดจำก่อนเช็คเอาท์) — แต่ละใบใช้เส้นเดียวกับ ResyncSingleReceipt (in-place ก่อนเสมอ,
+        /// เลขเดิม; fallback void→สร้างใหม่เฉพาะเมื่อ NextAcc ปฏิเสธ). ใบที่ไม่เคย sync → เข้าคิวสร้างใหม่.
+        /// ไม่ reset ทั้งก้อน (reset = void ทุกใบ → เลขเสียหมด — มีปุ่มแยกไว้เป็นทางเลือกสุดท้าย).</summary>
+        public (int fixedCount, string message) ResyncReservationDocuments(int reservationId)
         {
             if (reservationId <= 0) return (-1, "รหัสการจองไม่ถูกต้อง");
-            var (reversed, resetMsg) = ResetReservationAccounting(reservationId);
-            if (reversed < 0) return (-1, resetMsg);
+            if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc");
 
-            int enq = 0;
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT ID FROM Account_Receipt
                   WHERE Reservation_ID = @rid AND (Status = 'Normal' OR Status IS NULL)
                   ORDER BY Created_Date, ID",
                 new Dictionary<string, object> { { "@rid", reservationId } });
-            if (dt != null)
-                foreach (System.Data.DataRow r in dt.Rows)
+            if (dt == null || dt.Rows.Count == 0) return (0, "การจองนี้ไม่มีใบเสร็จให้ resync");
+
+            int inPlace = 0, fallback = 0, firstSync = 0, failed = 0;
+            var lines = new List<string>();
+            foreach (System.Data.DataRow r in dt.Rows)
+            {
+                string rn = r["ID"]?.ToString();
+                if (string.IsNullOrEmpty(rn)) continue;
+                try
                 {
-                    string rn = r["ID"]?.ToString();
-                    if (string.IsNullOrEmpty(rn)) continue;
-                    if (EnqueueReceiptResyncInternal(rn) > 0) enq++;
+                    var (rc, msg, kind) = ResyncSingleReceipt(rn);
+                    if (kind == "INPLACE") inPlace++;
+                    else if (kind == "FIRST") firstSync++;
+                    else if (kind == "FALLBACK") fallback++;
+                    else failed++;
+                    lines.Add($"{rn}: {msg}");
                 }
+                catch (Exception ex)
+                {
+                    failed++;
+                    lines.Add($"{rn}: ผิดพลาด {ex.Message}");
+                }
+            }
 
+            string summary = $"Resync การจอง #{reservationId}: แก้ in-place (เลขเดิม) {inPlace} ใบ" +
+                (firstSync > 0 ? $", สร้างครั้งแรก {firstSync} ใบ" : "") +
+                (fallback > 0 ? $", ⚠ void→สร้างใหม่ (เลขเปลี่ยน) {fallback} ใบ" : "") +
+                (failed > 0 ? $", ❌ ไม่สำเร็จ {failed} ใบ" : "") +
+                "\n" + string.Join("\n", lines);
             _code.Logs(_connectionString, "AccountingSync",
-                $"ResyncReservationDocuments #{reservationId}: กลับ {reversed} JE + เข้าคิวสร้างใหม่ {enq} ใบ", "SYSTEM");
-            return (enq,
-                $"รีเซ็ตแล้ว (กลับ {reversed} JE + void เอกสารเดิม) และเข้าคิวสร้างใหม่ {enq} ใบ — " +
-                "ระบบจะ sync อัตโนมัติภายใน ~1-2 นาที (เอกสาร/JE ใหม่ตาม logic ปัจจุบัน พร้อมแนบสลิป). " +
-                "ตรวจผลได้ที่ปุ่มนี้อีกครั้ง หรือหน้า Accounting Integration");
-        }
-
-        /// <summary>🔁 Resync ใบเดียว: void เอกสารเดิม (ถ้ามี — เข้าคิว VOID ก่อน) + เข้าคิวสร้างใหม่
-        /// (คิวประมวลตามลำดับ id: void เสร็จก่อน create). ใช้แก้ใบที่ผิดใบเดียวโดยไม่แตะใบอื่น.</summary>
-        public (long queueId, string message) ResyncSingleReceipt(string receiptNumber)
-        {
-            if (string.IsNullOrEmpty(receiptNumber)) return (-1, "ไม่ระบุเลขที่ใบเสร็จ");
-            if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc");
-
-            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
-            long voidQ = -1;
-            if (docId != Guid.Empty) voidQ = EnqueueVoidReceipt(receiptNumber);
-            long qid = EnqueueReceiptResyncInternal(receiptNumber);
-            if (qid <= 0) return (-1, "เข้าคิวสร้างใหม่ไม่สำเร็จ (ใบยอด 0/ไม่พบใบเสร็จ?)");
-
-            _code.Logs(_connectionString, "AccountingSync",
-                $"ResyncSingleReceipt {receiptNumber}: voidQueue={voidQ} createQueue={qid}", "SYSTEM");
-            return (qid, voidQ > 0
-                ? $"เข้าคิวแล้ว: void เอกสารเดิม (#{voidQ}) → สร้างใหม่ (#{qid}) — sync อัตโนมัติใน ~1-2 นาที"
-                : $"เข้าคิวสร้างใหม่แล้ว (#{qid}) — sync อัตโนมัติใน ~1-2 นาที");
+                $"ResyncReservationDocuments #{reservationId}: inPlace={inPlace} first={firstSync} fallback={fallback} failed={failed}", "SYSTEM");
+            return (failed > 0 && inPlace + firstSync + fallback == 0 ? -1 : inPlace + firstSync + fallback, summary);
         }
 
         /// <summary>กลับ JV ตาม EntryNumber (native ReverseJournalAsync, idempotent). true = กลับแล้ว/สำเร็จ.</summary>

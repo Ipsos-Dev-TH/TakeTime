@@ -116,8 +116,9 @@ namespace Take_Time_BangPhra
                             }
                         case "resyncReceipt":
                             {
-                                var (q, msg) = sync.ResyncSingleReceipt(doc);
-                                result = new { Success = q > 0, Message = msg };
+                                Server.ScriptTimeout = 300;   // repost ยิง NextAcc ตรง (in-place) — อาจใช้เวลา
+                                var (rc, msg, _) = sync.ResyncSingleReceipt(doc);
+                                result = new { Success = rc >= 0, Message = msg };
                                 break;
                             }
                         case "voidReceipt":

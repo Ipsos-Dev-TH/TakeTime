@@ -987,9 +987,9 @@
                 html += '<td style="text-align:center;">' + (rc.JeCount || 0) + '</td>';
                 html += '<td style="white-space:nowrap;">';
                 if (!cancelled) {
-                    html += '<button type="button" class="btn btn-warning btn-xs btn-sm" style="margin-right:4px;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="void เอกสารเดิม (ถ้ามี) แล้วสร้างใหม่ตาม logic ปัจจุบัน">🔁 Resync</button>';
+                    html += '<button type="button" class="btn btn-warning btn-xs btn-sm" style="margin-right:4px;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place)">🔁 Resync (คงเลขเดิม)</button>';
                     if (rc.State === 'DOCUMENT')
-                        html += '<button type="button" class="btn btn-danger btn-xs btn-sm" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิกเอกสารบน NextAcc (JE ถูกยกเลิกตาม cascade)">🚫 ลบเอกสาร</button>';
+                        html += '<button type="button" class="btn btn-danger btn-xs btn-sm" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
                 }
                 html += '</td></tr>';
             });
@@ -1002,15 +1002,17 @@
         function naShowResult(ok, msg) {
             var el = document.getElementById('naActionResult') || document.getElementById('naModalBody');
             var box = '<div class="alert ' + (ok ? 'alert-success' : 'alert-danger') + '" style="margin-top:8px;">'
-                    + (ok ? '✅ ' : '⚠ ') + naEsc(msg) + '</div>';
+                    + (ok ? '✅ ' : '⚠ ') + naEsc(msg).replace(/\n/g, '<br/>') + '</div>';
             if (el.id === 'naActionResult') el.innerHTML = box; else el.innerHTML += box;
         }
 
         function naReceiptAction(action, doc) {
             var confirmMsg = action === 'voidReceipt'
-                ? 'ยกเลิกเอกสารของใบ ' + doc + ' บน NextAcc?\n\nเอกสาร + JE ที่ผูกกันจะถูกยกเลิก (void cascade)\nใบเสร็จฝั่งระบบนี้ไม่ถูกแตะ'
-                : 'Resync ใบ ' + doc + '?\n\nvoid เอกสารเดิมบน NextAcc (ถ้ามี) แล้วสร้างใหม่ตาม logic ปัจจุบัน\nพร้อมแนบสลิปอัตโนมัติ — ประมวลผลใน ~1-2 นาที';
+                ? '🚫 ยกเลิก (void) เอกสารของใบ ' + doc + ' บน NextAcc?\n\nเอกสาร + JE ที่ผูกกันจะถูกยกเลิก (void cascade)\nเลขเอกสารที่ใช้ไปแล้วจะไม่กลับมา — ใบเสร็จฝั่งระบบนี้ไม่ถูกแตะ'
+                : '🔁 Resync ใบ ' + doc + ' (คงเลขเอกสารเดิม)?\n\nแก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม (ที่ส่งลูกค้าไปแล้วใช้ได้ต่อ)\n• ถ้าเอกสารเดิมถูกลบไปแล้ว → สร้างใหม่สะอาด\n• ถ้า NextAcc ไม่ให้แก้ (ชำระแล้ว/งวดปิด) → จะแจ้งก่อนว่าเลขจะเปลี่ยน\n\nอาจใช้เวลา 10-30 วินาที';
             if (!confirm(confirmMsg)) return;
+            var el0 = document.getElementById('naActionResult');
+            if (el0) el0.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ...</div>';
             fetch(naPageUrl + '?naAction=' + action + '&doc=' + encodeURIComponent(doc) + '&resId=' + naCurrentResId + '&_=' + Date.now())
                 .then(function (r) { return r.json(); })
                 .then(function (d) { naShowResult(d.Success, d.Message); })
@@ -1019,8 +1021,8 @@
 
         function naReservationAction(action) {
             var confirmMsg = action === 'resyncAll'
-                ? '🔁 Resync การจอง #' + naCurrentResId + ' ทั้งชุด?\n\n1) กลับทุก JE + void ทุกเอกสารของการจองบน NextAcc (idempotent)\n2) เข้าคิวสร้างเอกสารใหม่ทุกใบ (มัดจำ→เช็คเอาท์ ตามลำดับ) ตาม logic ปัจจุบัน พร้อมแนบสลิป\n\nใช้เมื่อเอกสารเดิมผิด/ churn — ประมวลผลใน ~1-2 นาที'
-                : '🧹 ลบเอกสารเดิมของการจอง #' + naCurrentResId + ' บน NextAcc?\n\nกลับทุก JE + void ทุกเอกสาร (ไม่สร้างใหม่)\nGL ของการจองนี้ (21510/21913/ลูกหนี้) กลับเป็น 0\nidempotent — กดซ้ำไม่เบิ้ล';
+                ? '🔁 Resync การจอง #' + naCurrentResId + ' ทั้งชุด (คงเลขเอกสารเดิม)?\n\nไล่แก้เอกสารทุกใบ (มัดจำ→เช็คเอาท์) ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม\n• ใบที่ไม่เคย sync → สร้างครั้งแรก / ใบที่ถูกลบ → สร้างใหม่สะอาด\n• NextAcc ไม่ให้แก้ใบไหน (ชำระแล้ว/งวดปิด) → รายงานเป็นรายใบ\n\nอาจใช้เวลาถึง 1-2 นาที'
+                : '🧹 ลบเอกสารเดิมของการจอง #' + naCurrentResId + ' บน NextAcc?\n\n⚠ ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (ไม่สร้างใหม่)\nเลขเอกสารเดิมทั้งหมดจะเสีย (ใบใหม่ได้เลขใหม่)\nGL ของการจองนี้ (21510/21913/ลูกหนี้) กลับเป็น 0\nidempotent — กดซ้ำไม่เบิ้ล';
             if (!confirm(confirmMsg)) return;
             var el = document.getElementById('naActionResult');
             if (el) el.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ (อาจใช้เวลาถึง 1-2 นาที)...</div>';
@@ -1074,10 +1076,10 @@
                 <div class="modal-body" id="naModalBody" style="max-height:65vh; overflow:auto;"></div>
                 <div class="modal-footer" style="flex-wrap:wrap; gap:6px;">
                     <button type="button" class="btn btn-outline-secondary btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
-                    <button type="button" class="btn btn-danger btn-sm" onclick="naReservationAction('reset')"
-                        title="กลับทุก JE + void ทุกเอกสารของการจอง (ไม่สร้างใหม่)">🧹 ลบเอกสารเดิมทั้งหมด</button>
                     <button type="button" class="btn btn-warning btn-sm" onclick="naReservationAction('resyncAll')"
-                        title="ลบเอกสารเดิม แล้วเข้าคิวสร้างใหม่ทุกใบตาม logic ปัจจุบัน พร้อมแนบสลิป">🔁 Resync ทั้งการจอง (ลบ + สร้างใหม่)</button>
+                        title="แก้เอกสารทุกใบให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสาร NextAcc เดิม (in-place)">🔁 Resync ทั้งการจอง (คงเลขเดิม)</button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="naReservationAction('reset')"
+                        title="ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (เลขเอกสารเดิมเสีย ไม่สร้างใหม่)">🧹 ล้างทั้งหมด (void — เลขเสีย)</button>
                     <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">ปิด</button>
                 </div>
             </div>
