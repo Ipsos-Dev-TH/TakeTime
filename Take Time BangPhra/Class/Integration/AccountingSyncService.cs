@@ -8741,41 +8741,60 @@ namespace Take_Time_BangPhra.Integration
                 return (-1, "ต้องตั้ง acc_ key + เปิด company endpoints ก่อน (diagnostic เป็น company endpoint)");
             try
             {
-                var debris = System.Threading.Tasks.Task.Run(() =>
-                    _apiClient.GetDepositGlDebrisAsync()).GetAwaiter().GetResult();
-                var items = debris?.data?.Items;
-                if (items == null || items.Count == 0)
-                    return (0, "ไม่พบซาก GL มัดจำ (215xx/217xx/21913) ที่ค้าง");
-
-                // เฉพาะ JV ของ TakeTime (ไม่ผูกเอกสาร) — reverse เอง; ซากจาก "เอกสารถูกลบ" NextAcc กวาดเอง
-                var jvEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var it in items)
-                    if (!string.IsNullOrEmpty(it.EntryNumber) && IsTakeTimeJvSource(it.SourceStatus))
-                        jvEntries.Add(it.EntryNumber);
-
-                if (jvEntries.Count == 0)
-                    return (0, $"พบซาก {items.Count} บรรทัด แต่ไม่มี JV ของ TakeTime ให้กลับ (เป็นซากเอกสารที่ถูกลบ — NextAcc กวาดตอนลบครั้งถัดไป)");
-
-                int reversed = 0;
-                foreach (string en in jvEntries)
+                // LOOP จน "ไม่มี JV ของ TakeTime ที่ยังไม่กลับ" เหลือ — กันเคส endpoint แบ่งหน้า/ซ้อนหลายชั้น
+                // (churn resync หลายรอบ = JV ซ้อนหลายอัน) → กดครั้งเดียวเคลียครบ. seen กันวนซ้ำ + cap กัน infinite.
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int reversed = 0, docLinkedDebris = 0, totalLines = 0;
+                for (int round = 0; round < 25; round++)
                 {
-                    try
+                    var debris = System.Threading.Tasks.Task.Run(() =>
+                        _apiClient.GetDepositGlDebrisAsync()).GetAwaiter().GetResult();
+                    var items = debris?.data?.Items;
+                    if (items == null || items.Count == 0) break;
+                    totalLines = items.Count;
+
+                    // แยก 2 ชนิด: JV ของ TakeTime (กลับเอง) vs ซากเอกสารถูกลบ (NextAcc กวาด)
+                    var newJvEntries = new List<string>();
+                    docLinkedDebris = 0;
+                    foreach (var it in items)
                     {
-                        bool ok = System.Threading.Tasks.Task.Run(() =>
-                            TryReverseJournalByEntryNumberAsync(en)).GetAwaiter().GetResult();
-                        if (ok) reversed++;
+                        if (string.IsNullOrEmpty(it.EntryNumber)) continue;
+                        if (IsTakeTimeJvSource(it.SourceStatus))
+                        {
+                            if (seen.Add(it.EntryNumber) && !newJvEntries.Contains(it.EntryNumber))
+                                newJvEntries.Add(it.EntryNumber);
+                        }
+                        else docLinkedDebris++;   // เอกสารถูกลบ → NextAcc กวาดตอนลบครั้งถัดไป
                     }
-                    catch (Exception rex)
+                    if (newJvEntries.Count == 0) break;   // ไม่มี JV ใหม่ให้กลับแล้ว → จบ
+
+                    foreach (string en in newJvEntries)
                     {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"CleanupDepositGlDebrisJvs: กลับ JV {en} ล้มเหลว {rex.Message}", "SYSTEM");
+                        try
+                        {
+                            bool ok = System.Threading.Tasks.Task.Run(() =>
+                                TryReverseJournalByEntryNumberAsync(en)).GetAwaiter().GetResult();
+                            if (ok) reversed++;
+                        }
+                        catch (Exception rex)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"CleanupDepositGlDebrisJvs: กลับ JV {en} ล้มเหลว {rex.Message}", "SYSTEM");
+                        }
                     }
                 }
+
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"CleanupDepositGlDebrisJvs: ซาก {items.Count} บรรทัด, JV ของ TakeTime {jvEntries.Count} รายการ → กลับสำเร็จ {reversed}", "SYSTEM");
-                return (reversed,
-                    $"กลับ JV มัดจำที่ค้าง (churn) {reversed}/{jvEntries.Count} รายการ. " +
-                    "⚠ ยอดที่เหลือหลังกลับ (ถ้ามี) เกิดจาก churn บน env เก่า — ให้นักบัญชีตรวจ/ออก correcting JV ยืนยันให้เป็น 0");
+                    $"CleanupDepositGlDebrisJvs: กลับ JV ของ TakeTime {reversed} รายการ (ครบทุกอันที่ซ้อน), เหลือซากเอกสารถูกลบ {docLinkedDebris} บรรทัด (NextAcc กวาดตอนลบ)", "SYSTEM");
+
+                if (reversed == 0 && docLinkedDebris == 0 && seen.Count == 0)
+                    return (0, "ไม่พบซาก GL มัดจำ (215xx/217xx/21913) ที่ค้าง");
+
+                string msg = $"กลับ JV มัดจำของ TakeTime ที่ค้าง (churn) ครบทุกอันที่ซ้อน — {reversed} รายการ.";
+                if (docLinkedDebris > 0)
+                    msg += $" ยังมีซากจาก 'เอกสารที่ถูกลบ' อีก {docLinkedDebris} บรรทัด → NextAcc จะกวาดเองตอนลบเอกสารครั้งถัดไป (ไม่ใช่ JV ของเรา).";
+                msg += " ⚠ ยอดที่เหลือหลังกลับ (ถ้ามี) เกิดจาก churn — ให้นักบัญชีตรวจ/ออก correcting JV ยืนยันให้เป็น 0";
+                return (reversed, msg);
             }
             catch (Exception ex)
             {
