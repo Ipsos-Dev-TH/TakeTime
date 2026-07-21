@@ -606,6 +606,12 @@
             if (s === null || s === undefined) return '';
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+        // ค่าที่ฝังใน onclick="fn('...')" — escape JS-string (\ ') ก่อน แล้ว HTML-attr
+        function jsArg(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
         function num(n) {
             var v = (typeof n === 'number') ? n : parseFloat(n || 0);
             if (isNaN(v)) v = 0;
@@ -630,7 +636,7 @@
                     clearTimeout(timer);
                     var m = (err && err.name === 'AbortError') ? 'หมดเวลา — NextAcc ไม่ตอบกลับ ลองใหม่อีกครั้ง' : esc(err.message);
                     body.innerHTML = '<div class="je-empty">⚠ ดึงข้อมูลไม่สำเร็จ: ' + m +
-                        '</div><div style="text-align:center; margin-top:10px;"><button type="button" class="btn-sync-action" onclick="viewJE(\'' + esc(doc) + '\')">🔄 ลองใหม่</button></div>';
+                        '</div><div style="text-align:center; margin-top:10px;"><button type="button" class="btn-sync-action" onclick="viewJE(\'' + jsArg(doc) + '\')">🔄 ลองใหม่</button></div>';
                 });
         }
 
@@ -655,7 +661,7 @@
                 html += '<div><span class="lbl">คงค้าง</span>' + (arWarn
                         ? '<span class="badge warn">' + num(d.BalanceDue) + ' (ลูกหนี้ยังเปิด)</span>'
                         : num(d.BalanceDue)) + '</div>';
-                html += '<div><span class="lbl">รหัสจอง</span>' + (d.ReservationId || '-') + '</div>';
+                html += '<div><span class="lbl">รหัสจอง</span>' + esc(d.ReservationId || '-') + '</div>';
                 html += '</div></div>';
             }
 

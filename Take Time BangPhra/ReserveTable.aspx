@@ -949,6 +949,12 @@
             if (s === null || s === undefined) return '';
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+        // ค่าที่ฝังใน onclick="fn('...')" — escape สำหรับ JS-string (\ ' ) ก่อน แล้ว HTML-attr (& < > ")
+        function naJsArg(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
         function naNum(n) {
             var v = (typeof n === 'number') ? n : parseFloat(n || 0);
             if (isNaN(v)) v = 0;
@@ -973,7 +979,7 @@
                 .then(function (d) { body.innerHTML = naRenderOverview(d); naSetBusy(false); })
                 .catch(function (err) {
                     body.innerHTML = '<div class="alert alert-danger">⚠ ' + naEsc(err.message) +
-                        '</div><div style="text-align:center; margin-top:8px;"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="naLoadOverview()">🔄 ลองใหม่</button></div>';
+                        '</div><div style="text-align:center; margin-top:8px;"><button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ลองใหม่</button></div>';
                     naSetBusy(false);
                 });
         }
@@ -1026,9 +1032,9 @@
                     var rTitle = keeps
                         ? 'แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place resyncUpdate)'
                         : 'เอกสารนี้เป็น company doc (RECEIPT) — resync ต้อง void แล้วสร้างใหม่ เลขเอกสารจะเปลี่ยน';
-                    html += '<button type="button" class="btn btn-warning btn-xs" style="margin:2px 4px 2px 0;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
+                    html += '<button type="button" class="btn btn-warning btn-xs" style="margin:2px 4px 2px 0;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naJsArg(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
                     if (rc.State === 'DOCUMENT')
-                        html += '<button type="button" class="btn btn-danger btn-xs" style="margin:2px 0;" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
+                        html += '<button type="button" class="btn btn-danger btn-xs" style="margin:2px 0;" onclick="naReceiptAction(\'voidReceipt\', \'' + naJsArg(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
                 }
                 html += '</td></tr>';
             });
@@ -1047,6 +1053,7 @@
 
         function naReceiptAction(action, doc) {
             if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }   // กัน refresh ค้างชนกับ action ใหม่
             var confirmMsg = action === 'voidReceipt'
                 ? '🚫 ยกเลิก (void) เอกสารของใบ ' + doc + ' บน NextAcc?\n\nเอกสาร + JE ที่ผูกกันจะถูกยกเลิก (void cascade)\nเลขเอกสารที่ใช้ไปแล้วจะไม่กลับมา — ใบเสร็จฝั่งระบบนี้ไม่ถูกแตะ'
                 : '🔁 Resync ใบ ' + doc + ' (คงเลขเอกสารเดิม)?\n\nแก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม (ที่ส่งลูกค้าไปแล้วใช้ได้ต่อ)\n• ถ้าเอกสารเดิมถูกลบไปแล้ว → สร้างใหม่สะอาด\n• ถ้าแก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขจะเปลี่ยน)\n• งวด/เดือนภาษี "ปิดแล้ว" เท่านั้นที่แก้/ลบไม่ได้ → จะแจ้งเหตุผล เลขคงเดิม\n\nอาจใช้เวลา 10-30 วินาที';
@@ -1076,6 +1083,7 @@
                 : '🧹 ลบเอกสารเดิมของการจอง #' + naCurrentResId + ' บน NextAcc?\n\n⚠ ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (ไม่สร้างใหม่)\nเลขเอกสารเดิมทั้งหมดจะเสีย (ใบใหม่ได้เลขใหม่)\nGL ของการจองนี้ (21510/21913/ลูกหนี้) กลับเป็น 0\nidempotent — กดซ้ำไม่เบิ้ล';
             if (!confirm(confirmMsg)) return;
             if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }   // กัน refresh ค้างชนกับ action ใหม่
             naSetBusy(true, action === 'resyncAll' ? 'กำลัง Resync ทั้งการจอง... (อาจถึง 1-2 นาที)' : 'กำลังล้างเอกสารทั้งหมด...');
             naFetch(naPageUrl + '?naAction=' + (action === 'resyncAll' ? 'resyncAll' : 'reset') + '&resId=' + naCurrentResId + '&_=' + Date.now(), 240000)
                 .then(function (d) {
