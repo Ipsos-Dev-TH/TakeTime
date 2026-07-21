@@ -5123,14 +5123,18 @@ namespace Take_Time_BangPhra.Integration
                       ORDER BY Created_Date",
                     new Dictionary<string, object> { { "@rid", reservationId } });
                 if (dt == null || dt.Rows.Count == 0) return null;
+                // แสดง "เฉพาะเลขเอกสาร NextAcc" ของใบมัดจำ (ตรงกับที่ลูกค้าเห็น) — ห้าม fallback เลข local
+                // (เช่น REC260616002 ไม่มีขีด) เพราะมัดจำใบเดียวจะโชว์ทั้ง local+NextAcc ดูเหมือน 2 ใบ.
+                // dedup กันเลขซ้ำ (หลาย Account_Receipt row ของมัดจำก้อนเดียว/re-sync → เลข NextAcc เดียวกัน).
                 var refs = new List<string>();
                 foreach (System.Data.DataRow r in dt.Rows)
                 {
                     string localId = r["ID"]?.ToString();
                     if (string.IsNullOrEmpty(localId)) continue;
-                    // แสดงเลขเอกสาร NextAcc ของใบมัดจำ (ไม่ใช่ local id) → ตรงกับที่ลูกค้าเห็นบนใบเสร็จมัดจำ
                     string nexNum = LookupNexaaccDocNumberForReceipt(localId);
-                    refs.Add(!string.IsNullOrEmpty(nexNum) ? nexNum : localId);
+                    if (string.IsNullOrEmpty(nexNum)) continue;   // ยังไม่มีเลข NextAcc → ข้าม (ไม่โชว์ local)
+                    if (!refs.Any(x => string.Equals(x, nexNum, StringComparison.OrdinalIgnoreCase)))
+                        refs.Add(nexNum);
                 }
                 return refs.Count > 0 ? string.Join(", ", refs) : null;
             }
