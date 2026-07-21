@@ -1516,6 +1516,10 @@ namespace Take_Time_BangPhra.Integration
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
 
+        /// <summary>true = เอกสารบน NextAcc ที่ resolve ได้เป็นของใบอื่น (ExternalRef ไม่ตรง — เลขเอกสารชน
+        /// จากบั๊กก่อน fix) → caller ไม่ควรเปิด และควรแนะให้กด Retry ออกเอกสารของใบนี้เอง</summary>
+        public bool MismatchedIdentity { get; set; }
+
         /// <summary>URL ไฟล์ PDF ใบหัก ณ ที่จ่าย (50 ทวิ) ที่ cache ไว้ฝั่ง TakeTime — ว่างถ้าไม่มี</summary>
         public string WhtCertPdfRelativeUrl { get; set; }
 

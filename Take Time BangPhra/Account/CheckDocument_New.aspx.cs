@@ -1481,6 +1481,13 @@ namespace Take_Time_BangPhra.Account
                                 Response.Redirect(naPdf.PdfRelativeUrl);
                                 return;
                             }
+                            // เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (ExternalRef ไม่ตรง) → หยุด ไม่ดึงต่อ
+                            // ด้วย GUID (เป็น GUID ที่ชนตัวเดียวกัน) กันเปิดเอกสารผิดคน — แจ้งให้กด Retry
+                            if (naPdf != null && naPdf.MismatchedIdentity)
+                            {
+                                ShowError(naPdf.Message ?? "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น — กด Retry เพื่อออกเอกสารของใบนี้เอง");
+                                return;
+                            }
 
                             // fallback ชั้น 2: การจับคู่ตอนโหลดตาราง (merge) เก็บ GUID เอกสาร NextAcc ไว้ใน
                             // DataKeys["NextAccId"] แล้ว → ดึง PDF ตรงด้วย GUID (ไม่พึ่งการ lookup จากคิว

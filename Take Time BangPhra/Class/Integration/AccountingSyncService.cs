@@ -10382,6 +10382,30 @@ namespace Take_Time_BangPhra.Integration
                 return result;
             }
 
+            // ── IDENTITY GUARD: กันเปิด "เอกสารของใบอื่น" (คนละลูกค้า/ยอด) ──
+            // เหตุ (บั๊กจริง res 149094): ใบหลายใบของการจองเดียวเคยชนกัน (shared RES-{id} key ก่อน fix
+            // 2552c85) → คิวเก็บ GUID ไขว้กัน → ดู PDF ใบ REC260716004 เด้งไปเอกสาร REC-20260716-0001 ของอีกใบ.
+            // ตรวจ ExternalRef ของเอกสารจริงบน NextAcc: ถ้ามีค่าและ "ไม่ตรง" receiptNumber = เอกสารนี้เป็น
+            // ของใบอื่น (ชน) → ไม่เสิร์ฟ (ตก local ของใบนี้เอง กันแสดงเอกสารภาษีผิดคน). lenient: เอกสารเก่า
+            // ที่ไม่มี ExternalRef (null/ว่าง) ไม่บล็อก (ไม่ regress). ทำก่อน cache เพราะ cache ก็ผูก GUID ที่ชน.
+            try
+            {
+                var idChk = await _apiClient.GetDocumentAsync(docId);
+                string docExtRef = idChk?.data?.ExternalRef;
+                if (!string.IsNullOrWhiteSpace(docExtRef)
+                    && !string.Equals(docExtRef.Trim(), receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"⚠ DownloadReceiptPdf: receipt={receiptNumber} → เอกสาร GUID {docId.ToString().Substring(0, 8)} " +
+                        $"มี ExternalRef='{docExtRef}' (คนละใบ — เลขเอกสารชนจากบั๊กก่อน fix) → ไม่เสิร์ฟ กันแสดงเอกสารผิดคน. " +
+                        "แก้: กด Retry ใบนี้ให้ออกเอกสารของตัวเอง (unique key ต่อใบแล้ว)", "SYSTEM");
+                    result.Message = "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (เลขเอกสารซ้ำจากบั๊กเดิม) — กด Retry เพื่อออกเอกสารของใบนี้เอง แล้วดู PDF ใหม่";
+                    result.MismatchedIdentity = true;
+                    return result;
+                }
+            }
+            catch { /* อ่านตรวจไม่ได้ → ไม่บล็อก (ดำเนินต่อ ปกติ) */ }
+
             string safeDoc = MakeSafeFileName(receiptNumber);
             string suffix = isCancelled ? "_Cancel" : "";
             string guid8 = docId.ToString("N").Substring(0, 8);
