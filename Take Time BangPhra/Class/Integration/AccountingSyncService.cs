@@ -8729,6 +8729,89 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>กลับ (reverse) "JV มัดจำที่ TakeTime post เอง" ซึ่งค้างเป็นซาก GL จาก churn
+        /// (215xx/217xx/21913 ติดลบ/ค้าง) — NextAcc กวาดไม่ถึงเพราะ JV พวกนี้ไม่ผูก SourceDocumentId.
+        /// ดึงรายการจาก `/cleanup/deposit-gl-debris` → เลือกเฉพาะ sourceStatus = JV ของเรา →
+        /// ReverseJournalAsync (native, idempotent ผ่าน ReversedByEntryId). ซากที่เป็น "เอกสารถูกลบ"
+        /// ไม่แตะ (NextAcc กวาดตอนลบครั้งถัดไป). คืน (จำนวนที่กลับ, ข้อความ).
+        /// ⚠ ยอดที่เหลือหลังกลับ = churn ที่ auto-fix 100% ไม่ได้ → ให้บัญชียืนยันด้วย correcting JV</summary>
+        public (int reversed, string message) CleanupDepositGlDebrisJvs()
+        {
+            if (!_config.CanUseCompanyEndpoints)
+                return (-1, "ต้องตั้ง acc_ key + เปิด company endpoints ก่อน (diagnostic เป็น company endpoint)");
+            try
+            {
+                var debris = System.Threading.Tasks.Task.Run(() =>
+                    _apiClient.GetDepositGlDebrisAsync()).GetAwaiter().GetResult();
+                var items = debris?.data?.Items;
+                if (items == null || items.Count == 0)
+                    return (0, "ไม่พบซาก GL มัดจำ (215xx/217xx/21913) ที่ค้าง");
+
+                // เฉพาะ JV ของ TakeTime (ไม่ผูกเอกสาร) — reverse เอง; ซากจาก "เอกสารถูกลบ" NextAcc กวาดเอง
+                var jvEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var it in items)
+                    if (!string.IsNullOrEmpty(it.EntryNumber) && IsTakeTimeJvSource(it.SourceStatus))
+                        jvEntries.Add(it.EntryNumber);
+
+                if (jvEntries.Count == 0)
+                    return (0, $"พบซาก {items.Count} บรรทัด แต่ไม่มี JV ของ TakeTime ให้กลับ (เป็นซากเอกสารที่ถูกลบ — NextAcc กวาดตอนลบครั้งถัดไป)");
+
+                int reversed = 0;
+                foreach (string en in jvEntries)
+                {
+                    try
+                    {
+                        bool ok = System.Threading.Tasks.Task.Run(() =>
+                            TryReverseJournalByEntryNumberAsync(en)).GetAwaiter().GetResult();
+                        if (ok) reversed++;
+                    }
+                    catch (Exception rex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"CleanupDepositGlDebrisJvs: กลับ JV {en} ล้มเหลว {rex.Message}", "SYSTEM");
+                    }
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CleanupDepositGlDebrisJvs: ซาก {items.Count} บรรทัด, JV ของ TakeTime {jvEntries.Count} รายการ → กลับสำเร็จ {reversed}", "SYSTEM");
+                return (reversed,
+                    $"กลับ JV มัดจำที่ค้าง (churn) {reversed}/{jvEntries.Count} รายการ. " +
+                    "⚠ ยอดที่เหลือหลังกลับ (ถ้ามี) เกิดจาก churn บน env เก่า — ให้นักบัญชีตรวจ/ออก correcting JV ยืนยันให้เป็น 0");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CleanupDepositGlDebrisJvs failed: {ex.Message}", "SYSTEM");
+                return (-1, "กลับซาก JV ไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
+        private bool IsTakeTimeJvSource(string sourceStatus)
+        {
+            if (string.IsNullOrEmpty(sourceStatus)) return false;
+            return sourceStatus.IndexOf("ไม่ผูกเอกสาร", StringComparison.OrdinalIgnoreCase) >= 0
+                || sourceStatus.IndexOf("integration", StringComparison.OrdinalIgnoreCase) >= 0
+                || sourceStatus.IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>กลับ JV ตาม EntryNumber (native ReverseJournalAsync, idempotent). true = กลับแล้ว/สำเร็จ.</summary>
+        private async Task<bool> TryReverseJournalByEntryNumberAsync(string entryNumber)
+        {
+            if (string.IsNullOrEmpty(entryNumber)) return false;
+            try
+            {
+                var found = await _apiClient.SearchJournalsAsync(entryNumber, 10);
+                var je = found?.data?.Items?.FirstOrDefault(j =>
+                    string.Equals(j.EntryNumber, entryNumber, StringComparison.OrdinalIgnoreCase)
+                    && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null);   // ตัวจริง ไม่ใช่ reversal เอง
+                if (je == null) return false;
+                if (je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty) return true;   // เคยกลับแล้ว
+                var rev = await _apiClient.ReverseJournalAsync(je.Id,
+                    new ReverseJournalEntryRequest { Description = "กลับซาก JV มัดจำ (churn cleanup)" });
+                return rev?.success == true;
+            }
+            catch { return false; }
+        }
+
         public long RepostReceiptWithCurrentLogic(long queueId)
         {
             LastRepostMessage = null;

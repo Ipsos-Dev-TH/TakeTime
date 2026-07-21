@@ -462,6 +462,7 @@
                     <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
                     <button type="button" class="btn-danger" onclick="reconcileDeleted()"><i class="fas fa-trash-alt"></i> ตรวจ &amp; ลบใบที่หายจาก NextAcc</button>
                     <button type="button" class="btn-warning" onclick="cleanupOrphanReceipts()"><i class="fas fa-broom"></i> เก็บกวาดใบรับเงิน orphan</button>
+                    <button type="button" class="btn-danger" onclick="cleanupDepositDebris()"><i class="fas fa-undo"></i> กลับ JV มัดจำค้าง (churn)</button>
                 </div>
                 <div class="help-text" style="margin-top:6px;">ตรวจใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว: ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะ <b>ลบ record ในระบบนี้ถาวร</b> — ลบเฉพาะ 404 ชัดเจน, error ชั่วคราวจะข้าม</div>
                 <div class="test-result" id="syncTestResult"></div>
@@ -1082,6 +1083,11 @@
         function cleanupOrphanReceipts() {
             if (!confirm('เก็บกวาดใบเสร็จรับเงิน (หลักฐานรับเงิน) ที่ orphan บน NextAcc?\n\nลบเฉพาะใบที่ "ใบกำกับต้นทางถูกลบ/ยกเลิกไปแล้ว" (soft-delete บน NextAcc ไม่กระทบ GL).\nใบที่ยังมีใบกำกับใช้งานอยู่จะไม่ถูกแตะ (NextAcc กันให้).')) return;
             getAction('cleanupOrphanReceipts', 'syncTestResult');
+        }
+
+        function cleanupDepositDebris() {
+            if (!confirm('กลับ (reverse) JV มัดจำที่ค้างเป็นซาก GL จากการ resync ซ้ำ?\n\nกลับเฉพาะ JV ที่ TakeTime post เอง (215xx/217xx/21913 ที่ไม่ผูกเอกสาร).\nⓘ ทำหลัง NextAcc deploy + หยุด resync แล้วเท่านั้น\nⓘ ยอดที่เหลือหลังกลับต้องให้นักบัญชีตรวจ/ยืนยัน (churn แก้อัตโนมัติ 100% ไม่ได้)')) return;
+            getAction('cleanupDepositDebris', 'syncTestResult');
         }
 
         // ── Deposit Lifecycle ──

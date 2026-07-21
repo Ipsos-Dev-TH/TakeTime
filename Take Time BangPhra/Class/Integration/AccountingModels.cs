@@ -1517,6 +1517,33 @@ namespace Take_Time_BangPhra.Integration
         public List<string> DeletedIds { get; set; } = new List<string>();
     }
 
+    /// <summary>ผลตรวจซาก GL มัดจำ (215xx/217xx/21913) ที่ churn ทิ้งไว้ — NextAcc
+    /// `GET /cleanup/deposit-gl-debris`. sourceStatus ชี้ว่าบรรทัดนั้นเป็น JV ของ TakeTime
+    /// (ต้อง reverse เอง) หรือซากจากเอกสารที่ถูกลบ</summary>
+    public class DepositGlDebrisResult
+    {
+        public List<DepositGlDebrisItem> Items { get; set; } = new List<DepositGlDebrisItem>();
+        public List<DepositGlDebrisSuspectNet> SuspectNet { get; set; } = new List<DepositGlDebrisSuspectNet>();
+    }
+
+    public class DepositGlDebrisItem
+    {
+        public string EntryNumber { get; set; }
+        public DateTime EntryDate { get; set; }
+        public string AccountCode { get; set; }
+        public decimal DebitAmount { get; set; }
+        public decimal CreditAmount { get; set; }
+        /// <summary>"ไม่ผูกเอกสาร (JV integration/manual)" = JV ของ TakeTime → reverse เอง /
+        /// "เอกสารต้นทางถูกลบ/ยกเลิก" = ซากจากลบเอกสาร (NextAcc กวาดตอนลบครั้งถัดไป)</summary>
+        public string SourceStatus { get; set; }
+    }
+
+    public class DepositGlDebrisSuspectNet
+    {
+        public string AccountCode { get; set; }
+        public decimal Net { get; set; }
+    }
+
     /// <summary>ผลตรวจ (GET diagnostic) ใบเสร็จหลักฐานรับเงินที่ orphan</summary>
     public class OrphanReceiptsDiagnostic
     {

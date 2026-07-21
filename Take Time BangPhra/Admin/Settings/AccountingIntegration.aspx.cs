@@ -132,6 +132,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "cleanupOrphanReceipts":
                     result = CleanupOrphanReceipts();
                     break;
+                case "cleanupDepositDebris":
+                    result = CleanupDepositDebris();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -438,6 +441,25 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return new Dictionary<string, object>
                 {
                     { "success", deleted >= 0 },
+                    { "message", message }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Cleanup Error: " + ex.Message } };
+            }
+        }
+
+        // กลับ JV มัดจำที่ TakeTime post เอง ซึ่งค้างเป็นซาก GL จาก churn (215xx/217xx/21913)
+        private Dictionary<string, object> CleanupDepositDebris()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                var (reversed, message) = sync.CleanupDepositGlDebrisJvs();
+                return new Dictionary<string, object>
+                {
+                    { "success", reversed >= 0 },
                     { "message", message }
                 };
             }

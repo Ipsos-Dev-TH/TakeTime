@@ -654,6 +654,14 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/cleanup/orphaned-settlement-receipts");
         }
 
+        /// <summary>ตรวจซาก GL มัดจำ (215xx/217xx/21913) ที่ค้างจาก churn — read-only, acc_ key.
+        /// คืน entryNumber + sourceStatus ให้แยกว่าบรรทัดไหนเป็น JV ของ TakeTime (reverse เอง)</summary>
+        public async Task<ApiResponse<DepositGlDebrisResult>> GetDepositGlDebrisAsync()
+        {
+            return await GetAsync<ApiResponse<DepositGlDebrisResult>>(
+                $"{CompanyPath}/cleanup/deposit-gl-debris");
+        }
+
         [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {
