@@ -4378,12 +4378,11 @@ namespace Take_Time_BangPhra.Integration
                         paymentAccountId: paymentAccountId, hasVat: depositHasVat, vatAtReceipt: depositVatAtReceipt);
                     if (!string.IsNullOrEmpty(receiptNumber))
                     {
-                        invoice.Reference = receiptNumber;
-                        invoice.ExternalRef = receiptNumber;
+                        invoice.ExternalRef = receiptNumber;   // dedup ราย ใบ (อ้างอิง display ตั้ง RES-{id} ด้านล่าง)
                         invoice.ReplaceExistingForSource = true;
                     }
                     invoice.Attachments = attachments;
-                    // อ้างอิง = รหัสการจอง (คู่กับใบกำกับสุดท้ายชุดเดียวกัน); externalRef คงเลขใบเสร็จ (dedup)
+                    // อ้างอิง = รหัสการจอง RES-{id} เสมอ (คู่กับใบกำกับสุดท้ายชุดเดียวกัน); externalRef คงเลขใบเสร็จ (dedup)
                     if (reservationId > 0) invoice.Reference = $"RES-{reservationId}";
                     // int_ deposit = TaxInvoice บน NextAcc → โดน gate §86/4 ด้วย: ไม่มีข้อมูลภาษี
                     // → เคสไม่ประสงค์รับใบกำกับ (contact กลางลูกค้าเงินสด)
@@ -4839,7 +4838,7 @@ namespace Take_Time_BangPhra.Integration
                     {
                         invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
                             customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
-                        invoice.Reference = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}";
+                        // อ้างอิง (Reference) ตั้งเป็น RES-{id} ด้านล่าง — ที่นี่ตั้งแค่ ExternalRef (dedup ราย ใบ)
                         if (!string.IsNullOrEmpty(receiptNumber))
                         {
                             invoice.ExternalRef = receiptNumber;
@@ -4847,9 +4846,8 @@ namespace Take_Time_BangPhra.Integration
                         }
                     }
                     invoice.Attachments = attachments;
-                    // อ้างอิง = รหัสการจอง (จับคู่กับใบมัดจำ RES-{id} ชุดเดียวกัน) —
-                    // externalRef คงเป็นเลขใบเสร็จ (คีย์ dedup ราย "ใบ" ห้ามใช้รหัสจอง:
-                    // การจองเดียวอาจมีหลายใบ เช่น มัดจำ+ส่วนต่าง จะชนกันเอง)
+                    // อ้างอิง = รหัสการจอง RES-{id} เสมอ (จับคู่ใบมัดจำ/ใบกำกับชุดเดียวกัน) — ห้ามเป็นเลขใบเสร็จ local.
+                    // externalRef = เลขใบเสร็จ (dedup ราย "ใบ" — การจองเดียวมีหลายใบ เช่น มัดจำ+ส่วนต่าง)
                     if (reservationId > 0) invoice.Reference = $"RES-{reservationId}";
                     // ลูกค้ามีข้อมูลภาษีครบ → ใบกำกับเต็มรูปผูก contact จริง
                     // ไม่ครบ (B2C ทั่วไป) → "ไม่ประสงค์รับใบกำกับภาษี": NextAcc ผูก contact กลาง

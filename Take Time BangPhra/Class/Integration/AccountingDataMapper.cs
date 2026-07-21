@@ -2422,12 +2422,16 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException("MapMultiLinePaymentToInvoice: ไม่มี line ที่มียอด > 0");
 
             string refStr = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : $"RES-{reservationId}-PAY";
+            // อ้างอิง (Reference display) = รหัสการจอง RES-{id} เสมอ — ห้ามใช้เลขใบเสร็จ local
+            // (เลขใบเสร็จเก็บที่ ExternalRef สำหรับ dedup + โชว์ใน Description). ตั้งที่ mapper ตรง ๆ
+            // ไม่พึ่ง caller override → มั่นใจว่าอ้างอิงไม่ผิดทุกกรณี
+            string refDisplay = reservationId > 0 ? $"RES-{reservationId}" : refStr;
 
             return new CreateIntegrationInvoiceRequest
             {
                 DocumentDate = paymentDate,
                 CustomerName = customerName,
-                Reference = refStr,
+                Reference = refDisplay,
                 BookingNumber = reservationId > 0 ? $"RES-{reservationId}" : null,
                 ExternalRef = !string.IsNullOrEmpty(receiptNumber) ? receiptNumber : null,
                 ReplaceExistingForSource = !string.IsNullOrEmpty(receiptNumber),
