@@ -8682,6 +8682,53 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>ข้อความผลลัพธ์ล่าสุดจาก RepostReceiptWithCurrentLogic (in-place/reversal/เหตุผล guard) — ให้หน้า UI แสดง</summary>
         public string LastRepostMessage { get; private set; }
 
+        /// <summary>เก็บกวาดใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ orphan ทั้ง company (on-demand/admin).
+        /// ใช้ acc_ key: GET diagnostic หา orphan → purge เจาะจงตาม parentReference แต่ละใบ (ไม่ต้อง Owner
+        /// สำหรับ "กวาดทั้ง company" ที่เป็น Owner-only). คืน (จำนวนที่ลบ, ข้อความสรุป).</summary>
+        public (int deleted, string message) SweepOrphanSettlementReceipts()
+        {
+            if (!_config.CanUseCompanyEndpoints)
+                return (-1, "ต้องตั้ง acc_ key + เปิด company endpoints ก่อน (cleanup เป็น company endpoint)");
+            try
+            {
+                var diag = System.Threading.Tasks.Task.Run(() =>
+                    _apiClient.GetOrphanedSettlementReceiptsAsync()).GetAwaiter().GetResult();
+                var items = diag?.data?.Items;
+                if (items == null || items.Count == 0)
+                    return (0, "ไม่พบใบเสร็จหลักฐานรับเงินที่ orphan");
+
+                // purge ราย parentReference (distinct) — endpoint intersect กับ orphan set เสมอ (ปลอดภัย)
+                var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var it in items)
+                    if (!string.IsNullOrEmpty(it.ParentReference)) refs.Add(it.ParentReference);
+
+                int total = 0;
+                foreach (string r in refs)
+                {
+                    try
+                    {
+                        var purge = System.Threading.Tasks.Task.Run(() =>
+                            _apiClient.PurgeOrphanedSettlementReceiptsAsync(r)).GetAwaiter().GetResult();
+                        total += purge?.data?.Deleted ?? 0;
+                    }
+                    catch (Exception pex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"SweepOrphanSettlementReceipts: purge ref={r} ล้มเหลว {pex.Message}", "SYSTEM");
+                    }
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SweepOrphanSettlementReceipts: พบ orphan {items.Count} ใบ ({refs.Count} ใบกำกับ) → ลบ {total} ใบ", "SYSTEM");
+                return (total, $"เก็บกวาดใบรับเงิน orphan สำเร็จ — ลบ {total} ใบ (จาก {refs.Count} ใบกำกับที่ถูกลบ)");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"SweepOrphanSettlementReceipts failed: {ex.Message}", "SYSTEM");
+                return (-1, "เก็บกวาดไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
         public long RepostReceiptWithCurrentLogic(long queueId)
         {
             LastRepostMessage = null;
@@ -8739,10 +8786,35 @@ namespace Take_Time_BangPhra.Integration
                     {
                         _code.Logs(_connectionString, "AccountingSync",
                             $"RepostReceipt: เอกสารเดิม {oldGuid.ToString().Substring(0, 8)} ถูกลบ/ยกเลิกบน NextAcc → สร้างใหม่สะอาด (reset marker) receipt={receiptNumber}", "SYSTEM");
+
+                        // เก็บกวาด REC (settlement receipt) ที่กลายเป็น orphan หลังลบ TIV แม่ — soft-delete
+                        // เฉพาะที่ไม่มี parent ใช้งาน (NextAcc intersect ให้). ต้อง company endpoint (acc_).
+                        // ทำก่อนสร้างใหม่: กัน REC เก่าค้างปนกับใบใหม่. best-effort — ล้มเหลวไม่บล็อกการสร้างใหม่.
+                        if (_config.CanUseCompanyEndpoints)
+                        {
+                            try
+                            {
+                                string oldDocNum = LookupNexaaccDocNumberForReceipt(receiptNumber);
+                                if (!string.IsNullOrEmpty(oldDocNum))
+                                {
+                                    var purge = System.Threading.Tasks.Task.Run(() =>
+                                        _apiClient.PurgeOrphanedSettlementReceiptsAsync(oldDocNum)).GetAwaiter().GetResult();
+                                    int deleted = purge?.data?.Deleted ?? 0;
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"RepostReceipt: purge orphan REC ของใบกำกับที่ลบ {oldDocNum} → ลบ {deleted} ใบ ({purge?.message ?? "-"}) receipt={receiptNumber}", "SYSTEM");
+                                }
+                            }
+                            catch (Exception px)
+                            {
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"RepostReceipt: purge orphan REC ล้มเหลว (ดำเนินต่อสร้างใหม่): {px.Message} receipt={receiptNumber}", "SYSTEM");
+                            }
+                        }
+
                         PrepareResync(receiptNumber);          // เคลียร์คิวเก่า mark SUPERSEDED
                         ClearReceiptPdfCache(receiptNumber);   // ล้าง PDF cache (GUID ใหม่)
                         SetReceiptPaymentMarker(receiptNumber, null);   // reset → settle/drives เริ่มใหม่
-                        LastRepostMessage = "🔄 เอกสารเดิมถูกลบบน NextAcc → สร้างเอกสารใหม่ (ยอดถูกต้องตามระบบ, อ้างใบมัดจำเดิม)";
+                        LastRepostMessage = "🔄 เอกสารเดิมถูกลบบน NextAcc → เก็บกวาดใบรับเงิน orphan + สร้างเอกสารใหม่ (ยอดถูกต้อง, อ้างใบมัดจำเดิม)";
                         return InsertQueue("RECEIPT",
                             p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0,
                             "CREATE_RECEIPT_DOCUMENT", p);

@@ -1509,6 +1509,33 @@ namespace Take_Time_BangPhra.Integration
     /// ผลการดาวน์โหลดเอกสารอย่างเป็นทางการ (PDF + ไฟล์แนบ) จาก NextAcc มาเก็บที่ฝั่ง TakeTime
     /// ใช้ในหน้า CheckPayment เพื่อเปิดดู PDF จาก NextAcc แทน PDF ที่ระบบออกเอง
     /// </summary>
+    /// <summary>ผลลัพธ์ purge ใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ orphan
+    /// (parent TaxInvoice ถูกลบ/void) — NextAcc `/cleanup/orphaned-settlement-receipts/purge`</summary>
+    public class PurgeOrphanReceiptsResult
+    {
+        public int Deleted { get; set; }
+        public List<string> DeletedIds { get; set; } = new List<string>();
+    }
+
+    /// <summary>ผลตรวจ (GET diagnostic) ใบเสร็จหลักฐานรับเงินที่ orphan</summary>
+    public class OrphanReceiptsDiagnostic
+    {
+        public int Count { get; set; }
+        public decimal TotalAmount { get; set; }
+        public List<OrphanReceiptItem> Items { get; set; } = new List<OrphanReceiptItem>();
+    }
+
+    public class OrphanReceiptItem
+    {
+        public string Id { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public string ContactName { get; set; }
+        public decimal TotalAmount { get; set; }
+        public string ParentReference { get; set; }
+        public string Reason { get; set; }
+    }
+
     public class NextAccCachedDocument
     {
         public bool Found { get; set; }

@@ -635,6 +635,25 @@ namespace Take_Time_BangPhra.Integration
             return await GetAsync<ApiResponse<DocumentResponse>>($"{CompanyPath}/document/{documentId}");
         }
 
+        /// <summary>ลบใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ "orphan" — parent TaxInvoice ถูกลบ/void.
+        /// ส่ง reference = เลขใบกำกับต้นทางที่ลบ → ลบเฉพาะ REC ของใบนั้น (soft-delete, ไม่กระทบ GL).
+        /// NextAcc intersect กับ orphan set เสมอ → REC ที่ parent ยัง active จะไม่ถูกลบ (กันลบผิด).
+        /// company endpoint (acc_ ผ่าน X-Api-Key). คืน deleted count + ids.</summary>
+        public async Task<ApiResponse<PurgeOrphanReceiptsResult>> PurgeOrphanedSettlementReceiptsAsync(string reference)
+        {
+            var body = new { reference = reference };
+            return await PostAsync<object, ApiResponse<PurgeOrphanReceiptsResult>>(
+                $"{CompanyPath}/cleanup/orphaned-settlement-receipts/purge", body);
+        }
+
+        /// <summary>ตรวจรายการใบเสร็จหลักฐานรับเงินที่ orphan (GET diagnostic, acc_ key) — ไม่ลบ.
+        /// ใช้ parentReference ไป purge เจาะจงต่อได้</summary>
+        public async Task<ApiResponse<OrphanReceiptsDiagnostic>> GetOrphanedSettlementReceiptsAsync()
+        {
+            return await GetAsync<ApiResponse<OrphanReceiptsDiagnostic>>(
+                $"{CompanyPath}/cleanup/orphaned-settlement-receipts");
+        }
+
         [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {
