@@ -580,8 +580,8 @@
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="Detail"
                                                 CssClass="btn btn-primary btn-sm" />
 
-                                            <asp:Button ID="btnNextAcc" runat="server" Text="บัญชี NextAcc"
-                                                CssClass="btn btn-info btn-sm mt-1" Visible='<%# IsNaAdmin %>'
+                                            <asp:Button ID="btnNextAcc" runat="server" Text="💼 บัญชี NextAcc"
+                                                CssClass="btn btn-info btn-sm" Visible='<%# IsNaAdmin %>'
                                                 OnClientClick='<%# "showNaModal(" + Eval("ID") + "); return false;" %>' />
                                         </div>
                                         <div class="print-only">
@@ -913,6 +913,37 @@
         // ══ จัดการบัญชี NextAcc ราย "การจอง" ══
         var naCurrentResId = 0;
         var naPageUrl = '<%= ResolveUrl("~/ReserveTable") %>';
+        var naBusy = false;   // กันกดซ้ำ/ทำหลาย action พร้อมกัน
+
+        // fetch + timeout (AbortController) กัน UI ค้างถาวรถ้า server ไม่ตอบ
+        function naFetch(url, timeoutMs) {
+            var ctrl = new AbortController();
+            var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs || 120000);
+            return fetch(url, { signal: ctrl.signal })
+                .then(function (r) { clearTimeout(timer); return r.json(); })
+                .catch(function (err) {
+                    clearTimeout(timer);
+                    throw (err && err.name === 'AbortError')
+                        ? new Error('หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับ (ลองใหม่/ตรวจสถานะอีกครั้ง)')
+                        : err;
+                });
+        }
+
+        // เปิด/ปิดสถานะ busy: disable ปุ่มทั้งหมดในโมดัล + เปลี่ยน cursor
+        function naSetBusy(on, label) {
+            naBusy = on;
+            var modal = document.getElementById('naModal');
+            if (!modal) return;
+            var btns = modal.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].getAttribute('data-dismiss') === 'modal') continue;  // ปุ่มปิดยังกดได้
+                btns[i].disabled = on;
+                btns[i].style.opacity = on ? '0.5' : '';
+                btns[i].style.cursor = on ? 'wait' : '';
+            }
+            var ov = document.getElementById('naBusyBar');
+            if (ov) ov.innerHTML = on ? ('<div class="alert alert-info" style="margin:0;">⏳ ' + naEsc(label || 'กำลังดำเนินการ...') + '</div>') : '';
+        }
 
         function naEsc(s) {
             if (s === null || s === undefined) return '';
@@ -937,11 +968,13 @@
         function naLoadOverview() {
             var body = document.getElementById('naModalBody');
             body.innerHTML = '<div style="text-align:center; padding:24px; color:#888;">⏳ กำลังตรวจสถานะบน NextAcc...</div>';
-            fetch(naPageUrl + '?naAction=overview&resId=' + naCurrentResId + '&_=' + Date.now())
-                .then(function (r) { return r.json(); })
-                .then(function (d) { body.innerHTML = naRenderOverview(d); })
+            naSetBusy(true, 'กำลังตรวจสถานะบน NextAcc...');
+            naFetch(naPageUrl + '?naAction=overview&resId=' + naCurrentResId + '&_=' + Date.now(), 100000)
+                .then(function (d) { body.innerHTML = naRenderOverview(d); naSetBusy(false); })
                 .catch(function (err) {
-                    body.innerHTML = '<div class="alert alert-danger">⚠ ' + naEsc(err.message) + '</div>';
+                    body.innerHTML = '<div class="alert alert-danger">⚠ ' + naEsc(err.message) +
+                        '</div><div style="text-align:center; margin-top:8px;"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="naLoadOverview()">🔄 ลองใหม่</button></div>';
+                    naSetBusy(false);
                 });
         }
 
@@ -970,7 +1003,7 @@
             if (!d.Receipts || d.Receipts.length === 0)
                 return html + '<div class="alert alert-info">' + naEsc(d.Message || 'การจองนี้ไม่มีใบเสร็จในระบบ') + '</div>';
 
-            html += '<div style="overflow-x:auto;"><table class="table table-sm table-bordered" style="font-size:13px;">';
+            html += '<div style="overflow-x:auto;"><table class="table table-condensed table-bordered" style="font-size:13px;">';
             html += '<thead><tr style="background:#f5f5f5;"><th>ใบเสร็จ</th><th>วันที่</th><th style="text-align:right;">ยอด</th>'
                  + '<th>ประเภท</th><th>สลิป</th><th>สถานะบน NextAcc</th><th>JE</th><th>จัดการ</th></tr></thead><tbody>';
             d.Receipts.forEach(function (rc) {
@@ -993,9 +1026,9 @@
                     var rTitle = keeps
                         ? 'แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place resyncUpdate)'
                         : 'เอกสารนี้เป็น company doc (RECEIPT) — resync ต้อง void แล้วสร้างใหม่ เลขเอกสารจะเปลี่ยน';
-                    html += '<button type="button" class="btn btn-warning btn-xs btn-sm" style="margin-right:4px;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
+                    html += '<button type="button" class="btn btn-warning btn-xs" style="margin:2px 4px 2px 0;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
                     if (rc.State === 'DOCUMENT')
-                        html += '<button type="button" class="btn btn-danger btn-xs btn-sm" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
+                        html += '<button type="button" class="btn btn-danger btn-xs" style="margin:2px 0;" onclick="naReceiptAction(\'voidReceipt\', \'' + naEsc(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
                 }
                 html += '</td></tr>';
             });
@@ -1013,20 +1046,20 @@
         }
 
         function naReceiptAction(action, doc) {
+            if (naBusy) return;
             var confirmMsg = action === 'voidReceipt'
                 ? '🚫 ยกเลิก (void) เอกสารของใบ ' + doc + ' บน NextAcc?\n\nเอกสาร + JE ที่ผูกกันจะถูกยกเลิก (void cascade)\nเลขเอกสารที่ใช้ไปแล้วจะไม่กลับมา — ใบเสร็จฝั่งระบบนี้ไม่ถูกแตะ'
                 : '🔁 Resync ใบ ' + doc + ' (คงเลขเอกสารเดิม)?\n\nแก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม (ที่ส่งลูกค้าไปแล้วใช้ได้ต่อ)\n• ถ้าเอกสารเดิมถูกลบไปแล้ว → สร้างใหม่สะอาด\n• ถ้าแก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขจะเปลี่ยน)\n• งวด/เดือนภาษี "ปิดแล้ว" เท่านั้นที่แก้/ลบไม่ได้ → จะแจ้งเหตุผล เลขคงเดิม\n\nอาจใช้เวลา 10-30 วินาที';
             if (!confirm(confirmMsg)) return;
-            var el0 = document.getElementById('naActionResult');
-            if (el0) el0.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ...</div>';
-            fetch(naPageUrl + '?naAction=' + action + '&doc=' + encodeURIComponent(doc) + '&resId=' + naCurrentResId + '&_=' + Date.now())
-                .then(function (r) { return r.json(); })
+            naSetBusy(true, action === 'voidReceipt' ? ('กำลังยกเลิกเอกสาร ' + doc + '...') : ('กำลัง Resync ' + doc + '... (10-30 วินาที)'));
+            naFetch(naPageUrl + '?naAction=' + action + '&doc=' + encodeURIComponent(doc) + '&resId=' + naCurrentResId + '&_=' + Date.now(), 180000)
                 .then(function (d) {
+                    naSetBusy(false);
                     naShowResult(d.Success, d.Message);
                     // in-place resync เห็นผลทันที → refresh เลย; void ผ่านคิว → หน่วง 3 วิให้คิวประมวลก่อน
                     if (d.Success) naScheduleRefresh(action === 'voidReceipt' ? 3500 : 800);
                 })
-                .catch(function (err) { naShowResult(false, err.message); });
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
         }
 
         // ข้อความผลลัพธ์ล่าสุด — คงไว้ข้ามการ refresh ตาราง (naRenderOverview จะแสดงต่อท้าย)
@@ -1042,16 +1075,16 @@
                 ? '🔁 Resync การจอง #' + naCurrentResId + ' ทั้งชุด (คงเลขเอกสารเดิม)?\n\nไล่แก้เอกสารทุกใบ (มัดจำ→เช็คเอาท์) ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม\n• ใบที่ไม่เคย sync → สร้างครั้งแรก / ใบที่ถูกลบ → สร้างใหม่สะอาด\n• แก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขเปลี่ยน)\n• งวด/เดือนภาษีปิดแล้วเท่านั้นที่แก้ไม่ได้ → รายงานเป็นรายใบ\n\nอาจใช้เวลาถึง 1-2 นาที'
                 : '🧹 ลบเอกสารเดิมของการจอง #' + naCurrentResId + ' บน NextAcc?\n\n⚠ ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (ไม่สร้างใหม่)\nเลขเอกสารเดิมทั้งหมดจะเสีย (ใบใหม่ได้เลขใหม่)\nGL ของการจองนี้ (21510/21913/ลูกหนี้) กลับเป็น 0\nidempotent — กดซ้ำไม่เบิ้ล';
             if (!confirm(confirmMsg)) return;
-            var el = document.getElementById('naActionResult');
-            if (el) el.innerHTML = '<div style="color:#888;">⏳ กำลังดำเนินการ (อาจใช้เวลาถึง 1-2 นาที)...</div>';
-            fetch(naPageUrl + '?naAction=' + (action === 'resyncAll' ? 'resyncAll' : 'reset') + '&resId=' + naCurrentResId + '&_=' + Date.now())
-                .then(function (r) { return r.json(); })
+            if (naBusy) return;
+            naSetBusy(true, action === 'resyncAll' ? 'กำลัง Resync ทั้งการจอง... (อาจถึง 1-2 นาที)' : 'กำลังล้างเอกสารทั้งหมด...');
+            naFetch(naPageUrl + '?naAction=' + (action === 'resyncAll' ? 'resyncAll' : 'reset') + '&resId=' + naCurrentResId + '&_=' + Date.now(), 240000)
                 .then(function (d) {
+                    naSetBusy(false);
                     naShowResult(d.Success, d.Message);
                     // resyncAll = in-place เห็นผลทันที; reset ผ่านการ void ตรง → refresh ได้เลย
-                    if (d.Success) naScheduleRefresh(action === 'resyncAll' ? 1500 : 1500);
+                    if (d.Success) naScheduleRefresh(1500);
                 })
-                .catch(function (err) { naShowResult(false, err.message); });
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
         }
     </script>
 
@@ -1095,14 +1128,15 @@
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <div class="modal-body" id="naModalBody" style="max-height:65vh; overflow:auto;"></div>
-                <div class="modal-footer" style="flex-wrap:wrap; gap:6px;">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
+                <div class="modal-body" id="naModalBody" style="max-height:62vh; overflow:auto;"></div>
+                <div id="naBusyBar" style="padding:0 15px;"></div>
+                <div class="modal-footer" style="display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; text-align:right;">
+                    <button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
                     <button type="button" class="btn btn-warning btn-sm" onclick="naReservationAction('resyncAll')"
                         title="แก้เอกสารทุกใบให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสาร NextAcc เดิม (in-place)">🔁 Resync ทั้งการจอง (คงเลขเดิม)</button>
                     <button type="button" class="btn btn-danger btn-sm" onclick="naReservationAction('reset')"
                         title="ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (เลขเอกสารเดิมเสีย ไม่สร้างใหม่)">🧹 ล้างทั้งหมด (void — เลขเสีย)</button>
-                    <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">ปิด</button>
+                    <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">ปิด</button>
                 </div>
             </div>
         </div>

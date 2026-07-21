@@ -621,11 +621,16 @@
             modal.style.display = 'block';
 
             var url = '<%= ResolveUrl("~/Account/CheckDocument_New") %>?action=viewJE&doc=' + encodeURIComponent(doc) + '&_=' + Date.now();
-            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                .then(function (r) { return r.json(); })
+            var ctrl = new AbortController();
+            var timer = setTimeout(function () { ctrl.abort(); }, 90000);
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: ctrl.signal })
+                .then(function (r) { clearTimeout(timer); return r.json(); })
                 .then(function (d) { body.innerHTML = renderJE(d); })
                 .catch(function (err) {
-                    body.innerHTML = '<div class="je-empty">⚠ ดึงข้อมูลไม่สำเร็จ: ' + esc(err.message) + '</div>';
+                    clearTimeout(timer);
+                    var m = (err && err.name === 'AbortError') ? 'หมดเวลา — NextAcc ไม่ตอบกลับ ลองใหม่อีกครั้ง' : esc(err.message);
+                    body.innerHTML = '<div class="je-empty">⚠ ดึงข้อมูลไม่สำเร็จ: ' + m +
+                        '</div><div style="text-align:center; margin-top:10px;"><button type="button" class="btn-sync-action" onclick="viewJE(\'' + esc(doc) + '\')">🔄 ลองใหม่</button></div>';
                 });
         }
 
