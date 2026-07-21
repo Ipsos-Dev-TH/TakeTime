@@ -9234,6 +9234,353 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        // ══════════════════════════════════════════════════════════════════
+        // จัดการ sync ราย "การจอง" (หน้า ReserveTable) — ภาพรวม + ลบ/resync ทั้งชุด
+        // ══════════════════════════════════════════════════════════════════
+
+        public class ReservationReceiptSyncInfo
+        {
+            public string ReceiptNumber { get; set; }
+            public string Date { get; set; }
+            public decimal Amount { get; set; }
+            public decimal Vat { get; set; }
+            public bool IsDeposit { get; set; }
+            public string LocalStatus { get; set; }      // Normal/Cancel/Refunded
+            public decimal DepositApplied { get; set; }
+            public int SlipCount { get; set; }           // สลิป/ไฟล์แนบฝั่ง TakeTime ที่จะแนบตอน sync
+            public string State { get; set; }            // NONE/PENDING/FAILED/JE_ONLY/DOCUMENT/DOC_VOIDED/DELETED
+            public string StateLabel { get; set; }       // ป้ายไทยพร้อมแสดง
+            public string DocNumber { get; set; }        // เลขเอกสาร NextAcc (TIV-…/REC-…)
+            public string DocStatus { get; set; }
+            public decimal BalanceDue { get; set; }
+            public int JeCount { get; set; }             // JE ตัวจริงที่ผูกกับใบนี้
+            public string QueueStatus { get; set; }      // สถานะคิวล่าสุดของใบนี้
+        }
+        public class ReservationSyncOverview
+        {
+            public bool Success { get; set; }
+            public string Message { get; set; }
+            public int ReservationId { get; set; }
+            public string GuestName { get; set; }
+            public decimal DepositPaid { get; set; }
+            public decimal DepositAppliedTotal { get; set; }
+            public List<ReservationReceiptSyncInfo> Receipts { get; set; }
+        }
+
+        /// <summary>สถานะคิวล่าสุดของใบเสร็จ (CREATE_*) — คืน null ถ้าไม่เคยเข้าคิว</summary>
+        private string LookupLatestQueueStatusByReceipt(string receiptNumber)
+        {
+            try
+            {
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Status FROM Accounting_Sync_Queue
+                      WHERE Action_Type LIKE 'CREATE_RECEIPT%' AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (dt?.Rows.Count > 0) return dt.Rows[0]["Status"]?.ToString();
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>📋 ภาพรวมสถานะ sync ของ "การจองเดียว" — จำแนกใบเสร็จแต่ละใบว่าอยู่บน NextAcc แบบไหน:
+        /// ไม่มีเลย (NONE) / ลง JE อย่างเดียว (JE_ONLY) / เอกสารเต็ม (DOCUMENT) / เอกสารถูกลบไปแล้ว (DELETED)
+        /// / รอคิว-ล้มเหลว. ใช้ตัดสินใจว่าจะลบ/resync อย่างไรให้ข้อมูลถูกต้อง + เห็นว่ามีสลิปให้แนบไหม.</summary>
+        public async Task<ReservationSyncOverview> GetReservationSyncOverviewAsync(int reservationId)
+        {
+            var ov = new ReservationSyncOverview
+            {
+                ReservationId = reservationId,
+                Receipts = new List<ReservationReceiptSyncInfo>()
+            };
+            if (reservationId <= 0) { ov.Message = "รหัสการจองไม่ถูกต้อง"; return ov; }
+            if (!_config.IsConfigured) { ov.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return ov; }
+            if (!_config.CanUseCompanyEndpoints)
+            {
+                ov.Message = "ต้องเปิด company endpoints (ตั้ง CompanyId + Nexaacc_Company_Endpoints=1) จึงจะตรวจสถานะเอกสาร/JE บน NextAcc ได้";
+                return ov;
+            }
+
+            try
+            {
+                ov.GuestName = LookupGuestName(reservationId);
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID, ISNULL(Total_Amount,0) AS Amt, ISNULL(Vat,0) AS Vat, Created_Date,
+                             ISNULL(IsDeposit,0) AS IsDep, Status, ISNULL(Deposit_Applied_Amount,0) AS DepApp
+                      FROM Account_Receipt WHERE Reservation_ID = @rid
+                      ORDER BY Created_Date, ID",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt == null || dt.Rows.Count == 0)
+                {
+                    ov.Success = true;
+                    ov.Message = "การจองนี้ไม่มีใบเสร็จในระบบ";
+                    return ov;
+                }
+
+                // JE ระดับ "การจอง" (โหมด JOURNAL ลง ref เป็น RES-{id}-DEP/-PAY/-CHK ไม่ใช่เลขใบเสร็จ)
+                // นับครั้งเดียวไว้ attribute ให้ใบที่หา JE ด้วยเลขใบเสร็จไม่เจอ — กันจำแนกผิดเป็น "ถูกลบ/ไม่มี"
+                int resJeDep = 0, resJeOther = 0;
+                try
+                {
+                    string resRef = $"RES-{reservationId}";
+                    var rj = await _apiClient.SearchJournalsAsync(resRef, 50);
+                    var rjItems = rj?.data?.Items;
+                    if (rjItems != null)
+                        foreach (var je in rjItems)
+                        {
+                            if (je == null || je.OriginalEntryId != null || IsVoidedStatus(je.Status)) continue;
+                            if (je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty) continue;
+                            if (je.Reference == null) continue;
+                            bool exact = string.Equals(je.Reference, resRef, StringComparison.OrdinalIgnoreCase);
+                            bool prefixed = je.Reference.StartsWith(resRef + "-", StringComparison.OrdinalIgnoreCase);
+                            if (!exact && !prefixed) continue;
+                            if (je.Reference.EndsWith("-DEP", StringComparison.OrdinalIgnoreCase)) resJeDep++;
+                            else resJeOther++;
+                        }
+                }
+                catch { }
+
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string rn = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(rn)) continue;
+                    var info = new ReservationReceiptSyncInfo
+                    {
+                        ReceiptNumber = rn,
+                        Date = r["Created_Date"] != DBNull.Value ? Convert.ToDateTime(r["Created_Date"]).ToString("dd/MM/yyyy") : "-",
+                        Amount = Convert.ToDecimal(r["Amt"]),
+                        Vat = Convert.ToDecimal(r["Vat"]),
+                        IsDeposit = Convert.ToInt32(r["IsDep"]) == 1,
+                        LocalStatus = r["Status"] == DBNull.Value || string.IsNullOrEmpty(r["Status"]?.ToString())
+                            ? "Normal" : r["Status"].ToString(),
+                        DepositApplied = Convert.ToDecimal(r["DepApp"])
+                    };
+                    if (info.IsDeposit && info.LocalStatus == "Normal") ov.DepositPaid += info.Amount;
+                    if (!info.IsDeposit && info.LocalStatus == "Normal") ov.DepositAppliedTotal += info.DepositApplied;
+
+                    try { info.SlipCount = LookupReceiptAttachments(rn, reservationId)?.Count ?? 0; } catch { }
+                    info.QueueStatus = LookupLatestQueueStatusByReceipt(rn);
+
+                    // ── จำแนกสถานะบน NextAcc ──
+                    Guid docId = LookupNexaaccDocIdByReceipt(rn);
+                    bool docFound = false, docWas404 = false;
+                    if (docId != Guid.Empty)
+                    {
+                        try
+                        {
+                            var doc = await _apiClient.GetDocumentAsync(docId);
+                            if (doc?.data != null)
+                            {
+                                docFound = true;
+                                info.DocNumber = doc.data.DocumentNumber;
+                                info.DocStatus = NexaaccDocStatusLabel(doc.data.Status);
+                                info.BalanceDue = doc.data.BalanceDue;
+                                bool voided = doc.data.Status == NexaaccDocumentStatus.Voided;
+                                info.State = voided ? "DOC_VOIDED" : "DOCUMENT";
+                                info.StateLabel = voided
+                                    ? $"เอกสารถูกยกเลิก ({doc.data.DocumentNumber})"
+                                    : $"เอกสารเต็ม ({doc.data.DocumentNumber})";
+                            }
+                        }
+                        catch (AccountingApiException aex) when (aex.StatusCode == 404) { docWas404 = true; }
+                        catch (Exception gex)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"SyncOverview #{reservationId}: GetDocument({docId}) error {gex.Message}", "SYSTEM");
+                        }
+                    }
+
+                    // นับ JE ที่ผูกกับใบนี้ (ตัวจริง ไม่ใช่ reversal และยังไม่ถูกกลับ)
+                    try
+                    {
+                        var jes = await _apiClient.SearchJournalsAsync(rn, 25);
+                        var items = jes?.data?.Items;
+                        if (items != null)
+                            info.JeCount = items.Count(je => je != null
+                                && je.OriginalEntryId == null
+                                && !IsVoidedStatus(je.Status)
+                                && (je.ReversedByEntryId == null || je.ReversedByEntryId == Guid.Empty)
+                                && je.Reference != null
+                                && (string.Equals(je.Reference, rn, StringComparison.OrdinalIgnoreCase)
+                                    || je.Reference.StartsWith(rn + "-", StringComparison.OrdinalIgnoreCase)));
+                    }
+                    catch { }
+
+                    if (!docFound)
+                    {
+                        // JE ระดับการจอง (RES-{id}-DEP/-PAY/-CHK) — โหมด JOURNAL ไม่ใช้เลขใบเสร็จเป็น ref
+                        int resLevelJe = info.IsDeposit ? resJeDep : resJeOther;
+
+                        if (info.JeCount > 0)
+                        {
+                            info.State = "JE_ONLY";
+                            info.StateLabel = docWas404
+                                ? $"เอกสารถูกลบ — เหลือ JE {info.JeCount} ใบ"
+                                : $"ลง JE อย่างเดียว ({info.JeCount} ใบ)";
+                        }
+                        else if (resLevelJe > 0)
+                        {
+                            info.State = "JE_ONLY";
+                            info.JeCount = resLevelJe;
+                            info.StateLabel = info.IsDeposit
+                                ? $"ลง JE อย่างเดียว (RES-{reservationId}-DEP × {resLevelJe})"
+                                : $"ลง JE อย่างเดียว (ref ระดับการจอง × {resLevelJe})";
+                        }
+                        else if (docId != Guid.Empty)
+                        {
+                            info.State = "DELETED";
+                            info.StateLabel = "เคย sync แต่ถูกลบจาก NextAcc แล้ว";
+                        }
+                        else
+                        {
+                            info.State = "NONE";
+                            info.StateLabel = "ไม่มีบน NextAcc";
+                        }
+                    }
+
+                    // คิวค้าง/ล้มเหลว override การแสดงผล (ผู้ใช้ควรรอ/แก้คิวก่อน)
+                    if (info.QueueStatus == "PENDING" || info.QueueStatus == "PROCESSING")
+                    {
+                        info.State = "PENDING";
+                        info.StateLabel = "รอ sync (อยู่ในคิว)";
+                    }
+                    else if (info.QueueStatus == "FAILED")
+                    {
+                        info.State = "FAILED";
+                        info.StateLabel = "sync ล้มเหลว (ดูคิวในหน้า Accounting)";
+                    }
+
+                    ov.Receipts.Add(info);
+                }
+
+                ov.Success = true;
+                return ov;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"GetReservationSyncOverview #{reservationId} failed: {ex.Message}", "SYSTEM");
+                ov.Message = "ดึงข้อมูลไม่สำเร็จ: " + ex.Message;
+                return ov;
+            }
+        }
+
+        /// <summary>เข้าคิวสร้างใบเสร็จใหม่ (CREATE_RECEIPT_DOCUMENT) แบบข้าม anti-duplicate — สำหรับ resync
+        /// หลังลบ/รีเซ็ต. ใช้ payload เดิมล่าสุดของใบ (คงวิธีจ่าย/แหล่งเงิน/หมวดรายได้) ถ้าไม่เคยมี → สร้างจาก
+        /// ข้อมูลใบเสร็จใน DB. dedup เฉพาะ PENDING (กันกดซ้ำระหว่างรอคิว).</summary>
+        private long EnqueueReceiptResyncInternal(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber) || !_config.IsConfigured) return -1;
+
+            long pending = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
+            if (pending > 0) return pending;
+
+            Dictionary<string, object> payload = null;
+            int resId = 0;
+            try
+            {
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var q = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Payload, Entity_ID FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (q?.Rows.Count > 0)
+                {
+                    string pj = q.Rows[0]["Payload"]?.ToString();
+                    if (!string.IsNullOrEmpty(pj))
+                        payload = _serializer.Deserialize<Dictionary<string, object>>(pj);
+                    if (q.Rows[0]["Entity_ID"] != DBNull.Value) resId = Convert.ToInt32(q.Rows[0]["Entity_ID"]);
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReceiptResync: อ่าน payload เดิม {receiptNumber} ไม่ได้ ({ex.Message}) → สร้างจาก DB", "SYSTEM");
+                payload = null;
+            }
+
+            if (payload == null)
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT Reservation_ID, ISNULL(Total_Amount,0) AS Amt, ISNULL(Vat,0) AS Vat,
+                             Created_Date, ISNULL(IsDeposit,0) AS IsDep
+                      FROM Account_Receipt WHERE ID = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt == null || dt.Rows.Count == 0) return -1;
+                var r = dt.Rows[0];
+                resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
+                decimal amt = Convert.ToDecimal(r["Amt"]);
+                if (amt <= 0) return -1;
+                payload = new Dictionary<string, object>
+                {
+                    { "reservationId", resId },
+                    { "receiptNumber", receiptNumber },
+                    { "totalAmount", amt },
+                    { "vatAmount", Convert.ToDecimal(r["Vat"]) },
+                    { "receiptDate", AcctDate(r["Created_Date"] != DBNull.Value ? Convert.ToDateTime(r["Created_Date"]) : DateTime.Now) },
+                    { "customerName", LookupGuestName(resId) },
+                    { "isDeposit", Convert.ToInt32(r["IsDep"]) == 1 },
+                    { "paymentMethod", "CASH" }
+                };
+            }
+
+            return InsertQueue("RECEIPT", resId, "CREATE_RECEIPT_DOCUMENT", payload);
+        }
+
+        /// <summary>🔁 Resync การจองทั้งชุด "กดทีเดียวจบ": (1) รีเซ็ต — กลับทุก JE + void ทุกเอกสารของการจอง
+        /// + reset marker (idempotent) → (2) เข้าคิวสร้างใหม่ทุกใบ Normal เรียงตามวันที่ (มัดจำก่อนเช็คเอาท์
+        /// โดยลำดับคิว + guard VerifyDepositBookedOnNextAcc กันหักมัดจำก่อนมัดจำขึ้น) → เอกสาร+JE ใหม่ถูกต้อง
+        /// ตาม logic ปัจจุบัน พร้อมแนบสลิปอัตโนมัติ (LookupReceiptAttachments ใน CREATE path).</summary>
+        public (int enqueued, string message) ResyncReservationDocuments(int reservationId)
+        {
+            if (reservationId <= 0) return (-1, "รหัสการจองไม่ถูกต้อง");
+            var (reversed, resetMsg) = ResetReservationAccounting(reservationId);
+            if (reversed < 0) return (-1, resetMsg);
+
+            int enq = 0;
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT ID FROM Account_Receipt
+                  WHERE Reservation_ID = @rid AND (Status = 'Normal' OR Status IS NULL)
+                  ORDER BY Created_Date, ID",
+                new Dictionary<string, object> { { "@rid", reservationId } });
+            if (dt != null)
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string rn = r["ID"]?.ToString();
+                    if (string.IsNullOrEmpty(rn)) continue;
+                    if (EnqueueReceiptResyncInternal(rn) > 0) enq++;
+                }
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ResyncReservationDocuments #{reservationId}: กลับ {reversed} JE + เข้าคิวสร้างใหม่ {enq} ใบ", "SYSTEM");
+            return (enq,
+                $"รีเซ็ตแล้ว (กลับ {reversed} JE + void เอกสารเดิม) และเข้าคิวสร้างใหม่ {enq} ใบ — " +
+                "ระบบจะ sync อัตโนมัติภายใน ~1-2 นาที (เอกสาร/JE ใหม่ตาม logic ปัจจุบัน พร้อมแนบสลิป). " +
+                "ตรวจผลได้ที่ปุ่มนี้อีกครั้ง หรือหน้า Accounting Integration");
+        }
+
+        /// <summary>🔁 Resync ใบเดียว: void เอกสารเดิม (ถ้ามี — เข้าคิว VOID ก่อน) + เข้าคิวสร้างใหม่
+        /// (คิวประมวลตามลำดับ id: void เสร็จก่อน create). ใช้แก้ใบที่ผิดใบเดียวโดยไม่แตะใบอื่น.</summary>
+        public (long queueId, string message) ResyncSingleReceipt(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return (-1, "ไม่ระบุเลขที่ใบเสร็จ");
+            if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc");
+
+            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+            long voidQ = -1;
+            if (docId != Guid.Empty) voidQ = EnqueueVoidReceipt(receiptNumber);
+            long qid = EnqueueReceiptResyncInternal(receiptNumber);
+            if (qid <= 0) return (-1, "เข้าคิวสร้างใหม่ไม่สำเร็จ (ใบยอด 0/ไม่พบใบเสร็จ?)");
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ResyncSingleReceipt {receiptNumber}: voidQueue={voidQ} createQueue={qid}", "SYSTEM");
+            return (qid, voidQ > 0
+                ? $"เข้าคิวแล้ว: void เอกสารเดิม (#{voidQ}) → สร้างใหม่ (#{qid}) — sync อัตโนมัติใน ~1-2 นาที"
+                : $"เข้าคิวสร้างใหม่แล้ว (#{qid}) — sync อัตโนมัติใน ~1-2 นาที");
+        }
+
         /// <summary>กลับ JV ตาม EntryNumber (native ReverseJournalAsync, idempotent). true = กลับแล้ว/สำเร็จ.</summary>
         private async Task<bool> TryReverseJournalByEntryNumberAsync(string entryNumber)
         {

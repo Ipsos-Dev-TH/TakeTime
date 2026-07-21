@@ -23,6 +23,11 @@ namespace Take_Time_BangPhra
         code code2 = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // สิทธิ์จัดการบัญชี NextAcc (ปุ่ม/AJAX ในหน้านี้) — Owner/Admin เท่านั้น
+        protected bool IsNaAdmin =>
+            Session["permission"]?.ToString() == "True"
+            && (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin");
+
         protected void Page_Load(object sender, EventArgs e)
         {
             Page.MaintainScrollPositionOnPostBack = true;
@@ -30,6 +35,13 @@ namespace Take_Time_BangPhra
             {
                 if (Session["permission"]?.ToString() == "True")
                 {
+                    // AJAX จัดการ sync NextAcc รายการจอง — ตอบ JSON แล้วจบ (ไม่ render หน้า)
+                    if (!string.IsNullOrEmpty(Request.QueryString["naAction"]))
+                    {
+                        HandleNaAction(Request.QueryString["naAction"]);
+                        return;
+                    }
+
                     if (!IsPostBack)
                     {
                         // Select today's date in the calendar
@@ -48,10 +60,90 @@ namespace Take_Time_BangPhra
                     Response.Redirect("./Default");
                 }
             }
+            catch (System.Threading.ThreadAbortException) { throw; }   // Response.End ของ AJAX naAction — อย่ากลืน
             catch
             {
                 Response.Redirect("./Default");
             }
+        }
+
+        /// <summary>AJAX จัดการ sync NextAcc ของ "การจองเดียว": overview (จำแนก ไม่มี/JE/เอกสาร ต่อใบ) /
+        /// resyncAll (รีเซ็ต + สร้างใหม่ทั้งชุด) / reset (ลบเอกสาร+กลับ JE อย่างเดียว) /
+        /// resyncReceipt, voidReceipt (รายใบ). Owner/Admin เท่านั้น.</summary>
+        private void HandleNaAction(string act)
+        {
+            Response.Clear();
+            Response.ContentType = "application/json; charset=utf-8";
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            object result;
+            try
+            {
+                if (!IsNaAdmin)
+                {
+                    result = new { Success = false, Message = "เฉพาะ Owner/Admin เท่านั้น" };
+                }
+                else
+                {
+                    int resId;
+                    int.TryParse(Request.QueryString["resId"] ?? "0", out resId);
+                    string doc = (Request.QueryString["doc"] ?? "").Trim();
+                    var sync = new Integration.AccountingSyncService(conn);
+
+                    switch (act)
+                    {
+                        case "overview":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var t = Task.Run(() => sync.GetReservationSyncOverviewAsync(resId));
+                                result = t.Wait(90000)
+                                    ? (object)t.Result
+                                    : new { Success = false, Message = "NextAcc ตอบช้าเกิน 90 วินาที — ลองใหม่อีกครั้ง" };
+                                break;
+                            }
+                        case "resyncAll":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var (n, msg) = sync.ResyncReservationDocuments(resId);
+                                result = new { Success = n >= 0, Message = msg };
+                                break;
+                            }
+                        case "reset":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var (n, msg) = sync.ResetReservationAccounting(resId);
+                                result = new { Success = n >= 0, Message = msg };
+                                break;
+                            }
+                        case "resyncReceipt":
+                            {
+                                var (q, msg) = sync.ResyncSingleReceipt(doc);
+                                result = new { Success = q > 0, Message = msg };
+                                break;
+                            }
+                        case "voidReceipt":
+                            {
+                                long q = sync.EnqueueVoidReceipt(doc);
+                                result = new
+                                {
+                                    Success = q > 0,
+                                    Message = q > 0
+                                        ? $"เข้าคิว void เอกสาร {doc} บน NextAcc แล้ว (คิว #{q}) — เอกสาร+JE ถูกยกเลิกอัตโนมัติใน ~1-2 นาที"
+                                        : $"ไม่พบเอกสารบน NextAcc ของใบ {doc} (อาจยังไม่เคย sync)"
+                                };
+                                break;
+                            }
+                        default:
+                            result = new { Success = false, Message = "ไม่รู้จักคำสั่ง: " + act };
+                            break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result = new { Success = false, Message = "ผิดพลาด: " + ex.Message };
+            }
+            Response.Write(ser.Serialize(result));
+            Response.End();
         }
 
         protected void Calendar1_SelectionChanged(object sender, EventArgs e)
