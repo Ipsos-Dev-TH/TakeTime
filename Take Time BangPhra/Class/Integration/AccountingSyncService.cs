@@ -4432,86 +4432,80 @@ namespace Take_Time_BangPhra.Integration
                         return docRId != Guid.Empty ? docRId.ToString() : "DEPREV_ONLY";
                     }
 
-                    // ✅ ขายสด "ใบเดียว" (Option B, isCashSale): ใบกำกับภาษี/ใบเสร็จรับเงิน จ่ายจบในใบ
-                    //    ไม่เปิดลูกหนี้ ไม่มีใบเสร็จรับชำระแยก (เดิมได้ TIV + REC หลายใบ). เปิดด้วย config
-                    //    Nexaacc_TaxReceipt_SingleDoc=1 + ต้องเป็นยอดเต็มไม่มีหักมัดจำ (มัดจำยังใช้เส้นเดิม
-                    //    จนกว่า NextAcc ยืนยัน contract หักมัดจำบน cash-sale invoice). ยิง integration invoice
-                    //    เดียว → NextAcc โพสต์ Dr แหล่งเงิน / Cr รายได้ราย line / Cr VAT + e-Tax TAX_INVOICE.
-                    // เคสหักมัดจำรวมใบได้เมื่อ (ก) เปิด Nexaacc_CashSale_Deposit (NextAcc รองรับ deposit fields
-                    // บน isCashSale แล้ว) และ (ข) ใบมัดจำ resolve เป็นเอกสาร NextAcc แล้ว (มี ref ให้กลับ 217xx)
-                    // — ไม่ครบ → ตกไปเส้นเดิม (TIV + settle, GL ถูกแน่นอน)
-                    bool csDepositOk = depositApplied <= 0.005m
-                        || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId));
-                    if (_config.IsTaxReceiptSingleDoc && csDepositOk)
+                    // ✅ DEFAULT: ขายสด "ใบเดียว" (isCashSale) = ใบกำกับภาษี/ใบเสร็จรับเงิน จ่ายจบในใบ
+                    //    NextAcc โพสต์ **Dr แหล่งเงิน (ตรง ๆ) / Cr รายได้ราย line / Cr ภาษีขาย** + e-Tax TAX_INVOICE
+                    //    → **ไม่เปิดลูกหนี้การค้า** (เดิมทำ TaxInvoice type 4 = Dr ลูกหนี้ แล้ว settle → ลูกหนี้เปิด-ปิด
+                    //    เปล่า ๆ + ได้ 2 ใบ). เปลี่ยนเป็น default เพื่อตัดลูกหนี้การค้าที่ไม่จำเป็นออกจากการขายสด.
+                    //    หักมัดจำ: Option B (default) TakeTime โพสต์ JV Dr 21510(+VAT ตามโหมด) / Cr แหล่งเงิน กลับหนี้สินมัดจำ
+                    //    (Option A drives=true เฉพาะเมื่อเปิด Nexaacc_CashSale_Deposit_NativeA + ใบมัดจำ resolve เป็นเอกสาร).
+                    bool csHasDeposit = depositApplied > 0.005m;
+
+                    // มัดจำต้อง booked บน NextAcc ก่อน (มี 21510 ให้ JV กลับ) — ยังไม่ขึ้น → backfill + defer รอบถัดไป
+                    // กัน 21510 ติดลบจากการกลับมัดจำที่ยังไม่มีจริงบน NextAcc
+                    if (csHasDeposit)
                     {
-                        bool csHasDeposit = depositApplied > 0.005m;
-                        string csDepositRef = csHasDeposit ? LookupDepositReceiptRefs(reservationId) : null;
-                        var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
-                            totalAmount, revenueType, paymentMethod, receiptDate, customerName,
-                            customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
-                            depositApplied: depositApplied, depositRef: csDepositRef,
-                            deferOutputVat: hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred);
-                        // โหมดหักมัดจำ: A (native, drives=true → NextAcc ลง Dr 21510 ในใบ) / B (default, TakeTime JV)
-                        bool csNativeA = csHasDeposit && _config.IsCashSaleDepositNativeA;
-                        //   A: drives=true (NextAcc reverse 21510 ในใบ) / B: drives=false + TakeTime โพสต์ JV
-                        csInv.DepositAppliedDrivesJournal = csHasDeposit ? csNativeA : (bool?)null;
-                        ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
-                        csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
-                        var csFilePaths = ExtractFilePaths(attachments);
-                        ApiResponse<IntegrationDocumentResponse> csRes = (csFilePaths != null && csFilePaths.Count > 0)
-                            ? await _apiClient.CreateInvoiceMultipartAsync(csInv, csFilePaths)
-                            : await _apiClient.CreateInvoiceAsync(csInv);
-                        Guid csId = RequireValidDocId(csRes?.data?.Id, $"CashSaleTaxInvoice receipt={receiptNumber}");
-                        _lastDocNumber = csRes?.data?.DocumentNumber;
-                        _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
-
-                        // Option B เท่านั้น: TakeTime โพสต์ JV กลับมัดจำ (Dr 21510 / Cr แหล่งเงิน) idempotent ด้วย ref.
-                        //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
-                        if (csHasDeposit && !csNativeA)
+                        var csDep = VerifyDepositBookedOnNextAcc(reservationId);
+                        bool csBooked = csDep.AnyDeposit && !csDep.PendingSync
+                            && csDep.BookedAmount + 0.01m >= depositApplied;
+                        if (csDep.AnyDeposit && !csBooked)
                         {
-                            string csAdjRef = $"{receiptNumber}-CSDEPADJ";
-                            if (!await JournalExistsByReferenceAsync(csAdjRef))
-                            {
-                                var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
-                                    receiptDate, customerName, paymentAccountId, receiptNumber,
-                                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt);
-                                var csAdjRes = await _apiClient.CreateJournalAsync(csAdj);
-                                Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
-                                await SafePostJournalAsync(csAdjId);
-                                _code.Logs(_connectionString, "AccountingSync",
-                                    $"ProcessReceiptDocument(cash-sale deposit JV, B): receipt={receiptNumber} Dr 21510 {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
-                            }
+                            int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
+                            throw new Exception(
+                                $"เช็คเอาท์ #{reservationId} (ใบเดียว): ใบมัดจำยังไม่ขึ้น NextAcc (booked {csDep.BookedAmount:N2}, " +
+                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป receipt={receiptNumber}");
                         }
-
-                        // ปิดจบในใบเดียว: mark final. Option A ใช้ prefix "CSNATIVE:" ให้ void รู้ว่า 21510 reversal
-                        //   อยู่ใน JE ของใบ (void cascade กลับให้เอง) → ไม่ต้องโพสต์ counter-adj
-                        SetReceiptPaymentMarker(receiptNumber, (csNativeA ? "CSNATIVE:" : "") + csId.ToString());
-                        await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessReceiptDocument(cash-sale single doc): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
-                            $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} (ไม่มีใบเสร็จรับชำระแยก)", "SYSTEM");
-                        return csId.ToString();
+                        // !AnyDeposit = ไม่มีใบมัดจำเอกสาร (legacy/ยอดยกมา) → JV กลับกับ 21510 ยกมา (log ด้านล่าง)
                     }
 
-                    // ✅ รับชำระ/เช็คเอาท์ = "ใบกำกับภาษี" (TaxInvoice type 4) ไม่ใช่ใบเสร็จรับเงิน:
-                    //    doc → Dr ลูกหนี้ / Cr รายได้ราย line / Cr ภาษีขาย แล้วปิดลูกหนี้ด้วย
-                    //    SettleReceiptInNextAcc (ตัดมัดจำ Dr รับล่วงหน้า/Cr ลูกหนี้ + รับเงินสดจริง
-                    //    Dr เงินสดตามแหล่งเงิน/Cr ลูกหนี้) — รองรับยอดส่วนต่าง/อัพเกรด/โอนตรง
-                    //    (ใบเสร็จที่สร้างด้วยยอดใดก็ได้ จะออกใบกำกับเท่ายอดนั้น). ใบกำกับจริงบน
-                    //    NextAcc → /etax/generate TAX_INVOICE ผ่าน (เดิมเป็น Receipt doc → e-Tax ไม่ออก)
-                    var doc = _mapper.MapReceiptToDocument(reservationId, useMultiLine ? lines : null, totalAmount, revenueType,
-                        paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
-                        paymentAccountId, hasVat, receiptNumber, isDeposit: false,
-                        documentType: NexaaccDocumentType.TaxInvoice);
-                    // B2B TaxInvoice: มัดจำแสดง/ตัดผ่าน document payment ใน SettleReceiptInNextAcc (ลด BalanceDue)
-                    // — ไม่ตั้ง field §9 (display-only นั้นเพื่อ Receipt; บน AR doc จะซ้อนกับ payment section)
-                    Guid docId = await EnsureRevenueDocCreatedApprovedAsync(doc, receiptNumber);
-                    await SettleReceiptInNextAcc(docId, receiptNumber, totalAmount, depositApplied,
-                        paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
-                    await UploadReceiptSlipsAsync(docId, attachments, receiptNumber);   // แนบสลิปเข้า company TaxInvoice doc
-                    _lastDocType = "RECEIPT";   // company doc → deep link /documents; repost ใช้เส้น void→สร้างใหม่
-                    await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
-                    return docId.ToString();
+                    string csDepositRef = csHasDeposit ? LookupDepositReceiptRefs(reservationId) : null;
+                    // A (native, drives) เฉพาะเมื่อเปิด flag + มัดจำ resolve เป็นเอกสาร NextAcc; อื่น ๆ = B (TakeTime JV)
+                    bool csNativeA = csHasDeposit && _config.IsCashSaleDepositNativeA && DepositRefsResolvedToNextAcc(reservationId);
+                    // Option B: TakeTime JV เป็นเจ้าของการกลับมัดจำ+VAT ทั้งหมด → ไม่ส่ง deferred flag ให้ NextAcc
+                    //   (ใบขายสดลง Cr 21911 เต็มยอด, JV ย้าย 21913→net กับ 21911 เอง) กัน NextAcc ตีความซ้ำ.
+                    //   Option A: ส่ง deferred flag ให้ NextAcc drives กลับ 21913 ในใบเอง.
+                    bool csInvoiceDefer = csNativeA && hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred;
+                    var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
+                        totalAmount, revenueType, paymentMethod, receiptDate, customerName,
+                        customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
+                        depositApplied: depositApplied, depositRef: csDepositRef, deferOutputVat: csInvoiceDefer);
+                    csInv.DepositAppliedDrivesJournal = csHasDeposit ? csNativeA : (bool?)null;
+                    ApplyReceiptPreparer(csInv, receiptNumber);   // ผู้รับเงิน = คนสร้างใบในระบบ
+                    csInv.Attachments = attachments;              // แนบสลิปในใบเดียว
+                    var csFilePaths = ExtractFilePaths(attachments);
+                    ApiResponse<IntegrationDocumentResponse> csRes = (csFilePaths != null && csFilePaths.Count > 0)
+                        ? await _apiClient.CreateInvoiceMultipartAsync(csInv, csFilePaths)
+                        : await _apiClient.CreateInvoiceAsync(csInv);
+                    Guid csId = RequireValidDocId(csRes?.data?.Id, $"CashSaleTaxInvoice receipt={receiptNumber}");
+                    _lastDocNumber = csRes?.data?.DocumentNumber;
+                    _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
+
+                    // Option B: TakeTime โพสต์ JV กลับมัดจำ (Dr 21510 + Dr VAT[21913 defer/21911 no-defer] / Cr แหล่งเงิน)
+                    //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
+                    if (csHasDeposit && !csNativeA)
+                    {
+                        string csAdjRef = $"{receiptNumber}-CSDEPADJ";
+                        if (!await JournalExistsByReferenceAsync(csAdjRef))
+                        {
+                            var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
+                                receiptDate, customerName, paymentAccountId, receiptNumber,
+                                hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt,
+                                deferOutputVat: _config.IsDepositOutputVatDeferred);
+                            var csAdjRes = await _apiClient.CreateJournalAsync(csAdj);
+                            Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
+                            await SafePostJournalAsync(csAdjId);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessReceiptDocument(cash-sale deposit JV, B): receipt={receiptNumber} Dr 21510(+VAT) {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
+                        }
+                    }
+
+                    // ปิดจบในใบเดียว: mark final. Option A ใช้ prefix "CSNATIVE:" ให้ void รู้ว่า 21510 reversal
+                    //   อยู่ใน JE ของใบ (void cascade กลับให้เอง) → ไม่ต้องโพสต์ counter-adj
+                    SetReceiptPaymentMarker(receiptNumber, (csNativeA ? "CSNATIVE:" : "") + csId.ToString());
+                    await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessReceiptDocument(cash-sale single doc, DEFAULT): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
+                        $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} (ไม่มีลูกหนี้/ไม่มีใบเสร็จแยก)", "SYSTEM");
+                    return csId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints
                     && customerContact?.NexaaccContactId != null)
@@ -5039,7 +5033,8 @@ namespace Take_Time_BangPhra.Integration
             if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV")) return true; // กลับแล้ว
             var undo = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
                 custName, paymentAccountId, receiptNumber,
-                hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt);
+                hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                deferOutputVat: _config.IsDepositOutputVatDeferred);
             var res = await _apiClient.CreateJournalAsync(undo);
             Guid id = RequireValidDocId(res?.data?.Id, $"CashSaleDepositReversalUndo receipt={receiptNumber}");
             await SafePostJournalAsync(id);
@@ -8815,11 +8810,10 @@ namespace Take_Time_BangPhra.Integration
                     else
                         invoice = _mapper.MapPaymentToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
                             customerName, hasVat, revenueType: revenueType, paymentAccountId: paymentAccountId);
-                    // ขายสดใบเดียว (Option B): resync ต้องคงรูปแบบ isCashSale ไม่งั้น Retry กลับไปเป็นหลายใบ
-                    // (รวมเคสหักมัดจำเมื่อเปิด Nexaacc_CashSale_Deposit + ใบมัดจำ resolve แล้ว)
-                    cashSaleEligible = _config.IsTaxReceiptSingleDoc
-                        && (depositApplied <= 0.005m
-                            || (_config.IsCashSaleDepositEnabled && DepositRefsResolvedToNextAcc(reservationId)));
+                    // ขายสดใบเดียว = default แล้ว (ตรงกับ ProcessReceiptDocument): resync ต้องคงรูปแบบ isCashSale
+                    // ไม่งั้น Retry กลับไปเป็น TaxInvoice+ลูกหนี้/หลายใบ. ใบเดิม (default ใหม่) สร้างเป็น isCashSale +
+                    // JV มัดจำ (-CSDEPADJ) โพสต์ตอน create แล้ว → resync แค่แก้เนื้อใบ ไม่แตะ JV
+                    cashSaleEligible = true;
                     cashSaleDepositApplied = depositApplied;   // ใช้ set field มัดจำ "หลังผ่านเช็คข้อมูลภาษีผู้ซื้อ" เท่านั้น
                 }
 
@@ -8852,8 +8846,10 @@ namespace Take_Time_BangPhra.Integration
                             invoice.DepositAppliedRef = LookupDepositReceiptRefs(reservationId);
                             // A: drives=true (NextAcc reverse ในใบ) / B: drives=false (TakeTime JV โพสต์ตอน create
                             // แล้ว idempotent ด้วย ref -CSDEPADJ; resync แค่แก้เนื้อใบ ไม่แตะ JV)
-                            invoice.DepositAppliedDrivesJournal = _config.IsCashSaleDepositNativeA;
-                            if (hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
+                            bool repostNativeA = _config.IsCashSaleDepositNativeA && DepositRefsResolvedToNextAcc(reservationId);
+                            invoice.DepositAppliedDrivesJournal = repostNativeA;
+                            // deferred flag ส่งเฉพาะ Option A (NextAcc drives); Option B → TakeTime JV เจ้าของ (ตรงกับ main path)
+                            if (repostNativeA && hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred)
                                 invoice.DepositOutputVatDeferred = true;
                         }
                     }

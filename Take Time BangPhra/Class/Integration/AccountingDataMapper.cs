@@ -2793,7 +2793,7 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapDepositCashSaleReversal(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
             string customerName, string paymentAccountId, string receiptNumber,
-            bool hasVat = false, bool vatAtReceipt = false)
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
         {
             if (depositApplied <= 0)
                 throw new ArgumentException("MapDepositCashSaleReversal: depositApplied ต้อง > 0");
@@ -2806,11 +2806,19 @@ namespace Take_Time_BangPhra.Integration
 
             if (hasVat && vatAtReceipt)
             {
-                // โหมด RECEIPT: 21510 เก็บ net, VAT รับรู้ตอนรับมัดจำ → กลับ VAT กัน VAT ซ้ำ
+                // โหมด RECEIPT: 21510 เก็บ net, VAT ของมัดจำถูก book แยกตอนรับเงิน → ต้อง Dr กลับบัญชี VAT เดิม
+                //   defer   : VAT พักที่ 21913 (ยังไม่เข้า ภ.พ.30) → Dr 21913 (ใบขายสดลง Cr 21911 เต็มยอด →
+                //             ย้ายส่วนมัดจำจาก 21913 มา net กับ 21911 เต็ม = VAT รวมถูกต้องใน 21911)
+                //   no-defer: VAT อยู่ที่ 21911 แล้ว (นับซ้ำกับใบขายสด) → Dr 21911 กันนับซ้ำ
+                // ⚠ เดิม hardcode OUTPUT_VAT (21911) เสมอ → โหมด defer ทำ 21913 ค้าง (VAT ไม่กลับ) + 21911 เกิน
                 decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal depositVat = depositApplied - depositNet;
+                Guid deferredVatId;
+                Guid vatBackAccountId = (deferOutputVat
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty)
+                    ? deferredVatId : GetAccountId("OUTPUT_VAT");
                 lines.Add(new JournalEntryLineRequest { AccountId = advanceDepositAccountId, DebitAmount = depositNet, CreditAmount = 0, Description = "ตัดเงินรับล่วงหน้า net (ขายสดใบเดียว)" });
-                lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("OUTPUT_VAT"), DebitAmount = depositVat, CreditAmount = 0, Description = "กลับ VAT มัดจำที่รับรู้ไปแล้ว (กัน VAT ซ้ำ)" });
+                lines.Add(new JournalEntryLineRequest { AccountId = vatBackAccountId, DebitAmount = depositVat, CreditAmount = 0, Description = deferOutputVat ? "ย้ายภาษีขายรอเรียกเก็บมัดจำ (ขายสดใบเดียว)" : "กลับ VAT มัดจำที่รับรู้ไปแล้ว (กัน VAT ซ้ำ)" });
             }
             else
             {
@@ -2833,7 +2841,7 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapDepositCashSaleReversalUndo(
             int reservationId, decimal depositApplied, string paymentMethod, DateTime entryDate,
             string customerName, string paymentAccountId, string receiptNumber,
-            bool hasVat = false, bool vatAtReceipt = false)
+            bool hasVat = false, bool vatAtReceipt = false, bool deferOutputVat = false)
         {
             if (depositApplied <= 0)
                 throw new ArgumentException("MapDepositCashSaleReversalUndo: depositApplied ต้อง > 0");
@@ -2848,10 +2856,15 @@ namespace Take_Time_BangPhra.Integration
             };
             if (hasVat && vatAtReceipt)
             {
+                // กลับขา VAT ให้ตรงกับ MapDepositCashSaleReversal (defer→21913 / no-defer→21911)
                 decimal depositNet = Math.Round(depositApplied * 100m / 107m, 2, MidpointRounding.AwayFromZero);
                 decimal depositVat = depositApplied - depositNet;
+                Guid deferredVatId;
+                Guid vatBackAccountId = (deferOutputVat
+                    && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty)
+                    ? deferredVatId : GetAccountId("OUTPUT_VAT");
                 lines.Add(new JournalEntryLineRequest { AccountId = advanceDepositAccountId, DebitAmount = 0, CreditAmount = depositNet, Description = "เอาเงินรับล่วงหน้ากลับ (net)" });
-                lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("OUTPUT_VAT"), DebitAmount = 0, CreditAmount = depositVat, Description = "กลับ VAT มัดจำที่เคยกลับไว้" });
+                lines.Add(new JournalEntryLineRequest { AccountId = vatBackAccountId, DebitAmount = 0, CreditAmount = depositVat, Description = "กลับ VAT มัดจำที่เคยกลับไว้" });
             }
             else
             {
