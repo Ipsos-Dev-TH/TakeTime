@@ -4485,12 +4485,15 @@ namespace Take_Time_BangPhra.Integration
                     // → รอบ retry LookupDepositAppliedFromReceipt คืนค่าที่รวม lines ไว้แล้ว ถ้าบวกอีกจะเบิล
                     if (depositApplied < depositFromLines)
                         depositApplied += depositFromLines;
-                    // สำคัญ: ใบเช็คอินที่มี line "ส่วนลด" ติดลบ เก็บ Total_Amount เป็นยอด "สุทธิหลังหักมัดจำ"
-                    // แต่ convention ปลายทาง (SettleReceiptDocAsync / SettleReceiptInNextAcc คิด
-                    // cashNow = totalAmount − depositApplied และ doc/invoice สร้างจาก line บวกยอดเต็ม)
-                    // คาดหวัง totalAmount = ยอดเต็ม (GROSS) → บวกมัดจำกลับคืนก่อน ไม่งั้นมัดจำถูกหักซ้ำ
-                    // (เงินสดบน NextAcc ขาดเท่ายอดมัดจำ + ลูกหนี้ค้างเปิด)
-                    totalAmount += depositFromLines;
+                    // GROSS = ผลรวม "บรรทัดบวก" (room/service จริง จาก LookupReceiptLinesEx ที่ตัด negative ออก)
+                    // — deterministic ไม่ขึ้นกับว่า Total_Amount ที่ store เป็น net หรือ gross.
+                    // ⚠ เดิม `totalAmount += depositFromLines` สมมติ Total_Amount = net เสมอ → ถ้าบางใบ store
+                    // เป็น gross อยู่แล้ว (เช่น TIV-0002) จะบวกมัดจำซ้ำ → ยอดเบิ้ล (6,400+3,500=9,900).
+                    decimal grossFromLines = lines != null ? lines.Sum(l => l.Amount) : 0m;
+                    if (grossFromLines > 0.005m)
+                        totalAmount = grossFromLines;         // ยอดเต็มจากบรรทัดจริง (กันเบิ้ล)
+                    else
+                        totalAmount += depositFromLines;      // ไม่มี lines → fallback เดิม
                     // Persist depositApplied ลง Account_Receipt เพื่อให้ TryEnqueueDepositClearing เห็น (anti-double-clear)
                     try
                     {
@@ -8989,7 +8992,10 @@ namespace Take_Time_BangPhra.Integration
                         // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
                         if (depositApplied < depositFromLines)
                             depositApplied += depositFromLines;
-                        totalAmount += depositFromLines;   // คืน GROSS (fix มัดจำหักซ้ำ)
+                        // GROSS = ผลรวมบรรทัดบวกจริง (กันเบิ้ลถ้า Total_Amount store เป็น gross อยู่แล้ว)
+                        decimal grossFromLines = lines != null ? lines.Sum(l => l.Amount) : 0m;
+                        if (grossFromLines > 0.005m) totalAmount = grossFromLines;
+                        else totalAmount += depositFromLines;   // fallback ไม่มี lines
                     }
 
                     bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
@@ -9104,7 +9110,10 @@ namespace Take_Time_BangPhra.Integration
                     // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
                     if (depositApplied < depositFromLines)
                         depositApplied += depositFromLines;
-                    totalAmount += depositFromLines;   // คืน GROSS (fix มัดจำหักซ้ำ)
+                    // GROSS = ผลรวมบรรทัดบวกจริง (กันเบิ้ลถ้า Total_Amount store เป็น gross อยู่แล้ว)
+                    decimal grossFromLinesJ = lines != null ? lines.Sum(l => l.Amount) : 0m;
+                    if (grossFromLinesJ > 0.005m) totalAmount = grossFromLinesJ;
+                    else totalAmount += depositFromLines;   // fallback ไม่มี lines
                 }
 
                 bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
