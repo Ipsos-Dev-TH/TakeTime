@@ -8901,6 +8901,20 @@ namespace Take_Time_BangPhra.Integration
                     }
                 }
 
+                // void "เอกสาร" (TIV/REC) ของการจองนี้ด้วย — ไม่ใช่แค่ JE (GL) — ให้กดทีเดียวจบจริง
+                int docsVoided = 0, docsFailed = 0;
+                try
+                {
+                    var vr = System.Threading.Tasks.Task.Run(() =>
+                        VoidReservationDocumentsAsync(reservationId)).GetAwaiter().GetResult();
+                    docsVoided = vr.voided; docsFailed = vr.failed;
+                }
+                catch (Exception vex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ResetReservationAccounting: void เอกสารล้มเหลว {vex.Message}", "SYSTEM");
+                }
+
                 // reset marker → re-sync สะอาดได้ (settle/drives เริ่มใหม่)
                 try
                 {
@@ -8911,10 +8925,11 @@ namespace Take_Time_BangPhra.Integration
                 catch { }
 
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ResetReservationAccounting #{reservationId}: กลับ {reversed} JE, reset marker แล้ว", "SYSTEM");
+                    $"ResetReservationAccounting #{reservationId}: กลับ {reversed} JE, void {docsVoided} เอกสาร (fail {docsFailed}), reset marker แล้ว", "SYSTEM");
                 return (reversed,
-                    $"รีเซ็ตบัญชีการจอง #{reservationId} — กลับ {reversed} รายการ GL (มัดจำ/ใบกำกับ/ตัดมัดจำ/churn). " +
-                    "✅ ตรวจ 21510/21913/ลูกหนี้ บน NextAcc → ควรเป็น 0. ยังไม่ 0 = กดซ้ำได้ (ไม่เบิ้ล) หรือมีเอกสาร/payment ที่ผูกเอกสารต้องลบเพิ่ม. " +
+                    $"รีเซ็ตบัญชีการจอง #{reservationId} — กลับ {reversed} รายการ GL (มัดจำ/ใบกำกับ/ตัดมัดจำ/churn) + void {docsVoided} เอกสาร" +
+                    (docsFailed > 0 ? $" (void ไม่สำเร็จ {docsFailed} ใบ — อาจถูกลบไปแล้ว/ผูก payment ต้องเคลียร์เพิ่ม)" : "") + ". " +
+                    "✅ ตรวจ 21510/21913/ลูกหนี้ บน NextAcc → ควรเป็น 0. ยังไม่ 0 = กดซ้ำได้ (ไม่เบิ้ล). " +
                     "reset marker แล้ว → re-sync ได้สะอาด (หลัง isCashSale deploy)");
             }
             catch (Exception ex)
@@ -8922,6 +8937,300 @@ namespace Take_Time_BangPhra.Integration
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ResetReservationAccounting #{reservationId} failed: {ex.Message}", "SYSTEM");
                 return (-1, "รีเซ็ตไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
+        /// <summary>void "เอกสาร" NextAcc ทุกใบของการจอง (TIV/REC/มัดจำ) — คู่กับ ResetReservationAccounting
+        /// (ที่กลับ JE). idempotent: ข้ามใบที่ voided แล้ว. ลอง company void ก่อน → fallback integration void.
+        /// คืน (จำนวน void สำเร็จ, จำนวน fail).</summary>
+        private async Task<(int voided, int failed)> VoidReservationDocumentsAsync(int reservationId)
+        {
+            int voided = 0, failed = 0;
+            var docIds = new HashSet<Guid>();
+            try
+            {
+                var rc = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ID FROM Account_Receipt WHERE Reservation_ID = @rid",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (rc != null)
+                    foreach (System.Data.DataRow r in rc.Rows)
+                    {
+                        string rn = r["ID"]?.ToString();
+                        if (string.IsNullOrEmpty(rn)) continue;
+                        Guid id = LookupNexaaccDocIdByReceipt(rn);
+                        if (id != Guid.Empty) docIds.Add(id);
+                    }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"VoidReservationDocuments #{reservationId}: หาเอกสารล้มเหลว {ex.Message}", "SYSTEM");
+                return (0, 0);
+            }
+
+            foreach (Guid docId in docIds)
+            {
+                try
+                {
+                    // ข้ามใบที่ voided แล้ว (idempotent — กดซ้ำไม่ error)
+                    try
+                    {
+                        var doc = await _apiClient.GetDocumentAsync(docId);
+                        if (doc?.data != null && doc.data.Status == NexaaccDocumentStatus.Voided) continue;
+                    }
+                    catch { /* GetDocument fail (อาจถูกลบไปแล้ว) → ลอง void ต่อ */ }
+
+                    await _apiClient.VoidDocumentAsync(docId);
+                    voided++;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"VoidReservationDocuments #{reservationId}: void เอกสาร {docId}", "SYSTEM");
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"VoidReservationDocuments #{reservationId}: void {docId} ล้มเหลว {ex.Message}", "SYSTEM");
+                }
+            }
+            return (voided, failed);
+        }
+
+        // ── DTOs สำหรับหน้า "ดู JE + เอกสาร" (CheckDocument_New) ──
+        public class ReceiptAccountingLine
+        {
+            public string AccountCode { get; set; }
+            public string AccountName { get; set; }
+            public decimal Debit { get; set; }
+            public decimal Credit { get; set; }
+            public string Description { get; set; }
+        }
+        public class ReceiptAccountingJournal
+        {
+            public string EntryNumber { get; set; }
+            public string Date { get; set; }
+            public string Description { get; set; }
+            public string Reference { get; set; }
+            public string Status { get; set; }       // ร่าง/ผ่านรายการ/ยกเลิก
+            public bool IsReversed { get; set; }     // ถูกกลับแล้ว (มี ReversedByEntryId)
+            public bool IsReversal { get; set; }     // เป็นตัวกลับของใบอื่น (มี OriginalEntryId)
+            public decimal TotalDebit { get; set; }
+            public decimal TotalCredit { get; set; }
+            public bool Balanced { get; set; }
+            public string SourceDocumentNumber { get; set; }
+            public List<ReceiptAccountingLine> Lines { get; set; }
+        }
+        public class ReceiptAccountingView
+        {
+            public bool Success { get; set; }
+            public string Message { get; set; }
+            public string ReceiptNumber { get; set; }
+            public int ReservationId { get; set; }
+            public bool HasDocument { get; set; }
+            public string DocumentNumber { get; set; }
+            public string DocumentType { get; set; }
+            public string DocumentStatus { get; set; }
+            public string DocumentDate { get; set; }
+            public decimal SubTotal { get; set; }
+            public decimal VatAmount { get; set; }
+            public decimal TotalAmount { get; set; }
+            public decimal PaidAmount { get; set; }
+            public decimal BalanceDue { get; set; }
+            public string DocumentReference { get; set; }
+            public List<string> SearchedRefs { get; set; }
+            public List<ReceiptAccountingJournal> Journals { get; set; }
+        }
+
+        private static string NexaaccDocTypeLabel(int t)
+        {
+            switch (t)
+            {
+                case NexaaccDocumentType.Quotation: return "ใบเสนอราคา";
+                case NexaaccDocumentType.Invoice: return "ใบแจ้งหนี้";
+                case NexaaccDocumentType.Receipt: return "ใบเสร็จรับเงิน";
+                case NexaaccDocumentType.TaxInvoice: return "ใบกำกับภาษี/ใบเสร็จรับเงิน";
+                case NexaaccDocumentType.DebitNote: return "ใบเพิ่มหนี้";
+                case NexaaccDocumentType.CreditNote: return "ใบลดหนี้";
+                case NexaaccDocumentType.BillingNote: return "ใบวางบิล";
+                case NexaaccDocumentType.ReceiptVoucher: return "ใบสำคัญรับ";
+                case NexaaccDocumentType.PurchaseInvoice: return "ใบแจ้งหนี้ซื้อ";
+                case NexaaccDocumentType.Expense: return "ค่าใช้จ่าย";
+                case NexaaccDocumentType.PaymentVoucher: return "ใบสำคัญจ่าย";
+                case NexaaccDocumentType.CertificateInLieu: return "ใบรับรองแทนใบกำกับภาษี";
+                default: return "ประเภท " + t;
+            }
+        }
+        private static string NexaaccDocStatusLabel(int s)
+        {
+            switch (s)
+            {
+                case 0: return "ร่าง";
+                case NexaaccDocumentStatus.WaitingApproval: return "รออนุมัติ";
+                case NexaaccDocumentStatus.Approved: return "อนุมัติ";
+                case NexaaccDocumentStatus.Sent: return "ส่งแล้ว";
+                case NexaaccDocumentStatus.PartiallyPaid: return "ชำระบางส่วน";
+                case NexaaccDocumentStatus.Paid: return "ชำระแล้ว";
+                case NexaaccDocumentStatus.Voided: return "ยกเลิก";
+                case NexaaccDocumentStatus.Overdue: return "เกินกำหนด";
+                case NexaaccDocumentStatus.Rejected: return "ปฏิเสธ";
+                default: return "สถานะ " + s;
+            }
+        }
+        private static string JournalStatusLabel(int s)
+        {
+            // NextAcc JournalEntryStatus (string) map ผ่าน DocumentStatusConverter:
+            // Draft=0, Posted=1, Voided=6, Reversed=9 (2 = voided ถ้ามาเป็น int token ดิบ)
+            switch (s)
+            {
+                case 0: return "ร่าง";
+                case 1: return "ผ่านรายการ";
+                case 2:
+                case NexaaccDocumentStatus.Voided: return "ยกเลิก";
+                case 9: return "กลับรายการแล้ว";
+                default: return "สถานะ " + s;
+            }
+        }
+
+        /// <summary>🔎 ดึง "ทั้ง JE และเอกสาร" ของใบเสร็จจาก NextAcc มาแสดงคู่กัน (read-only) — ให้ผู้ใช้
+        /// ตรวจว่ารายการบัญชี (Dr/Cr ราย line) ถูกต้องและสัมพันธ์กับเอกสารจริง. รวม JE ทุกใบที่ผูกกับ
+        /// ใบเสร็จนี้ตาม Reference (เลขใบเสร็จ / RES-{id} / เลขเอกสาร NextAcc) + สรุปหัวเอกสาร.</summary>
+        public async Task<ReceiptAccountingView> GetReceiptAccountingViewAsync(string receiptNumber)
+        {
+            var view = new ReceiptAccountingView
+            {
+                ReceiptNumber = receiptNumber,
+                Journals = new List<ReceiptAccountingJournal>(),
+                SearchedRefs = new List<string>()
+            };
+            if (string.IsNullOrWhiteSpace(receiptNumber)) { view.Message = "ไม่ระบุเลขที่เอกสาร"; return view; }
+            if (!_config.IsConfigured) { view.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return view; }
+            if (!_config.CanUseCompanyEndpoints)
+            {
+                view.Message = "ต้องเปิด company endpoints (ตั้ง CompanyId + Nexaacc_Company_Endpoints=1) จึงจะดึง JE/เอกสารจาก NextAcc ได้";
+                return view;
+            }
+
+            try
+            {
+                // 1) หา doc id + reservation ของใบเสร็จ (รองรับกรณีส่ง GUID ของเอกสาร NextAcc ตรง ๆ)
+                Guid docId = Guid.Empty;
+                if (Guid.TryParse(receiptNumber.Trim(), out var directGuid) && directGuid != Guid.Empty)
+                    docId = directGuid;
+                else
+                    docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+
+                int resId = LookupReservationIdByReceipt(receiptNumber);
+                view.ReservationId = resId;
+
+                // 2) หัวเอกสาร (สรุปยอด) — ถ้ามี doc id
+                var searchTerms = new List<string>();
+                if (!string.IsNullOrWhiteSpace(receiptNumber) && !Guid.TryParse(receiptNumber.Trim(), out _))
+                    searchTerms.Add(receiptNumber.Trim());
+                if (resId > 0) searchTerms.Add($"RES-{resId}");
+
+                if (docId != Guid.Empty)
+                {
+                    try
+                    {
+                        var docRes = await _apiClient.GetDocumentAsync(docId);
+                        var d = docRes?.data;
+                        if (d != null)
+                        {
+                            view.HasDocument = true;
+                            view.DocumentNumber = d.DocumentNumber;
+                            view.DocumentType = NexaaccDocTypeLabel(d.DocumentType);
+                            view.DocumentStatus = NexaaccDocStatusLabel(d.Status);
+                            view.DocumentDate = d.DocumentDate.ToString("dd/MM/yyyy");
+                            view.SubTotal = d.SubTotal;
+                            view.VatAmount = d.VatAmount;
+                            view.TotalAmount = d.TotalAmount;
+                            view.PaidAmount = d.PaidAmount;
+                            view.BalanceDue = d.BalanceDue;
+                            view.DocumentReference = d.Reference;
+                            if (!string.IsNullOrWhiteSpace(d.DocumentNumber)) searchTerms.Add(d.DocumentNumber);
+                        }
+                    }
+                    catch (Exception dex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"GetReceiptAccountingView: GetDocument({docId}) ล้มเหลว {dex.Message}", "SYSTEM");
+                    }
+                }
+
+                // 3) รวม JE ทุกใบจากทุก search term (dedup by Id)
+                var seen = new HashSet<Guid>();
+                foreach (string term in searchTerms.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    view.SearchedRefs.Add(term);
+                    ApiResponse<PagedResponse<JournalEntryResponse>> found = null;
+                    try { found = await _apiClient.SearchJournalsAsync(term, 50); }
+                    catch (Exception sex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"GetReceiptAccountingView: SearchJournals('{term}') ล้มเหลว {sex.Message}", "SYSTEM");
+                        continue;
+                    }
+                    var items = found?.data?.Items;
+                    if (items == null) continue;
+                    foreach (var je in items)
+                    {
+                        if (je == null || je.Id == Guid.Empty || seen.Contains(je.Id)) continue;
+                        // เอาเฉพาะ JE ที่ผูกกับใบนี้จริง — Reference ตรง term หรือขึ้นต้นด้วย term+"-"
+                        // (รองรับ JV ตัดมัดจำ/VAT ที่ ref = "{เลขใบเสร็จ}-DEPADJ", "RES-{id}-CHK" ฯลฯ)
+                        // ใช้ "-" กันเลขจองอื่นที่เป็น prefix กัน (RES-148936 ไม่ match RES-1489360)
+                        bool relevant =
+                            (je.Reference != null && searchTerms.Any(t =>
+                                string.Equals(je.Reference, t, StringComparison.OrdinalIgnoreCase)
+                                || je.Reference.StartsWith(t + "-", StringComparison.OrdinalIgnoreCase)))
+                            || (je.SourceDocumentNumber != null && searchTerms.Any(t => string.Equals(je.SourceDocumentNumber, t, StringComparison.OrdinalIgnoreCase)))
+                            || (docId != Guid.Empty && je.SourceDocumentId == docId);
+                        if (!relevant) continue;
+                        seen.Add(je.Id);
+
+                        var row = new ReceiptAccountingJournal
+                        {
+                            EntryNumber = je.EntryNumber,
+                            Date = je.EntryDate.ToString("dd/MM/yyyy"),
+                            Description = je.Description,
+                            Reference = je.Reference,
+                            Status = JournalStatusLabel(je.Status),
+                            IsReversed = je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty,
+                            IsReversal = je.OriginalEntryId != null && je.OriginalEntryId != Guid.Empty,
+                            TotalDebit = je.TotalDebit,
+                            TotalCredit = je.TotalCredit,
+                            Balanced = Math.Abs(je.TotalDebit - je.TotalCredit) < 0.01m,
+                            SourceDocumentNumber = je.SourceDocumentNumber,
+                            Lines = new List<ReceiptAccountingLine>()
+                        };
+                        if (je.Lines != null)
+                            foreach (var ln in je.Lines.OrderBy(l => l.LineOrder))
+                                row.Lines.Add(new ReceiptAccountingLine
+                                {
+                                    AccountCode = ln.AccountCode,
+                                    AccountName = ln.AccountName,
+                                    Debit = ln.DebitAmount,
+                                    Credit = ln.CreditAmount,
+                                    Description = ln.Description
+                                });
+                        view.Journals.Add(row);
+                    }
+                }
+
+                view.Journals = view.Journals
+                    .OrderBy(j => j.IsReversal)           // ตัวจริงก่อน ตัวกลับต่อท้าย
+                    .ThenBy(j => j.EntryNumber)
+                    .ToList();
+
+                view.Success = true;
+                if (!view.HasDocument && view.Journals.Count == 0)
+                    view.Message = "ไม่พบเอกสาร/JE บน NextAcc สำหรับใบนี้ (อาจยังไม่ sync หรือถูกลบไปแล้ว)";
+                return view;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"GetReceiptAccountingView({receiptNumber}) failed: {ex.Message}", "SYSTEM");
+                view.Message = "ดึงข้อมูลไม่สำเร็จ: " + ex.Message;
+                return view;
             }
         }
 

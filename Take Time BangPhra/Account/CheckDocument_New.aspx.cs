@@ -28,6 +28,13 @@ namespace Take_Time_BangPhra.Account
                 if (Session["permission"]?.ToString() == "True" &&
                     (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin"))
                 {
+                    // AJAX: ดึง JE + เอกสารของใบเสร็จจาก NextAcc มาแสดง (read-only) — ตอบ JSON แล้วจบ
+                    if (string.Equals(Request.QueryString["action"], "viewJE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        HandleViewJE(Request.QueryString["doc"]);
+                        return;
+                    }
+
                     if (!IsPostBack)
                     {
                         if (Request.QueryString["deleted"] == "1")
@@ -48,6 +55,7 @@ namespace Take_Time_BangPhra.Account
                     Response.Redirect("/Default");
                 }
             }
+            catch (System.Threading.ThreadAbortException) { throw; }   // Response.End/Redirect (เช่น viewJE JSON) — อย่ากลืน
             catch (Exception ex)
             {
                 loggingService?.LogException(ex, LoggingService.LogCategory.Accounting,
@@ -71,6 +79,38 @@ namespace Take_Time_BangPhra.Account
             ddlYear.Items.Clear();
             ddlYear.Items.Add(new ListItem(thisYear, thisYear));
             ddlYear.Items.Add(new ListItem(lastYear, lastYear));
+        }
+
+        /// <summary>AJAX handler: ดึง "ทั้ง JE และเอกสาร" ของใบเสร็จจาก NextAcc → ตอบ JSON ให้ modal แสดง</summary>
+        private void HandleViewJE(string doc)
+        {
+            Response.Clear();
+            Response.ContentType = "application/json; charset=utf-8";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(doc))
+                {
+                    Response.Write("{\"success\":false,\"message\":\"ไม่ระบุเลขที่เอกสาร\"}");
+                }
+                else
+                {
+                    Server.ScriptTimeout = 120;
+                    var svc = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                    Take_Time_BangPhra.Integration.AccountingSyncService.ReceiptAccountingView view = null;
+                    var task = System.Threading.Tasks.Task.Run(() => svc.GetReceiptAccountingViewAsync(doc.Trim()));
+                    if (task.Wait(60000)) view = task.Result;
+                    else view = new Take_Time_BangPhra.Integration.AccountingSyncService.ReceiptAccountingView
+                    { Success = false, Message = "NextAcc ตอบช้าเกิน 60 วินาที — ลองใหม่อีกครั้ง" };
+
+                    Response.Write(new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(view));
+                }
+            }
+            catch (Exception ex)
+            {
+                Response.Write("{\"success\":false,\"message\":" +
+                    new System.Web.Script.Serialization.JavaScriptSerializer().Serialize("ผิดพลาด: " + ex.Message) + "}");
+            }
+            Response.End();
         }
 
         protected void btnSearch_Click(object sender, EventArgs e)

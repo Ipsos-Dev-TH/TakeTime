@@ -487,7 +487,7 @@
                         <input type="number" id="resetResId" placeholder="Reservation ID (เช่น 148936)" min="1" style="width:220px;" />
                         <button type="button" class="btn-danger" onclick="resetReservation()"><i class="fas fa-eraser"></i> รีเซ็ตบัญชีการจอง</button>
                     </div>
-                    <div class="help-text" style="margin-top:6px;">กลับ (reverse) <b>ทุก JE ที่ TakeTime post ให้การจองนี้</b> (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn ทุกแพทเทิร์น RES-{id}* และเลขใบเสร็จทุกใบ) → 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0. <b>idempotent</b> (กดซ้ำไม่เบิ้ล) + reset marker → re-sync ใหม่ได้สะอาด. ⚠ เอกสาร (TIV/REC) ที่เหลือลบแยกได้ (นี่จัดการ "GL" เป็นหลัก)</div>
+                    <div class="help-text" style="margin-top:6px;">กลับ (reverse) <b>ทุก JE ที่ TakeTime post ให้การจองนี้</b> (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn ทุกแพทเทิร์น RES-{id}* และเลขใบเสร็จทุกใบ) → 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0 <b>พร้อม void เอกสาร (TIV/REC) ทุกใบของการจองบน NextAcc</b> = กดทีเดียวจบทั้ง GL และเอกสาร. <b>idempotent</b> (กดซ้ำไม่เบิ้ล — ข้ามใบที่ voided แล้ว) + reset marker → re-sync ใหม่ได้สะอาด</div>
                     <div class="test-result" id="resetResResult"></div>
                 </div>
             </div>
@@ -1125,7 +1125,7 @@
                 el.innerHTML = '<i class="fas fa-times-circle"></i> กรอกรหัสการจอง (Reservation ID) ก่อน';
                 return;
             }
-            if (!confirm('🧹 รีเซ็ตบัญชีการจอง #' + resId + '?\n\nจะกลับ (reverse) ทุก JE ที่ TakeTime post ให้การจองนี้ (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn)\n→ 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0\n\nⓘ idempotent (กดซ้ำไม่เบิ้ล) + reset marker เพื่อ re-sync ใหม่ได้สะอาด\nⓘ เอกสาร (TIV/REC) ที่เหลือลบแยกได้ (นี่จัดการ GL เป็นหลัก)')) return;
+            if (!confirm('🧹 รีเซ็ตบัญชีการจอง #' + resId + '?\n\nจะกลับ (reverse) ทุก JE ที่ TakeTime post ให้การจองนี้ (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn)\n→ 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0\nพร้อม void เอกสาร (TIV/REC) ทุกใบของการจองบน NextAcc\n\nⓘ idempotent (กดซ้ำไม่เบิ้ล — ข้ามใบที่ voided แล้ว) + reset marker เพื่อ re-sync ใหม่ได้สะอาด')) return;
 
             el.className = 'test-result loading';
             el.textContent = 'กำลังรีเซ็ตบัญชีการจอง #' + resId + '...';
