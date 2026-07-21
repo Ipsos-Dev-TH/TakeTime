@@ -136,6 +136,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "cleanupDepositDebris":
                     result = CleanupDepositDebris();
                     break;
+                case "resetReservation":
+                    result = ResetReservationAccounting();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -468,6 +471,29 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Cleanup Error: " + ex.Message } };
+            }
+        }
+
+        // 🧹 รีเซ็ตบัญชี "การจองเดียว" ทั้งหมดบน NextAcc (กดทีเดียวจบ) — churn หนักเกิน cleanup ปกติ
+        private Dictionary<string, object> ResetReservationAccounting()
+        {
+            try
+            {
+                int resId;
+                if (!int.TryParse((Request.QueryString["resId"] ?? "").Trim(), out resId) || resId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "กรอกรหัสการจอง (Reservation ID) ให้ถูกต้อง" } };
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                var (reversed, message) = sync.ResetReservationAccounting(resId);
+                return new Dictionary<string, object>
+                {
+                    { "success", reversed >= 0 },
+                    { "message", message }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Reset Error: " + ex.Message } };
             }
         }
 

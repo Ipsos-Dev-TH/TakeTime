@@ -479,6 +479,17 @@
                 </div>
                 <div class="help-text" style="margin-top:6px;">ตรวจใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว: ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะ <b>ลบ record ในระบบนี้ถาวร</b> — ลบเฉพาะ 404 ชัดเจน, error ชั่วคราวจะข้าม</div>
                 <div class="test-result" id="syncTestResult"></div>
+
+                <!-- 🧹 รีเซ็ตบัญชีของ "การจองเดียว" (churn หนัก กดทีเดียวจบ) -->
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed #ddd;">
+                    <label style="font-weight:600;"><i class="fas fa-eraser"></i> รีเซ็ตบัญชีการจอง (กดทีเดียว กลับ GL ทั้งหมดของการจอง)</label>
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap;">
+                        <input type="number" id="resetResId" placeholder="Reservation ID (เช่น 148936)" min="1" style="width:220px;" />
+                        <button type="button" class="btn-danger" onclick="resetReservation()"><i class="fas fa-eraser"></i> รีเซ็ตบัญชีการจอง</button>
+                    </div>
+                    <div class="help-text" style="margin-top:6px;">กลับ (reverse) <b>ทุก JE ที่ TakeTime post ให้การจองนี้</b> (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn ทุกแพทเทิร์น RES-{id}* และเลขใบเสร็จทุกใบ) → 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0. <b>idempotent</b> (กดซ้ำไม่เบิ้ล) + reset marker → re-sync ใหม่ได้สะอาด. ⚠ เอกสาร (TIV/REC) ที่เหลือลบแยกได้ (นี่จัดการ "GL" เป็นหลัก)</div>
+                    <div class="test-result" id="resetResResult"></div>
+                </div>
             </div>
         </div>
 
@@ -1103,6 +1114,35 @@
         function cleanupDepositDebris() {
             if (!confirm('กลับ (reverse) JV มัดจำที่ค้างเป็นซาก GL จากการ resync ซ้ำ?\n\nกลับเฉพาะ JV ที่ TakeTime post เอง (215xx/217xx/21913 ที่ไม่ผูกเอกสาร).\nⓘ ทำหลัง NextAcc deploy + หยุด resync แล้วเท่านั้น\nⓘ ยอดที่เหลือหลังกลับต้องให้นักบัญชีตรวจ/ยืนยัน (churn แก้อัตโนมัติ 100% ไม่ได้)')) return;
             getAction('cleanupDepositDebris', 'syncTestResult');
+        }
+
+        function resetReservation() {
+            var input = document.getElementById('resetResId');
+            var resId = (input.value || '').trim();
+            var el = document.getElementById('resetResResult');
+            if (!resId || parseInt(resId, 10) <= 0) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรอกรหัสการจอง (Reservation ID) ก่อน';
+                return;
+            }
+            if (!confirm('🧹 รีเซ็ตบัญชีการจอง #' + resId + '?\n\nจะกลับ (reverse) ทุก JE ที่ TakeTime post ให้การจองนี้ (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn)\n→ 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0\n\nⓘ idempotent (กดซ้ำไม่เบิ้ล) + reset marker เพื่อ re-sync ใหม่ได้สะอาด\nⓘ เอกสาร (TIV/REC) ที่เหลือลบแยกได้ (นี่จัดการ GL เป็นหลัก)')) return;
+
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังรีเซ็ตบัญชีการจอง #' + resId + '...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=resetReservation&resId=' + encodeURIComponent(resId) + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
         }
 
         // ── Deposit Lifecycle ──

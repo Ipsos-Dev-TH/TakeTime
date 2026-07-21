@@ -8826,6 +8826,105 @@ namespace Take_Time_BangPhra.Integration
                 || sourceStatus.IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        /// <summary>กลับ "ทุก JE" ที่มี Reference ตรง (ตัวจริง ไม่ใช่ reversal, ยังไม่ถูกกลับ) — churn อาจมี
+        /// หลาย JE ref เดียวกัน. idempotent (ReversedByEntryId). คืนจำนวนที่กลับใหม่รอบนี้.</summary>
+        private async Task<int> ReverseAllJournalsByReferenceAsync(string reference, string description)
+        {
+            if (string.IsNullOrEmpty(reference)) return 0;
+            int n = 0;
+            try
+            {
+                var found = await _apiClient.SearchJournalsAsync(reference, 50);
+                var items = found?.data?.Items;
+                if (items == null) return 0;
+                foreach (var je in items)
+                {
+                    if (je == null || !string.Equals(je.Reference, reference, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (IsVoidedStatus(je.Status) || je.OriginalEntryId != null) continue;   // ตัวจริงเท่านั้น
+                    if (je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty) continue;   // กลับแล้ว
+                    try
+                    {
+                        var rev = await _apiClient.ReverseJournalAsync(je.Id, new ReverseJournalEntryRequest { Description = description });
+                        if (rev?.success == true) n++;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return n;
+        }
+
+        /// <summary>🧹 รีเซ็ตบัญชีของ "การจองเดียว" ทั้งหมดบน NextAcc (กดทีเดียวจบ) — churn หนัก.
+        /// กลับ (reverse) ทุก JE ที่ TakeTime post ให้การจองนี้ (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn) ตาม
+        /// Reference ทุกแพทเทิร์น (RES-{id}*, {เลขใบเสร็จ}*) → 21510/21913/ลูกหนี้ ของการจองกลับเป็น 0.
+        /// idempotent (native ReverseJournal ผ่าน ReversedByEntryId — กดซ้ำไม่เบิ้ล) + reset marker เพื่อ
+        /// re-sync สะอาดได้. ⚠ เอกสาร (TIV/REC) ที่เหลือ ลบแยกได้ (นี่จัดการ "GL" เป็นหลักตามที่ขอ).</summary>
+        public (int reversed, string message) ResetReservationAccounting(int reservationId)
+        {
+            if (reservationId <= 0) return (-1, "รหัสการจองไม่ถูกต้อง");
+            if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc");
+            try
+            {
+                var refs = new List<string>
+                {
+                    $"RES-{reservationId}", $"RES-{reservationId}-DEP", $"RES-{reservationId}-PAY",
+                    $"RES-{reservationId}-CHK", $"RES-{reservationId}-DEPADJ", $"RES-{reservationId}-DEPVAT",
+                    $"RES-{reservationId}-DEPREV", $"RES-{reservationId}-FORFEIT", $"RES-{reservationId}-REF"
+                };
+                // เลขใบเสร็จทุกใบของการจอง (มัดจำ + เช็คเอาท์ ทุกสถานะ) → ref ของ JV ตัดมัดจำ/VAT ต่อใบ
+                var rc = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT ID FROM Account_Receipt WHERE Reservation_ID = @rid",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (rc != null)
+                    foreach (System.Data.DataRow r in rc.Rows)
+                    {
+                        string rn = r["ID"]?.ToString();
+                        if (string.IsNullOrEmpty(rn)) continue;
+                        refs.Add(rn);
+                        refs.Add($"{rn}-DEPADJ"); refs.Add($"{rn}-CSDEPADJ"); refs.Add($"{rn}-CSDEPADJ2");
+                        refs.Add($"{rn}-DEPVAT"); refs.Add($"{rn}-DEPVATFIX");
+                    }
+
+                int reversed = 0;
+                string desc = $"รีเซ็ตบัญชีการจอง #{reservationId} (churn cleanup)";
+                foreach (string rf in refs.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        reversed += System.Threading.Tasks.Task.Run(() =>
+                            ReverseAllJournalsByReferenceAsync(rf, desc)).GetAwaiter().GetResult();
+                    }
+                    catch (Exception rex)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ResetReservationAccounting: ref={rf} ล้มเหลว {rex.Message}", "SYSTEM");
+                    }
+                }
+
+                // reset marker → re-sync สะอาดได้ (settle/drives เริ่มใหม่)
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Account_Receipt SET Nexaacc_Receipt_Payment_Id = NULL WHERE Reservation_ID = @rid",
+                        new Dictionary<string, object> { { "@rid", reservationId } });
+                }
+                catch { }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ResetReservationAccounting #{reservationId}: กลับ {reversed} JE, reset marker แล้ว", "SYSTEM");
+                return (reversed,
+                    $"รีเซ็ตบัญชีการจอง #{reservationId} — กลับ {reversed} รายการ GL (มัดจำ/ใบกำกับ/ตัดมัดจำ/churn). " +
+                    "✅ ตรวจ 21510/21913/ลูกหนี้ บน NextAcc → ควรเป็น 0. ยังไม่ 0 = กดซ้ำได้ (ไม่เบิ้ล) หรือมีเอกสาร/payment ที่ผูกเอกสารต้องลบเพิ่ม. " +
+                    "reset marker แล้ว → re-sync ได้สะอาด (หลัง isCashSale deploy)");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ResetReservationAccounting #{reservationId} failed: {ex.Message}", "SYSTEM");
+                return (-1, "รีเซ็ตไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
         /// <summary>กลับ JV ตาม EntryNumber (native ReverseJournalAsync, idempotent). true = กลับแล้ว/สำเร็จ.</summary>
         private async Task<bool> TryReverseJournalByEntryNumberAsync(string entryNumber)
         {
