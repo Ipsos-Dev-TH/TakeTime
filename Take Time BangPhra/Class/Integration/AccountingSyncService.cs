@@ -1771,6 +1771,45 @@ namespace Take_Time_BangPhra.Integration
             return Guid.Empty;
         }
 
+        /// <summary>เอกสาร GUID นี้ถูก "ใบเสร็จอื่น" (คนละ receiptNumber) อ้างเป็น Nexaacc_Response_Id ด้วยไหม
+        /// (COMPLETED). true = เลขเอกสารชนจากบั๊กก่อน fix (หลายใบของการจองเดียวยุบเป็นเอกสารเดียว) →
+        /// ไม่ควรเปิด PDF เอกสารนี้ให้ใบที่ขอ (เป็นของอีกใบ). ตรวจจากคิวโดยไม่ต้องยิง NextAcc.</summary>
+        private bool IsDocGuidClaimedByOtherReceipt(Guid docId, string receiptNumber)
+        {
+            if (docId == Guid.Empty || string.IsNullOrEmpty(receiptNumber)) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT Payload FROM Accounting_Sync_Queue
+                      WHERE Status = 'COMPLETED'
+                        AND Nexaacc_Response_Id LIKE @g
+                        AND (Action_Type LIKE 'CREATE_RECEIPT%' OR Action_Type LIKE 'CREATE_DEPOSIT%' OR Action_Type LIKE 'CREATE_PAYMENT%')",
+                    new Dictionary<string, object> { { "@g", "%" + docId.ToString() + "%" } });
+                if (dt == null) return false;
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string payload = r["Payload"]?.ToString() ?? "";
+                    // ดึง receiptNumber จาก payload (string match ทน — เหมือน LoadSyncStatusCache)
+                    const string key = "\"receiptNumber\":\"";
+                    int i = payload.IndexOf(key, StringComparison.Ordinal);
+                    if (i < 0) continue;
+                    i += key.Length;
+                    int j = payload.IndexOf('"', i);
+                    if (j <= i) continue;
+                    string rn = payload.Substring(i, j - i);
+                    if (!string.IsNullOrEmpty(rn)
+                        && !string.Equals(rn.Trim(), receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+                        return true;   // เอกสารเดียวกันแต่คนละใบ = ชน
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"IsDocGuidClaimedByOtherReceipt failed receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+            }
+            return false;
+        }
+
         private int LookupReservationIdByReceipt(string receiptNumber)
         {
             try
@@ -8718,7 +8757,7 @@ namespace Take_Time_BangPhra.Integration
                             // ใบขายสด: resync แก้แค่เนื้อใบ — ตรวจ/ซ่อมสถานะ JE ต่อ (เคสจริง: ใบเดิมสร้างตอน
                             // NextAcc ยังไม่รองรับ isCashSale → ลูกหนี้ค้าง + JV มัดจำผิดฝั่ง). helper จะ
                             // undo JV หลง + settle ปิดลูกหนี้ให้ (หรือถ้า NextAcc อัปเกรดแล้ว = โพสต์ JV ที่ขาด)
-                            if (invoice.IsCashSale && resp.data != null && resp.data.Id != Guid.Empty)
+                            if (invoice.IsCashSale == true && resp.data != null && resp.data.Id != Guid.Empty)
                             {
                                 try
                                 {
@@ -10385,26 +10424,18 @@ namespace Take_Time_BangPhra.Integration
             // ── IDENTITY GUARD: กันเปิด "เอกสารของใบอื่น" (คนละลูกค้า/ยอด) ──
             // เหตุ (บั๊กจริง res 149094): ใบหลายใบของการจองเดียวเคยชนกัน (shared RES-{id} key ก่อน fix
             // 2552c85) → คิวเก็บ GUID ไขว้กัน → ดู PDF ใบ REC260716004 เด้งไปเอกสาร REC-20260716-0001 ของอีกใบ.
-            // ตรวจ ExternalRef ของเอกสารจริงบน NextAcc: ถ้ามีค่าและ "ไม่ตรง" receiptNumber = เอกสารนี้เป็น
-            // ของใบอื่น (ชน) → ไม่เสิร์ฟ (ตก local ของใบนี้เอง กันแสดงเอกสารภาษีผิดคน). lenient: เอกสารเก่า
-            // ที่ไม่มี ExternalRef (null/ว่าง) ไม่บล็อก (ไม่ regress). ทำก่อน cache เพราะ cache ก็ผูก GUID ที่ชน.
-            try
+            // ตรวจจากคิว (ไม่ยิง NextAcc): ถ้า GUID นี้ถูก "ใบอื่น" อ้างเป็นเอกสารด้วย = ชน → ไม่เสิร์ฟ
+            // (กันแสดงเอกสารภาษีผิดคน) แนะให้กด Retry. ทำก่อน cache เพราะ cache ก็ผูก GUID ที่ชน.
+            if (IsDocGuidClaimedByOtherReceipt(docId, receiptNumber))
             {
-                var idChk = await _apiClient.GetDocumentAsync(docId);
-                string docExtRef = idChk?.data?.ExternalRef;
-                if (!string.IsNullOrWhiteSpace(docExtRef)
-                    && !string.Equals(docExtRef.Trim(), receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"⚠ DownloadReceiptPdf: receipt={receiptNumber} → เอกสาร GUID {docId.ToString().Substring(0, 8)} " +
-                        $"มี ExternalRef='{docExtRef}' (คนละใบ — เลขเอกสารชนจากบั๊กก่อน fix) → ไม่เสิร์ฟ กันแสดงเอกสารผิดคน. " +
-                        "แก้: กด Retry ใบนี้ให้ออกเอกสารของตัวเอง (unique key ต่อใบแล้ว)", "SYSTEM");
-                    result.Message = "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (เลขเอกสารซ้ำจากบั๊กเดิม) — กด Retry เพื่อออกเอกสารของใบนี้เอง แล้วดู PDF ใหม่";
-                    result.MismatchedIdentity = true;
-                    return result;
-                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"⚠ DownloadReceiptPdf: receipt={receiptNumber} → เอกสาร GUID {docId.ToString().Substring(0, 8)} " +
+                    "ถูกใบอื่นอ้างด้วย (เลขเอกสารชนจากบั๊กก่อน fix) → ไม่เสิร์ฟ กันแสดงเอกสารผิดคน. " +
+                    "แก้: กด Retry ใบนี้ให้ออกเอกสารของตัวเอง (unique key ต่อใบแล้ว)", "SYSTEM");
+                result.Message = "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (เลขเอกสารซ้ำจากบั๊กเดิม) — กด Retry เพื่อออกเอกสารของใบนี้เอง แล้วดู PDF ใหม่";
+                result.MismatchedIdentity = true;
+                return result;
             }
-            catch { /* อ่านตรวจไม่ได้ → ไม่บล็อก (ดำเนินต่อ ปกติ) */ }
 
             string safeDoc = MakeSafeFileName(receiptNumber);
             string suffix = isCancelled ? "_Cancel" : "";
