@@ -129,6 +129,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "reconcileDeleted":
                     result = ReconcileDeletedDocuments();
                     break;
+                case "cleanupOrphanReceipts":
+                    result = CleanupOrphanReceipts();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -421,6 +424,26 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Process Error: " + ex.Message } };
+            }
+        }
+
+        // เก็บกวาดใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ orphan บน NextAcc
+        // (parent ใบกำกับถูกลบ/void) — soft-delete, ไม่กระทบ GL
+        private Dictionary<string, object> CleanupOrphanReceipts()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                var (deleted, message) = sync.SweepOrphanSettlementReceipts();
+                return new Dictionary<string, object>
+                {
+                    { "success", deleted >= 0 },
+                    { "message", message }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Cleanup Error: " + ex.Message } };
             }
         }
 

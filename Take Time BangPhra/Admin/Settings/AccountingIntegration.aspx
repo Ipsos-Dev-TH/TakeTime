@@ -461,6 +461,7 @@
                     <button type="button" class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
                     <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
                     <button type="button" class="btn-danger" onclick="reconcileDeleted()"><i class="fas fa-trash-alt"></i> ตรวจ &amp; ลบใบที่หายจาก NextAcc</button>
+                    <button type="button" class="btn-warning" onclick="cleanupOrphanReceipts()"><i class="fas fa-broom"></i> เก็บกวาดใบรับเงิน orphan</button>
                 </div>
                 <div class="help-text" style="margin-top:6px;">ตรวจใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว: ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะ <b>ลบ record ในระบบนี้ถาวร</b> — ลบเฉพาะ 404 ชัดเจน, error ชั่วคราวจะข้าม</div>
                 <div class="test-result" id="syncTestResult"></div>
@@ -1076,6 +1077,11 @@
         function reconcileDeleted() {
             if (!confirm('⚠️ ยืนยันตรวจสอบ & ลบเอกสารที่หายจาก NextAcc?\n\nใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะถูก "ลบถาวร" ออกจากระบบนี้\n(ลบเฉพาะ 404 ชัดเจน — error ชั่วคราวจะข้าม)')) return;
             getAction('reconcileDeleted', 'syncTestResult');
+        }
+
+        function cleanupOrphanReceipts() {
+            if (!confirm('เก็บกวาดใบเสร็จรับเงิน (หลักฐานรับเงิน) ที่ orphan บน NextAcc?\n\nลบเฉพาะใบที่ "ใบกำกับต้นทางถูกลบ/ยกเลิกไปแล้ว" (soft-delete บน NextAcc ไม่กระทบ GL).\nใบที่ยังมีใบกำกับใช้งานอยู่จะไม่ถูกแตะ (NextAcc กันให้).')) return;
+            getAction('cleanupOrphanReceipts', 'syncTestResult');
         }
 
         // ── Deposit Lifecycle ──
