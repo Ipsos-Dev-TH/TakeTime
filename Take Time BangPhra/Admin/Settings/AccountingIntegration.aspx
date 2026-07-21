@@ -366,6 +366,19 @@
                         ปิดไว้ = ใช้ Option B (default, TakeTime โพสต์ JV เอง ไม่พึ่ง NextAcc).
                     </div>
                 </div>
+                <div class="config-item" style="background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleUseReceipt" />
+                        🚑 ใช้ "ใบเสร็จรับเงิน (Receipt)" แทนใบกำกับ — <b>Dr เงินสดตรง ไม่มีลูกหนี้ (ไม่ต้องรอ NextAcc)</b>
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #f57c00; padding-left:8px;">
+                        เช็คเอาท์ลูกค้ามีเลขภาษี → ออกเป็น <b>Receipt (type 3)</b> ซึ่ง NextAcc production ปัจจุบัน AutoPost เป็น
+                        <b>Dr เงินสด / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้การค้า ไม่มีใบเสร็จ settlement งอก</b>
+                        + หัวเอกสาร "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำในใบ (Dr 21510/21913). <b>ทำงานได้เลย ไม่ต้องรอ isCashSale deploy</b>.
+                        <br /><strong style="color:#c0392b;">⚠ ข้อแลก: Receipt(3) ไม่ออก e-Tax XML</strong> (ใบกระดาษ/PDF ใช้ได้ปกติ ลูกค้าเคลม VAT ด้วยใบนี้ได้).
+                        <br />เปิด <b>ชั่วคราว</b> ระหว่างรอ NextAcc deploy isCashSale → deploy เสร็จให้ <b>ปิด flag นี้</b> กลับไปใช้ใบกำกับ+e-Tax.
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -947,6 +960,7 @@
                 document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
                 document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
                 document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
+                document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
                 syncCashSaleToggles();
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
@@ -1026,6 +1040,7 @@
                 taxReceiptSingleDoc: document.getElementById('cfgTaxReceiptSingleDoc').checked,
                 cashSaleDeposit: document.getElementById('cfgCashSaleDeposit').checked,
                 cashSaleDepositNativeA: document.getElementById('cfgCashSaleDepositNativeA').checked,
+                cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

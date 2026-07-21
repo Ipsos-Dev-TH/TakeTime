@@ -175,6 +175,18 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_CashSale_Deposit_NativeA", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// true = เช็คเอาท์ลูกค้ามีเลขภาษี ให้ออกเป็น **Receipt (type 3)** แทน TaxInvoice+isCashSale.
+        /// NextAcc AutoPost Receipt branch = **Dr เงินสดตรง / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้**
+        /// (ทำงานบน production ปัจจุบันเลย ไม่ต้องรอ isCashSale deploy) + หัวเอกสาร "ใบกำกับภาษี/ใบเสร็จรับเงิน"
+        /// + มัดจำหักในใบ (Dr 21510/21913) ผ่าน SettleReceiptDocAsync.
+        /// ⚠ ข้อแลก: Receipt(3) **ไม่ออก e-Tax XML** (ใบกระดาษ/PDF ใช้ได้ปกติ). เปิดชั่วคราวระหว่างรอ
+        /// NextAcc deploy isCashSale — deploy แล้วปิด flag นี้กลับไปใช้ TaxInvoice+e-Tax.
+        /// false (default) = ใช้ TaxInvoice/isCashSale (ได้ e-Tax แต่ต้องรอ NextAcc รองรับ ไม่งั้น fallback AR).
+        /// </summary>
+        public bool IsCashSaleUseReceipt => GetConfig("Nexaacc_CashSale_UseReceipt", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_CashSale_UseReceipt", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
         /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
         /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:

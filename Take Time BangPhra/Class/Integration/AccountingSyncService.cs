@@ -4536,7 +4536,8 @@ namespace Take_Time_BangPhra.Integration
                     "SYSTEM");
 
                 if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null
-                    && HasFullBuyerTaxData(customerContact))
+                    && HasFullBuyerTaxData(customerContact)
+                    && !_config.IsCashSaleUseReceipt)   // toggle: ON → ตกไปเส้น Receipt(3) ด้านล่าง (Dr เงินสด ไม่มีลูกหนี้ ไม่ต้องรอ isCashSale, ไม่ได้ e-Tax)
                 {
                     // โหมด §78/1 เคร่ง (RECEIPT + ไม่ defer + มีการหักมัดจำ): มัดจำออกใบกำกับ+รับรู้ VAT
                     // ไปแล้วตอนรับเงิน → เช็คเอาท์ต้องออกใบกำกับ "เฉพาะยอดคงเหลือ" (ไม่ใช่เต็มยอด)
