@@ -805,8 +805,15 @@ namespace Take_Time_BangPhra.Account
                     ShowError($"ไม่พบเอกสารในช่วง {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}{diagInfo}\n\nกรุณาตรวจสอบ:\n1. เลือกช่วงวันที่ที่มีเอกสาร\n2. วันที่ที่เลือกถูกต้องหรือไม่\n3. ตรวจสอบ Debug Output สำหรับรายละเอียดเพิ่มเติม");
                 }
 
-                // Bind to GridView — เรียงตามเลขที่ที่แสดง (DisplayDoc) ให้เอกสาร NextAcc/local อ่านต่อเนื่อง
-                if (dt != null && dt.Columns.Contains("DisplayDoc"))
+                // Bind to GridView — เรียงตาม "วันที่เอกสาร" (Created_Date) เป็นหลัก, tie-break ด้วยเลขที่
+                // (DisplayDoc) ให้เอกสารวันเดียวกันเรียงตามเลขต่อเนื่อง
+                if (dt != null && dt.Columns.Contains("Created_Date"))
+                {
+                    string tie = dt.Columns.Contains("DisplayDoc") ? ", DisplayDoc ASC" : "";
+                    dt.DefaultView.Sort = "Created_Date ASC" + tie;
+                    gvDetails.DataSource = dt.DefaultView;
+                }
+                else if (dt != null && dt.Columns.Contains("DisplayDoc"))
                 {
                     dt.DefaultView.Sort = "DisplayDoc ASC";
                     gvDetails.DataSource = dt.DefaultView;
