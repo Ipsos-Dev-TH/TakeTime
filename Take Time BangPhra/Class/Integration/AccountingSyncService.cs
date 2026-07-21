@@ -9666,6 +9666,21 @@ namespace Take_Time_BangPhra.Integration
             catch { return false; }
         }
 
+        /// <summary>ข้อความ guard จาก NextAcc บ่งชี้ว่า "งวด/เดือนภาษีปิดแล้ว" หรือไม่ — ตามหลัก NextAcc
+        /// เอกสารที่งวดยังเปิดยัง "ลบ/แก้ได้" (ต่อให้ชำระแล้ว/มี CN-DN); ปิดงวด/ยื่นภาษีแล้วเท่านั้นที่บล็อกจริง.
+        /// ใช้ตัดสินว่า resync จะยอมแพ้ (งวดปิด) หรือ fallback void→สร้างใหม่ (งวดเปิด).</summary>
+        private static bool IsPeriodLockedGuardMessage(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return false;
+            string m = msg.ToLowerInvariant();
+            return m.Contains("ปิดงบ") || m.Contains("งวดปิด") || m.Contains("ปิดงวด")
+                || m.Contains("งวดบัญชีปิด") || m.Contains("งวดบัญชีถูกปิด") || m.Contains("period is closed")
+                || m.Contains("period closed") || m.Contains("closed period") || m.Contains("accounting period")
+                || m.Contains("fiscalperiod") || m.Contains("fiscal period") || m.Contains("period locked")
+                || m.Contains("ภ.พ.30") || m.Contains("ภพ.30") || m.Contains("ยื่นภาษี") || m.Contains("ยื่นแบบ")
+                || m.Contains("vat return") || m.Contains("tax filed") || m.Contains("already filed");
+        }
+
         public long RepostReceiptWithCurrentLogic(long queueId)
         {
             LastRepostMessage = null;
@@ -9855,24 +9870,30 @@ namespace Take_Time_BangPhra.Integration
                                 $"RepostReceipt: resyncUpdate สำเร็จ receipt={receiptNumber} → {msg}", "SYSTEM");
                             return 0;
                         }
-                        if (resp != null && !resp.success)
+                        // resyncUpdate (แก้ in-place คงเลข) ถูกปฏิเสธ — แยกตามหลัก NextAcc:
+                        //   • งวด/เดือนภาษี "ปิดแล้ว" → แก้/ลบไม่ได้จริง ๆ → หยุด (return -1) คงเลขเดิม รายงานเหตุผล
+                        //   • เหตุผลอื่น (ชำระแล้ว/มี CN-DN) แต่งวดยัง "เปิด" → NextAcc ยังลบได้ → fallback void→สร้างใหม่
+                        //     (เลขเปลี่ยน) แทนการยอมแพ้ — void endpoint จะเป็นตัวตัดสินสุดท้าย (ปฏิเสธถ้างวดปิด)
+                        if ((resp != null && !resp.success) || guardMsg != null)
                         {
-                            // ติด guard — NextAcc บอกทางแก้ในข้อความ (เช่น ชำระแล้ว → ต้อง void/CN)
-                            LastRepostMessage = "NextAcc ปฏิเสธการแก้: " + (resp.message ?? "ไม่ทราบสาเหตุ");
+                            string gm = guardMsg ?? resp?.message ?? "ไม่ทราบสาเหตุ";
+                            if (IsPeriodLockedGuardMessage(gm))
+                            {
+                                LastRepostMessage = "NextAcc ปฏิเสธ (งวด/เดือนภาษีปิดแล้ว — แก้/ลบเอกสารไม่ได้ตามหลักบัญชี): " + gm;
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"RepostReceipt: resyncUpdate ถูกปฏิเสธ (งวดปิด) receipt={receiptNumber}: {gm}", "SYSTEM");
+                                return -1;
+                            }
+                            // งวดยังเปิด → ยังลบได้ → ตกไป fallback void→สร้างใหม่ (ไม่ return)
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"RepostReceipt: resyncUpdate ถูก guard ปฏิเสธ receipt={receiptNumber}: {resp.message}", "SYSTEM");
-                            return -1;
+                                $"RepostReceipt: resyncUpdate แก้ทับไม่ได้ (งวดเปิด) receipt={receiptNumber}: {gm} → fallback void→สร้างใหม่", "SYSTEM");
                         }
-                        if (guardMsg != null)
+                        else
                         {
-                            LastRepostMessage = "NextAcc ปฏิเสธการแก้: " + guardMsg;
+                            // success + "Already synced" = NextAcc รุ่นเก่ายังไม่รู้จัก resyncUpdate → fallback void→สร้างใหม่
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"RepostReceipt: resyncUpdate error receipt={receiptNumber}: {guardMsg}", "SYSTEM");
-                            return -1;
+                                $"RepostReceipt: NextAcc ตอบ '{msg}' (รุ่นเก่า/ไม่เข้าเงื่อนไข resync) receipt={receiptNumber} → fallback void→สร้างใหม่", "SYSTEM");
                         }
-                        // success + "Already synced" = NextAcc รุ่นเก่ายังไม่รู้จัก resyncUpdate → fallback void→สร้างใหม่
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"RepostReceipt: NextAcc ตอบ '{msg}' (รุ่นเก่า/ไม่เข้าเงื่อนไข resync) receipt={receiptNumber} → fallback void→สร้างใหม่", "SYSTEM");
                     }
                 }
                 catch (Exception rex)
