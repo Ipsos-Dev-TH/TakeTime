@@ -8703,6 +8703,58 @@ namespace Take_Time_BangPhra.Integration
             string docType = row.Table.Columns.Contains("Nexaacc_Document_Type")
                 ? row["Nexaacc_Document_Type"]?.ToString() ?? "" : "";
 
+            // ── ทางที่ -1: เอกสารเดิม "ถูกลบ/ยกเลิกบน NextAcc" (ผู้ใช้ลบเองเพื่อ Resync สร้างใหม่) ──
+            // ไม่มีเอกสารให้ update in-place อีก → ข้าม resyncUpdate (จะไปแก้ผี/สร้างซ้ำผิด ๆ) ไปเส้น
+            // "สร้างใหม่สะอาด": reset marker + เคลียร์คิว/PDF cache + CREATE ใหม่ (ยอดถูกตาม fix gross-up,
+            // มัดจำอ้างใบเดิมผ่าน depositAppliedRef ไม่ recognize ใหม่). ตรวจเฉพาะ 404 จริง (เอกสารหาย)
+            // หรือสถานะ Voided — ไม่ใช่ error ชั่วคราว (กัน recreate ซ้ำตอน NextAcc ล่ม).
+            try
+            {
+                Guid oldGuid = Guid.Empty;
+                if (!Guid.TryParse(row["Nexaacc_Response_Id"]?.ToString(), out oldGuid))
+                {
+                    string mk0 = LookupReceiptPaymentMarker(receiptNumber);
+                    if (!string.IsNullOrEmpty(mk0))
+                    {
+                        string mkClean = mk0.StartsWith("CSNATIVE:") ? mk0.Substring("CSNATIVE:".Length) : mk0;
+                        Guid.TryParse(mkClean, out oldGuid);
+                    }
+                }
+                if (oldGuid != Guid.Empty)
+                {
+                    bool gone = false;
+                    try
+                    {
+                        var chk = System.Threading.Tasks.Task.Run(() => _apiClient.GetDocumentAsync(oldGuid)).GetAwaiter().GetResult();
+                        if (chk?.data != null && chk.data.Status == NexaaccDocumentStatus.Voided)
+                            gone = true;   // ยกเลิกบน NextAcc → สร้างใหม่เช่นกัน
+                    }
+                    catch (AccountingApiException aex) when (aex.StatusCode == 404 || aex.StatusCode == 410)
+                    {
+                        gone = true;       // ลบจริงบน NextAcc
+                    }
+                    catch { /* error อื่น (เน็ต/ล่ม) → ไม่ฟันธงว่าลบ ปล่อยเส้น resync ปกติ */ }
+
+                    if (gone)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"RepostReceipt: เอกสารเดิม {oldGuid.ToString().Substring(0, 8)} ถูกลบ/ยกเลิกบน NextAcc → สร้างใหม่สะอาด (reset marker) receipt={receiptNumber}", "SYSTEM");
+                        PrepareResync(receiptNumber);          // เคลียร์คิวเก่า mark SUPERSEDED
+                        ClearReceiptPdfCache(receiptNumber);   // ล้าง PDF cache (GUID ใหม่)
+                        SetReceiptPaymentMarker(receiptNumber, null);   // reset → settle/drives เริ่มใหม่
+                        LastRepostMessage = "🔄 เอกสารเดิมถูกลบบน NextAcc → สร้างเอกสารใหม่ (ยอดถูกต้องตามระบบ, อ้างใบมัดจำเดิม)";
+                        return InsertQueue("RECEIPT",
+                            p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0,
+                            "CREATE_RECEIPT_DOCUMENT", p);
+                    }
+                }
+            }
+            catch (Exception delChkEx)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RepostReceipt: ตรวจเอกสารถูกลบล้มเหลว (ดำเนินเส้น resync ปกติ): {delChkEx.Message}", "SYSTEM");
+            }
+
             // ── ทางที่ 0: Official resync contract (INTEGRATION_RESYNC.md) — เอกสารเดิมเป็น
             // integration invoice → ส่ง /integration/invoices ซ้ำด้วย externalRef เดิม + resyncUpdate:true
             // NextAcc จัดการเอง: งวดเปิด+JE เดียว = in-place (เลข JE คงเดิม) / งวดปิด = reversal+post ใหม่
