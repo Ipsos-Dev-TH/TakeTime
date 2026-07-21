@@ -4161,6 +4161,108 @@ namespace Take_Time_BangPhra.Integration
             return null;
         }
 
+        /// <summary>
+        /// TRUST-BUT-VERIFY สำหรับใบขายสด (isCashSale): อ่านเอกสารกลับจาก NextAcc "พิสูจน์" ว่า
+        /// JE ถูกโพสต์เป็นเงินสดจบในใบจริง (BalanceDue ≈ 0) หรือ NextAcc รุ่น deploy ยังไม่รองรับ
+        /// (ลง Dr ลูกหนี้แบบเดิม, BalanceDue = ยอดเต็ม — เคสจริง TIV-20260718-0001: ใบแสดงถูก
+        /// แต่ JE เป็นลูกหนี้ ไม่มีขามัดจำ). ใช้ทั้งตอน create และตอน Retry/resync (ซ่อมใบเก่า).
+        ///   เงินสดจริง → โพสต์ Option B JV กลับมัดจำ (idempotent -CSDEPADJ) + ตั้ง marker = docId
+        ///   AR ค้าง   → self-heal: undo JV -CSDEPADJ ที่หลงโพสต์ (ถ้ามี) → ล้าง marker (GUID เดิม
+        ///               จะหลอก settle ว่าจ่ายแล้ว — ปลอดภัยเพราะ settle มี BalanceDue guard ระดับ
+        ///               เอกสารกันจ่ายซ้อน) → SettleReceiptInNextAcc ตัดมัดจำ+รับเงินสุทธิ ปิดลูกหนี้
+        ///   อ่านไม่ได้ → เดิน fallback settle (ปลอดภัยกว่า: ถ้าเอกสารจ่ายแล้วจริง settle จะเจอ
+        ///               BalanceDue=0 → PAID_EXTERNAL ไม่โพสต์อะไรซ้ำ)
+        /// คืน true = NextAcc ลงเงินสดในใบจริง (single-JE), false = fallback AR+settle ถูกใช้
+        /// </summary>
+        private async Task<bool> EnsureCashSaleDocSettledAsync(
+            Guid csId, string receiptNumber, decimal totalAmount, decimal depositApplied,
+            string paymentMethod, DateTime receiptDate, string customerName, bool hasVat,
+            int reservationId, string paymentAccountId, bool csNativeA)
+        {
+            bool csHasDeposit = depositApplied > 0.005m;
+            bool cashHonored = false;
+            try
+            {
+                var csChk = await _apiClient.GetDocumentAsync(csId);
+                if (csChk?.data != null)
+                {
+                    cashHonored = csChk.data.BalanceDue <= 0.01m;
+                    if (!cashHonored)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠⚠ CashSaleVerify: receipt={receiptNumber} doc={csChk.data.DocumentNumber} BalanceDue={csChk.data.BalanceDue:N2} " +
+                            $"(Paid={csChk.data.PaidAmount:N2}/Total={csChk.data.TotalAmount:N2}) — NextAcc รุ่นนี้ยังไม่โพสต์ isCashSale เป็นเงินสด " +
+                            "(JE ลง Dr ลูกหนี้แบบเดิม) → fallback settle ปิดลูกหนี้อัตโนมัติ. อัปเกรด NextAcc แล้วใบใหม่จะเป็น JE เงินสดใบเดียวเอง", "SYSTEM");
+                }
+            }
+            catch (Exception vex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CashSaleVerify: receipt={receiptNumber} อ่านเอกสารตรวจไม่ได้ ({vex.Message}) → ใช้เส้น fallback settle (ปลอดภัยกว่า)", "SYSTEM");
+            }
+
+            if (cashHonored)
+            {
+                // Option B: TakeTime โพสต์ JV กลับมัดจำ (Dr 21510 + Dr VAT[21913 defer/21911 no-defer] / Cr แหล่งเงิน)
+                //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
+                if (csHasDeposit && !csNativeA)
+                {
+                    // ref ที่จะโพสต์: ปกติ -CSDEPADJ; ถ้าคู่เดิมถูก self-heal undo ไปแล้ว (รอบที่ใบยังเป็น AR
+                    // แล้วต่อมาใบกลายเป็นเงินสด เช่น void→recreate หลังอัปเกรด NextAcc) คู่ ADJ+REV หักล้างกัน
+                    // → โพสต์ใหม่ด้วย ref -CSDEPADJ2 (idempotent แยกชุด)
+                    string csAdjRef = $"{receiptNumber}-CSDEPADJ";
+                    bool adjExists = await JournalExistsByReferenceAsync(csAdjRef);
+                    bool adjUndone = adjExists && await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV");
+                    string postRef = !adjExists ? csAdjRef : (adjUndone ? $"{receiptNumber}-CSDEPADJ2" : null);
+                    if (postRef != null && !await JournalExistsByReferenceAsync(postRef))
+                    {
+                        var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
+                            receiptDate, customerName, paymentAccountId, receiptNumber,
+                            hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt,
+                            deferOutputVat: _config.IsDepositOutputVatDeferred);
+                        csAdj.Reference = postRef;
+                        var csAdjRes = await _apiClient.CreateJournalAsync(csAdj);
+                        Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
+                        await SafePostJournalAsync(csAdjId);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"CashSaleVerify(JV, B): receipt={receiptNumber} Dr 21510(+VAT) {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId} ref={postRef}", "SYSTEM");
+                    }
+                }
+                // ปิดจบในใบเดียว: mark final. Option A ใช้ prefix "CSNATIVE:" ให้ void รู้ว่า 21510 reversal
+                //   อยู่ใน JE ของใบ (void cascade กลับให้เอง) → ไม่ต้องโพสต์ counter-adj
+                SetReceiptPaymentMarker(receiptNumber, (csNativeA ? "CSNATIVE:" : "") + csId.ToString());
+                return true;
+            }
+
+            // ── FALLBACK (NextAcc รุ่นเก่า / อ่านตรวจไม่ได้): เอกสารเปิดลูกหนี้อยู่ ──
+            // self-heal: JV -CSDEPADJ ที่หลงโพสต์รอบก่อน ผิดฝั่ง (Cr แหล่งเงินที่ไม่เคยถูก Dr) → กลับทิ้งก่อน
+            if (csHasDeposit
+                && await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")
+                && !await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV"))
+            {
+                var csUndo = _mapper.MapDepositCashSaleReversalUndo(reservationId, depositApplied, paymentMethod,
+                    receiptDate, customerName, paymentAccountId, receiptNumber,
+                    hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt,
+                    deferOutputVat: _config.IsDepositOutputVatDeferred);
+                var csUndoRes = await _apiClient.CreateJournalAsync(csUndo);
+                Guid csUndoId = RequireValidDocId(csUndoRes?.data?.Id, $"CashSaleDepositReversalUndo(self-heal) receipt={receiptNumber}");
+                await SafePostJournalAsync(csUndoId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CashSaleVerify(self-heal): receipt={receiptNumber} กลับ JV -CSDEPADJ ที่โพสต์ผิดฝั่ง (ใบเป็น AR ไม่ใช่เงินสด) JE={csUndoId}", "SYSTEM");
+            }
+
+            // marker GUID เดิม (docId จาก flow เก่า) จะหลอก SettleReceiptInNextAcc ว่า "จ่ายแล้ว" → ล้างก่อน.
+            // ปลอดภัย: settle อ่าน BalanceDue จริงจากเอกสาร (PAID_EXTERNAL / cap) กันจ่ายซ้อนระดับเอกสารเอง
+            string mkNow = LookupReceiptPaymentMarker(receiptNumber);
+            if (!string.IsNullOrEmpty(mkNow) && !mkNow.StartsWith("ADJ:"))
+                SetReceiptPaymentMarker(receiptNumber, null);
+
+            // settle เส้น audit-hardened เดิม: ตัดมัดจำ (Dr 21510(+VAT) / Cr ลูกหนี้) + รับเงินสุทธิ
+            // (Dr แหล่งเงิน / Cr ลูกหนี้) → ลูกหนี้ปิดเป็น 0. marker (ADJ:→paymentId/NOCASH) settle จัดการเอง
+            await SettleReceiptInNextAcc(csId, receiptNumber, totalAmount, depositApplied,
+                paymentMethod, receiptDate, customerName, hasVat, reservationId, paymentAccountId);
+            return false;
+        }
+
         private async Task<string> ProcessReceiptDocument(Dictionary<string, object> p)
         {
             // Per-type mode: skip if receipt sync is LOCAL
@@ -4479,32 +4581,17 @@ namespace Take_Time_BangPhra.Integration
                     _lastDocNumber = csRes?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";     // integration invoice → repost ใช้ resyncUpdate ได้
 
-                    // Option B: TakeTime โพสต์ JV กลับมัดจำ (Dr 21510 + Dr VAT[21913 defer/21911 no-defer] / Cr แหล่งเงิน)
-                    //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
-                    if (csHasDeposit && !csNativeA)
-                    {
-                        string csAdjRef = $"{receiptNumber}-CSDEPADJ";
-                        if (!await JournalExistsByReferenceAsync(csAdjRef))
-                        {
-                            var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
-                                receiptDate, customerName, paymentAccountId, receiptNumber,
-                                hasVat: hasVat, vatAtReceipt: _config.IsDepositVatAtReceipt,
-                                deferOutputVat: _config.IsDepositOutputVatDeferred);
-                            var csAdjRes = await _apiClient.CreateJournalAsync(csAdj);
-                            Guid csAdjId = RequireValidDocId(csAdjRes?.data?.Id, $"CashSaleDepositReversal receipt={receiptNumber}");
-                            await SafePostJournalAsync(csAdjId);
-                            _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessReceiptDocument(cash-sale deposit JV, B): receipt={receiptNumber} Dr 21510(+VAT) {depositApplied:N2} / Cr แหล่งเงิน — 21510 ล้าง, JE={csAdjId}", "SYSTEM");
-                        }
-                    }
+                    // ── TRUST-BUT-VERIFY: พิสูจน์จากเอกสารจริงว่า NextAcc โพสต์แบบขายสด (จ่ายจบในใบ) ──
+                    // แล้วเลือกทางให้ GL ถูกเสมอ (Option B JV เมื่อเป็นเงินสดจริง / undo+settle เมื่อเป็น AR)
+                    bool csCashHonored = await EnsureCashSaleDocSettledAsync(csId, receiptNumber, totalAmount,
+                        depositApplied, paymentMethod, receiptDate, customerName, hasVat, reservationId,
+                        paymentAccountId, csNativeA);
 
-                    // ปิดจบในใบเดียว: mark final. Option A ใช้ prefix "CSNATIVE:" ให้ void รู้ว่า 21510 reversal
-                    //   อยู่ใน JE ของใบ (void cascade กลับให้เอง) → ไม่ต้องโพสต์ counter-adj
-                    SetReceiptPaymentMarker(receiptNumber, (csNativeA ? "CSNATIVE:" : "") + csId.ToString());
                     await TryAutoGenerateEtaxAsync(csId, receiptNumber, reservationId, totalAmount, customerName);
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument(cash-sale single doc, DEFAULT): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
-                        $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน ใบเดียว docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} (ไม่มีลูกหนี้/ไม่มีใบเสร็จแยก)", "SYSTEM");
+                        $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} " +
+                        $"โหมด JE={(csCashHonored ? "เงินสดในใบ (ไม่มีลูกหนี้)" : "AR+settle (NextAcc ยังไม่รองรับ isCashSale — อัปเกรดแล้วใบใหม่จะเป็นใบเดียวเอง)")}", "SYSTEM");
                     return csId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints
@@ -5029,6 +5116,22 @@ namespace Take_Time_BangPhra.Integration
                 return true;
             }
 
+            // ชุดที่ 2 ก่อน (-CSDEPADJ2 = JV ที่ re-post หลัง self-heal เมื่อใบกลับมาเป็นเงินสด) — ชุดที่ยัง active
+            if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ2")
+                && !await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ2-REV"))
+            {
+                var undo2 = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
+                    custName, paymentAccountId, receiptNumber,
+                    hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                    deferOutputVat: _config.IsDepositOutputVatDeferred);
+                undo2.Reference = $"{receiptNumber}-CSDEPADJ2-REV";
+                var res2 = await _apiClient.CreateJournalAsync(undo2);
+                Guid id2 = RequireValidDocId(res2?.data?.Id, $"CashSaleDepositReversalUndo2 receipt={receiptNumber}");
+                await SafePostJournalAsync(id2);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidReceipt: cash-sale deposit JV (ชุด 2) กลับแล้ว receipt={receiptNumber} JE={id2}", "SYSTEM");
+                return true;
+            }
             if (!await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")) return false;   // ไม่ใช่ Option B
             if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV")) return true; // กลับแล้ว
             var undo = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
@@ -8582,7 +8685,8 @@ namespace Take_Time_BangPhra.Integration
                             }
                         }
                     }
-                    var invoice = BuildCorrectedReceiptInvoice(p, receiptNumber);
+                    decimal rvTotal, rvDeposit;
+                    var invoice = BuildCorrectedReceiptInvoice(p, receiptNumber, out rvTotal, out rvDeposit);
                     if (invoice != null)
                     {
                         ApiResponse<IntegrationDocumentResponse> resp = null;
@@ -8610,6 +8714,36 @@ namespace Take_Time_BangPhra.Integration
                                 "UPDATE Accounting_Sync_Queue SET Error_Message = @m WHERE ID = @id",
                                 new Dictionary<string, object> { { "@m", "Resync: " + msg }, { "@id", queueId } });
                             ClearReceiptPdfCache(receiptNumber);
+
+                            // ใบขายสด: resync แก้แค่เนื้อใบ — ตรวจ/ซ่อมสถานะ JE ต่อ (เคสจริง: ใบเดิมสร้างตอน
+                            // NextAcc ยังไม่รองรับ isCashSale → ลูกหนี้ค้าง + JV มัดจำผิดฝั่ง). helper จะ
+                            // undo JV หลง + settle ปิดลูกหนี้ให้ (หรือถ้า NextAcc อัปเกรดแล้ว = โพสต์ JV ที่ขาด)
+                            if (invoice.IsCashSale && resp.data != null && resp.data.Id != Guid.Empty)
+                            {
+                                try
+                                {
+                                    int rvResId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+                                    DateTime rvDate = ParseAcctDate(p.ContainsKey("receiptDate") ? p["receiptDate"]?.ToString() : null);
+                                    string rvCust = p.ContainsKey("customerName") ? p["customerName"]?.ToString() ?? "" : "";
+                                    string rvMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() ?? "CASH" : "CASH";
+                                    string rvPayAcc = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
+                                    bool rvNativeA = _config.IsCashSaleDepositNativeA && rvDeposit > 0.005m
+                                        && DepositRefsResolvedToNextAcc(rvResId);
+                                    bool rvCash = System.Threading.Tasks.Task.Run(() =>
+                                        EnsureCashSaleDocSettledAsync(resp.data.Id, receiptNumber, rvTotal, rvDeposit,
+                                            rvMethod, rvDate, rvCust, LookupBusinessHasVat(), rvResId, rvPayAcc, rvNativeA))
+                                        .GetAwaiter().GetResult();
+                                    if (!rvCash)
+                                        LastRepostMessage += " | ⚠ NextAcc ยังไม่รองรับ isCashSale → ปิดลูกหนี้ด้วย settle ให้แล้ว (GL ถูก)";
+                                }
+                                catch (Exception vfx)
+                                {
+                                    LastRepostMessage += " | ⚠ ตรวจ/ปิดลูกหนี้ต่อไม่สำเร็จ: " + vfx.Message + " — กด Retry ซ้ำได้ (idempotent)";
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"RepostReceipt(cash-sale verify): receipt={receiptNumber} ล้มเหลว {vfx.Message}", "SYSTEM");
+                                }
+                            }
+
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"RepostReceipt: resyncUpdate สำเร็จ receipt={receiptNumber} → {msg}", "SYSTEM");
                             return 0;
@@ -8755,6 +8889,17 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         private CreateIntegrationInvoiceRequest BuildCorrectedReceiptInvoice(Dictionary<string, object> p, string receiptNumber)
         {
+            decimal _t, _d;
+            return BuildCorrectedReceiptInvoice(p, receiptNumber, out _t, out _d);
+        }
+
+        /// <summary>overload คืนยอดที่ปรับแล้ว (gross-up ส่วนลด-line ฯลฯ) ให้ caller ใช้ verify/settle ต่อ
+        /// (adjTotalAmount/adjDepositApplied = ค่าที่เส้น sync ปกติจะใช้จริง — ตรงกับใบที่สร้าง)</summary>
+        private CreateIntegrationInvoiceRequest BuildCorrectedReceiptInvoice(Dictionary<string, object> p, string receiptNumber,
+            out decimal adjTotalAmount, out decimal adjDepositApplied)
+        {
+            adjTotalAmount = 0m;
+            adjDepositApplied = 0m;
             try
             {
                 int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
@@ -8774,6 +8919,7 @@ namespace Take_Time_BangPhra.Integration
 
                 if (isDeposit)
                 {
+                    adjTotalAmount = totalAmount;
                     invoice = _mapper.MapDepositToInvoice(reservationId, totalAmount, paymentMethod, receiptDate,
                         customerName, paymentAccountId: paymentAccountId, hasVat: hasVat,
                         vatAtReceipt: _config.IsDepositVatAtReceipt);
@@ -8815,6 +8961,8 @@ namespace Take_Time_BangPhra.Integration
                     // JV มัดจำ (-CSDEPADJ) โพสต์ตอน create แล้ว → resync แค่แก้เนื้อใบ ไม่แตะ JV
                     cashSaleEligible = true;
                     cashSaleDepositApplied = depositApplied;   // ใช้ set field มัดจำ "หลังผ่านเช็คข้อมูลภาษีผู้ซื้อ" เท่านั้น
+                    adjTotalAmount = totalAmount;              // ค่า gross-up แล้ว — ให้ caller ใช้ verify/settle
+                    adjDepositApplied = depositApplied;
                 }
 
                 // Reference = รหัสการจอง (นโยบายเดียวกับ sync ปกติ); externalRef = เลขใบเสร็จ (คีย์ dedup)
