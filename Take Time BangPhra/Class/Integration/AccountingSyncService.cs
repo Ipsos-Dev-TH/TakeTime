@@ -10428,13 +10428,26 @@ namespace Take_Time_BangPhra.Integration
             // ── IDENTITY GUARD: กันเปิด "เอกสารของใบอื่น" (คนละลูกค้า/ยอด) ──
             // เหตุ (บั๊กจริง res 149094): ใบหลายใบของการจองเดียวเคยชนกัน (shared RES-{id} key ก่อน fix
             // 2552c85) → คิวเก็บ GUID ไขว้กัน → ดู PDF ใบ REC260716004 เด้งไปเอกสาร REC-20260716-0001 ของอีกใบ.
-            // ตรวจจากคิว (ไม่ยิง NextAcc): ถ้า GUID นี้ถูก "ใบอื่น" อ้างเป็นเอกสารด้วย = ชน → ไม่เสิร์ฟ
-            // (กันแสดงเอกสารภาษีผิดคน) แนะให้กด Retry. ทำก่อน cache เพราะ cache ก็ผูก GUID ที่ชน.
-            if (IsDocGuidClaimedByOtherReceipt(docId, receiptNumber))
+            // ชั้น 1 (authoritative, dev NextAcc ยืนยัน): อ่าน `reference` (=externalRef=เลขใบเสร็จ) ของเอกสารจริง
+            //   → ถ้ามีค่าและไม่ตรง receiptNumber = เอกสารของใบอื่น (ชน) → ไม่เสิร์ฟ.
+            // ชั้น 2 (fallback ถ้าอ่านไม่ได้/reference ว่าง = เอกสารเก่า): เช็คจากคิวว่า GUID ถูกใบอื่นอ้างไหม.
+            bool mismatch = false;
+            try
+            {
+                var idChk = await _apiClient.GetDocumentAsync(docId);
+                string docRef = idChk?.data?.Reference;
+                if (!string.IsNullOrWhiteSpace(docRef))
+                    mismatch = !string.Equals(docRef.Trim(), receiptNumber.Trim(), StringComparison.OrdinalIgnoreCase);
+                else
+                    mismatch = IsDocGuidClaimedByOtherReceipt(docId, receiptNumber);   // เอกสารเก่าไม่มี reference → ดูคิว
+            }
+            catch { mismatch = IsDocGuidClaimedByOtherReceipt(docId, receiptNumber); }   // อ่านไม่ได้ → ดูคิว
+
+            if (mismatch)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"⚠ DownloadReceiptPdf: receipt={receiptNumber} → เอกสาร GUID {docId.ToString().Substring(0, 8)} " +
-                    "ถูกใบอื่นอ้างด้วย (เลขเอกสารชนจากบั๊กก่อน fix) → ไม่เสิร์ฟ กันแสดงเอกสารผิดคน. " +
+                    "เป็นของใบอื่น (reference/คิวไม่ตรง — เลขเอกสารชนจากบั๊กก่อน fix) → ไม่เสิร์ฟ กันแสดงเอกสารผิดคน. " +
                     "แก้: กด Retry ใบนี้ให้ออกเอกสารของตัวเอง (unique key ต่อใบแล้ว)", "SYSTEM");
                 result.Message = "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (เลขเอกสารซ้ำจากบั๊กเดิม) — กด Retry เพื่อออกเอกสารของใบนี้เอง แล้วดู PDF ใหม่";
                 result.MismatchedIdentity = true;

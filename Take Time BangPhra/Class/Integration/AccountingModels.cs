@@ -264,6 +264,9 @@ namespace Take_Time_BangPhra.Integration
         public decimal BalanceDue { get; set; }
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
+        /// <summary>externalRef ของเอกสาร (NextAcc `GET /documents/{id}` คืน field `reference`) —
+        /// TakeTime ใช้ = เลขใบเสร็จ (receiptNumber) → ยืนยันตัวตนเอกสารก่อนเปิด PDF กันเปิดผิดใบ</summary>
+        public string Reference { get; set; }
     }
 
     // ──────────────────────────────────────────────
