@@ -4659,6 +4659,11 @@ namespace Take_Time_BangPhra
                     // Don't fail receipt creation if payment history fails
                 }
 
+                // สร้าง PDF + ส่งอีเมล e-Tax = ผลข้างเคียง "หลังบันทึกใบเสร็จ+enqueue sync แล้ว" ห้ามให้ล้มเหลว
+                // (ไฟล์ PDF ไม่พบ / SMTP error) ทำให้ throw ออกจาก createReceipt → ผู้เรียกไม่ได้อัปเดตสถานะ
+                // "เช็คอินแล้ว" (CheckInReservation รันหลัง createReceipt). กลืน error + log เหมือน Payment_History
+                try
+                {
                 if (CheckBox4.Checked == false)
                 {
                     createReport(ReceiptID, status, docDate);
@@ -4735,6 +4740,13 @@ namespace Take_Time_BangPhra
                     string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
                     SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox13.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                }
+                }
+                catch (Exception pdfEx)
+                {
+                    code2.Logs(conn, "Receipt PDF/e-Tax Error (createReceipt)",
+                        pdfEx.Message + " - " + pdfEx.StackTrace, "SYSTEM");
+                    // ไม่ throw — ใบเสร็จ+sync บันทึกแล้ว, ต้องปล่อยให้ผู้เรียกอัปเดตสถานะเช็คอินต่อ
                 }
 
                 // 🏨 Mark product charges as paid
@@ -7650,7 +7662,18 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         ph.PaymentType,
                         ph.PaymentMethod,
                         ph.Status,
-                        ph.Receipt_ID as ReceiptNumber,
+                        -- แสดง "เลขเอกสาร NextAcc" (TIV-/REC-) ถ้า sync แล้ว, ไม่งั้นเลข local เดิม
+                        -- ไม่กรอง Nexaacc_Document_Type เพื่อให้จับได้ทั้ง TaxInvoice(TIV)/Receipt(REC)/Invoice
+                        COALESCE(
+                            (SELECT TOP 1 q.Nexaacc_Document_Number
+                               FROM Accounting_Sync_Queue q
+                              WHERE q.Entity_Type = 'RECEIPT' AND q.Status = 'COMPLETED'
+                                AND q.Nexaacc_Document_Number IS NOT NULL
+                                AND LTRIM(RTRIM(q.Nexaacc_Document_Number)) <> ''
+                                AND q.Nexaacc_Document_Number NOT LIKE 'DRAFT%'
+                                AND q.Payload LIKE '%""receiptNumber"":""' + ph.Receipt_ID + '""%'
+                              ORDER BY q.ID DESC),
+                            ph.Receipt_ID) as ReceiptNumber,
                         ps.SlipFileURL,
                         a.Username as ProcessedBy
                     FROM Payment_History ph
