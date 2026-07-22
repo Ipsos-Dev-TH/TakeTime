@@ -143,6 +143,11 @@ namespace Take_Time_BangPhra.Integration
         public bool IsDepositOutputVatDeferred => GetConfig("Deposit_Defer_Output_Vat", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
             || GetConfig("Deposit_Defer_Output_Vat", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>GR/IR: รับสินค้าเข้าสต๊อก (Product/In) เครดิต GRNI 21240 แทนเจ้าหนี้การค้า (default เปิด)
+        /// → ใบกำกับ/วางบิลที่ OCR ทีหลังล้าง GRNI + เพิ่มภาษีซื้อ (เคลมได้) กันโพสต์ซ้อน. ปิด = พฤติกรรมเดิม.</summary>
+        public bool IsStockInUseGRNI => GetConfig("Nexaacc_StockIn_UseGRNI", "1").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_StockIn_UseGRNI", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// true = เช็คเอาท์/รับชำระ B2B (ลูกค้ามีเลขภาษี) ออก "ใบเดียว" ใบกำกับภาษี/ใบเสร็จรับเงิน
         /// (ขายสด isCashSale) แทนการเปิดลูกหนี้ + ใบเสร็จรับชำระแยก (เดิมได้ 3 ใบต่อการขาย).

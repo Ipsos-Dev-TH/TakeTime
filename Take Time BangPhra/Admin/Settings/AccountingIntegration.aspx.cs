@@ -139,6 +139,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "resetReservation":
                     result = ResetReservationAccounting();
                     break;
+                case "grniReconcile":
+                    result = GrniReconcile();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -494,6 +497,32 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Reset Error: " + ex.Message } };
+            }
+        }
+
+        // 🔎 GR/IR reconcile: ยอดคงค้าง GRNI + รายการรับของ
+        private Dictionary<string, object> GrniReconcile()
+        {
+            try
+            {
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                var r = sync.GetGrniReconcile();
+                return new Dictionary<string, object>
+                {
+                    { "success", r.Success },
+                    { "message", r.Message },
+                    { "accountCode", r.AccountCode },
+                    { "hasBalance", r.HasBalance },
+                    { "debitBalance", r.DebitBalance },
+                    { "creditBalance", r.CreditBalance },
+                    { "netOpen", r.NetOpen },
+                    { "interpretation", r.Interpretation },
+                    { "items", r.StockInItems }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "GRNI Reconcile Error: " + ex.Message } };
             }
         }
 

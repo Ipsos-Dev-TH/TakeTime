@@ -525,6 +525,13 @@ namespace Take_Time_BangPhra.Voucher
             ddlChargeAccount.Items.Clear();
             ddlChargeAccount.Items.Add(new ListItem("— ใช้บัญชีที่ OCR แนะนำ —", ""));
 
+            // GR/IR: ถ้าใบนี้คือ "ใบกำกับของสินค้าที่รับเข้าสต๊อกแล้ว" → เดบิต GRNI (ล้างรับของ) แทนค่าใช้จ่าย
+            // → NextAcc โพสต์ Dr GRNI + Dr ภาษีซื้อ / Cr แหล่งเงิน = ล้างพักรับของ + เคลม VAT, ไม่โพสต์สินค้าซ้ำ
+            string grniCode = LookupMappedAccountCode("GRNI");
+            if (!string.IsNullOrEmpty(grniCode))
+                ddlChargeAccount.Items.Add(new ListItem(
+                    $"🔄 ล้างรับของ GRNI {grniCode} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)", grniCode));
+
             // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ที่ชื่อมี "กรรมการ")
             // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร) ที่เดบิตเป็นหนี้สิน
             var na = LoadNexaaccAccounts(
@@ -557,6 +564,25 @@ namespace Take_Time_BangPhra.Voucher
                     }
             }
             catch { /* เหลือแค่ "ใช้บัญชีที่ OCR แนะนำ" */ }
+        }
+
+        /// <summary>หา Nexaacc_AccountCode (เช่น "21240") จาก TakeTime_Code ใน Accounting_Account_Mapping.
+        /// คืน "" ถ้ายังไม่ได้ map/ปิด — ใช้ตัดสินใจว่าจะโชว์ตัวเลือก GRNI ไหม.</summary>
+        private string LookupMappedAccountCode(string takeTimeCode)
+        {
+            try
+            {
+                var c = new Take_Time_BangPhra.code();
+                var dt = c.DatabaseQuerySafe(Conn,
+                    @"SELECT TOP 1 Nexaacc_AccountCode FROM Accounting_Account_Mapping
+                      WHERE TakeTime_Code = @code AND Is_Active = 1
+                        AND Nexaacc_AccountCode IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountCode)) <> ''",
+                    new Dictionary<string, object> { { "@code", takeTimeCode } });
+                if (dt != null && dt.Rows.Count > 0)
+                    return dt.Rows[0]["Nexaacc_AccountCode"]?.ToString() ?? "";
+            }
+            catch { }
+            return "";
         }
 
         /// <summary>โหลดรายชื่อผู้ขายจากระบบ TakeTime (Vendor) — กรณี OCR ไม่เจอชื่อ</summary>

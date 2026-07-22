@@ -934,10 +934,43 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public CreateJournalEntryRequest MapStockInToJournal(
             int productId, string productName, decimal totalCost, DateTime receiveDate,
-            string supplierName, string paymentMethod = null, bool hasInputVat = false)
+            string supplierName, string paymentMethod = null, bool hasInputVat = false,
+            bool useGRNI = false)
         {
             var inventoryAccountId = GetAccountId("INVENTORY");
             bool isCashPurchase = !string.IsNullOrEmpty(paymentMethod);
+
+            // ── GR/IR: รับของ = Dr สินค้าคงเหลือ / Cr GRNI (พักรับของ) ไม่มี VAT ไม่แตะเจ้าหนี้/เงินสด ──
+            // VAT + เจ้าหนี้จริง ไปอยู่ที่ใบกำกับ/วางบิล (OCR) ที่ล้าง GRNI ภายหลัง → กันโพสต์ซ้อน +
+            // ภาษีซื้อเคลมได้ (ใบกำกับมีเลขภาษีผู้ขาย). VAT ที่ก้อนนี้ตัดออกเสมอ (แม้ hasInputVat=true)
+            if (useGRNI)
+            {
+                var grniAccountId = GetAccountId("GRNI");
+                return new CreateJournalEntryRequest
+                {
+                    EntryDate = receiveDate,
+                    JournalType = NexaaccJournalType.Purchase,
+                    Description = $"รับสินค้าเข้าสต็อก - {productName} (พักรับของ GR/IR)",
+                    Reference = $"GRNI-{productId}-{receiveDate:yyyyMMddHHmmss}",
+                    Lines = new List<JournalEntryLineRequest>
+                    {
+                        new JournalEntryLineRequest
+                        {
+                            AccountId = inventoryAccountId,
+                            DebitAmount = totalCost,
+                            CreditAmount = 0,
+                            Description = $"สินค้าคงเหลือ - {productName}",
+                        },
+                        new JournalEntryLineRequest
+                        {
+                            AccountId = grniAccountId,
+                            DebitAmount = 0,
+                            CreditAmount = totalCost,
+                            Description = $"รับสินค้ายังไม่วางบิล - {supplierName}",
+                        }
+                    }
+                };
+            }
 
             // บัญชีด้านเครดิต: ซื้อสด = Cash/Bank, ซื้อเชื่อ = AP
             Guid creditAccountId = isCashPurchase

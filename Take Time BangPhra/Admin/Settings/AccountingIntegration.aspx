@@ -490,6 +490,16 @@
                     <div class="help-text" style="margin-top:6px;">กลับ (reverse) <b>ทุก JE ที่ TakeTime post ให้การจองนี้</b> (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn ทุกแพทเทิร์น RES-{id}* และเลขใบเสร็จทุกใบ) → 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0 <b>พร้อม void เอกสาร (TIV/REC) ทุกใบของการจองบน NextAcc</b> = กดทีเดียวจบทั้ง GL และเอกสาร. <b>idempotent</b> (กดซ้ำไม่เบิ้ล — ข้ามใบที่ voided แล้ว) + reset marker → re-sync ใหม่ได้สะอาด</div>
                     <div class="test-result" id="resetResResult"></div>
                 </div>
+
+                <!-- 🔎 GR/IR — reconcile ยอดคงค้าง GRNI (รับของ ↔ ใบกำกับ) -->
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed #ddd;">
+                    <label style="font-weight:600;"><i class="fas fa-scale-balanced"></i> GR/IR — ยอดคงค้าง GRNI (รับสินค้ายังไม่วางบิล)</label>
+                    <div style="margin-top:6px;">
+                        <button type="button" class="btn-warning" onclick="grniReconcile()"><i class="fas fa-scale-balanced"></i> ตรวจยอดคงค้าง GRNI</button>
+                    </div>
+                    <div class="help-text" style="margin-top:6px;">รับของ (Product/In) เครดิต GRNI 21240 / ใบกำกับที่ OCR ล้าง GRNI + เพิ่มภาษีซื้อ. ยอดคงค้าง <b>ควรใกล้ 0</b> — บวก = ของมายังไม่วางบิล (ตามใบกำกับ), ลบ = วางบิลแล้วของยังไม่มา (ตามของ / ใบกำกับลงบัญชีผิด)</div>
+                    <div class="test-result" id="grniResult"></div>
+                </div>
             </div>
         </div>
 
@@ -1142,6 +1152,49 @@
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
                     el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        function grniReconcile() {
+            var el = document.getElementById('grniResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตรวจยอดคงค้าง GRNI...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+            fetch(pageUrl + '?action=grniReconcile&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(d) {
+                    if (!d.success) {
+                        el.className = 'test-result error';
+                        el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (d.message || 'ไม่สำเร็จ');
+                        return;
+                    }
+                    el.className = 'test-result success';
+                    var net = parseFloat(d.netOpen || 0);
+                    var color = Math.abs(net) < 0.01 ? '#28a745' : '#c0392b';
+                    var html = '<div style="font-size:14px;">บัญชี GRNI <b>' + (d.accountCode || '-') + '</b> · คงค้างสุทธิ '
+                        + '<b style="color:' + color + ';">' + net.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</b></div>';
+                    html += '<div style="margin:4px 0 8px;">' + (d.interpretation || '') + '</div>';
+                    if (d.items && d.items.length) {
+                        html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">'
+                            + '<thead><tr style="background:#f5f5f5;"><th style="padding:4px 6px; text-align:left;">อ้างอิง</th>'
+                            + '<th style="padding:4px 6px; text-align:left;">เลข JE</th><th style="padding:4px 6px;">วันที่</th>'
+                            + '<th style="padding:4px 6px; text-align:right;">รับของ (Cr GRNI)</th></tr></thead><tbody>';
+                        d.items.forEach(function(it) {
+                            html += '<tr' + (it.Voided ? ' style="color:#999;text-decoration:line-through;"' : '') + '>'
+                                + '<td style="padding:3px 6px;">' + (it.Reference||'') + '</td>'
+                                + '<td style="padding:3px 6px;">' + (it.DocNumber||'-') + '</td>'
+                                + '<td style="padding:3px 6px; text-align:center;">' + (it.Date||'') + '</td>'
+                                + '<td style="padding:3px 6px; text-align:right;">' + parseFloat(it.Amount||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
+                        });
+                        html += '</tbody></table>';
+                    }
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (err.name === 'AbortError' ? 'หมดเวลา 60 วินาที' : err.message);
                 });
         }
 

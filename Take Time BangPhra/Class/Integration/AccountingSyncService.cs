@@ -6746,8 +6746,10 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessStockIn: product={productName} qty={quantity} cost={costPerUnit} total={totalCost} supplier={supplierName}", "SYSTEM");
 
+            // GR/IR (default): Cr GRNI 21240 แทนเจ้าหนี้/เงินสด — ใบกำกับ OCR ล้าง GRNI ภายหลัง (กันซ้อน)
+            bool useGRNI = _config.IsStockInUseGRNI;
             var journal = _mapper.MapStockInToJournal(productId, productName, totalCost, receiveDate, supplierName,
-                string.IsNullOrEmpty(paymentMethod) ? null : paymentMethod, hasInputVat);
+                string.IsNullOrEmpty(paymentMethod) ? null : paymentMethod, hasInputVat, useGRNI);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid docId = RequireValidDocId(result?.data?.Id, $"StockIn product={productId}");
             await SafePostJournalAsync(docId);
@@ -9561,6 +9563,114 @@ namespace Take_Time_BangPhra.Integration
         /// ไม่ void), (2) RECEIPT/JOURNAL → แก้ JE in-place, (3) เอกสารเดิมถูกลบบน NextAcc → สร้างใหม่สะอาด
         /// (reset marker + purge orphan REC), (4) NextAcc ปฏิเสธ (ชำระแล้ว/งวดปิด) → fallback void→สร้างใหม่
         /// (เลขเปลี่ยน — แจ้งชัดในข้อความ). ใบที่ไม่เคย sync → เข้าคิวสร้างครั้งแรกปกติ.</summary>
+        // ── GR/IR reconcile (หน้า Admin) — ยอดคงค้าง GRNI + รายการรับของฝั่ง TakeTime ──
+        public class GrniStockInItem
+        {
+            public string Reference { get; set; }
+            public string DocNumber { get; set; }
+            public string Date { get; set; }
+            public string Description { get; set; }
+            public decimal Amount { get; set; }
+            public bool Voided { get; set; }
+        }
+        public class GrniReconcileResult
+        {
+            public bool Success { get; set; }
+            public string Message { get; set; }
+            public string AccountCode { get; set; }
+            public bool HasBalance { get; set; }
+            public decimal DebitBalance { get; set; }
+            public decimal CreditBalance { get; set; }
+            public decimal NetOpen { get; set; }        // + = ของมาแล้วยังไม่วางบิล / − = วางบิลแล้วของยังไม่มา
+            public string Interpretation { get; set; }
+            public List<GrniStockInItem> StockInItems { get; set; }
+        }
+
+        /// <summary>🔎 GR/IR reconcile: ยอดคงค้างบัญชี GRNI (21240) จาก NextAcc + รายการ "รับของ" ฝั่ง
+        /// TakeTime (JE ref = GRNI-*) — ให้ผู้ทำบัญชีเห็นว่าค้างอะไร (ของมาไม่มีบิล / จ่ายแล้วของไม่มา).</summary>
+        public GrniReconcileResult GetGrniReconcile()
+        {
+            var res = new GrniReconcileResult { StockInItems = new List<GrniStockInItem>() };
+            if (!_config.IsConfigured) { res.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return res; }
+
+            string grniCode = null;
+            try { grniCode = _mapper.GetAccountCode("GRNI"); } catch { }
+            if (string.IsNullOrEmpty(grniCode))
+            {
+                res.Message = "ยังไม่ได้ตั้งค่าบัญชี GRNI (รัน migration PHASE18_10 + map ในหน้า Account Mapping)";
+                return res;
+            }
+            res.AccountCode = grniCode;
+
+            try
+            {
+                // 1) ยอดคงค้าง GRNI จาก account-balances (net ของทั้งรับของ + วางบิล)
+                try
+                {
+                    var balances = System.Threading.Tasks.Task.Run(() =>
+                        _apiClient.GetIntegrationAccountBalancesAsync()).GetAwaiter().GetResult();
+                    var g = balances?.FirstOrDefault(b =>
+                        string.Equals(b.AccountCode, grniCode, StringComparison.OrdinalIgnoreCase));
+                    if (g != null)
+                    {
+                        res.HasBalance = true;
+                        res.DebitBalance = g.DebitBalance;
+                        res.CreditBalance = g.CreditBalance;
+                        // GRNI เป็นหนี้สิน (เครดิตปกติ): เครดิต > เดบิต = ของมายังไม่วางบิล (+)
+                        res.NetOpen = g.CreditBalance - g.DebitBalance;
+                        if (Math.Abs(res.NetOpen) < 0.01m)
+                            res.Interpretation = "✅ GRNI = 0 — รับของ↔ใบกำกับ ล้างครบ ไม่มีค้าง";
+                        else if (res.NetOpen > 0)
+                            res.Interpretation = $"⚠ ของมาแล้วยังไม่วางบิล {res.NetOpen:N2} — ตามใบกำกับมา OCR ล้าง GRNI + เคลมภาษีซื้อ";
+                        else
+                            res.Interpretation = $"⚠ วางบิล/จ่ายแล้วของยังไม่มา {Math.Abs(res.NetOpen):N2} — ตามของเข้าสต๊อก (หรือใบกำกับลงบัญชีผิด ควรเป็น GRNI)";
+                    }
+                    else
+                    {
+                        res.Interpretation = "ยังไม่มียอดในบัญชี GRNI (ยังไม่มีรับของแบบ GR/IR หรือ NextAcc ไม่คืนยอดบัญชีนี้)";
+                    }
+                }
+                catch (Exception bex)
+                {
+                    res.Interpretation = "ดึงยอดคงค้าง GRNI ไม่สำเร็จ: " + bex.Message;
+                }
+
+                // 2) รายการ "รับของ" ฝั่ง TakeTime (JE Reference ขึ้นต้น GRNI-) เพื่อดูฝั่งของที่รับเข้า
+                try
+                {
+                    var found = System.Threading.Tasks.Task.Run(() =>
+                        _apiClient.SearchJournalsAsync("GRNI-", 100)).GetAwaiter().GetResult();
+                    var items = found?.data?.Items;
+                    if (items != null)
+                        foreach (var je in items.OrderByDescending(j => j.EntryDate))
+                        {
+                            if (je == null || je.Reference == null
+                                || !je.Reference.StartsWith("GRNI-", StringComparison.OrdinalIgnoreCase)) continue;
+                            res.StockInItems.Add(new GrniStockInItem
+                            {
+                                Reference = je.Reference,
+                                DocNumber = je.EntryNumber,
+                                Date = je.EntryDate.ToString("dd/MM/yyyy"),
+                                Description = je.Description,
+                                Amount = je.TotalCredit,   // ฝั่งรับของ = Cr GRNI
+                                Voided = IsVoidedStatus(je.Status)
+                            });
+                            if (res.StockInItems.Count >= 100) break;
+                        }
+                }
+                catch { }
+
+                res.Success = true;
+                return res;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"GetGrniReconcile failed: {ex.Message}", "SYSTEM");
+                res.Message = "ดึงข้อมูลไม่สำเร็จ: " + ex.Message;
+                return res;
+            }
+        }
+
         public (long result, string message, string kind) ResyncSingleReceipt(string receiptNumber)
         {
             if (string.IsNullOrEmpty(receiptNumber)) return (-1, "ไม่ระบุเลขที่ใบเสร็จ", "FAIL");
