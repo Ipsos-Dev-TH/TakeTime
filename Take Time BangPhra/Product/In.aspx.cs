@@ -283,7 +283,8 @@ namespace Take_Time_BangPhra.Product
                 try
                 {
                     var config = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
-                    if (config.IsConfigured && config.Enabled && !config.IsVoucherLocal)
+                    // ปิด JE รับของ (invoice-only): ให้ใบกำกับซื้อที่ OCR โพสต์บัญชีทั้งหมดแทน
+                    if (config.IsConfigured && config.Enabled && !config.IsVoucherLocal && !config.IsStockInSkipJournal)
                     {
                         var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
                         DateTime receiveDate = DateTime.Now;

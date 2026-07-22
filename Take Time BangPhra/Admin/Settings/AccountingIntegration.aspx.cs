@@ -70,6 +70,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "posDailyRollup", config.IsPosDailyRollupEnabled },
                     { "stockInUseGRNI", config.IsStockInUseGRNI },
+                    { "stockInSkipJournal", config.IsStockInSkipJournal },
                     { "stockQtySync", config.IsStockQtySyncEnabled },
                     { "stockQtyPull", config.IsStockQtyPullEnabled },
                     { "attachFiles", config.AttachFiles },
@@ -285,6 +286,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("posDailyRollup")) config.SetConfig("Nexaacc_PosDailyRollup", BoolToFlag(data["posDailyRollup"]));
                 if (data.ContainsKey("stockInUseGRNI")) config.SetConfig("Nexaacc_StockIn_UseGRNI", BoolToFlag(data["stockInUseGRNI"]));
+                if (data.ContainsKey("stockInSkipJournal")) config.SetConfig("Nexaacc_StockIn_SkipJournal", BoolToFlag(data["stockInSkipJournal"]));
                 if (data.ContainsKey("stockQtySync")) config.SetConfig("Nexaacc_StockQtySync", BoolToFlag(data["stockQtySync"]));
                 if (data.ContainsKey("stockQtyPull")) config.SetConfig("Nexaacc_StockQtyPull", BoolToFlag(data["stockQtyPull"]));
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");

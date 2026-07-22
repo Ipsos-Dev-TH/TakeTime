@@ -393,6 +393,19 @@
                         <br />ปิด = พฤติกรรมเดิม (รับของ Cr เจ้าหนี้การค้า).
                     </div>
                 </div>
+                <div class="config-item" style="background:#fff3e0; border:1px solid #ffb74d; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgStockInSkipJournal" />
+                        🚫 ปิด JE ตอนรับของ — ให้ <b>ใบกำกับซื้อ (OCR) โพสต์บัญชีทั้งหมดอย่างเดียว</b> (invoice-only)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #fb8c00; padding-left:8px;">
+                        รับของ (Product/In) จะ <b>ไม่ยิง JE ไป NextAcc เลย</b> (ทับ GR/IR ด้านบน). ใบกำกับซื้อที่ OCR เป็นตัวโพสต์
+                        สินค้า/ค่าใช้จ่าย + VAT + เจ้าหนี้ ทั้งหมด → ไม่มี GRNI ไม่ต้องแมพ ไม่มีทางเบิ้ล.
+                        <br /><strong style="color:#c0392b;">⚠ ใบกำกับต้องเดบิต "สินค้าคงเหลือ"</strong> (ไม่ใช่ค่าใช้จ่าย) มิฉะนั้น COGS ตอนขาย
+                        (Dr COGS / Cr สินค้าคงเหลือ) จะทำให้ <b>สต๊อกติดลบ</b> เพราะไม่มี Dr สินค้าคงเหลือตอนรับของ.
+                        เหมาะกับกิจการที่ให้ใบกำกับเป็นตัวลงต้นทุนสินค้าเสมอ. ปกติ (ยังตัด COGS รายการขาย) แนะนำใช้ GR/IR แทน.
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -997,6 +1010,7 @@
                 document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
                 document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
                 document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
+                document.getElementById('cfgStockInSkipJournal').checked = !!cfg.stockInSkipJournal;
                 syncCashSaleToggles();
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
@@ -1078,6 +1092,7 @@
                 cashSaleDepositNativeA: document.getElementById('cfgCashSaleDepositNativeA').checked,
                 cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
                 stockInUseGRNI: document.getElementById('cfgStockInUseGRNI').checked,
+                stockInSkipJournal: document.getElementById('cfgStockInSkipJournal').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,

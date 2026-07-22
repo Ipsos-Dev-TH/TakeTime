@@ -148,6 +148,12 @@ namespace Take_Time_BangPhra.Integration
         public bool IsStockInUseGRNI => GetConfig("Nexaacc_StockIn_UseGRNI", "1").Equals("1", StringComparison.OrdinalIgnoreCase)
             || GetConfig("Nexaacc_StockIn_UseGRNI", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>true = ไม่ยิง JE ตอนรับสินค้าเข้าสต๊อก (Product/In) เลย — ให้ใบกำกับซื้อที่ OCR โพสต์
+        /// บัญชีทั้งหมด (invoice-only). ทับ GR/IR. ⚠ ใบกำกับต้องเดบิต "สินค้าคงเหลือ" ไม่งั้น COGS ตอนขาย
+        /// ทำสต๊อกติดลบ (perpetual ต้องมี Dr สินค้าคงเหลือก่อน). default ปิด.</summary>
+        public bool IsStockInSkipJournal => GetConfig("Nexaacc_StockIn_SkipJournal", "0").Equals("1", StringComparison.OrdinalIgnoreCase)
+            || GetConfig("Nexaacc_StockIn_SkipJournal", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// true = เช็คเอาท์/รับชำระ B2B (ลูกค้ามีเลขภาษี) ออก "ใบเดียว" ใบกำกับภาษี/ใบเสร็จรับเงิน
         /// (ขายสด isCashSale) แทนการเปิดลูกหนี้ + ใบเสร็จรับชำระแยก (เดิมได้ 3 ใบต่อการขาย).
