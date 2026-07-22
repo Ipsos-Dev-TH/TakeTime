@@ -942,10 +942,15 @@ namespace Take_Time_BangPhra.Integration
 
             // ── GR/IR: รับของ = Dr สินค้าคงเหลือ / Cr GRNI (พักรับของ) ไม่มี VAT ไม่แตะเจ้าหนี้/เงินสด ──
             // VAT + เจ้าหนี้จริง ไปอยู่ที่ใบกำกับ/วางบิล (OCR) ที่ล้าง GRNI ภายหลัง → กันโพสต์ซ้อน +
-            // ภาษีซื้อเคลมได้ (ใบกำกับมีเลขภาษีผู้ขาย). VAT ที่ก้อนนี้ตัดออกเสมอ (แม้ hasInputVat=true)
+            // ภาษีซื้อไม่ลงก้อนนี้ (ไปอยู่ที่ใบกำกับ). สินค้าคงเหลือ/GRNI ต้องเป็น "ยอดสุทธิ (ไม่รวม VAT)"
+            // เพื่อให้ใบกำกับที่ล้าง GRNI (ยอด net) หักกลับหมดพอดี — ถ้า cost ที่ส่งมารวม VAT (hasInputVat)
+            // ถอด 7% ออกก่อน กัน GRNI ค้างเศษ = VAT + สินค้าคงเหลือสูงเกิน
             if (useGRNI)
             {
                 var grniAccountId = GetAccountId("GRNI");
+                decimal netCost = hasInputVat
+                    ? totalCost - Math.Round(totalCost * 7m / 107m, 2, MidpointRounding.AwayFromZero)
+                    : totalCost;
                 return new CreateJournalEntryRequest
                 {
                     EntryDate = receiveDate,
@@ -957,7 +962,7 @@ namespace Take_Time_BangPhra.Integration
                         new JournalEntryLineRequest
                         {
                             AccountId = inventoryAccountId,
-                            DebitAmount = totalCost,
+                            DebitAmount = netCost,
                             CreditAmount = 0,
                             Description = $"สินค้าคงเหลือ - {productName}",
                         },
@@ -965,7 +970,7 @@ namespace Take_Time_BangPhra.Integration
                         {
                             AccountId = grniAccountId,
                             DebitAmount = 0,
-                            CreditAmount = totalCost,
+                            CreditAmount = netCost,
                             Description = $"รับสินค้ายังไม่วางบิล - {supplierName}",
                         }
                     }

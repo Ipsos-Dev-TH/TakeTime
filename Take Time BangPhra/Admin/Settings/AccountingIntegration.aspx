@@ -379,6 +379,20 @@
                         <br />เปิด <b>ชั่วคราว</b> ระหว่างรอ NextAcc deploy isCashSale → deploy เสร็จให้ <b>ปิด flag นี้</b> กลับไปใช้ใบกำกับ+e-Tax.
                     </div>
                 </div>
+                <div class="config-item" style="background:#e8f5e9; border:1px solid #a5d6a7; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgStockInUseGRNI" />
+                        📦 GR/IR — รับสินค้าเข้าสต๊อกเครดิต <b>GRNI (พักรับของ)</b> แทนเจ้าหนี้การค้า
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #43a047; padding-left:8px;">
+                        รับของ (Product/In) → <b>Dr สินค้าคงเหลือ / Cr GRNI 21240</b> (ไม่มี VAT ไม่แตะเจ้าหนี้).
+                        ใบกำกับซื้อที่ผู้ใช้ OCR ทีหลัง → เลือกบัญชีเดบิต <b>"🔄 ล้างรับของ GRNI"</b> → NextAcc โพสต์
+                        <b>Dr GRNI + Dr ภาษีซื้อ / Cr เงินสด-เจ้าหนี้</b> = ล้างพักรับของ + เคลมภาษีซื้อได้ ไม่โพสต์ต้นทุนซ้ำ.
+                        <br /><strong style="color:#c0392b;">⚠ ต้อง map บัญชี GRNI (21240) ให้ตรงกับ CoA ของ NextAcc</strong> + เปิดใช้แล้ว
+                        ผู้ใช้ <b>ต้องเลือก "ล้างรับของ GRNI" ตอน OCR ใบกำกับสินค้า</b> มิฉะนั้นต้นทุนซ้ำ. ตรวจยอดค้างได้ที่ปุ่ม "ตรวจยอดคงค้าง GRNI".
+                        <br />ปิด = พฤติกรรมเดิม (รับของ Cr เจ้าหนี้การค้า).
+                    </div>
+                </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
                     <label><i class="fas fa-file-invoice"></i> ใบกำกับภาษีอิเล็กทรอนิกส์ (E-Tax)</label>
                     <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#555; margin-bottom:8px;">
@@ -982,6 +996,7 @@
                 document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
                 document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
                 document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
+                document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
                 syncCashSaleToggles();
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
@@ -1062,6 +1077,7 @@
                 cashSaleDeposit: document.getElementById('cfgCashSaleDeposit').checked,
                 cashSaleDepositNativeA: document.getElementById('cfgCashSaleDepositNativeA').checked,
                 cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
+                stockInUseGRNI: document.getElementById('cfgStockInUseGRNI').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
