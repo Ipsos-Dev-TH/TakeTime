@@ -334,49 +334,12 @@
                         <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test</strong> — จัดการเคส churn ช่วง dev; booking ใหม่ปกติไม่ติดลบอยู่แล้ว
                     </div>
                 </div>
-                <div class="config-item">
-                    <label>
-                        <input type="checkbox" id="cfgTaxReceiptSingleDoc" onchange="syncCashSaleToggles()" />
-                        ออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" (ขายสด B2B)
-                    </label>
-                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
-                        เช็คเอาท์/รับชำระ <b>ลูกค้ามีเลขภาษี</b> ที่จ่ายเต็ม (ไม่หักมัดจำ) → NextAcc ออก
-                        <b>ใบเดียว</b> (payment ฝังในใบ Dr แหล่งเงิน / Cr รายได้ / Cr VAT) แทนใบกำกับ +
-                        ใบเสร็จรับชำระแยกหลายใบ. e-Tax TAX_INVOICE ออกได้เหมือนเดิม, GL ไม่เปลี่ยน.
-                        <br />ปิดไว้ (default) = พฤติกรรมเดิม (ใบกำกับ AR + ใบเสร็จรับชำระแยก).
-                        <br /><strong style="color:#c0392b;">⚠ ต้องใช้ NextAcc รุ่นรองรับ isCashSale + เปิดหลัง test เช็คเอาท์ 1 รายการ</strong>.
-                        เคส <b>หักมัดจำ</b> ยังใช้เส้นเดิมอัตโนมัติ (ยังไม่รวมใบ) จนกว่าจะเปิดตัวเลือกด้านล่าง.
-                    </div>
-                </div>
-                <div class="config-item">
-                    <label>
-                        <input type="checkbox" id="cfgCashSaleDeposit" onchange="syncCashSaleToggles()" />
-                        └ รวมเคส "หักมัดจำ" ในใบเดียวด้วย (Option B — TakeTime โพสต์ JV เอง)
-                    </label>
-                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
-                        เช็คเอาท์ที่หักมัดจำ → ออก <b>ใบเดียว</b> (ใบกำกับ/ใบเสร็จ แสดง "หักมัดจำ (REC-xxx) / ยอดชำระสุทธิ")
-                        + TakeTime โพสต์ JV กลับมัดจำเอง (<b>Dr 21510 / Cr แหล่งเงิน</b>) → 21510 ล้างเกลี้ยง
-                        <b>ไม่ต้องรอ NextAcc</b> (ไม่พึ่ง drives ฝั่ง NextAcc). GL รวม: Dr แหล่งเงินสุทธิ + Dr 21510 / Cr รายได้+VAT.
-                        <br /><strong style="color:#c0392b;">⚠ ต้องเปิด "ออกใบเดียว" ด้านบนก่อน + ทดสอบ GL เคสมัดจำ 1 รายการบน Windows ก่อนใช้จริง</strong>
-                        (ตรวจ JE: Dr 21510 เท่ายอดมัดจำ + 21510 กลับเป็น 0). ใบมัดจำที่ยังไม่ sync เป็นเอกสาร → ตกเส้นเดิมอัตโนมัติ.
-                        โหมด §78/1 เคร่ง (RECEIPT+ไม่ defer) ยังใช้เส้นเดิม.
-                    </div>
-                </div>
-                <div class="config-item">
-                    <label>
-                        <input type="checkbox" id="cfgCashSaleDepositNativeA" onchange="syncCashSaleToggles()" />
-                        └└ ใช้ NextAcc native (JE เดียว ไม่มี JV แยก) — <b>Option A</b>
-                    </label>
-                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
-                        เปลี่ยนจาก B (TakeTime โพสต์ JV) → <b>A</b>: ส่ง <code>drives=true</code> ให้ NextAcc ลง Dr 21510
-                        ใน JE ของใบเอง (สะอาดกว่า JE เดียว ไม่มี JV แยก) — NextAcc กลับมัดจำผ่าน
-                        <code>ApplyDepositToInvoiceAsync</code> (สืบทอด guard over-apply / one-shot / deferred-VAT).
-                        <br /><strong style="color:#27ae60;">✓ NextAcc ต่อสายแล้ว (CI ผ่านฝั่ง dev) — ปลดล็อกแล้ว</strong>.
-                        <br /><strong style="color:#c0392b;">⚠ เปิดเฉพาะหลัง rebuild บน Windows + test GL เคสมัดจำผ่านแล้วเท่านั้น</strong>
-                        (ตรวจ checklist: cash sale + มัดจำ → 217xx/21510 <b>balanced กลับเป็น 0</b>). drives ต้อง resolve
-                        ใบมัดจำเป็นเอกสาร IsDeposit จริงจาก <code>depositAppliedRef</code> ไม่งั้น fail-soft (21510 ไม่กลับ —
-                        ระบบ gate ด้วย <code>DepositRefsResolvedToNextAcc</code> อยู่แล้ว แต่ยังควร test ก่อนเปิดจริง).
-                        ปิดไว้ = ใช้ Option B (default, TakeTime โพสต์ JV เอง ไม่พึ่ง NextAcc).
+                <div class="config-item" style="background:#f1f3f4; border:1px dashed #bbb; border-radius:4px; padding:8px;">
+                    <label style="color:#666;"><i class="fas fa-info-circle"></i> การออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำ</label>
+                    <div class="help-text" style="padding-left:4px;">
+                        จัดการอัตโนมัติผ่าน<b>ปุ่ม "⭐ ใช้ค่าแนะนำ" ด้านบน</b> — route เอกสารรับ B2B ไปเส้น <b>company Receipt(3) + drives</b>
+                        (verified): ใบเดียว หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน", หักมัดจำในใบ (Dr 21510), e-Tax T03.
+                        <br/><small style="color:#999;">(toggle ทดลอง isCashSale เดิม — TaxReceipt_SingleDoc / CashSale_Deposit / NativeA — <b>เอาออกแล้ว</b>: ตัวแรก 2 ตัวไม่มีผลต่อโค้ด, การหักมัดจำใช้ drives ผ่านค่าแนะนำแทน)</small>
                     </div>
                 </div>
                 <div class="config-item" style="background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px;">
@@ -1018,13 +981,9 @@
                 document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
                 document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
-                document.getElementById('cfgTaxReceiptSingleDoc').checked = !!cfg.taxReceiptSingleDoc;
-                document.getElementById('cfgCashSaleDeposit').checked = !!cfg.cashSaleDeposit;
-                document.getElementById('cfgCashSaleDepositNativeA').checked = !!cfg.cashSaleDepositNativeA;
                 document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
                 document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
                 document.getElementById('cfgStockInSkipJournal').checked = !!cfg.stockInSkipJournal;
-                syncCashSaleToggles();
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
@@ -1052,19 +1011,6 @@
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
-        }
-
-        // ลำดับชั้น: ออกใบเดียว → หักมัดจำ (Option B) → native (Option A).
-        // แต่ละชั้นต้องเปิดชั้นบนก่อน (โค้ด backend gate อยู่แล้ว แต่บังคับใน UI ให้ชัด กันติ๊กหลอกตา).
-        function syncCashSaleToggles() {
-            var single = document.getElementById('cfgTaxReceiptSingleDoc').checked;
-            var dep = document.getElementById('cfgCashSaleDeposit');
-            var nativeA = document.getElementById('cfgCashSaleDepositNativeA');
-            dep.disabled = !single;
-            if (!single) { dep.checked = false; }
-            // Option A ขึ้นกับ single + deposit (ปลดล็อกแล้ว — ควบคุมด้วย dependency ไม่ใช่ hard-lock)
-            nativeA.disabled = !(single && dep.checked);
-            if (!single || !dep.checked) { nativeA.checked = false; }
         }
 
         function saveConfig() {
@@ -1100,9 +1046,6 @@
                 autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
                 postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
                 autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
-                taxReceiptSingleDoc: document.getElementById('cfgTaxReceiptSingleDoc').checked,
-                cashSaleDeposit: document.getElementById('cfgCashSaleDeposit').checked,
-                cashSaleDepositNativeA: document.getElementById('cfgCashSaleDepositNativeA').checked,
                 cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
                 stockInUseGRNI: document.getElementById('cfgStockInUseGRNI').checked,
                 stockInSkipJournal: document.getElementById('cfgStockInSkipJournal').checked,

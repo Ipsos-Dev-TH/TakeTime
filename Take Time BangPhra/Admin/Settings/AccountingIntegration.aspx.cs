@@ -81,9 +81,6 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "autoRecoverDeposit", config.IsAutoRecoverDeposit },
                     { "postSyncVerify", config.IsPostSyncVerifyEnabled },
                     { "autoReconcileDeposit", config.IsAutoReconcileDeposit },
-                    { "taxReceiptSingleDoc", config.IsTaxReceiptSingleDoc },
-                    { "cashSaleDeposit", config.IsCashSaleDepositEnabled },
-                    { "cashSaleDepositNativeA", config.IsCashSaleDepositNativeA },
                     { "cashSaleUseReceipt", config.IsCashSaleUseReceipt },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
@@ -308,12 +305,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("autoRecoverDeposit")) config.SetConfig("Nexaacc_Auto_Recover_Deposit", BoolToFlag(data["autoRecoverDeposit"]));
                 if (data.ContainsKey("postSyncVerify")) config.SetConfig("Nexaacc_Post_Sync_Verify", BoolToFlag(data["postSyncVerify"]));
                 if (data.ContainsKey("autoReconcileDeposit")) config.SetConfig("Nexaacc_Auto_Reconcile_Deposit", BoolToFlag(data["autoReconcileDeposit"]));
-                // ⚠ เปิดได้เมื่อ NextAcc รองรับ isCashSale แล้วเท่านั้น (ออกใบเดียว ใบกำกับ/ใบเสร็จ ขายสด B2B)
-                if (data.ContainsKey("taxReceiptSingleDoc")) config.SetConfig("Nexaacc_TaxReceipt_SingleDoc", BoolToFlag(data["taxReceiptSingleDoc"]));
-                // ⚠⚠ เปิดได้เมื่อ NextAcc รองรับ deposit fields บน isCashSale แล้วเท่านั้น (หักมัดจำในใบเดียว)
-                if (data.ContainsKey("cashSaleDeposit")) config.SetConfig("Nexaacc_CashSale_Deposit", BoolToFlag(data["cashSaleDeposit"]));
-                // ⚠⚠ Option A (NextAcc native drives) — เปิดได้เมื่อ NextAcc ต่อสาย reverse 21510 แล้วเท่านั้น
-                if (data.ContainsKey("cashSaleDepositNativeA")) config.SetConfig("Nexaacc_CashSale_Deposit_NativeA", BoolToFlag(data["cashSaleDepositNativeA"]));
+                // toggle ทดลอง isCashSale (TaxReceipt_SingleDoc / CashSale_Deposit / NativeA) เอา UI ออกแล้ว
+                // (2 ตัวแรกไม่มีผลต่อโค้ด; การหักมัดจำใช้ drives ผ่านค่าแนะนำ). preset ตั้งค่าให้ = 0
                 if (data.ContainsKey("cashSaleUseReceipt")) config.SetConfig("Nexaacc_CashSale_UseReceipt", BoolToFlag(data["cashSaleUseReceipt"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
