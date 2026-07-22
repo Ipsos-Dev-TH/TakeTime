@@ -144,6 +144,19 @@
             <!-- Sync Settings -->
             <div class="acc-card">
                 <h3><i class="fas fa-sync-alt"></i> Sync Settings</h3>
+
+                <!-- ⭐ ตั้งค่าแนะนำ (กดทีเดียว ตั้งค่าถูกทั้งชุด) -->
+                <div style="background:#e8f0fe; border:1px solid #4285f4; border-radius:6px; padding:12px; margin-bottom:14px;">
+                    <label style="font-weight:700; color:#1a56c4; font-size:15px;"><i class="fas fa-star"></i> ตั้งค่าแนะนำ (Production) — กดทีเดียวจบ</label>
+                    <div style="font-size:12px; color:#444; margin:6px 0;">
+                        ตั้งค่าทั้งชุดเป็น<b>เส้นทางที่ทดสอบแล้วถูกต้อง</b>: เอกสารรับ B2B = <b>company Receipt(3)</b> หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำในใบ + e-Tax T03,
+                        หักมัดจำ = <b>drives (JE เดียว Dr แหล่งเงินสุทธิ + Dr 21510)</b>, มัดจำ VAT = รับรู้ตอนเช็คเอาท์, เปิด safety-net.
+                        <br/><b style="color:#c0392b;">แก้ต้นเหตุ:</b> เดิมไปเส้น isCashSale → หัวขึ้น "ใบเสร็จรับเงิน" + มัดจำไม่หักในใบ (6,400 เต็ม). กดปุ่มนี้เคลียร์ toggle ที่เปิดซ้อน/ตายแล้ว กลับสู่ค่ามาตรฐาน.
+                    </div>
+                    <button type="button" class="btn-success" onclick="applyRecommendedPreset()"><i class="fas fa-star"></i> ใช้ค่าแนะนำ (Production)</button>
+                    <div class="test-result" id="presetResult"></div>
+                </div>
+
                 <div class="config-item">
                     <label>เปิดใช้งาน Sync</label>
                     <select id="cfgEnabled">
@@ -1184,6 +1197,21 @@
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
                     el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
                 });
+        }
+
+        function applyRecommendedPreset() {
+            if (!confirm('⭐ ใช้ค่าแนะนำ (Production)?\n\nจะตั้งค่าทั้งชุดเป็นเส้นทางที่ทดสอบแล้วถูกต้อง:\n• เอกสารรับ/จ่าย = DOCUMENT\n• หักมัดจำ = drives (JE เดียว หักมัดจำในใบ)\n• ปิดเส้นทดลอง isCashSale / cash-sale-deposit\n• มัดจำ VAT = รับรู้ตอนเช็คเอาท์\n• เปิด safety-net (auto-recover / reconcile / verify)\n\nทับค่า toggle เดิมที่เปิดซ้อนกัน — บันทึกทันที')) return;
+            var el = document.getElementById('presetResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตั้งค่า...';
+            fetch(pageUrl + '?action=applyRecommendedPreset&_=' + Date.now())
+                .then(function(r){ return r.json(); })
+                .then(function(d){
+                    el.className = 'test-result ' + (d.success ? 'success' : 'error');
+                    el.innerHTML = (d.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + d.message;
+                    if (d.success) setTimeout(function(){ location.reload(); }, 2500);
+                })
+                .catch(function(err){ el.className = 'test-result error'; el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message; });
         }
 
         function grniReconcile() {

@@ -144,6 +144,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "grniReconcile":
                     result = GrniReconcile();
                     break;
+                case "applyRecommendedPreset":
+                    result = ApplyRecommendedPreset();
+                    break;
                 case "queueData":
                     result = GetQueueData();
                     break;
@@ -501,6 +504,55 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Reset Error: " + ex.Message } };
+            }
+        }
+
+        // ⭐ ตั้งค่าแนะนำ (production) — เส้นทางที่ verified แล้ว: company /document + drives เดี่ยว
+        //    ปิด flag ทดลอง (isCashSale single-doc / cash-sale deposit) ที่ทำให้เอกสารมั่ว/หักมัดจำไม่เข้าใบ
+        //    เปิด safety-net (auto-recover / auto-reconcile / post-sync verify)
+        private Dictionary<string, object> ApplyRecommendedPreset()
+        {
+            try
+            {
+                var cfg = new Integration.AccountingConfig(ConnStr);
+                // เอกสารรับ/จ่าย = DOCUMENT (ออกเอกสารจริงบน NextAcc)
+                cfg.SetConfig("Nexaacc_SyncMode_Receipt", "DOCUMENT");
+                cfg.SetConfig("Nexaacc_SyncMode_Voucher", "DOCUMENT");
+                cfg.SetConfig("Nexaacc_Company_Endpoints", "1");
+                // ✅ เส้นเอกสารรับ B2B = company Receipt(3) (UseReceipt=1) — render "ใบกำกับภาษี/ใบเสร็จรับเงิน",
+                //    หักมัดจำในใบ (native), ออก e-Tax T03 ได้. **แก้ต้นเหตุ Bug: เดิม (=0) ไปเส้น isCashSale
+                //    integration invoice → หัวขึ้น "ใบเสร็จรับเงิน" + มัดจำไม่หักในใบ (6,400 เต็ม)**
+                cfg.SetConfig("Nexaacc_CashSale_UseReceipt", "1");
+                // หักมัดจำ = drives (JE เดียว self-contained, Dr แหล่งเงินสุทธิ + Dr 21510) — เส้น verified
+                cfg.SetConfig("Nexaacc_Deposit_Drives_Journal", "1");
+                cfg.SetConfig("Nexaacc_Drives_Journal_Ref", "1");
+                // ปิดเส้นทดลอง (toggle ที่ไม่ได้ใช้จริง/isCashSale) — เคลียร์ความสับสน
+                cfg.SetConfig("Nexaacc_TaxReceipt_SingleDoc", "0");   // ⚠ dead toggle (ไม่มีโค้ดใช้) — ตั้ง 0 กันสับสน
+                cfg.SetConfig("Nexaacc_CashSale_Deposit", "0");        // ⚠ dead toggle
+                cfg.SetConfig("Nexaacc_CashSale_Deposit_NativeA", "0");
+                // มัดจำ VAT: รับรู้ตอนเช็คเอาท์ ใบกำกับใบเดียวเต็มยอด (แนะนำ hotel — ตรงเวลา ภ.พ.30, ไม่ซ้อน)
+                cfg.SetConfig("Deposit_Vat_Recognition", "CHECKOUT");
+                cfg.SetConfig("Deposit_Defer_Output_Vat", "0");
+                // safety-net: กัน GL เพี้ยน/มัดจำค้าง อัตโนมัติ
+                cfg.SetConfig("Nexaacc_Auto_Recover_Deposit", "1");
+                cfg.SetConfig("Nexaacc_Auto_Reconcile_Deposit", "1");
+                cfg.SetConfig("Nexaacc_Post_Sync_Verify", "1");
+
+                _code.Logs(ConnStr, "AccountingConfig",
+                    "ApplyRecommendedPreset: ตั้งค่าแนะนำ production (DOCUMENT + drives, ปิด isCashSale, เปิด safety-net)", "SYSTEM");
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message",
+                        "✅ ตั้งค่าแนะนำเรียบร้อย — เอกสารรับ B2B = company Receipt(3) หัว 'ใบกำกับภาษี/ใบเสร็จรับเงิน' + หักมัดจำในใบ + e-Tax T03 " +
+                        "(แก้ต้นเหตุที่เดิมไปเส้น isCashSale → หัวขึ้น 'ใบเสร็จรับเงิน' + มัดจำไม่หักในใบ 6,400 เต็ม), " +
+                        "หักมัดจำ = drives (JE เดียว Dr แหล่งเงินสุทธิ + Dr 21510), มัดจำ VAT = CHECKOUT, เปิด safety-net. " +
+                        "โหลดหน้าใหม่เพื่อดูค่าที่อัปเดต แล้ว rebuild+deploy บน Windows" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "ตั้งค่าแนะนำไม่สำเร็จ: " + ex.Message } };
             }
         }
 
