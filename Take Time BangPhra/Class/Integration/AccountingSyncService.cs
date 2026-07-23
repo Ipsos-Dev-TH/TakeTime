@@ -4823,6 +4823,11 @@ namespace Take_Time_BangPhra.Integration
                     _lastReceiptUsedDrives = doc.DepositAppliedDrivesJournal;   // ให้ post-sync verify รู้ว่า safe จะ reconcile -DEPADJ ค้าง
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
+                    // ลูกค้ามีเลขภาษีครบ §86/4 (B2B ที่ route มาที่นี่ผ่าน CashSale_UseReceipt) → Receipt(3) เป็น
+                    // "ใบกำกับภาษี/ใบเสร็จรับเงิน" ออก e-Tax T03 ได้ (NextAcc รองรับ Receipt→T03). walk-in ไม่มีเลขภาษี
+                    // → ข้าม (TryAutoGenerate จะ fail-soft เองอยู่แล้ว แต่ gate กันเรียกเปล่า)
+                    if (HasFullBuyerTaxData(customerContact))
+                        await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
