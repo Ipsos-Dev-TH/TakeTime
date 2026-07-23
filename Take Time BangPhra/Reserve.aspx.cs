@@ -7662,8 +7662,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         ph.PaymentType,
                         ph.PaymentMethod,
                         ph.Status,
-                        -- แสดง "เลขเอกสาร NextAcc" (TIV-/REC-) ถ้า sync แล้ว, ไม่งั้นเลข local เดิม
-                        -- ไม่กรอง Nexaacc_Document_Type เพื่อให้จับได้ทั้ง TaxInvoice(TIV)/Receipt(REC)/Invoice
+                        -- แสดงเลขเอกสาร NextAcc (TIV-/REC-) ถ้า sync แล้ว, ไม่งั้นเลข local เดิม
+                        -- ไม่กรอง Nexaacc_Document_Type เพื่อให้จับได้ทั้ง TaxInvoice/Receipt/Invoice
                         COALESCE(
                             (SELECT TOP 1 q.Nexaacc_Document_Number
                                FROM Accounting_Sync_Queue q
