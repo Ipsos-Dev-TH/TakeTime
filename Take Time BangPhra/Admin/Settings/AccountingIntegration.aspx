@@ -602,12 +602,14 @@
                 <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
                 <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
+                <button type="button" class="btn-default" onclick="loadEmailLog()"><i class="fas fa-list-alt"></i> ดู logs ล่าสุด</button>
             </div>
             <div class="help-text" style="margin-top:8px;">
                 ⓘ เปิด IMAP: Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP. สร้าง App Password: Google Account → Security → 2-Step Verification → App passwords.
                 ระบบดึงอัตโนมัติทุก N นาทีตามที่ตั้ง (อาศัย background timer เดียวกับ accounting sync). dedup ด้วย Booking ID — รันคู่โปรแกรมเดิมได้ไม่สร้างซ้ำ.
             </div>
             <div class="test-result" id="emailRsvResult"></div>
+            <div id="emailRsvLog" style="margin-top:12px;"></div>
         </div>
 
         <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
@@ -1280,6 +1282,42 @@
 
         function escHtml(s) {
             return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function loadEmailLog() {
+            var el = document.getElementById('emailRsvLog');
+            el.innerHTML = '<div class="test-result loading">กำลังโหลด logs...</div>';
+            fetch(pageUrl + '?action=emailIntakeLog&limit=100&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + (data.message || 'โหลด logs ไม่สำเร็จ') + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result">ยังไม่มี log (ลองกด "ดึงตอนนี้" หรือรอ timer รอบถัดไป)</div>';
+                        return;
+                    }
+                    var html = '<div style="max-height:340px; overflow:auto; border:1px solid #e0e0e0; border-radius:4px;">' +
+                        '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+                        '<thead><tr style="background:#f5f5f5; position:sticky; top:0;">' +
+                        '<th style="text-align:left; padding:6px 8px; white-space:nowrap;">เวลา</th>' +
+                        '<th style="text-align:left; padding:6px 8px;">รายละเอียด</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.items.length; i++) {
+                        var it = data.items[i];
+                        var d = it.detail || '';
+                        var isErr = /error|failed|ล้มเหลว|ไม่สำเร็จ|ไม่พบ|no mapping|not enough/i.test(d);
+                        html += '<tr style="border-top:1px solid #eee;">' +
+                            '<td style="padding:6px 8px; white-space:nowrap; color:#777;">' + escHtml(it.time) + '</td>' +
+                            '<td style="padding:6px 8px; color:' + (isErr ? '#c0392b' : '#333') + ';">' + escHtml(d) + '</td></tr>';
+                    }
+                    html += '</tbody></table></div>' +
+                        '<div style="font-size:11px; color:#999; margin-top:4px;">แสดง ' + data.items.length + ' รายการล่าสุด (LogAction = EmailReservation)</div>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
         }
 
         function reconcileDeleted() {

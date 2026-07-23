@@ -217,6 +217,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakeTest":
                     result = TestEmailIntakeConnection();
                     break;
+                case "emailIntakeLog":
+                    result = GetEmailIntakeLog();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -529,6 +532,36 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Test Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> GetEmailIntakeLog()
+        {
+            try
+            {
+                int limit = 100;
+                int.TryParse(Request.QueryString["limit"], out limit);
+                if (limit <= 0 || limit > 500) limit = 100;
+
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    $"SELECT TOP {limit} LogDateTime, LogDetail, LogBy FROM Logs WHERE LogAction = 'EmailReservation' ORDER BY LogDateTime DESC",
+                    null);
+
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "time", r["LogDateTime"] == DBNull.Value ? "" : Convert.ToDateTime(r["LogDateTime"]).ToString("yyyy-MM-dd HH:mm:ss") },
+                            { "detail", r["LogDetail"]?.ToString() ?? "" },
+                            { "by", r["LogBy"]?.ToString() ?? "" }
+                        });
+
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "total", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Log Error: " + ex.Message } };
             }
         }
 
