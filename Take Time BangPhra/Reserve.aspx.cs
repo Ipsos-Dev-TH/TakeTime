@@ -2768,6 +2768,9 @@ namespace Take_Time_BangPhra
                                         var reservationDA = new ReservationDataAccess(conn);
 
                                         IsDeposit = false;
+                                        // true = เช็คอินไม่สำเร็จ (ไม่ติ๊กชำระเงิน/ยอดไม่ครบ) → อย่า redirect กลับ ReserveTable
+                                        // ให้ค้างหน้าเดิมเพื่อโชว์ alert (เดิม redirect ทับ alert → เด้งกลับเงียบ ๆ ไม่รู้สาเหตุ)
+                                        bool checkinBlocked = false;
 
                                         // ✅ Validate Customer_Type_ID with fallback to default
                                         int customerTypeId = 1; // Default: บุคคลธรรมดา
@@ -3196,6 +3199,7 @@ namespace Take_Time_BangPhra
                                         else
                                         {
                                             // ❌ ไม่ได้ tick checkbox หรือไม่ได้กรอกยอดเงิน - ไม่ทำการเช็คอิน
+                                            checkinBlocked = true;   // อย่า redirect → ค้างหน้าให้ alert แสดง
                                             string alertMessage = "⚠️ ยังไม่ได้ทำการเช็คอิน!\\n\\n" +
                                                                 "กรุณาติ๊กเลือก \\'ชำระเงิน\\' และกรอกยอดเงินที่รับ\\n" +
                                                                 "จึงจะสามารถเช็คอินได้\\n\\n" +
@@ -3227,11 +3231,12 @@ namespace Take_Time_BangPhra
                                             Response.Redirect($"./Reserve?command=checkin&id={id}&check={TextBox1.Text}", false);
                                             HttpContext.Current.ApplicationInstance.CompleteRequest();
                                         }
-                                        else
+                                        else if (!checkinBlocked)
                                         {
                                             Response.Redirect("/ReserveTable",false);
                                             HttpContext.Current.ApplicationInstance.CompleteRequest();
                                         }
+                                        // checkinBlocked = true → ไม่ redirect, ค้างหน้าเดิมให้ alert "ยังไม่ได้เช็คอิน" แสดง
                                     }
                                     else if (command == "reserve")
                                     {

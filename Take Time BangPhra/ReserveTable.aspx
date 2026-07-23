@@ -1077,6 +1077,19 @@
             naRefreshTimer = setTimeout(function () { naLoadOverview(); }, ms || 800);
         }
 
+        function naSetCheckedIn() {
+            if (naBusy) return;
+            if (!confirm('✓ ตั้งสถานะการจอง #' + naCurrentResId + ' เป็น "เช็คอินแล้ว"?\n\nสำหรับเคสที่รับเงินครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะค้าง\nจะแก้เฉพาะสถานะ — ไม่แตะเงิน/เอกสาร NextAcc')) return;
+            naSetBusy(true, 'กำลังตั้งสถานะเช็คอิน...');
+            naFetch(naPageUrl + '?naAction=setCheckedIn&resId=' + naCurrentResId + '&_=' + Date.now(), 30000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    if (d.Success) setTimeout(function () { location.reload(); }, 1800);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
+        }
+
         function naReservationAction(action) {
             var confirmMsg = action === 'resyncAll'
                 ? '🔁 Resync การจอง #' + naCurrentResId + ' ทั้งชุด (คงเลขเอกสารเดิม)?\n\nไล่แก้เอกสารทุกใบ (มัดจำ→เช็คเอาท์) ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม\n• ใบที่ไม่เคย sync → สร้างครั้งแรก / ใบที่ถูกลบ → สร้างใหม่สะอาด\n• แก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขเปลี่ยน)\n• งวด/เดือนภาษีปิดแล้วเท่านั้นที่แก้ไม่ได้ → รายงานเป็นรายใบ\n\nอาจใช้เวลาถึง 1-2 นาที'
@@ -1139,6 +1152,8 @@
                 <div class="modal-body" id="naModalBody" style="max-height:62vh; overflow:auto;"></div>
                 <div id="naBusyBar" style="padding:0 15px;"></div>
                 <div class="modal-footer" style="display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; text-align:right;">
+                    <button type="button" class="btn btn-success btn-sm" onclick="naSetCheckedIn()"
+                        title="ตั้งสถานะการจองเป็น 'เช็คอินแล้ว' โดยตรง — สำหรับเคสที่จ่ายครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะค้าง (ไม่แตะเงิน/เอกสาร)">✓ ตั้งเช็คอินแล้ว</button>
                     <button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
                     <button type="button" class="btn btn-warning btn-sm" onclick="naReservationAction('resyncAll')"
                         title="แก้เอกสารทุกใบให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสาร NextAcc เดิม (in-place)">🔁 Resync ทั้งการจอง (คงเลขเดิม)</button>

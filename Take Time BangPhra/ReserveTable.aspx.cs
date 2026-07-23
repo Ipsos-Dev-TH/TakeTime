@@ -121,6 +121,18 @@ namespace Take_Time_BangPhra
                                 result = new { Success = rc >= 0, Message = msg };
                                 break;
                             }
+                        case "setCheckedIn":
+                            {
+                                // แก้สถานะการจองที่ค้าง (จ่ายครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะไม่อัปเดต) →
+                                // ตั้งเป็น "เช็คอินแล้ว" โดยตรง (ไม่แตะเงิน/เอกสาร). ปลอดภัยเมื่อรับเงินครบแล้ว
+                                if (resId <= 0) { result = new { Success = false, Message = "รหัสการจองไม่ถูกต้อง" }; break; }
+                                int n = code2.DatabaseInsertSafe(conn,
+                                    "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว', [Deposit] = [TotalPrice] WHERE ID = @rid AND [Status] <> N'เช็คอินแล้ว'",
+                                    new Dictionary<string, object> { { "@rid", resId } });
+                                code2.Logs(conn, "Reserve CheckIn", $"setCheckedIn manual: #{resId} → เช็คอินแล้ว (rows={n})", Session["User"]?.ToString());
+                                result = new { Success = true, Message = $"ตั้งสถานะการจอง #{resId} เป็น 'เช็คอินแล้ว' เรียบร้อย (เงิน/เอกสารไม่ถูกแตะ) — โหลดหน้าใหม่เพื่อเห็นสถานะ" };
+                                break;
+                            }
                         case "voidReceipt":
                             {
                                 long q = sync.EnqueueVoidReceipt(doc);
