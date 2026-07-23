@@ -7733,6 +7733,38 @@ namespace Take_Time_BangPhra.Integration
                     _code.Logs(_connectionString, "AccountingSync",
                         $"{logPrefix}: upserted {info.Name} ({info.ExternalId}) taxId={(taxIdOk ? info.TaxId : "-")} → {info.NexaaccContactId}",
                         "SYSTEM");
+
+                    // ⚠ workaround บั๊ก NextAcc: integration upsert (ProcessCustomerAsync) อัปเดต contact
+                    // "ที่มีอยู่แล้ว" โดยไม่ทับ BranchCode/ContactType (สอง field นี้ตกหล่นใน update-branch —
+                    // set เฉพาะตอนสร้างใหม่) → contact นิติบุคคลเก่าไม่มีรหัสสาขา → NextAcc ปัด 400 §86/4
+                    // "ต้องมีรหัสสาขาผู้ซื้อ 5 หลัก" ตอน approve ใบกำกับ. แพตช์ตรงผ่าน company
+                    // PUT /document/contacts/{id} (verified: อัปเดต BranchCode + ContactType ครบ).
+                    // best-effort — ไม่มี company endpoint/พลาด → ข้าม (เอกสารจะฟ้อง 400 พร้อม hint เดิม)
+                    if (_config.CanUseCompanyEndpoints)
+                    {
+                        try
+                        {
+                            string patchBranch = (info.BranchCode ?? "").Trim();
+                            if (!System.Text.RegularExpressions.Regex.IsMatch(patchBranch, @"^\d{5}$"))
+                                patchBranch = isJuristic ? "00000" : null;
+                            if (!string.IsNullOrEmpty(patchBranch) || isJuristic)
+                            {
+                                await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
+                                {
+                                    BranchCode = patchBranch,
+                                    ContactType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual
+                                });
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"{logPrefix}: patch contact {info.NexaaccContactId} branch={patchBranch ?? "-"} " +
+                                    $"type={(isJuristic ? "Juristic" : "Individual")} ผ่าน company PUT (int_ upsert ไม่ทับ field เดิม)", "SYSTEM");
+                            }
+                        }
+                        catch (Exception px)
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"{logPrefix}: patch branch/type ล้มเหลว (ไม่บล็อก): {px.Message}", "SYSTEM");
+                        }
+                    }
                     return null;
                 }
 
