@@ -291,6 +291,23 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool EtaxEmailLocalOnly => GetConfig("Etax_EmailLocalOnly", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        // ── Email reservation intake (STAAH) ─────────────────────────────────────
+        /// <summary>เปิดอ่านอีเมลจอง OTA (STAAH) ในระบบเอง</summary>
+        public bool IsEmailReservationEnabled => GetConfig("Email_Rsv_Enabled", "0") == "1";
+        public string EmailRsvImapServer => GetConfig("Email_Rsv_ImapServer", "imap.gmail.com");
+        public int EmailRsvImapPort => int.TryParse(GetConfig("Email_Rsv_ImapPort", "993"), out var v) ? v : 993;
+        public string EmailRsvUsername => GetConfig("Email_Rsv_Username", "");
+        public bool EmailRsvHasPassword => !string.IsNullOrEmpty(GetConfig("Email_Rsv_Password_Encrypted", ""));
+        public int EmailRsvPollMinutes => int.TryParse(GetConfig("Email_Rsv_PollMinutes", "5"), out var v) ? v : 5;
+        public string EmailRsvProcessedLabel => GetConfig("Email_Rsv_ProcessedLabel", "STAAH-Processed");
+        public string EmailRsvFailedLabel => GetConfig("Email_Rsv_FailedLabel", "STAAH-Failed");
+        public int EmailRsvMaxStayDays => int.TryParse(GetConfig("Email_Rsv_MaxStayDays", "30"), out var v) ? v : 30;
+        public int EmailRsvMaxDaysFuture => int.TryParse(GetConfig("Email_Rsv_MaxDaysFuture", "365"), out var v) ? v : 365;
+        public bool EmailRsvNotifyTelegram => GetConfig("Email_Rsv_NotifyTelegram", "1") == "1";
+        public bool EmailRsvCreateDocument => GetConfig("Email_Rsv_CreateDocument", "0") == "1";
+        public bool EmailRsvMoveFailed => GetConfig("Email_Rsv_MoveFailed", "1") == "1";
+        public string EmailRsvFromContains => GetConfig("Email_Rsv_FromContains", "staah");
+
         /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง

@@ -13,6 +13,8 @@ IF COL_LENGTH('Reservation', 'OTA_Channel') IS NULL
     ALTER TABLE Reservation ADD OTA_Channel NVARCHAR(50) NULL;
 IF COL_LENGTH('Reservation', 'OTA_Booking_ID') IS NULL
     ALTER TABLE Reservation ADD OTA_Booking_ID NVARCHAR(100) NULL;
+IF COL_LENGTH('Reservation', 'OTA_Guest_Name') IS NULL
+    ALTER TABLE Reservation ADD OTA_Guest_Name NVARCHAR(200) NULL;   -- ชื่อผู้เข้าพักจาก OTA (Channel Manager อาจเพิ่มไว้แล้ว)
 IF COL_LENGTH('Reservation', 'OTA_Gross_Amount') IS NULL
     ALTER TABLE Reservation ADD OTA_Gross_Amount DECIMAL(18,2) NULL;   -- refsell_amt: ราคาที่ลูกค้าจ่าย OTA
 IF COL_LENGTH('Reservation', 'OTA_Net_Amount') IS NULL
@@ -55,6 +57,16 @@ IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Em
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_NotifyTelegram')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
     VALUES ('Email_Rsv_NotifyTelegram', '1', N'แจ้ง Telegram เมื่อลงจอง/ล้มเหลว (ใช้ token เดิมของระบบ)');
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_CreateDocument')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('Email_Rsv_CreateDocument', '0',
+            N'หลังลงจองจากอีเมล: 0 = ลงจองเฉย ๆ (เอกสารออกตอนเช็คอิน/เช็คเอาท์ตามปกติ) / 1 = ยิงสร้างเอกสารบัญชีทันที (ลูกหนี้ OTA ถ้าเปิด Nexaacc_Ota_Settlement, ไม่งั้นข้าม)');
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_MoveFailed')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('Email_Rsv_MoveFailed', '1', N'ย้ายอีเมลที่ประมวลผลไม่สำเร็จไป folder Failed (0 = แค่ mark seen)');
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_FromContains')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('Email_Rsv_FromContains', 'staah', N'กรองอีเมลจากผู้ส่งที่มีคำนี้ (เช่น staah)');
 GO
 
 SELECT ConfigKey, ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey LIKE 'Email_Rsv_%' ORDER BY ConfigKey;

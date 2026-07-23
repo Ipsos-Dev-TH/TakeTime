@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
 using System.Web.UI;
+using Take_Time_BangPhra.Class.Services;
 
 namespace Take_Time_BangPhra.Admin.Settings
 {
@@ -96,7 +97,22 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "syncInterval", config.SyncIntervalSeconds },
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
-                    { "isConfigured", config.IsConfigured }
+                    { "isConfigured", config.IsConfigured },
+                    // Email reservation intake (STAAH)
+                    { "emailRsvEnabled", config.IsEmailReservationEnabled },
+                    { "emailRsvImapServer", config.EmailRsvImapServer },
+                    { "emailRsvImapPort", config.EmailRsvImapPort },
+                    { "emailRsvUsername", config.EmailRsvUsername },
+                    { "emailRsvHasPassword", config.EmailRsvHasPassword },
+                    { "emailRsvPollMinutes", config.EmailRsvPollMinutes },
+                    { "emailRsvProcessedLabel", config.EmailRsvProcessedLabel },
+                    { "emailRsvFailedLabel", config.EmailRsvFailedLabel },
+                    { "emailRsvMaxStayDays", config.EmailRsvMaxStayDays },
+                    { "emailRsvMaxDaysFuture", config.EmailRsvMaxDaysFuture },
+                    { "emailRsvNotifyTelegram", config.EmailRsvNotifyTelegram },
+                    { "emailRsvCreateDocument", config.EmailRsvCreateDocument },
+                    { "emailRsvMoveFailed", config.EmailRsvMoveFailed },
+                    { "emailRsvFromContains", config.EmailRsvFromContains }
                 };
                 hfConfigData.Value = new JavaScriptSerializer().Serialize(data);
             }
@@ -195,6 +211,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "depositStatus":
                     result = LookupDepositStatus();
                     break;
+                case "emailIntakeRun":
+                    result = RunEmailIntakeNow();
+                    break;
+                case "emailIntakeTest":
+                    result = TestEmailIntakeConnection();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -238,6 +260,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "stockProductSync":
                     result = ManualProductSync(data);
+                    break;
+                case "saveEmailIntake":
+                    result = SaveEmailIntakeConfig(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -435,6 +460,75 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Process Error: " + ex.Message } };
+            }
+        }
+
+        // ── Email reservation intake (STAAH) ─────────────────────────────────────
+        private Dictionary<string, object> SaveEmailIntakeConfig(Dictionary<string, object> data)
+        {
+            try
+            {
+                var config = new Integration.AccountingConfig(ConnStr);
+                if (data.ContainsKey("emailRsvEnabled")) config.SetConfig("Email_Rsv_Enabled", BoolToFlag(data["emailRsvEnabled"]));
+                if (data.ContainsKey("emailRsvImapServer")) config.SetConfig("Email_Rsv_ImapServer", data["emailRsvImapServer"]?.ToString() ?? "imap.gmail.com");
+                if (data.ContainsKey("emailRsvImapPort")) config.SetConfig("Email_Rsv_ImapPort", data["emailRsvImapPort"]?.ToString() ?? "993");
+                if (data.ContainsKey("emailRsvUsername")) config.SetConfig("Email_Rsv_Username", data["emailRsvUsername"]?.ToString() ?? "");
+                // รหัสผ่าน: บันทึกเฉพาะเมื่อมีการกรอกใหม่ (ไม่ทับด้วยค่าว่าง/mask)
+                if (data.ContainsKey("emailRsvPassword"))
+                {
+                    string pw = data["emailRsvPassword"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(pw)) config.SetConfig("Email_Rsv_Password_Encrypted", _code.Crypt(pw));
+                }
+                if (data.ContainsKey("emailRsvPollMinutes")) config.SetConfig("Email_Rsv_PollMinutes", data["emailRsvPollMinutes"]?.ToString() ?? "5");
+                if (data.ContainsKey("emailRsvProcessedLabel")) config.SetConfig("Email_Rsv_ProcessedLabel", data["emailRsvProcessedLabel"]?.ToString() ?? "STAAH-Processed");
+                if (data.ContainsKey("emailRsvFailedLabel")) config.SetConfig("Email_Rsv_FailedLabel", data["emailRsvFailedLabel"]?.ToString() ?? "STAAH-Failed");
+                if (data.ContainsKey("emailRsvMaxStayDays")) config.SetConfig("Email_Rsv_MaxStayDays", data["emailRsvMaxStayDays"]?.ToString() ?? "30");
+                if (data.ContainsKey("emailRsvMaxDaysFuture")) config.SetConfig("Email_Rsv_MaxDaysFuture", data["emailRsvMaxDaysFuture"]?.ToString() ?? "365");
+                if (data.ContainsKey("emailRsvNotifyTelegram")) config.SetConfig("Email_Rsv_NotifyTelegram", BoolToFlag(data["emailRsvNotifyTelegram"]));
+                if (data.ContainsKey("emailRsvCreateDocument")) config.SetConfig("Email_Rsv_CreateDocument", BoolToFlag(data["emailRsvCreateDocument"]));
+                if (data.ContainsKey("emailRsvMoveFailed")) config.SetConfig("Email_Rsv_MoveFailed", BoolToFlag(data["emailRsvMoveFailed"]));
+                if (data.ContainsKey("emailRsvFromContains")) config.SetConfig("Email_Rsv_FromContains", data["emailRsvFromContains"]?.ToString() ?? "staah");
+
+                return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกการตั้งค่าอ่านอีเมลจองแล้ว" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Save Error: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> RunEmailIntakeNow()
+        {
+            try
+            {
+                var svc = new Class.Services.EmailReservationService(ConnStr);
+                var r = System.Threading.Tasks.Task.Run(() => svc.ProcessEmails()).Result;
+                if (r.Error != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", r.Error } };
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", r.ToString() },
+                    { "detail", string.Join("\n", r.Messages) }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Run Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> TestEmailIntakeConnection()
+        {
+            try
+            {
+                var svc = new Class.Services.EmailReservationService(ConnStr);
+                var (ok, msg) = System.Threading.Tasks.Task.Run(() => svc.TestConnection()).Result;
+                return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Test Error: " + (ex.InnerException ?? ex).Message } };
             }
         }
 

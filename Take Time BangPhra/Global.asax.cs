@@ -11,6 +11,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Take_Time_BangPhra.Integration;
+using Take_Time_BangPhra.Class.Services;
 
 namespace Take_Time_BangPhra
 {
@@ -59,7 +60,15 @@ namespace Take_Time_BangPhra
             try
             {
                 var config = new AccountingConfig();
-                if (!config.IsReadyToSync) return;
+                // เปิด timer ถ้า accounting sync พร้อม หรือ เปิดอ่านอีเมลจอง OTA (email intake ก็อาศัย timer นี้)
+                bool emailOn = false;
+                try
+                {
+                    string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    emailOn = EmailReservationService.IsEnabled(conn);
+                }
+                catch { }
+                if (!config.IsReadyToSync && !emailOn) return;
 
                 int intervalMs = config.SyncIntervalSeconds * 1000;
                 if (intervalMs < 10000) intervalMs = 30000; // minimum 10 seconds
@@ -99,6 +108,10 @@ namespace Take_Time_BangPhra
                 try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
                 catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }
 
+                // อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ — gate ด้วย flag Email_Rsv_Enabled + poll interval; no-op ถ้าปิด
+                try { ProcessEmailReservationIntakeIfDue(); }
+                catch (Exception eex) { System.Diagnostics.Trace.TraceError($"EmailReservation timer error: {(eex.InnerException ?? eex).Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)
@@ -119,6 +132,36 @@ namespace Take_Time_BangPhra
             {
                 _isSyncing = false;
             }
+        }
+
+        private static DateTime _lastEmailPoll = DateTime.MinValue;
+
+        /// <summary>
+        /// ดึง+ลงจองอีเมล OTA (STAAH) ตามรอบ Email_Rsv_PollMinutes — เรียกจาก timer หลัก.
+        /// no-op ถ้า flag ปิด; กันยิงถี่ด้วยตัวจับเวลา in-memory (ต่อ worker process).
+        /// </summary>
+        private static void ProcessEmailReservationIntakeIfDue()
+        {
+            string conn;
+            try { conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString; }
+            catch { return; }
+            if (!EmailReservationService.IsEnabled(conn)) return;
+
+            int pollMin = 5;
+            try
+            {
+                var c = new code();
+                var dt = c.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_PollMinutes'", null);
+                if (dt?.Rows.Count > 0) int.TryParse(dt.Rows[0][0]?.ToString(), out pollMin);
+            }
+            catch { }
+            if (pollMin < 1) pollMin = 5;
+            if ((DateTime.Now - _lastEmailPoll).TotalMinutes < pollMin) return;
+            _lastEmailPoll = DateTime.Now;
+
+            var svc = new EmailReservationService(conn);
+            svc.ProcessEmails();
         }
 
         /// <summary>

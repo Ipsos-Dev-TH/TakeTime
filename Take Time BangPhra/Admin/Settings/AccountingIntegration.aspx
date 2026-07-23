@@ -506,6 +506,110 @@
             </div>
         </div>
 
+        <!-- 📧 อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ -->
+        <div class="journey-card">
+            <h3><i class="fas fa-envelope-open-text"></i> อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) จาก Gmail แล้วลงจองในระบบให้อัตโนมัติ — แทนโปรแกรมภายนอกเดิม.<br/>
+                เก็บ <b>ราคาขายจริง (gross/refsell_amt)</b> แยกจาก <b>ยอดที่ OTA จะโอน (net)</b> เพื่อให้รายได้/VAT/ลูกหนี้ OTA ถูกต้อง.
+                ต้องใช้ <b>Gmail App Password</b> (ไม่ใช่รหัสผ่านปกติ) และเปิด IMAP ในบัญชี Gmail.
+            </p>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="cfgEmailRsvEnabled" style="width:100%; padding:8px;">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — อ่านอีเมลอัตโนมัติ</option>
+                    </select>
+                </div>
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">หลังลงจอง (สำคัญ)</label>
+                    <select id="cfgEmailRsvCreateDocument" style="width:100%; padding:8px;">
+                        <option value="false">ลงจองเฉย ๆ (เอกสารออกตอนเช็คอิน/เช็คเอาท์ตามปกติ)</option>
+                        <option value="true">ยิงสร้างเอกสารบัญชีทันที (ต้องเปิด OTA settlement)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:220px; flex:2;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">IMAP Server</label>
+                    <input type="text" id="cfgEmailRsvImapServer" placeholder="imap.gmail.com" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:90px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Port</label>
+                    <input type="number" id="cfgEmailRsvImapPort" value="993" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:120px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ดึงทุก (นาที)</label>
+                    <input type="number" id="cfgEmailRsvPollMinutes" value="5" min="1" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Gmail address</label>
+                    <input type="text" id="cfgEmailRsvUsername" placeholder="booking@yourhotel.com" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">App Password <span id="cfgEmailRsvPwStatus" style="font-weight:400; font-size:12px;"></span></label>
+                    <input type="password" id="cfgEmailRsvPassword" placeholder="Gmail App Password (16 ตัว)" autocomplete="new-password" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:160px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่อ่านแล้ว</label>
+                    <input type="text" id="cfgEmailRsvProcessedLabel" placeholder="STAAH-Processed" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่ล้มเหลว</label>
+                    <input type="text" id="cfgEmailRsvFailedLabel" placeholder="STAAH-Failed" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">กรองผู้ส่ง (มีคำ)</label>
+                    <input type="text" id="cfgEmailRsvFromContains" placeholder="staah" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">คืนสูงสุด</label>
+                    <input type="number" id="cfgEmailRsvMaxStayDays" value="30" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">จองล่วงหน้าสูงสุด (วัน)</label>
+                    <input type="number" id="cfgEmailRsvMaxDaysFuture" value="365" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">แจ้ง Telegram</label>
+                    <select id="cfgEmailRsvNotifyTelegram" style="width:100%; padding:8px;">
+                        <option value="true">แจ้ง</option>
+                        <option value="false">ไม่แจ้ง</option>
+                    </select>
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">อีเมลที่ล้มเหลว</label>
+                    <select id="cfgEmailRsvMoveFailed" style="width:100%; padding:8px;">
+                        <option value="true">ย้ายไป folder Failed</option>
+                        <option value="false">แค่ mark อ่านแล้ว</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;">
+                <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
+                <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
+                <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
+            </div>
+            <div class="help-text" style="margin-top:8px;">
+                ⓘ เปิด IMAP: Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP. สร้าง App Password: Google Account → Security → 2-Step Verification → App passwords.
+                ระบบดึงอัตโนมัติทุก N นาทีตามที่ตั้ง (อาศัย background timer เดียวกับ accounting sync). dedup ด้วย Booking ID — รันคู่โปรแกรมเดิมได้ไม่สร้างซ้ำ.
+            </div>
+            <div class="test-result" id="emailRsvResult"></div>
+        </div>
+
         <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
         <div class="journey-card">
             <h3><i class="fas fa-piggy-bank"></i> สถานะเจ้าหนี้ค่ามัดจำ (Advance Deposit Liability)</h3>
@@ -1009,8 +1113,36 @@
                 } else {
                     accStatus.innerHTML = '<span style="color:#7f8c8d;">ℹ ยังไม่ได้ตั้ง acc_ แยก — company endpoints จะใช้ Integration Key (int_) ผ่าน X-Api-Key fallback</span>';
                 }
+                // Email reservation intake (STAAH)
+                setVal('cfgEmailRsvEnabled', cfg.emailRsvEnabled ? 'true' : 'false');
+                setVal('cfgEmailRsvCreateDocument', cfg.emailRsvCreateDocument ? 'true' : 'false');
+                setVal('cfgEmailRsvImapServer', cfg.emailRsvImapServer || 'imap.gmail.com');
+                setVal('cfgEmailRsvImapPort', cfg.emailRsvImapPort || 993);
+                setVal('cfgEmailRsvPollMinutes', cfg.emailRsvPollMinutes || 5);
+                setVal('cfgEmailRsvUsername', cfg.emailRsvUsername || '');
+                setVal('cfgEmailRsvProcessedLabel', cfg.emailRsvProcessedLabel || 'STAAH-Processed');
+                setVal('cfgEmailRsvFailedLabel', cfg.emailRsvFailedLabel || 'STAAH-Failed');
+                setVal('cfgEmailRsvFromContains', cfg.emailRsvFromContains || 'staah');
+                setVal('cfgEmailRsvMaxStayDays', cfg.emailRsvMaxStayDays || 30);
+                setVal('cfgEmailRsvMaxDaysFuture', cfg.emailRsvMaxDaysFuture || 365);
+                setVal('cfgEmailRsvNotifyTelegram', cfg.emailRsvNotifyTelegram ? 'true' : 'false');
+                setVal('cfgEmailRsvMoveFailed', cfg.emailRsvMoveFailed ? 'true' : 'false');
+                var pwStat = document.getElementById('cfgEmailRsvPwStatus');
+                if (pwStat) {
+                    if (cfg.emailRsvHasPassword) {
+                        pwStat.innerHTML = '<span style="color:#27ae60;">✓ ตั้งไว้แล้ว — ปล่อยว่างเพื่อคงเดิม</span>';
+                        document.getElementById('cfgEmailRsvPassword').placeholder = '•••••••• (มีอยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    } else {
+                        pwStat.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง</span>';
+                    }
+                }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
+        }
+
+        function setVal(id, v) {
+            var el = document.getElementById(id);
+            if (el) el.value = v;
         }
 
         function saveConfig() {
@@ -1096,6 +1228,58 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        // ── Email reservation intake (STAAH) ──
+        function saveEmailIntake() {
+            var data = {
+                action: 'saveEmailIntake',
+                emailRsvEnabled: document.getElementById('cfgEmailRsvEnabled').value === 'true',
+                emailRsvCreateDocument: document.getElementById('cfgEmailRsvCreateDocument').value === 'true',
+                emailRsvImapServer: document.getElementById('cfgEmailRsvImapServer').value,
+                emailRsvImapPort: document.getElementById('cfgEmailRsvImapPort').value,
+                emailRsvPollMinutes: document.getElementById('cfgEmailRsvPollMinutes').value,
+                emailRsvUsername: document.getElementById('cfgEmailRsvUsername').value,
+                emailRsvPassword: document.getElementById('cfgEmailRsvPassword').value,
+                emailRsvProcessedLabel: document.getElementById('cfgEmailRsvProcessedLabel').value,
+                emailRsvFailedLabel: document.getElementById('cfgEmailRsvFailedLabel').value,
+                emailRsvFromContains: document.getElementById('cfgEmailRsvFromContains').value,
+                emailRsvMaxStayDays: document.getElementById('cfgEmailRsvMaxStayDays').value,
+                emailRsvMaxDaysFuture: document.getElementById('cfgEmailRsvMaxDaysFuture').value,
+                emailRsvNotifyTelegram: document.getElementById('cfgEmailRsvNotifyTelegram').value === 'true',
+                emailRsvMoveFailed: document.getElementById('cfgEmailRsvMoveFailed').value === 'true'
+            };
+            postAction(data, 'emailRsvResult');
+        }
+
+        function testEmailIntake() {
+            getAction('emailIntakeTest', 'emailRsvResult');
+        }
+
+        function runEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังดึงอีเมล...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=emailIntakeRun&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        function escHtml(s) {
+            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
         function reconcileDeleted() {
