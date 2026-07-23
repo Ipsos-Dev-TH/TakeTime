@@ -2884,9 +2884,36 @@ namespace Take_Time_BangPhra
                                             decimal DepositAmount = 0;
                                             if (dtfindDeposit.Rows.Count <= 0)
                                             {
-                                                // 🆕 Use manual payment amount from TextBox10 (like rentmore)
-                                                // Deposit already declared above at line 1636
-                                                dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", Deposit * -1, Deposit * -1);
+                                                // ไม่มีใบมัดจำจริงแต่มียอดชำระเดิม (Deposit=TextBox5) = OTA-prepaid (เช่น Agoda
+                                                // เก็บค่าห้องแล้ว โรงแรมไม่ได้รับเงินก้อนนั้น) หรือจ่ายที่อื่นโดยไม่ออกใบเสร็จ.
+                                                // เดิม: add "ส่วนลด -Deposit" ทั้งก้อนทับรายการเต็ม → ใบเสร็จลูกค้าโชว์ค่าห้อง
+                                                // + ส่วนลดก้อนใหญ่แปลก ๆ ทั้งที่ลูกค้าจ่ายจริงแค่ของเช่า/ค่าบริการเพิ่ม และ JE
+                                                // ฝั่งบัญชีเพี้ยน (กลับมัดจำ 21510 ที่ไม่มีจริง).
+                                                // ใหม่: "ตัดรายการที่ถูกจ่ายล่วงหน้าแล้ว" (เริ่มจากที่พัก ProductType=1) ออกจากใบ
+                                                // → ใบเสร็จเหลือเฉพาะรายการที่ลูกค้าจ่ายจริงหน้างาน + ส่วนลดเฉพาะเศษที่เหลือ
+                                                // (เช่น Agoda 2,391 - ห้อง 2,390 = เศษ 1 บาท) → ยอดสุทธิเท่าเดิมเป๊ะ
+                                                decimal prepaidRemain = Deposit;
+                                                if (prepaidRemain > 0)
+                                                {
+                                                    // ตัดรายการที่พัก (ไม่ใช่บรรทัดส่วนลด) ที่ยอด ≤ ยอดจ่ายล่วงหน้าคงเหลือ
+                                                    for (int ri = dtReserve.Rows.Count - 1; ri >= 0; ri--)
+                                                    {
+                                                        var rr = dtReserve.Rows[ri];
+                                                        if ((rr["ProductType_ID"]?.ToString() ?? "") != "1") continue;
+                                                        if ((rr["Product_Data"]?.ToString() ?? "").StartsWith("ส่วนลด")) continue;
+                                                        decimal amtCut = 0;
+                                                        decimal.TryParse(rr["Price_Amount"]?.ToString(), out amtCut);
+                                                        if (amtCut > 0 && amtCut <= prepaidRemain + 0.005m)
+                                                        {
+                                                            prepaidRemain -= amtCut;
+                                                            dtReserve.Rows.RemoveAt(ri);
+                                                        }
+                                                    }
+                                                    for (int ri = 0; ri < dtReserve.Rows.Count; ri++)
+                                                        dtReserve.Rows[ri]["Number"] = (ri + 1).ToString();
+                                                }
+                                                if (prepaidRemain > 0.005m)
+                                                    dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", prepaidRemain * -1, prepaidRemain * -1);
                                                 id = Request.QueryString["id"];
                                                 if (CheckBox4.Checked == false)
                                                 {
