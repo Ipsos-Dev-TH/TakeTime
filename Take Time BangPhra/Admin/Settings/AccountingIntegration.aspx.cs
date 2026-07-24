@@ -112,7 +112,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "emailRsvNotifyTelegram", config.EmailRsvNotifyTelegram },
                     { "emailRsvCreateDocument", config.EmailRsvCreateDocument },
                     { "emailRsvMoveFailed", config.EmailRsvMoveFailed },
-                    { "emailRsvFromContains", config.EmailRsvFromContains }
+                    { "emailRsvFromContains", config.EmailRsvFromContains },
+                    // Daily reservation board → LINE
+                    { "lineDailyEnabled", config.IsDailyLineReportEnabled },
+                    { "lineDailyRecipients", config.LineDailyRecipients },
+                    { "lineDailySendTime", config.LineDailySendTime },
+                    { "lineDailySourceUrl", config.LineDailySourceUrl },
+                    { "lineDailyImageWidth", config.LineDailyImageWidth },
+                    { "lineDailyImageHeight", config.LineDailyImageHeight },
+                    { "lineDailyAutoHeight", config.LineDailyAutoHeight },
+                    { "lineDailyCaption", config.LineDailyCaption },
+                    { "lineDailyPublicBaseUrl", config.LineDailyPublicBaseUrl },
+                    { "lineDailyImageFolder", config.LineDailyImageFolder },
+                    { "lineDailyHasTokenOverride", config.LineDailyHasTokenOverride },
+                    { "lineDailyJpegQuality", config.LineDailyJpegQuality },
+                    { "lineDailyLastSent", config.LineDailyLastSent }
                 };
                 hfConfigData.Value = new JavaScriptSerializer().Serialize(data);
             }
@@ -220,6 +234,18 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakeLog":
                     result = GetEmailIntakeLog();
                     break;
+                case "lineDailySend":
+                    result = SendDailyLineNow();
+                    break;
+                case "lineDailyPreview":
+                    result = PreviewDailyLine();
+                    break;
+                case "lineDailyTest":
+                    result = TestDailyLine();
+                    break;
+                case "lineDailyLog":
+                    result = GetDailyLineLog();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -266,6 +292,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "saveEmailIntake":
                     result = SaveEmailIntakeConfig(data);
+                    break;
+                case "saveLineDaily":
+                    result = SaveLineDailyConfig(data);
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
@@ -558,6 +587,112 @@ namespace Take_Time_BangPhra.Admin.Settings
                         });
 
                 return new Dictionary<string, object> { { "success", true }, { "items", items }, { "total", items.Count } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Log Error: " + ex.Message } };
+            }
+        }
+
+        // ── Daily reservation board → LINE ───────────────────────────────────────
+        private Dictionary<string, object> SaveLineDailyConfig(Dictionary<string, object> data)
+        {
+            try
+            {
+                var config = new Integration.AccountingConfig(ConnStr);
+                if (data.ContainsKey("lineDailyEnabled")) config.SetConfig("Line_DailyReport_Enabled", BoolToFlag(data["lineDailyEnabled"]));
+                if (data.ContainsKey("lineDailyRecipients")) config.SetConfig("Line_DailyReport_Recipients", data["lineDailyRecipients"]?.ToString() ?? "");
+                if (data.ContainsKey("lineDailySendTime")) config.SetConfig("Line_DailyReport_SendTime", data["lineDailySendTime"]?.ToString() ?? "08:00");
+                if (data.ContainsKey("lineDailySourceUrl")) config.SetConfig("Line_DailyReport_SourceUrl", data["lineDailySourceUrl"]?.ToString() ?? "");
+                if (data.ContainsKey("lineDailyImageWidth")) config.SetConfig("Line_DailyReport_ImageWidth", data["lineDailyImageWidth"]?.ToString() ?? "1600");
+                if (data.ContainsKey("lineDailyImageHeight")) config.SetConfig("Line_DailyReport_ImageHeight", data["lineDailyImageHeight"]?.ToString() ?? "700");
+                if (data.ContainsKey("lineDailyAutoHeight")) config.SetConfig("Line_DailyReport_AutoHeight", BoolToFlag(data["lineDailyAutoHeight"]));
+                if (data.ContainsKey("lineDailyCaption")) config.SetConfig("Line_DailyReport_Caption", data["lineDailyCaption"]?.ToString() ?? "");
+                if (data.ContainsKey("lineDailyPublicBaseUrl")) config.SetConfig("Line_DailyReport_PublicBaseUrl", data["lineDailyPublicBaseUrl"]?.ToString() ?? "");
+                if (data.ContainsKey("lineDailyImageFolder")) config.SetConfig("Line_DailyReport_ImageFolder", data["lineDailyImageFolder"]?.ToString() ?? "~/Images/Reservation");
+                if (data.ContainsKey("lineDailyJpegQuality")) config.SetConfig("Line_DailyReport_JpegQuality", data["lineDailyJpegQuality"]?.ToString() ?? "90");
+                // token override: บันทึกเฉพาะเมื่อกรอกใหม่ ("-" = ล้าง)
+                if (data.ContainsKey("lineDailyTokenOverride"))
+                {
+                    string tk = data["lineDailyTokenOverride"]?.ToString() ?? "";
+                    if (tk == "-") config.SetConfig("Line_DailyReport_TokenOverride_Encrypted", "");
+                    else if (!string.IsNullOrEmpty(tk)) config.SetConfig("Line_DailyReport_TokenOverride_Encrypted", _code.Crypt(tk));
+                }
+                return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกการตั้งค่าส่งรายงาน LINE แล้ว" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Save Error: " + ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> SendDailyLineNow()
+        {
+            try
+            {
+                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var r = System.Threading.Tasks.Task.Run(() => s.SendNow(true)).Result;
+                if (!r.Success && r.Error != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", r.Error }, { "detail", string.Join("\n", r.Messages) } };
+                return new Dictionary<string, object>
+                {
+                    { "success", r.Success },
+                    { "message", r.ToString() },
+                    { "detail", string.Join("\n", r.Messages) },
+                    { "imageUrl", r.ImageUrl }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Send Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> PreviewDailyLine()
+        {
+            try
+            {
+                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var (ok, urlOrErr, _) = System.Threading.Tasks.Task.Run(() => s.GeneratePreview()).Result;
+                return ok
+                    ? new Dictionary<string, object> { { "success", true }, { "message", "สร้างรูปพรีวิวแล้ว" }, { "imageUrl", urlOrErr } }
+                    : new Dictionary<string, object> { { "success", false }, { "message", urlOrErr } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Preview Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> TestDailyLine()
+        {
+            try
+            {
+                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var (ok, msg) = System.Threading.Tasks.Task.Run(() => s.SendTestText()).Result;
+                return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Test Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> GetDailyLineLog()
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 50 LogDateTime, LogDetail FROM Logs WHERE LogAction = 'DailyLineReport' ORDER BY LogDateTime DESC", null);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "time", r["LogDateTime"] == DBNull.Value ? "" : Convert.ToDateTime(r["LogDateTime"]).ToString("yyyy-MM-dd HH:mm:ss") },
+                            { "detail", r["LogDetail"]?.ToString() ?? "" }
+                        });
+                return new Dictionary<string, object> { { "success", true }, { "items", items } };
             }
             catch (Exception ex)
             {

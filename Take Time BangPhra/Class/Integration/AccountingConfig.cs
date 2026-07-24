@@ -308,6 +308,21 @@ namespace Take_Time_BangPhra.Integration
         public bool EmailRsvMoveFailed => GetConfig("Email_Rsv_MoveFailed", "1") == "1";
         public string EmailRsvFromContains => GetConfig("Email_Rsv_FromContains", "staah");
 
+        // ── Daily reservation board → LINE ───────────────────────────────────────
+        public bool IsDailyLineReportEnabled => GetConfig("Line_DailyReport_Enabled", "0") == "1";
+        public string LineDailyRecipients => GetConfig("Line_DailyReport_Recipients", "");
+        public string LineDailySendTime => GetConfig("Line_DailyReport_SendTime", "08:00");
+        public string LineDailySourceUrl => GetConfig("Line_DailyReport_SourceUrl", "https://taketimebangphra.com/displaytoday");
+        public int LineDailyImageWidth => int.TryParse(GetConfig("Line_DailyReport_ImageWidth", "1600"), out var v) ? v : 1600;
+        public int LineDailyImageHeight => int.TryParse(GetConfig("Line_DailyReport_ImageHeight", "700"), out var v) ? v : 700;
+        public bool LineDailyAutoHeight => GetConfig("Line_DailyReport_AutoHeight", "1") == "1";
+        public string LineDailyCaption => GetConfig("Line_DailyReport_Caption", "ตารางการจองวันที่ {date}");
+        public string LineDailyPublicBaseUrl => GetConfig("Line_DailyReport_PublicBaseUrl", "https://taketimebangphra.com/Images/Reservation");
+        public string LineDailyImageFolder => GetConfig("Line_DailyReport_ImageFolder", "~/Images/Reservation");
+        public bool LineDailyHasTokenOverride => !string.IsNullOrEmpty(GetConfig("Line_DailyReport_TokenOverride_Encrypted", ""));
+        public int LineDailyJpegQuality => int.TryParse(GetConfig("Line_DailyReport_JpegQuality", "90"), out var v) ? v : 90;
+        public string LineDailyLastSent => GetConfig("Line_DailyReport_LastSent", "");
+
         /// <summary>
         /// ตั้งค่า API ครบแล้วหรือยัง (Base URL, API Key, Company ID)
         /// ไม่รวม Enabled — เพราะ "ตั้งค่าครบ" กับ "เปิด sync" เป็นคนละเรื่อง

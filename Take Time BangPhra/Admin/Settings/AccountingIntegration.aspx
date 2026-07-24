@@ -612,6 +612,99 @@
             <div id="emailRsvLog" style="margin-top:12px;"></div>
         </div>
 
+        <!-- 📱 ส่งรูปตารางจองรายวันเข้า LINE -->
+        <div class="journey-card">
+            <h3><i class="fab fa-line" style="color:#06C755;"></i> ส่งรูปตารางจองรายวันเข้า LINE (อัตโนมัติ)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                render หน้า <b>DisplayToday</b> เป็นรูป แล้ว push เข้า LINE ให้อัตโนมัติทุกวันตามเวลาที่ตั้ง — แทนโปรแกรมภายนอกเดิม.
+                ใช้ token ของ <b>LINE OA เดิม</b> (ตั้งไว้แล้วในระบบ) หรือระบุเฉพาะงานนี้ก็ได้.
+                ความสูงรูปวัดจากเนื้อหาจริง (ไม่ตัด/ไม่เหลือขอบ).
+            </p>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="cfgLineDailyEnabled" style="width:100%; padding:8px;">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ส่งอัตโนมัติ</option>
+                    </select>
+                </div>
+                <div style="min-width:120px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เวลาส่ง (HH:mm)</label>
+                    <input type="time" id="cfgLineDailySendTime" value="08:00" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ข้อความประกอบ ({date} = วันที่ไทย)</label>
+                    <input type="text" id="cfgLineDailyCaption" placeholder="ตารางการจองวันที่ {date}" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">ผู้รับ (LINE userId / groupId / roomId) — คั่นด้วย comma หรือขึ้นบรรทัดใหม่</label>
+                <textarea id="cfgLineDailyRecipients" rows="2" placeholder="Cxxxxxxxx...&#10;Uxxxxxxxx..." style="width:100%; padding:8px; font-family:monospace;"></textarea>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:110px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">กว้าง (px)</label>
+                    <input type="number" id="cfgLineDailyImageWidth" value="1600" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สูงพื้นฐาน (px)</label>
+                    <input type="number" id="cfgLineDailyImageHeight" value="700" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ปรับสูงอัตโนมัติ</label>
+                    <select id="cfgLineDailyAutoHeight" style="width:100%; padding:8px;">
+                        <option value="true">วัดจากเนื้อหาจริง</option>
+                        <option value="false">ใช้ค่าคงที่</option>
+                    </select>
+                </div>
+                <div style="min-width:120px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">คุณภาพ JPEG</label>
+                    <input type="number" id="cfgLineDailyJpegQuality" value="90" min="1" max="100" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">URL หน้าที่จะ render</label>
+                <input type="text" id="cfgLineDailySourceUrl" placeholder="https://taketimebangphra.com/displaytoday" style="width:100%; padding:8px;" />
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">URL สาธารณะของโฟลเดอร์รูป (HTTPS — LINE ต้องเข้าถึงได้)</label>
+                    <input type="text" id="cfgLineDailyPublicBaseUrl" placeholder="https://taketimebangphra.com/Images/Reservation" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">โฟลเดอร์เก็บรูป (~/... หรือ physical path)</label>
+                    <input type="text" id="cfgLineDailyImageFolder" placeholder="~/Images/Reservation" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">
+                    LINE token เฉพาะงานนี้ (ไม่บังคับ) <span id="cfgLineDailyTokenStatus" style="font-weight:400; font-size:12px;"></span>
+                </label>
+                <input type="password" id="cfgLineDailyTokenOverride" autocomplete="new-password" placeholder="เว้นว่าง = ใช้ token ของ LINE OA เดิม (ใส่ &quot;-&quot; เพื่อล้าง)" style="width:100%; padding:8px;" />
+            </div>
+
+            <div style="margin-top:16px;">
+                <button type="button" class="btn-primary" onclick="saveLineDaily()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
+                <button type="button" class="btn-default" onclick="previewLineDaily()"><i class="fas fa-image"></i> พรีวิวรูป</button>
+                <button type="button" class="btn-warning" onclick="sendLineDaily()"><i class="fab fa-line"></i> ส่งตอนนี้</button>
+                <button type="button" class="btn-default" onclick="testLineDaily()"><i class="fas fa-vial"></i> ทดสอบข้อความ</button>
+                <button type="button" class="btn-default" onclick="loadLineDailyLog()"><i class="fas fa-list-alt"></i> ดู logs</button>
+            </div>
+            <div class="help-text" style="margin-top:8px;">
+                ⓘ ต้องรันบน Windows+IIS ที่ติดตั้งฟอนต์ไทย และตั้ง App Pool → Load User Profile = True (GDI+ ต้องใช้).
+                LINE รับเฉพาะรูปที่เข้าถึงได้ผ่าน HTTPS สาธารณะ. หา groupId: เชิญ OA เข้ากลุ่มแล้วดู source.groupId จาก webhook.
+            </div>
+            <div class="test-result" id="lineDailyResult"></div>
+            <div id="lineDailyPreview" style="margin-top:10px;"></div>
+            <div id="lineDailyLog" style="margin-top:12px;"></div>
+        </div>
+
         <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
         <div class="journey-card">
             <h3><i class="fas fa-piggy-bank"></i> สถานะเจ้าหนี้ค่ามัดจำ (Advance Deposit Liability)</h3>
@@ -1138,6 +1231,26 @@
                         pwStat.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง</span>';
                     }
                 }
+                // Daily reservation board → LINE
+                setVal('cfgLineDailyEnabled', cfg.lineDailyEnabled ? 'true' : 'false');
+                setVal('cfgLineDailySendTime', cfg.lineDailySendTime || '08:00');
+                setVal('cfgLineDailyCaption', cfg.lineDailyCaption || '');
+                setVal('cfgLineDailyRecipients', cfg.lineDailyRecipients || '');
+                setVal('cfgLineDailyImageWidth', cfg.lineDailyImageWidth || 1600);
+                setVal('cfgLineDailyImageHeight', cfg.lineDailyImageHeight || 700);
+                setVal('cfgLineDailyAutoHeight', cfg.lineDailyAutoHeight ? 'true' : 'false');
+                setVal('cfgLineDailyJpegQuality', cfg.lineDailyJpegQuality || 90);
+                setVal('cfgLineDailySourceUrl', cfg.lineDailySourceUrl || '');
+                setVal('cfgLineDailyPublicBaseUrl', cfg.lineDailyPublicBaseUrl || '');
+                setVal('cfgLineDailyImageFolder', cfg.lineDailyImageFolder || '~/Images/Reservation');
+                var lts = document.getElementById('cfgLineDailyTokenStatus');
+                if (lts) lts.innerHTML = cfg.lineDailyHasTokenOverride
+                    ? '<span style="color:#27ae60;">✓ ตั้ง token เฉพาะไว้แล้ว</span>'
+                    : '<span style="color:#7f8c8d;">ℹ ใช้ token ของ LINE OA เดิม</span>';
+                if (cfg.lineDailyLastSent) {
+                    var lr = document.getElementById('lineDailyResult');
+                    if (lr) lr.innerHTML = '<span style="color:#7f8c8d;">ส่งอัตโนมัติล่าสุด: ' + cfg.lineDailyLastSent + '</span>';
+                }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
         }
@@ -1318,6 +1431,86 @@
                 .catch(function(err) {
                     el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
                 });
+        }
+
+        // ── Daily reservation board → LINE ──
+        function saveLineDaily() {
+            var data = {
+                action: 'saveLineDaily',
+                lineDailyEnabled: document.getElementById('cfgLineDailyEnabled').value === 'true',
+                lineDailySendTime: document.getElementById('cfgLineDailySendTime').value,
+                lineDailyCaption: document.getElementById('cfgLineDailyCaption').value,
+                lineDailyRecipients: document.getElementById('cfgLineDailyRecipients').value,
+                lineDailyImageWidth: document.getElementById('cfgLineDailyImageWidth').value,
+                lineDailyImageHeight: document.getElementById('cfgLineDailyImageHeight').value,
+                lineDailyAutoHeight: document.getElementById('cfgLineDailyAutoHeight').value === 'true',
+                lineDailyJpegQuality: document.getElementById('cfgLineDailyJpegQuality').value,
+                lineDailySourceUrl: document.getElementById('cfgLineDailySourceUrl').value,
+                lineDailyPublicBaseUrl: document.getElementById('cfgLineDailyPublicBaseUrl').value,
+                lineDailyImageFolder: document.getElementById('cfgLineDailyImageFolder').value,
+                lineDailyTokenOverride: document.getElementById('cfgLineDailyTokenOverride').value
+            };
+            postAction(data, 'lineDailyResult');
+        }
+
+        function lineDailyRun(action, withImage) {
+            var el = document.getElementById('lineDailyResult');
+            var prev = document.getElementById('lineDailyPreview');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังดำเนินการ...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=' + action + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                    if (withImage && data.imageUrl && prev) {
+                        prev.innerHTML = '<div style="font-size:12px; color:#777; margin-bottom:4px;">พรีวิว:</div>' +
+                            '<img src="' + escHtml(data.imageUrl) + '" style="max-width:100%; border:1px solid #ddd; border-radius:4px;" />';
+                    }
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา (120 วินาที)' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        function previewLineDaily() { lineDailyRun('lineDailyPreview', true); }
+        function sendLineDaily() {
+            if (!confirm('ส่งรูปตารางจองวันนี้เข้า LINE ถึงผู้รับที่ตั้งไว้เลยหรือไม่?')) return;
+            lineDailyRun('lineDailySend', true);
+        }
+        function testLineDaily() { lineDailyRun('lineDailyTest', false); }
+
+        function loadLineDailyLog() {
+            var el = document.getElementById('lineDailyLog');
+            el.innerHTML = '<div class="test-result loading">กำลังโหลด logs...</div>';
+            fetch(pageUrl + '?action=lineDailyLog&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { el.innerHTML = '<div class="test-result error">' + (data.message || 'โหลดไม่สำเร็จ') + '</div>'; return; }
+                    if (!data.items || data.items.length === 0) { el.innerHTML = '<div class="test-result">ยังไม่มี log</div>'; return; }
+                    var html = '<div style="max-height:280px; overflow:auto; border:1px solid #e0e0e0; border-radius:4px;">' +
+                        '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+                        '<thead><tr style="background:#f5f5f5; position:sticky; top:0;">' +
+                        '<th style="text-align:left; padding:6px 8px; white-space:nowrap;">เวลา</th>' +
+                        '<th style="text-align:left; padding:6px 8px;">รายละเอียด</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.items.length; i++) {
+                        var it = data.items[i];
+                        var isErr = /error|ล้มเหลว|ผิดพลาด|ไม่/i.test(it.detail || '');
+                        html += '<tr style="border-top:1px solid #eee;">' +
+                            '<td style="padding:6px 8px; white-space:nowrap; color:#777;">' + escHtml(it.time) + '</td>' +
+                            '<td style="padding:6px 8px; color:' + (isErr ? '#c0392b' : '#333') + ';">' + escHtml(it.detail) + '</td></tr>';
+                    }
+                    html += '</tbody></table></div>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) { el.innerHTML = '<div class="test-result error">' + err.message + '</div>'; });
         }
 
         function reconcileDeleted() {

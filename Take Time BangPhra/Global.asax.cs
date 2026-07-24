@@ -61,14 +61,14 @@ namespace Take_Time_BangPhra
             {
                 var config = new AccountingConfig();
                 // เปิด timer ถ้า accounting sync พร้อม หรือ เปิดอ่านอีเมลจอง OTA (email intake ก็อาศัย timer นี้)
-                bool emailOn = false;
+                bool bgFeaturesOn = false;
                 try
                 {
                     string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                    emailOn = EmailReservationService.IsEnabled(conn);
+                    bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn);
                 }
                 catch { }
-                if (!config.IsReadyToSync && !emailOn) return;
+                if (!config.IsReadyToSync && !bgFeaturesOn) return;
 
                 int intervalMs = config.SyncIntervalSeconds * 1000;
                 if (intervalMs < 10000) intervalMs = 30000; // minimum 10 seconds
@@ -111,6 +111,10 @@ namespace Take_Time_BangPhra
                 // อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ — gate ด้วย flag Email_Rsv_Enabled + poll interval; no-op ถ้าปิด
                 try { ProcessEmailReservationIntakeIfDue(); }
                 catch (Exception eex) { System.Diagnostics.Trace.TraceError($"EmailReservation timer error: {(eex.InnerException ?? eex).Message}"); }
+
+                // ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — no-op ถ้าปิด
+                try { SendDailyLineReportIfDue(); }
+                catch (Exception lex) { System.Diagnostics.Trace.TraceError($"DailyLineReport timer error: {(lex.InnerException ?? lex).Message}"); }
 
                 _consecutiveTimerErrors = 0;
             }
@@ -162,6 +166,21 @@ namespace Take_Time_BangPhra
 
             var svc = new EmailReservationService(conn);
             svc.ProcessEmails();
+        }
+
+        /// <summary>
+        /// ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — เรียกจาก timer หลัก.
+        /// IsDueNow คุมเอง (เปิด + เลยเวลา + ยังไม่ส่งวันนี้) → no-op ถ้ายังไม่ถึง/ปิด.
+        /// </summary>
+        private static void SendDailyLineReportIfDue()
+        {
+            string conn;
+            try { conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString; }
+            catch { return; }
+            if (!DailyReportLineService.IsEnabled(conn)) return;
+            var svc = new DailyReportLineService(conn);
+            if (!svc.IsDueNow()) return;
+            svc.SendNow(markSent: true);
         }
 
         /// <summary>
