@@ -1256,16 +1256,48 @@ namespace Take_Time_BangPhra.Integration
                 if (totalAmount <= 0)
                     return (false, "snapshot มียอด 0 — ข้อมูลไม่พอสำหรับดึงกลับ");
 
-                // 2) กันซ้ำ: ใบยังอยู่ในระบบ → ไม่ต้องดึง
+                // 2) กันซ้ำ: ใบยังอยู่ในระบบ → ไม่ต้องดึง; แต่ถ้ารอบก่อนล้มครึ่งทาง (มีใบแต่ไม่มี
+                //    ประวัติชำระ) → ซ่อมส่วนที่ขาด (Payment_History + คืนมัดจำ) ให้จบ
                 var exist = _code.DatabaseQuerySafe(_connectionString,
                     "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", receiptNumber } });
                 if (exist?.Rows.Count > 0)
-                    return (false, $"ใบเสร็จ {receiptNumber} ยังอยู่ในระบบ — ไม่ต้องดึงกลับ (กดค้นหาใหม่)");
+                {
+                    if (reservationId > 0)
+                    {
+                        var phExist = _code.DatabaseQuerySafe(_connectionString,
+                            "SELECT TOP 1 ID FROM Payment_History WHERE Receipt_ID = @id",
+                            new Dictionary<string, object> { { "@id", receiptNumber } });
+                        if (phExist == null || phExist.Rows.Count == 0)
+                        {
+                            _code.DatabaseInsertSafe(_connectionString,
+                                @"INSERT INTO [dbo].[Payment_History]
+                                    (Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
+                                     Receipt_ID, RemainingBalance, Status)
+                                  VALUES (@res, @docDate, @amount, @ptype, @method, @id, 0, 'COMPLETED')",
+                                new Dictionary<string, object>
+                                {
+                                    { "@res", reservationId },
+                                    { "@docDate", receiptDate.ToString("yyyy-MM-dd") },
+                                    { "@amount", totalAmount },
+                                    { "@ptype", isDeposit ? "DEPOSIT" : "PAYMENT" },
+                                    { "@method", (object)paymentMethod ?? "CASH" },
+                                    { "@id", receiptNumber }
+                                });
+                            _code.DatabaseInsertSafe(_connectionString,
+                                "UPDATE Reservation SET Deposit = ISNULL(Deposit, 0) + @amount WHERE ID = @res",
+                                new Dictionary<string, object> { { "@amount", totalAmount }, { "@res", reservationId } });
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RestoreDeletedReceiptFromNextAcc: repaired partial restore {receiptNumber} (added Payment_History + deposit {totalAmount:N2} to #{reservationId})", "SYSTEM");
+                            return (true, $"ใบเสร็จ {receiptNumber} มีอยู่แล้วแต่ประวัติชำระขาด — ซ่อมให้แล้ว (คืนยอด {totalAmount:N2} เข้าการจอง #{reservationId})");
+                        }
+                    }
+                    return (false, $"ใบเสร็จ {receiptNumber} ยังอยู่ในระบบครบ — ไม่ต้องดึงกลับ (กดค้นหาใหม่)");
+                }
 
-                // 3) สร้าง Account_Receipt กลับ (marker DOC: = เอกสารบน NextAcc ถูกกู้เป็นฉบับร่าง
-                //    ยังไม่อนุมัติ — กัน sync สร้างซ้ำ และให้ปุ่มดู PDF/แก้ไขจับคู่ได้)
-                string uid = Guid.NewGuid().ToString("N");
+                // 3) สร้าง Account_Receipt กลับ (marker ตามสถานะเอกสารบน NextAcc — กัน sync สร้างซ้ำ)
+                //    หมายเหตุ: ไม่ใส่คอลัมน์ UID — เป็น UNIQUEIDENTIFIER default NEWID()
+                //    (insert หลักใน Reserve.aspx.cs ก็ไม่ใส่; ส่ง string เองเสี่ยง conversion error)
                 string customerId = null;
                 if (reservationId > 0)
                 {
@@ -1279,15 +1311,14 @@ namespace Take_Time_BangPhra.Integration
 
                 _code.DatabaseInsertSafe(_connectionString,
                     @"INSERT INTO [dbo].[Account_Receipt]
-                        (ID, UID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                        (ID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
                          [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
                          Paid_Type, Created_By_ID, Etax, Customer_ID, Nexaacc_Receipt_Payment_Id)
-                      VALUES (@id, @uid, @res, @docDate, @total, @vat, @exVat,
+                      VALUES (@id, @res, @docDate, @total, @vat, @exVat,
                               @isDep, 'False', 'Normal', @paidType, 0, 'False', @custId, @marker)",
                     new Dictionary<string, object>
                     {
                         { "@id", receiptNumber },
-                        { "@uid", uid },
                         { "@res", reservationId },
                         { "@docDate", receiptDate.ToString("yyyy-MM-dd") },
                         { "@total", totalAmount },
