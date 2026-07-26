@@ -899,6 +899,7 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("IsNextAccOnly")) dt.Columns.Add("IsNextAccOnly", typeof(string));
             if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
+            if (!dt.Columns.Contains("NextAccDocStatus")) dt.Columns.Add("NextAccDocStatus", typeof(string));
 
             foreach (DataRow r in dt.Rows)
             {
@@ -906,6 +907,7 @@ namespace Take_Time_BangPhra.Account
                 r["IsNextAccOnly"] = "0";
                 r["NextAccId"] = "";
                 r["NextAccViewUrl"] = "";
+                r["NextAccDocStatus"] = "";
             }
 
             System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
@@ -1016,6 +1018,7 @@ namespace Take_Time_BangPhra.Account
                 nr["IsNextAccOnly"] = "1";
                 nr["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
                 nr["NextAccViewUrl"] = "";
+                nr["NextAccDocStatus"] = nd.Status ?? "";   // สถานะจริงบน NextAcc (Draft/Approved/...) — ใช้ตอน "ดึงกลับ"
                 dt.Rows.Add(nr);
                 added++;
             }
@@ -1846,8 +1849,9 @@ namespace Take_Time_BangPhra.Account
                         }
                         string restoreNaId = dkEdit["NextAccId"]?.ToString() ?? "";
                         string restoreDocNum = dkEdit["ID"]?.ToString() ?? "";
+                        string restoreNaStatus = dkEdit["NextAccDocStatus"]?.ToString() ?? "";
                         var restoreSvc = new AccountingSyncService(conn);
-                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum);
+                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum, restoreNaStatus);
                         ShowError((rOk ? "✅ " : "") + rMsg + (rOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
                         return;
                     }

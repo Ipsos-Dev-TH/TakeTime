@@ -1205,10 +1205,15 @@ namespace Take_Time_BangPhra.Integration
         /// Account_Receipt_Detail + Payment_History กลับ พร้อมบวก Reservation.Deposit คืน (mirror
         /// ของ delete flow ที่ลดไว้). idempotent — ใบยังอยู่/ดึงแล้ว = ไม่ทำซ้ำ.
         /// </summary>
-        public (bool Ok, string Message) RestoreDeletedReceiptFromNextAcc(string nexaaccId, string nexaaccDocNumber)
+        public (bool Ok, string Message) RestoreDeletedReceiptFromNextAcc(string nexaaccId, string nexaaccDocNumber, string nexaaccStatus = null)
         {
             try
             {
+                // สถานะจริงบน NextAcc: อนุมัติ/ลงบัญชีแล้ว → marker APR: (กัน flow อื่นพยายามอนุมัติซ้ำ);
+                // ยังเป็นฉบับร่าง/รออนุมัติ → marker DOC: + เตือนให้ไปกดอนุมัติ
+                bool docApproved = !string.IsNullOrEmpty(nexaaccStatus)
+                    && !nexaaccStatus.Equals("Draft", StringComparison.OrdinalIgnoreCase)
+                    && nexaaccStatus.IndexOf("Pending", StringComparison.OrdinalIgnoreCase) < 0;
                 if (string.IsNullOrWhiteSpace(nexaaccId) && string.IsNullOrWhiteSpace(nexaaccDocNumber))
                     return (false, "ไม่มีรหัสเอกสาร NextAcc สำหรับดึงกลับ");
 
@@ -1291,7 +1296,7 @@ namespace Take_Time_BangPhra.Integration
                         { "@isDep", isDeposit ? "True" : "False" },
                         { "@paidType", (object)paymentMethod ?? "CASH" },
                         { "@custId", (object)customerId ?? DBNull.Value },
-                        { "@marker", Guid.TryParse(nexaaccId, out var ng) ? "DOC:" + ng : (object)DBNull.Value }
+                        { "@marker", Guid.TryParse(nexaaccId, out var ng) ? (docApproved ? "APR:" : "DOC:") + ng : (object)DBNull.Value }
                     });
 
                 // ใบที่เคยหักมัดจำ (จากใบมัดจำก่อนหน้า) → คืนสถานะ UseDeposit + ยอดที่หักไว้
@@ -1346,9 +1351,12 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"RestoreDeletedReceiptFromNextAcc: {restoreNote} (nexaaccId={nexaaccId}, queue snapshot #{qdt.Rows[0]["ID"]})",
+                    $"RestoreDeletedReceiptFromNextAcc: {restoreNote} (nexaaccId={nexaaccId}, status={nexaaccStatus}, queue snapshot #{qdt.Rows[0]["ID"]})",
                     "SYSTEM");
-                return (true, restoreNote + " — หมายเหตุ: เอกสารบน NextAcc ถูกกู้เป็นฉบับร่าง อย่าลืมกดอนุมัติบน NextAcc เพื่อลงบัญชีใหม่");
+                string tail = docApproved
+                    ? " — เอกสารบน NextAcc อนุมัติ/ลงบัญชีแล้ว ไม่ต้องทำอะไรเพิ่ม"
+                    : " — หมายเหตุ: เอกสารบน NextAcc ยังเป็นฉบับร่าง อย่าลืมกดอนุมัติบน NextAcc เพื่อลงบัญชีใหม่";
+                return (true, restoreNote + tail);
             }
             catch (Exception ex)
             {
