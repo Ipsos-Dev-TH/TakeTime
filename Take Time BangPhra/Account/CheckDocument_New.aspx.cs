@@ -1850,8 +1850,11 @@ namespace Take_Time_BangPhra.Account
                         string restoreNaId = dkEdit["NextAccId"]?.ToString() ?? "";
                         string restoreDocNum = dkEdit["ID"]?.ToString() ?? "";
                         string restoreNaStatus = dkEdit["NextAccDocStatus"]?.ToString() ?? "";
+                        // เลขการจองของเอกสาร (จาก Reference RES-{id}) — บังคับ snapshot ต้องเป็นการจองเดียวกัน
+                        int restoreResId = 0;
+                        int.TryParse(dkEdit["Reservation_ID"]?.ToString() ?? "0", out restoreResId);
                         var restoreSvc = new AccountingSyncService(conn);
-                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum, restoreNaStatus);
+                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum, restoreNaStatus, restoreResId);
                         ShowError((rOk ? "✅ " : "") + rMsg + (rOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
                         return;
                     }

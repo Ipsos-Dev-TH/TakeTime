@@ -1205,7 +1205,7 @@ namespace Take_Time_BangPhra.Integration
         /// Account_Receipt_Detail + Payment_History กลับ พร้อมบวก Reservation.Deposit คืน (mirror
         /// ของ delete flow ที่ลดไว้). idempotent — ใบยังอยู่/ดึงแล้ว = ไม่ทำซ้ำ.
         /// </summary>
-        public (bool Ok, string Message) RestoreDeletedReceiptFromNextAcc(string nexaaccId, string nexaaccDocNumber, string nexaaccStatus = null)
+        public (bool Ok, string Message) RestoreDeletedReceiptFromNextAcc(string nexaaccId, string nexaaccDocNumber, string nexaaccStatus = null, int expectedReservationId = 0, string preferLocalReceipt = null)
         {
             try
             {
@@ -1217,30 +1217,57 @@ namespace Take_Time_BangPhra.Integration
                 if (string.IsNullOrWhiteSpace(nexaaccId) && string.IsNullOrWhiteSpace(nexaaccDocNumber))
                     return (false, "ไม่มีรหัสเอกสาร NextAcc สำหรับดึงกลับ");
 
-                // 1) หา snapshot จากคิว sync (แถว CREATE ล่าสุดที่ชี้เอกสาร NextAcc ใบนี้)
+                // 1) หา snapshot จากคิว sync — เลข local↔NextAcc อาจไขว้กันจากประวัติแก้/void/สร้างใหม่
+                //    หลายรอบ → ห้ามหยิบ TOP 1 ดื้อ ๆ: ไล่ทุกแถวที่ชี้เอกสารนี้ (GUID ตรงมาก่อน แล้วค่อย
+                //    เลขเอกสาร) และถ้ารู้ว่าเอกสารเป็นของการจองไหน (Reference RES-{id}) ต้องเลือกเฉพาะ
+                //    snapshot ของการจองนั้น — กันดึงใบของการจองอื่นมาใส่ผิด
                 var qdt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1 ID, Payload FROM Accounting_Sync_Queue
+                    @"SELECT ID, Payload FROM Accounting_Sync_Queue
                       WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT'
                         AND ((@nid <> '' AND Nexaacc_Response_Id = @nid)
-                          OR (@num <> '' AND Nexaacc_Document_Number = @num))
-                      ORDER BY ID DESC",
+                          OR (@num <> '' AND Nexaacc_Document_Number = @num)
+                          OR (@rnPat <> '' AND Payload LIKE @rnPat))
+                      ORDER BY CASE WHEN @nid <> '' AND Nexaacc_Response_Id = @nid THEN 0 ELSE 1 END, ID DESC",
                     new Dictionary<string, object>
                     {
                         { "@nid", nexaaccId ?? "" },
-                        { "@num", nexaaccDocNumber ?? "" }
+                        { "@num", nexaaccDocNumber ?? "" },
+                        // เส้นทางจาก modal การจอง: หา snapshot ด้วยเลขใบเสร็จ local ตรง ๆ ด้วย —
+                        // กันเคส GUID/เลขเอกสารในคิว stale หลังกู้คืนบน NextAcc
+                        { "@rnPat", string.IsNullOrWhiteSpace(preferLocalReceipt) ? "" : "%\"receiptNumber\":\"" + preferLocalReceipt + "\"%" }
                     });
                 if (qdt == null || qdt.Rows.Count == 0)
                     return (false, $"ไม่พบประวัติ sync ของเอกสาร {nexaaccDocNumber} ในคิว — ดึงกลับอัตโนมัติไม่ได้ (เอกสารอาจสร้างบน NextAcc โดยตรง)");
 
-                string payloadJson = qdt.Rows[0]["Payload"]?.ToString() ?? "";
                 var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                Dictionary<string, object> p;
-                try { p = ser.Deserialize<Dictionary<string, object>>(payloadJson) ?? new Dictionary<string, object>(); }
-                catch { return (false, "อ่าน snapshot ใบเสร็จเดิมจากคิวไม่ได้ (payload เสียหาย)"); }
+                Dictionary<string, object> p = null;
+                var mismatchRes = new HashSet<int>();
+                foreach (System.Data.DataRow qrow in qdt.Rows)
+                {
+                    Dictionary<string, object> cand;
+                    try { cand = ser.Deserialize<Dictionary<string, object>>(qrow["Payload"]?.ToString() ?? "") ?? new Dictionary<string, object>(); }
+                    catch { continue; }
+                    string rn = cand.ContainsKey("receiptNumber") ? cand["receiptNumber"]?.ToString() : null;
+                    if (string.IsNullOrWhiteSpace(rn)) continue;
+                    if (!string.IsNullOrWhiteSpace(preferLocalReceipt)
+                        && !string.Equals(rn, preferLocalReceipt, StringComparison.OrdinalIgnoreCase))
+                        continue;   // เส้นทาง modal ระบุใบชัดเจน — เอาเฉพาะ snapshot ใบนั้น
+                    int candRes = 0;
+                    if (cand.ContainsKey("reservationId")) int.TryParse(cand["reservationId"]?.ToString(), out candRes);
+                    if (expectedReservationId > 0 && candRes != expectedReservationId)
+                    {
+                        if (candRes > 0) mismatchRes.Add(candRes);
+                        continue;   // snapshot ของการจองอื่น — ข้าม
+                    }
+                    p = cand;
+                    break;
+                }
+                if (p == null)
+                    return (false, mismatchRes.Count > 0
+                        ? $"snapshot ที่พบของ {nexaaccDocNumber} เป็นของการจองอื่น (#{string.Join(", #", mismatchRes)}) ไม่ตรงกับการจองของเอกสารนี้ (#{expectedReservationId}) — กันดึงผิดใบ. ใช้ปุ่ม \"📥 ดึงใบเสร็จกลับ\" ใน modal บัญชี NextAcc ของการจอง #{expectedReservationId} แทน (ค้นจากประวัติของการจองตรง ๆ)"
+                        : $"ไม่พบ snapshot ที่ใช้ได้ของเอกสาร {nexaaccDocNumber} — ดึงกลับอัตโนมัติไม่ได้");
 
-                string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
-                if (string.IsNullOrWhiteSpace(receiptNumber))
-                    return (false, "snapshot ในคิวไม่มีเลขใบเสร็จ local — ดึงกลับอัตโนมัติไม่ได้");
+                string receiptNumber = p["receiptNumber"].ToString();
 
                 int reservationId = 0;
                 if (p.ContainsKey("reservationId")) int.TryParse(p["reservationId"]?.ToString(), out reservationId);
@@ -1259,10 +1286,31 @@ namespace Take_Time_BangPhra.Integration
                 // 2) กันซ้ำ: ใบยังอยู่ในระบบ → ไม่ต้องดึง; แต่ถ้ารอบก่อนล้มครึ่งทาง (มีใบแต่ไม่มี
                 //    ประวัติชำระ) → ซ่อมส่วนที่ขาด (Payment_History + คืนมัดจำ) ให้จบ
                 var exist = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
+                    "SELECT TOP 1 ID, Nexaacc_Receipt_Payment_Id FROM Account_Receipt WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", receiptNumber } });
                 if (exist?.Rows.Count > 0)
                 {
+                    // ซ่อม marker ที่ชี้เอกสารผิดใบ (ผลพวงจากการจับ snapshot ไขว้ก่อนมี reservation check):
+                    // แก้เฉพาะ marker ว่าง/DOC:/APR: ที่ค่าไม่ตรงเอกสารปัจจุบัน — ไม่แตะ marker ชำระแล้ว
+                    // (bare payment GUID) / ADJ: / VOIDED
+                    string repairedMarkerNote = "";
+                    if (Guid.TryParse(nexaaccId, out var curG))
+                    {
+                        string curMarker = exist.Rows[0]["Nexaacc_Receipt_Payment_Id"]?.ToString() ?? "";
+                        string wantMarker = (docApproved ? "APR:" : "DOC:") + curG;
+                        bool markerRepairable = string.IsNullOrEmpty(curMarker)
+                            || curMarker.StartsWith("DOC:", StringComparison.OrdinalIgnoreCase)
+                            || curMarker.StartsWith("APR:", StringComparison.OrdinalIgnoreCase);
+                        if (markerRepairable && !string.Equals(curMarker, wantMarker, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _code.DatabaseInsertSafe(_connectionString,
+                                "UPDATE Account_Receipt SET Nexaacc_Receipt_Payment_Id = @m WHERE ID = @id",
+                                new Dictionary<string, object> { { "@m", wantMarker }, { "@id", receiptNumber } });
+                            repairedMarkerNote = $" (ซ่อม marker ให้ชี้เอกสาร {nexaaccDocNumber} ถูกใบแล้ว)";
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RestoreDeletedReceiptFromNextAcc: repaired marker {receiptNumber}: '{curMarker}' → '{wantMarker}'", "SYSTEM");
+                        }
+                    }
                     if (reservationId > 0)
                     {
                         var phExist = _code.DatabaseQuerySafe(_connectionString,
@@ -1289,10 +1337,11 @@ namespace Take_Time_BangPhra.Integration
                                 new Dictionary<string, object> { { "@amount", totalAmount }, { "@res", reservationId } });
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"RestoreDeletedReceiptFromNextAcc: repaired partial restore {receiptNumber} (added Payment_History + deposit {totalAmount:N2} to #{reservationId})", "SYSTEM");
-                            return (true, $"ใบเสร็จ {receiptNumber} มีอยู่แล้วแต่ประวัติชำระขาด — ซ่อมให้แล้ว (คืนยอด {totalAmount:N2} เข้าการจอง #{reservationId})");
+                            return (true, $"ใบเสร็จ {receiptNumber} มีอยู่แล้วแต่ประวัติชำระขาด — ซ่อมให้แล้ว (คืนยอด {totalAmount:N2} เข้าการจอง #{reservationId}){repairedMarkerNote}");
                         }
                     }
-                    return (false, $"ใบเสร็จ {receiptNumber} ยังอยู่ในระบบครบ — ไม่ต้องดึงกลับ (กดค้นหาใหม่)");
+                    return (repairedMarkerNote != "",
+                        $"ใบเสร็จ {receiptNumber} ยังอยู่ในระบบครบ — ไม่ต้องดึงกลับ{repairedMarkerNote}");
                 }
 
                 // 3) สร้าง Account_Receipt กลับ (marker ตามสถานะเอกสารบน NextAcc — กัน sync สร้างซ้ำ)
@@ -1428,9 +1477,10 @@ namespace Take_Time_BangPhra.Integration
                 if (qdt == null || qdt.Rows.Count == 0)
                     return (0, "ไม่พบประวัติ sync ใบเสร็จของการจองนี้ — ไม่มีอะไรให้ดึงกลับ");
 
-                // แถวล่าสุดต่อใบเสร็จ (คิวเรียง DESC — เจอเลขซ้ำ = ข้าม), เฉพาะใบที่หายจาก local
+                // แถวล่าสุดต่อใบเสร็จ (คิวเรียง DESC — เจอเลขซ้ำ = ข้าม). ใบที่ยังอยู่ใน local ก็เก็บไว้
+                // ด้วย — ให้ตัวกู้รายใบซ่อมส่วนที่ขาด (ประวัติชำระ/marker ชี้ผิดใบ) แบบ idempotent
                 var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                var candidates = new List<(string ReceiptNumber, string NexaaccId, string DocNumber, DateTime ReceiptDate)>();
+                var candidates = new List<(string ReceiptNumber, string NexaaccId, string DocNumber, DateTime ReceiptDate, decimal Total)>();
                 var seenReceipts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (System.Data.DataRow row in qdt.Rows)
                 {
@@ -1440,18 +1490,14 @@ namespace Take_Time_BangPhra.Integration
                     string rn = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
                     if (string.IsNullOrWhiteSpace(rn) || !seenReceipts.Add(rn)) continue;
 
-                    var exist = _code.DatabaseQuerySafe(_connectionString,
-                        "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
-                        new Dictionary<string, object> { { "@id", rn } });
-                    if (exist?.Rows.Count > 0) continue;   // ใบยังอยู่ — ไม่ต้องดึง
-
                     DateTime rd = DateTime.Today;
                     if (p.ContainsKey("receiptDate")) DateTime.TryParse(p["receiptDate"]?.ToString(), out rd);
                     candidates.Add((rn, row["Nexaacc_Response_Id"]?.ToString() ?? "",
-                        row["Nexaacc_Document_Number"]?.ToString() ?? "", rd == default ? DateTime.Today : rd));
+                        row["Nexaacc_Document_Number"]?.ToString() ?? "",
+                        rd == default ? DateTime.Today : rd, ParsePayloadDecimal(p, "totalAmount")));
                 }
                 if (candidates.Count == 0)
-                    return (0, "ใบเสร็จทุกใบของการจองนี้ยังอยู่ในระบบครบ — ไม่มีอะไรให้ดึงกลับ");
+                    return (0, "ไม่พบ snapshot ใบเสร็จของการจองนี้ในประวัติ sync — ไม่มีอะไรให้ดึงกลับ");
 
                 // เช็คสถานะจริงบน NextAcc (ช่วงวันที่ครอบทุกใบ) — กู้เฉพาะใบที่ active (ถูกกู้คืนแล้ว)
                 DateTime fromD = candidates.Min(c => c.ReceiptDate).AddDays(-2);
@@ -1474,6 +1520,7 @@ namespace Take_Time_BangPhra.Integration
 
                 int restored = 0;
                 var lines = new List<string>();
+                var usedDocIds = new HashSet<Guid>();
                 foreach (var c in candidates)
                 {
                     NextAccPaymentDoc doc = null;
@@ -1481,6 +1528,17 @@ namespace Take_Time_BangPhra.Integration
                         doc = naDocs.FirstOrDefault(d => d.Id == g);
                     if (doc == null && !string.IsNullOrEmpty(c.DocNumber))
                         doc = naDocs.FirstOrDefault(d => string.Equals(d.DocumentNumber, c.DocNumber, StringComparison.OrdinalIgnoreCase));
+                    // fallback: การกู้คืนบน NextAcc อาจได้ GUID ใหม่/เลขในคิวไขว้จากประวัติแก้หลายรอบ →
+                    // จับด้วย Reference ของการจอง + ยอดตรง (เอาเฉพาะกรณีเจอใบเดียวชัด ๆ)
+                    if (doc == null && c.Total > 0)
+                    {
+                        var byRef = naDocs.Where(d => !IsVoid(d.Status)
+                            && !usedDocIds.Contains(d.Id)
+                            && System.Text.RegularExpressions.Regex.IsMatch(d.Reference ?? "",
+                                   @"RES-?0*" + reservationId + @"(\D|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                            && Math.Abs(d.TotalAmount - c.Total) < 0.01m).ToList();
+                        if (byRef.Count == 1) doc = byRef[0];
+                    }
 
                     if (doc == null)
                     {
@@ -1492,10 +1550,13 @@ namespace Take_Time_BangPhra.Integration
                         lines.Add($"⏭ {c.ReceiptNumber} ({doc.DocumentNumber}): ยังถูกยกเลิกอยู่บน NextAcc — ไปกด \"กู้คืน\" บน NextAcc ก่อน แล้วค่อยดึงกลับ");
                         continue;
                     }
+                    usedDocIds.Add(doc.Id);
 
-                    var (ok, msg) = RestoreDeletedReceiptFromNextAcc(c.NexaaccId, doc.DocumentNumber, doc.Status);
+                    // ใช้ GUID ปัจจุบันของเอกสาร (ไม่ใช่ค่าในคิวที่อาจ stale หลังกู้คืนบน NextAcc)
+                    // + ยืนยัน reservation + ระบุใบ local ชัดเจน (กันหยิบใบอื่นของการจองเดียวกัน)
+                    var (ok, msg) = RestoreDeletedReceiptFromNextAcc(doc.Id.ToString(), doc.DocumentNumber, doc.Status, reservationId, c.ReceiptNumber);
                     if (ok) { restored++; lines.Add("✅ " + msg); }
-                    else lines.Add($"⚠ {c.ReceiptNumber}: {msg}");
+                    else lines.Add($"• {c.ReceiptNumber}: {msg}");
                 }
 
                 string summary = restored > 0
