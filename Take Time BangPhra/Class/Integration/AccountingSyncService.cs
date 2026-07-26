@@ -1197,6 +1197,175 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// ดึงใบเสร็จที่ถูกลบใน TakeTime กลับเข้าระบบ จากเอกสาร NextAcc ที่ถูก "กู้คืนจากยกเลิก" —
+        /// เคส: ลบใบเสร็จในระบบ (hard-delete Account_Receipt/Payment_History + ลด Reservation.Deposit
+        /// + void บน NextAcc) แล้วภายหลังกดกู้คืนเอกสารบน NextAcc → ฝั่งเราไม่มีข้อมูลเหลือ
+        /// ทำให้การจองไม่ถูกหักมัดจำ. ฟังก์ชันนี้กู้จาก snapshot ใน Accounting_Sync_Queue
+        /// (payload ตอน CREATE_RECEIPT_DOCUMENT เก็บข้อมูลใบเสร็จเดิมครบ): สร้าง Account_Receipt +
+        /// Account_Receipt_Detail + Payment_History กลับ พร้อมบวก Reservation.Deposit คืน (mirror
+        /// ของ delete flow ที่ลดไว้). idempotent — ใบยังอยู่/ดึงแล้ว = ไม่ทำซ้ำ.
+        /// </summary>
+        public (bool Ok, string Message) RestoreDeletedReceiptFromNextAcc(string nexaaccId, string nexaaccDocNumber)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(nexaaccId) && string.IsNullOrWhiteSpace(nexaaccDocNumber))
+                    return (false, "ไม่มีรหัสเอกสาร NextAcc สำหรับดึงกลับ");
+
+                // 1) หา snapshot จากคิว sync (แถว CREATE ล่าสุดที่ชี้เอกสาร NextAcc ใบนี้)
+                var qdt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Payload FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND ((@nid <> '' AND Nexaacc_Response_Id = @nid)
+                          OR (@num <> '' AND Nexaacc_Document_Number = @num))
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@nid", nexaaccId ?? "" },
+                        { "@num", nexaaccDocNumber ?? "" }
+                    });
+                if (qdt == null || qdt.Rows.Count == 0)
+                    return (false, $"ไม่พบประวัติ sync ของเอกสาร {nexaaccDocNumber} ในคิว — ดึงกลับอัตโนมัติไม่ได้ (เอกสารอาจสร้างบน NextAcc โดยตรง)");
+
+                string payloadJson = qdt.Rows[0]["Payload"]?.ToString() ?? "";
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                Dictionary<string, object> p;
+                try { p = ser.Deserialize<Dictionary<string, object>>(payloadJson) ?? new Dictionary<string, object>(); }
+                catch { return (false, "อ่าน snapshot ใบเสร็จเดิมจากคิวไม่ได้ (payload เสียหาย)"); }
+
+                string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+                if (string.IsNullOrWhiteSpace(receiptNumber))
+                    return (false, "snapshot ในคิวไม่มีเลขใบเสร็จ local — ดึงกลับอัตโนมัติไม่ได้");
+
+                int reservationId = 0;
+                if (p.ContainsKey("reservationId")) int.TryParse(p["reservationId"]?.ToString(), out reservationId);
+                decimal totalAmount = ParsePayloadDecimal(p, "totalAmount");
+                decimal vatAmount = ParsePayloadDecimal(p, "vatAmount");
+                bool isDeposit = p.ContainsKey("isDeposit") && string.Equals(p["isDeposit"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+                string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : "CASH";
+                decimal depositApplied = ParsePayloadDecimal(p, "depositApplied");
+                DateTime receiptDate = DateTime.Today;
+                if (p.ContainsKey("receiptDate")) DateTime.TryParse(p["receiptDate"]?.ToString(), out receiptDate);
+                if (receiptDate == default) receiptDate = DateTime.Today;
+
+                if (totalAmount <= 0)
+                    return (false, "snapshot มียอด 0 — ข้อมูลไม่พอสำหรับดึงกลับ");
+
+                // 2) กันซ้ำ: ใบยังอยู่ในระบบ → ไม่ต้องดึง
+                var exist = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber } });
+                if (exist?.Rows.Count > 0)
+                    return (false, $"ใบเสร็จ {receiptNumber} ยังอยู่ในระบบ — ไม่ต้องดึงกลับ (กดค้นหาใหม่)");
+
+                // 3) สร้าง Account_Receipt กลับ (marker DOC: = เอกสารบน NextAcc ถูกกู้เป็นฉบับร่าง
+                //    ยังไม่อนุมัติ — กัน sync สร้างซ้ำ และให้ปุ่มดู PDF/แก้ไขจับคู่ได้)
+                string uid = Guid.NewGuid().ToString("N");
+                string customerId = null;
+                if (reservationId > 0)
+                {
+                    var cdt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT TOP 1 c.ID FROM Customer c
+                          INNER JOIN Reservation r ON r.Customer_MobilePhone = c.MobilePhone
+                          WHERE r.ID = @res",
+                        new Dictionary<string, object> { { "@res", reservationId } });
+                    if (cdt?.Rows.Count > 0) customerId = cdt.Rows[0][0]?.ToString();
+                }
+
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO [dbo].[Account_Receipt]
+                        (ID, UID, [Reservation_ID], [Created_Date], [Total_Amount], [Vat],
+                         [Total_Amount_Exclude_Vat], [IsDeposit], [UseDeposit], Status,
+                         Paid_Type, Created_By_ID, Etax, Customer_ID, Nexaacc_Receipt_Payment_Id)
+                      VALUES (@id, @uid, @res, @docDate, @total, @vat, @exVat,
+                              @isDep, 'False', 'Normal', @paidType, 0, 'False', @custId, @marker)",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", receiptNumber },
+                        { "@uid", uid },
+                        { "@res", reservationId },
+                        { "@docDate", receiptDate.ToString("yyyy-MM-dd") },
+                        { "@total", totalAmount },
+                        { "@vat", vatAmount },
+                        { "@exVat", totalAmount - vatAmount },
+                        { "@isDep", isDeposit ? "True" : "False" },
+                        { "@paidType", (object)paymentMethod ?? "CASH" },
+                        { "@custId", (object)customerId ?? DBNull.Value },
+                        { "@marker", Guid.TryParse(nexaaccId, out var ng) ? "DOC:" + ng : (object)DBNull.Value }
+                    });
+
+                // ใบที่เคยหักมัดจำ (จากใบมัดจำก่อนหน้า) → คืนสถานะ UseDeposit + ยอดที่หักไว้
+                if (depositApplied > 0)
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Account_Receipt SET UseDeposit = 'True', Deposit_Applied_Amount = @dep WHERE ID = @id",
+                        new Dictionary<string, object> { { "@dep", depositApplied }, { "@id", receiptNumber } });
+
+                string detailText = isDeposit
+                    ? $"ค่ามัดจำที่พักของหมายเลขการจอง {reservationId} [{receiptNumber}] (ดึงกลับจาก NextAcc {nexaaccDocNumber})"
+                    : $"รับชำระ - การจอง #{reservationId} [{receiptNumber}] (ดึงกลับจาก NextAcc {nexaaccDocNumber})";
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO [dbo].[Account_Receipt_Detail]
+                        ([Number], [Receipt_ID], [ProductType_ID], [Product_ID], [Product_Data],
+                         [Product_Amount], [Product_Unit], [Price_PerPeice], [Price_Amount])
+                      VALUES ('1', @id, 1, 7, @detail, '1', N'ครั้ง', @total, @total)",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", receiptNumber },
+                        { "@detail", detailText },
+                        { "@total", totalAmount }
+                    });
+
+                // 4) Payment_History + คืนยอดมัดจำเข้า Reservation (mirror ของ delete ที่ลดไว้)
+                string restoreNote;
+                if (reservationId > 0)
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"INSERT INTO [dbo].[Payment_History]
+                            (Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
+                             Receipt_ID, RemainingBalance, Status)
+                          VALUES (@res, @docDate, @amount, @ptype, @method, @id, 0, 'COMPLETED')",
+                        new Dictionary<string, object>
+                        {
+                            { "@res", reservationId },
+                            { "@docDate", receiptDate.ToString("yyyy-MM-dd") },
+                            { "@amount", totalAmount },
+                            { "@ptype", isDeposit ? "DEPOSIT" : "PAYMENT" },
+                            { "@method", (object)paymentMethod ?? "CASH" },
+                            { "@id", receiptNumber }
+                        });
+
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Reservation SET Deposit = ISNULL(Deposit, 0) + @amount WHERE ID = @res",
+                        new Dictionary<string, object> { { "@amount", totalAmount }, { "@res", reservationId } });
+                    restoreNote = $"ดึงกลับสำเร็จ: {receiptNumber} ({nexaaccDocNumber}) ผูกการจอง #{reservationId} " +
+                                  $"+ คืนยอดชำระ {totalAmount:N2} เข้าการจองแล้ว (มัดจำจะถูกหักตอนเช็คเอาท์ตามปกติ)";
+                }
+                else
+                {
+                    restoreNote = $"ดึงกลับสำเร็จ: {receiptNumber} ({nexaaccDocNumber}) — ใบนี้ไม่ผูกการจอง";
+                }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RestoreDeletedReceiptFromNextAcc: {restoreNote} (nexaaccId={nexaaccId}, queue snapshot #{qdt.Rows[0]["ID"]})",
+                    "SYSTEM");
+                return (true, restoreNote + " — หมายเหตุ: เอกสารบน NextAcc ถูกกู้เป็นฉบับร่าง อย่าลืมกดอนุมัติบน NextAcc เพื่อลงบัญชีใหม่");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RestoreDeletedReceiptFromNextAcc failed ({nexaaccDocNumber}): {ex.Message}", "SYSTEM");
+                return (false, "ดึงกลับล้มเหลว: " + ex.Message);
+            }
+        }
+
+        private static decimal ParsePayloadDecimal(Dictionary<string, object> p, string key)
+        {
+            if (!p.ContainsKey(key) || p[key] == null) return 0m;
+            return decimal.TryParse(p[key].ToString(),
+                System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0m;
+        }
+
+        /// <summary>
         /// Enqueue void for a payment voucher that was deleted or cancelled.
         /// </summary>
         public long EnqueueVoidPaymentVoucher(string documentNumber)

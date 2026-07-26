@@ -998,6 +998,13 @@ namespace Take_Time_BangPhra.Account
                 nr["ID"] = naNum;
                 nr["DisplayDoc"] = naNum;
                 nr["Created_Date"] = nd.DocumentDate;
+                // ดึงเลขการจองจาก Reference "RES-{id}" ของเอกสาร NextAcc — ให้คอลัมน์การจองไม่ว่าง
+                // (เคสใบที่ถูกลบใน local แล้วกู้คืนบน NextAcc: ผู้ใช้เห็นทันทีว่าใบนี้เป็นของการจองไหน)
+                if (dt.Columns.Contains("Reservation_ID"))
+                {
+                    var mRes = System.Text.RegularExpressions.Regex.Match(nd.Reference ?? "", @"RES-?(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (mRes.Success && int.TryParse(mRes.Groups[1].Value, out int naResId)) nr["Reservation_ID"] = naResId;
+                }
                 if (dt.Columns.Contains("CustomerName")) nr["CustomerName"] = string.IsNullOrEmpty(nd.ContactName) ? "-" : nd.ContactName;
                 if (dt.Columns.Contains("Paid_Type")) nr["Paid_Type"] = nd.DocumentTypeLabel ?? "";
                 nr["Total_Amount"] = nd.TotalAmount;
@@ -1826,11 +1833,22 @@ namespace Take_Time_BangPhra.Account
                 {
                     int rowIndex = Convert.ToInt32(e.CommandArgument);
 
-                    // เอกสาร NextAcc-only (สร้างบน NextAcc โดยตรง/ใบยกเลิก) — ไม่มีใบ local ให้แก้
+                    // เอกสาร NextAcc-only (ไม่มีใบ local) — ปุ่มนี้กลายเป็น "↩️ ดึงกลับ":
+                    // กู้ใบเสร็จที่ถูกลบใน TakeTime กลับจาก snapshot ในคิว sync (สร้าง Account_Receipt/
+                    // Payment_History + ผูกการจอง + คืนยอดมัดจำ) — เคสลบแล้วไปกู้คืนเอกสารบน NextAcc
                     var dkEdit = gvDetails.DataKeys[rowIndex];
                     if (dkEdit != null && dkEdit["IsNextAccOnly"]?.ToString() == "1")
                     {
-                        ShowError("เอกสารนี้อยู่บน NextAcc (ไม่มีใบในระบบ) — แก้ไขรายละเอียดที่ระบบ NextAcc");
+                        if (dkEdit["Status"]?.ToString() == "Cancel")
+                        {
+                            ShowError("เอกสารนี้ถูกยกเลิกบน NextAcc — ไม่มีอะไรให้ดึงกลับ");
+                            return;
+                        }
+                        string restoreNaId = dkEdit["NextAccId"]?.ToString() ?? "";
+                        string restoreDocNum = dkEdit["ID"]?.ToString() ?? "";
+                        var restoreSvc = new AccountingSyncService(conn);
+                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum);
+                        ShowError((rOk ? "✅ " : "") + rMsg + (rOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
                         return;
                     }
 
@@ -2167,7 +2185,18 @@ namespace Take_Time_BangPhra.Account
                                 else bDel.Text = "🚫 ยกเลิก";             // active → ยกเลิกบน NextAcc ได้
                             }
                     var bEdit = e.Row.FindControl("btnEdit") as Button;
-                    if (bEdit != null) bEdit.Visible = false;             // ปุ่มแก้ไข (ไม่มีใบ local)
+                    if (bEdit != null)
+                    {
+                        if (voided) bEdit.Visible = false;                // ใบยกเลิก — ไม่มีอะไรให้ทำ
+                        else
+                        {
+                            // ใบ active ที่ไม่มีคู่ใน local (เช่น ลบในระบบแล้วไปกู้คืนบน NextAcc) →
+                            // ปุ่ม "ดึงกลับ": สร้าง Account_Receipt/Payment_History + คืนมัดจำเข้าการจอง
+                            bEdit.Text = "↩️ ดึงกลับ";
+                            bEdit.ToolTip = "ดึงใบเสร็จกลับเข้าระบบ (กู้ข้อมูลการจอง/มัดจำจากประวัติ sync)";
+                            bEdit.OnClientClick = "return confirm('ดึงเอกสารนี้กลับเข้าระบบ?\\n\\nระบบจะสร้างใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำเข้าการจองให้ (กู้จากประวัติ sync)');";
+                        }
+                    }
                 }
                 catch { }
                 if (voided) e.Row.Attributes["style"] = "background-color:#fff3f3;color:#a00;";
