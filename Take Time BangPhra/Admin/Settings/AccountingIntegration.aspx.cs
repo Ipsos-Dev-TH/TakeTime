@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
 using System.Web.UI;
-using Take_Time_BangPhra.Class.Services;
+using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Admin.Settings
 {
@@ -533,7 +533,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var svc = new Class.Services.EmailReservationService(ConnStr);
+                var svc = new EmailReservationService(ConnStr);
                 var r = System.Threading.Tasks.Task.Run(() => svc.ProcessEmails()).Result;
                 if (r.Error != null)
                     return new Dictionary<string, object> { { "success", false }, { "message", r.Error } };
@@ -554,7 +554,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var svc = new Class.Services.EmailReservationService(ConnStr);
+                var svc = new EmailReservationService(ConnStr);
                 var (ok, msg) = System.Threading.Tasks.Task.Run(() => svc.TestConnection()).Result;
                 return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
             }
@@ -630,7 +630,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var s = new DailyReportLineService(ConnStr);
                 var r = System.Threading.Tasks.Task.Run(() => s.SendNow(true)).Result;
                 if (!r.Success && r.Error != null)
                     return new Dictionary<string, object> { { "success", false }, { "message", r.Error }, { "detail", string.Join("\n", r.Messages) } };
@@ -652,7 +652,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var s = new DailyReportLineService(ConnStr);
                 var (ok, urlOrErr, _) = System.Threading.Tasks.Task.Run(() => s.GeneratePreview()).Result;
                 return ok
                     ? new Dictionary<string, object> { { "success", true }, { "message", "สร้างรูปพรีวิวแล้ว" }, { "imageUrl", urlOrErr } }
@@ -668,7 +668,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                var s = new Class.Services.DailyReportLineService(ConnStr);
+                var s = new DailyReportLineService(ConnStr);
                 var (ok, msg) = System.Threading.Tasks.Task.Run(() => s.SendTestText()).Result;
                 return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
             }

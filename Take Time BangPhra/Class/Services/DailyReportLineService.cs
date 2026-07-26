@@ -10,7 +10,7 @@ using System.Text;
 using System.Web.Script.Serialization;
 using TheArtOfDev.HtmlRenderer.WinForms;
 
-namespace Take_Time_BangPhra.Class.Services
+namespace Take_Time_BangPhra.Services
 {
     /// <summary>
     /// สร้างรูปตารางจองรายวัน (render หน้า DisplayToday) แล้ว push เข้า LINE — พอร์ตจาก

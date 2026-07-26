@@ -11,7 +11,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Take_Time_BangPhra.Integration;
-using Take_Time_BangPhra.Class.Services;
+using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra
 {

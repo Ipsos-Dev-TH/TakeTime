@@ -853,6 +853,8 @@
     <Compile Include="Class\RoomChargeService.cs" />
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
+    <Compile Include="Class\Services\EmailReservationService.cs" />
+    <Compile Include="Class\Services\DailyReportLineService.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\OmniChannelService.cs" />
     <Compile Include="Class\Services\AIKnowledgeService.cs" />

@@ -11,7 +11,7 @@ using MailKit.Net.Imap;
 using MailKit.Search;
 using MimeKit;
 
-namespace Take_Time_BangPhra.Class.Services
+namespace Take_Time_BangPhra.Services
 {
     /// <summary>
     /// อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) → ลงจองในระบบ TakeTime.
