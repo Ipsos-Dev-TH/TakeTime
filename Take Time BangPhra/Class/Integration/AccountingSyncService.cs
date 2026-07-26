@@ -1374,6 +1374,113 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// ดึงใบเสร็จที่ถูกลบของ "ทั้งการจอง" กลับจาก NextAcc — เรียกจาก modal บัญชี NextAcc บน
+        /// ReserveTable (เคสผู้ใช้อยู่หน้าการจอง ไม่ต้องไปไล่หาแถวในหน้าเอกสาร).
+        /// ไล่จากประวัติคิว sync ของการจองนี้ (CREATE_RECEIPT_DOCUMENT ที่เคย COMPLETED):
+        /// ใบไหนหายจาก local + เอกสารบน NextAcc ยัง active (ถูกกู้คืนแล้ว) → กู้กลับด้วย
+        /// RestoreDeletedReceiptFromNextAcc (ผูกการจอง + คืนมัดจำ). ใบที่ยัง void บน NextAcc →
+        /// ข้ามพร้อมบอกให้ไปกดกู้คืนบน NextAcc ก่อน. idempotent.
+        /// </summary>
+        public async System.Threading.Tasks.Task<(int Restored, string Message)> RestoreReservationReceiptsFromNextAccAsync(int reservationId)
+        {
+            try
+            {
+                if (reservationId <= 0) return (-1, "รหัสการจองไม่ถูกต้อง");
+
+                var qdt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID, Payload, Nexaacc_Response_Id, Nexaacc_Document_Number
+                      FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Entity_ID = @res
+                        AND Status = 'COMPLETED' AND Nexaacc_Response_Id IS NOT NULL
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@res", reservationId } });
+                if (qdt == null || qdt.Rows.Count == 0)
+                    return (0, "ไม่พบประวัติ sync ใบเสร็จของการจองนี้ — ไม่มีอะไรให้ดึงกลับ");
+
+                // แถวล่าสุดต่อใบเสร็จ (คิวเรียง DESC — เจอเลขซ้ำ = ข้าม), เฉพาะใบที่หายจาก local
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var candidates = new List<(string ReceiptNumber, string NexaaccId, string DocNumber, DateTime ReceiptDate)>();
+                var seenReceipts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (System.Data.DataRow row in qdt.Rows)
+                {
+                    Dictionary<string, object> p;
+                    try { p = ser.Deserialize<Dictionary<string, object>>(row["Payload"]?.ToString() ?? "") ?? new Dictionary<string, object>(); }
+                    catch { continue; }
+                    string rn = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+                    if (string.IsNullOrWhiteSpace(rn) || !seenReceipts.Add(rn)) continue;
+
+                    var exist = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rn } });
+                    if (exist?.Rows.Count > 0) continue;   // ใบยังอยู่ — ไม่ต้องดึง
+
+                    DateTime rd = DateTime.Today;
+                    if (p.ContainsKey("receiptDate")) DateTime.TryParse(p["receiptDate"]?.ToString(), out rd);
+                    candidates.Add((rn, row["Nexaacc_Response_Id"]?.ToString() ?? "",
+                        row["Nexaacc_Document_Number"]?.ToString() ?? "", rd == default ? DateTime.Today : rd));
+                }
+                if (candidates.Count == 0)
+                    return (0, "ใบเสร็จทุกใบของการจองนี้ยังอยู่ในระบบครบ — ไม่มีอะไรให้ดึงกลับ");
+
+                // เช็คสถานะจริงบน NextAcc (ช่วงวันที่ครอบทุกใบ) — กู้เฉพาะใบที่ active (ถูกกู้คืนแล้ว)
+                DateTime fromD = candidates.Min(c => c.ReceiptDate).AddDays(-2);
+                DateTime toD = candidates.Max(c => c.ReceiptDate).AddDays(2);
+                List<NextAccPaymentDoc> naDocs = null;
+                try { naDocs = await FetchNextAccReceiptDocumentsAsync(fromD, toD); }
+                catch (Exception fex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"RestoreReservationReceipts: fetch NextAcc docs failed ({fex.Message})", "SYSTEM");
+                }
+                if (naDocs == null)
+                    return (-1, "ตรวจสถานะเอกสารบน NextAcc ไม่ได้ (เชื่อมต่อไม่สำเร็จ) — ลองใหม่ หรือใช้ปุ่ม ↩️ ดึงกลับ ในหน้าเอกสาร");
+
+                bool IsVoid(string s) =>
+                    string.Equals(s, "Voided", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s, "Canceled", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+                int restored = 0;
+                var lines = new List<string>();
+                foreach (var c in candidates)
+                {
+                    NextAccPaymentDoc doc = null;
+                    if (Guid.TryParse(c.NexaaccId, out var g))
+                        doc = naDocs.FirstOrDefault(d => d.Id == g);
+                    if (doc == null && !string.IsNullOrEmpty(c.DocNumber))
+                        doc = naDocs.FirstOrDefault(d => string.Equals(d.DocumentNumber, c.DocNumber, StringComparison.OrdinalIgnoreCase));
+
+                    if (doc == null)
+                    {
+                        lines.Add($"⏭ {c.ReceiptNumber} ({c.DocNumber}): ไม่พบเอกสารบน NextAcc — อาจถูกลบถาวร, ข้าม");
+                        continue;
+                    }
+                    if (IsVoid(doc.Status))
+                    {
+                        lines.Add($"⏭ {c.ReceiptNumber} ({doc.DocumentNumber}): ยังถูกยกเลิกอยู่บน NextAcc — ไปกด \"กู้คืน\" บน NextAcc ก่อน แล้วค่อยดึงกลับ");
+                        continue;
+                    }
+
+                    var (ok, msg) = RestoreDeletedReceiptFromNextAcc(c.NexaaccId, doc.DocumentNumber, doc.Status);
+                    if (ok) { restored++; lines.Add("✅ " + msg); }
+                    else lines.Add($"⚠ {c.ReceiptNumber}: {msg}");
+                }
+
+                string summary = restored > 0
+                    ? $"ดึงกลับสำเร็จ {restored}/{candidates.Count} ใบ\n" + string.Join("\n", lines)
+                    : "ไม่มีใบไหนถูกดึงกลับ\n" + string.Join("\n", lines);
+                return (restored, summary);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RestoreReservationReceiptsFromNextAcc failed (res={reservationId}): {ex.Message}", "SYSTEM");
+                return (-1, "ดึงกลับล้มเหลว: " + ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Enqueue void for a payment voucher that was deleted or cancelled.
         /// </summary>
         public long EnqueueVoidPaymentVoucher(string documentNumber)

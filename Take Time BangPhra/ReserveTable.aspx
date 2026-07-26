@@ -1007,7 +1007,14 @@
                  + ' · ถูกหักในใบเช็คเอาท์ <b>' + naNum(d.DepositAppliedTotal) + '</b></div>';
 
             if (!d.Receipts || d.Receipts.length === 0)
-                return html + '<div class="alert alert-info">' + naEsc(d.Message || 'การจองนี้ไม่มีใบเสร็จในระบบ') + '</div>';
+                return html + '<div class="alert alert-info">' + naEsc(d.Message || 'การจองนี้ไม่มีใบเสร็จในระบบ')
+                     + '<div style="margin-top:10px;">'
+                     + '<button type="button" class="btn btn-primary btn-sm" onclick="naRestoreReceipts()" '
+                     + 'title="เคสใบเสร็จถูกลบในระบบแล้วไปกดกู้คืนเอกสารบน NextAcc — กู้ใบเสร็จ + ผูกการจอง + คืนยอดมัดจำจากประวัติ sync">'
+                     + '📥 ดึงใบเสร็จกลับจาก NextAcc</button>'
+                     + '<div style="font-size:12px; color:#666; margin-top:6px;">ถ้าเอกสารของการจองนี้เคยถูกลบในระบบ แล้วถูก "กู้คืนจากยกเลิก" บน NextAcc — ปุ่มนี้จะกู้ใบเสร็จ+มัดจำกลับเข้าการจองให้จากประวัติ sync</div>'
+                     + '</div></div>'
+                     + '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
 
             html += '<div style="overflow-x:auto;"><table class="table table-condensed table-bordered" style="font-size:13px;">';
             html += '<thead><tr style="background:#f5f5f5;"><th>ใบเสร็จ</th><th>วันที่</th><th style="text-align:right;">ยอด</th>'
@@ -1075,6 +1082,20 @@
         function naScheduleRefresh(ms) {
             if (naRefreshTimer) clearTimeout(naRefreshTimer);
             naRefreshTimer = setTimeout(function () { naLoadOverview(); }, ms || 800);
+        }
+
+        function naRestoreReceipts() {
+            if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }
+            if (!confirm('📥 ดึงใบเสร็จของการจอง #' + naCurrentResId + ' กลับจาก NextAcc?\n\nสำหรับเคส: ใบเสร็จถูกลบในระบบ แล้วเอกสารบน NextAcc ถูก "กู้คืนจากยกเลิก"\n• กู้ใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำ จากประวัติ sync\n• กู้เฉพาะใบที่เอกสารบน NextAcc ยัง active (ใบที่ยัง void อยู่จะข้าม พร้อมบอกเหตุผล)\n• กดซ้ำไม่เบิ้ล (ใบที่กลับมาแล้วจะถูกข้าม)')) return;
+            naSetBusy(true, 'กำลังดึงใบเสร็จกลับจาก NextAcc... (10-60 วินาที)');
+            naFetch(naPageUrl + '?naAction=restoreReceipts&resId=' + naCurrentResId + '&_=' + Date.now(), 180000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    if (d.Success) naScheduleRefresh(1200);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
         }
 
         function naSetCheckedIn() {
@@ -1155,6 +1176,8 @@
                     <button type="button" class="btn btn-success btn-sm" onclick="naSetCheckedIn()"
                         title="ตั้งสถานะการจองเป็น 'เช็คอินแล้ว' โดยตรง — สำหรับเคสที่จ่ายครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะค้าง (ไม่แตะเงิน/เอกสาร)">✓ ตั้งเช็คอินแล้ว</button>
                     <button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="naRestoreReceipts()"
+                        title="กู้ใบเสร็จที่ถูกลบในระบบกลับจากเอกสาร NextAcc ที่ถูกกู้คืน — ผูกการจอง + คืนยอดมัดจำจากประวัติ sync (idempotent)">📥 ดึงใบเสร็จกลับ</button>
                     <button type="button" class="btn btn-warning btn-sm" onclick="naReservationAction('resyncAll')"
                         title="แก้เอกสารทุกใบให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสาร NextAcc เดิม (in-place)">🔁 Resync ทั้งการจอง (คงเลขเดิม)</button>
                     <button type="button" class="btn btn-danger btn-sm" onclick="naReservationAction('reset')"

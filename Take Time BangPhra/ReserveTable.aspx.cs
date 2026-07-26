@@ -133,6 +133,20 @@ namespace Take_Time_BangPhra
                                 result = new { Success = true, Message = $"ตั้งสถานะการจอง #{resId} เป็น 'เช็คอินแล้ว' เรียบร้อย (เงิน/เอกสารไม่ถูกแตะ) — โหลดหน้าใหม่เพื่อเห็นสถานะ" };
                                 break;
                             }
+                        case "restoreReceipts":
+                            {
+                                // ดึงใบเสร็จที่ถูกลบของการจองกลับจาก NextAcc (เคสลบในระบบแล้วกู้คืนเอกสารบน
+                                // NextAcc) — กู้จาก snapshot คิว sync: ผูกการจอง + คืนมัดจำ. idempotent.
+                                Server.ScriptTimeout = 300;
+                                var tr = Task.Run(() => sync.RestoreReservationReceiptsFromNextAccAsync(resId));
+                                if (tr.Wait(120000))
+                                {
+                                    var (n, msg) = tr.Result;
+                                    result = new { Success = n >= 0, Message = msg };
+                                }
+                                else result = new { Success = false, Message = "NextAcc ตอบช้าเกิน 120 วินาที — ลองใหม่อีกครั้ง" };
+                                break;
+                            }
                         case "voidReceipt":
                             {
                                 long q = sync.EnqueueVoidReceipt(doc);
