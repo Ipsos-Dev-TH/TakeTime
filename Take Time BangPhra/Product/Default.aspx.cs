@@ -39,6 +39,11 @@ namespace Take_Time_BangPhra.Product
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // กันเบราว์เซอร์ (โดยเฉพาะมือถือ) เก็บหน้า POS ลง cache แล้ว restore ฟอร์มเก่า →
+            // ViewState ไม่ตรง session → Invalid postback ตอนกดปุ่ม / ตะกร้าแสดงค่าค้าง
+            Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            Response.Cache.SetNoStore();
+
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);
@@ -1631,6 +1636,22 @@ namespace Take_Time_BangPhra.Product
 
         protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            // ปุ่มตะกร้า (+/-/ลบ) อ้าง index ของแถว — กันเคสหน้า stale (เปิดค้าง/ย้อนจาก cache มือถือ)
+            // ที่ index ไม่ตรงตะกร้าปัจจุบัน หรือ session หมดอายุ → รีเฟรชตารางแทนการ error
+            if (e.CommandName == "Add" || e.CommandName == "Reduce" || e.CommandName == "DeleteItem")
+            {
+                var cart = Session["dtOrder"] as DataTable;
+                int cartIdx;
+                if (cart == null || !int.TryParse(e.CommandArgument?.ToString(), out cartIdx)
+                    || cartIdx < 0 || cartIdx >= cart.Rows.Count)
+                {
+                    if (cart != null) { GridView1.DataSource = cart; GridView1.DataBind(); }
+                    ClientScript.RegisterStartupScript(GetType(), "cartStale",
+                        "alert('หน้าจอไม่ตรงกับตะกร้าปัจจุบัน — รีเฟรชให้แล้ว กรุณาลองใหม่อีกครั้ง');", true);
+                    return;
+                }
+            }
+
             if (e.CommandName == "Add")
             {
                 DataTable dtOrder = (DataTable)Session["dtOrder"];
