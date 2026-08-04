@@ -166,18 +166,32 @@ namespace Take_Time_BangPhra.Product
             }
         }
 
+        // กันเพิ่มซ้ำใน postback เดียว: กด "➕ เพิ่ม" หลังพิมพ์ชื่อ → TextChanged ยิงก่อน (เพิ่มสินค้า
+        // + ล้างช่องค้นหา) แล้ว Button3_Click เรียก renderProduct ซ้ำอีกรอบในคำขอเดียวกัน
+        private bool _productAddedThisRequest = false;
+
         public void renderProduct()
         {
+            // ⛔ ช่องค้นหาว่าง = ไม่มีอะไรให้เพิ่ม — ห้าม query ต่อ!
+            // เดิมค้น "Product_Name = '' OR Barcode = ''" → แมตช์สินค้าที่ไม่มีบาร์โค้ด (ค่าว่าง)
+            // ในตาราง Product เช่น ฮูการ์เดน → ทุก postback ที่ช่องว่างจะเพิ่ม/บวกสินค้าตัวนั้นตลอด
+            string searchText = (TextBox1.Text ?? "").Trim();
+            if (searchText.Length == 0) return;
+            if (_productAddedThisRequest) return;
+            _productAddedThisRequest = true;
+
             // SECURE: Use parameterized query to prevent SQL Injection
             var parameters = new Dictionary<string, object>
             {
-                { "@ProductName", TextBox1.Text ?? "" },
-                { "@Barcode", TextBox1.Text ?? "" }
+                { "@ProductName", searchText },
+                { "@Barcode", searchText }
             };
 
+            // เทียบ Barcode เฉพาะที่มีค่าจริง — สินค้าที่ไม่มีบาร์โค้ด (NULL/ว่าง) ห้ามติดมากับการค้น
             DataTable dtProduct = code.DatabaseQuerySafe(conn,
                 "SELECT * FROM [Taketime].[dbo].[Product] " +
-                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                "WHERE [Product_Name] = @ProductName " +
+                "   OR (Barcode = @Barcode AND LTRIM(RTRIM(ISNULL(Barcode,''))) <> '')",
                 parameters);
             if (dtProduct.Rows.Count > 0)
             {
