@@ -434,6 +434,9 @@
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
     <Content Include="Guest\Activities.aspx" />
+    <Content Include="Guest\ActivityBooking.aspx" />
+    <Content Include="Activities.aspx" />
+    <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
@@ -1201,6 +1204,28 @@
     <Compile Include="Guest\Activities.aspx.designer.cs">
       <DependentUpon>Activities.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Guest\ActivityBooking.aspx.cs">
+      <DependentUpon>ActivityBooking.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\ActivityBooking.aspx.designer.cs">
+      <DependentUpon>ActivityBooking.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Activities.aspx.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Activities.aspx.designer.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\ActivityManagement.aspx.cs">
+      <DependentUpon>ActivityManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\ActivityManagement.aspx.designer.cs">
+      <DependentUpon>ActivityManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

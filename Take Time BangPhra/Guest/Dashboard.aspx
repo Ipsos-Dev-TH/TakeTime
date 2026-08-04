@@ -612,6 +612,14 @@
                 <p>กิจกรรมในและนอกที่พัก</p>
             </a>
 
+            <a href="ActivityBooking.aspx" class="service-card">
+                <div class="service-icon primary">
+                    <i class="fas fa-calendar-check"></i>
+                </div>
+                <h3>จองกิจกรรม</h3>
+                <p>จองเวลาใช้บริการ เช่น โต๊ะปิงปอง</p>
+            </a>
+
             <a href="MyPoints.aspx" class="service-card">
                 <div class="service-icon payment">
                     <i class="fas fa-coins"></i>

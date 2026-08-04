@@ -593,6 +593,10 @@
                             </ul>
                         </li>
                         
+                        <li><a runat="server" href="~/Activities">
+                            <i class="fas fa-person-hiking"></i> กิจกรรม
+                        </a></li>
+
                         <li><a runat="server" href="~/Contact">
                             <i class="fas fa-phone-alt"></i> ติดต่อเรา
                         </a></li>
@@ -735,6 +739,9 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Notifications/Settings">
                                                         <i class="fas fa-bell"></i> Notifications
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/ActivityManagement">
+                                                        <i class="fas fa-person-hiking"></i> จัดการกิจกรรม
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/ConnectionSettings">
                                                         <i class="fas fa-plug"></i> Connection Settings
