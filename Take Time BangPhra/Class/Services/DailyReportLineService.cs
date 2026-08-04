@@ -24,7 +24,7 @@ namespace Take_Time_BangPhra.Services
 
         private readonly bool _enabled;
         private readonly string _recipientsRaw, _sendTime, _sourceUrl, _caption, _publicBaseUrl, _imageFolder, _tokenOverrideEnc;
-        private readonly int _imageWidth, _imageHeight, _jpegQuality;
+        private readonly int _imageWidth, _imageHeight, _jpegQuality, _fontScale;
         private readonly bool _autoHeight;
 
         public DailyReportLineService(string connectionString)
@@ -42,6 +42,7 @@ namespace Take_Time_BangPhra.Services
             _imageHeight = ParseInt(Cfg("Line_DailyReport_ImageHeight", "700"), 700);
             _autoHeight = Cfg("Line_DailyReport_AutoHeight", "1") == "1";
             _jpegQuality = Math.Max(1, Math.Min(100, ParseInt(Cfg("Line_DailyReport_JpegQuality", "90"), 90)));
+            _fontScale = Math.Max(100, Math.Min(300, ParseInt(Cfg("Line_DailyReport_FontScale", "100"), 100)));
         }
 
         // ── public API ───────────────────────────────────────────────────────────
@@ -75,6 +76,65 @@ namespace Take_Time_BangPhra.Services
             if (Cfg("Line_DailyReport_LastSent", "") == DateTime.Now.ToString("yyyyMMdd")) return false;
             var t = ParseTime(_sendTime);
             return DateTime.Now.TimeOfDay >= t;
+        }
+
+        /// <summary>
+        /// ส่งรอบอัตโนมัติ (เรียกจาก timer) — "จองสิทธิ์วันนี้" ก่อนส่งแบบ atomic
+        /// เพื่อกันยิงซ้ำ: timer เดินทุก ~30 วิ ถ้ามาร์กหลังส่งเสร็จ (ซึ่งใช้เวลา render+push หลายวินาที)
+        /// รอบถัดไปจะเข้าเงื่อนไข "ยังไม่ส่ง" แล้วส่งซ้ำไม่จบ. ถ้าส่งไม่สำเร็จจะคืนสิทธิ์ให้ลองใหม่รอบหน้า.
+        /// </summary>
+        public SendResult SendScheduled()
+        {
+            if (!IsDueNow()) return null;
+            if (!TryClaimToday()) return null;      // มีคนจองสิทธิ์ไปแล้ว (อีก worker/รอบก่อน) → ข้าม
+
+            var res = SendNow(markSent: false);
+            if (res == null || !res.Success)
+            {
+                ReleaseToday();                     // ส่งไม่สำเร็จ → ปลดสิทธิ์ ให้ retry รอบถัดไป
+                _code.Logs(_conn, "DailyLineReport",
+                    "ส่งอัตโนมัติไม่สำเร็จ → ปลดสิทธิ์เพื่อลองใหม่: " + (res?.Error ?? res?.ToString()), "SYSTEM");
+            }
+            return res;
+        }
+
+        /// <summary>จองสิทธิ์ส่งของวันนี้ (คืน true = เราได้สิทธิ์) — upsert + เช็คในคำสั่งเดียว กัน race</summary>
+        private bool TryClaimToday()
+        {
+            try
+            {
+                string today = DateTime.Now.ToString("yyyyMMdd");
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config
+                                      WHERE ConfigKey = 'Line_DailyReport_LastSent')
+                          INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+                          VALUES ('Line_DailyReport_LastSent', '', N'วันที่ส่งรูปตารางจองล่าสุด (ระบบตั้งเอง)');
+
+                      UPDATE Accounting_Integration_Config SET ConfigValue = @today
+                       WHERE ConfigKey = 'Line_DailyReport_LastSent'
+                         AND ISNULL(ConfigValue, '') <> @today;
+
+                      SELECT @@ROWCOUNT AS Claimed;",
+                    new Dictionary<string, object> { { "@today", today } });
+                return dt?.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["Claimed"]) > 0;
+            }
+            catch (Exception ex)
+            {
+                // จองสิทธิ์ไม่ได้ = ไม่ส่ง (ปลอดภัยกว่าเสี่ยงส่งรัว)
+                _code.Logs(_conn, "DailyLineReport", "TryClaimToday error: " + ex.Message, "SYSTEM");
+                return false;
+            }
+        }
+
+        private void ReleaseToday()
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_conn,
+                    "UPDATE Accounting_Integration_Config SET ConfigValue = '' WHERE ConfigKey = 'Line_DailyReport_LastSent'",
+                    null);
+            }
+            catch { }
         }
 
         /// <summary>สร้างรูป + push เข้า LINE. ถ้า markSent=true จะบันทึกว่าส่งวันนี้แล้ว (กันส่งซ้ำ).</summary>
@@ -120,10 +180,7 @@ namespace Take_Time_BangPhra.Services
                 }
 
                 res.Success = res.RecipientsOk > 0;
-                if (markSent && res.Success)
-                    _code.DatabaseInsertSafe(_conn,
-                        "UPDATE Accounting_Integration_Config SET ConfigValue = @v WHERE ConfigKey = 'Line_DailyReport_LastSent'",
-                        new Dictionary<string, object> { { "@v", DateTime.Now.ToString("yyyyMMdd") } });
+                if (markSent && res.Success) TryClaimToday();   // upsert-safe (สร้าง key ให้ถ้ายังไม่มี)
                 _code.Logs(_conn, "DailyLineReport", res.ToString() + " | " + url, "SYSTEM");
                 return res;
             }
@@ -170,10 +227,14 @@ namespace Take_Time_BangPhra.Services
                 string html = DownloadHtml(_sourceUrl);
                 if (string.IsNullOrWhiteSpace(html)) { error = "โหลดหน้า source ไม่ได้ (" + _sourceUrl + ")"; return false; }
 
+                // ขยายขนาดตัวอักษรก่อน render (ตัวหนังสือเล็กเกินเมื่อดูในแอป LINE)
+                html = ApplyFontScale(html, _fontScale);
+
                 int width = _imageWidth > 0 ? _imageWidth : 1600;
                 int height = _imageHeight > 0 ? _imageHeight : 700;
 
-                // วัดความสูงจากเนื้อหาจริง (ไม่ตัด/ไม่เหลือขอบ) — ดีกว่าการเดาจากความยาว HTML แบบเดิม
+                // วัดความสูงจากเนื้อหาจริง — เดิมใช้ `if (measured > height)` ทำให้ความสูง "โตได้อย่างเดียว"
+                // เนื้อหาสั้นกว่าค่าพื้นฐานจึงเหลือพื้นที่ขาวท้ายรูป. ตอนนี้ยึดค่าที่วัดได้เป็นหลัก
                 if (_autoHeight)
                 {
                     try
@@ -182,13 +243,19 @@ namespace Take_Time_BangPhra.Services
                         using (var mg = Graphics.FromImage(measureBmp))
                         {
                             SizeF sz = HtmlRender.Measure(mg, html, width);
-                            int measured = (int)Math.Ceiling(sz.Height) + 40; // padding ล่าง
-                            if (measured > height) height = measured;
+                            int measured = (int)Math.Ceiling(sz.Height) + 24;   // เผื่อขอบล่างเล็กน้อย
+                            if (measured > 120) height = measured;              // วัดได้สมเหตุสมผล → ใช้เลย
                         }
                     }
                     catch { /* วัดไม่ได้ → ใช้ height พื้นฐาน */ }
                 }
-                if (height > 8000) height = 8000; // กัน runaway
+                if (height > 8000) height = 8000;   // กัน runaway
+                if (height < 120) height = 120;
+
+                string folder = ResolveFolder(_imageFolder);
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+                string fileName = DateTime.Now.ToString("yyyyMMdd") + ".jpg";
+                physicalPath = Path.Combine(folder, fileName);
 
                 using (var bmp = new Bitmap(width, height))
                 {
@@ -200,14 +267,18 @@ namespace Take_Time_BangPhra.Services
                         HtmlRender.Render(g, html, new PointF(0, 0), new SizeF(width, height));
                     }
 
-                    string folder = ResolveFolder(_imageFolder);
-                    if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-                    string fileName = DateTime.Now.ToString("yyyyMMdd") + ".jpg";
-                    physicalPath = Path.Combine(folder, fileName);
-                    SaveJpeg(bmp, physicalPath, _jpegQuality);
-                    // cache-bust ให้ LINE โหลดรูปใหม่ (LINE cache ตาม URL)
-                    publicUrl = _publicBaseUrl + "/" + fileName + "?t=" + DateTime.Now.ToString("HHmmss");
+                    // ตัดขอบขาวส่วนเกินจริง ๆ จากรูป (กันกรณี Measure คลาดเคลื่อน + ตัดขาวด้านขวาด้วย
+                    // → เนื้อหาเต็มเฟรมมากขึ้น ตัวหนังสือดูใหญ่ขึ้นเมื่อ LINE ย่อรูปให้พอดีจอ)
+                    if (_autoHeight)
+                    {
+                        using (var cropped = TrimWhitespace(bmp, 16))
+                            SaveJpeg(cropped ?? bmp, physicalPath, _jpegQuality);
+                    }
+                    else SaveJpeg(bmp, physicalPath, _jpegQuality);
                 }
+
+                // cache-bust ให้ LINE โหลดรูปใหม่ (LINE cache ตาม URL)
+                publicUrl = _publicBaseUrl + "/" + fileName + "?t=" + DateTime.Now.ToString("HHmmss");
                 return true;
             }
             catch (Exception ex)
@@ -216,6 +287,92 @@ namespace Take_Time_BangPhra.Services
                 _code.Logs(_conn, "DailyLineReport", error, "SYSTEM");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// ขยายฟอนต์ก่อน render — HtmlRenderer ไม่รองรับ zoom/transform จึงฉีด CSS override
+        /// (scale = 100 → ไม่แตะ HTML เลย, ปลอดภัยกับหน้าเดิม)
+        /// </summary>
+        private static string ApplyFontScale(string html, int scale)
+        {
+            if (scale <= 100 || string.IsNullOrEmpty(html)) return html;
+
+            int baseSize = (int)Math.Round(13.0 * scale / 100.0);
+            int headSize = (int)Math.Round(17.0 * scale / 100.0);
+            string css =
+                "<style type=\"text/css\">" +
+                $"body,div,span,p,a,li,td{{font-size:{baseSize}px !important;}}" +
+                $"th{{font-size:{baseSize}px !important;font-weight:bold !important;}}" +
+                $"h1,h2,h3,h4{{font-size:{headSize}px !important;}}" +
+                "</style>";
+
+            int headIdx = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+            if (headIdx >= 0) return html.Insert(headIdx, css);
+
+            int bodyIdx = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
+            if (bodyIdx >= 0)
+            {
+                int close = html.IndexOf('>', bodyIdx);
+                if (close > 0) return html.Insert(close + 1, css);
+            }
+            return css + html;
+        }
+
+        /// <summary>
+        /// ตัดขอบขาวด้านล่าง/ขวาออกจากรูป (คืน null ถ้าไม่มีอะไรต้องตัด — ผู้เรียกใช้ต้นฉบับต่อ)
+        /// อ่านทีละแถวด้วย LockBits + Marshal.Copy (เร็วพอสำหรับรูปหลักล้านพิกเซล)
+        /// </summary>
+        private static Bitmap TrimWhitespace(Bitmap src, int padding)
+        {
+            const int WHITE_THRESHOLD = 245;   // ต่ำกว่านี้ = ถือว่ามีเนื้อหา
+            try
+            {
+                var rect = new Rectangle(0, 0, src.Width, src.Height);
+                var data = src.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+                int lastRow = -1, lastCol = -1;
+                try
+                {
+                    int stride = data.Stride;
+                    var row = new byte[stride];
+
+                    // หาแถวสุดท้ายที่มีเนื้อหา (ไล่จากล่างขึ้นบน — เจอแล้วหยุด)
+                    for (int y = src.Height - 1; y >= 0; y--)
+                    {
+                        System.Runtime.InteropServices.Marshal.Copy(data.Scan0 + y * stride, row, 0, stride);
+                        for (int i = 0; i < src.Width * 3; i++)
+                            if (row[i] < WHITE_THRESHOLD) { lastRow = y; break; }
+                        if (lastRow >= 0) break;
+                    }
+                    if (lastRow < 0) return null;   // รูปว่างทั้งหมด → ไม่ตัด
+
+                    // หาคอลัมน์สุดท้ายที่มีเนื้อหา (สแกนเฉพาะช่วงที่มีเนื้อหาจริง)
+                    for (int y = 0; y <= lastRow; y++)
+                    {
+                        System.Runtime.InteropServices.Marshal.Copy(data.Scan0 + y * stride, row, 0, stride);
+                        for (int x = src.Width - 1; x > lastCol; x--)
+                        {
+                            int i = x * 3;
+                            if (row[i] < WHITE_THRESHOLD || row[i + 1] < WHITE_THRESHOLD || row[i + 2] < WHITE_THRESHOLD)
+                            { lastCol = x; break; }
+                        }
+                    }
+                }
+                finally { src.UnlockBits(data); }
+
+                int newH = Math.Min(src.Height, lastRow + 1 + padding);
+                int newW = lastCol > 0 ? Math.Min(src.Width, lastCol + 1 + padding) : src.Width;
+                if (newW < 200) newW = Math.Min(src.Width, 200);
+                if (newH >= src.Height && newW >= src.Width) return null;   // ไม่มีอะไรต้องตัด
+
+                var dst = new Bitmap(newW, newH);
+                using (var g = Graphics.FromImage(dst))
+                {
+                    g.Clear(Color.White);
+                    g.DrawImage(src, new Rectangle(0, 0, newW, newH), new Rectangle(0, 0, newW, newH), GraphicsUnit.Pixel);
+                }
+                return dst;
+            }
+            catch { return null; }   // ตัดไม่ได้ → ใช้รูปเดิม
         }
 
         private static void SaveJpeg(Bitmap bmp, string path, int quality)

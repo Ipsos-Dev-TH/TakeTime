@@ -321,6 +321,7 @@ namespace Take_Time_BangPhra.Integration
         public string LineDailyImageFolder => GetConfig("Line_DailyReport_ImageFolder", "~/Images/Reservation");
         public bool LineDailyHasTokenOverride => !string.IsNullOrEmpty(GetConfig("Line_DailyReport_TokenOverride_Encrypted", ""));
         public int LineDailyJpegQuality => int.TryParse(GetConfig("Line_DailyReport_JpegQuality", "90"), out var v) ? v : 90;
+        public int LineDailyFontScale => int.TryParse(GetConfig("Line_DailyReport_FontScale", "100"), out var v) ? v : 100;
         public string LineDailyLastSent => GetConfig("Line_DailyReport_LastSent", "");
 
         /// <summary>

@@ -178,9 +178,9 @@ namespace Take_Time_BangPhra
             try { conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString; }
             catch { return; }
             if (!DailyReportLineService.IsEnabled(conn)) return;
-            var svc = new DailyReportLineService(conn);
-            if (!svc.IsDueNow()) return;
-            svc.SendNow(markSent: true);
+            // SendScheduled จองสิทธิ์ "ส่งของวันนี้" แบบ atomic ก่อนส่ง → timer รอบถัดไป (ทุก ~30 วิ)
+            // จะไม่ยิงซ้ำระหว่างที่รอบนี้กำลัง render/push อยู่
+            new DailyReportLineService(conn).SendScheduled();
         }
 
         /// <summary>

@@ -664,6 +664,11 @@
                     <label style="display:block; font-weight:600; margin-bottom:6px;">คุณภาพ JPEG</label>
                     <input type="number" id="cfgLineDailyJpegQuality" value="90" min="1" max="100" style="width:100%; padding:8px;" />
                 </div>
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ขนาดตัวอักษร (%)</label>
+                    <input type="number" id="cfgLineDailyFontScale" value="100" min="100" max="300" step="10" style="width:100%; padding:8px;" />
+                    <div class="help-text" style="margin-top:4px;">100 = ตามหน้าเว็บ · 150 = ใหญ่ขึ้น 1.5 เท่า (อ่านง่ายบนมือถือ)</div>
+                </div>
             </div>
 
             <div style="margin-top:12px;">
@@ -1240,6 +1245,7 @@
                 setVal('cfgLineDailyImageHeight', cfg.lineDailyImageHeight || 700);
                 setVal('cfgLineDailyAutoHeight', cfg.lineDailyAutoHeight ? 'true' : 'false');
                 setVal('cfgLineDailyJpegQuality', cfg.lineDailyJpegQuality || 90);
+                setVal('cfgLineDailyFontScale', cfg.lineDailyFontScale || 100);
                 setVal('cfgLineDailySourceUrl', cfg.lineDailySourceUrl || '');
                 setVal('cfgLineDailyPublicBaseUrl', cfg.lineDailyPublicBaseUrl || '');
                 setVal('cfgLineDailyImageFolder', cfg.lineDailyImageFolder || '~/Images/Reservation');
@@ -1445,6 +1451,7 @@
                 lineDailyImageHeight: document.getElementById('cfgLineDailyImageHeight').value,
                 lineDailyAutoHeight: document.getElementById('cfgLineDailyAutoHeight').value === 'true',
                 lineDailyJpegQuality: document.getElementById('cfgLineDailyJpegQuality').value,
+                lineDailyFontScale: document.getElementById('cfgLineDailyFontScale').value,
                 lineDailySourceUrl: document.getElementById('cfgLineDailySourceUrl').value,
                 lineDailyPublicBaseUrl: document.getElementById('cfgLineDailyPublicBaseUrl').value,
                 lineDailyImageFolder: document.getElementById('cfgLineDailyImageFolder').value,

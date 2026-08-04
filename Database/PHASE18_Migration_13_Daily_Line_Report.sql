@@ -46,6 +46,10 @@ IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Li
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_JpegQuality')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
     VALUES ('Line_DailyReport_JpegQuality', '90', N'คุณภาพ JPEG 1-100 (สูง = คมชัด/ไฟล์ใหญ่)');
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_FontScale')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('Line_DailyReport_FontScale', '100',
+            N'ขยายขนาดตัวอักษรในรูป (% — 100 = ตามหน้าเว็บเดิม, 150 = ใหญ่ขึ้น 1.5 เท่า) แก้ปัญหาตัวหนังสือเล็กเมื่อดูบนมือถือ');
 GO
 
 SELECT ConfigKey, ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey LIKE 'Line_DailyReport_%' ORDER BY ConfigKey;

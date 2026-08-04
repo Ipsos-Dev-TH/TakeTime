@@ -126,6 +126,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "lineDailyImageFolder", config.LineDailyImageFolder },
                     { "lineDailyHasTokenOverride", config.LineDailyHasTokenOverride },
                     { "lineDailyJpegQuality", config.LineDailyJpegQuality },
+                    { "lineDailyFontScale", config.LineDailyFontScale },
                     { "lineDailyLastSent", config.LineDailyLastSent }
                 };
                 hfConfigData.Value = new JavaScriptSerializer().Serialize(data);
@@ -611,6 +612,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("lineDailyPublicBaseUrl")) config.SetConfig("Line_DailyReport_PublicBaseUrl", data["lineDailyPublicBaseUrl"]?.ToString() ?? "");
                 if (data.ContainsKey("lineDailyImageFolder")) config.SetConfig("Line_DailyReport_ImageFolder", data["lineDailyImageFolder"]?.ToString() ?? "~/Images/Reservation");
                 if (data.ContainsKey("lineDailyJpegQuality")) config.SetConfig("Line_DailyReport_JpegQuality", data["lineDailyJpegQuality"]?.ToString() ?? "90");
+                if (data.ContainsKey("lineDailyFontScale")) config.SetConfig("Line_DailyReport_FontScale", data["lineDailyFontScale"]?.ToString() ?? "100");
                 // token override: บันทึกเฉพาะเมื่อกรอกใหม่ ("-" = ล้าง)
                 if (data.ContainsKey("lineDailyTokenOverride"))
                 {
