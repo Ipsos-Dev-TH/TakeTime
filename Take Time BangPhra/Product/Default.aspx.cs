@@ -117,7 +117,22 @@ namespace Take_Time_BangPhra.Product
                 }
                 else
                 {
-                    renderProduct();
+                    // เพิ่มสินค้าลงตะกร้า "เฉพาะ" เมื่อ postback มาจากช่องค้นหา/สแกน หรือปุ่ม ➕ เพิ่ม เท่านั้น
+                    // (เดิมเรียก renderProduct() ทุก postback → กดปุ่มอะไรก็ตาม เช่น ลบ/+/-/แก้ไข ระบบจะ
+                    //  เอาชื่อสินค้าที่ค้างอยู่ในช่องค้นหาไปเพิ่ม/บวกจำนวนซ้ำทุกครั้ง)
+                    string evTarget = Request["__EVENTTARGET"] ?? "";
+                    bool fromSearch = evTarget == TextBox1.UniqueID
+                                      || Request[Button3.UniqueID] != null;
+                    if (fromSearch)
+                    {
+                        renderProduct();
+                    }
+                    else
+                    {
+                        // ล้างค่าค้างในช่องค้นหา — กัน TextChanged ที่จะยิงหลัง Page_Load
+                        // ไปเรียก renderProduct() เพิ่มสินค้าซ้ำโดยที่ผู้ใช้ไม่ได้สั่ง
+                        TextBox1.Text = string.Empty;
+                    }
                 }
             }
 

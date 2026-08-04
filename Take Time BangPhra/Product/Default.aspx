@@ -339,7 +339,9 @@
         // ViewState/EventValidation ไม่ตรงกับ session ปัจจุบัน → กดปุ่มแล้ว Invalid postback / ตะกร้าค้าง
         // เจอ restore จาก cache → โหลดหน้าใหม่ให้สดเสมอ
         window.addEventListener('pageshow', function (e) {
-            if (e.persisted) location.reload();
+            // ใช้ replace() ไม่ใช่ reload() — reload เบราว์เซอร์จะ "คืนค่าฟอร์มเดิม" กลับมาด้วย
+            // (ชื่อสินค้าที่ค้างในช่องค้นหาจะถูกยัดกลับ แล้วโดนเพิ่มลงตะกร้าซ้ำ), replace = โหลดสดจริง
+            if (e.persisted) window.location.replace(window.location.href);
         });
 
         function checkEnter(event) {
