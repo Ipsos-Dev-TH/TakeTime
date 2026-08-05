@@ -18,7 +18,14 @@ IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Li
     VALUES ('Line_DailyReport_SendTime', '08:00', N'เวลาส่งรายวัน (HH:mm) — timer ส่งเมื่อถึงเวลานี้ วันละครั้ง');
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_SourceUrl')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
-    VALUES ('Line_DailyReport_SourceUrl', 'https://taketimebangphra.com/displaytoday', N'URL ของหน้าที่จะ render เป็นรูป (ปกติหน้า DisplayToday)');
+    VALUES ('Line_DailyReport_SourceUrl', 'https://taketimebangphra.com/DailyBoard',
+            N'URL ของหน้าที่จะ render เป็นรูป — แนะนำ /DailyBoard (ออกแบบมาเพื่อรูป LINE: สรุปยอด + เคยมาพักกี่ครั้ง + เข้า/ออกวันนี้ + ยอดค้าง)');
+
+-- ระบบเดิมที่ชี้หน้า displaytoday อยู่ → ย้ายมาหน้าใหม่ที่อ่านง่ายกว่า (ผู้ใช้เปลี่ยนกลับเองได้ในหน้า Admin)
+UPDATE Accounting_Integration_Config
+   SET ConfigValue = REPLACE(REPLACE(ConfigValue, '/displaytoday', '/DailyBoard'), '/DisplayToday', '/DailyBoard')
+ WHERE ConfigKey = 'Line_DailyReport_SourceUrl'
+   AND ConfigValue LIKE '%isplay%oday%';
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_ImageWidth')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
     VALUES ('Line_DailyReport_ImageWidth', '1600', N'ความกว้างรูป (px)');

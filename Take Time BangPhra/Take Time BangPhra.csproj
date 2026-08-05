@@ -436,6 +436,7 @@
     <Content Include="Guest\Activities.aspx" />
     <Content Include="Guest\ActivityBooking.aspx" />
     <Content Include="Activities.aspx" />
+    <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
@@ -1217,6 +1218,13 @@
     </Compile>
     <Compile Include="Activities.aspx.designer.cs">
       <DependentUpon>Activities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="DailyBoard.aspx.cs">
+      <DependentUpon>DailyBoard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="DailyBoard.aspx.designer.cs">
+      <DependentUpon>DailyBoard.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\ActivityManagement.aspx.cs">
       <DependentUpon>ActivityManagement.aspx</DependentUpon>
