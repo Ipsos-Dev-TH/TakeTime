@@ -35,9 +35,16 @@ IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Li
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_AutoHeight')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
     VALUES ('Line_DailyReport_AutoHeight', '1', N'ปรับความสูงรูปอัตโนมัติตามปริมาณเนื้อหา (0/1)');
+-- ค่าเริ่มต้น = ว่าง (ส่งเฉพาะรูป) — รูปมีวันที่อยู่ในหัวตารางอยู่แล้ว ไม่ต้องส่งข้อความซ้ำ
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_Caption')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
-    VALUES ('Line_DailyReport_Caption', N'ตารางการจองวันที่ {date}', N'ข้อความประกอบ (แทนที่ {date} ด้วยวันที่ไทย) — เว้นว่าง = ส่งเฉพาะรูป');
+    VALUES ('Line_DailyReport_Caption', '', N'ข้อความประกอบก่อนรูป ({date} = วันที่ไทย) — เว้นว่าง = ส่งเฉพาะรูป (ค่าเริ่มต้น)');
+
+-- ระบบที่ตั้งค่าเริ่มต้นเดิมไว้ (ยังไม่เคยแก้เอง) → เคลียร์เป็นส่งเฉพาะรูป
+UPDATE Accounting_Integration_Config
+   SET ConfigValue = ''
+ WHERE ConfigKey = 'Line_DailyReport_Caption'
+   AND ConfigValue = N'ตารางการจองวันที่ {date}';
 IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Line_DailyReport_PublicBaseUrl')
     INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
     VALUES ('Line_DailyReport_PublicBaseUrl', 'https://taketimebangphra.com/Images/Reservation', N'URL สาธารณะ(HTTPS)ของโฟลเดอร์รูป — LINE ต้องเข้าถึงได้');

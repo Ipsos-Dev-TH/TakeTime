@@ -316,7 +316,7 @@ namespace Take_Time_BangPhra.Integration
         public int LineDailyImageWidth => int.TryParse(GetConfig("Line_DailyReport_ImageWidth", "1600"), out var v) ? v : 1600;
         public int LineDailyImageHeight => int.TryParse(GetConfig("Line_DailyReport_ImageHeight", "700"), out var v) ? v : 700;
         public bool LineDailyAutoHeight => GetConfig("Line_DailyReport_AutoHeight", "1") == "1";
-        public string LineDailyCaption => GetConfig("Line_DailyReport_Caption", "ตารางการจองวันที่ {date}");
+        public string LineDailyCaption => GetConfig("Line_DailyReport_Caption", "");
         public string LineDailyPublicBaseUrl => GetConfig("Line_DailyReport_PublicBaseUrl", "https://taketimebangphra.com/Images/Reservation");
         public string LineDailyImageFolder => GetConfig("Line_DailyReport_ImageFolder", "~/Images/Reservation");
         public bool LineDailyHasTokenOverride => !string.IsNullOrEmpty(GetConfig("Line_DailyReport_TokenOverride_Encrypted", ""));

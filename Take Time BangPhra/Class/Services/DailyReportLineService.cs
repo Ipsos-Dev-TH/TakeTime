@@ -34,7 +34,8 @@ namespace Take_Time_BangPhra.Services
             _recipientsRaw = Cfg("Line_DailyReport_Recipients", "");
             _sendTime = Cfg("Line_DailyReport_SendTime", "08:00");
             _sourceUrl = Cfg("Line_DailyReport_SourceUrl", "https://taketimebangphra.com/displaytoday");
-            _caption = Cfg("Line_DailyReport_Caption", "ตารางการจองวันที่ {date}");
+            // ค่าเริ่มต้น = ว่าง → ส่งเฉพาะรูป (รูปมีวันที่ในหัวตารางอยู่แล้ว)
+            _caption = Cfg("Line_DailyReport_Caption", "");
             _publicBaseUrl = Cfg("Line_DailyReport_PublicBaseUrl", "https://taketimebangphra.com/Images/Reservation").TrimEnd('/');
             _imageFolder = Cfg("Line_DailyReport_ImageFolder", "~/Images/Reservation");
             _tokenOverrideEnc = Cfg("Line_DailyReport_TokenOverride_Encrypted", "");

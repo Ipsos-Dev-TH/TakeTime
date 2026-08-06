@@ -634,8 +634,9 @@
                     <input type="time" id="cfgLineDailySendTime" value="08:00" style="width:100%; padding:8px;" />
                 </div>
                 <div style="min-width:220px; flex:1;">
-                    <label style="display:block; font-weight:600; margin-bottom:6px;">ข้อความประกอบ ({date} = วันที่ไทย)</label>
-                    <input type="text" id="cfgLineDailyCaption" placeholder="ตารางการจองวันที่ {date}" style="width:100%; padding:8px;" />
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ข้อความประกอบ (ไม่บังคับ)</label>
+                    <input type="text" id="cfgLineDailyCaption" placeholder="เว้นว่าง = ส่งเฉพาะรูป (แนะนำ)" style="width:100%; padding:8px;" />
+                    <div class="help-text" style="margin-top:4px;">เว้นว่าง = ส่งเฉพาะรูป · ใส่ข้อความจะส่งเป็นอีก 1 ข้อความก่อนรูป ({date} = วันที่ไทย)</div>
                 </div>
             </div>
 
