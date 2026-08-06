@@ -36,16 +36,21 @@ namespace Take_Time_BangPhra
         {
             var p = new Dictionary<string, object> { { "@d", day.ToString("yyyy-MM-dd") } };
 
+            // คอลัมน์เสริมที่มาจาก migration รุ่นหลัง (Channel Manager / email intake) — บาง
+            // ฐานข้อมูลยังไม่ได้รัน จึงต้องตรวจก่อนใส่ใน SELECT ไม่งั้นทั้งหน้าพัง
+            string otaCols = "";
+            if (HasColumn("Reservation", "OTA_Channel")) otaCols += ", r.OTA_Channel";
+            if (HasColumn("Reservation", "OTA_Booking_ID")) otaCols += ", r.OTA_Booking_ID";
+
             // การจองที่ "มีผู้พักอยู่" ในวันนี้
             DataTable dt = _code.DatabaseQuerySafe(_conn,
-                @"SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.StayDays,
-                         r.TotalPrice, r.Deposit, r.Remark, r.Reserve_By, r.Status,
-                         r.OTA_Channel, r.OTA_Booking_ID,
-                         c.Name, c.NickName
-                    FROM Reservation r
-                    INNER JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
-                   WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate
-                     AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
+                $@"SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.StayDays,
+                          r.TotalPrice, r.Deposit, r.Remark, r.Reserve_By, r.Status{otaCols},
+                          c.Name, c.NickName
+                     FROM Reservation r
+                     INNER JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                    WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate
+                      AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
 
             if (dt == null || dt.Rows.Count == 0)
                 return Header(day, 0, 0, 0, 0, 0) +
@@ -61,7 +66,7 @@ namespace Take_Time_BangPhra
                    ORDER BY a.OrderID", p);
 
             // ของเช่าต่อการจอง
-            DataTable items = _code.DatabaseQuerySafe(_conn,
+            DataTable items = SafeQuery(
                 @"SELECT ri.Reservation_ID, i.ItemName, ri.Amount
                     FROM Reservation r
                     INNER JOIN Reservation_Items ri ON ri.Reservation_ID = r.ID
@@ -77,14 +82,14 @@ namespace Take_Time_BangPhra
                    GROUP BY Customer_MobilePhone", p);
 
             // ค่าใช้จ่ายในห้อง + ยอดที่ชำระแล้ว (รวมทีเดียว ไม่ query ต่อแถว)
-            DataTable charges = _code.DatabaseQuerySafe(_conn,
+            DataTable charges = SafeQuery(
                 @"SELECT rpc.Reservation_ID, SUM(rpc.TotalAmount) AS Charges
                     FROM Reservation_Product_Charges rpc
                     INNER JOIN Reservation r ON r.ID = rpc.Reservation_ID
                    WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate AND rpc.Status <> 'CANCELLED'
                    GROUP BY rpc.Reservation_ID", p);
 
-            DataTable paid = _code.DatabaseQuerySafe(_conn,
+            DataTable paid = SafeQuery(
                 @"SELECT ph.Reservation_ID, SUM(ph.PaymentAmount) AS Paid
                     FROM Payment_History ph
                     INNER JOIN Reservation r ON r.ID = ph.Reservation_ID
@@ -107,7 +112,7 @@ namespace Take_Time_BangPhra
 
                 // ห้องพัก
                 var names = new List<string>();
-                foreach (DataRow a in accom.Rows)
+                foreach (DataRow a in Rows(accom))
                 {
                     if (Convert.ToInt32(a["Reservation_ID"]) != resId) continue;
                     string nm = a["AccomName"].ToString();
@@ -122,7 +127,7 @@ namespace Take_Time_BangPhra
 
                 // ของเช่า
                 var it = new List<string>();
-                foreach (DataRow i in items.Rows)
+                foreach (DataRow i in Rows(items))
                     if (Convert.ToInt32(i["Reservation_ID"]) == resId)
                         it.Add($"{i["ItemName"]} ×{i["Amount"]}");
                 row.Items = it.Count > 0 ? string.Join(", ", it) : "-";
@@ -156,10 +161,10 @@ namespace Take_Time_BangPhra
                 // จำนวนครั้งที่เคยมา
                 row.PastVisits = visitMap.ContainsKey(row.Phone) ? visitMap[row.Phone] : 0;
 
-                // ช่องทาง / หมายเหตุ
-                row.Channel = r["OTA_Channel"] != DBNull.Value && !string.IsNullOrWhiteSpace(r["OTA_Channel"].ToString())
-                    ? r["OTA_Channel"].ToString()
-                    : (r["Reserve_By"]?.ToString() ?? "");
+                // ช่องทาง / หมายเหตุ (OTA_Channel อาจไม่มีคอลัมน์ในบางฐานข้อมูล)
+                string ota = dt.Columns.Contains("OTA_Channel") && r["OTA_Channel"] != DBNull.Value
+                    ? r["OTA_Channel"].ToString() : "";
+                row.Channel = !string.IsNullOrWhiteSpace(ota) ? ota : (r["Reserve_By"]?.ToString() ?? "");
                 row.Remark = r["Remark"]?.ToString() ?? "";
                 row.Status = r["Status"]?.ToString() ?? "";
 
@@ -279,6 +284,34 @@ namespace Take_Time_BangPhra
                 m[Convert.ToInt32(r[keyCol])] = r[valCol] != DBNull.Value ? Convert.ToDecimal(r[valCol]) : 0m;
             }
             return m;
+        }
+
+        /// <summary>ตรวจว่ามีคอลัมน์นี้จริงไหม — กันหน้าพังเมื่อฐานข้อมูลยังไม่ได้รัน migration บางตัว</summary>
+        private bool HasColumn(string table, string column)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE TABLE_NAME = @t AND COLUMN_NAME = @c",
+                    new Dictionary<string, object> { { "@t", table }, { "@c", column } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>query ที่พึ่งตารางเสริม — ถ้าตารางยังไม่มีให้คืน null แทนการโยน error</summary>
+        private DataTable SafeQuery(string sql, Dictionary<string, object> p)
+        {
+            try { return _code.DatabaseQuerySafe(_conn, sql, p); }
+            catch { return null; }
+        }
+
+        /// <summary>วนแถวได้เสมอแม้ตารางเป็น null (ตารางเสริมที่ยังไม่มีในฐานข้อมูล)</summary>
+        private static IEnumerable<DataRow> Rows(DataTable dt)
+        {
+            if (dt == null) yield break;
+            foreach (DataRow r in dt.Rows) yield return r;
         }
 
         private static string Shorten(string s, int max)
