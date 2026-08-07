@@ -263,8 +263,12 @@ namespace Take_Time_BangPhra.Services
                     using (var g = Graphics.FromImage(bmp))
                     {
                         g.Clear(Color.White);
-                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                        // ClearTypeGridFit ให้ตัวอักษร (โดยเฉพาะภาษาไทย) คมกว่า AntiAliasGridFit
+                        // มาก บนพื้นทึบ — พื้นเป็นสีขาวทึบอยู่แล้วจึงใช้ได้ปลอดภัย
+                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
                         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
                         HtmlRender.Render(g, html, new PointF(0, 0), new SizeF(width, height));
                     }
 

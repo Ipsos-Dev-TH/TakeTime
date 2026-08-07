@@ -175,58 +175,100 @@ namespace Take_Time_BangPhra
 
             var sb = new StringBuilder();
             sb.Append(Header(day, rows.Count, roomCount, checkIn, checkOut, dueTotal));
-            sb.Append("<table class='main'><tr>");
-            sb.Append("<th>ห้องพัก</th><th>ผู้เข้าพัก</th><th>วันนี้</th><th>เข้า - ออก</th>");
-            sb.Append("<th>เคยมา</th><th>ของเช่า</th><th class='num'>ยอดรวม</th><th class='num'>รับแล้ว</th>");
-            sb.Append("<th class='num'>คงเหลือ</th><th>ช่องทาง / หมายเหตุ</th>");
+
+            // ทุกสีสั่งผ่าน bgcolor attribute + inline style — HtmlRenderer วาด CSS class
+            // บางตัวไม่ครบ (พื้นหลังหาย → ตัวหนังสือขาวบนพื้นขาว มองไม่เห็น)
+            // ดีไซน์ใช้ "ตัวเข้มบนพื้นอ่อน" เสมอ เพื่อให้อ่านออกแม้พื้นหลังไม่ถูกวาด
+            sb.Append("<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;margin-top:14px;'>");
+
+            sb.Append("<tr bgcolor='" + HEAD_BG + "'>");
+            AppendTh(sb, "ห้องพัก", "left");
+            AppendTh(sb, "ผู้เข้าพัก", "left");
+            AppendTh(sb, "วันนี้", "left");
+            AppendTh(sb, "เข้า - ออก", "left");
+            AppendTh(sb, "เคยมา", "left");
+            AppendTh(sb, "ของเช่า", "left");
+            AppendTh(sb, "ยอดรวม", "right");
+            AppendTh(sb, "รับแล้ว", "right");
+            AppendTh(sb, "คงเหลือ", "right");
+            AppendTh(sb, "ช่องทาง / หมายเหตุ", "left");
             sb.Append("</tr>");
 
             bool alt = false;
             foreach (var row in rows)
             {
-                sb.Append(alt ? "<tr class='alt'>" : "<tr>");
+                string bg = alt ? ROW_ALT : "#ffffff";
                 alt = !alt;
+                sb.Append("<tr bgcolor='" + bg + "'>");
 
-                sb.Append($"<td><span class='room'>{E(row.Rooms)}</span></td>");
-                sb.Append($"<td><span class='guest'>{E(row.Guest)}</span><div class='sub'>{E(row.Phone)}</div></td>");
+                sb.Append(Td($"<span style='{ST_ROOM}'>{E(row.Rooms)}</span>", bg));
+                sb.Append(Td($"<span style='{ST_STRONG}'>{E(row.Guest)}</span><br/><span style='{ST_SUB}'>{E(row.Phone)}</span>", bg));
 
                 // ป้ายสถานะวันนี้ — สิ่งที่ทีมหน้างานต้องเห็นก่อนเพื่อน
-                string tag = row.IsArrival ? "<span class='tag t-in'>เข้าวันนี้</span>"
-                           : row.IsDeparture ? "<span class='tag t-out'>ออกพรุ่งนี้</span>"
-                           : "<span class='tag t-stay'>พักต่อ</span>";
-                sb.Append($"<td>{tag}</td>");
+                string tag = row.IsArrival ? Tag("เข้าวันนี้", "#1b5e9c")
+                           : row.IsDeparture ? Tag("ออกพรุ่งนี้", "#a85a12")
+                           : Tag("พักต่อ", "#5a6b62");
+                sb.Append(Td(tag, bg));
 
-                sb.Append($"<td>{row.CheckIn:dd/MM} - {row.CheckOut:dd/MM}<div class='sub'>{row.Nights} คืน</div></td>");
+                sb.Append(Td($"{row.CheckIn:dd/MM} - {row.CheckOut:dd/MM}<br/><span style='{ST_SUB}'>{row.Nights} คืน</span>", bg));
 
                 // จำนวนครั้งที่เคยมาพัก
                 string visitCell = row.PastVisits > 0
-                    ? $"<span class='tag t-vip'>ครั้งที่ {row.PastVisits + 1}</span><div class='sub'>เคยมา {row.PastVisits} ครั้ง</div>"
-                    : "<span class='tag t-new'>ลูกค้าใหม่</span>";
-                sb.Append($"<td>{visitCell}</td>");
+                    ? Tag($"ครั้งที่ {row.PastVisits + 1}", "#6b2d8f") + $"<br/><span style='{ST_SUB}'>เคยมา {row.PastVisits} ครั้ง</span>"
+                    : Tag("ลูกค้าใหม่", "#7a8a80");
+                sb.Append(Td(visitCell, bg));
 
-                sb.Append($"<td>{E(row.Items)}");
-                if (row.Extra > 0) sb.Append($"<div class='sub'>ค่าใช้จ่ายในห้อง {row.Extra:N0}</div>");
-                sb.Append("</td>");
+                string itemCell = E(row.Items);
+                if (row.Extra > 0) itemCell += $"<br/><span style='{ST_SUB}'>ค่าใช้จ่ายในห้อง {row.Extra:N0}</span>";
+                sb.Append(Td(itemCell, bg));
 
-                sb.Append($"<td class='num'>{row.Total:N0}</td>");
-                sb.Append($"<td class='num'>{row.Paid:N0}</td>");
+                sb.Append(Td($"{row.Total:N0}", bg, "right"));
+                sb.Append(Td($"{row.Paid:N0}", bg, "right"));
                 sb.Append(row.Due > 0
-                    ? $"<td class='num due'>{row.Due:N0}</td>"
-                    : "<td class='num paid'>ครบแล้ว</td>");
+                    ? Td($"<span style='font-size:18px;font-weight:bold;color:#a5241a;'>{row.Due:N0}</span>", bg, "right")
+                    : Td("<span style='font-weight:bold;color:#1b7a43;'>ครบแล้ว</span>", bg, "right"));
 
                 string note = E(row.Channel);
                 if (!string.IsNullOrWhiteSpace(row.Remark))
-                    note += $"<div class='sub'>{E(Shorten(row.Remark, 70))}</div>";
-                sb.Append($"<td>{note}</td>");
+                    note += $"<br/><span style='{ST_SUB}'>{E(Shorten(row.Remark, 70))}</span>";
+                sb.Append(Td(note, bg));
 
                 sb.Append("</tr>");
             }
 
             sb.Append("</table>");
-            sb.Append($"<div class='foot'>สร้างเมื่อ {DateTime.Now:dd/MM/yyyy HH:mm} น. · Take Time Nature Resort</div>");
+            sb.Append($"<div style='margin-top:12px;font-size:14px;color:#6b7f73;'>" +
+                      $"สร้างเมื่อ {DateTime.Now:dd/MM/yyyy HH:mm} น. · Take Time Nature Resort</div>");
             return sb.ToString();
         }
 
+        // ── สไตล์กลาง (inline ทั้งหมด เพื่อให้ HtmlRenderer วาดได้ชัวร์) ──────────────
+        private const string HEAD_BG = "#d7e7dc";     // หัวตาราง: เขียวอ่อน + ตัวหนังสือเข้ม
+        private const string ROW_ALT = "#f4f8f5";
+        private const string BORDER = "1px solid #b9cdc0";
+        private const string ST_ROOM = "font-size:19px;font-weight:bold;color:#14401f;";
+        private const string ST_STRONG = "font-size:18px;font-weight:bold;color:#1a1a1a;";
+        private const string ST_SUB = "font-size:15px;color:#5f7268;";
+
+        private static void AppendTh(StringBuilder sb, string text, string align)
+        {
+            sb.Append($"<td align='{align}' bgcolor='{HEAD_BG}' " +
+                      $"style='border:{BORDER};padding:11px 9px;font-size:18px;font-weight:bold;color:#14401f;'>{text}</td>");
+        }
+
+        private static string Td(string html, string bg, string align = "left")
+        {
+            return $"<td align='{align}' bgcolor='{bg}' " +
+                   $"style='border:{BORDER};padding:10px 9px;font-size:18px;color:#1a1a1a;'>{html}</td>";
+        }
+
+        /// <summary>ป้ายสี — ใช้ตัวหนังสือสีเข้มบนพื้นอ่อนของสีเดียวกัน อ่านออกแม้พื้นไม่ถูกวาด</summary>
+        private static string Tag(string text, string color)
+        {
+            return $"<span style='font-size:16px;font-weight:bold;color:{color};'>&#9679; {text}</span>";
+        }
+
+        /// <summary>แถบหัวเรื่อง + สรุปตัวเลขประจำวัน</summary>
         private string Header(DateTime day, int bookings, int rooms, int checkIn, int checkOut, decimal due)
         {
             string thaiDate;
@@ -234,21 +276,31 @@ namespace Take_Time_BangPhra
             catch { thaiDate = day.ToString("dd/MM/yyyy"); }
 
             var sb = new StringBuilder();
-            sb.Append("<div class='hd'>");
-            sb.Append($"<div class='t1'>ตารางการจอง · {E(thaiDate)}</div>");
-            sb.Append("<div class='t2'>สรุปผู้เข้าพักประจำวัน</div>");
-            sb.Append("</div>");
 
-            sb.Append("<table class='kpi'><tr>");
-            sb.Append($"<td><div class='n'>{bookings}</div><div class='l'>การจอง</div></td>");
-            sb.Append($"<td><div class='n'>{rooms}</div><div class='l'>ห้องที่มีผู้พัก</div></td>");
-            sb.Append($"<td><div class='n'>{checkIn}</div><div class='l'>เข้าวันนี้</div></td>");
-            sb.Append($"<td><div class='n'>{checkOut}</div><div class='l'>ออกพรุ่งนี้</div></td>");
-            sb.Append(due > 0
-                ? $"<td class='warn'><div class='n'>{due:N0}</div><div class='l'>ยอดค้างชำระ</div></td>"
-                : "<td><div class='n'>0</div><div class='l'>ยอดค้างชำระ</div></td>");
+            // เดิมเป็นตัวหนังสือ "ขาวบนเขียวเข้ม" — พอ HtmlRenderer ไม่วาดพื้นหลัง ตัวขาวเลยหาย
+            // ไปกับพื้นขาว. เปลี่ยนเป็นพื้นเขียวอ่อน + ตัวเขียวเข้ม อ่านออกทุกกรณี
+            sb.Append("<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;'>" +
+                      $"<tr bgcolor='#c9dfd0'><td style='padding:16px 18px;border:{BORDER};'>" +
+                      $"<span style='font-size:30px;font-weight:bold;color:#14401f;'>ตารางการจอง &#183; {E(thaiDate)}</span>" +
+                      "<br/><span style='font-size:16px;color:#3f6b4d;'>สรุปผู้เข้าพักประจำวัน</span>" +
+                      "</td></tr></table>");
+
+            sb.Append("<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;margin-top:10px;'><tr>");
+            sb.Append(Kpi(bookings.ToString(), "การจอง", false));
+            sb.Append(Kpi(rooms.ToString(), "ห้องที่มีผู้พัก", false));
+            sb.Append(Kpi(checkIn.ToString(), "เข้าวันนี้", false));
+            sb.Append(Kpi(checkOut.ToString(), "ออกพรุ่งนี้", false));
+            sb.Append(Kpi(due.ToString("N0"), "ยอดค้างชำระ", due > 0));
             sb.Append("</tr></table>");
             return sb.ToString();
+        }
+
+        private static string Kpi(string number, string label, bool warn)
+        {
+            string numColor = warn ? "#a5241a" : "#14401f";
+            return $"<td width='20%' align='center' bgcolor='#eef5f0' style='border:{BORDER};padding:12px 10px;'>" +
+                   $"<span style='font-size:30px;font-weight:bold;color:{numColor};'>{number}</span>" +
+                   $"<br/><span style='font-size:16px;color:#4e6459;'>{label}</span></td>";
         }
 
         // ── helpers ───────────────────────────────────────────────────────────────
