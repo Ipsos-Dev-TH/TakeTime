@@ -132,12 +132,12 @@ namespace Take_Time_BangPhra.Services
                     var processed = GetOrCreateFolder(client, _processedLabel);
                     var failed = _moveFailed ? GetOrCreateFolder(client, _failedLabel) : null;
 
+                    // กรองแค่ผู้ส่ง + ยังไม่อ่าน — ไม่กรองหัวเรื่อง เพราะอีเมล "แก้ไข" ของ STAAH
+                    // ใช้หัวเรื่อง "New Reservation ..." เหมือนจองใหม่ (สถานะจริงอยู่ในเนื้อเมล)
+                    // อีเมลที่ไม่ใช่ใบจองจะ parse ไม่ได้ แล้วถูกรายงานเป็นล้มเหลวตามปกติ
                     var query = SearchQuery.And(
                         SearchQuery.FromContains(_fromContains),
-                        SearchQuery.And(SearchQuery.NotSeen,
-                            SearchQuery.Or(SearchQuery.SubjectContains("New Reservation"),
-                                SearchQuery.Or(SearchQuery.SubjectContains("Cancelled"),
-                                    SearchQuery.SubjectContains("Modif")))));
+                        SearchQuery.NotSeen);
                     var uids = inbox.Search(query);
                     res.Fetched = uids.Count;
 
@@ -191,22 +191,29 @@ namespace Take_Time_BangPhra.Services
         // คืน (success, isDuplicate, isCancellation, message)
         private (bool, bool, bool, string) ProcessOne(MimeMessage msg, string subject, out string kind)
         {
-            if (subject.IndexOf("Cancelled", StringComparison.OrdinalIgnoreCase) >= 0)
+            // ⚠️ สถานะจริงอยู่ใน "เนื้ออีเมล" (Bookings Status: Confirmed/Modified/Cancelled)
+            // ไม่ใช่หัวเรื่อง — อีเมลแก้ไขของ STAAH ใช้หัวเรื่อง "New Reservation ..." เหมือนเดิม
+            // ถ้าดูแต่หัวเรื่องจะถูกมองเป็นจองใหม่ แล้ว dedup ตัดทิ้ง = การแก้ไขหายเงียบ ๆ
+            var rooms = ExtractRoomBookings(msg.HtmlBody);
+            string bodyStatus = rooms.Count > 0 ? (rooms[0].BookingsStatus ?? "") : "";
+            string signal = bodyStatus + " | " + (subject ?? "");
+
+            if (Has(signal, "Cancel"))
             {
                 kind = "ยกเลิก";
-                return ProcessCancellation(msg);
+                return ProcessCancellation(rooms);
             }
-            if (subject.IndexOf("Modif", StringComparison.OrdinalIgnoreCase) >= 0)
+            if (Has(signal, "Modif") || Has(signal, "Amend") || Has(signal, "Change") || Has(signal, "Update"))
             {
                 kind = "แก้ไข";
-                // Modified = ยกเลิกเดิม + สร้างใหม่
-                ProcessCancellation(msg);
-                var (s, d, _, m) = ProcessNewReservation(msg);
-                return (s, d, false, m);
+                return ProcessModification(rooms);
             }
             kind = "จองใหม่";
-            return ProcessNewReservation(msg);
+            return ProcessNewReservation(rooms);
         }
+
+        private static bool Has(string haystack, string needle) =>
+            (haystack ?? "").IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
 
         // ── Parse ──────────────────────────────────────────────────────────────
         private class RoomBooking
@@ -287,9 +294,8 @@ namespace Take_Time_BangPhra.Services
         }
 
         // ── New reservation ─────────────────────────────────────────────────────
-        private (bool, bool, bool, string) ProcessNewReservation(MimeMessage msg)
+        private (bool, bool, bool, string) ProcessNewReservation(List<RoomBooking> rooms)
         {
-            var rooms = ExtractRoomBookings(msg.HtmlBody);
             if (rooms.Count == 0) return (false, false, false, "แยกข้อมูลจากอีเมลไม่ได้ (format เปลี่ยน?)");
             var head = rooms[0];
             if (string.IsNullOrWhiteSpace(head.BookingId)) return (false, false, false, "ไม่พบ Booking ID");
@@ -418,15 +424,19 @@ namespace Take_Time_BangPhra.Services
             return ids;
         }
 
-        private HashSet<int> OverlappingAccomIds(SqlConnection con, SqlTransaction tx, DateTime ci, DateTime co)
+        /// <param name="excludeReservationId">ไม่นับห้องของการจองนี้ (ใช้ตอนแก้ไข — ย้ายวันทับตัวเองได้)</param>
+        private HashSet<int> OverlappingAccomIds(SqlConnection con, SqlTransaction tx, DateTime ci, DateTime co,
+            int excludeReservationId = 0)
         {
             var set = new HashSet<int>();
             using (var cmd = new SqlCommand(@"SELECT ra.Accommodation_ID
                 FROM Reservation r WITH (HOLDLOCK)
                 INNER JOIN Reservation_Accommodation ra ON r.ID = ra.Reservation_ID
                 WHERE r.CheckinDate < @co AND r.CheckoutDate > @ci
-                  AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน')", con, tx))
+                  AND r.ID <> @exclude
+                  AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", con, tx))
             {
+                cmd.Parameters.AddWithValue("@exclude", excludeReservationId);
                 cmd.Parameters.AddWithValue("@ci", ci);
                 cmd.Parameters.AddWithValue("@co", co);
                 using (var rd = cmd.ExecuteReader())
@@ -452,10 +462,188 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
-        // ── Cancellation ─────────────────────────────────────────────────────────
-        private (bool, bool, bool, string) ProcessCancellation(MimeMessage msg)
+        // ── Modification (อีเมล "Bookings Status: Modified") ──────────────────────
+        /// <summary>
+        /// อัปเดตการจองเดิม "ในที่เดิม" (คง Reservation ID / ประวัติชำระ / เอกสารที่ผูกไว้)
+        /// — OTA ส่ง Booking Id เดิมมาพร้อมข้อมูลใหม่ (วันที่/ราคา/จำนวนคน เปลี่ยนได้หมด)
+        /// ไม่ใช้วิธี "ยกเลิกเดิม + สร้างใหม่" เพราะจะได้เลขจองใหม่ และประวัติเงิน/เอกสารขาดจากกัน
+        /// เคสที่แก้อัตโนมัติไม่ปลอดภัย (เช็คอินแล้ว / ออกใบเสร็จแล้ว) → ไม่แตะ + แจ้งให้คนตรวจ
+        /// </summary>
+        private (bool, bool, bool, string) ProcessModification(List<RoomBooking> rooms)
         {
-            var rooms = ExtractRoomBookings(msg.HtmlBody);
+            if (rooms.Count == 0) return (false, false, false, "แยกข้อมูลจากอีเมลแก้ไขไม่ได้ (format เปลี่ยน?)");
+            var head = rooms[0];
+            if (string.IsNullOrWhiteSpace(head.BookingId)) return (false, false, false, "ไม่พบ Booking ID ในอีเมลแก้ไข");
+
+            // หาการจองเดิมที่ยังใช้งานอยู่
+            var dt = _code.DatabaseQuerySafe(_conn,
+                @"SELECT TOP 1 ID, Status, CheckinDate, CheckoutDate, TotalPrice, Deposit
+                    FROM Reservation
+                   WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)
+                     AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                   ORDER BY ID DESC",
+                new Dictionary<string, object> { { "@b", head.BookingId }, { "@p", "%" + head.BookingId + "%" } });
+
+            // ไม่เคยมีในระบบ (หรือถูกยกเลิกไปแล้ว) → ถือเป็นการจองใหม่
+            if (dt == null || dt.Rows.Count == 0)
+                return ProcessNewReservation(rooms);
+
+            int resId = Convert.ToInt32(dt.Rows[0]["ID"]);
+            string curStatus = dt.Rows[0]["Status"]?.ToString() ?? "";
+
+            // ── ตรวจความปลอดภัยก่อนแก้ ─────────────────────────────────────────
+            if (curStatus.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0
+                || curStatus.IndexOf("เช็คเอาท์", StringComparison.Ordinal) >= 0)
+            {
+                string warn = $"⚠️ Booking {head.BookingId} (จอง #{resId}) มีอีเมลแก้ไข แต่สถานะเป็น \"{curStatus}\" แล้ว — ไม่แก้อัตโนมัติ กรุณาตรวจสอบเอง " +
+                              $"(ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
+                _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
+                if (_notifyTelegram) Notify(warn);
+                return (false, false, false, warn);
+            }
+
+            var rcpt = _code.DatabaseQuerySafe(_conn,
+                "SELECT TOP 1 ID FROM Account_Receipt WHERE Reservation_ID = @id AND Status = 'Normal'",
+                new Dictionary<string, object> { { "@id", resId } });
+            if (rcpt?.Rows.Count > 0)
+            {
+                string warn = $"⚠️ Booking {head.BookingId} (จอง #{resId}) มีอีเมลแก้ไข แต่ออกใบเสร็จไปแล้ว ({rcpt.Rows[0][0]}) — ไม่แก้อัตโนมัติ " +
+                              $"กรุณาปรับเอกสาร/ยอดเงินเอง (ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
+                _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
+                if (_notifyTelegram) Notify(warn);
+                return (false, false, false, warn);
+            }
+
+            // ── validate ข้อมูลใหม่ ────────────────────────────────────────────
+            if (head.CheckIn == default || head.CheckOut == default || head.CheckOut <= head.CheckIn)
+                return (false, false, false, "วันเช็คอิน/เอาท์ในอีเมลแก้ไขไม่ถูกต้อง");
+            int stayDays = (int)(head.CheckOut - head.CheckIn).TotalDays;
+            if (stayDays > _maxStayDays) return (false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
+
+            DateTime oldIn = Convert.ToDateTime(dt.Rows[0]["CheckinDate"]);
+            DateTime oldOut = Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]);
+            decimal oldTotal = dt.Rows[0]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["TotalPrice"]) : 0m;
+
+            var (ok, msg) = UpdateReservation(resId, rooms, stayDays);
+            if (!ok) return (false, false, false, msg);
+
+            string changes = BuildChangeSummary(oldIn, oldOut, oldTotal, head, stayDays);
+            string done = $"แก้ไขการจอง #{resId} ({head.BookingId}) เรียบร้อย — {changes}";
+            _code.Logs(_conn, "EmailReservation", done, "SYSTEM");
+            return (true, false, false, done);
+        }
+
+        private static string BuildChangeSummary(DateTime oldIn, DateTime oldOut, decimal oldTotal,
+            RoomBooking head, int stayDays)
+        {
+            var parts = new List<string>();
+            if (oldIn.Date != head.CheckIn.Date || oldOut.Date != head.CheckOut.Date)
+                parts.Add($"วันที่ {oldIn:dd/MM}-{oldOut:dd/MM} → {head.CheckIn:dd/MM}-{head.CheckOut:dd/MM} ({stayDays} คืน)");
+            decimal newTotal = (decimal)(head.GrossTotal > 0 ? head.GrossTotal : 0);
+            if (newTotal > 0 && Math.Abs(newTotal - oldTotal) > 0.01m)
+                parts.Add($"ยอด {oldTotal:N2} → {newTotal:N2}");
+            return parts.Count > 0 ? string.Join(", ", parts) : "ข้อมูลเหมือนเดิม";
+        }
+
+        /// <summary>
+        /// เขียนทับข้อมูลการจองเดิม + จัดห้องใหม่ใน transaction เดียว
+        /// (วันที่เปลี่ยน = ต้องเช็คห้องว่างรอบใหม่ โดยไม่นับห้องของการจองนี้เอง)
+        /// </summary>
+        private (bool Ok, string Message) UpdateReservation(int resId, List<RoomBooking> rooms, int stayDays)
+        {
+            var head = rooms[0];
+            using (var con = new SqlConnection(_conn))
+            {
+                con.Open();
+                using (var tx = con.BeginTransaction(IsolationLevel.Serializable))
+                {
+                    try
+                    {
+                        // จัดห้องใหม่ตามข้อมูลล่าสุด (ไม่นับห้องเดิมของการจองนี้ = ย้ายวันทับตัวเองได้)
+                        var plan = new List<(int accomId, int adults, double amt)>();
+                        var chosen = new HashSet<int>();
+                        foreach (var r in rooms)
+                        {
+                            var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
+                            if (map.Count == 0)
+                            {
+                                tx.Rollback();
+                                return (false, $"ไม่มี mapping ห้อง '{r.RoomType}' ของ {r.ChannelName} — แก้ไขไม่สำเร็จ");
+                            }
+                            var reserved = OverlappingAccomIds(con, tx, r.CheckIn, r.CheckOut, resId);
+                            var avail = map.Where(id => !reserved.Contains(id) && !chosen.Contains(id)).Take(r.NoOfRooms).ToList();
+                            if (avail.Count < r.NoOfRooms)
+                            {
+                                tx.Rollback();
+                                return (false, $"ห้องไม่ว่างตามวันที่ใหม่ ({r.RoomType} ต้องการ {r.NoOfRooms} ว่าง {avail.Count}) — ต้องจัดห้องเอง");
+                            }
+                            foreach (var id in avail) { chosen.Add(id); plan.Add((id, r.Adults, r.NetAmount)); }
+                        }
+
+                        double grossTotal = head.GrossTotal > 0 ? head.GrossTotal
+                            : rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
+                        double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
+                        bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
+                                              || string.IsNullOrEmpty(head.PaymentType);
+
+                        using (var cmd = new SqlCommand(@"UPDATE [dbo].[Reservation] SET
+                                [CheckinDate] = @In, [CheckoutDate] = @Out, [StayDays] = @Days,
+                                [TotalPrice] = @Total, [Deposit] = @Dep,
+                                OTA_Gross_Amount = @Gross, OTA_Net_Amount = @Net,
+                                OTA_Payment_Type = @Pay, OTA_Guest_Name = @Guest,
+                                [Remark] = @Remark, Modified_Date = GETDATE()
+                              WHERE ID = @id", con, tx))
+                        {
+                            cmd.Parameters.AddWithValue("@id", resId);
+                            cmd.Parameters.AddWithValue("@In", head.CheckIn);
+                            cmd.Parameters.AddWithValue("@Out", head.CheckOut);
+                            cmd.Parameters.AddWithValue("@Days", stayDays);
+                            cmd.Parameters.AddWithValue("@Total", (decimal)grossTotal);
+                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)grossTotal : 0m);
+                            cmd.Parameters.AddWithValue("@Gross", (decimal)grossTotal);
+                            cmd.Parameters.AddWithValue("@Net", (decimal)netTotal);
+                            cmd.Parameters.AddWithValue("@Pay", (object)(head.PaymentType ?? "") ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@Guest", (object)head.GuestName ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@Remark",
+                                $"จองผ่าน {head.ChannelName}\r\nBooking ID:{head.BookingId}\r\n(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // จัดห้องใหม่ทั้งชุด
+                        using (var del = new SqlCommand(
+                            "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @id", con, tx))
+                        {
+                            del.Parameters.AddWithValue("@id", resId);
+                            del.ExecuteNonQuery();
+                        }
+                        foreach (var pl in plan)
+                            using (var ins = new SqlCommand(@"INSERT INTO [dbo].[Reservation_Accommodation]
+                                    ([Reservation_ID],[Accommodation_ID],[Amount],[Price],Use_Coupon)
+                                    VALUES (@R,@A,@Adults,@Price,'0')", con, tx))
+                            {
+                                ins.Parameters.AddWithValue("@R", resId);
+                                ins.Parameters.AddWithValue("@A", pl.accomId);
+                                ins.Parameters.AddWithValue("@Adults", pl.adults);
+                                ins.Parameters.AddWithValue("@Price", (int)Math.Floor(pl.amt));
+                                ins.ExecuteNonQuery();
+                            }
+
+                        tx.Commit();
+                        return (true, "ok");
+                    }
+                    catch (Exception ex)
+                    {
+                        try { tx.Rollback(); } catch { }
+                        _code.Logs(_conn, "EmailReservation", $"update failed res={resId}: {ex.Message}", "SYSTEM");
+                        return (false, "อัปเดตการจองไม่สำเร็จ: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        // ── Cancellation ─────────────────────────────────────────────────────────
+        private (bool, bool, bool, string) ProcessCancellation(List<RoomBooking> rooms)
+        {
             string bookingId = rooms.Count > 0 ? rooms[0].BookingId : null;
             if (string.IsNullOrWhiteSpace(bookingId)) return (false, false, true, "ไม่พบ Booking ID ในอีเมลยกเลิก");
 
