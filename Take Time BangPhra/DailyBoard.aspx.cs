@@ -253,13 +253,15 @@ namespace Take_Time_BangPhra
         private static void AppendTh(StringBuilder sb, string text, string align)
         {
             sb.Append($"<td align='{align}' bgcolor='{HEAD_BG}' " +
-                      $"style='border:{BORDER};padding:11px 9px;font-size:18px;font-weight:bold;color:#14401f;'>{text}</td>");
+                      $"style='background-color:{HEAD_BG};border:{BORDER};padding:11px 9px;" +
+                      $"font-size:18px;font-weight:bold;color:#14401f;'>{text}</td>");
         }
 
         private static string Td(string html, string bg, string align = "left")
         {
             return $"<td align='{align}' bgcolor='{bg}' " +
-                   $"style='border:{BORDER};padding:10px 9px;font-size:18px;color:#1a1a1a;'>{html}</td>";
+                   $"style='background-color:{bg};border:{BORDER};padding:10px 9px;" +
+                   $"font-size:18px;color:#1a1a1a;'>{html}</td>";
         }
 
         /// <summary>ป้ายสี — ใช้ตัวหนังสือสีเข้มบนพื้นอ่อนของสีเดียวกัน อ่านออกแม้พื้นไม่ถูกวาด</summary>
@@ -280,7 +282,8 @@ namespace Take_Time_BangPhra
             // เดิมเป็นตัวหนังสือ "ขาวบนเขียวเข้ม" — พอ HtmlRenderer ไม่วาดพื้นหลัง ตัวขาวเลยหาย
             // ไปกับพื้นขาว. เปลี่ยนเป็นพื้นเขียวอ่อน + ตัวเขียวเข้ม อ่านออกทุกกรณี
             sb.Append("<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;'>" +
-                      $"<tr bgcolor='#c9dfd0'><td style='padding:16px 18px;border:{BORDER};'>" +
+                      $"<tr bgcolor='#c9dfd0'><td bgcolor='#c9dfd0' " +
+                      $"style='background-color:#c9dfd0;padding:16px 18px;border:{BORDER};'>" +
                       $"<span style='font-size:30px;font-weight:bold;color:#14401f;'>ตารางการจอง &#183; {E(thaiDate)}</span>" +
                       "<br/><span style='font-size:16px;color:#3f6b4d;'>สรุปผู้เข้าพักประจำวัน</span>" +
                       "</td></tr></table>");
@@ -298,7 +301,8 @@ namespace Take_Time_BangPhra
         private static string Kpi(string number, string label, bool warn)
         {
             string numColor = warn ? "#a5241a" : "#14401f";
-            return $"<td width='20%' align='center' bgcolor='#eef5f0' style='border:{BORDER};padding:12px 10px;'>" +
+            return $"<td width='20%' align='center' bgcolor='#eef5f0' " +
+                   $"style='background-color:#eef5f0;border:{BORDER};padding:12px 10px;'>" +
                    $"<span style='font-size:30px;font-weight:bold;color:{numColor};'>{number}</span>" +
                    $"<br/><span style='font-size:16px;color:#4e6459;'>{label}</span></td>";
         }

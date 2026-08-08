@@ -559,6 +559,18 @@ namespace Take_Time_BangPhra.Services
                 {
                     try
                     {
+                        // ห้องที่ถืออยู่เดิม — ใช้จัดลำดับให้ "ได้ห้องเดิมก่อน" ถ้ายังว่างในวันใหม่
+                        // (ไม่งั้นแค่เลื่อนวันก็อาจถูกสลับห้อง ทั้งที่ประเภทห้องเท่าเดิม —
+                        //  สร้างความสับสนกับแม่บ้าน/ลูกค้าที่รู้เลขห้องไปแล้ว)
+                        var currentRooms = new HashSet<int>();
+                        using (var cur = new SqlCommand(
+                            "SELECT Accommodation_ID FROM Reservation_Accommodation WHERE Reservation_ID = @id", con, tx))
+                        {
+                            cur.Parameters.AddWithValue("@id", resId);
+                            using (var rd = cur.ExecuteReader())
+                                while (rd.Read()) if (rd[0] != DBNull.Value) currentRooms.Add(Convert.ToInt32(rd[0]));
+                        }
+
                         // จัดห้องใหม่ตามข้อมูลล่าสุด (ไม่นับห้องเดิมของการจองนี้ = ย้ายวันทับตัวเองได้)
                         var plan = new List<(int accomId, int adults, double amt)>();
                         var chosen = new HashSet<int>();
@@ -571,13 +583,25 @@ namespace Take_Time_BangPhra.Services
                                 return (false, $"ไม่มี mapping ห้อง '{r.RoomType}' ของ {r.ChannelName} — แก้ไขไม่สำเร็จ");
                             }
                             var reserved = OverlappingAccomIds(con, tx, r.CheckIn, r.CheckOut, resId);
-                            var avail = map.Where(id => !reserved.Contains(id) && !chosen.Contains(id)).Take(r.NoOfRooms).ToList();
+                            var avail = map.Where(id => !reserved.Contains(id) && !chosen.Contains(id))
+                                           .OrderByDescending(id => currentRooms.Contains(id))   // ห้องเดิมมาก่อน
+                                           .Take(r.NoOfRooms).ToList();
                             if (avail.Count < r.NoOfRooms)
                             {
                                 tx.Rollback();
                                 return (false, $"ห้องไม่ว่างตามวันที่ใหม่ ({r.RoomType} ต้องการ {r.NoOfRooms} ว่าง {avail.Count}) — ต้องจัดห้องเอง");
                             }
                             foreach (var id in avail) { chosen.Add(id); plan.Add((id, r.Adults, r.NetAmount)); }
+                        }
+
+                        // แจ้งเตือนถ้าถูกย้ายห้องจริง (ห้องเดิมไม่ว่างในวันใหม่ / เปลี่ยนประเภทห้อง)
+                        var newRooms = new HashSet<int>(plan.Select(x => x.accomId));
+                        if (currentRooms.Count > 0 && !newRooms.SetEquals(currentRooms))
+                        {
+                            string moved = $"ℹ️ การจอง #{resId} ({head.BookingId}) ถูกย้ายห้องจากการแก้ไข " +
+                                           $"(ห้องเดิมไม่ว่างตามวันที่ใหม่ หรือเปลี่ยนประเภทห้อง) — ตรวจสอบการจัดห้องอีกครั้ง";
+                            _code.Logs(_conn, "EmailReservation", moved, "SYSTEM");
+                            if (_notifyTelegram) Notify(moved);
                         }
 
                         double grossTotal = head.GrossTotal > 0 ? head.GrossTotal
