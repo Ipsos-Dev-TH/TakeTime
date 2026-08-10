@@ -743,6 +743,9 @@
                                                     <li><a runat="server" href="~/Admin/Settings/ActivityManagement">
                                                         <i class="fas fa-person-hiking"></i> จัดการกิจกรรม
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/LineAccount">
+                                                        <i class="fab fa-line"></i> บัญชี LINE ของฉัน
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/ConnectionSettings">
                                                         <i class="fas fa-plug"></i> Connection Settings
                                                     </a></li>

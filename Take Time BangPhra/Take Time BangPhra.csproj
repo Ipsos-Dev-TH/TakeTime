@@ -438,6 +438,8 @@
     <Content Include="Activities.aspx" />
     <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
+    <Content Include="Admin\Settings\LineAccount.aspx" />
+    <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
@@ -1233,6 +1235,21 @@
     <Compile Include="Admin\Settings\ActivityManagement.aspx.designer.cs">
       <DependentUpon>ActivityManagement.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\LineAccount.aspx.cs">
+      <DependentUpon>LineAccount.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
+      <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\LineLinkCallback.aspx.cs">
+      <DependentUpon>LineLinkCallback.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\LineLinkCallback.aspx.designer.cs">
+      <DependentUpon>LineLinkCallback.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\Services\LineLoginService.cs" />
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
