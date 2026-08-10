@@ -325,6 +325,10 @@ namespace Take_Time_BangPhra.Services
                     case "TELEGRAM":
                         DeliverToTelegram(conversationId, content);
                         break;
+                    case "EMAIL":
+                        // สะพานแชท↔อีเมลลูกค้า OTA (Agoda/Booking relay) — ตอบเป็นอีเมลเบื้องหลัง
+                        new EmailChatService(_connStr).DeliverToEmail(conversationId, content);
+                        break;
                 }
             }
             catch (Exception ex)

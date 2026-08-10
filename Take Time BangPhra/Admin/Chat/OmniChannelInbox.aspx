@@ -377,7 +377,12 @@
                 var cls = m.direction === 'IN' ? 'incoming' : 'outgoing';
                 msgHtml += '<div class="msg ' + cls + '"><div>';
                 if (m.direction === 'IN' && m.sender) msgHtml += '<div class="msg-sender">' + escHtml(m.sender) + '</div>';
-                msgHtml += '<div class="bubble">' + escHtml(m.content) + '</div>';
+                if (m.mediaUrl && m.type === 'IMAGE')
+                    msgHtml += '<div class="bubble"><a href="' + escHtml(m.mediaUrl) + '" target="_blank"><img src="' + escHtml(m.mediaUrl) + '" style="max-width:100%; border-radius:8px; display:block;" alt="" /></a></div>';
+                else if (m.mediaUrl)
+                    msgHtml += '<div class="bubble"><a href="' + escHtml(m.mediaUrl) + '" target="_blank">📎 ' + escHtml(m.content || 'ไฟล์แนบ') + '</a></div>';
+                else
+                    msgHtml += '<div class="bubble">' + escHtml(m.content) + '</div>';
                 msgHtml += '<div class="msg-meta">' + (m.time || '') + '</div>';
                 msgHtml += '</div></div>';
             }

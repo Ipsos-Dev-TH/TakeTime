@@ -65,7 +65,8 @@ namespace Take_Time_BangPhra
                 try
                 {
                     string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                    bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn);
+                    bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn)
+                                   || EmailChatService.IsEnabled(conn);
                 }
                 catch { }
                 if (!config.IsReadyToSync && !bgFeaturesOn) return;
@@ -115,6 +116,15 @@ namespace Take_Time_BangPhra
                 // ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — no-op ถ้าปิด
                 try { SendDailyLineReportIfDue(); }
                 catch (Exception lex) { System.Diagnostics.Trace.TraceError($"DailyLineReport timer error: {(lex.InnerException ?? lex).Message}"); }
+
+                // แชทลูกค้า OTA ผ่านอีเมล: ดึงอีเมลจาก relay ของ OTA เข้า OmniChannel inbox
+                // — gate ด้วยสวิตช์ channel EMAIL + รอบเวลาใน PollIfDue; no-op ถ้าปิด
+                try
+                {
+                    string chatConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    EmailChatService.PollIfDue(chatConn);
+                }
+                catch (Exception cex) { System.Diagnostics.Trace.TraceError($"EmailChat timer error: {(cex.InnerException ?? cex).Message}"); }
 
                 _consecutiveTimerErrors = 0;
             }

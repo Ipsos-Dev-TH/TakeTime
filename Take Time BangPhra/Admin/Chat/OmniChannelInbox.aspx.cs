@@ -231,6 +231,7 @@ namespace Take_Time_BangPhra.Admin.Chat
                         sender = msg["SenderName"]?.ToString(),
                         content = msg["Content"]?.ToString(),
                         type = msg["MessageType"]?.ToString(),
+                        mediaUrl = msg["MediaUrl"]?.ToString(),
                         time = created.ToString("HH:mm"),
                         dateLabel = created.Date == DateTime.Today ? "วันนี้" :
                                     created.Date == DateTime.Today.AddDays(-1) ? "เมื่อวาน" :
