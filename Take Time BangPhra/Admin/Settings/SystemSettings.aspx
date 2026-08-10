@@ -54,11 +54,14 @@
             <h3><i class="fas fa-vial"></i> ทดสอบการเชื่อมต่อ</h3>
             <div class="sub">ทดสอบด้วยค่าที่ใช้งานจริงตอนนี้ (บันทึกก่อนทดสอบ)</div>
             <asp:Button ID="btnTestTelegram" runat="server" Text="📨 ส่ง Telegram ทดสอบ"
-                CssClass="btn btn-default" OnClick="btnTestTelegram_Click" />
+                CssClass="btn btn-default" OnClick="btnTestTelegram_Click" UseSubmitBehavior="false"
+                OnClientClick="this.disabled=true; this.value='⏳ กำลังส่ง...';" />
             <asp:Button ID="btnTestLine" runat="server" Text="💬 ตรวจ Token LINE OA"
-                CssClass="btn btn-default" OnClick="btnTestLine_Click" />
+                CssClass="btn btn-default" OnClick="btnTestLine_Click" UseSubmitBehavior="false"
+                OnClientClick="this.disabled=true; this.value='⏳ กำลังตรวจ...';" />
             <asp:Button ID="btnTestEmail" runat="server" Text="✉️ ส่งอีเมลทดสอบ"
-                CssClass="btn btn-default" OnClick="btnTestEmail_Click" />
+                CssClass="btn btn-default" OnClick="btnTestEmail_Click" UseSubmitBehavior="false"
+                OnClientClick="this.disabled=true; this.value='⏳ กำลังส่ง...';" />
             <asp:TextBox ID="txtTestEmailTo" runat="server" placeholder="อีเมลปลายทางสำหรับทดสอบ"
                 style="padding:8px 12px; border:1.5px solid #dbe2e7; border-radius:8px; min-width:240px; margin-left:6px;" />
             <div class="res" id="divRes" runat="server"><asp:Literal ID="litRes" runat="server" /></div>

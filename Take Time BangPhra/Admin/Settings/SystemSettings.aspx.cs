@@ -187,19 +187,60 @@ namespace Take_Time_BangPhra.Admin.Settings
         }
 
         // ── ทดสอบ ─────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// ทดสอบส่ง Telegram — เรียก API ตรงแบบ synchronous แทนการใช้ TelegramBot2 เพราะ:
+        ///  1) TelegramBot2.SendMessageAsync ใช้ await โดยไม่มี ConfigureAwait(false)
+        ///     การ block รอบน request thread ของ ASP.NET ทำให้ deadlock (หน้าหมุนค้าง)
+        ///  2) เมธอดนั้น "กลืน" ทุก exception ไม่เคย throw → ปุ่มทดสอบจะรายงานว่าสำเร็จ
+        ///     แม้ token ผิด ซึ่งใช้ตรวจสอบอะไรไม่ได้เลย
+        /// เรียกตรงแบบนี้ได้ผลจริงจาก Telegram (รวม error เช่น chat not found / Unauthorized)
+        /// </summary>
         protected void btnTestTelegram_Click(object sender, EventArgs e)
         {
             try
             {
                 string token = AppCfg.Get("TelegramTokenTakeTime");
                 string chatId = AppCfg.Get("TelegramChatId", "-4969611371");
-                if (string.IsNullOrEmpty(token)) { Res("ยังไม่ได้ตั้ง Telegram Bot Token", false); return; }
+                if (string.IsNullOrEmpty(token)) { Res("ยังไม่ได้ตั้ง Telegram Bot Token", false); Render(); return; }
+                if (string.IsNullOrEmpty(chatId)) { Res("ยังไม่ได้ตั้ง Telegram Chat ID", false); Render(); return; }
 
-                var bot = new TelegramBot2(token);
-                bot.SendMessageAsync(chatId,
-                    $"🔔 ทดสอบจากศูนย์รวมการตั้งค่า TakeTime\n{DateTime.Now:dd/MM/yyyy HH:mm} น.")
-                   .GetAwaiter().GetResult();
-                Res($"ส่ง Telegram สำเร็จ (chat {chatId})", true);
+                string text = $"🔔 ทดสอบจากศูนย์รวมการตั้งค่า TakeTime\n{DateTime.Now:dd/MM/yyyy HH:mm} น.";
+                string json = new System.Web.Script.Serialization.JavaScriptSerializer()
+                    .Serialize(new { chat_id = chatId, text = text });
+
+                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(
+                    $"https://api.telegram.org/bot{token}/sendMessage");
+                req.Method = "POST";
+                req.ContentType = "application/json";
+                req.Timeout = 20000;                    // กันค้างถาวรถ้าเครือข่ายไม่ตอบ
+                req.ReadWriteTimeout = 20000;
+                byte[] data = System.Text.Encoding.UTF8.GetBytes(json);
+                req.ContentLength = data.Length;
+                using (var st = req.GetRequestStream()) st.Write(data, 0, data.Length);
+                using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
+                using (var rd = new System.IO.StreamReader(resp.GetResponseStream()))
+                {
+                    rd.ReadToEnd();
+                    Res($"ส่ง Telegram สำเร็จ → chat {chatId}", true);
+                }
+            }
+            catch (System.Net.WebException wex)
+            {
+                string detail = "";
+                try
+                {
+                    if (wex.Response != null)
+                        using (var rd = new System.IO.StreamReader(wex.Response.GetResponseStream()))
+                            detail = rd.ReadToEnd();
+                }
+                catch { }
+                // แปล error ที่พบบ่อยให้อ่านรู้เรื่อง
+                string hint = detail.IndexOf("chat not found", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? " → Chat ID ไม่ถูกต้อง หรือบอทยังไม่ได้ถูกเชิญเข้ากลุ่มนั้น"
+                    : detail.IndexOf("Unauthorized", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? " → Bot Token ไม่ถูกต้อง/ถูกยกเลิกแล้ว"
+                    : "";
+                Res("ส่งไม่สำเร็จ: " + wex.Message + " " + detail + hint, false);
             }
             catch (Exception ex) { Res("ส่งไม่สำเร็จ: " + ex.Message, false); }
             Render();
