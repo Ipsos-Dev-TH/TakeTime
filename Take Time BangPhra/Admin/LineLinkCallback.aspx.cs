@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Configuration;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
@@ -59,6 +59,19 @@ namespace Take_Time_BangPhra.Admin
                 var prof = svc.ResolveProfile(code);
                 if (!prof.Success) { Show(false, "เข้าสู่ระบบไม่สำเร็จ", Server.HtmlEncode(prof.Message)); return; }
 
+                Session["LineAccessToken"] = prof.AccessToken;
+
+                // ยังไม่ได้เพิ่ม LINE OA เป็นเพื่อน → ส่งข้อความหาไม่ได้เลย
+                // LINE บังคับตอนล็อกอินไม่ได้ จึงกันที่ระบบเราแทน (ค้างหน้าเพิ่มเพื่อนจนกว่าจะเพิ่ม)
+                if (svc.RequireFriend && !prof.IsFriend)
+                {
+                    Session["LinePendingProfile"] = prof;
+                    Session["LineAfterFriend"] = returnUrl;
+                    Response.Redirect("~/Mobile/AddFriend", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+
                 var admin = svc.FindAdminByLineUserId(prof.UserId);
                 if (admin == null)
                 {
@@ -95,6 +108,16 @@ namespace Take_Time_BangPhra.Admin
             }
 
             var result = svc.HandleCallback(code, adminId);
+            if (result.Success) Session["LineAccessToken"] = result.AccessToken;
+
+            // ผูกสำเร็จแล้วแต่ยังไม่เป็นเพื่อน → พาไปเพิ่มเพื่อนต่อทันที (ไม่งั้น push ไม่ถึง)
+            if (result.Success && svc.RequireFriend && !result.IsFriend)
+            {
+                Session["LineAfterFriend"] = "/Admin/Settings/LineAccount";
+                Response.Redirect("~/Mobile/AddFriend", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
+            }
 
             if (result.Success)
             {

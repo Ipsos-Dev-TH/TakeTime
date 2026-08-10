@@ -178,6 +178,21 @@
                         autocomplete="new-password" placeholder="เว้นว่าง = คงค่าเดิม" />
                 </div>
             </div>
+            <div class="grid2">
+                <div class="form-row">
+                    <label>บังคับเพิ่มเพื่อน LINE OA ก่อนใช้งาน</label>
+                    <asp:DropDownList ID="ddlRequireFriend" runat="server" CssClass="form-control">
+                        <asp:ListItem Value="1" Text="บังคับ (แนะนำ — ไม่เป็นเพื่อน ส่งข้อความหาไม่ได้)" />
+                        <asp:ListItem Value="0" Text="ไม่บังคับ" />
+                    </asp:DropDownList>
+                </div>
+                <div class="form-row">
+                    <label>LINE OA Basic ID</label>
+                    <asp:TextBox ID="txtBotBasicId" runat="server" CssClass="form-control" placeholder="@taketime" />
+                    <div class="help-text" style="margin-top:4px;">ดูได้ที่ LINE Official Account Manager — ใช้ทำลิงก์/QR เพิ่มเพื่อน</div>
+                </div>
+            </div>
+
             <div class="form-row">
                 <label>Callback URL <span style="font-weight:400;font-size:12px;color:#7a8a80;">
                     (ต้องใส่ค่านี้ใน LINE Developers Console → LINE Login → Callback URL ให้ตรงทุกตัวอักษร)</span></label>

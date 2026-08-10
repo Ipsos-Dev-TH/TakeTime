@@ -444,6 +444,7 @@
     <Content Include="Mobile\Leave.aspx" />
     <Content Include="Mobile\LeaveApprove.aspx" />
     <Content Include="Mobile\LineLink.aspx" />
+    <Content Include="Mobile\AddFriend.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
@@ -1284,6 +1285,13 @@
     </Compile>
     <Compile Include="Mobile\LineLink.aspx.designer.cs">
       <DependentUpon>LineLink.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Mobile\AddFriend.aspx.cs">
+      <DependentUpon>AddFriend.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\AddFriend.aspx.designer.cs">
+      <DependentUpon>AddFriend.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">

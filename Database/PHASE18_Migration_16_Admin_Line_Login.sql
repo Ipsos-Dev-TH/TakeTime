@@ -52,3 +52,18 @@ SELECT ConfigKey, ConfigValue FROM Accounting_Integration_Config
 SELECT ID, Username, Role, Line_UserId, Line_DisplayName, Line_LinkedDate, Line_NotifyEnabled
   FROM [dbo].[Admin] WHERE Status = 1 ORDER BY Username;
 GO
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- เพิ่มเติม: บังคับเพิ่มเพื่อน LINE OA ก่อนใช้งาน
+-- LINE ไม่มี API ให้ "บังคับ" ตอนล็อกอิน (ผู้ใช้กดข้ามได้) — ระบบจึงตรวจด้วย
+-- friendship API แล้วไม่ปล่อยผ่านจนกว่าจะเพิ่มจริง
+-- ════════════════════════════════════════════════════════════════════════════
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'LineLogin_RequireFriend')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('LineLogin_RequireFriend', '1',
+            N'บังคับเพิ่ม LINE OA เป็นเพื่อนก่อนใช้งาน (1=บังคับ) — ไม่เป็นเพื่อน ระบบส่งข้อความหาไม่ได้');
+IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'LineLogin_BotBasicId')
+    INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description)
+    VALUES ('LineLogin_BotBasicId', '',
+            N'Basic ID ของ LINE OA เช่น @taketime (ดูที่ LINE Official Account Manager) — ใช้ทำลิงก์/QR เพิ่มเพื่อน');
+GO

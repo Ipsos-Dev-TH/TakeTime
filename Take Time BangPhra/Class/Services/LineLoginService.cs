@@ -54,6 +54,61 @@ namespace Take_Time_BangPhra.Services
         {
             public bool Success;
             public string UserId, DisplayName, PictureUrl, Message;
+            /// <summary>access token ของรอบนี้ — ใช้ตรวจสถานะเพื่อนกับ LINE OA</summary>
+            public string AccessToken;
+            /// <summary>true = ผู้ใช้เพิ่ม LINE OA เป็นเพื่อนแล้ว (จำเป็นต่อการส่งข้อความหา)</summary>
+            public bool IsFriend;
+        }
+
+        /// <summary>บังคับให้ต้องเพิ่ม LINE OA เป็นเพื่อนก่อนใช้งาน (default เปิด)</summary>
+        public bool RequireFriend => Cfg("LineLogin_RequireFriend", "1") == "1";
+
+        /// <summary>Basic ID ของ LINE OA เช่น @taketime — ใช้ทำลิงก์/QR เพิ่มเพื่อน</summary>
+        public string BotBasicId => Cfg("LineLogin_BotBasicId", "");
+
+        /// <summary>ลิงก์เพิ่มเพื่อน (บนมือถือจะเปิดแอป LINE ให้เลย)</summary>
+        public string AddFriendUrl
+        {
+            get
+            {
+                string id = (BotBasicId ?? "").Trim();
+                if (string.IsNullOrEmpty(id)) return "";
+                if (!id.StartsWith("@")) id = "@" + id;
+                return "https://line.me/R/ti/p/" + Uri.EscapeDataString(id);
+            }
+        }
+
+        /// <summary>QR เพิ่มเพื่อน (LINE สร้างให้จาก basic id)</summary>
+        public string AddFriendQrUrl
+        {
+            get
+            {
+                string id = (BotBasicId ?? "").Trim().TrimStart('@');
+                return string.IsNullOrEmpty(id) ? "" : $"https://qr-official.line.me/gs/M_{id}_GW.png";
+            }
+        }
+
+        /// <summary>
+        /// ตรวจว่าผู้ใช้เพิ่ม LINE OA (ที่ผูกกับ Login channel) เป็นเพื่อนแล้วหรือยัง
+        /// LINE ไม่มีวิธี "บังคับ" เพิ่มเพื่อน — ทำได้แค่ชวน (bot_prompt) แล้วตรวจผลด้วย API นี้
+        /// แล้วให้ระบบเราไม่ปล่อยผ่านจนกว่าจะเพิ่มจริง
+        /// </summary>
+        public bool CheckIsFriend(string accessToken)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(accessToken)) return false;
+                string json = GetWithBearer("https://api.line.me/friendship/v1/status", accessToken);
+                var r = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+                return r != null && r.ContainsKey("friendFlag")
+                       && r["friendFlag"]?.ToString().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+            }
+            catch
+            {
+                // เรียกไม่ได้ (Login channel ยังไม่ผูกกับ bot / เน็ตมีปัญหา) → ถือว่าเป็นเพื่อน
+                // เพื่อไม่ให้ผู้ใช้ติดค้างเข้าระบบไม่ได้เพราะเรื่องที่ตรวจไม่ได้
+                return true;
+            }
         }
 
         /// <summary>หา Admin จาก LINE userId — ใช้ "เข้าสู่ระบบด้วย LINE" ตอนกดลิงก์จากแชท</summary>
@@ -96,6 +151,8 @@ namespace Take_Time_BangPhra.Services
                 res.UserId = profile["userId"].ToString();
                 res.DisplayName = profile.ContainsKey("displayName") ? profile["displayName"]?.ToString() : "";
                 res.PictureUrl = profile.ContainsKey("pictureUrl") ? profile["pictureUrl"]?.ToString() : "";
+                res.AccessToken = token["access_token"].ToString();
+                res.IsFriend = CheckIsFriend(res.AccessToken);
                 res.Success = true;
                 return res;
             }
@@ -135,6 +192,8 @@ namespace Take_Time_BangPhra.Services
                 res.UserId = profile["userId"].ToString();
                 res.DisplayName = profile.ContainsKey("displayName") ? profile["displayName"]?.ToString() : "";
                 res.PictureUrl = profile.ContainsKey("pictureUrl") ? profile["pictureUrl"]?.ToString() : "";
+                res.AccessToken = accessToken;
+                res.IsFriend = CheckIsFriend(accessToken);
 
                 // 3) กัน userId ซ้ำกับ Admin คนอื่น (1 บัญชี LINE = 1 คน)
                 var dup = _code.DatabaseQuerySafe(_conn,

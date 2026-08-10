@@ -219,6 +219,8 @@ namespace Take_Time_BangPhra.Admin.Settings
             txtChannelId.Text = _svc.ChannelId;
             txtCallback.Text = string.IsNullOrWhiteSpace(_svc.CallbackUrl)
                 ? GuessCallbackUrl() : _svc.CallbackUrl;
+            ddlRequireFriend.SelectedValue = _svc.RequireFriend ? "1" : "0";
+            txtBotBasicId.Text = _svc.BotBasicId;
             litSecretStatus.Text = string.IsNullOrWhiteSpace(_svc.ChannelSecret)
                 ? "<span style='color:#c0392b;font-weight:400;font-size:12px;'>✗ ยังไม่ได้ตั้ง</span>"
                 : "<span style='color:#27ae60;font-weight:400;font-size:12px;'>✓ ตั้งไว้แล้ว (เว้นว่าง = คงเดิม)</span>";
@@ -243,6 +245,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 cfg.SetConfig("LineLogin_Enabled", ddlEnabled.SelectedValue == "1" ? "1" : "0");
                 cfg.SetConfig("LineLogin_ChannelId", txtChannelId.Text.Trim());
                 cfg.SetConfig("LineLogin_CallbackUrl", txtCallback.Text.Trim());
+                cfg.SetConfig("LineLogin_RequireFriend", ddlRequireFriend.SelectedValue == "1" ? "1" : "0");
+                cfg.SetConfig("LineLogin_BotBasicId", txtBotBasicId.Text.Trim());
 
                 // secret: บันทึกเฉพาะเมื่อกรอกใหม่ ("-" = ล้าง)
                 string sec = txtChannelSecret.Text.Trim();

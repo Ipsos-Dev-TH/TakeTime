@@ -33,6 +33,8 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected global::System.Web.UI.WebControls.TextBox txtChannelId;
         protected global::System.Web.UI.WebControls.TextBox txtChannelSecret;
         protected global::System.Web.UI.WebControls.Literal litSecretStatus;
+        protected global::System.Web.UI.WebControls.DropDownList ddlRequireFriend;
+        protected global::System.Web.UI.WebControls.TextBox txtBotBasicId;
         protected global::System.Web.UI.WebControls.TextBox txtCallback;
         protected global::System.Web.UI.WebControls.Button btnSaveConfig;
     }
