@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -75,7 +75,7 @@ namespace Take_Time_BangPhra.API
                 {
                     string uid = dt.Rows[0]["UID"]?.ToString() ?? "";
                     DateTime created = Convert.ToDateTime(dt.Rows[0]["Created_Date"]);
-                    string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"];
+                    string basePath = AppCfg.Get("ReceiptFolderPath");
                     foreach (string month in new[] { created.Month.ToString("00"), created.Month.ToString() })
                     {
                         foreach (string name in new[] { $"{doc}_{uid}.pdf", $"{doc}.pdf" })

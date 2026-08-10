@@ -233,7 +233,7 @@ namespace Take_Time_BangPhra
         {
             // Key + place id อ่านจาก Web.config appSettings ก่อน (แก้/หมุนคีย์ได้โดยไม่ต้อง rebuild)
             // ถ้าไม่ตั้งใน config จะ fallback เป็นค่าเดิม
-            string apiKey = ConfigurationManager.AppSettings["GooglePlacesApiKey"];
+            string apiKey = AppCfg.Get("GooglePlacesApiKey");
             if (string.IsNullOrWhiteSpace(apiKey)) apiKey = "AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U";
             string placeId = ConfigurationManager.AppSettings["GooglePlaceId"];
             if (string.IsNullOrWhiteSpace(placeId)) placeId = "ChIJvUgTD9nLAjERMgFSAIuRHJw";

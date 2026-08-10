@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -711,10 +711,10 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                string token = System.Configuration.ConfigurationManager.AppSettings["TelegramTokenTakeTime"];
+                string token = AppCfg.Get("TelegramTokenTakeTime");
                 if (string.IsNullOrEmpty(token)) return;
                 var bot = new TelegramBot2(token);
-                bot.SendMessageAsync("-4969611371", text).GetAwaiter().GetResult();
+                bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), text).GetAwaiter().GetResult();
             }
             catch { }
         }

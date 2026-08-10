@@ -192,7 +192,7 @@ namespace Take_Time_BangPhra.Account.Report
                     DropDownList1.SelectedIndex = DropDownList1.Items.IndexOf(DropDownList1.Items.FindByValue(dtVendorSelected.Rows[0]["ID"].ToString()));
                     DropDownList1.DataBind();
 
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     string paymentPath = path + "\\" + docdate.Year + "\\" + docdate.Month;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(paymentPath))
@@ -778,7 +778,7 @@ namespace Take_Time_BangPhra.Account.Report
                             fallbackParams);
                     }
                 }
-                string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                string path = AppCfg.Get("PaymentFolderPath").ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -910,7 +910,7 @@ namespace Take_Time_BangPhra.Account.Report
                 dtSignature.Columns.Add("ReceivedName");
                 dtSignature.Columns.Add("Received");
 
-                string Signaturepath = System.Configuration.ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+                string Signaturepath = AppCfg.Get("StaffSignatureFolderPath")?.ToString() ?? "";
 
                 // Get creator name
                 var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"]?.ToString() } };
@@ -1335,7 +1335,7 @@ namespace Take_Time_BangPhra.Account.Report
                 string searchPattern = fileName.ToString(); // filename ที่ถูก strip แล้ว (เช่น "ใบเสร็จ.pdf")
 
                 // Get payment folder path
-                string basePath = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"]?.ToString();
+                string basePath = AppCfg.Get("PaymentFolderPath")?.ToString();
                 if (string.IsNullOrEmpty(basePath))
                     return "#";
 

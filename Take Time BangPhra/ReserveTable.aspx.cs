@@ -850,8 +850,8 @@ namespace Take_Time_BangPhra
 
 ⚠️ *หมายเหตุ:* ยกเลิกไม่คืนเงิน";
 
-                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"]);
-                    await bot.SendMessageAsync("-4969611371", message);
+                    var bot = new TelegramBot2(AppCfg.Get("TelegramTokenTakeTime"));
+                    await bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
                 }
             }
             catch (Exception ex)
@@ -862,8 +862,8 @@ namespace Take_Time_BangPhra
 
         private void ProcessRefund(string reservationId)
         {
-            string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
-            string Imagespath = ConfigurationManager.AppSettings["ImagesFolderPath"];
+            string path = AppCfg.Get("ReceiptFolderPath");
+            string Imagespath = AppCfg.Get("ImagesFolderPath");
             DataTable dtRec = DatabaseQuery(conn,
                 "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND Reservation_ID = @ReservationId",
                 new SqlParameter("@ReservationId", reservationId));

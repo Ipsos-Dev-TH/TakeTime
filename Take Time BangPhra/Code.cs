@@ -935,7 +935,7 @@ namespace Take_Time_BangPhra
             string status = "";
             try
             {
-                string channelAccessToken = ConfigurationManager.AppSettings["linechannelaccesstokentaketime"]?.ToString() ?? "";
+                string channelAccessToken = AppCfg.Get("linechannelaccesstokentaketime")?.ToString() ?? "";
                 var lineMessagingClient = new LineMessagingClient(channelAccessToken);
 
                 // สร้างข้อความ

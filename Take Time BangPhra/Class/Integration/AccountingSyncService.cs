@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -10827,7 +10827,7 @@ namespace Take_Time_BangPhra.Integration
             // ครั้งต่อไปจะ re-download ยอดใหม่จาก NextAcc ไม่ค้างยอดเก่าหลัง edit/re-sync
             try
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (!string.IsNullOrEmpty(basePath))
                 {
                     string naRoot = Path.Combine(basePath, "NextAcc");
@@ -10889,8 +10889,8 @@ namespace Take_Time_BangPhra.Integration
             var attachments = new List<IntegrationAttachment>();
             try
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"]
-                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath")
+                    ?? AppCfg.Get("BaseFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
 
                 // Pattern 1: Documents/Payment/{Year}/{Month}/ — PaymentVoucher.aspx uploads
@@ -10974,8 +10974,8 @@ namespace Take_Time_BangPhra.Integration
             var attachments = new List<IntegrationAttachment>();
             try
             {
-                string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"]
-                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                string basePath = AppCfg.Get("ReceiptFolderPath")
+                    ?? AppCfg.Get("BaseFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
 
                 // Search in Documents/Receipt/{Year}/{Month}/ for receipt PDFs
@@ -11017,7 +11017,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     try
                     {
-                        string slipBasePath = ConfigurationManager.AppSettings["BaseFolderPath"] ?? basePath;
+                        string slipBasePath = AppCfg.Get("BaseFolderPath") ?? basePath;
                         var dt = _code.DatabaseQuerySafe(_connectionString,
                             "SELECT TOP 2 SlipFileURL, FileName, FileType FROM Payment_Slips WHERE Reservation_ID = @id AND VerificationStatus != 'REJECTED'",
                             new Dictionary<string, object> { { "@id", reservationId } });
@@ -11103,8 +11103,8 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 // Fallback: search Documents/Payment/{Year}/{Month}/ for files matching docNumber
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"]
-                    ?? ConfigurationManager.AppSettings["BaseFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath")
+                    ?? AppCfg.Get("BaseFolderPath");
                 if (!string.IsNullOrEmpty(basePath))
                 {
                     string yearMonth = $"{payDate.Year}/{payDate.Month}";
@@ -11700,7 +11700,7 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(voucherDocNumber)) { result.Message = "ไม่มีเลขที่เอกสาร"; return result; }
             if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
 
-            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            string basePath = AppCfg.Get("PaymentFolderPath");
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
             // ── Fast path: ถ้า PDF cache อยู่แล้วบนดิสก์ + ยังใหม่ → คืนทันที ไม่ต้อง query DB/ยิง API ──
@@ -11873,7 +11873,7 @@ namespace Take_Time_BangPhra.Integration
             if (nextAccId == Guid.Empty) { result.Message = "ไม่มี NextAcc document id"; return result; }
             if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
 
-            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            string basePath = AppCfg.Get("PaymentFolderPath");
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า PaymentFolderPath"; return result; }
 
             // key ต้องผูก GUID — docNumber ที่ส่งมาคือ Reference/เลขอ้างอิง ซึ่งซ้ำข้ามใบได้ (เคส "82/6")
@@ -11998,7 +11998,7 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(receiptNumber)) { result.Message = "ไม่มีเลขที่ใบเสร็จ"; return result; }
             if (!_config.IsConfigured || !_config.Enabled) { result.Message = "ยังไม่ได้ตั้งค่า NextAcc"; return result; }
 
-            string basePath = ConfigurationManager.AppSettings["ReceiptFolderPath"];
+            string basePath = AppCfg.Get("ReceiptFolderPath");
             if (string.IsNullOrEmpty(basePath)) { result.Message = "ไม่ได้ตั้งค่า ReceiptFolderPath"; return result; }
 
             // resolve doc GUID ก่อน — cache ต้องผูก GUID ด้วย ไม่ใช่แค่เลขใบเสร็จ.
@@ -12224,7 +12224,7 @@ namespace Take_Time_BangPhra.Integration
                 return list;
             }
 
-            string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+            string basePath = AppCfg.Get("PaymentFolderPath");
             if (string.IsNullOrEmpty(basePath)) { LastRangeFetchInfo = "ไม่ได้ตั้ง PaymentFolderPath"; return list; }
             string baseUrl = _config.RawBaseUrl.TrimEnd('/');
 
@@ -12328,7 +12328,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 if (list == null || list.Count == 0) return;
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return;
                 string dir = Path.Combine(basePath, "NextAcc", "_list");
                 Directory.CreateDirectory(dir);
@@ -12345,7 +12345,7 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return;
                 string dir = Path.Combine(basePath, "NextAcc", "_list");
                 Directory.CreateDirectory(dir);

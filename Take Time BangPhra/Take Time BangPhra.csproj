@@ -439,6 +439,7 @@
     <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Admin\Settings\LineAccount.aspx" />
+    <Content Include="Admin\Settings\SystemSettings.aspx" />
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
     <Content Include="Mobile\LeaveApprove.aspx" />
@@ -1245,6 +1246,14 @@
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\SystemSettings.aspx.cs">
+      <DependentUpon>SystemSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SystemSettings.aspx.designer.cs">
+      <DependentUpon>SystemSettings.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\AppCfg.cs" />
     <Compile Include="Admin\LineLinkCallback.aspx.cs">
       <DependentUpon>LineLinkCallback.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

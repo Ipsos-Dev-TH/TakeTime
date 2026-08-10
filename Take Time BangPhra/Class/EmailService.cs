@@ -18,13 +18,13 @@ namespace Take_Time_BangPhra.Services
 
         public EmailService()
         {
-            _smtpServer = ConfigurationManager.AppSettings["SMTP"];
-            _port = Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"]);
-            _enableSsl = Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"]);
-            _useDefaultCredentials = Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"]);
-            _fromEmail = ConfigurationManager.AppSettings["Email_From"];
-            _password = ConfigurationManager.AppSettings["Email_Password_From"];
-            _ccEmail = ConfigurationManager.AppSettings["Email_CC"];
+            _smtpServer = AppCfg.Get("SMTP");
+            _port = Convert.ToInt32(AppCfg.Get("SMTP_Port"));
+            _enableSsl = Convert.ToBoolean(AppCfg.Get("SMTP_EnableSsl"));
+            _useDefaultCredentials = Convert.ToBoolean(AppCfg.Get("SMTP_UseDefaultCredentials"));
+            _fromEmail = AppCfg.Get("Email_From");
+            _password = AppCfg.Get("Email_Password_From");
+            _ccEmail = AppCfg.Get("Email_CC");
         }
 
         public void SendEmail(string to, string subject, string body, Attachment[] attachments = null)

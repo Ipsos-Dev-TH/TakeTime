@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -470,7 +470,7 @@ namespace Take_Time_BangPhra.API
                 string uid = row["UID"].ToString();
                 string receiptId = row["ID"].ToString();
 
-                string basePath = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"];
+                string basePath = AppCfg.Get("ReceiptFolderPath");
                 string year = createdDate.Year.ToString();
                 string month = createdDate.Month.ToString("00");
 
@@ -513,7 +513,7 @@ namespace Take_Time_BangPhra.API
                 return false;
 
             // ดึง API Key จาก database หรือ config
-            string validApiKey = System.Configuration.ConfigurationManager.AppSettings["TaxInvoiceApiKey"];
+            string validApiKey = AppCfg.Get("TaxInvoiceApiKey");
 
             // ถ้ายังไม่ได้ตั้งค่า API Key ให้ใช้ค่า default (ควรเปลี่ยนในระบบ production)
             if (string.IsNullOrEmpty(validApiKey))

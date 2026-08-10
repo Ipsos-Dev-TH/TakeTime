@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -1240,11 +1240,11 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
-                    string path = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("ReceiptFolderPath") + "\\" + docYear + "\\" + docMonth;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(path))
                     {
-                        string altPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        string altPath = AppCfg.Get("ReceiptFolderPath") + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
                         if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
                             path = altPath;
                     }
@@ -1364,11 +1364,11 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("PaymentFolderPath") + "\\" + docYear + "\\" + docMonth;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(path))
                     {
-                        string altPath = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        string altPath = AppCfg.Get("PaymentFolderPath") + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
                         if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
                             path = altPath;
                     }
@@ -1582,7 +1582,7 @@ namespace Take_Time_BangPhra.Account
                     }
 
                     // Get receipt UID from database (SECURE)
-                    string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
+                    string path = AppCfg.Get("ReceiptFolderPath");
                     var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
                     var uidResult = codeInstance.DatabaseQuerySafe(conn,
                         "SELECT [UID] FROM [dbo].[Account_Receipt] WHERE ID = @DocNum",
@@ -1657,7 +1657,7 @@ namespace Take_Time_BangPhra.Account
                 else if (docType == "PAY")
                 {
                     // Get payment UID from database (SECURE)
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                    string path = AppCfg.Get("PaymentFolderPath");
                     var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
                     var uidResult = codeInstance.DatabaseQuerySafe(conn,
                         "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = @DocNum",

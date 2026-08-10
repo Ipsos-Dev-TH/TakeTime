@@ -746,6 +746,9 @@
                                                     <li><a runat="server" href="~/Admin/Settings/LineAccount">
                                                         <i class="fab fa-line"></i> บัญชี LINE ของฉัน
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/SystemSettings">
+                                                        <i class="fas fa-sliders"></i> ตั้งค่าระบบ (Token/API/อีเมล)
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/ConnectionSettings">
                                                         <i class="fas fa-plug"></i> Connection Settings
                                                     </a></li>

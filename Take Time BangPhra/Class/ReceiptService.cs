@@ -33,10 +33,10 @@ namespace Take_Time_BangPhra.Services
             _connectionString = DatabaseHelper.GetConnectionString();
             _codeHelper = new CodeHelper();
             _emailService = new EmailService();
-            _receiptFolderPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] ?? "~/Documents/Receipt";
-            _imagesFolderPath = ConfigurationManager.AppSettings["ImagesFolderPath"] ?? "~/Images";
-            _staffSignatureFolderPath = ConfigurationManager.AppSettings["StaffSignatureFolderPath"] ?? "~/Signatures";
-            _baseFolderPath = ConfigurationManager.AppSettings["BaseFolderPath"] ?? "~/";
+            _receiptFolderPath = AppCfg.Get("ReceiptFolderPath") ?? "~/Documents/Receipt";
+            _imagesFolderPath = AppCfg.Get("ImagesFolderPath") ?? "~/Images";
+            _staffSignatureFolderPath = AppCfg.Get("StaffSignatureFolderPath") ?? "~/Signatures";
+            _baseFolderPath = AppCfg.Get("BaseFolderPath") ?? "~/";
         }
 
         public async Task CancelReceipt(string receiptId, string uid)

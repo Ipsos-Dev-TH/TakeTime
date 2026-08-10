@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -506,7 +506,7 @@ namespace Take_Time_BangPhra.Services
             }
             catch { }
             // 3) Web.config
-            return System.Configuration.ConfigurationManager.AppSettings["linechannelaccesstokentaketime"] ?? "";
+            return AppCfg.Get("linechannelaccesstokentaketime") ?? "";
         }
 
         // ── helpers ───────────────────────────────────────────────────────────────

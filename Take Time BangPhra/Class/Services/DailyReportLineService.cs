@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -456,7 +456,7 @@ namespace Take_Time_BangPhra.Services
             }
             catch { }
             // 3) AppSettings เดิม
-            string appTok = System.Configuration.ConfigurationManager.AppSettings["linechannelaccesstokentaketime"];
+            string appTok = AppCfg.Get("linechannelaccesstokentaketime");
             return appTok ?? "";
         }
 

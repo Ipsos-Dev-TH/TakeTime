@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
@@ -1018,7 +1018,7 @@ namespace Take_Time_BangPhra.Admin.HR
             }
 
             // Use physical path from config to avoid permission issues
-            string signatureDir = ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+            string signatureDir = AppCfg.Get("StaffSignatureFolderPath")?.ToString() ?? "";
             if (string.IsNullOrEmpty(signatureDir))
             {
                 // Fallback to Server.MapPath if config not set

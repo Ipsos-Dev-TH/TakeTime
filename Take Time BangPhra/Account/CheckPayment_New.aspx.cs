@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -648,7 +648,7 @@ namespace Take_Time_BangPhra.Account
                 if (docType == "PAY")
                 {
                     // SECURE: Get payment UID from database with parameterized query
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                    string path = AppCfg.Get("PaymentFolderPath");
                     var uidParams = new Dictionary<string, object>
                     {
                         { "@ID", docNum }
@@ -933,7 +933,7 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
                 string file = Path.Combine(basePath, "NextAcc", "_list", $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.status.txt");
                 return File.Exists(file) ? File.ReadAllText(file) : null;
@@ -947,7 +947,7 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
                 string dir = Path.Combine(basePath, "NextAcc", "_list");
                 return Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.json");
@@ -1375,7 +1375,7 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 if (string.IsNullOrEmpty(docId)) return null;
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
 
                 string safe = docId;
@@ -1415,7 +1415,7 @@ namespace Take_Time_BangPhra.Account
                 if (createdDateObj == null || createdDateObj == DBNull.Value) return urls;
 
                 DateTime dt = Convert.ToDateTime(createdDateObj);
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return urls;
 
                 if (_uidCache == null) return urls;
