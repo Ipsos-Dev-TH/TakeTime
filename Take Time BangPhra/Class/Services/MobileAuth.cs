@@ -42,8 +42,10 @@ namespace Take_Time_BangPhra.Services
 
         private static void Redirect(Page page, string url)
         {
+            // Page.Context เป็น protected internal — เรียกจากคลาสภายนอกไม่ได้ (CS0122)
+            // ใช้ HttpContext.Current แทน (เป็น context เดียวกันของ request นี้)
             page.Response.Redirect(url, false);
-            page.Context.ApplicationInstance.CompleteRequest();
+            HttpContext.Current?.ApplicationInstance?.CompleteRequest();
         }
     }
 }
