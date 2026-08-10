@@ -442,6 +442,7 @@
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
     <Content Include="Mobile\LeaveApprove.aspx" />
+    <Content Include="Mobile\LineLink.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
@@ -1267,6 +1268,13 @@
     </Compile>
     <Compile Include="Mobile\LeaveApprove.aspx.designer.cs">
       <DependentUpon>LeaveApprove.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Mobile\LineLink.aspx.cs">
+      <DependentUpon>LineLink.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\LineLink.aspx.designer.cs">
+      <DependentUpon>LineLink.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">

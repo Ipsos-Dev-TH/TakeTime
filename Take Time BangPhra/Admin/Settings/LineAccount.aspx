@@ -69,6 +69,49 @@
             </div>
         </div>
 
+        <!-- คำขอผูกบัญชีรออนุมัติ (เฉพาะ Owner) -->
+        <asp:Panel ID="pnlRequests" runat="server" CssClass="la-card" Visible="false">
+            <h3><i class="fas fa-user-clock"></i> คำขอผูกบัญชี LINE รออนุมัติ
+                <asp:Literal ID="litReqCount" runat="server" /></h3>
+            <div class="hint">
+                พนักงานที่จำรหัสผ่านไม่ได้ จะเลือกชื่อตัวเองแล้วส่งคำขอมาที่นี่ —
+                <b>กรุณาตรวจสอบให้แน่ใจว่าเป็นคนคนเดียวกันจริงก่อนอนุมัติ</b>
+                (อนุมัติผิดคน = คนนั้นจะเข้าระบบในชื่อผู้ใช้นั้นได้)
+            </div>
+            <div style="overflow-x:auto;">
+                <asp:GridView ID="gvRequests" runat="server" AutoGenerateColumns="false" CssClass="tbl"
+                    GridLines="None" DataKeyNames="ID" OnRowCommand="gvRequests_RowCommand"
+                    EmptyDataText="ไม่มีคำขอรออนุมัติ">
+                    <Columns>
+                        <asp:TemplateField HeaderText="บัญชี LINE ที่ขอผูก">
+                            <ItemTemplate><%# ReqLineCell(Container.DataItem) %></ItemTemplate>
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="อ้างว่าเป็น">
+                            <ItemTemplate>
+                                <b><%# Eval("Username") %></b>
+                                <div style="font-size:12px;color:#8a9a90;"><%# Eval("Role") %></div>
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="ขอเมื่อ">
+                            <ItemTemplate><%# Eval("RequestedDate", "{0:dd/MM/yyyy HH:mm}") %></ItemTemplate>
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="จัดการ">
+                            <ItemTemplate>
+                                <asp:LinkButton runat="server" CssClass="btn btn-success btn-xs" CommandName="ApproveReq"
+                                    CommandArgument='<%# Eval("ID") %>'
+                                    OnClientClick="return confirm('ยืนยันว่าเป็นคนคนเดียวกันจริง?\nอนุมัติแล้วผู้ใช้นี้จะเข้าระบบด้วย LINE ได้ทันที');">
+                                    <i class="fas fa-check"></i> อนุมัติ</asp:LinkButton>
+                                <asp:LinkButton runat="server" CssClass="btn btn-danger btn-xs" CommandName="RejectReq"
+                                    CommandArgument='<%# Eval("ID") %>'
+                                    OnClientClick="return confirm('ปฏิเสธคำขอนี้?');">
+                                    <i class="fas fa-xmark"></i></asp:LinkButton>
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                    </Columns>
+                </asp:GridView>
+            </div>
+        </asp:Panel>
+
         <!-- รายชื่อผู้ใช้ (เฉพาะ Owner) -->
         <asp:Panel ID="pnlTeam" runat="server" CssClass="la-card" Visible="false">
             <h3><i class="fas fa-users"></i> สถานะการผูกบัญชีของทีม</h3>

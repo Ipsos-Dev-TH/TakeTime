@@ -20,6 +20,9 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected global::System.Web.UI.WebControls.Button btnUnlink;
         protected global::System.Web.UI.WebControls.CheckBox chkNotify;
 
+        protected global::System.Web.UI.WebControls.Panel pnlRequests;
+        protected global::System.Web.UI.WebControls.Literal litReqCount;
+        protected global::System.Web.UI.WebControls.GridView gvRequests;
         protected global::System.Web.UI.WebControls.Panel pnlTeam;
         protected global::System.Web.UI.WebControls.GridView gvTeam;
         protected global::System.Web.UI.WebControls.TextBox txtBroadcast;

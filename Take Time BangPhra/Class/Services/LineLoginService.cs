@@ -174,6 +174,191 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        // ── ผูกบัญชีด้วยการ "เลือกชื่อตัวเอง" (ไม่ต้องล็อกอินระบบก่อน) ─────────────
+
+        /// <summary>รายชื่อบัญชีที่ยังไม่ได้ผูก LINE — ให้ผู้ใช้เลือกว่าตัวเองคือใคร</summary>
+        public DataTable GetUnlinkedAdmins()
+        {
+            return _code.DatabaseQuerySafe(_conn,
+                @"SELECT ID, Username, Role,
+                         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(FirstName,'') + ' ' + ISNULL(LastName,''))), ''), Username) AS FullName
+                    FROM [dbo].[Admin]
+                   WHERE Status = 1 AND (Line_UserId IS NULL OR Line_UserId = '')
+                   ORDER BY FullName", null);
+        }
+
+        /// <summary>ผูกทันทีโดยยืนยันด้วยรหัสผ่านของบัญชีนั้น (เส้นทางที่เร็วที่สุด)</summary>
+        public (bool Ok, string Message) LinkWithPassword(int adminId, string password, LinkResult profile)
+        {
+            try
+            {
+                if (profile == null || string.IsNullOrWhiteSpace(profile.UserId))
+                    return (false, "ข้อมูล LINE ไม่ครบ กรุณาเริ่มใหม่");
+                if (string.IsNullOrWhiteSpace(password)) return (false, "กรุณากรอกรหัสผ่าน");
+
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ID, Password, Username FROM [dbo].[Admin] WHERE ID = @id AND Status = 1",
+                    new Dictionary<string, object> { { "@id", adminId } });
+                if (dt == null || dt.Rows.Count == 0) return (false, "ไม่พบบัญชีนี้");
+
+                if (!SecurityHelper.VerifyPassword(password, dt.Rows[0]["Password"]?.ToString() ?? ""))
+                {
+                    _code.Logs(_conn, "LineLogin",
+                        $"ผูกบัญชีล้มเหลว: รหัสผ่านไม่ถูกต้อง (admin #{adminId}, line {Mask(profile.UserId)})", "SYSTEM");
+                    return (false, "รหัสผ่านไม่ถูกต้อง");
+                }
+
+                var dup = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Username FROM [dbo].[Admin] WHERE Line_UserId = @uid AND ID <> @id",
+                    new Dictionary<string, object> { { "@uid", profile.UserId }, { "@id", adminId } });
+                if (dup?.Rows.Count > 0)
+                    return (false, $"บัญชี LINE นี้ถูกผูกกับ \"{dup.Rows[0][0]}\" อยู่แล้ว");
+
+                ApplyLink(adminId, profile);
+                _code.Logs(_conn, "LineLogin",
+                    $"ผูกบัญชีสำเร็จ (ยืนยันด้วยรหัสผ่าน): {dt.Rows[0]["Username"]} ← {profile.DisplayName}", "SYSTEM");
+                return (true, "ผูกบัญชีสำเร็จ");
+            }
+            catch (Exception ex) { return (false, "ผูกบัญชีไม่สำเร็จ: " + ex.Message); }
+        }
+
+        /// <summary>ส่งคำขอให้ผู้ดูแลอนุมัติ (สำหรับคนที่จำรหัสผ่านไม่ได้)</summary>
+        public (bool Ok, string Message) RequestLinkApproval(int adminId, LinkResult profile)
+        {
+            try
+            {
+                if (profile == null || string.IsNullOrWhiteSpace(profile.UserId))
+                    return (false, "ข้อมูล LINE ไม่ครบ กรุณาเริ่มใหม่");
+
+                var dup = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Username FROM [dbo].[Admin] WHERE Line_UserId = @uid",
+                    new Dictionary<string, object> { { "@uid", profile.UserId } });
+                if (dup?.Rows.Count > 0)
+                    return (false, $"บัญชี LINE นี้ถูกผูกกับ \"{dup.Rows[0][0]}\" อยู่แล้ว");
+
+                // มีคำขอค้างอยู่แล้ว → ไม่สร้างซ้ำ
+                var pending = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ID FROM Admin_Line_Link_Requests WHERE Line_UserId = @uid AND Status = 'PENDING'",
+                    new Dictionary<string, object> { { "@uid", profile.UserId } });
+                if (pending?.Rows.Count > 0)
+                    return (true, "ส่งคำขอไปแล้ว กำลังรอผู้ดูแลอนุมัติ");
+
+                _code.DatabaseInsertSafe(_conn,
+                    @"INSERT INTO Admin_Line_Link_Requests
+                        (Admin_ID, Line_UserId, Line_DisplayName, Line_PictureUrl, Status, RequestedDate)
+                      VALUES (@id, @uid, @name, @pic, 'PENDING', GETDATE())",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", adminId }, { "@uid", profile.UserId },
+                        { "@name", (object)profile.DisplayName ?? DBNull.Value },
+                        { "@pic", (object)profile.PictureUrl ?? DBNull.Value }
+                    });
+
+                NotifyOwnersOfRequest(adminId, profile);
+                return (true, "ส่งคำขอให้ผู้ดูแลอนุมัติแล้ว");
+            }
+            catch (Exception ex) { return (false, "ส่งคำขอไม่สำเร็จ: " + ex.Message); }
+        }
+
+        private void NotifyOwnersOfRequest(int adminId, LinkResult profile)
+        {
+            try
+            {
+                var who = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Username FROM [dbo].[Admin] WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", adminId } });
+                string username = who?.Rows.Count > 0 ? who.Rows[0][0].ToString() : "#" + adminId;
+
+                string msg = "🔗 มีคำขอผูกบัญชี LINE\n\n"
+                           + $"บัญชีระบบ: {username}\n"
+                           + $"บัญชี LINE: {profile.DisplayName}\n\n"
+                           + "กรุณาตรวจสอบว่าเป็นคนคนเดียวกันจริง แล้วกดอนุมัติที่\n"
+                           + "เมนู จัดการโรงแรม → บัญชี LINE ของฉัน";
+                Broadcast(msg, "Owner");
+            }
+            catch { }
+        }
+
+        public DataTable GetPendingLinkRequests()
+        {
+            return _code.DatabaseQuerySafe(_conn,
+                @"SELECT r.ID, r.Admin_ID, r.Line_UserId, r.Line_DisplayName, r.Line_PictureUrl,
+                         r.RequestedDate, A.Username, A.Role
+                    FROM Admin_Line_Link_Requests r
+                    INNER JOIN [dbo].[Admin] A ON A.ID = r.Admin_ID
+                   WHERE r.Status = 'PENDING'
+                   ORDER BY r.RequestedDate DESC", null);
+        }
+
+        public (bool Ok, string Message) DecideLinkRequest(long requestId, bool approve, int decidedByAdminId, string reason = null)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT TOP 1 Admin_ID, Line_UserId, Line_DisplayName, Line_PictureUrl, Status
+                        FROM Admin_Line_Link_Requests WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", requestId } });
+                if (dt == null || dt.Rows.Count == 0) return (false, "ไม่พบคำขอนี้");
+                if (dt.Rows[0]["Status"]?.ToString() != "PENDING") return (false, "คำขอนี้ถูกดำเนินการไปแล้ว");
+
+                int adminId = Convert.ToInt32(dt.Rows[0]["Admin_ID"]);
+                string uid = dt.Rows[0]["Line_UserId"].ToString();
+
+                if (approve)
+                {
+                    var dup = _code.DatabaseQuerySafe(_conn,
+                        "SELECT TOP 1 Username FROM [dbo].[Admin] WHERE Line_UserId = @uid AND ID <> @id",
+                        new Dictionary<string, object> { { "@uid", uid }, { "@id", adminId } });
+                    if (dup?.Rows.Count > 0) return (false, $"บัญชี LINE นี้ถูกผูกกับ \"{dup.Rows[0][0]}\" ไปแล้ว");
+
+                    ApplyLink(adminId, new LinkResult
+                    {
+                        UserId = uid,
+                        DisplayName = dt.Rows[0]["Line_DisplayName"]?.ToString(),
+                        PictureUrl = dt.Rows[0]["Line_PictureUrl"]?.ToString()
+                    });
+                    PushText(uid, "✅ ผู้ดูแลอนุมัติการผูกบัญชีแล้ว\nคุณจะได้รับแจ้งเตือนจากระบบทาง LINE นี้");
+                }
+                else
+                {
+                    PushText(uid, "❌ คำขอผูกบัญชีไม่ได้รับอนุมัติ"
+                                  + (string.IsNullOrWhiteSpace(reason) ? "" : "\nเหตุผล: " + reason));
+                }
+
+                _code.DatabaseInsertSafe(_conn,
+                    @"UPDATE Admin_Line_Link_Requests
+                         SET Status = @st, DecidedBy_AdminID = @by, DecidedDate = GETDATE(), RejectReason = @rs
+                       WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@st", approve ? "APPROVED" : "REJECTED" },
+                        { "@by", decidedByAdminId }, { "@id", requestId },
+                        { "@rs", (object)reason ?? DBNull.Value }
+                    });
+
+                _code.Logs(_conn, "LineLogin",
+                    $"คำขอผูกบัญชี #{requestId} → {(approve ? "อนุมัติ" : "ปฏิเสธ")} โดย admin #{decidedByAdminId}", "SYSTEM");
+                return (true, approve ? "อนุมัติและผูกบัญชีแล้ว" : "ปฏิเสธคำขอแล้ว");
+            }
+            catch (Exception ex) { return (false, "ดำเนินการไม่สำเร็จ: " + ex.Message); }
+        }
+
+        private void ApplyLink(int adminId, LinkResult p)
+        {
+            _code.DatabaseInsertSafe(_conn,
+                @"UPDATE [dbo].[Admin]
+                     SET Line_UserId = @uid, Line_DisplayName = @name,
+                         Line_PictureUrl = @pic, Line_LinkedDate = GETDATE()
+                   WHERE ID = @id",
+                new Dictionary<string, object>
+                {
+                    { "@uid", p.UserId },
+                    { "@name", (object)p.DisplayName ?? DBNull.Value },
+                    { "@pic", (object)p.PictureUrl ?? DBNull.Value },
+                    { "@id", adminId }
+                });
+        }
+
         public void Unlink(int adminId)
         {
             _code.DatabaseInsertSafe(_conn,

@@ -44,6 +44,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 LoadConfig();
                 LoadTeam();
+                LoadRequests();
             }
         }
 
@@ -126,6 +127,51 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             _svc.SetNotifyEnabled(MyAdminId, chkNotify.Checked);
             ShowMsg(chkNotify.Checked ? "เปิดรับแจ้งเตือนทาง LINE แล้ว" : "ปิดรับแจ้งเตือนทาง LINE แล้ว", true);
+        }
+
+        // ── คำขอผูกบัญชี (Owner) ──────────────────────────────────────────────────
+        private void LoadRequests()
+        {
+            try
+            {
+                var dt = _svc.GetPendingLinkRequests();
+                int n = dt?.Rows.Count ?? 0;
+                gvRequests.DataSource = dt;
+                gvRequests.DataBind();
+                pnlRequests.Visible = n > 0;
+                litReqCount.Text = n > 0 ? $"<span class='pill' style='background:#e67e22;'>{n}</span>" : "";
+            }
+            catch { pnlRequests.Visible = false; }
+        }
+
+        protected void gvRequests_RowCommand(object sender, GridViewCommandEventArgs e)
+        {
+            if (!IsOwner) return;
+            if (!long.TryParse(e.CommandArgument?.ToString(), out long reqId) || reqId <= 0) return;
+
+            if (e.CommandName == "ApproveReq")
+            {
+                var (ok, msg) = _svc.DecideLinkRequest(reqId, true, MyAdminId);
+                ShowMsg(msg, ok);
+            }
+            else if (e.CommandName == "RejectReq")
+            {
+                var (ok, msg) = _svc.DecideLinkRequest(reqId, false, MyAdminId, "ผู้ดูแลปฏิเสธคำขอ");
+                ShowMsg(msg, ok);
+            }
+            LoadAll();
+        }
+
+        protected string ReqLineCell(object item)
+        {
+            var r = (DataRowView)item;
+            string pic = r["Line_PictureUrl"] != DBNull.Value ? r["Line_PictureUrl"].ToString() : "";
+            string name = r["Line_DisplayName"] != DBNull.Value ? r["Line_DisplayName"].ToString() : "(ไม่ทราบชื่อ)";
+            string img = string.IsNullOrWhiteSpace(pic)
+                ? "<i class='fab fa-line' style='color:#06C755;font-size:20px;'></i>"
+                : $"<img src='{Server.HtmlEncode(pic)}' style='width:34px;height:34px;border-radius:50%;vertical-align:middle;' />";
+            return $"{img} <b>{Server.HtmlEncode(name)}</b>" +
+                   $"<div style='font-size:12px;color:#8a9a90;'>{Server.HtmlEncode(LineLoginService.Mask(r["Line_UserId"].ToString()))}</div>";
         }
 
         // ── ทีม (Owner) ───────────────────────────────────────────────────────────

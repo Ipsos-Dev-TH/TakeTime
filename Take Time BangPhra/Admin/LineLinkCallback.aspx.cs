@@ -62,9 +62,11 @@ namespace Take_Time_BangPhra.Admin
                 var admin = svc.FindAdminByLineUserId(prof.UserId);
                 if (admin == null)
                 {
-                    Show(false, "ยังไม่ได้ผูกบัญชี",
-                         $"บัญชี LINE <b>{Server.HtmlEncode(prof.DisplayName)}</b> ยังไม่ได้ผูกกับผู้ใช้ในระบบ<br/>" +
-                         "กรุณาเข้าสู่ระบบด้วยรหัสผ่านครั้งแรก แล้วไปที่เมนู \"บัญชี LINE ของฉัน\" เพื่อผูกบัญชี");
+                    // ยังไม่ผูกกับใคร → พาไปหน้า "เลือกชื่อตัวเอง" (ไม่ต้องรู้รหัสผ่านมาก่อน)
+                    Session["LinePendingProfile"] = prof;
+                    Session["LineAfterLink"] = returnUrl;
+                    Response.Redirect("~/Mobile/LineLink", false);
+                    Context.ApplicationInstance.CompleteRequest();
                     return;
                 }
 
