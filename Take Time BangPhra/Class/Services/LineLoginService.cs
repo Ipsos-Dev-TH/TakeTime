@@ -56,6 +56,52 @@ namespace Take_Time_BangPhra.Services
             public string UserId, DisplayName, PictureUrl, Message;
         }
 
+        /// <summary>หา Admin จาก LINE userId — ใช้ "เข้าสู่ระบบด้วย LINE" ตอนกดลิงก์จากแชท</summary>
+        public DataRow FindAdminByLineUserId(string lineUserId)
+        {
+            if (string.IsNullOrWhiteSpace(lineUserId)) return null;
+            var dt = _code.DatabaseQuerySafe(_conn,
+                @"SELECT TOP 1 ID, Username, Role, Line_UserId, Line_DisplayName
+                    FROM [dbo].[Admin]
+                   WHERE Line_UserId = @uid AND Status = 1",
+                new Dictionary<string, object> { { "@uid", lineUserId } });
+            return dt?.Rows.Count > 0 ? dt.Rows[0] : null;
+        }
+
+        /// <summary>แลก code → userId อย่างเดียว (ไม่ผูกบัญชี) สำหรับ flow เข้าสู่ระบบด้วย LINE</summary>
+        public LinkResult ResolveProfile(string code)
+        {
+            var res = new LinkResult();
+            try
+            {
+                if (!IsConfigured) { res.Message = "ยังไม่ได้ตั้งค่า LINE Login"; return res; }
+                if (string.IsNullOrWhiteSpace(code)) { res.Message = "ไม่ได้รับรหัสยืนยันจาก LINE"; return res; }
+
+                string body = "grant_type=authorization_code"
+                            + "&code=" + HttpUtility.UrlEncode(code)
+                            + "&redirect_uri=" + HttpUtility.UrlEncode(CallbackUrl)
+                            + "&client_id=" + HttpUtility.UrlEncode(ChannelId)
+                            + "&client_secret=" + HttpUtility.UrlEncode(ChannelSecret);
+
+                var token = new JavaScriptSerializer()
+                    .Deserialize<Dictionary<string, object>>(PostForm(TOKEN_URL, body));
+                if (token == null || !token.ContainsKey("access_token"))
+                { res.Message = "แลก token ไม่สำเร็จ"; return res; }
+
+                var profile = new JavaScriptSerializer()
+                    .Deserialize<Dictionary<string, object>>(GetWithBearer(PROFILE_URL, token["access_token"].ToString()));
+                if (profile == null || !profile.ContainsKey("userId"))
+                { res.Message = "อ่านโปรไฟล์ LINE ไม่สำเร็จ"; return res; }
+
+                res.UserId = profile["userId"].ToString();
+                res.DisplayName = profile.ContainsKey("displayName") ? profile["displayName"]?.ToString() : "";
+                res.PictureUrl = profile.ContainsKey("pictureUrl") ? profile["pictureUrl"]?.ToString() : "";
+                res.Success = true;
+                return res;
+            }
+            catch (Exception ex) { res.Message = ex.Message; return res; }
+        }
+
         /// <summary>แลก code → access token → โปรไฟล์ แล้วผูกกับ Admin ที่ล็อกอินอยู่</summary>
         public LinkResult HandleCallback(string code, int adminId)
         {

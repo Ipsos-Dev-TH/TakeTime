@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.IO;
 using System.Web.UI;
@@ -370,6 +370,16 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                 if (result.Success)
                 {
+                    // แจ้งหัวหน้าทาง LINE (best-effort — ล้มเหลวต้องไม่กระทบการยื่นใบลา)
+                    try
+                    {
+                        new Take_Time_BangPhra.Services.LeaveLineNotifier(
+                            System.Configuration.ConfigurationManager
+                                .ConnectionStrings["TaketimeConnectionString"].ConnectionString)
+                            .NotifyNewRequest(result.ID);
+                    }
+                    catch { }
+
                     // PRG Pattern: Store success message in session and redirect
                     Session["LeaveRequestSuccess"] = "ส่งคำขอลาสำเร็จ เลขที่คำขอ: " + result.ID;
                     Response.Redirect(Request.Url.PathAndQuery, false);

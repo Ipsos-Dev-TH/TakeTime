@@ -15,8 +15,11 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            // ต้องล็อกอินอยู่ (การผูกบัญชีต้องรู้ว่าเป็นของใคร)
-            if (Session["permission"]?.ToString() != "True" || Session["UserID"] == null)
+            // purpose = "link" (ผูกบัญชี ต้องล็อกอินอยู่) หรือ "login" (เข้าสู่ระบบด้วย LINE
+            // จากลิงก์ในแชท — ยังไม่ได้ล็อกอินก็ได้ ระบบจะจับคู่จาก Line_UserId ที่ผูกไว้)
+            string purpose = Session["LineLinkPurpose"]?.ToString() ?? "link";
+
+            if (purpose == "link" && (Session["permission"]?.ToString() != "True" || Session["UserID"] == null))
             {
                 Show(false, "ยังไม่ได้เข้าสู่ระบบ", "กรุณาเข้าสู่ระบบก่อนแล้วลองผูกบัญชีใหม่อีกครั้ง");
                 return;
@@ -44,6 +47,44 @@ namespace Take_Time_BangPhra.Admin
                 return;
             }
 
+            var svc = new LineLoginService(_conn);
+
+            // ── เข้าสู่ระบบด้วย LINE (กดลิงก์จากแชท) ────────────────────────────
+            if (purpose == "login")
+            {
+                string returnUrl = Session["LineLinkReturn"]?.ToString();
+                Session["LineLinkPurpose"] = null;
+                Session["LineLinkReturn"] = null;
+
+                var prof = svc.ResolveProfile(code);
+                if (!prof.Success) { Show(false, "เข้าสู่ระบบไม่สำเร็จ", Server.HtmlEncode(prof.Message)); return; }
+
+                var admin = svc.FindAdminByLineUserId(prof.UserId);
+                if (admin == null)
+                {
+                    Show(false, "ยังไม่ได้ผูกบัญชี",
+                         $"บัญชี LINE <b>{Server.HtmlEncode(prof.DisplayName)}</b> ยังไม่ได้ผูกกับผู้ใช้ในระบบ<br/>" +
+                         "กรุณาเข้าสู่ระบบด้วยรหัสผ่านครั้งแรก แล้วไปที่เมนู \"บัญชี LINE ของฉัน\" เพื่อผูกบัญชี");
+                    return;
+                }
+
+                Session["permission"] = "True";
+                Session["UserID"] = admin["ID"].ToString();
+                Session["UserName"] = admin["Username"]?.ToString();
+                Session["User"] = admin["Role"]?.ToString();
+
+                // เปิดเฉพาะ path ภายในเว็บเรา — กัน open redirect จากลิงก์ที่ถูกแก้
+                if (!string.IsNullOrEmpty(returnUrl) && returnUrl.StartsWith("/") && !returnUrl.StartsWith("//"))
+                {
+                    Response.Redirect(returnUrl, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                Show(true, "เข้าสู่ระบบสำเร็จ", $"ยินดีต้อนรับ {Server.HtmlEncode(admin["Username"]?.ToString())}");
+                return;
+            }
+
+            // ── ผูกบัญชี ──────────────────────────────────────────────────────
             int adminId;
             if (!int.TryParse(Session["UserID"].ToString(), out adminId) || adminId <= 0)
             {
@@ -51,7 +92,6 @@ namespace Take_Time_BangPhra.Admin
                 return;
             }
 
-            var svc = new LineLoginService(_conn);
             var result = svc.HandleCallback(code, adminId);
 
             if (result.Success)
