@@ -63,39 +63,32 @@
                 <div runat="server" id="divMsg" class="msg"><asp:Literal ID="litMsg" runat="server" /></div>
             </asp:Panel>
 
-            <!-- ขั้นที่ 1: เลือกชื่อตัวเอง -->
-            <asp:Panel ID="pnlPick" runat="server" CssClass="card">
-                <h2><i class="fas fa-user-check"></i> เลือกชื่อของคุณ</h2>
-                <p class="lead">แตะชื่อของคุณในรายการ เพื่อผูกกับบัญชี LINE นี้</p>
-                <input type="text" id="q" class="search" placeholder="🔍 พิมพ์ชื่อเพื่อค้นหา..." onkeyup="filterList()" />
-                <div id="list"><asp:Literal ID="litPeople" runat="server" /></div>
-                <asp:HiddenField ID="hfPicked" runat="server" />
-            </asp:Panel>
-
-            <!-- ขั้นที่ 2: ยืนยันตัวตน -->
-            <asp:Panel ID="pnlConfirm" runat="server" CssClass="card" Visible="false">
-                <h2><i class="fas fa-shield-halved"></i> ยืนยันว่าเป็นคุณจริง</h2>
-                <div class="picked">
-                    เลือกไว้: <b><asp:Literal ID="litPickedName" runat="server" /></b>
-                </div>
+            <!-- ยืนยันตัวตนด้วยบัญชีระบบ (ครั้งแรกเท่านั้น) -->
+            <asp:Panel ID="pnlVerify" runat="server" CssClass="card">
+                <h2><i class="fas fa-shield-halved"></i> ยืนยันตัวตนก่อนผูกบัญชี</h2>
                 <p class="lead">
-                    เพื่อความปลอดภัย ต้องยืนยันก่อนผูกบัญชี — เลือกวิธีที่สะดวก
+                    นี่เป็นการผูกบัญชี LINE ครั้งแรก — กรุณากรอกชื่อผู้ใช้และรหัสผ่านของคุณ
+                    เพื่อยืนยันว่าเป็นเจ้าของบัญชีจริง (ทำครั้งเดียว ครั้งต่อไปกดเข้าด้วย LINE ได้เลย)
                 </p>
 
                 <div class="field">
-                    <label>วิธีที่ 1 · ใส่รหัสผ่านของคุณ (ผูกได้ทันที)</label>
-                    <asp:TextBox ID="txtPassword" runat="server" TextMode="Password" autocomplete="current-password"
-                        placeholder="รหัสผ่านที่ใช้เข้าระบบ" />
+                    <label>ชื่อผู้ใช้</label>
+                    <asp:TextBox ID="txtUsername" runat="server" autocomplete="username"
+                        placeholder="ชื่อผู้ใช้ที่ใช้เข้าระบบ" />
                 </div>
+                <div class="field">
+                    <label>รหัสผ่าน</label>
+                    <asp:TextBox ID="txtPassword" runat="server" TextMode="Password"
+                        autocomplete="current-password" placeholder="รหัสผ่าน" />
+                </div>
+
                 <asp:Button ID="btnLinkNow" runat="server" Text="🔗 ยืนยันและผูกบัญชี"
                     CssClass="btn btn-go" OnClick="btnLinkNow_Click" />
 
-                <div style="text-align:center; color:#93a3af; font-size:13px; margin:8px 0;">— หรือ —</div>
-
-                <asp:Button ID="btnAskApproval" runat="server" Text="📩 จำรหัสไม่ได้ — ขอให้ผู้ดูแลอนุมัติ"
-                    CssClass="btn btn-alt" OnClick="btnAskApproval_Click" CausesValidation="false" />
-                <asp:Button ID="btnBack" runat="server" Text="← เลือกชื่อใหม่"
-                    CssClass="btn btn-gh" OnClick="btnBack_Click" CausesValidation="false" />
+                <div style="font-size:12.5px; color:#93a3af; text-align:center; line-height:1.7;">
+                    จำรหัสผ่านไม่ได้? ติดต่อผู้ดูแลระบบเพื่อรีเซ็ตรหัสผ่านก่อน<br />
+                    แล้วจึงกลับมาผูกบัญชีอีกครั้ง
+                </div>
             </asp:Panel>
 
             <!-- เสร็จแล้ว -->
@@ -107,21 +100,7 @@
             </asp:Panel>
         </div>
 
-        <script>
-            function pick(el, id, name) {
-                document.getElementById('<%= hfPicked.ClientID %>').value = id;
-                document.querySelectorAll('.who').forEach(function (b) { b.classList.remove('sel'); });
-                el.classList.add('sel');
-                // ส่ง postback ไปขั้นยืนยันทันที (แตะครั้งเดียว)
-                __doPostBack('<%= hfPicked.UniqueID %>', '');
-            }
-            function filterList() {
-                var q = (document.getElementById('q').value || '').toLowerCase();
-                document.querySelectorAll('.who').forEach(function (b) {
-                    b.style.display = b.getAttribute('data-s').indexOf(q) >= 0 ? '' : 'none';
-                });
-            }
-        </script>
+
     </form>
 </body>
 </html>

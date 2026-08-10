@@ -1,23 +1,23 @@
 using System;
 using System.Configuration;
 using System.Data;
-using System.Text;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Mobile
 {
     /// <summary>
-    /// หน้า "เลือกชื่อตัวเองเพื่อผูกบัญชี LINE" — เข้ามาหลังล็อกอิน LINE สำเร็จ
-    /// แต่ยังไม่มีบัญชีระบบผูกไว้ (ไม่ต้องเข้าระบบด้วยรหัสผ่านมาก่อน)
+    /// ผูกบัญชี LINE ครั้งแรก — เข้ามาหลังล็อกอิน LINE สำเร็จ แต่ LINE นี้ยังไม่ผูกกับใคร
     ///
-    /// ⚠️ ความปลอดภัย: เลือกชื่อแล้วผูกทันทีไม่ได้ เพราะใครก็ตามที่มี LINE จะสวมสิทธิ์
-    /// บัญชี Owner ได้ จึงต้องยืนยันทางใดทางหนึ่ง — ใส่รหัสผ่านเอง (ผูกทันที)
-    /// หรือส่งคำขอให้ผู้ดูแลกดอนุมัติ (สำหรับคนที่จำรหัสไม่ได้)
+    /// ⚠️ ความปลอดภัย: ต้องกรอก "ชื่อผู้ใช้ + รหัสผ่าน" ของตัวเองเสมอ
+    /// เดิมให้เลือกชื่อจากรายการ ซึ่งเปิดเผยรายชื่อพนักงาน/username/ตำแหน่งทั้งหมด
+    /// ให้คนแปลกหน้าที่ล็อกอิน LINE เห็น — เปลี่ยนมาเป็นกรอกเองเพื่อไม่ให้หลุดข้อมูล
+    /// และกันคนนอกสวมสิทธิ์บัญชีในระบบ
     /// </summary>
     public partial class LineLink : Page
     {
         private readonly string _conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        private readonly code _code = new code();
         private LineLoginService _svc;
 
         /// <summary>โปรไฟล์ LINE ที่ callback เก็บไว้ให้ (session — ไม่ส่งผ่าน URL)</summary>
@@ -30,8 +30,7 @@ namespace Take_Time_BangPhra.Mobile
             var p = Profile;
             if (p == null || string.IsNullOrWhiteSpace(p.UserId))
             {
-                // ไม่มีข้อมูล LINE ในเซสชัน → เริ่ม flow ใหม่
-                StartLineLogin();
+                StartLineLogin();   // ไม่มีข้อมูล LINE ในเซสชัน → เริ่ม flow ใหม่
                 return;
             }
 
@@ -44,9 +43,7 @@ namespace Take_Time_BangPhra.Mobile
 
                 // ผูกไปแล้วระหว่างทาง → เข้าระบบให้เลย
                 var already = _svc.FindAdminByLineUserId(p.UserId);
-                if (already != null) { SignInAndGo(already); return; }
-
-                LoadPeople();
+                if (already != null) SignInAndGo(already);
             }
         }
 
@@ -66,112 +63,46 @@ namespace Take_Time_BangPhra.Mobile
             Context.ApplicationInstance.CompleteRequest();
         }
 
-        // ── ขั้นที่ 1: รายชื่อให้เลือก ────────────────────────────────────────────
-        private void LoadPeople()
-        {
-            var sb = new StringBuilder();
-            try
-            {
-                DataTable dt = _svc.GetUnlinkedAdmins();
-                if (dt == null || dt.Rows.Count == 0)
-                {
-                    litPeople.Text = "<div class='empty'>ทุกบัญชีถูกผูกกับ LINE ไปหมดแล้ว<br/>" +
-                                     "หากนี่คือบัญชีของคุณ กรุณาติดต่อผู้ดูแลระบบ</div>";
-                    return;
-                }
-                foreach (DataRow r in dt.Rows)
-                {
-                    string id = r["ID"].ToString();
-                    string full = r["FullName"]?.ToString() ?? "";
-                    string user = r["Username"]?.ToString() ?? "";
-                    string role = r["Role"]?.ToString() ?? "";
-                    string search = Server.HtmlEncode((full + " " + user + " " + role).ToLowerInvariant());
-                    sb.Append($"<button type='button' class='who' data-s='{search}' " +
-                              $"onclick=\"pick(this,'{id}','')\">" +
-                              $"<b>{Server.HtmlEncode(full)}</b>" +
-                              $"<small>{Server.HtmlEncode(user)} · {Server.HtmlEncode(role)}</small></button>");
-                }
-            }
-            catch (Exception ex)
-            {
-                sb.Append($"<div class='empty'>{Server.HtmlEncode(ex.Message)}</div>");
-            }
-            litPeople.Text = sb.ToString();
-        }
-
-        /// <summary>เลือกชื่อแล้ว (postback จาก hidden field) → ไปขั้นยืนยัน</summary>
-        protected void Page_LoadComplete(object sender, EventArgs e)
-        {
-            // ตรวจว่ามีการเลือกชื่อจาก JS หรือไม่ (postback ที่ target = hidden field)
-            if (IsPostBack && Request["__EVENTTARGET"] == hfPicked.UniqueID)
-                ShowConfirmStep();
-        }
-
-        private void ShowConfirmStep()
-        {
-            if (!int.TryParse(hfPicked.Value, out int adminId) || adminId <= 0) return;
-
-            var dt = new code().DatabaseQuerySafe(_conn,
-                @"SELECT TOP 1 ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(FirstName,'') + ' ' + ISNULL(LastName,''))), ''), Username) AS FullName,
-                         Username, Role
-                    FROM [dbo].[Admin] WHERE ID = @id AND Status = 1",
-                new System.Collections.Generic.Dictionary<string, object> { { "@id", adminId } });
-            if (dt == null || dt.Rows.Count == 0) { Msg("ไม่พบบัญชีนี้", false); return; }
-
-            litPickedName.Text = Server.HtmlEncode(dt.Rows[0]["FullName"]?.ToString()) +
-                                 $" <small style='color:#7d8f9c;'>({Server.HtmlEncode(dt.Rows[0]["Username"]?.ToString())})</small>";
-            pnlPick.Visible = false;
-            pnlConfirm.Visible = true;
-            pnlDone.Visible = false;
-        }
-
-        // ── ขั้นที่ 2: ยืนยัน ─────────────────────────────────────────────────────
+        /// <summary>ยืนยันด้วย username+password ของบัญชีระบบ แล้วผูกกับ LINE ปัจจุบัน</summary>
         protected void btnLinkNow_Click(object sender, EventArgs e)
         {
-            if (!int.TryParse(hfPicked.Value, out int adminId) || adminId <= 0)
-            { Msg("กรุณาเลือกชื่อของคุณก่อน", false); ResetToPick(); return; }
+            var p = Profile;
+            if (p == null || string.IsNullOrWhiteSpace(p.UserId))
+            { StartLineLogin(); return; }
 
-            var (ok, msg) = _svc.LinkWithPassword(adminId, txtPassword.Text, Profile);
+            string username = (txtUsername.Text ?? "").Trim();
+            string password = txtPassword.Text ?? "";
             txtPassword.Text = "";
 
-            if (!ok) { Msg(msg, false); ShowConfirmStep(); return; }
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            { Msg("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน", false); return; }
 
-            var admin = _svc.FindAdminByLineUserId(Profile.UserId);
+            // หาบัญชีจาก username (ไม่บอกว่าชื่อผู้ใช้มีจริงไหม — กันเดาชื่อผู้ใช้)
+            var dt = _code.DatabaseQuerySafe(_conn,
+                "SELECT TOP 1 ID FROM [dbo].[Admin] WHERE Username = @u AND Status = 1",
+                new System.Collections.Generic.Dictionary<string, object> { { "@u", username } });
+
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                _code.Logs(_conn, "LineLogin",
+                    $"ผูกบัญชีล้มเหลว: ไม่พบผู้ใช้ '{username}' (line {LineLoginService.Mask(p.UserId)})", "SYSTEM");
+                Msg("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", false);
+                return;
+            }
+
+            int adminId = Convert.ToInt32(dt.Rows[0]["ID"]);
+            var (ok, msg) = _svc.LinkWithPassword(adminId, password, p);
+            if (!ok) { Msg(msg, false); return; }
+
+            var admin = _svc.FindAdminByLineUserId(p.UserId);
             if (admin != null) { SignInAndGo(admin); return; }
 
             ShowDone("ผูกบัญชีสำเร็จ", "คุณจะได้รับแจ้งเตือนจากระบบทาง LINE นี้");
         }
 
-        protected void btnAskApproval_Click(object sender, EventArgs e)
-        {
-            if (!int.TryParse(hfPicked.Value, out int adminId) || adminId <= 0)
-            { Msg("กรุณาเลือกชื่อของคุณก่อน", false); ResetToPick(); return; }
-
-            var (ok, msg) = _svc.RequestLinkApproval(adminId, Profile);
-            if (!ok) { Msg(msg, false); ShowConfirmStep(); return; }
-
-            ShowDone("ส่งคำขอแล้ว",
-                "ผู้ดูแลระบบได้รับคำขอของคุณแล้ว เมื่ออนุมัติจะมีข้อความแจ้งกลับมาทาง LINE นี้");
-        }
-
-        protected void btnBack_Click(object sender, EventArgs e)
-        {
-            hfPicked.Value = "";
-            ResetToPick();
-        }
-
-        private void ResetToPick()
-        {
-            pnlConfirm.Visible = false;
-            pnlDone.Visible = false;
-            pnlPick.Visible = true;
-            LoadPeople();
-        }
-
         private void ShowDone(string title, string text)
         {
-            pnlPick.Visible = false;
-            pnlConfirm.Visible = false;
+            pnlVerify.Visible = false;
             pnlDone.Visible = true;
             litDoneTitle.Text = Server.HtmlEncode(title);
             litDoneText.Text = Server.HtmlEncode(text);

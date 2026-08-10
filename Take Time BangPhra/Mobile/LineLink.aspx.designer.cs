@@ -14,15 +14,10 @@ namespace Take_Time_BangPhra.Mobile
         protected global::System.Web.UI.WebControls.Panel pnlMsg;
         protected global::System.Web.UI.HtmlControls.HtmlGenericControl divMsg;
         protected global::System.Web.UI.WebControls.Literal litMsg;
-        protected global::System.Web.UI.WebControls.Panel pnlPick;
-        protected global::System.Web.UI.WebControls.Literal litPeople;
-        protected global::System.Web.UI.WebControls.HiddenField hfPicked;
-        protected global::System.Web.UI.WebControls.Panel pnlConfirm;
-        protected global::System.Web.UI.WebControls.Literal litPickedName;
+        protected global::System.Web.UI.WebControls.Panel pnlVerify;
+        protected global::System.Web.UI.WebControls.TextBox txtUsername;
         protected global::System.Web.UI.WebControls.TextBox txtPassword;
         protected global::System.Web.UI.WebControls.Button btnLinkNow;
-        protected global::System.Web.UI.WebControls.Button btnAskApproval;
-        protected global::System.Web.UI.WebControls.Button btnBack;
         protected global::System.Web.UI.WebControls.Panel pnlDone;
         protected global::System.Web.UI.WebControls.Literal litDoneTitle;
         protected global::System.Web.UI.WebControls.Literal litDoneText;
