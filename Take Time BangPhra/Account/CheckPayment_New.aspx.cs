@@ -771,6 +771,12 @@ namespace Take_Time_BangPhra.Account
                 return;
             }
 
+            if (e.CommandName == "refreshpdf")
+            {
+                HandleRefreshPdf(e.CommandArgument?.ToString());
+                return;
+            }
+
             if (e.CommandName == "edit")
             {
                 try
@@ -1644,6 +1650,79 @@ namespace Take_Time_BangPhra.Account
             {
                 try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, $"Sync error: {docId}", GetCurrentUserId()); } catch { }
                 ShowError("Sync ไม่สำเร็จ กรุณาลองใหม่");
+            }
+        }
+
+        /// <summary>
+        /// ปุ่ม "🔄 ดึงล่าสุด" — ดึง PDF ใบสำคัญจ่ายฉบับล่าสุดจาก NextAcc มาทับ cache ฝั่งเรา
+        /// (แบบเดียวกับหน้าใบกำกับ) ใช้เมื่อแก้เอกสารบน NextAcc แล้วอยากได้ไฟล์ใหม่ทันที
+        /// โดยไม่ต้องรอ cache หมดอายุ
+        /// </summary>
+        private void HandleRefreshPdf(string commandArg)
+        {
+            try
+            {
+                if (!int.TryParse(commandArg, out int rowIndex)
+                    || rowIndex < 0 || rowIndex >= gvDetails.DataKeys.Count)
+                { ShowError("ไม่พบแถวที่เลือก กรุณาค้นหาใหม่แล้วลองอีกครั้ง"); return; }
+
+                var dk = gvDetails.DataKeys[rowIndex];
+                string docNum = dk?["ID"]?.ToString() ?? "";
+                bool cancelled = (dk?["Status"]?.ToString() ?? "") == "Cancel";
+                bool isNaOnly = dk?["IsNextAccOnly"]?.ToString() == "1";
+                string naId = dk?["NextAccId"]?.ToString() ?? "";
+
+                if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!naCfg.IsConfigured || !naCfg.Enabled)
+                { ShowError("ยังไม่ได้เปิดใช้ NextAcc — ดึงไฟล์ล่าสุดไม่ได้"); return; }
+
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                Take_Time_BangPhra.Integration.NextAccCachedDocument fresh = null;
+                bool timedOut = false;
+
+                if (isNaOnly && Guid.TryParse(naId, out var gNa) && gNa != Guid.Empty)
+                {
+                    // แถวที่มีเฉพาะบน NextAcc → ดึงตรงด้วย GUID
+                    var t = System.Threading.Tasks.Task.Run(() =>
+                        svc.DownloadNextAccDocumentByIdAsync(gNa, docNum, true, cancelled));
+                    if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+                }
+                else
+                {
+                    // ใบในระบบที่ sync แล้ว → เส้นทางเลขที่เอกสาร (forceRefresh) แล้ว fallback GUID
+                    var t = System.Threading.Tasks.Task.Run(() =>
+                        svc.DownloadVoucherDocumentFromNextAccAsync(docNum, true, cancelled));
+                    if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+
+                    if (!timedOut && (fresh == null || !fresh.Found)
+                        && Guid.TryParse(naId, out var g2) && g2 != Guid.Empty)
+                    {
+                        var t2 = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadNextAccDocumentByIdAsync(g2, docNum, true, cancelled));
+                        if (t2.Wait(30000)) fresh = t2.Result; else timedOut = true;
+                    }
+                }
+
+                if (timedOut)
+                { ShowError($"ดึงไฟล์ {docNum} ไม่ทันใน 45 วินาที — NextAcc อาจตอบช้า ลองใหม่อีกครั้ง"); return; }
+
+                if (fresh != null && fresh.Found)
+                {
+                    ShowError($"✅ ดึงไฟล์ล่าสุดของ {docNum} จาก NextAcc แล้ว — กด \"📄 ดู PDF\" เพื่อเปิดไฟล์ใหม่");
+                    btnSearch_Click(null, EventArgs.Empty);   // รีเฟรชตารางให้เห็นสถานะไฟล์ล่าสุด
+                }
+                else
+                {
+                    ShowError($"ยังไม่มีเอกสารของ {docNum} บน NextAcc" +
+                              (string.IsNullOrEmpty(fresh?.Message) ? "" : " — " + fresh.Message));
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("ดึงไฟล์ล่าสุดไม่สำเร็จ: " + (ex.InnerException ?? ex).Message);
             }
         }
 
