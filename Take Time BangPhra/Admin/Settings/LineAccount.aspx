@@ -179,10 +179,33 @@
                 </div>
             </div>
             <div class="form-row">
-                <label>Callback URL (คัดลอกไปใส่ใน LINE Developers Console)</label>
-                <asp:TextBox ID="txtCallback" runat="server" CssClass="form-control"
-                    placeholder="https://taketimebangphra.com/Admin/LineLinkCallback" />
+                <label>Callback URL <span style="font-weight:400;font-size:12px;color:#7a8a80;">
+                    (ต้องใส่ค่านี้ใน LINE Developers Console → LINE Login → Callback URL ให้ตรงทุกตัวอักษร)</span></label>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <asp:TextBox ID="txtCallback" runat="server" CssClass="form-control" style="flex:1; min-width:240px;"
+                        placeholder="https://taketimebangphra.com/Admin/LineLinkCallback" />
+                    <button type="button" class="btn btn-default" onclick="copyCallback()">
+                        <i class="fas fa-copy"></i> คัดลอก
+                    </button>
+                </div>
+                <div id="copyOk" style="display:none; color:#06C755; font-size:13px; margin-top:5px;">
+                    <i class="fas fa-check"></i> คัดลอกแล้ว — ไปวางใน LINE Developers Console ได้เลย
+                </div>
             </div>
+
+            <script>
+                function copyCallback() {
+                    var el = document.getElementById('<%= txtCallback.ClientID %>');
+                    el.select(); el.setSelectionRange(0, 99999);
+                    try {
+                        if (navigator.clipboard) navigator.clipboard.writeText(el.value);
+                        else document.execCommand('copy');
+                        var ok = document.getElementById('copyOk');
+                        ok.style.display = 'block';
+                        setTimeout(function () { ok.style.display = 'none'; }, 2500);
+                    } catch (e) { alert('คัดลอกไม่สำเร็จ — กรุณาเลือกข้อความแล้วคัดลอกเอง'); }
+                }
+            </script>
             <asp:Button ID="btnSaveConfig" runat="server" Text="💾 บันทึกการตั้งค่า"
                 CssClass="btn btn-success" OnClick="btnSaveConfig_Click" />
         </asp:Panel>
