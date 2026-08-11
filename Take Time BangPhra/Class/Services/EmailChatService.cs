@@ -207,12 +207,19 @@ namespace Take_Time_BangPhra.Services
 
         private IngestOutcome IngestMessage(MimeMessage msg)
         {
-            // ที่อยู่สำหรับตอบกลับ = Reply-To ก่อน (OTA บางเจ้าใส่ alias ไว้ตรงนี้) แล้วค่อย From
-            var mbox = msg.ReplyTo?.Mailboxes?.FirstOrDefault() ?? msg.From?.Mailboxes?.FirstOrDefault();
+            // ที่อยู่สำหรับตอบกลับ = Reply-To ก่อน (Agoda ใส่ alias ของลูกค้าไว้ตรงนี้ — From เป็น
+            // notifications@agoda-messaging.com ที่ตอบกลับไม่ถึงลูกค้า) แล้วค่อย fallback From
+            var replyBox = msg.ReplyTo?.Mailboxes?.FirstOrDefault();
+            var fromBox = msg.From?.Mailboxes?.FirstOrDefault();
+            var mbox = replyBox ?? fromBox;
             string alias = mbox?.Address?.Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(alias)) return IngestOutcome.Failed;
 
-            string guestName = (mbox.Name ?? "").Trim();
+            // ชื่อลูกค้า: เอาจาก From ก่อน (Agoda ใส่ชื่อจริง เช่น "PHENRATCHANEE PHENSUPA")
+            // ส่วนชื่อบน Reply-To เป็น "Reply to XXX (do not edit)" — ตัด wrapper ทิ้งถ้าจำเป็น
+            string guestName = (fromBox?.Name ?? mbox.Name ?? "").Trim();
+            guestName = Regex.Replace(guestName, @"^\s*Reply\s+to\s+", "", RegexOptions.IgnoreCase);
+            guestName = Regex.Replace(guestName, @"\s*\(do not edit\)\s*$", "", RegexOptions.IgnoreCase).Trim();
             if (string.IsNullOrWhiteSpace(guestName)) guestName = alias.Split('@')[0];
 
             // dedup ด้วย Message-Id (ถ้าย้ายโฟลเดอร์ไม่สำเร็จ รอบหน้าอ่านซ้ำจะไม่ลงข้อความซ้ำ)
@@ -473,12 +480,19 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                var seen = new HashSet<string>();
+                // ตัวเลขที่มีป้ายกำกับชัดเจนมาก่อน (format จริงของ Agoda: "หมายเลขการจอง: 2038656748")
+                var candidates = new List<string>();
+                foreach (Match m in Regex.Matches(text ?? "",
+                    @"(?:หมายเลขการจอง|Booking\s*(?:Id|Number)|การจอง)\s*[#:：]?\s*(\d{6,14})", RegexOptions.IgnoreCase))
+                    candidates.Add(m.Groups[1].Value);
                 foreach (Match m in Regex.Matches(text ?? "", @"\b(\d{7,12})\b"))
+                    candidates.Add(m.Groups[1].Value);
+
+                var seen = new HashSet<string>();
+                foreach (string cand in candidates)
                 {
-                    string cand = m.Groups[1].Value;
                     if (!seen.Add(cand)) continue;
-                    if (seen.Count > 6) break;
+                    if (seen.Count > 8) break;
                     var dt = _code.DatabaseQuerySafe(_conn,
                         @"SELECT TOP 1 ID FROM [dbo].[Reservation]
                           WHERE OTA_Booking_ID LIKE @b ORDER BY ID DESC",

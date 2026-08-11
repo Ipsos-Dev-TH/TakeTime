@@ -234,6 +234,10 @@
             loadPendingBookings(true);
             pollTimer = setInterval(function () { loadConversations(true); loadStats(); loadPendingBookings(true); }, 5000);
 
+            // deep link จากหน้าอื่น (เช่น ปุ่ม 💬 แชทลูกค้า ในตารางจองรายวัน): ?conv={id} → เปิดบทสนทนาทันที
+            var deepConv = parseInt((window.location.search.match(/[?&]conv=(\d+)/) || [])[1] || '0', 10);
+            if (deepConv > 0) openConversation(deepConv);
+
             // Auto-resize reply textarea
             $('#txtReply').on('input', function () {
                 this.style.height = 'auto';

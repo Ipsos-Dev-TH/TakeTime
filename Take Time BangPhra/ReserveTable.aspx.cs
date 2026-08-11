@@ -67,6 +67,36 @@ namespace Take_Time_BangPhra
             }
         }
 
+        // ── ปุ่มแชทลูกค้า (OmniChannel) บนตารางจองรายวัน ─────────────────────────
+        // การจองที่มีบทสนทนาผูกอยู่ (เช่น ลูกค้า OTA ทักผ่านอีเมล relay ของ Agoda/Booking
+        // แล้วระบบจับคู่เลขการจองได้) จะโชว์ปุ่ม 💬 เปิดหน้าแชทของลูกค้าคนนั้นตรง ๆ
+        private Dictionary<long, long> _chatConvByRes;
+
+        /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม). โหลดครั้งเดียวต่อ request.</summary>
+        protected long GuestChatConvId(object resIdObj)
+        {
+            try
+            {
+                if (_chatConvByRes == null)
+                {
+                    _chatConvByRes = new Dictionary<long, long>();
+                    var dt = code2.DatabaseQuerySafe(conn,
+                        @"SELECT ct.Reservation_ID, MAX(c.ID) AS ConvId
+                          FROM OmniChannel_Conversations c
+                          JOIN OmniChannel_Contacts ct ON ct.ID = c.ContactID
+                          WHERE ct.Reservation_ID IS NOT NULL
+                          GROUP BY ct.Reservation_ID", null);
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                            _chatConvByRes[Convert.ToInt64(r["Reservation_ID"])] = Convert.ToInt64(r["ConvId"]);
+                }
+                long resId = Convert.ToInt64(resIdObj);
+                long convId;
+                return _chatConvByRes.TryGetValue(resId, out convId) ? convId : 0;
+            }
+            catch { return 0; }   // ตาราง OmniChannel ยังไม่มี → ไม่โชว์ปุ่ม
+        }
+
         /// <summary>AJAX จัดการ sync NextAcc ของ "การจองเดียว": overview (จำแนก ไม่มี/JE/เอกสาร ต่อใบ) /
         /// resyncAll (รีเซ็ต + สร้างใหม่ทั้งชุด) / reset (ลบเอกสาร+กลับ JE อย่างเดียว) /
         /// resyncReceipt, voidReceipt (รายใบ). Owner/Admin เท่านั้น.</summary>

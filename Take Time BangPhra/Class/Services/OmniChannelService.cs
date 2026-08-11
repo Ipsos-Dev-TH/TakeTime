@@ -111,7 +111,8 @@ namespace Take_Time_BangPhra.Services
 
             if (!string.IsNullOrEmpty(search))
             {
-                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search)";
+                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search"
+                 + "      OR ct.Email LIKE @Search OR c.Subject LIKE @Search OR c.Tags LIKE @Search)";
                 parms["@Search"] = "%" + search + "%";
             }
 

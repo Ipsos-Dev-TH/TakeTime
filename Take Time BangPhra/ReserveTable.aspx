@@ -583,6 +583,12 @@
                                             <asp:Button ID="btnNextAcc" runat="server" Text="💼 บัญชี NextAcc"
                                                 CssClass="btn btn-info btn-sm" Visible='<%# IsNaAdmin %>'
                                                 OnClientClick='<%# "showNaModal(" + Eval("ID") + "); return false;" %>' />
+
+                                            <asp:HyperLink ID="lnkGuestChat" runat="server" Text="💬 แชทลูกค้า"
+                                                CssClass="btn btn-success btn-sm mb-1" Target="_blank"
+                                                ToolTip="เปิดบทสนทนากับลูกค้า (ข้อความจาก OTA/ช่องทางอื่นที่ผูกกับการจองนี้)"
+                                                Visible='<%# GuestChatConvId(Eval("ID")) > 0 %>'
+                                                NavigateUrl='<%# ResolveUrl("~/Admin/Chat/OmniChannelInbox") + "?conv=" + GuestChatConvId(Eval("ID")) %>' />
                                         </div>
                                         <div class="print-only">
                                             &nbsp;
