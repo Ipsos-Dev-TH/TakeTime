@@ -31,6 +31,7 @@
    | `fromDomains` | `agoda-messaging.com, mchat.booking.com, guest.booking.com` | โดเมนที่ถือว่าเป็น "ข้อความลูกค้า" (คั่นจุลภาค เพิ่มได้) |
    | `pollMinutes` | 3 | รอบดึงอีเมล (นาที) |
    | `processedLabel` | `Chat-Processed` | โฟลเดอร์/label ที่ย้ายอีเมลที่ประมวลผลแล้ว |
+   | `extraFolders` | (ว่าง) | โฟลเดอร์/label เพิ่มเติมที่ให้ไล่อ่านนอกจาก INBOX (คั่นจุลภาค เช่น `OTA-Chat, งาน/Agoda`) — ใช้เมื่อตั้ง filter ใน Gmail ให้ติด label แล้วย้ายอีเมลข้าม Inbox; ข้อความเดียวกันโผล่หลายโฟลเดอร์ก็ไม่ลงแชทซ้ำ (dedup ด้วย Message-Id) |
    | `notifyTelegram` | 1 | แจ้ง Telegram เมื่อมีข้อความใหม่ |
    | `signature` | (ว่าง) | ลายเซ็นต่อท้ายอีเมลตอบกลับ เช่น ชื่อที่พัก + เบอร์โทร |
 2. **กล่องเมลขาเข้า (IMAP)**: ใช้ค่าเดียวกับระบบอ่านอีเมลจอง STAAH

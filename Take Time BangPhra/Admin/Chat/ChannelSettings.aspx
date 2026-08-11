@@ -129,6 +129,7 @@
                 { key: 'fromDomains', label: 'โดเมนอีเมลลูกค้า OTA', hint: 'คั่นด้วยจุลภาค — ค่าเริ่มต้น agoda-messaging.com, mchat.booking.com, guest.booking.com (อีเมลจากโดเมนเหล่านี้ = ข้อความลูกค้า จะเข้ากล่องแชทอัตโนมัติ)' },
                 { key: 'pollMinutes', label: 'รอบดึงอีเมล (นาที)', hint: 'ค่าเริ่มต้น 3 นาที — ใช้กล่องอีเมล IMAP เดียวกับระบบอ่านอีเมลจอง (ตั้งที่ Admin → Accounting Integration)' },
                 { key: 'processedLabel', label: 'โฟลเดอร์เก็บอีเมลที่อ่านแล้ว', hint: 'ค่าเริ่มต้น Chat-Processed' },
+                { key: 'extraFolders', label: 'โฟลเดอร์/label เพิ่มเติมที่ให้ไล่อ่าน', hint: 'คั่นจุลภาค เช่น OTA-Chat, งาน/Agoda — สำหรับกรณีตั้ง filter ใน Gmail ให้ติด label แล้วย้ายอีเมลข้าม Inbox ไป (ปกติเว้นว่าง = อ่านเฉพาะ INBOX)' },
                 { key: 'notifyTelegram', label: 'แจ้งเตือน Telegram (1/0)', hint: 'แจ้งพนักงานทันทีเมื่อลูกค้าส่งข้อความมา' },
                 { key: 'signature', label: 'ลายเซ็นท้ายอีเมลตอบกลับ', hint: 'ต่อท้ายทุกข้อความที่ส่งถึงลูกค้า เช่น ชื่อที่พัก + เบอร์โทร' }
             ],

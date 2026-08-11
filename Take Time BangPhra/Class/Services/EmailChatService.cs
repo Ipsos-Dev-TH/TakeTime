@@ -46,6 +46,7 @@ namespace Take_Time_BangPhra.Services
         private readonly string[] _fromDomains;
         private readonly int _pollMinutes;
         private readonly string _processedLabel;
+        private readonly string[] _extraFolders;
         private readonly bool _notifyTelegram;
         private readonly string _signature;
 
@@ -73,6 +74,10 @@ namespace Take_Time_BangPhra.Services
                 .Select(d => d.Trim().ToLowerInvariant()).Where(d => d.Length > 3).Distinct().ToArray();
             _pollMinutes = int.TryParse(Get("pollMinutes", "3"), out var pm) && pm >= 1 ? pm : 3;
             _processedLabel = Get("processedLabel", "Chat-Processed");
+            _extraFolders = Get("extraFolders", "")
+                .Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(f => f.Trim()).Where(f => f.Length > 0 && !f.Equals("INBOX", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             _notifyTelegram = Get("notifyTelegram", "1") != "0";
             _signature = Get("signature", "");
 
@@ -154,43 +159,74 @@ namespace Take_Time_BangPhra.Services
                 {
                     client.Connect(_imapServer, _imapPort, true);
                     client.Authenticate(_imapUser, _imapPassword);
-                    var inbox = client.Inbox;
-                    inbox.Open(FolderAccess.ReadWrite);
 
                     IMailFolder processed = null;
                     try { processed = GetOrCreateFolder(client, _processedLabel); } catch { }
+
+                    // โฟลเดอร์ที่ไล่อ่าน: INBOX + โฟลเดอร์/label เพิ่มเติมที่ตั้งไว้ (extraFolders)
+                    // — รองรับเคส Gmail ตั้ง filter ติด label แล้วย้ายข้าม Inbox ไป
+                    var folders = new List<IMailFolder> { client.Inbox };
+                    foreach (string name in _extraFolders)
+                    {
+                        if (string.Equals(name, _processedLabel, StringComparison.OrdinalIgnoreCase)) continue;
+                        try
+                        {
+                            var f = client.GetFolder(name);   // full path เช่น "OTA-Chat" หรือ "งาน/Agoda"
+                            if (f != null) folders.Add(f);
+                        }
+                        catch (FolderNotFoundException)
+                        {
+                            res.Messages.Add($"[warn] ไม่พบโฟลเดอร์ '{name}' ในกล่องเมล");
+                        }
+                    }
 
                     // OR ของทุกโดเมน AND ยังไม่อ่าน
                     SearchQuery domainQuery = SearchQuery.FromContains(_fromDomains[0]);
                     for (int i = 1; i < _fromDomains.Length; i++)
                         domainQuery = SearchQuery.Or(domainQuery, SearchQuery.FromContains(_fromDomains[i]));
-                    var uids = inbox.Search(SearchQuery.And(domainQuery, SearchQuery.NotSeen));
-                    res.Fetched = uids.Count;
+                    var query = SearchQuery.And(domainQuery, SearchQuery.NotSeen);
 
-                    foreach (var uid in uids)
+                    foreach (var folder in folders)
                     {
-                        bool ok = false;
                         try
                         {
-                            var msg = inbox.GetMessage(uid);
-                            var r = IngestMessage(msg);
-                            if (r == IngestOutcome.Received) { res.Received++; ok = true; }
-                            else if (r == IngestOutcome.Duplicate) { res.Duplicate++; ok = true; }
-                            else res.Failed++;
-                        }
-                        catch (Exception ex)
-                        {
-                            res.Failed++;
-                            res.Messages.Add("[error] " + ex.Message);
-                            _code.Logs(_conn, "EmailChat", $"ingest failed: {ex.Message}", "SYSTEM");
-                        }
+                            folder.Open(FolderAccess.ReadWrite);
+                            var uids = folder.Search(query);
+                            res.Fetched += uids.Count;
 
-                        try
-                        {
-                            if (ok && processed != null) inbox.MoveTo(uid, processed);
-                            else inbox.AddFlags(uid, MessageFlags.Seen, true);   // กันวนซ้ำแม้ ingest พลาด (มี log แล้ว)
+                            foreach (var uid in uids)
+                            {
+                                bool ok = false;
+                                try
+                                {
+                                    var msg = folder.GetMessage(uid);
+                                    // ข้อความเดียวกันอาจโผล่หลายโฟลเดอร์ (Gmail label ซ้อน) —
+                                    // dedup ด้วย Message-Id ใน IngestMessage กันลงแชทซ้ำอยู่แล้ว
+                                    var r = IngestMessage(msg);
+                                    if (r == IngestOutcome.Received) { res.Received++; ok = true; }
+                                    else if (r == IngestOutcome.Duplicate) { res.Duplicate++; ok = true; }
+                                    else res.Failed++;
+                                }
+                                catch (Exception ex)
+                                {
+                                    res.Failed++;
+                                    res.Messages.Add("[error] " + ex.Message);
+                                    _code.Logs(_conn, "EmailChat", $"ingest failed: {ex.Message}", "SYSTEM");
+                                }
+
+                                try
+                                {
+                                    if (ok && processed != null) folder.MoveTo(uid, processed);
+                                    else folder.AddFlags(uid, MessageFlags.Seen, true);   // กันวนซ้ำแม้ ingest พลาด (มี log แล้ว)
+                                }
+                                catch { }
+                            }
                         }
-                        catch { }
+                        catch (Exception fex)
+                        {
+                            res.Messages.Add($"[warn] อ่านโฟลเดอร์ '{folder.FullName}' ไม่สำเร็จ: {fex.Message}");
+                            _code.Logs(_conn, "EmailChat", $"folder '{folder.FullName}' error: {fex.Message}", "SYSTEM");
+                        }
                     }
                     client.Disconnect(true);
                 }
