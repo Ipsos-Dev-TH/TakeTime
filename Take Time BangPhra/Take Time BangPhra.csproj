@@ -439,6 +439,7 @@
     <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Admin\Settings\LineAccount.aspx" />
+    <Content Include="Admin\Settings\Index.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
@@ -1249,6 +1250,13 @@
     </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\Index.aspx.cs">
+      <DependentUpon>Index.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\Index.aspx.designer.cs">
+      <DependentUpon>Index.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\SystemSettings.aspx.cs">
       <DependentUpon>SystemSettings.aspx</DependentUpon>

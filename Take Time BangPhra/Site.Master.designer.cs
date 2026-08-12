@@ -33,17 +33,19 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.PlaceHolder phNavLoyalty;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavReviews;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavChannelMgr;
-        protected global::System.Web.UI.WebControls.PlaceHolder phNavDynPricing;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavMaintenance;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavActivityMgmt;
-        protected global::System.Web.UI.WebControls.PlaceHolder phNavAI;
-        protected global::System.Web.UI.WebControls.PlaceHolder phNavChatSettings;
-        protected global::System.Web.UI.WebControls.PlaceHolder phNavTier;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavAIReport;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavHR;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavAssets;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavAffiliateAdmin;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavWebAnalytics;
+
+        /// <summary>Role-scoped menu columns (Admin/Owner)</summary>
+        protected global::System.Web.UI.WebControls.Panel pnlFinanceNav;
+        protected global::System.Web.UI.WebControls.Panel pnlCrmNav;
+        protected global::System.Web.UI.WebControls.Panel pnlSettingsNav;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavSettingsOwner;
 
         /// <summary>
         /// Label1 control.

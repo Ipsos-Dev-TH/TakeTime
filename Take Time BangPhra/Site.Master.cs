@@ -27,14 +27,31 @@ namespace Take_Time_BangPhra
                     // Check if user is Owner to show owner-only menus
                     // Owner sees ALL menus including Hotel Management and System/HR
                     // Owner can see ALL employees without supervisor assignment
-                    bool isOwner = Session["User"]?.ToString() == "Owner";
+                    // สิทธิ์ตามบทบาท:
+                    //   Staff  = งานประจำวัน / บริการลูกค้า / ขายหน้าร้าน (3 คอลัมน์แรก)
+                    //   Admin  = + การเงิน&บัญชี + ลูกค้า&การตลาด
+                    //   Owner  = + รายงาน + บุคคล + ตั้งค่า
+                    // เดิม Staff เห็นเมนูบัญชี/ใบสำคัญจ่าย/ข้อมูลลูกค้าทั้งหมดเท่ากับ Admin
+                    string role = Session["User"]?.ToString() ?? "";
+                    bool isOwner = role == "Owner";
+                    bool isAdminOrOwner = isOwner || role == "Admin";
+
+                    pnlFinanceNav.Visible = isAdminOrOwner;
+                    pnlCrmNav.Visible = isAdminOrOwner;
                     pnlHotelMgmt.Visible = isOwner;
                     pnlOwnerOnly.Visible = isOwner;
+                    // ตั้งค่า: Admin เห็น "ศูนย์ตั้งค่า" (หน้าจะกรองรายการ Owner-only ให้เอง)
+                    // Owner เห็นทางลัดหน้าที่เป็น Owner-only เพิ่ม
+                    pnlSettingsNav.Visible = isAdminOrOwner;
+                    phNavSettingsOwner.Visible = isOwner;
                 }
                 else
                 {
                     // Hide admin controls
                     pnlAdminNav.Visible = false;
+                    pnlFinanceNav.Visible = false;
+                    pnlSettingsNav.Visible = false;
+                    pnlCrmNav.Visible = false;
                     pnlHotelMgmt.Visible = false;
                     pnlOwnerOnly.Visible = false;
                     pnlEmployeeNav.Visible = false;
@@ -47,6 +64,9 @@ namespace Take_Time_BangPhra
             {
                 // Hide admin controls on error
                 pnlAdminNav.Visible = false;
+                pnlFinanceNav.Visible = false;
+                pnlSettingsNav.Visible = false;
+                pnlCrmNav.Visible = false;
                 pnlHotelMgmt.Visible = false;
                 pnlOwnerOnly.Visible = false;
                 pnlEmployeeNav.Visible = false;
@@ -75,15 +95,11 @@ namespace Take_Time_BangPhra
                 phNavHousekeeping.Visible = Feature.On("Housekeeping");
                 phNavMaintenance.Visible = Feature.On("Maintenance");
                 phNavChat.Visible = Feature.On("Chat");
-                phNavChatSettings.Visible = Feature.On("Chat");
                 phNavRoomService.Visible = Feature.On("RoomService");
                 phNavLoyalty.Visible = Feature.On("Loyalty");
-                phNavTier.Visible = Feature.On("Loyalty");
                 phNavReviews.Visible = Feature.On("Reviews");
-                phNavChannelMgr.Visible = Feature.On("ChannelManager");
-                phNavDynPricing.Visible = Feature.On("DynamicPricing");
-                phNavAI.Visible = Feature.On("AI");
                 phNavAIReport.Visible = Feature.On("AI");
+                phNavChannelMgr.Visible = Feature.On("ChannelManager");
                 phNavHR.Visible = Feature.On("HR");
                 phNavAssets.Visible = Feature.On("Assets");
                 phNavWebAnalytics.Visible = Feature.On("WebAnalytics");
