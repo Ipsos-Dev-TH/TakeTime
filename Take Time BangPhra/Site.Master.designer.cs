@@ -44,6 +44,9 @@ namespace Take_Time_BangPhra
         /// <summary>Role-scoped menu columns (Admin/Owner)</summary>
         protected global::System.Web.UI.WebControls.Panel pnlFinanceNav;
         protected global::System.Web.UI.WebControls.Panel pnlCrmNav;
+
+        /// <summary>Public floating customer chat widget</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phPublicChat;
         protected global::System.Web.UI.WebControls.Panel pnlSettingsNav;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavSettingsOwner;
 

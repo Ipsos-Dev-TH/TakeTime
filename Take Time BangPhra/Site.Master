@@ -1624,6 +1624,149 @@
                 });
             </script>
         </asp:Panel>
+
+        <%-- ═══ แชทลูกค้าลอย (สาธารณะ) — โชว์เฉพาะผู้เยี่ยมชม ไม่โชว์ตอนพนักงานล็อกอิน ═══ --%>
+        <asp:PlaceHolder ID="phPublicChat" runat="server" Visible="false">
+        <style>
+            #ttChatBtn { position: fixed; right: 20px; bottom: 20px; width: 60px; height: 60px;
+                border-radius: 50%; background: linear-gradient(135deg,#6d4c41,#4e342e); color:#fff;
+                border:none; cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.28); z-index: 99998;
+                font-size: 26px; display:flex; align-items:center; justify-content:center; transition:transform .15s; }
+            #ttChatBtn:hover { transform: scale(1.07); }
+            #ttChatBtn .badge { position:absolute; top:-3px; right:-3px; background:#e53935; color:#fff;
+                font-size:11px; min-width:18px; height:18px; border-radius:9px; display:none; align-items:center; justify-content:center; padding:0 4px; }
+            #ttChatWin { position: fixed; right: 20px; bottom: 90px; width: 360px; max-width: calc(100vw - 32px);
+                height: 520px; max-height: calc(100vh - 130px); background:#fff; border-radius:16px; z-index:99999;
+                box-shadow:0 12px 40px rgba(0,0,0,.28); display:none; flex-direction:column; overflow:hidden; }
+            #ttChatWin.open { display:flex; }
+            .ttc-head { background: linear-gradient(135deg,#6d4c41,#4e342e); color:#fff; padding:14px 16px; }
+            .ttc-head h4 { margin:0; font-size:15px; font-weight:700; }
+            .ttc-head p { margin:2px 0 0; font-size:11.5px; opacity:.85; }
+            .ttc-head .x { position:absolute; top:12px; right:14px; color:#fff; background:none; border:none; font-size:20px; cursor:pointer; opacity:.85; }
+            .ttc-body { flex:1; overflow-y:auto; padding:14px; background:#f6f3f1; }
+            .ttc-msg { margin-bottom:10px; display:flex; }
+            .ttc-msg.user { justify-content:flex-end; }
+            .ttc-bubble { max-width:78%; padding:9px 13px; border-radius:14px; font-size:13.5px; line-height:1.5; white-space:pre-wrap; word-wrap:break-word; }
+            .ttc-msg.bot .ttc-bubble { background:#fff; color:#333; border-bottom-left-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+            .ttc-msg.user .ttc-bubble { background:#6d4c41; color:#fff; border-bottom-right-radius:4px; }
+            .ttc-bubble img { max-width:100%; border-radius:8px; display:block; }
+            .ttc-book { background:#fff; border:1.5px solid #d7ccc8; border-radius:12px; padding:12px; margin-bottom:10px; font-size:13px; }
+            .ttc-book b { color:#4e342e; }
+            .ttc-book .slipbtn { display:inline-block; margin-top:8px; background:#43a047; color:#fff; border:none;
+                border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; }
+            .ttc-foot { padding:10px; border-top:1px solid #eee; display:flex; gap:8px; background:#fff; }
+            .ttc-foot input { flex:1; border:1.5px solid #ddd; border-radius:20px; padding:9px 14px; font-size:13.5px; outline:none; }
+            .ttc-foot input:focus { border-color:#6d4c41; }
+            .ttc-foot button { background:#6d4c41; color:#fff; border:none; border-radius:50%; width:40px; height:40px; cursor:pointer; font-size:16px; }
+            .ttc-typing { font-size:12px; color:#999; padding:0 14px 8px; display:none; }
+        </style>
+
+        <button id="ttChatBtn" type="button" title="แชทสอบถาม/จองห้องพัก" aria-label="แชท">
+            <i class="fas fa-comment-dots"></i><span class="badge" id="ttChatBadge">1</span>
+        </button>
+        <div id="ttChatWin" role="dialog" aria-label="แชทกับที่พัก">
+            <div class="ttc-head" style="position:relative;">
+                <h4><i class="fas fa-hotel"></i> Take Time Nature Resort</h4>
+                <p>สอบถามห้องว่าง ราคา หรือจองได้เลยค่ะ 😊</p>
+                <button class="x" type="button" id="ttChatClose" aria-label="ปิด">&times;</button>
+            </div>
+            <div class="ttc-body" id="ttChatBody"></div>
+            <div class="ttc-typing" id="ttChatTyping">กำลังพิมพ์…</div>
+            <div class="ttc-foot">
+                <input type="text" id="ttChatInput" placeholder="พิมพ์ข้อความ…" autocomplete="off" maxlength="1000" />
+                <button type="button" id="ttChatSend" aria-label="ส่ง"><i class="fas fa-paper-plane"></i></button>
+            </div>
+            <input type="file" id="ttSlipFile" accept="image/*,.pdf" style="display:none;" />
+        </div>
+
+        <script>
+        (function () {
+            var API = '<%= ResolveUrl("~/API/PublicChat.ashx") %>';
+            var sid = localStorage.getItem('ttChatSid');
+            if (!sid) { sid = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); localStorage.setItem('ttChatSid', sid); }
+            var pendingResId = null, greeted = false;
+            var $ = function (id) { return document.getElementById(id); };
+
+            function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+            function scrollDown() { var b = $('ttChatBody'); b.scrollTop = b.scrollHeight; }
+
+            function addMsg(from, text, mediaUrl) {
+                var wrap = document.createElement('div');
+                wrap.className = 'ttc-msg ' + (from === 'user' ? 'user' : 'bot');
+                var inner = mediaUrl ? '<img src="' + esc(mediaUrl) + '" alt="" />' : esc(text).replace(/\n/g, '<br>');
+                wrap.innerHTML = '<div class="ttc-bubble">' + inner + '</div>';
+                $('ttChatBody').appendChild(wrap); scrollDown();
+            }
+
+            function addBookingCard(b) {
+                if (!b) return;
+                var el = document.createElement('div');
+                el.className = 'ttc-book';
+                el.innerHTML = '<b>สรุปการจอง (รอยืนยัน)</b><br>' +
+                    'ห้อง: ' + esc(b.roomName || '-') + '<br>' +
+                    'เข้าพัก: ' + esc(b.checkIn || '') + ' → ' + esc(b.checkOut || '') + ' (' + esc('' + (b.nights || '')) + ' คืน)<br>' +
+                    'ยอดรวม: ฿' + esc(Number(b.total || 0).toLocaleString()) + '<br>' +
+                    '<button class="slipbtn" type="button" id="ttDoSlip"><i class="fas fa-receipt"></i> แนบสลิปโอนเงิน</button>';
+                $('ttChatBody').appendChild(el); scrollDown();
+                $('ttDoSlip').onclick = function () { $('ttSlipFile').click(); };
+            }
+
+            function typing(on) { $('ttChatTyping').style.display = on ? 'block' : 'none'; if (on) scrollDown(); }
+
+            function send() {
+                var inp = $('ttChatInput'); var text = inp.value.trim();
+                if (!text) return;
+                inp.value = ''; addMsg('user', text); typing(true);
+                fetch(API + '?action=send', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sid: sid, message: text })
+                }).then(function (r) { return r.json(); }).then(function (d) {
+                    typing(false);
+                    if (d && d.ok) {
+                        addMsg('bot', d.reply);
+                        if (d.needSlip && d.pendingReservationId) { pendingResId = d.pendingReservationId; addBookingCard(d.booking); }
+                    } else { addMsg('bot', (d && d.error) || 'ขออภัยค่ะ ลองใหม่อีกครั้งนะคะ'); }
+                }).catch(function () { typing(false); addMsg('bot', 'การเชื่อมต่อขัดข้อง ลองใหม่อีกครั้งค่ะ'); });
+            }
+
+            $('ttSlipFile').onchange = function () {
+                if (!this.files.length || !pendingResId) return;
+                var fd = new FormData(); fd.append('sid', sid); fd.append('resId', pendingResId); fd.append('file', this.files[0]);
+                addMsg('user', '📎 กำลังส่งสลิป…'); typing(true);
+                fetch(API + '?action=slip', { method: 'POST', body: fd })
+                    .then(function (r) { return r.json(); }).then(function (d) {
+                        typing(false);
+                        addMsg('bot', (d && d.ok) ? d.reply : ((d && d.error) || 'แนบสลิปไม่สำเร็จ ลองใหม่ค่ะ'));
+                        if (d && d.ok) pendingResId = null;
+                    }).catch(function () { typing(false); addMsg('bot', 'ส่งสลิปไม่สำเร็จ ลองใหม่ค่ะ'); });
+                this.value = '';
+            };
+
+            function loadHistory() {
+                fetch(API + '?action=history&sid=' + encodeURIComponent(sid))
+                    .then(function (r) { return r.json(); }).then(function (d) {
+                        if (d && d.messages && d.messages.length) {
+                            d.messages.forEach(function (m) { addMsg(m.from, m.text, m.mediaUrl); });
+                        } else if (!greeted) {
+                            addMsg('bot', 'สวัสดีค่ะ 😊 ยินดีต้อนรับสู่ Take Time Nature Resort\nสอบถามห้องว่าง ราคา หรือแจ้งวันที่อยากเข้าพักได้เลยค่ะ');
+                        }
+                        greeted = true;
+                    }).catch(function () {});
+            }
+
+            function toggle(open) {
+                var w = $('ttChatWin');
+                if (open) { w.classList.add('open'); $('ttChatBadge').style.display = 'none'; if (!greeted) loadHistory(); $('ttChatInput').focus(); }
+                else w.classList.remove('open');
+            }
+
+            $('ttChatBtn').onclick = function () { toggle(!$('ttChatWin').classList.contains('open')); };
+            $('ttChatClose').onclick = function () { toggle(false); };
+            $('ttChatSend').onclick = send;
+            $('ttChatInput').addEventListener('keypress', function (e) { if (e.key === 'Enter') send(); });
+        })();
+        </script>
+        </asp:PlaceHolder>
     </form>
 </body>
 </html>

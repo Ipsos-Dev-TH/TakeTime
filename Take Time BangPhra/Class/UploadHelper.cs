@@ -75,6 +75,39 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>
+        /// เหมือน Save(FileUpload…) แต่รับ HttpPostedFile ตรง ๆ — ใช้ในตัวจัดการ .ashx
+        /// (เช่น แชทหน้าเว็บที่แนบสลิป) ที่ไม่มี control FileUpload
+        /// </summary>
+        public static SaveResult Save(HttpPostedFile file, string virtualFolder, string prefix,
+            string[] allowed = null, long maxBytes = 8 * 1024 * 1024)
+        {
+            if (file == null || file.ContentLength <= 0)
+                return new SaveResult { Success = false, Error = "ไม่พบไฟล์ที่แนบมา" };
+
+            allowed = allowed ?? ImageDoc;
+            string ext = (Path.GetExtension(file.FileName) ?? "").ToLowerInvariant();
+            if (string.IsNullOrEmpty(ext) || !allowed.Contains(ext))
+                return new SaveResult { Success = false, Error = "รองรับเฉพาะไฟล์: " + string.Join(", ", allowed) };
+            if (file.ContentLength > maxBytes)
+                return new SaveResult { Success = false, Error = $"ไฟล์ใหญ่เกิน {maxBytes / (1024 * 1024)} MB" };
+
+            try
+            {
+                string absFolder = HttpContext.Current.Server.MapPath(virtualFolder);
+                Directory.CreateDirectory(absFolder);
+                string safePrefix = SanitizePrefix(prefix);
+                string name = $"{safePrefix}_{DateTime.Now:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}".TrimStart('_') + ext;
+                file.SaveAs(Path.Combine(absFolder, name));
+                string webBase = virtualFolder.TrimStart('~').TrimEnd('/');
+                return new SaveResult { Success = true, WebPath = webBase + "/" + name };
+            }
+            catch (Exception ex)
+            {
+                return new SaveResult { Success = false, Error = "บันทึกไฟล์ไม่สำเร็จ: " + ex.Message };
+            }
+        }
+
         private static string SanitizePrefix(string prefix)
         {
             if (string.IsNullOrEmpty(prefix)) return "file";

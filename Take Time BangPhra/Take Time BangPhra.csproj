@@ -364,6 +364,7 @@
     <Content Include="API\TaxInvoiceAPI.ashx" />
     <Content Include="API\ViewReceiptDoc.ashx" />
     <Content Include="API\VendorAPI.ashx" />
+    <Content Include="API\PublicChat.ashx" />
     <Content Include="API\OmniChannelWebhook.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
@@ -616,6 +617,10 @@
     </Compile>
     <Compile Include="API\VendorAPI.ashx.cs">
       <DependentUpon>VendorAPI.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\PublicChat.ashx.cs">
+      <DependentUpon>PublicChat.ashx</DependentUpon>
+      <SubType>Component</SubType>
     </Compile>
     <Compile Include="API\OmniChannelWebhook.ashx.cs">
       <DependentUpon>OmniChannelWebhook.ashx</DependentUpon>

@@ -330,6 +330,10 @@ namespace Take_Time_BangPhra.Services
                         // สะพานแชท↔อีเมลลูกค้า OTA (Agoda/Booking relay) — ตอบเป็นอีเมลเบื้องหลัง
                         new EmailChatService(_connStr).DeliverToEmail(conversationId, content);
                         break;
+                    case "TIKTOK":
+                        DeliverToTikTok(conversationId, content);
+                        break;
+                    // WEBCHAT ไม่มี outbound push — ลูกค้าดึงคำตอบผ่าน endpoint เอง (polling/หลังส่ง)
                 }
             }
             catch (Exception ex)
@@ -411,6 +415,27 @@ namespace Take_Time_BangPhra.Services
             var body = new { chat_id = chatId, text = content };
             PostJson("https://api.telegram.org/bot" + botToken + "/sendMessage",
                 new JavaScriptSerializer().Serialize(body), null);
+        }
+
+        /// <summary>
+        /// ส่งข้อความออกทาง TikTok Business Messaging.
+        /// TikTok DM API ยังจำกัดสิทธิ์ (ต้องได้รับอนุมัติ scope + business account) และรูปแบบ
+        /// endpoint ต่างกันตามรุ่นที่ได้รับอนุมัติ → ให้ตั้ง sendUrl + accessToken เองในหน้าตั้งค่า
+        /// ช่องทาง (ถ้าไม่ตั้ง = รับข้อความเข้ากล่องแชทได้ แต่ตอบต้องพนักงานตอบผ่านแอป TikTok)
+        /// </summary>
+        private void DeliverToTikTok(long conversationId, string content)
+        {
+            var config = GetChannelConfig("TIKTOK");
+            string token = config.ContainsKey("accessToken") ? config["accessToken"]?.ToString() : "";
+            string sendUrl = config.ContainsKey("sendUrl") ? config["sendUrl"]?.ToString() : "";
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(sendUrl)) return;
+
+            string recipientId = GetPlatformUserId(conversationId);
+            if (string.IsNullOrEmpty(recipientId)) return;
+
+            var body = new { recipient_id = recipientId, message = new { text = content } };
+            PostJson(sendUrl, new JavaScriptSerializer().Serialize(body),
+                new Dictionary<string, string> { { "Authorization", "Bearer " + token } });
         }
 
         private string GetPlatformUserId(long conversationId)

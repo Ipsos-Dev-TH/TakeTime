@@ -108,6 +108,12 @@
             'TELEGRAM': [
                 { key: 'botToken', label: 'Bot Token', hint: 'จาก @BotFather' }
             ],
+            'TIKTOK': [
+                { key: 'accessToken', label: 'Access Token', hint: 'จาก TikTok for Business — ต้องได้รับสิทธิ์ Messaging' },
+                { key: 'appSecret', label: 'App Secret', hint: 'ใช้ตรวจสอบลายเซ็น Webhook' },
+                { key: 'sendUrl', label: 'Send Message URL', hint: 'endpoint สำหรับส่งข้อความออก (ตามที่ TikTok อนุมัติให้) — เว้นว่างได้ถ้ายังตอบผ่านแอป TikTok' }
+            ],
+            'WEBCHAT': [],
             'AGODA': [
                 { key: 'hotelId', label: 'Hotel ID', hint: 'รหัสโรงแรมบน Agoda' },
                 { key: 'apiKey', label: 'API Key (ถ้ามี)', hint: 'สำหรับ Agoda Partner API' }
@@ -140,7 +146,7 @@
         };
 
         function renderChannels() {
-            var types = { 'SOCIAL': 'โซเชียลมีเดีย', 'OTA': 'OTA (Online Travel Agency)', 'EMAIL': 'อีเมลและ SMS', 'SMS': 'อีเมลและ SMS', 'INTERNAL': 'ภายในระบบ' };
+            var types = { 'SOCIAL': 'โซเชียลมีเดีย', 'OTA': 'OTA (Online Travel Agency)', 'EMAIL': 'อีเมลและ SMS', 'SMS': 'อีเมลและ SMS', 'WEB': 'แชทหน้าเว็บ', 'INTERNAL': 'ภายในระบบ' };
             var grouped = {};
             for (var i = 0; i < allChannels.length; i++) {
                 var ch = allChannels[i];
@@ -149,7 +155,7 @@
                 grouped[group].push(ch);
             }
 
-            var order = ['SOCIAL', 'OTA', 'EMAIL', 'INTERNAL'];
+            var order = ['WEB', 'SOCIAL', 'OTA', 'EMAIL', 'INTERNAL'];
             var html = '';
             for (var o = 0; o < order.length; o++) {
                 var key = order[o];

@@ -56,6 +56,11 @@ namespace Take_Time_BangPhra.API
                     case "WECHAT":
                         HandleWeChat(context, body);
                         break;
+                    case "TIKTOK":
+                        // TikTok Messaging ส่ง event เป็น JSON POST → ใช้ตัวรับทั่วไป
+                        // (senderId / senderName / message / messageId) + auto-reply
+                        HandleGeneric(context, body, "TIKTOK");
+                        break;
                     default:
                         HandleGeneric(context, body, channel);
                         break;

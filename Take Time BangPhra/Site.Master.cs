@@ -77,6 +77,27 @@ namespace Take_Time_BangPhra
 
             // ต้องเรียกหลังบล็อกสิทธิ์ด้านบน — ไม่งั้นค่า Visible ของแชท/เมนูถูกบล็อกบนเขียนทับ
             ApplyFeatureToggles();
+            ApplyPublicChatWidget();
+        }
+
+        /// <summary>
+        /// แชทลูกค้าลอย — โชว์เฉพาะผู้เยี่ยมชม (ไม่ล็อกอิน) และเมื่อช่องทาง WEBCHAT เปิด + ฟีเจอร์ Chat เปิด
+        /// พนักงานที่ล็อกอินไม่เห็น (ใช้กล่องแชทรวมแทน)
+        /// </summary>
+        private void ApplyPublicChatWidget()
+        {
+            try
+            {
+                if (Session["permission"]?.ToString() == "True") { phPublicChat.Visible = false; return; }
+                if (Feature.Off("Chat")) { phPublicChat.Visible = false; return; }
+
+                string conn = System.Configuration.ConfigurationManager
+                    .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var dt = new code().DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 IsEnabled FROM OmniChannel_Channels WHERE ChannelCode = 'WEBCHAT'", null);
+                phPublicChat.Visible = dt != null && dt.Rows.Count > 0 && Convert.ToBoolean(dt.Rows[0][0]);
+            }
+            catch { phPublicChat.Visible = false; }  // ตาราง/คอลัมน์ยังไม่มี → ไม่โชว์
         }
 
         /// <summary>
