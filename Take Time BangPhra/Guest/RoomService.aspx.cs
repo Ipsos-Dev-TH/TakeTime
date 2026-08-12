@@ -308,26 +308,16 @@ namespace Take_Time_BangPhra.Guest
                 string paymentSlipPath = null;
                 if (paymentMethod == "TRANSFER" && filePaymentSlip.HasFile)
                 {
-                    try
-                    {
-                        string fileName = $"RS_{DateTime.Now:yyyyMMddHHmmss}_{filePaymentSlip.FileName}";
-                        string uploadFolder = Server.MapPath("~/Uploads/PaymentSlips/");
-
-                        if (!Directory.Exists(uploadFolder))
-                        {
-                            Directory.CreateDirectory(uploadFolder);
-                        }
-
-                        string filePath = Path.Combine(uploadFolder, fileName);
-                        filePaymentSlip.SaveAs(filePath);
-                        paymentSlipPath = $"/Uploads/PaymentSlips/{fileName}";
-                    }
-                    catch (Exception ex)
+                    // ตรวจนามสกุล + สร้างชื่อไฟล์เอง (กัน .aspx web shell / path traversal)
+                    var slip = UploadHelper.Save(filePaymentSlip, "~/Uploads/PaymentSlips", "RS",
+                        UploadHelper.ImageDoc);
+                    if (!slip.Success)
                     {
                         ScriptManager.RegisterStartupScript(this, GetType(), "alert",
-                            $"alert('Error uploading payment slip: {ex.Message}');", true);
+                            $"alert('{slip.Error.Replace("'", "\\'")}');", true);
                         return;
                     }
+                    paymentSlipPath = slip.WebPath;
                 }
 
                 // Create order

@@ -143,28 +143,16 @@ namespace Take_Time_BangPhra.Guest
                     return;
                 }
 
-                // Upload payment slip
-                string paymentSlipPath = null;
-                try
-                {
-                    string fileName = $"Payment_{DateTime.Now:yyyyMMddHHmmss}_{_reservationId}_{filePaymentSlip.FileName}";
-                    string uploadFolder = Server.MapPath("~/Uploads/PaymentSlips/");
-
-                    if (!Directory.Exists(uploadFolder))
-                    {
-                        Directory.CreateDirectory(uploadFolder);
-                    }
-
-                    string filePath = Path.Combine(uploadFolder, fileName);
-                    filePaymentSlip.SaveAs(filePath);
-                    paymentSlipPath = $"/Uploads/PaymentSlips/{fileName}";
-                }
-                catch (Exception ex)
+                // Upload payment slip — ตรวจนามสกุล + สร้างชื่อไฟล์เอง (กัน .aspx web shell / path traversal)
+                var slip = UploadHelper.Save(filePaymentSlip, "~/Uploads/PaymentSlips",
+                    $"Payment_{_reservationId}", UploadHelper.ImageDoc);
+                if (!slip.Success)
                 {
                     ScriptManager.RegisterStartupScript(this, GetType(), "alert",
-                        $"alert('Error uploading payment slip: {ex.Message}');", true);
+                        $"alert('{slip.Error.Replace("'", "\\'")}');", true);
                     return;
                 }
+                string paymentSlipPath = slip.WebPath;
 
                 // Record payment (create a payment record - you may need to create a table for this)
                 var parameters = new Dictionary<string, object>
