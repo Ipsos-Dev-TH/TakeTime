@@ -460,7 +460,6 @@
     <Content Include="Content\Site.css" />
     <Content Include="CountReserved.aspx" />
     <Content Include="Default.aspx" />
-    <Content Include="Default_Backup.aspx" />
     <Content Include="DisplayReserve.aspx" />
     <Content Include="DisplayToday.aspx" />
     <Content Include="favicon.ico" />
@@ -1311,13 +1310,6 @@
     <Compile Include="Class\Services\MaintenanceRequestService.cs" />
     <Compile Include="Class\Services\NotificationService.cs" />
     <Compile Include="Class\Services\AdvancedAnalyticsService.cs" />
-    <Compile Include="Default_Backup.aspx.cs">
-      <DependentUpon>Default_Backup.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Compile>
-    <Compile Include="Default_Backup.aspx.designer.cs">
-      <DependentUpon>Default_Backup.aspx</DependentUpon>
-    </Compile>
     <Compile Include="Global.asax.cs">
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>

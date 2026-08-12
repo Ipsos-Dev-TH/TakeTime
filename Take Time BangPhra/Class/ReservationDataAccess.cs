@@ -334,11 +334,51 @@ namespace Take_Time_BangPhra
                 { "@useCoupon", useCoupon }
             };
 
-            _code.DatabaseInsertSafe(_connectionString,
+            // 🔒 กันจองซ้อน (double booking) แบบ atomic ที่ระดับฐานข้อมูล
+            //
+            // ปัญหาเดิม: หน้าจองตรวจว่าห้องว่าง (CheckAvailability) แล้วค่อย INSERT ทีหลังหลายร้อยบรรทัด
+            // ระหว่างนั้นถ้าอีกคนจองห้องเดียวกันแทรกเข้ามา ทั้งคู่ผ่านการตรวจ → ห้องถูกจองซ้อน
+            //
+            // วิธีแก้: ทำ "ตรวจ + เขียน" ให้เป็นคำสั่งเดียว (INSERT ... SELECT ... WHERE NOT EXISTS)
+            // พร้อม UPDLOCK/HOLDLOCK บน subquery → SQL Server ล็อกช่วงข้อมูลไว้จนจบคำสั่ง
+            // คนที่มาทีหลังจะรอ แล้วเห็นแถวของคนแรก → เงื่อนไขไม่ผ่าน → ไม่ถูกเขียนซ้อน
+            //
+            // ใช้เกณฑ์เดียวกับ AccommodationAvailabilityService (สถานะที่ไม่นับ + ช่วงวันที่ทับกัน)
+            // และ **ยกเว้นห้องแบบ LimitWithPeople** (ห้องรวม/เต็นท์ที่จองพร้อมกันหลายคนได้ตามจำนวนคน)
+            // — ห้องประเภทนั้นยังคุมจำนวนคนที่ชั้นแอปตามเดิม
+            int rows = _code.DatabaseInsertSafe(_connectionString,
                 @"INSERT INTO [dbo].[Reservation_Accommodation]
-                  ([Reservation_ID], [Accommodation_ID], [Amount], [Price], [Use_Coupon])
-                  VALUES (@reservationId, @accommodationId, @amount, @price, @useCoupon)",
+                      ([Reservation_ID], [Accommodation_ID], [Amount], [Price], [Use_Coupon])
+                  SELECT @reservationId, @accommodationId, @amount, @price, @useCoupon
+                  WHERE NOT EXISTS (
+                        SELECT 1
+                          FROM [dbo].[Reservation_Accommodation] ra WITH (UPDLOCK, HOLDLOCK)
+                          INNER JOIN [dbo].[Reservation] r  ON r.ID  = ra.Reservation_ID
+                          INNER JOIN [dbo].[Reservation] me ON me.ID = @reservationId
+                          INNER JOIN [dbo].[Accommodation] a ON a.ID = @accommodationId
+                         WHERE ra.Accommodation_ID = @accommodationId
+                           AND r.ID <> @reservationId
+                           AND r.Status NOT IN (N'ยกเลิก', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')
+                           AND me.CheckinDate < r.CheckoutDate
+                           AND me.CheckoutDate > r.CheckinDate
+                           AND ISNULL(a.LimitWithPeople, 0) = 0
+                  )",
                 parameters);
+
+            if (rows <= 0)
+            {
+                // มีคนจองห้องนี้ตัดหน้าไปแล้วในช่วงเวลาเดียวกัน — โยนให้ผู้เรียกจัดการ
+                // (หน้าจองจับ exception แล้วแจ้งผู้ใช้ + rollback ส่วนที่เหลือของการบันทึก)
+                try
+                {
+                    _code.Logs(_connectionString, "Reservation DoubleBooking Blocked",
+                        $"Reservation {reservationId}: ห้อง {accommodationId} ถูกจองซ้อนโดยผู้ใช้อื่นระหว่างบันทึก — ไม่บันทึกห้องนี้",
+                        "SYSTEM");
+                }
+                catch { }
+                throw new InvalidOperationException(
+                    "ห้องพักที่เลือกเพิ่งถูกจองโดยผู้ใช้อื่นระหว่างที่คุณกำลังบันทึก กรุณาเลือกห้องใหม่อีกครั้ง");
+            }
         }
 
         /// <summary>

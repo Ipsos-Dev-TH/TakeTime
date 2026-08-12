@@ -3785,7 +3785,23 @@ namespace Take_Time_BangPhra
                                         }
                                     }
                                     catch { }
-                                    
+
+                                    // เดิม catch นี้กลืนข้อผิดพลาดเงียบ ๆ — บันทึกไม่สำเร็จแต่ผู้ใช้ไม่รู้ตัว
+                                    // และไม่มี log ให้ตามหลัง → บันทึก log เสมอ + แจ้งผู้ใช้
+                                    try
+                                    {
+                                        code2.Logs(conn, "Reserve Save Error",
+                                            $"Reservation_ID={ID}: {ex.Message}", Session["User"]?.ToString() ?? "SYSTEM");
+                                    }
+                                    catch { }
+
+                                    // ห้องถูกจองตัดหน้าระหว่างบันทึก (guard atomic ใน InsertReservationAccommodation)
+                                    // → บอกผู้ใช้ตรง ๆ ให้เลือกห้องใหม่ ไม่ปล่อยเงียบจนเข้าใจว่าจองสำเร็จ
+                                    string userMsg = ex is InvalidOperationException
+                                        ? ex.Message
+                                        : "บันทึกการจองไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ";
+                                    ClientScript.RegisterStartupScript(this.GetType(), "reserveSaveError",
+                                        $"alert('{userMsg.Replace("'", "\\'").Replace("\r", " ").Replace("\n", " ")}');", true);
                                 }
                                 
                             }
@@ -3913,7 +3929,12 @@ namespace Take_Time_BangPhra
                 ClientId = googleClientId,
                 ClientSecret = googleClientSecret
             };
-            return GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes,user:"user",CancellationToken.None).Result;
+            // ⚠️ ห้ามใช้ .Result ตรง ๆ บน request thread ของ ASP.NET — async ที่ไม่ได้ ConfigureAwait(false)
+            // จะรอ SynchronizationContext ที่ถูกบล็อกอยู่ → deadlock (หน้าเว็บหมุนค้าง)
+            // ห่อด้วย Task.Run ให้รันบน thread pool (ไม่มี context) แล้วค่อยรอ
+            return System.Threading.Tasks.Task.Run(() =>
+                GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes, user: "user", CancellationToken.None)
+            ).GetAwaiter().GetResult();
         }
 
         //public void SendLineNotify(string Message)

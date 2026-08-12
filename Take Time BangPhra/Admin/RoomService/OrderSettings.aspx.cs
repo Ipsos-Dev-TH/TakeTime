@@ -14,9 +14,11 @@ namespace Take_Time_BangPhra.Admin.RoomService
         {
             if (!Feature.Guard(this, "RoomService", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             // Admin login check (เหมือนหน้า OrderManagement)
-            if (Session["username"] == null)
+            // ตรวจสิทธิ์แบบเดียวกับหน้าผู้ดูแลอื่น ๆ (เดิมเช็คแค่ว่ามีชื่อผู้ใช้ใน session
+            // ไม่ได้เช็คสิทธิ์จริง และใช้คีย์คนละตัวกับทั้งระบบ)
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Admin/Login.aspx");
+                Response.Redirect("~/Admin/Login");
                 return;
             }
 
