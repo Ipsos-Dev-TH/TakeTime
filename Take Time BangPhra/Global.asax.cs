@@ -105,6 +105,19 @@ namespace Take_Time_BangPhra
                 try { syncService.RollupPosDailySalesIfDue(); }
                 catch (Exception rex) { System.Diagnostics.Trace.TraceError($"PosDailyRollup timer error: {rex.Message}"); }
 
+                // ลงบันทึกรายได้ที่ยังตกหล่น (รูมเซอร์วิส / ค่าห้องจาก OTA) — no-op ถ้าปิดสวิตช์
+                // แยก try ต่อ job กันพังลามถึงคิวหลัก
+                try
+                {
+                    string revConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    var revenue = new RevenuePostingService(revConn);
+                    try { revenue.PostRoomServiceRevenueIfDue(); }
+                    catch (Exception rsx) { System.Diagnostics.Trace.TraceError($"RoomServiceRevenue timer error: {rsx.Message}"); }
+                    try { revenue.PostOtaRoomRevenueIfDue(); }
+                    catch (Exception otx) { System.Diagnostics.Trace.TraceError($"OtaRoomRevenue timer error: {otx.Message}"); }
+                }
+                catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"RevenuePosting timer error: {rvx.Message}"); }
+
                 // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
                 try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
                 catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }

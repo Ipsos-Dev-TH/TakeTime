@@ -113,6 +113,21 @@ namespace Take_Time_BangPhra.Integration
         /// → sync รายได้+VAT ขาย + COGS ตัดสต๊อก อัตโนมัติผ่าน background timer. default ปิด</summary>
         public bool IsPosDailyRollupEnabled => GetConfig("Nexaacc_PosDailyRollup", "0") == "1";
 
+        /// <summary>
+        /// ลงบันทึกรายได้รูมเซอร์วิส (สั่งอาหารผ่าน Guest Portal) — ออเดอร์ที่ลูกค้าจ่ายเอง (โอน/เงินสด)
+        /// รวบเป็นใบรับเงินสด 1 ใบ/วัน/วิธีจ่าย, ออเดอร์ที่ลงบิลห้องโพสต์เฉพาะต้นทุน (COGS) กันรายได้ซ้ำ.
+        /// default ปิด
+        /// </summary>
+        public bool IsRoomServiceRevenueEnabled => GetConfig("Nexaacc_RoomServiceRevenue", "0") == "1";
+
+        /// <summary>
+        /// ลงบันทึกรายได้ค่าห้องของการจองจาก OTA (ที่ไม่ออกใบเสร็จในระบบ) —
+        /// Dr ลูกหนี้ OTA / Cr รายได้ห้อง / Cr ภาษีขาย ต่อการจอง เมื่อเลยวันเช็คเอาท์.
+        /// ต้อง map บัญชี OTA_RECEIVABLE + ใช้ acc_ key (company endpoints) ถึงจะบังคับบัญชีลูกหนี้ได้.
+        /// default ปิด
+        /// </summary>
+        public bool IsOtaRoomRevenueEnabled => GetConfig("Nexaacc_OtaRoomRevenue", "0") == "1";
+
         /// <summary>ดันจำนวนสต๊อก (ขาออก) TakeTime → NextAcc /product/stock/adjust (qty-only). default ปิด</summary>
         public bool IsStockQtySyncEnabled => GetConfig("Nexaacc_StockQtySync", "0") == "1";
         /// <summary>ดึงจำนวนสต๊อก (ขากลับ) NextAcc → TakeTime (ปรับสต๊อกฝั่ง NextAcc เอง). default ปิด</summary>

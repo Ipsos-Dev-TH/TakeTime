@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -70,6 +70,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "voucherSyncMode", config.VoucherSyncMode },
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "posDailyRollup", config.IsPosDailyRollupEnabled },
+                    { "roomServiceRevenue", config.IsRoomServiceRevenueEnabled },
+                    { "otaRoomRevenue", config.IsOtaRoomRevenueEnabled },
                     { "stockInUseGRNI", config.IsStockInUseGRNI },
                     { "stockInSkipJournal", config.IsStockInSkipJournal },
                     { "stockQtySync", config.IsStockQtySyncEnabled },
@@ -343,6 +345,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("voucherSyncMode")) config.SetConfig("Nexaacc_SyncMode_Voucher", data["voucherSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("posDailyRollup")) config.SetConfig("Nexaacc_PosDailyRollup", BoolToFlag(data["posDailyRollup"]));
+                if (data.ContainsKey("roomServiceRevenue")) config.SetConfig("Nexaacc_RoomServiceRevenue", BoolToFlag(data["roomServiceRevenue"]));
+                if (data.ContainsKey("otaRoomRevenue")) config.SetConfig("Nexaacc_OtaRoomRevenue", BoolToFlag(data["otaRoomRevenue"]));
                 if (data.ContainsKey("stockInUseGRNI")) config.SetConfig("Nexaacc_StockIn_UseGRNI", BoolToFlag(data["stockInUseGRNI"]));
                 if (data.ContainsKey("stockInSkipJournal")) config.SetConfig("Nexaacc_StockIn_SkipJournal", BoolToFlag(data["stockInSkipJournal"]));
                 if (data.ContainsKey("stockQtySync")) config.SetConfig("Nexaacc_StockQtySync", BoolToFlag(data["stockQtySync"]));

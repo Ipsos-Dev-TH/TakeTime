@@ -829,6 +829,7 @@
     <Compile Include="Class\AccountingArithmeticValidator.cs" />
     <Compile Include="Class\AccountingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.cs" />
+    <Compile Include="Class\Integration\RevenuePostingService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />
     <Compile Include="Class\Integration\AccountingConfig.cs" />
     <Compile Include="Class\Integration\AccountingModels.cs" />

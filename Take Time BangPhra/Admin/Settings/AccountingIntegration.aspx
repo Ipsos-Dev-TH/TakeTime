@@ -1,4 +1,4 @@
-<%@ Page Title="Accounting Integration Settings" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AccountingIntegration.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AccountingIntegration" %>
+﻿<%@ Page Title="Accounting Integration Settings" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AccountingIntegration.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AccountingIntegration" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -211,6 +211,37 @@
                         เป็น <b>ใบรับเงินสดสรุป 1 ใบ/วัน/แหล่งรับเงิน</b> → ส่ง NextAcc (Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย)
                         + ตัดต้นทุน (Dr COGS/Cr สินค้าคงเหลือ) อัตโนมัติเบื้องหลัง (ไม่ต้องกดรายวัน).
                         กรณีที่ออกใบกำกับในระบบยังยิงทีละใบเหมือนเดิม.
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>รูมเซอร์วิส (สั่งอาหารผ่าน Guest Portal) → ลงบัญชี</label>
+                    <select id="cfgRoomServiceRevenue">
+                        <option value="false">ปิด — ไม่ลงบัญชี (ออเดอร์ที่ลูกค้าจ่ายเองจะไม่มีรายได้ในระบบบัญชี และไม่ตัดต้นทุน)</option>
+                        <option value="true">เปิด — ลงรายได้ + ตัดต้นทุนอัตโนมัติ</option>
+                    </select>
+                    <div class="help-text">
+                        เปิดแล้วระบบจะจัดการออเดอร์รูมเซอร์วิสของ <b>วันที่ผ่านไปแล้ว</b> ให้อัตโนมัติ:<br />
+                        • <b>ลูกค้าจ่ายเอง (โอน/เงินสด)</b> → รวบเป็น <b>ใบรับเงินสด 1 ใบ/วัน/วิธีจ่าย</b>
+                        (Dr เงินสด/ธนาคาร · Cr รายได้สินค้า · Cr ภาษีขาย) + ตัดต้นทุน (Dr COGS · Cr สินค้าคงเหลือ)<br />
+                        • <b>ลงบิลห้อง (Charge to room)</b> → <b>ตัดต้นทุนอย่างเดียว</b> เพราะรายได้ไปกับใบเสร็จตอนเช็คเอาท์อยู่แล้ว
+                        (ไม่โพสต์รายได้ซ้ำ)<br />
+                        ต้องรัน migration <code>PHASE18_20</code> ก่อน — ออเดอร์เก่าก่อนติดตั้งถูกทำเครื่องหมาย LEGACY ไม่ถูกลงย้อนหลัง
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>รายได้ค่าห้องจาก OTA (Agoda/Booking) → ลงบัญชี</label>
+                    <select id="cfgOtaRoomRevenue">
+                        <option value="false">ปิด — ไม่ลงบัญชี (การจองจาก OTA ไม่มีใบเสร็จ รายได้ค่าห้องจึงไม่เข้าบัญชีเลย)</option>
+                        <option value="true">เปิด — ลงรายได้ตามการจองจริง เป็นลูกหนี้ OTA</option>
+                    </select>
+                    <div class="help-text">
+                        การจองที่เข้ามาทางอีเมล OTA ถูกสร้างแบบ "ไม่ออกใบเสร็จ" → รายได้ค่าห้องไม่เคยเข้าบัญชี
+                        เปิดตัวเลือกนี้ ระบบจะโพสต์ <b>ต่อการจอง</b> หลังเลยวันเช็คเอาท์:
+                        <b>Dr ลูกหนี้ OTA · Cr รายได้ห้อง · Cr ภาษีขาย</b> (ยอดขายเต็มที่ลูกค้าจ่าย OTA)
+                        แล้วเงินที่ OTA โอนเข้ามาจริงค่อยไปตัดลูกหนี้ก้อนนี้ตอนปิดงวด payout (ค่าคอมเป็นค่าใช้จ่ายแยก)<br />
+                        <b>ต้องตั้งก่อน:</b> map บัญชี <code>OTA_RECEIVABLE</code> (ลูกหนี้ OTA) ในผังบัญชี + กด "ดึง Chart of Accounts"
+                        + ตั้ง Company ID ให้ใช้ company endpoints ได้ — ถ้ายังไม่ครบ ระบบจะ<b>ข้ามและเขียน log แจ้ง</b>
+                        (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน migration <code>PHASE18_20</code> และ <code>PHASE18_11</code>
                     </div>
                 </div>
                 <div class="config-item">
@@ -1176,6 +1207,8 @@
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgPosDailyRollup').value = cfg.posDailyRollup ? 'true' : 'false';
+                document.getElementById('cfgRoomServiceRevenue').value = cfg.roomServiceRevenue ? 'true' : 'false';
+                document.getElementById('cfgOtaRoomRevenue').value = cfg.otaRoomRevenue ? 'true' : 'false';
                 document.getElementById('cfgStockQtySync').value = cfg.stockQtySync ? 'true' : 'false';
                 document.getElementById('cfgStockQtyPull').value = cfg.stockQtyPull ? 'true' : 'false';
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
@@ -1290,6 +1323,8 @@
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
                 posDailyRollup: document.getElementById('cfgPosDailyRollup').value === 'true',
+                roomServiceRevenue: document.getElementById('cfgRoomServiceRevenue').value === 'true',
+                otaRoomRevenue: document.getElementById('cfgOtaRoomRevenue').value === 'true',
                 stockQtySync: document.getElementById('cfgStockQtySync').value === 'true',
                 stockQtyPull: document.getElementById('cfgStockQtyPull').value === 'true',
                 attachFiles: document.getElementById('cfgAttachFiles').value,
