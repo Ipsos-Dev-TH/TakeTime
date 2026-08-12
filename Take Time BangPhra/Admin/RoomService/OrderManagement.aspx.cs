@@ -171,7 +171,14 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     lblStatus.Text = GetStatusText(order["Order_Status"].ToString());
                     lblPayment.Text = GetPaymentText(order["Payment_Method"].ToString(), order["Payment_Status"].ToString());
                     lblDeliveryNote.Text = string.IsNullOrEmpty(order["Delivery_Instructions"].ToString()) ? "-" : order["Delivery_Instructions"].ToString();
-                    lblTotalAmount.Text = Convert.ToDecimal(order["Total_Amount"]).ToString("N0");
+                    // ยอดรวม + แยกให้เห็นว่ามีค่าบริการรวมอยู่เท่าไหร่ (คอลัมน์จาก PHASE18_21)
+                    decimal totalAmt = Convert.ToDecimal(order["Total_Amount"]);
+                    decimal svcAmt = 0m;
+                    if (order.Table.Columns.Contains("Service_Charge") && order["Service_Charge"] != DBNull.Value)
+                        svcAmt = Convert.ToDecimal(order["Service_Charge"]);
+                    lblTotalAmount.Text = svcAmt > 0m
+                        ? $"{totalAmt:N0} <small style='color:#7a8794; font-weight:400;'>(ค่าสินค้า {(totalAmt - svcAmt):N0} + ค่าบริการ {svcAmt:N0})</small>"
+                        : totalAmt.ToString("N0");
 
                     // Update button visibility based on status
                     string status = order["Order_Status"].ToString();

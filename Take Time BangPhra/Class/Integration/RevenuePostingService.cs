@@ -115,8 +115,12 @@ namespace Take_Time_BangPhra.Integration
                 return;
             }
 
-            decimal grossTotal = 0m;
-            foreach (DataRow r in prod.Rows) grossTotal += SafeDec(r["Gross"]);
+            decimal itemsTotal = 0m;
+            foreach (DataRow r in prod.Rows) itemsTotal += SafeDec(r["Gross"]);
+
+            // ค่าบริการที่เก็บจากลูกค้า (PHASE18_21) — เป็นรายได้เพิ่มจากค่าสินค้า ต้องลงบัญชีด้วย
+            decimal serviceChargeTotal = SumServiceCharge(day, payMethod);
+            decimal grossTotal = itemsTotal + serviceChargeTotal;
 
             // ── รายได้ (เฉพาะออเดอร์ที่ลูกค้าจ่ายเอง) ──
             if (!chargeToRoom && grossTotal > 0m)
@@ -136,8 +140,11 @@ namespace Take_Time_BangPhra.Integration
                     isDeposit: false, paymentMethod: paidHowName,
                     revenueType: "PRODUCT_REVENUE", paymentAccountId: paidHowAccId);
 
-                CreateSummaryReceiptRow(postRef, 0, day, grossTotal, paidHowName,
-                    $"รูมเซอร์วิสสรุปรายวัน {day:dd/MM/yyyy} ({paidHowName})", "3");
+                // บรรทัดที่ 1 = ค่าสินค้า, บรรทัดที่ 2 = ค่าบริการ (ถ้ามี) → ยอดรวมของบรรทัด
+                // ต้องเท่ากับยอดใบเสร็จ ไม่งั้น mapper จะเตือน line sum ≠ totalAmount
+                CreateSummaryReceiptRow(postRef, 0, day, itemsTotal, paidHowName,
+                    $"รูมเซอร์วิสสรุปรายวัน {day:dd/MM/yyyy} ({paidHowName})", "3",
+                    serviceChargeTotal, "ค่าบริการรูมเซอร์วิส");
             }
 
             // ── ต้นทุน/สต๊อก (ทุกออเดอร์ รวมที่ลงบิลห้อง) ──
@@ -157,8 +164,29 @@ namespace Take_Time_BangPhra.Integration
 
             MarkRoomServiceRows(day, payMethod, postRef);
             Log($"RoomServiceRevenue: {day:yyyy-MM-dd} ({payMethod}) " +
-                $"{(chargeToRoom ? "COGS อย่างเดียว (รายได้อยู่ในใบเสร็จห้อง)" : $"รายได้ {grossTotal:N2} + COGS")} " +
+                $"{(chargeToRoom ? "COGS อย่างเดียว (รายได้อยู่ในใบเสร็จห้อง)" : $"รายได้ {grossTotal:N2} (สินค้า {itemsTotal:N2} + ค่าบริการ {serviceChargeTotal:N2}) + COGS")} " +
                 $"— {prod.Rows.Count} รายการ ref={postRef}");
+        }
+
+        /// <summary>
+        /// รวมค่าบริการ (Service Charge) ของกลุ่ม (วัน × วิธีจ่าย) ที่ยังไม่โพสต์.
+        /// คอลัมน์มาจาก PHASE18_21 — ฐานที่ยังไม่อัปเดตคืน 0 (พฤติกรรมเดิม)
+        /// </summary>
+        private decimal SumServiceCharge(DateTime day, string payMethod)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT ISNULL(SUM(o.Service_Charge), 0)
+                        FROM Guest_Room_Service_Orders o
+                       WHERE o.Acct_Post_Ref IS NULL
+                         AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
+                         AND CAST(o.Order_Date AS DATE) = @d
+                         AND o.Payment_Method = @pm",
+                    new Dictionary<string, object> { { "@d", day.Date }, { "@pm", payMethod } });
+                return dt?.Rows.Count > 0 ? SafeDec(dt.Rows[0][0]) : 0m;
+            }
+            catch { return 0m; }   // ยังไม่ได้รัน PHASE18_21
         }
 
         private void MarkRoomServiceRows(DateTime day, string payMethod, string postRef)
@@ -355,14 +383,18 @@ namespace Take_Time_BangPhra.Integration
         /// "3" = สินค้า (ใช้กับรูมเซอร์วิส เหมือนใบรวบยอดขายหน้าร้าน),
         /// "0" = ไม่ระบุชนิด → mapper คืน ROOM_REVENUE (ใช้กับค่าห้องจาก OTA)
         /// </param>
+        /// <param name="extraLineAmount">ยอดบรรทัดที่ 2 (เช่น ค่าบริการ) — 0 = ไม่มีบรรทัดนี้</param>
+        /// <param name="extraLineText">คำอธิบายบรรทัดที่ 2</param>
         private void CreateSummaryReceiptRow(string receiptId, int reservationId, DateTime docDate,
-            decimal total, string paidTypeName, string lineText, string productTypeId)
+            decimal total, string paidTypeName, string lineText, string productTypeId,
+            decimal extraLineAmount = 0m, string extraLineText = null)
         {
             try
             {
+                decimal docTotal = total + (extraLineAmount > 0m ? extraLineAmount : 0m);
                 bool useVat = BusinessUsesVat();
-                decimal exVat = useVat ? Math.Round(total / 1.07m, 2, MidpointRounding.AwayFromZero) : total;
-                decimal vat = useVat ? (total - exVat) : 0m;
+                decimal exVat = useVat ? Math.Round(docTotal / 1.07m, 2, MidpointRounding.AwayFromZero) : docTotal;
+                decimal vat = useVat ? (docTotal - exVat) : 0m;
 
                 _code.DatabaseInsertSafe(_conn,
                     "IF NOT EXISTS (SELECT 1 FROM [dbo].[Account_Receipt] WHERE [ID] = @ID) " +
@@ -373,7 +405,7 @@ namespace Take_Time_BangPhra.Integration
                     new Dictionary<string, object>
                     {
                         { "@ID", receiptId }, { "@ResID", reservationId.ToString() },
-                        { "@CreatedDate", docDate.Date }, { "@TotalAmount", total },
+                        { "@CreatedDate", docDate.Date }, { "@TotalAmount", docTotal },
                         { "@Vat", vat }, { "@ExVat", exVat }, { "@PaidType", paidTypeName }
                     });
 
@@ -388,6 +420,25 @@ namespace Take_Time_BangPhra.Integration
                         { "@ReceiptID", receiptId }, { "@PType", productTypeId },
                         { "@Data", lineText }, { "@Total", total }
                     });
+
+                // บรรทัดค่าบริการ — แยกบรรทัดเพื่อให้เห็นในเอกสารและแยกบัญชีรายได้ได้
+                // (ProductType 0 → mapper คืนบัญชีรายได้ตั้งต้น; ตั้ง SERVICE_CHARGE_REVENUE
+                //  ในผังบัญชีเพื่อแยกบัญชีจริงได้ภายหลัง)
+                if (extraLineAmount > 0m)
+                {
+                    _code.DatabaseInsertSafe(_conn,
+                        "IF NOT EXISTS (SELECT 1 FROM [dbo].[Account_Receipt_Detail] " +
+                        "               WHERE [Receipt_ID] = @ReceiptID AND [Number] = 2) " +
+                        "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                        "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount]," +
+                        "[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                        "VALUES (2,@ReceiptID,@PType,'0',@Data,1,N'ครั้ง',@Total,@Total)",
+                        new Dictionary<string, object>
+                        {
+                            { "@ReceiptID", receiptId }, { "@PType", productTypeId },
+                            { "@Data", extraLineText ?? "ค่าบริการ" }, { "@Total", extraLineAmount }
+                        });
+                }
             }
             catch (Exception ex)
             {

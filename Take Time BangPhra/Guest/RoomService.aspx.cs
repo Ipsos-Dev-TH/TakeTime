@@ -33,6 +33,9 @@ namespace Take_Time_BangPhra.Guest
                 return;
             }
 
+            // ต้องลงทุกรอบ (รวม postback) ไม่งั้นตะกร้าหลัง postback จะไม่รู้ค่าบริการ
+            PublishServiceChargeSetting();
+
             if (!IsPostBack)
             {
                 ApplyOrderingAvailability();
@@ -64,6 +67,30 @@ namespace Take_Time_BangPhra.Guest
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"ApplyOrderingAvailability error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ส่งการตั้งค่าค่าบริการให้ JS แสดงยอดในตะกร้าแบบสด ๆ
+        /// (แสดงผลอย่างเดียว — ยอดที่บันทึกจริงคำนวณใหม่ฝั่งเซิร์ฟเวอร์ตอนกดสั่งเสมอ)
+        /// </summary>
+        private void PublishServiceChargeSetting()
+        {
+            try
+            {
+                var svc = _guestPortalService.GetServiceChargeSetting();
+                string label = (svc.Label ?? "ค่าบริการ").Replace("\\", "\\\\").Replace("'", "\\'");
+                ClientScript.RegisterClientScriptBlock(GetType(), "rsServiceCharge",
+                    "window.rsServiceCharge = {" +
+                    $"mode:'{svc.Mode}'," +
+                    $"value:{svc.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}," +
+                    $"max:{svc.MaxAmount.ToString(System.Globalization.CultureInfo.InvariantCulture)}," +
+                    $"label:'{label}'" +
+                    "};", true);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"PublishServiceChargeSetting error: {ex.Message}");
             }
         }
 
@@ -284,22 +311,29 @@ namespace Take_Time_BangPhra.Guest
                     return;
                 }
 
-                // Calculate total
-                decimal totalAmount = 0;
+                // Calculate subtotal (ค่าสินค้าล้วน)
+                decimal subtotal = 0;
+                int totalQuantity = 0;
                 foreach (var item in cartItems)
                 {
                     decimal price = Convert.ToDecimal(item["price"]);
                     int quantity = Convert.ToInt32(item["quantity"]);
-                    totalAmount += price * quantity;
+                    subtotal += price * quantity;
+                    totalQuantity += quantity;
                 }
 
-                // Check minimum order amount
-                if (totalAmount < MIN_ORDER_AMOUNT)
+                // Check minimum order amount — เทียบกับ "ค่าสินค้า" ไม่รวมค่าบริการ
+                if (subtotal < MIN_ORDER_AMOUNT)
                 {
                     ScriptManager.RegisterStartupScript(this, GetType(), "alert",
-                        $"alert('ยอดสั่งซื้อขั้นต่ำ ฿{MIN_ORDER_AMOUNT:N0}\\nยอดปัจจุบัน: ฿{totalAmount:N0}');", true);
+                        $"alert('ยอดสั่งซื้อขั้นต่ำ ฿{MIN_ORDER_AMOUNT:N0}\\nยอดปัจจุบัน: ฿{subtotal:N0}');", true);
                     return;
                 }
+
+                // ค่าบริการ — คิดฝั่งเซิร์ฟเวอร์เสมอตามที่แอดมินตั้งไว้ (ไม่เชื่อยอดจากหน้าเว็บ)
+                var svc = _guestPortalService.CalculateServiceCharge(subtotal, totalQuantity);
+                decimal serviceCharge = svc.Amount;
+                decimal totalAmount = subtotal + serviceCharge;
 
                 // Get payment method
                 string paymentMethod = Request.Form["paymentMethod"] ?? "CHARGE_TO_ROOM";
@@ -328,7 +362,8 @@ namespace Take_Time_BangPhra.Guest
                     txtDeliveryInstructions.Text.Trim(),
                     totalAmount,
                     paymentMethod,
-                    paymentSlipPath);
+                    paymentSlipPath,
+                    serviceCharge);
 
                 if (orderId == 0)
                 {

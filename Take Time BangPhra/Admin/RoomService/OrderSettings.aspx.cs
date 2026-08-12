@@ -52,7 +52,19 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 txtClosedMessage.Text = s["Closed_Message"] == DBNull.Value ? "" : s["Closed_Message"].ToString();
             }
 
+            LoadServiceChargeSettings();
             RefreshStatusBadge();
+        }
+
+        /// <summary>โหลดการตั้งค่าค่าบริการ (PHASE18_21) — ไม่มีคอลัมน์ = แสดงค่าเริ่มต้น "ไม่คิด"</summary>
+        private void LoadServiceChargeSettings()
+        {
+            var svc = _service.GetServiceChargeSetting();
+            if (ddlServiceChargeMode.Items.FindByValue(svc.Mode) != null)
+                ddlServiceChargeMode.SelectedValue = svc.Mode;
+            txtServiceChargeValue.Text = svc.Value > 0m ? svc.Value.ToString("0.##") : "";
+            txtServiceChargeMax.Text = svc.MaxAmount > 0m ? svc.MaxAmount.ToString("0.##") : "";
+            txtServiceChargeLabel.Text = svc.Label ?? "";
         }
 
         private static string FormatTime(object value, string fallback)
@@ -92,8 +104,18 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     txtClosedMessage.Text.Trim(),
                     updatedBy);
 
+                // ค่าบริการ — เก็บแยก (คอลัมน์จาก PHASE18_21)
+                decimal svcValue, svcMax;
+                decimal.TryParse((txtServiceChargeValue.Text ?? "").Trim(), out svcValue);
+                decimal.TryParse((txtServiceChargeMax.Text ?? "").Trim(), out svcMax);
+                bool okSvc = _service.SaveServiceChargeSettings(
+                    ddlServiceChargeMode.SelectedValue, svcValue, svcMax, txtServiceChargeLabel.Text);
+
                 lblSaved.Visible = true;
-                lblSaved.Text = ok ? "✔ บันทึกแล้ว" : "⚠ บันทึกไม่สำเร็จ (ตรวจสอบว่ารันสคริปต์ PHASE13 แล้ว)";
+                if (ok && !okSvc)
+                    lblSaved.Text = "✔ บันทึกเวลาทำการแล้ว — แต่บันทึกค่าบริการไม่สำเร็จ (ต้องรันสคริปต์ PHASE18_21 ก่อน)";
+                else
+                    lblSaved.Text = ok ? "✔ บันทึกแล้ว" : "⚠ บันทึกไม่สำเร็จ (ตรวจสอบว่ารันสคริปต์ PHASE13 แล้ว)";
 
                 // โหลดค่ากลับ + อัปเดตป้ายสถานะตามค่าใหม่
                 LoadSettings();
