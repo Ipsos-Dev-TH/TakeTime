@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.Services;
@@ -13,6 +13,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "RoomService", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
 
             // Check admin login

@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // AIReviewDashboard.aspx.cs
 // AI Review Dashboard - Sentiment analysis, review management, response tools
 // ===========================================================================
@@ -26,6 +26,7 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Reviews", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             // Auth check
             try
             {

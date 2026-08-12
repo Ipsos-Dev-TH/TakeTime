@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // MembershipManagement.aspx.cs
 // Admin member management for the restructured dual-pool loyalty system.
 // Search members, view/adjust points, manage reward redemptions.
@@ -21,6 +21,7 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Loyalty", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
             _loyaltyService = new LoyaltyService(_connectionString);
 

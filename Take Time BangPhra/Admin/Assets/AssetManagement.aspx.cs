@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.Assets
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Assets", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             assetService = new AssetService();
             code = new _Default();
             conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;

@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.HR
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             employeeService = new EmployeeService();
 
             if (!IsPostBack)

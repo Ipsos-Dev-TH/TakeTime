@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.Chat
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Chat", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             if (Session["permission"]?.ToString() != "True" ||
                 (Session["User"]?.ToString() != "Owner" && Session["User"]?.ToString() != "Admin"))
             {

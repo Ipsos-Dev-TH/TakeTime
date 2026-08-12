@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.Settings
     {
         private static readonly Dictionary<string, string> CategoryTitle = new Dictionary<string, string>
         {
+            { "FEATURE",  "ฟีเจอร์ (เปิด/ปิดรายโมดูล)" },
             { "LINE",     "LINE Official Account" },
             { "TELEGRAM", "Telegram" },
             { "EMAIL",    "อีเมล (SMTP)" },
@@ -25,6 +26,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         private static readonly Dictionary<string, string> CategoryIcon = new Dictionary<string, string>
         {
+            { "FEATURE", "fa-toggle-on" },
             { "LINE", "fa-comment-dots" }, { "TELEGRAM", "fa-paper-plane" },
             { "EMAIL", "fa-envelope" }, { "API", "fa-key" },
             { "PATH", "fa-folder-open" }, { "GENERAL", "fa-gear" }
@@ -32,6 +34,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         private static readonly Dictionary<string, string> CategoryNote = new Dictionary<string, string>
         {
+            { "FEATURE",  "ปิดโมดูลที่ยังไม่ใช้ = เมนูซ่อน + เข้าหน้านั้นไม่ได้ + การ์ดใน Guest Portal หาย (ข้อมูลไม่ถูกลบ เปิดกลับมาใช้ต่อได้) — ค่าว่าง = ใช้ค่าเริ่มต้นตามคำอธิบาย" },
             { "LINE",     "Token ที่ใช้ส่งข้อความทั้งระบบ (แจ้งเตือน, รายงานรายวัน, ใบลา)" },
             { "TELEGRAM", "แจ้งเตือนภายในทีม — Chat ID เดิมฝังอยู่ในโค้ด ตอนนี้ตั้งที่นี่ได้แล้ว" },
             { "EMAIL",    "ใช้ส่งใบเสร็จ / e-Tax / แจ้งลูกค้า (Gmail ต้องใช้ App Password)" },

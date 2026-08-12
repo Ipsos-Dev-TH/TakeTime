@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // RedemptionTerminal.aspx.cs
 // Staff-operated reward redemption terminal.
 // Staff selects a reward and scans the customer's QR (or searches by phone)
@@ -19,6 +19,7 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Loyalty", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             try
             {
                 if (Session["permission"]?.ToString() != "True" ||

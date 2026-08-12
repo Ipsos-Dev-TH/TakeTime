@@ -593,21 +593,27 @@
                             </ul>
                         </li>
                         
+                        <asp:PlaceHolder ID="phNavActivitiesPub" runat="server">
                         <li><a runat="server" href="~/Activities">
                             <i class="fas fa-person-hiking"></i> กิจกรรม
                         </a></li>
+                        </asp:PlaceHolder>
 
                         <li><a runat="server" href="~/Contact">
                             <i class="fas fa-phone-alt"></i> ติดต่อเรา
                         </a></li>
-                        
+
+                        <asp:PlaceHolder ID="phNavAffiliatePub" runat="server">
                         <li><a runat="server" href="~/Affiliate/Login">
                             <i class="fas fa-handshake"></i> Affiliate
                         </a></li>
+                        </asp:PlaceHolder>
 
+                        <asp:PlaceHolder ID="phNavGuestPortal" runat="server">
                         <li><a runat="server" href="~/Guest/Portal">
                             <i class="fas fa-mobile-alt"></i> Guest Portal
                         </a></li>
+                        </asp:PlaceHolder>
 
                         <!-- Admin Mega Menu -->
                         <asp:PlaceHolder ID="pnlAdminNav" runat="server" Visible="false">
@@ -633,21 +639,27 @@
                                                 <li><a runat="server" href="~/ReservationList">
                                                     <i class="fas fa-list-alt"></i> รายการจองทั้งหมด
                                                 </a></li>
+                                                <asp:PlaceHolder ID="phNavHousekeeping" runat="server">
                                                 <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
                                                     <i class="fas fa-broom"></i> Housekeeping
                                                 </a></li>
+                                                </asp:PlaceHolder>
+                                                <asp:PlaceHolder ID="phNavChat" runat="server">
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/Chat/OmniChannelInbox">
                                                     <i class="fas fa-inbox"></i> Omni-Channel Inbox
                                                 </a></li>
+                                                </asp:PlaceHolder>
+                                                <asp:PlaceHolder ID="phNavRoomService" runat="server">
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
                                                     <i class="fas fa-concierge-bell"></i> Room Service
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderSettings">
                                                     <i class="fas fa-store-alt"></i> ตั้งค่าเปิด-ปิดสั่งของ
                                                 </a></li>
+                                                </asp:PlaceHolder>
                                             </ul>
                                         </div>
 
@@ -699,6 +711,7 @@
                                                 <li><a runat="server" href="~/Admin/CRM/GuestProfile">
                                                     <i class="fas fa-user-circle"></i> Guest Profile 360
                                                 </a></li>
+                                                <asp:PlaceHolder ID="phNavLoyalty" runat="server">
                                                 <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
                                                     <i class="fas fa-trophy"></i> Loyalty Dashboard
                                                 </a></li>
@@ -708,12 +721,15 @@
                                                 <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
                                                     <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
                                                 </a></li>
+                                                </asp:PlaceHolder>
+                                                <asp:PlaceHolder ID="phNavReviews" runat="server">
                                                 <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
                                                     <i class="fas fa-star"></i> Review Management
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/CRM/AIReviewDashboard">
                                                     <i class="fas fa-chart-line"></i> AI Review Analysis
                                                 </a></li>
+                                                </asp:PlaceHolder>
                                             </ul>
                                         </div>
 
@@ -725,24 +741,32 @@
                                                     <li><a runat="server" href="~/Admin/Dashboard">
                                                         <i class="fas fa-tachometer-alt"></i> Dashboard
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavChannelMgr" runat="server">
                                                     <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
                                                         <i class="fas fa-network-wired"></i> Channel Manager
                                                     </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavDynPricing" runat="server">
                                                     <li><a runat="server" href="~/Admin/Pricing/DynamicPricing">
                                                         <i class="fas fa-tags"></i> Dynamic Pricing
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/HolidayPrice">
                                                         <i class="fas fa-calendar-day"></i> ราคาวันหยุด
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavMaintenance" runat="server">
                                                     <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
                                                         <i class="fas fa-tools"></i> Maintenance
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/Notifications/Settings">
                                                         <i class="fas fa-bell"></i> Notifications
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavActivityMgmt" runat="server">
                                                     <li><a runat="server" href="~/Admin/Settings/ActivityManagement">
                                                         <i class="fas fa-person-hiking"></i> จัดการกิจกรรม
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/Settings/LineAccount">
                                                         <i class="fab fa-line"></i> บัญชี LINE ของฉัน
                                                     </a></li>
@@ -755,21 +779,27 @@
                                                     <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
                                                         <i class="fas fa-calculator"></i> Accounting Integration
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavAI" runat="server">
                                                     <li><a runat="server" href="~/Admin/Settings/AISettings">
                                                         <i class="fas fa-robot"></i> AI Settings (DeepSeek)
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/AIKnowledgeBase">
                                                         <i class="fas fa-brain"></i> AI Knowledge Base
                                                     </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavChatSettings" runat="server">
                                                     <li><a runat="server" href="~/Admin/Chat/ChannelSettings">
                                                         <i class="fas fa-plug"></i> Channel Settings
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
                                                         <i class="fas fa-concierge-bell"></i> Guest Experience
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavTier" runat="server">
                                                     <li><a runat="server" href="~/Account/TierBenefitsManagement">
                                                         <i class="fas fa-crown"></i> Tier Benefits
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Admin/ManageFacilities">
                                                         <i class="fas fa-swimming-pool"></i> จัดการสิ่งอำนวยความสะดวก
@@ -804,9 +834,11 @@
                                                     <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
                                                         <i class="fas fa-chart-pie"></i> Customer Analytics
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavAIReport" runat="server">
                                                     <li><a runat="server" href="~/Admin/Report/AIReportSummary">
                                                         <i class="fas fa-robot"></i> AI Report Summary
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/DatabaseManagement">
                                                         <i class="fas fa-database"></i> ฐานข้อมูล
                                                     </a></li>
@@ -816,6 +848,7 @@
                                                     <li><a runat="server" href="~/Admin/ProductImages">
                                                         <i class="fas fa-images"></i> จัดการรูปสินค้า
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavHR" runat="server">
                                                     <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
                                                         <i class="fas fa-user-tie"></i> จัดการพนักงาน
@@ -835,19 +868,26 @@
                                                     <li><a runat="server" href="~/Admin/HR/OTManagement">
                                                         <i class="fas fa-list-alt"></i> จัดการ OT ทั้งหมด
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
+                                                    <asp:PlaceHolder ID="phNavAssets" runat="server">
                                                     <li><a runat="server" href="~/Admin/Assets/AssetManagement">
                                                         <i class="fas fa-boxes"></i> สินทรัพย์
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Admin/Vendor">
                                                         <i class="fas fa-store"></i> Vendor
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavAffiliateAdmin" runat="server">
                                                     <li><a runat="server" href="~/Admin/AffiliateManagement">
                                                         <i class="fas fa-handshake"></i> จัดการ Affiliate
                                                     </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavWebAnalytics" runat="server">
                                                     <li><a runat="server" href="~/Admin/WebAnalytics">
                                                         <i class="fas fa-chart-line"></i> Web Analytics
                                                     </a></li>
+                                                    </asp:PlaceHolder>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
