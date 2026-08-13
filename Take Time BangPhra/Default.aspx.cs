@@ -357,7 +357,7 @@ namespace Take_Time_BangPhra
                 Response.Redirect("./Default.aspx?selecteddate="+ Calendar1.SelectedDate.ToString("yyyy-MM-dd"));
                 
             }
-            if (DateTime.Now > Calendar1.SelectedDate.AddDays(1) && Session["permission"] == "No")
+            if (DateTime.Now > Calendar1.SelectedDate.AddDays(1) && Session["permission"]?.ToString() == "No")
             {
                 GridView1.Visible = false;
                 
@@ -633,7 +633,7 @@ namespace Take_Time_BangPhra
             }
             else
             {
-                if (DateTime.Now.AddDays(-1) > e.Day.Date && Session["permission"] == "No")
+                if (DateTime.Now.AddDays(-1) > e.Day.Date && Session["permission"]?.ToString() == "No")
                 {
                     e.Cell.ForeColor = System.Drawing.Color.Transparent;
                 }
@@ -660,7 +660,6 @@ namespace Take_Time_BangPhra
                         elseReservationParams);
                     DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by ID asc"));
                     int maxAccommodation = dtAccommodation.Rows.Count;
-                    int totalAmount = 0;
 
                     for (int j = 0; j < dtAccommodation.Rows.Count; j++)
                     {

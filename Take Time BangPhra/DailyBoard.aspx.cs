@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -53,7 +53,7 @@ namespace Take_Time_BangPhra
                       AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
 
             if (dt == null || dt.Rows.Count == 0)
-                return Header(day, 0, 0, 0, 0, 0) +
+                return BuildHeader(day, 0, 0, 0, 0, 0) +
                        "<div class='empty'>ไม่มีผู้เข้าพักในวันนี้</div>";
 
             // ห้องพักต่อการจอง
@@ -174,7 +174,7 @@ namespace Take_Time_BangPhra
             rows.Sort((a, b) => a.Order.CompareTo(b.Order));
 
             var sb = new StringBuilder();
-            sb.Append(Header(day, rows.Count, roomCount, checkIn, checkOut, dueTotal));
+            sb.Append(BuildHeader(day, rows.Count, roomCount, checkIn, checkOut, dueTotal));
 
             // ทุกสีสั่งผ่าน bgcolor attribute + inline style — HtmlRenderer วาด CSS class
             // บางตัวไม่ครบ (พื้นหลังหาย → ตัวหนังสือขาวบนพื้นขาว มองไม่เห็น)
@@ -271,7 +271,7 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>แถบหัวเรื่อง + สรุปตัวเลขประจำวัน</summary>
-        private string Header(DateTime day, int bookings, int rooms, int checkIn, int checkOut, decimal due)
+        private string BuildHeader(DateTime day, int bookings, int rooms, int checkIn, int checkOut, decimal due)
         {
             string thaiDate;
             try { thaiDate = day.ToString("dddd d MMMM yyyy", new CultureInfo("th-TH")); }
