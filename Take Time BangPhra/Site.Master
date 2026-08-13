@@ -271,13 +271,26 @@
             left: 0;
             right: 0;
             width: 100%;
-            padding: 20px 30px;
+            padding: 16px 24px;
             background: linear-gradient(135deg, #5D4037 0%, #4E342E 100%);
             border: none;
             border-radius: 0 0 12px 12px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.3);
             display: none;
+            /* เดิมไม่จำกัดความสูง → คอลัมน์แถวล่างถูกตัดที่ขอบจอและเลื่อนไม่ได้
+               จำกัดไม่ให้เกินความสูงจอ แล้วให้เลื่อนภายในกล่องเมนูเอง */
+            max-height: calc(100vh - 76px);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
+
+        /* แถบเลื่อนให้กลมกลืนกับพื้นสีน้ำตาลของเมนู */
+        .mega-menu .mega-dropdown::-webkit-scrollbar { width: 10px; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-track { background: rgba(0,0,0,0.18); border-radius: 0 0 12px 0; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-thumb { background: rgba(255,213,79,0.45); border-radius: 6px; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-thumb:hover { background: rgba(255,213,79,0.7); }
+        .mega-menu .mega-dropdown { scrollbar-width: thin; scrollbar-color: rgba(255,213,79,0.5) rgba(0,0,0,0.18); }
 
         .mega-menu:hover .mega-dropdown,
         .mega-menu.open .mega-dropdown {
@@ -286,22 +299,25 @@
 
         .mega-menu-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 20px;
-            max-width: 1400px;
+            /* 176px + gap 14 → จอ ~1520px ขึ้นไปวาง 8 คอลัมน์ได้ในแถวเดียว
+               (8×176 + 7×14 = 1506) จอแคบกว่านั้นตกแถว แล้วเลื่อนดูได้ตาม max-height ด้านบน */
+            grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+            gap: 14px;
+            max-width: 1620px;
             margin: 0 auto;
+            align-items: start;
         }
 
         .mega-menu-column {
-            min-width: 200px;
+            min-width: 0;
         }
 
         .mega-menu-column h4 {
             color: #FFD54F;
-            font-size: 13px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            padding-bottom: 8px;
+            font-size: 12.5px;
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            padding-bottom: 6px;
             border-bottom: 2px solid rgba(255,213,79,0.3);
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -318,18 +334,19 @@
         }
 
         .mega-menu-column ul li {
-            margin-bottom: 4px;
+            margin-bottom: 1px;
         }
 
         .mega-menu-column ul li a {
             display: flex;
             align-items: center;
-            padding: 8px 12px;
+            padding: 6px 10px;
             color: #F8F4E9 !important;
             text-decoration: none;
             border-radius: 6px;
             transition: all 0.2s ease;
-            font-size: 13px;
+            font-size: 12.8px;
+            line-height: 1.35;
         }
 
         .mega-menu-column ul li a:hover {
@@ -339,8 +356,9 @@
         }
 
         .mega-menu-column ul li a i {
-            width: 20px;
-            margin-right: 10px;
+            width: 18px;
+            margin-right: 8px;
+            flex: 0 0 18px;
             text-align: center;
             opacity: 0.8;
         }
@@ -348,7 +366,7 @@
         .mega-menu-column.owner-section {
             background: rgba(255, 193, 7, 0.1);
             border-radius: 8px;
-            padding: 15px;
+            padding: 11px 12px;
             border-left: 3px solid #FFC107;
         }
 
@@ -356,12 +374,18 @@
             color: #FFC107;
         }
 
+        /* จอเดสก์ท็อปแคบ — ย่อคอลัมน์ให้ยังลงได้หลายคอลัมน์ต่อแถว */
+        @media (max-width: 1500px) and (min-width: 1200px) {
+            .mega-menu-grid { grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; }
+            .mega-menu-column ul li a { font-size: 12.4px; padding: 5px 8px; }
+        }
+
         /* Mobile Mega Menu */
         @media (max-width: 1199px) {
             .mega-menu .mega-dropdown {
                 position: relative;
                 padding: 10px;
-                max-height: 60vh;
+                max-height: 72vh;
                 overflow-y: auto;
             }
 
