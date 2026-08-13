@@ -92,16 +92,43 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                if (Session["permission"]?.ToString() == "True") { phPublicChat.Visible = false; return; }
+                // แสดงกับทุกคนรวมพนักงานที่ล็อกอินอยู่ — เดิมซ่อนเมื่อล็อกอิน ทำให้เจ้าของ/พนักงาน
+                // เปิดหน้าแรกแล้วไม่เห็นปุ่มแชท (ต้องออกจากระบบก่อนถึงจะเห็น) ซึ่งสับสนและทดสอบยาก
                 if (Feature.Off("Chat")) { phPublicChat.Visible = false; return; }
 
                 string conn = System.Configuration.ConfigurationManager
                     .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                 var dt = new code().DatabaseQuerySafe(conn,
                     "SELECT TOP 1 IsEnabled FROM OmniChannel_Channels WHERE ChannelCode = 'WEBCHAT'", null);
-                phPublicChat.Visible = dt != null && dt.Rows.Count > 0 && Convert.ToBoolean(dt.Rows[0][0]);
+
+                bool rowExists = dt != null && dt.Rows.Count > 0;
+                phPublicChat.Visible = rowExists && Convert.ToBoolean(dt.Rows[0][0]);
+
+                // ช่วยไล่ปัญหา "ทำไมไม่เห็นปุ่มแชท" — บอกเหตุผลใน log ให้ผู้ดูแล (วันละครั้งพอ)
+                if (!phPublicChat.Visible) LogWidgetHidden(conn, rowExists
+                    ? "ช่องทาง WEBCHAT ถูกปิดอยู่ — เปิดที่ Admin → Chat → ตั้งค่าช่องทาง → แชทหน้าเว็บ"
+                    : "ยังไม่มีช่องทาง WEBCHAT ในระบบ — รัน migration PHASE18_Migration_22_WebChat_TikTok.sql");
             }
-            catch { phPublicChat.Visible = false; }  // ตาราง/คอลัมน์ยังไม่มี → ไม่โชว์
+            catch (Exception ex)
+            {
+                phPublicChat.Visible = false;
+                try
+                {
+                    string conn = System.Configuration.ConfigurationManager
+                        .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    LogWidgetHidden(conn, "อ่านค่าช่องทางแชทไม่สำเร็จ: " + ex.Message);
+                }
+                catch { }
+            }
+        }
+
+        private static DateTime _lastChatWidgetLog = DateTime.MinValue;
+        private static void LogWidgetHidden(string conn, string reason)
+        {
+            if ((DateTime.Now - _lastChatWidgetLog).TotalHours < 24) return;
+            _lastChatWidgetLog = DateTime.Now;
+            try { new code().Logs(conn, "PublicChatWidget", "ไม่แสดงปุ่มแชทหน้าเว็บ: " + reason, "SYSTEM"); }
+            catch { }
         }
 
         /// <summary>
