@@ -14,6 +14,7 @@ namespace Take_Time_BangPhra.Admin.Housekeeping
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsHousekeeping)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!Feature.Guard(this, "Housekeeping", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             // Check admin permission
             if (Session["permission"]?.ToString() != "True")

@@ -441,6 +441,7 @@
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Admin\Settings\LineAccount.aspx" />
     <Content Include="Admin\Settings\Index.aspx" />
+    <Content Include="Admin\Settings\PermissionGroups.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
@@ -872,6 +873,7 @@
     <Compile Include="Class\Services\LoyaltyService.cs" />
     <Compile Include="Class\DefaultCompat.cs" />
     <Compile Include="Class\Feature.cs" />
+    <Compile Include="Class\Perm.cs" />
     <Compile Include="Class\UploadHelper.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
     <Compile Include="Class\Services\EmailChatService.cs" />
@@ -1257,6 +1259,13 @@
     </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\PermissionGroups.aspx.cs">
+      <DependentUpon>PermissionGroups.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\PermissionGroups.aspx.designer.cs">
+      <DependentUpon>PermissionGroups.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\Index.aspx.cs">
       <DependentUpon>Index.aspx</DependentUpon>

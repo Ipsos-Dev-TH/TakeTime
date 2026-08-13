@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Account.Report
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             this.MaintainScrollPositionOnPostBack = true;
             documentHelper = new DocumentHelper(conn);
             assetService = new AssetService();

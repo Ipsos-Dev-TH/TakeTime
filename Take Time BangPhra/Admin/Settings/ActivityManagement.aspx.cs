@@ -20,6 +20,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsActivity)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!Feature.Guard(this, "Activities", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _svc = new ActivityService(_conn);
 

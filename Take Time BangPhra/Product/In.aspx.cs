@@ -26,6 +26,7 @@ namespace Take_Time_BangPhra.Product
         AddressHelper addressHelper;
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesStock)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             addressHelper = new AddressHelper(conn);
 
             try

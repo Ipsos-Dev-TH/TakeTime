@@ -24,6 +24,7 @@ namespace Take_Time_BangPhra.Product
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesStock)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner"))

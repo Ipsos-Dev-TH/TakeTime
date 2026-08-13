@@ -32,6 +32,7 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);

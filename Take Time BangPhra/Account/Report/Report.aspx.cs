@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Account.Report
         //int cutoffday = Convert.ToInt32(ConfigurationManager.AppSettings["PaymentCutOffDay"].ToString());
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReport)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Admin/Owner only — page renders receipt data (customer PII + financials)
             try
             {

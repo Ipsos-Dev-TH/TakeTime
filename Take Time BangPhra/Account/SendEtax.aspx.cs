@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Configuration;
 using System.Web.UI;
 using Take_Time_BangPhra.Integration;
@@ -11,6 +11,7 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // สิทธิ์เดียวกับหน้าเอกสาร (Owner/Admin)
             if (!(Session["permission"]?.ToString() == "True"
                   && (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin")))

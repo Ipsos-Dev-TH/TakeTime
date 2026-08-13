@@ -11,6 +11,7 @@ namespace Take_Time_BangPhra.Admin.Leave
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrLeave)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             leaveService = new LeaveService();
 

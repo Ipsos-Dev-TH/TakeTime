@@ -876,6 +876,9 @@
                                                         <i class="fas fa-star"></i> ศูนย์ตั้งค่า (ทั้งหมด)
                                                     </a></li>
                                                     <asp:PlaceHolder ID="phNavSettingsOwner" runat="server">
+                                                    <li><a runat="server" href="~/Admin/Settings/PermissionGroups">
+                                                        <i class="fas fa-users-gear"></i> กลุ่มสิทธิ์ผู้ใช้
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Settings/SystemSettings">
                                                         <i class="fas fa-key"></i> Token / API / อีเมล
                                                     </a></li>

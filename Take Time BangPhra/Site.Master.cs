@@ -32,17 +32,21 @@ namespace Take_Time_BangPhra
                     //   Admin  = + การเงิน&บัญชี + ลูกค้า&การตลาด
                     //   Owner  = + รายงาน + บุคคล + ตั้งค่า
                     // เดิม Staff เห็นเมนูบัญชี/ใบสำคัญจ่าย/ข้อมูลลูกค้าทั้งหมดเท่ากับ Admin
+                    // สิทธิ์มาจาก "กลุ่มสิทธิ์" ของผู้ใช้ (Perm) — ถ้ายังไม่ถูกกำหนดกลุ่ม
+                    // Perm จะย้อนไปใช้ค่าเริ่มต้นตาม Role เดิมให้เอง (Owner/Admin/Staff)
                     string role = Session["User"]?.ToString() ?? "";
                     bool isOwner = role == "Owner";
-                    bool isAdminOrOwner = isOwner || role == "Admin";
 
-                    pnlFinanceNav.Visible = isAdminOrOwner;
-                    pnlCrmNav.Visible = isAdminOrOwner;
-                    pnlHotelMgmt.Visible = isOwner;
-                    pnlOwnerOnly.Visible = isOwner;
-                    // ตั้งค่า: Admin เห็น "ศูนย์ตั้งค่า" (หน้าจะกรองรายการ Owner-only ให้เอง)
-                    // Owner เห็นทางลัดหน้าที่เป็น Owner-only เพิ่ม
-                    pnlSettingsNav.Visible = isAdminOrOwner;
+                    // การเงิน / ลูกค้า — เห็นเมื่อมีสิทธิ์ดูอย่างน้อยหนึ่งส่วนในคอลัมน์นั้น
+                    pnlFinanceNav.Visible = Perm.CanView(Perm.FinReceipt) || Perm.CanView(Perm.FinVoucher)
+                                            || Perm.CanView(Perm.FinReport);
+                    pnlCrmNav.Visible = Perm.CanView(Perm.CrmCustomer) || Perm.CanView(Perm.CrmLoyalty)
+                                        || Perm.CanView(Perm.CrmReview) || Perm.CanView(Perm.CrmAffiliate);
+                    pnlHotelMgmt.Visible = Perm.CanView(Perm.MgtDashboard) || Perm.CanView(Perm.MgtReport)
+                                           || Perm.CanView(Perm.MgtChannel);
+                    pnlOwnerOnly.Visible = Perm.CanView(Perm.HrEmployee) || Perm.CanView(Perm.HrLeave)
+                                           || Perm.CanView(Perm.HrPayroll) || Perm.CanView(Perm.HrAsset);
+                    pnlSettingsNav.Visible = Perm.CanView(Perm.SysSettings);
                     phNavSettingsOwner.Visible = isOwner;
                 }
                 else
@@ -109,21 +113,22 @@ namespace Take_Time_BangPhra
             try
             {
                 phNavActivitiesPub.Visible = Feature.On("Activities");
-                phNavActivityMgmt.Visible = Feature.On("Activities");
+                phNavActivityMgmt.Visible = Feature.On("Activities") && Perm.CanView(Perm.OpsActivity);
                 phNavAffiliatePub.Visible = Feature.On("Affiliate");
-                phNavAffiliateAdmin.Visible = Feature.On("Affiliate");
+                phNavAffiliateAdmin.Visible = Feature.On("Affiliate") && Perm.CanView(Perm.CrmAffiliate);
                 phNavGuestPortal.Visible = Feature.On("GuestPortal");
-                phNavHousekeeping.Visible = Feature.On("Housekeeping");
-                phNavMaintenance.Visible = Feature.On("Maintenance");
-                phNavChat.Visible = Feature.On("Chat");
-                phNavRoomService.Visible = Feature.On("RoomService");
-                phNavLoyalty.Visible = Feature.On("Loyalty");
-                phNavReviews.Visible = Feature.On("Reviews");
-                phNavAIReport.Visible = Feature.On("AI");
-                phNavChannelMgr.Visible = Feature.On("ChannelManager");
-                phNavHR.Visible = Feature.On("HR");
-                phNavAssets.Visible = Feature.On("Assets");
-                phNavWebAnalytics.Visible = Feature.On("WebAnalytics");
+                // เมนูจะขึ้นก็ต่อเมื่อ "ฟีเจอร์เปิด" และ "กลุ่มสิทธิ์ให้เห็น" พร้อมกัน
+                phNavHousekeeping.Visible = Feature.On("Housekeeping") && Perm.CanView(Perm.OpsHousekeeping);
+                phNavMaintenance.Visible = Feature.On("Maintenance") && Perm.CanView(Perm.OpsMaintenance);
+                phNavChat.Visible = Feature.On("Chat") && Perm.CanView(Perm.OpsChat);
+                phNavRoomService.Visible = Feature.On("RoomService") && Perm.CanView(Perm.OpsRoomService);
+                phNavLoyalty.Visible = Feature.On("Loyalty") && Perm.CanView(Perm.CrmLoyalty);
+                phNavReviews.Visible = Feature.On("Reviews") && Perm.CanView(Perm.CrmReview);
+                phNavAIReport.Visible = Feature.On("AI") && Perm.CanView(Perm.MgtReport);
+                phNavChannelMgr.Visible = Feature.On("ChannelManager") && Perm.CanView(Perm.MgtChannel);
+                phNavHR.Visible = Feature.On("HR") && Perm.CanView(Perm.HrEmployee);
+                phNavAssets.Visible = Feature.On("Assets") && Perm.CanView(Perm.HrAsset);
+                phNavWebAnalytics.Visible = Feature.On("WebAnalytics") && Perm.CanView(Perm.MgtReport);
 
                 // แชทปิดทั้งโมดูล → กระดิ่งแจ้งเตือนแชทก็ไม่ต้องโชว์
                 if (Feature.Off("Chat")) pnlChatNotification.Visible = false;

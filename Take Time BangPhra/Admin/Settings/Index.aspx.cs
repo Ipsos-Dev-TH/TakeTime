@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Web.UI;
@@ -45,6 +45,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysSettings)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (Session["permission"]?.ToString() != "True")
             {
                 Response.Redirect("~/Admin/Login");
@@ -61,6 +62,10 @@ namespace Take_Time_BangPhra.Admin.Settings
             var conn = new Group("การเชื่อมต่อ & ระบบ",
                 "Token / API / อีเมล / ที่เก็บไฟล์ — ค่าที่ทำให้ระบบคุยกับบริการภายนอกได้",
                 "fa-plug", "#546e7a");
+            conn.Items.Add(new Item("กลุ่มสิทธิ์ผู้ใช้",
+                "สร้างกลุ่มสิทธิ์เอง แล้วกำหนดว่าแต่ละกลุ่มมองเห็น/เข้าใช้งานส่วนไหนได้บ้าง + ผูกพนักงานเข้ากลุ่ม",
+                "~/Admin/Settings/PermissionGroups",
+                "สิทธิ์ permission กลุ่ม role ผู้ใช้ พนักงาน เข้าถึง มองเห็น เมนู owner admin staff", true));
             conn.Items.Add(new Item("ตั้งค่าระบบ (Token / API / SMTP)",
                 "LINE Token, Telegram, อีเมลส่งออก, API Key, path เก็บไฟล์ — แก้ได้โดยไม่ต้องแตะ Web.config",
                 "~/Admin/Settings/SystemSettings",

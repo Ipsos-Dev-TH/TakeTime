@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin.Assets
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrAsset)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!Feature.Guard(this, "Assets", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             assetService = new AssetService();
             code = new _Default();

@@ -39,6 +39,7 @@ namespace Take_Time_BangPhra.Product
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesPos)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // กันเบราว์เซอร์ (โดยเฉพาะมือถือ) เก็บหน้า POS ลง cache แล้ว restore ฟอร์มเก่า →
             // ViewState ไม่ตรง session → Invalid postback ตอนกดปุ่ม / ตะกร้าแสดงค่าค้าง
             Response.Cache.SetCacheability(HttpCacheability.NoCache);
