@@ -444,6 +444,7 @@
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
+    <Content Include="Admin\CRM\MemberHub.aspx" />
     <Content Include="Member\Login.aspx" />
     <Content Include="Member\Card.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
@@ -1264,6 +1265,13 @@
     </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberHub.aspx.cs">
+      <DependentUpon>MemberHub.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberHub.aspx.designer.cs">
+      <DependentUpon>MemberHub.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\CRM\MemberVouchers.aspx.cs">
       <DependentUpon>MemberVouchers.aspx</DependentUpon>

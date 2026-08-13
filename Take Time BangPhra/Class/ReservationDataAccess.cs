@@ -537,6 +537,33 @@ namespace Take_Time_BangPhra
             bool noCreateReceipt,
             bool noNameInReceipt)
         {
+            // ── ส่วนลดสมาชิกอัตโนมัติ (สวิตช์ Member_AutoDiscount ในศูนย์ตั้งค่า — default ปิด) ──
+            // ใช้เฉพาะเส้นทางจองหน้าเว็บ (เมธอดนี้) — การจองจากอีเมล OTA ใช้ INSERT ของตัวเอง
+            // จึงไม่โดนส่วนลด (ถูกต้อง: ราคาที่ OTA ส่งมาเป็นราคาสุทธิแล้ว)
+            // หักจากราคารวม + บันทึกใน Remark ให้ตรวจย้อนหลังได้ · Deposit (เงินโอนจริง) ไม่ถูกแตะ
+            try
+            {
+                if (AppCfg.GetBool("Member_AutoDiscount", false) && totalPrice > 0m)
+                {
+                    var member = new Services.MemberPortalService(_connectionString);
+                    decimal pct = member.GetRoomDiscountPct(customerPhone, checkinDate);
+                    if (pct > 0m)
+                    {
+                        decimal discount = Math.Round(totalPrice * pct / 100m, 2, MidpointRounding.AwayFromZero);
+                        totalPrice -= discount;
+                        remark = (remark ?? "") + $"\r\n[ส่วนลดสมาชิก {pct:0.##}% -฿{discount:N2} อัตโนมัติ]";
+                        try
+                        {
+                            _code.Logs(_connectionString, "MemberAutoDiscount",
+                                $"จอง {customerPhone} เช็คอิน {checkinDate:dd/MM/yyyy}: ลด {pct:0.##}% (-{discount:N2}) เหลือ {totalPrice:N2}",
+                                "SYSTEM");
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { /* ระบบสมาชิกไม่พร้อม → จองราคาเต็มตามเดิม */ }
+
             var parameters = new Dictionary<string, object>
             {
                 { "@customerPhone", customerPhone },

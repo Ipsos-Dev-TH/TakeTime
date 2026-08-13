@@ -796,6 +796,9 @@
                                                     <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
                                                         <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/MemberHub">
+                                                        <i class="fas fa-users-gear"></i> จัดการสมาชิก
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/CRM/MemberVouchers">
                                                         <i class="fas fa-ticket-alt"></i> Voucher & สิทธิ์สมาชิก
                                                     </a></li>

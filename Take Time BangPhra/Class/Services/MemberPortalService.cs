@@ -251,6 +251,17 @@ namespace Take_Time_BangPhra.Services
                 "SELECT TOP 1 1 FROM Customer_Loyalty WHERE Customer_MobilePhone = @p", P("@p", phone));
             if (m == null || m.Rows.Count == 0) return (0, $"เบอร์ {phone} ไม่ได้เป็นสมาชิก");
 
+            // ถูกตัดสิทธิ์ template นี้เป็นรายคนไว้ (หน้า จัดการสมาชิก) → ไม่แจก
+            try
+            {
+                var ex = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 1 FROM Member_Voucher_Exclusions WHERE Customer_MobilePhone = @p AND Template_ID = @t",
+                    P("@p", phone, "@t", templateId));
+                if (ex != null && ex.Rows.Count > 0)
+                    return (0, $"เบอร์ {phone} ถูกตั้งค่า \"ไม่ให้สิทธิ์\" คูปองนี้ไว้ — เอาติ๊กออกได้ที่หน้า จัดการสมาชิก");
+            }
+            catch { }
+
             string code = GenerateCode(t.Rows[0]["Code_Prefix"].ToString());
             int validDays = Convert.ToInt32(t.Rows[0]["Valid_Days"]);
             _code.DatabaseInsertSafe(_conn,
@@ -274,7 +285,10 @@ namespace Take_Time_BangPhra.Services
                      AND NOT EXISTS (SELECT 1 FROM Member_Vouchers v
                                       WHERE v.Customer_MobilePhone = cl.Customer_MobilePhone
                                         AND v.Template_ID = @tid
-                                        AND v.Status IN ('ISSUED','ACTIVATED'))",
+                                        AND v.Status IN ('ISSUED','ACTIVATED'))
+                     AND NOT EXISTS (SELECT 1 FROM Member_Voucher_Exclusions x
+                                      WHERE x.Customer_MobilePhone = cl.Customer_MobilePhone
+                                        AND x.Template_ID = @tid)",
                 P("@tier", tierId, "@tid", templateId));
             if (members == null || members.Rows.Count == 0) return (0, "ไม่มีสมาชิกที่ต้องแจกเพิ่ม (ทุกคนมี voucher นี้ค้างอยู่แล้ว)");
 
@@ -399,6 +413,230 @@ namespace Take_Time_BangPhra.Services
                     LEFT JOIN Customer c ON c.MobilePhone = v.Customer_MobilePhone
                     LEFT JOIN [dbo].[Admin] a ON a.ID = v.Redeemed_By_AdminID
                    ORDER BY v.ID DESC", P("@n", limit));
+        }
+
+        // ═══════════════ สมัคร/ต่ออายุสมาชิก (เก็บค่าสมัคร + ลงรายได้) ═══════════════
+
+        /// <summary>
+        /// สมัคร/ต่ออายุ/อัปเกรดสมาชิก — อัปเดต tier+วันหมดอายุ, บันทึกการชำระ,
+        /// และถ้ามีค่าสมัคร > 0: สร้างใบรับเงิน MBR-xxx + ส่งลงบัญชี NextAcc
+        /// (รายได้ค่าสมาชิก MEMBER_FEE_REVENUE — ไม่ตั้ง mapping ก็ fallback บัญชีรายได้เริ่มต้น)
+        /// </summary>
+        public (bool ok, string msg) Enroll(string phone, int tierId, decimal amount, string paidHow, string staffName)
+        {
+            phone = SanitizePhone(phone);
+            if (phone.Length < 9) return (false, "เบอร์โทรไม่ถูกต้อง");
+
+            var tier = _code.DatabaseQuerySafe(_conn,
+                @"SELECT TierName, ISNULL(Signup_Fee, 0) AS Fee, ISNULL(Duration_Months, 12) AS Months
+                    FROM Loyalty_Tiers WHERE ID = @t AND IsActive = 1", P("@t", tierId));
+            if (tier == null || tier.Rows.Count == 0) return (false, "ไม่พบระดับสมาชิกนี้");
+            int months = Convert.ToInt32(tier.Rows[0]["Months"]);
+            string tierName = tier.Rows[0]["TierName"].ToString();
+            if (amount < 0m) amount = 0m;
+
+            // สถานะเดิม (อ่านก่อนสร้างแถว เพื่อจำแนก NEW/RENEW/UPGRADE ให้ถูก)
+            var cur = _code.DatabaseQuerySafe(_conn,
+                "SELECT CurrentTier_ID, Membership_Expiry FROM Customer_Loyalty WHERE Customer_MobilePhone = @p",
+                P("@p", phone));
+            bool existed = cur != null && cur.Rows.Count > 0;
+            int oldTier = existed ? Convert.ToInt32(cur.Rows[0]["CurrentTier_ID"]) : 0;
+            DateTime? oldExpiry = existed && cur.Rows[0]["Membership_Expiry"] != DBNull.Value
+                ? (DateTime?)Convert.ToDateTime(cur.Rows[0]["Membership_Expiry"]) : null;
+            bool stillActive = existed && (oldExpiry == null || oldExpiry.Value.Date >= DateTime.Today);
+
+            string action = !existed || !stillActive ? "NEW"
+                : tierId != oldTier ? "UPGRADE" : "RENEW";
+
+            // ให้แน่ใจว่ามีแถวลูกค้า + แถวสมาชิก
+            _code.DatabaseInsertSafe(_conn,
+                @"IF NOT EXISTS (SELECT 1 FROM Customer WHERE MobilePhone = @p)
+                      INSERT INTO Customer (MobilePhone, Name) VALUES (@p, N'สมาชิกใหม่');
+                  IF NOT EXISTS (SELECT 1 FROM Customer_Loyalty WHERE Customer_MobilePhone = @p)
+                      INSERT INTO Customer_Loyalty (Customer_MobilePhone, CurrentTier_ID) VALUES (@p, @t);",
+                P("@p", phone, "@t", tierId));
+
+            DateTime? newExpiry;
+            if (months <= 0) newExpiry = null;   // ตลอดชีพ
+            else
+            {
+                DateTime baseDate = (action == "RENEW" && oldExpiry.HasValue && oldExpiry.Value.Date >= DateTime.Today)
+                    ? oldExpiry.Value.Date : DateTime.Today;   // ต่ออายุ = นับต่อจากวันหมดอายุเดิมที่ยังเหลือ
+                newExpiry = baseDate.AddMonths(months);
+            }
+
+            _code.DatabaseInsertSafe(_conn,
+                @"UPDATE Customer_Loyalty
+                     SET CurrentTier_ID = @t, Membership_Expiry = @e, LastUpdated = GETDATE()
+                   WHERE Customer_MobilePhone = @p",
+                P("@t", tierId, "@e", (object)newExpiry ?? DBNull.Value, "@p", phone));
+
+            // บันทึกการชำระ + ลงรายได้ (เฉพาะเมื่อเก็บเงินจริง)
+            string receiptRef = null;
+            long payId = _code.DatabaseInsertReturnSafe(_conn,
+                @"INSERT INTO Membership_Payments
+                      (Customer_MobilePhone, Tier_ID, Action_Type, Amount, Paid_How, Old_Expiry, New_Expiry, Created_By)
+                  VALUES (@p, @t, @a, @amt, @how, @oe, @ne, @by);
+                  SELECT SCOPE_IDENTITY();",
+                P("@p", phone, "@t", tierId, "@a", action, "@amt", amount,
+                  "@how", paidHow ?? "", "@oe", (object)oldExpiry ?? DBNull.Value,
+                  "@ne", (object)newExpiry ?? DBNull.Value, "@by", staffName ?? ""));
+
+            if (amount > 0m)
+            {
+                receiptRef = "MBR-" + payId;
+                CreateMemberFeeReceipt(receiptRef, amount, paidHow,
+                    $"ค่าสมัครสมาชิก {tierName} ({ActionThai(action)}) — {phone}");
+                _code.DatabaseInsertSafe(_conn,
+                    "UPDATE Membership_Payments SET Receipt_Ref = @r WHERE ID = @id",
+                    P("@r", receiptRef, "@id", payId));
+            }
+
+            try
+            {
+                _code.Logs(_conn, "Membership",
+                    $"{ActionThai(action)}สมาชิก {phone} → {tierName} ค่าสมัคร {amount:N2} " +
+                    $"หมดอายุ {(newExpiry.HasValue ? newExpiry.Value.ToString("dd/MM/yyyy") : "ตลอดชีพ")}" +
+                    (receiptRef != null ? $" (ใบรับเงิน {receiptRef})" : ""), staffName ?? "SYSTEM");
+            }
+            catch { }
+
+            return (true, $"{ActionThai(action)}สำเร็จ — ระดับ {tierName}, หมดอายุ " +
+                (newExpiry.HasValue ? newExpiry.Value.ToString("dd/MM/yyyy") : "ตลอดชีพ") +
+                (amount > 0m ? $" · เก็บเงิน ฿{amount:N2} ลงบัญชีแล้ว ({receiptRef})" : " · ไม่มีค่าสมัคร"));
+        }
+
+        private static string ActionThai(string a) =>
+            a == "NEW" ? "สมัคร" : a == "UPGRADE" ? "อัปเกรด" : "ต่ออายุ";
+
+        /// <summary>ใบรับเงินค่าสมาชิก + ส่งเข้า NextAcc — โครงเดียวกับใบสรุปรายวัน (idempotent ด้วย ref)</summary>
+        private void CreateMemberFeeReceipt(string receiptRef, decimal amount, string paidHow, string lineText)
+        {
+            try
+            {
+                bool useVat = false;
+                try
+                {
+                    var v = _code.DatabaseQuerySafe(_conn, "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                    if (v?.Rows.Count > 0 && v.Rows[0][0] != DBNull.Value)
+                    {
+                        string x = v.Rows[0][0].ToString();
+                        useVat = x == "1" || x.Equals("true", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                catch { }
+                decimal exVat = useVat ? Math.Round(amount / 1.07m, 2, MidpointRounding.AwayFromZero) : amount;
+                decimal vat = useVat ? (amount - exVat) : 0m;
+
+                _code.DatabaseInsertSafe(_conn,
+                    "IF NOT EXISTS (SELECT 1 FROM [dbo].[Account_Receipt] WHERE [ID] = @ID) " +
+                    "INSERT INTO [dbo].[Account_Receipt] " +
+                    "([ID],[Reservation_ID],[Created_Date],[Total_Amount],[Vat],[Total_Amount_Exclude_Vat]," +
+                    "[IsDeposit],[UseDeposit],[Paid_Type],[Status],[Created_By_ID],[Etax],[Customer_ID]) " +
+                    "VALUES (@ID,'0',GETDATE(),@T,@V,@X,0,0,@PT,'Normal',0,0,0)",
+                    P("@ID", receiptRef, "@T", amount, "@V", vat, "@X", exVat, "@PT", paidHow ?? "เงินสด"));
+                _code.DatabaseInsertSafe(_conn,
+                    "IF NOT EXISTS (SELECT 1 FROM [dbo].[Account_Receipt_Detail] WHERE [Receipt_ID] = @R) " +
+                    "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                    "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                    "VALUES (1,@R,'0','0',@D,1,N'รายการ',@T,@T)",
+                    P("@R", receiptRef, "@D", lineText, "@T", amount));
+
+                // ส่งเข้า NextAcc — revenueType MEMBER_FEE_REVENUE (mapper fallback บัญชีรายได้เริ่มต้นถ้ายังไม่ map)
+                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(_conn);
+                string accId = sync.LookupPaidHowAccountId(paidHow);
+                sync.EnqueueReceipt(0, receiptRef, amount, 0, DateTime.Today, lineText,
+                    isDeposit: false, paymentMethod: paidHow ?? "เงินสด",
+                    revenueType: "MEMBER_FEE_REVENUE", paymentAccountId: accId);
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_conn, "Membership", $"ลงบัญชีค่าสมาชิก {receiptRef} ไม่สำเร็จ: {ex.Message}", "SYSTEM"); }
+                catch { }
+            }
+        }
+
+        public DataTable GetTierFees()
+        {
+            return _code.DatabaseQuerySafe(_conn,
+                @"SELECT ID, TierName, TierColor, ISNULL(Signup_Fee, 0) AS Signup_Fee,
+                         ISNULL(Duration_Months, 12) AS Duration_Months
+                    FROM Loyalty_Tiers WHERE IsActive = 1 ORDER BY DisplayOrder", null);
+        }
+
+        public void SaveTierFee(int tierId, decimal fee, int months)
+        {
+            if (fee < 0m) fee = 0m; if (months < 0) months = 0;
+            _code.DatabaseInsertSafe(_conn,
+                "UPDATE Loyalty_Tiers SET Signup_Fee = @f, Duration_Months = @m WHERE ID = @t",
+                P("@f", fee, "@m", months, "@t", tierId));
+        }
+
+        public DataTable GetMemberPayments(string phone)
+        {
+            return _code.DatabaseQuerySafe(_conn,
+                @"SELECT TOP 30 mp.*, t.TierName FROM Membership_Payments mp
+                    JOIN Loyalty_Tiers t ON t.ID = mp.Tier_ID
+                   WHERE mp.Customer_MobilePhone = @p ORDER BY mp.ID DESC",
+                P("@p", SanitizePhone(phone)));
+        }
+
+        public void SetMembershipExpiry(string phone, DateTime? expiry)
+        {
+            _code.DatabaseInsertSafe(_conn,
+                "UPDATE Customer_Loyalty SET Membership_Expiry = @e WHERE Customer_MobilePhone = @p",
+                P("@e", (object)expiry ?? DBNull.Value, "@p", SanitizePhone(phone)));
+        }
+
+        // ═══════════════ ตัดสิทธิ์ voucher รายคน + ยกเลิกใบที่แจกแล้ว ═══════════════
+
+        /// <summary>template ทั้งหมด + สถานะของสมาชิกคนนี้ (ถูกตัดสิทธิ์? มีใบค้าง?)</summary>
+        public DataTable GetMemberVoucherMatrix(string phone)
+        {
+            return _code.DatabaseQuerySafe(_conn,
+                @"SELECT t.ID, t.Name, t.Description, t.Is_Active,
+                         CASE WHEN x.ID IS NULL THEN 0 ELSE 1 END AS Excluded,
+                         (SELECT COUNT(*) FROM Member_Vouchers v
+                           WHERE v.Customer_MobilePhone = @p AND v.Template_ID = t.ID
+                             AND v.Status IN ('ISSUED','ACTIVATED')) AS Held
+                    FROM Member_Voucher_Templates t
+                    LEFT JOIN Member_Voucher_Exclusions x
+                           ON x.Template_ID = t.ID AND x.Customer_MobilePhone = @p
+                   ORDER BY t.ID DESC",
+                P("@p", SanitizePhone(phone)));
+        }
+
+        /// <summary>ติ๊ก "ไม่ให้สิทธิ์" — excluded=true จะยกเลิกใบที่ยังไม่ใช้ของ template นั้นด้วย</summary>
+        public void SetExclusion(string phone, int templateId, bool excluded, string staffName)
+        {
+            phone = SanitizePhone(phone);
+            if (excluded)
+            {
+                _code.DatabaseInsertSafe(_conn,
+                    @"IF NOT EXISTS (SELECT 1 FROM Member_Voucher_Exclusions WHERE Customer_MobilePhone = @p AND Template_ID = @t)
+                          INSERT INTO Member_Voucher_Exclusions (Customer_MobilePhone, Template_ID, Created_By)
+                          VALUES (@p, @t, @by);
+                      UPDATE Member_Vouchers SET Status = 'CANCELLED'
+                       WHERE Customer_MobilePhone = @p AND Template_ID = @t AND Status IN ('ISSUED','ACTIVATED');",
+                    P("@p", phone, "@t", templateId, "@by", staffName ?? ""));
+            }
+            else
+            {
+                _code.DatabaseInsertSafe(_conn,
+                    "DELETE FROM Member_Voucher_Exclusions WHERE Customer_MobilePhone = @p AND Template_ID = @t",
+                    P("@p", phone, "@t", templateId));
+            }
+        }
+
+        /// <summary>ยกเลิก voucher รายใบ (เฉพาะที่ยังไม่ถูกใช้)</summary>
+        public bool CancelVoucher(long voucherId, string staffName)
+        {
+            int n = _code.DatabaseInsertSafe(_conn,
+                @"UPDATE Member_Vouchers SET Status = 'CANCELLED',
+                         Redeem_Note = LEFT(N'ยกเลิกโดย ' + @by, 300)
+                   WHERE ID = @id AND Status IN ('ISSUED','ACTIVATED')",
+                P("@by", staffName ?? "", "@id", voucherId));
+            return n > 0;
         }
 
         // ═══════════════════════ helpers ═══════════════════════
