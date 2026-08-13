@@ -442,6 +442,7 @@
     <Content Include="Admin\Settings\LineAccount.aspx" />
     <Content Include="Admin\Settings\Index.aspx" />
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
+    <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
@@ -1259,6 +1260,13 @@
     </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\ProductAccounting.aspx.cs">
+      <DependentUpon>ProductAccounting.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\ProductAccounting.aspx.designer.cs">
+      <DependentUpon>ProductAccounting.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\PermissionGroups.aspx.cs">
       <DependentUpon>PermissionGroups.aspx</DependentUpon>

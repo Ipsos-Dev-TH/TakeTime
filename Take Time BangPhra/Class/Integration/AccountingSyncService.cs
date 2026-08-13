@@ -719,6 +719,30 @@ namespace Take_Time_BangPhra.Integration
             string ds = day.ToString("yyyyMMdd");
             string rollupRef = $"POSDAY-{ds}-{paidHowId}";
 
+            // 0) สินค้าที่ตั้งค่า "ไม่รวมใบสรุปรายวัน" (Product.Include_In_Daily_Rollup = 0
+            //    — ตั้งได้รายสินค้าที่หน้า ตั้งค่าลงบัญชีรายสินค้า เช่น หมูกระทะที่ตกลงให้
+            //    รายได้ไปรวมกับค่าห้องแทน) → mark ข้ามด้วย ref 'EXCLUDED-...' กันวนซ้ำ
+            //    และตรวจย้อนหลังได้ว่าแถวไหนถูกข้ามเพราะการตั้งค่า ไม่ใช่ถูกรวบ
+            //    ต้อง mark ก่อนขั้นรวมยอด → แถวเหล่านี้จะไม่ถูกนับทั้งรายได้และต้นทุน
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE po SET po.Pos_Rollup_Ref = @xref
+                        FROM Product_Out po
+                        JOIN Product p ON p.ID = po.Product_ID
+                       WHERE po.Remark = N'ขาย'
+                         AND (po.Account_Receipt_ID = '0' OR po.Account_Receipt_ID IS NULL)
+                         AND po.Pos_Rollup_Ref IS NULL
+                         AND CAST(po.DateTime_Out AS DATE) = @d
+                         AND po.Account_Paid_How_ID = @ph
+                         AND ISNULL(p.Include_In_Daily_Rollup, 1) = 0",
+                    new Dictionary<string, object>
+                    {
+                        { "@xref", "EXCLUDED-" + rollupRef }, { "@d", day.Date }, { "@ph", paidHowId }
+                    });
+            }
+            catch { /* คอลัมน์ยังไม่มี (ยังไม่รัน PHASE18_24) → รวมทุกสินค้าเหมือนเดิม */ }
+
             // 1) ยอดต่อสินค้าในกลุ่ม (วัน+แหล่งรับเงิน) ที่ยังไม่รวบ
             var prod = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT po.Product_ID AS PID, SUM(po.Amount) AS Qty,

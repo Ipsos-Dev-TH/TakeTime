@@ -92,6 +92,11 @@ namespace Take_Time_BangPhra.Integration
             bool chargeToRoom = payMethod.Equals("CHARGE_TO_ROOM", StringComparison.OrdinalIgnoreCase);
 
             // ยอดต่อสินค้าในกลุ่ม (ราคาขาย + ต้นทุนจาก Product.Cost_Price)
+            // สินค้าที่ตั้ง "ไม่รวมใบสรุปรายวัน" (Include_In_Daily_Rollup = 0) ถูกกรองออก
+            // ทั้งรายได้และต้นทุน — ตั้งได้รายสินค้าที่หน้า ตั้งค่าลงบัญชีรายสินค้า
+            // (LEFT JOIN: สินค้าที่หาไม่เจอ/ถูกลบ ถือว่ารวมตามเดิม)
+            string flagFilter = HasRollupFlagColumn()
+                ? " AND ISNULL(p.Include_In_Daily_Rollup, 1) = 1" : "";
             var prod = _code.DatabaseQuerySafe(_conn,
                 @"SELECT i.Product_ID AS PID,
                          SUM(i.Quantity) AS Qty,
@@ -104,7 +109,7 @@ namespace Take_Time_BangPhra.Integration
                    WHERE o.Acct_Post_Ref IS NULL
                      AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
                      AND CAST(o.Order_Date AS DATE) = @d
-                     AND o.Payment_Method = @pm
+                     AND o.Payment_Method = @pm" + flagFilter + @"
                    GROUP BY i.Product_ID",
                 new Dictionary<string, object> { { "@d", day.Date }, { "@pm", payMethod } });
 
@@ -166,6 +171,24 @@ namespace Take_Time_BangPhra.Integration
             Log($"RoomServiceRevenue: {day:yyyy-MM-dd} ({payMethod}) " +
                 $"{(chargeToRoom ? "COGS อย่างเดียว (รายได้อยู่ในใบเสร็จห้อง)" : $"รายได้ {grossTotal:N2} (สินค้า {itemsTotal:N2} + ค่าบริการ {serviceChargeTotal:N2}) + COGS")} " +
                 $"— {prod.Rows.Count} รายการ ref={postRef}");
+        }
+
+        // ตรวจครั้งเดียวต่อ process ว่าคอลัมน์ตั้งค่ารายสินค้า (PHASE18_24) มีหรือยัง
+        private static int _rollupFlagState;   // 0 = ยังไม่ตรวจ, 1 = มี, -1 = ไม่มี
+        private bool HasRollupFlagColumn()
+        {
+            if (_rollupFlagState != 0) return _rollupFlagState == 1;
+            bool exists = false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT TOP 1 1 FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE TABLE_NAME = 'Product' AND COLUMN_NAME = 'Include_In_Daily_Rollup'", null);
+                exists = dt != null && dt.Rows.Count > 0;
+            }
+            catch { }
+            _rollupFlagState = exists ? 1 : -1;
+            return exists;
         }
 
         /// <summary>

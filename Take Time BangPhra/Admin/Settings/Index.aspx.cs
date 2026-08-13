@@ -92,6 +92,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "เชื่อมระบบบัญชี, ผังบัญชี, โหมด sync, อ่านอีเมลจอง OTA, สวิตช์ลงบันทึกรายได้ (ขายหน้าร้าน / รูมเซอร์วิส / ค่าห้อง OTA)",
                 "~/Admin/Settings/AccountingIntegration",
                 "บัญชี nextacc accounting ภาษี vat ผังบัญชี sync ใบกำกับ อีเมลจอง ota รายได้ รวบยอด รูมเซอร์วิส", true));
+            acc.Items.Add(new Item("ตั้งค่าลงบัญชีรายสินค้า",
+                "เลือกรายสินค้า ว่าการขายจะรวมเข้า **ใบสรุปรายได้รายวัน** หรือไม่ (เช่น หมูกระทะที่ให้รายได้ไปรวมกับค่าห้อง)",
+                "~/Admin/Settings/ProductAccounting",
+                "สินค้า รายสินค้า ใบสรุป รายวัน รวบยอด rollup หมูกระทะ รายได้ ลงบัญชี ขายหน้าร้าน", true));
             acc.Items.Add(new Item("สิทธิประโยชน์ระดับสมาชิก (Tier)",
                 "กำหนดส่วนลด/สิทธิพิเศษของแต่ละระดับสมาชิก",
                 "~/Account/TierBenefitsManagement",
