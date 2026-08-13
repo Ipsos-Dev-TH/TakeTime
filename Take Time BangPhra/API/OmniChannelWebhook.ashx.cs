@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Configuration;
@@ -394,6 +394,12 @@ namespace Take_Time_BangPhra.API
         {
             if (!inResult.Success || string.IsNullOrEmpty(text) || text.StartsWith("[")) return;
 
+            // จับคู่บทสนทนากับการจอง (ถ้ายังไม่เคยจับคู่) → ปุ่ม 💬 แชทลูกค้า ในตารางผู้เข้าพัก
+            // จะขึ้นกับลูกค้าที่ทักมาทาง LINE/FB/TikTok เหมือนที่ลูกค้า OTA มีอยู่แล้ว
+            // ทำก่อนเช็ค AUTO_REPLY เพราะควรผูกให้แม้ปิดบอท (พนักงานตอบเอง)
+            try { new ChatBookingLinker(ConnStr).TryLink(inResult.ConversationID, text); }
+            catch { }
+
             try
             {
                 var aiSvc = new AIKnowledgeService(ConnStr);
@@ -409,6 +415,8 @@ namespace Take_Time_BangPhra.API
                 {
                     int resId = Convert.ToInt32(reply.BookingData["reservationId"]);
                     omniSvc.SendBookingConfirmation(inResult.ConversationID, resId);
+                    // จองสำเร็จในแชทนี้ → ผูกทันที ไม่ต้องรอข้อความถัดไป
+                    try { new ChatBookingLinker(ConnStr).TryLink(inResult.ConversationID, text); } catch { }
                 }
             }
             catch (Exception ex)

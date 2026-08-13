@@ -874,6 +874,7 @@
     <Compile Include="Class\UploadHelper.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
     <Compile Include="Class\Services\EmailChatService.cs" />
+    <Compile Include="Class\Services\ChatBookingLinker.cs" />
     <Compile Include="Class\Services\DailyReportLineService.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\OmniChannelService.cs" />

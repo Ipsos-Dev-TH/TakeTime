@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -72,6 +72,9 @@ namespace Take_Time_BangPhra.API
 
             long convId = inRes.ConversationID;
 
+            // จับคู่กับการจองถ้าลูกค้าพิมพ์เบอร์/เลขจองมา → ปุ่มแชทขึ้นในตารางผู้เข้าพัก
+            try { new ChatBookingLinker(ConnStr).TryLink(convId, msg); } catch { }
+
             // 2) ถาม AI (KB → DeepSeek → booking) — gate ด้วย AUTO_REPLY
             var ai = new AIKnowledgeService(ConnStr);
             bool autoReply = false;
@@ -92,6 +95,8 @@ namespace Take_Time_BangPhra.API
                     {
                         pendingResId = Convert.ToInt32(r.BookingData["reservationId"]);
                         bookingSummary = BuildBookingSummary(r.BookingData);
+                        // ผูกบทสนทนากับการจองที่เพิ่งสร้าง → ปุ่มแชทขึ้นทันทีฝั่งพนักงาน
+                        try { new ChatBookingLinker(ConnStr).TryLink(convId, msg); } catch { }
                     }
                 }
             }

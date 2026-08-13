@@ -584,9 +584,10 @@
                                                 CssClass="btn btn-info btn-sm" Visible='<%# IsNaAdmin %>'
                                                 OnClientClick='<%# "showNaModal(" + Eval("ID") + "); return false;" %>' />
 
-                                            <asp:HyperLink ID="lnkGuestChat" runat="server" Text="💬 แชทลูกค้า"
-                                                CssClass="btn btn-success btn-sm mb-1" Target="_blank"
-                                                ToolTip="เปิดบทสนทนากับลูกค้า (ข้อความจาก OTA/ช่องทางอื่นที่ผูกกับการจองนี้)"
+                                            <asp:HyperLink ID="lnkGuestChat" runat="server" Target="_blank"
+                                                Text='<%# GuestChatLabel(Eval("ID")) %>'
+                                                CssClass='<%# GuestChatCss(Eval("ID")) %>'
+                                                ToolTip="เปิดบทสนทนากับลูกค้า — ข้อความจากช่องทางที่ผูกกับการจองนี้ (LINE / Facebook / TikTok / อีเมล OTA / แชทหน้าเว็บ)"
                                                 Visible='<%# GuestChatConvId(Eval("ID")) > 0 %>'
                                                 NavigateUrl='<%# ResolveUrl("~/Admin/Chat/OmniChannelInbox") + "?conv=" + GuestChatConvId(Eval("ID")) %>' />
                                         </div>

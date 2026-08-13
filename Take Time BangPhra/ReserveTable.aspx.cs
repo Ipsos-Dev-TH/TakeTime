@@ -68,33 +68,99 @@ namespace Take_Time_BangPhra
         }
 
         // ── ปุ่มแชทลูกค้า (OmniChannel) บนตารางจองรายวัน ─────────────────────────
-        // การจองที่มีบทสนทนาผูกอยู่ (เช่น ลูกค้า OTA ทักผ่านอีเมล relay ของ Agoda/Booking
-        // แล้วระบบจับคู่เลขการจองได้) จะโชว์ปุ่ม 💬 เปิดหน้าแชทของลูกค้าคนนั้นตรง ๆ
-        private Dictionary<long, long> _chatConvByRes;
+        // การจองที่มีบทสนทนาผูกอยู่จะโชว์ปุ่ม 💬 พร้อมบอกว่าลูกค้าติดต่อมาทางไหน
+        // (LINE / Facebook / TikTok / อีเมล OTA / แชทหน้าเว็บ) — ผูกโดย ChatBookingLinker
+        // ซึ่งจับคู่จากการจองที่เกิดในแชท, เบอร์โทรที่ลูกค้าพิมพ์, หรือเลขการจอง/เลข OTA
+        private class ChatLink
+        {
+            public long ConvId;
+            public string ChannelCode;
+            public string ChannelName;
+            public int Unread;
+        }
+        private Dictionary<long, ChatLink> _chatByRes;
 
-        /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม). โหลดครั้งเดียวต่อ request.</summary>
-        protected long GuestChatConvId(object resIdObj)
+        private void EnsureChatLinks()
+        {
+            if (_chatByRes != null) return;
+            _chatByRes = new Dictionary<long, ChatLink>();
+            try
+            {
+                // บทสนทนาล่าสุดต่อการจอง (ลูกค้าคนเดียวอาจทักหลายช่องทาง → เอาอันที่มีข้อความล่าสุด)
+                var dt = code2.DatabaseQuerySafe(conn,
+                    @"SELECT x.Reservation_ID, x.ConvID, x.ChannelCode, x.UnreadCount,
+                             ISNULL(ch.ChannelName, x.ChannelCode) AS ChannelName
+                        FROM (
+                            SELECT ct.Reservation_ID, c.ID AS ConvID, c.ChannelCode, c.UnreadCount,
+                                   ROW_NUMBER() OVER (PARTITION BY ct.Reservation_ID
+                                        ORDER BY ISNULL(c.LastMessageDate, c.Created_Date) DESC, c.ID DESC) AS rn
+                              FROM OmniChannel_Conversations c
+                              JOIN OmniChannel_Contacts ct ON ct.ID = c.ContactID
+                             WHERE ct.Reservation_ID IS NOT NULL
+                        ) x
+                        LEFT JOIN OmniChannel_Channels ch ON ch.ChannelCode = x.ChannelCode
+                       WHERE x.rn = 1", null);
+
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        _chatByRes[Convert.ToInt64(r["Reservation_ID"])] = new ChatLink
+                        {
+                            ConvId = Convert.ToInt64(r["ConvID"]),
+                            ChannelCode = r["ChannelCode"]?.ToString() ?? "",
+                            ChannelName = r["ChannelName"]?.ToString() ?? "",
+                            Unread = r["UnreadCount"] == DBNull.Value ? 0 : Convert.ToInt32(r["UnreadCount"])
+                        };
+            }
+            catch { /* ตาราง OmniChannel ยังไม่มี → ไม่โชว์ปุ่ม */ }
+        }
+
+        private ChatLink GetChatLink(object resIdObj)
         {
             try
             {
-                if (_chatConvByRes == null)
-                {
-                    _chatConvByRes = new Dictionary<long, long>();
-                    var dt = code2.DatabaseQuerySafe(conn,
-                        @"SELECT ct.Reservation_ID, MAX(c.ID) AS ConvId
-                          FROM OmniChannel_Conversations c
-                          JOIN OmniChannel_Contacts ct ON ct.ID = c.ContactID
-                          WHERE ct.Reservation_ID IS NOT NULL
-                          GROUP BY ct.Reservation_ID", null);
-                    if (dt != null)
-                        foreach (DataRow r in dt.Rows)
-                            _chatConvByRes[Convert.ToInt64(r["Reservation_ID"])] = Convert.ToInt64(r["ConvId"]);
-                }
-                long resId = Convert.ToInt64(resIdObj);
-                long convId;
-                return _chatConvByRes.TryGetValue(resId, out convId) ? convId : 0;
+                EnsureChatLinks();
+                ChatLink link;
+                return _chatByRes.TryGetValue(Convert.ToInt64(resIdObj), out link) ? link : null;
             }
-            catch { return 0; }   // ตาราง OmniChannel ยังไม่มี → ไม่โชว์ปุ่ม
+            catch { return null; }
+        }
+
+        /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม)</summary>
+        protected long GuestChatConvId(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            return link != null ? link.ConvId : 0;
+        }
+
+        /// <summary>ข้อความบนปุ่ม — บอกช่องทางที่ลูกค้าติดต่อมา + จำนวนที่ยังไม่อ่าน</summary>
+        protected string GuestChatLabel(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            if (link == null) return "💬 แชทลูกค้า";
+
+            string icon;
+            switch (link.ChannelCode)
+            {
+                case "LINE": icon = "💬 LINE"; break;
+                case "FACEBOOK": icon = "💬 Facebook"; break;
+                case "INSTAGRAM": icon = "💬 Instagram"; break;
+                case "TIKTOK": icon = "💬 TikTok"; break;
+                case "WHATSAPP": icon = "💬 WhatsApp"; break;
+                case "TELEGRAM": icon = "💬 Telegram"; break;
+                case "EMAIL": icon = "💬 อีเมล OTA"; break;
+                case "WEBCHAT": icon = "💬 แชทเว็บ"; break;
+                default: icon = "💬 " + (string.IsNullOrEmpty(link.ChannelName) ? "แชท" : link.ChannelName); break;
+            }
+            return link.Unread > 0 ? icon + $" ({link.Unread})" : icon;
+        }
+
+        /// <summary>ยังมีข้อความที่ยังไม่อ่าน → เน้นปุ่มเป็นสีแดงให้พนักงานเห็น</summary>
+        protected string GuestChatCss(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            return (link != null && link.Unread > 0)
+                ? "btn btn-danger btn-sm mb-1"
+                : "btn btn-success btn-sm mb-1";
         }
 
         /// <summary>AJAX จัดการ sync NextAcc ของ "การจองเดียว": overview (จำแนก ไม่มี/JE/เอกสาร ต่อใบ) /
