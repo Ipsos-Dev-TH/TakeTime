@@ -443,6 +443,9 @@
     <Content Include="Admin\Settings\Index.aspx" />
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
+    <Content Include="Admin\CRM\MemberVouchers.aspx" />
+    <Content Include="Member\Login.aspx" />
+    <Content Include="Member\Card.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
     <Content Include="Admin\LineLinkCallback.aspx" />
     <Content Include="Mobile\Leave.aspx" />
@@ -879,6 +882,7 @@
     <Compile Include="Class\Services\EmailReservationService.cs" />
     <Compile Include="Class\Services\EmailChatService.cs" />
     <Compile Include="Class\Services\ChatBookingLinker.cs" />
+    <Compile Include="Class\Services\MemberPortalService.cs" />
     <Compile Include="Class\Services\DailyReportLineService.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\OmniChannelService.cs" />
@@ -1260,6 +1264,27 @@
     </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberVouchers.aspx.cs">
+      <DependentUpon>MemberVouchers.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberVouchers.aspx.designer.cs">
+      <DependentUpon>MemberVouchers.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Member\Login.aspx.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Member\Login.aspx.designer.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Member\Card.aspx.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Member\Card.aspx.designer.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\ProductAccounting.aspx.cs">
       <DependentUpon>ProductAccounting.aspx</DependentUpon>

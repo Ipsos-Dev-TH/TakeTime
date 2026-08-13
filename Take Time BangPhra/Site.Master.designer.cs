@@ -27,6 +27,7 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.PlaceHolder phNavActivitiesPub;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavAffiliatePub;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavGuestPortal;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavMemberPub;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavHousekeeping;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavChat;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavRoomService;

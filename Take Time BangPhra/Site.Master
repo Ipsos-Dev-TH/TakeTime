@@ -633,6 +633,12 @@
                         </a></li>
                         </asp:PlaceHolder>
 
+                        <asp:PlaceHolder ID="phNavMemberPub" runat="server">
+                        <li><a runat="server" href="~/Member/Login">
+                            <i class="fas fa-id-card"></i> สมาชิก
+                        </a></li>
+                        </asp:PlaceHolder>
+
                         <asp:PlaceHolder ID="phNavGuestPortal" runat="server">
                         <li><a runat="server" href="~/Guest/Portal">
                             <i class="fas fa-mobile-alt"></i> Guest Portal
@@ -789,6 +795,9 @@
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
                                                         <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/MemberVouchers">
+                                                        <i class="fas fa-ticket-alt"></i> Voucher & สิทธิ์สมาชิก
                                                     </a></li>
                                                     </asp:PlaceHolder>
                                                     <asp:PlaceHolder ID="phNavReviews" runat="server">

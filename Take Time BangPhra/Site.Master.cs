@@ -117,6 +117,7 @@ namespace Take_Time_BangPhra
                 phNavAffiliatePub.Visible = Feature.On("Affiliate");
                 phNavAffiliateAdmin.Visible = Feature.On("Affiliate") && Perm.CanView(Perm.CrmAffiliate);
                 phNavGuestPortal.Visible = Feature.On("GuestPortal");
+                phNavMemberPub.Visible = Feature.On("Loyalty");
                 // เมนูจะขึ้นก็ต่อเมื่อ "ฟีเจอร์เปิด" และ "กลุ่มสิทธิ์ให้เห็น" พร้อมกัน
                 phNavHousekeeping.Visible = Feature.On("Housekeeping") && Perm.CanView(Perm.OpsHousekeeping);
                 phNavMaintenance.Visible = Feature.On("Maintenance") && Perm.CanView(Perm.OpsMaintenance);
