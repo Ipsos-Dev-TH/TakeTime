@@ -249,6 +249,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakeDiagnose":
                     result = DiagnoseEmailIntake();
                     break;
+                case "emailIntakeTestTelegram":
+                    result = TestEmailIntakeTelegram();
+                    break;
                 case "lineDailySend":
                     result = SendDailyLineNow();
                     break;
@@ -606,6 +609,20 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Diagnose Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        private Dictionary<string, object> TestEmailIntakeTelegram()
+        {
+            try
+            {
+                var svc = new EmailReservationService(ConnStr);
+                var (ok, msg) = System.Threading.Tasks.Task.Run(() => svc.TestTelegram()).Result;
+                return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Telegram Test Error: " + (ex.InnerException ?? ex).Message } };
             }
         }
 

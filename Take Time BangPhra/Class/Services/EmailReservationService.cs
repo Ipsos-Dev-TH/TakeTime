@@ -110,9 +110,51 @@ namespace Take_Time_BangPhra.Services
         private class Outcome
         {
             public bool Ok, Dup, Cancelled, Park;
-            public string Msg;
+            public string Msg;                 // ข้อความสั้น (log / หน้า Admin)
             public Outcome(bool ok, bool dup, bool cancelled, string msg, bool park = false)
             { Ok = ok; Dup = dup; Cancelled = cancelled; Msg = msg; Park = park; }
+
+            // ── ข้อมูลประกอบสำหรับข้อความ Telegram แบบละเอียด ──
+            public string Reason;              // หัวข้อสาเหตุตอนล้มเหลว (สั้น)
+            public int ResId;
+            public RoomBooking Head;
+            public List<RoomBooking> Rooms;
+            public string Changes;             // สรุปสิ่งที่เปลี่ยน (เส้นแก้ไข)
+            public string OldDates;            // ช่วงวันเดิมก่อนแก้/ก่อนยกเลิก
+
+            public Outcome Detail(RoomBooking head, List<RoomBooking> rooms = null, int resId = 0)
+            { Head = head; Rooms = rooms; ResId = resId; return this; }
+            public Outcome Because(string reason) { Reason = reason; return this; }
+        }
+
+        /// <summary>
+        /// ส่งข้อความตัวอย่างเข้า Telegram ด้วย layout จริง — ใช้ดูหน้าตาก่อนมีอีเมลจริงเข้ามา
+        /// </summary>
+        public (bool, string) TestTelegram()
+        {
+            if (string.IsNullOrEmpty(AppCfg.Get("TelegramTokenTakeTime")))
+                return (false, "ยังไม่ได้ตั้งค่า Telegram token ในระบบ");
+
+            var demo = new RoomBooking
+            {
+                ChannelName = "Booking.com", BookingId = "1114600000001674", GuestName = "ตัวอย่าง ทดสอบระบบ",
+                MobilePhone = "0812345678", RoomType = "Nordic Tent", NoOfRooms = 1, Adults = 2,
+                NetAmount = 950, GrossTotal = 1080, PaymentType = "ChannelCollect",
+                CheckIn = DateTime.Today.AddDays(1), CheckOut = DateTime.Today.AddDays(2),
+                AssignedRooms = new List<string> { "Nordic Tent 3" }
+            };
+            var rooms = new List<RoomBooking> { demo };
+            var ok = new Outcome(true, false, false, "ตัวอย่างข้อความ").Detail(demo, rooms, 9999);
+            Notify("🧪 <i>ข้อความทดสอบ — ไม่ใช่การจองจริง</i>\n\n"
+                   + BuildNotification("จองใหม่", ok, "New Reservation - Booking.com", false), true);
+
+            var bad = new Outcome(false, false, false,
+                "ห้องไม่ว่าง: 'Nordic Tent' (Booking.com) วันที่ … ต้องการ 1 ห้อง ว่าง 0 จาก 6 ห้องที่ map ไว้ | Nordic Tent 1=ติดจอง #123 …")
+                .Detail(demo, rooms).Because("ห้องไม่ว่าง");
+            Notify("🧪 <i>ข้อความทดสอบ — ไม่ใช่การจองจริง</i>\n\n"
+                   + BuildNotification("จองใหม่", bad, "New Reservation - Booking.com", false), true);
+
+            return (true, "ส่งตัวอย่าง 2 ข้อความเข้า Telegram แล้ว (สำเร็จ + ล้มเหลว) — เปิดดูในกลุ่มได้เลย");
         }
 
         /// <summary>ทดสอบเชื่อมต่อ IMAP + auth (ไม่แตะอีเมล). ใช้จากปุ่ม "ทดสอบการเชื่อมต่อ".</summary>
@@ -182,6 +224,7 @@ namespace Take_Time_BangPhra.Services
 
                     client.Disconnect(true);
                 }
+                NotifySummary(res);
             }
             catch (Exception ex)
             {
@@ -221,7 +264,7 @@ namespace Take_Time_BangPhra.Services
                 // รอบลองใหม่: แจ้งเฉพาะตอนสำเร็จ (ไม่งั้นจะเตือนซ้ำทุก 5 นาทีจนกว่าจะแก้)
                 // เคส Park แจ้งจากข้างใน Process* ไปแล้ว (ข้อความละเอียดกว่า) — ไม่แจ้งซ้ำ
                 if (_notifyTelegram && !o.Park && (o.Ok || (!o.Dup && !isRetry)))
-                    Notify($"{(o.Ok ? "✅" : "⚠️")} STAAH {kind}{(isRetry ? " (ลองใหม่)" : "")}: {o.Msg}", true);
+                    Notify(BuildNotification(kind, o, subject, isRetry), true);
             }
             catch (Exception ex)
             {
@@ -309,6 +352,7 @@ namespace Take_Time_BangPhra.Services
             public double NetAmount;      // AMOUNT ต่อคืน (net ที่ OTA จะโอน)
             public double GrossTotal;     // refsell_amt (ราคาลูกค้าจ่าย OTA — ระดับ booking)
             public DateTime CheckIn, CheckOut;
+            public List<string> AssignedRooms;   // ชื่อห้องจริงที่ระบบจัดให้ (ไว้แจ้ง Telegram)
         }
 
         private List<RoomBooking> ExtractRoomBookings(string html)
@@ -402,26 +446,36 @@ namespace Take_Time_BangPhra.Services
                   WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)
                     AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')",
                 new Dictionary<string, object> { { "@b", head.BookingId }, { "@p", "%" + head.BookingId + "%" } });
-            if (existing?.Rows.Count > 0) return new Outcome(false, true, false, $"Booking {head.BookingId} มีในระบบแล้ว (#{existing.Rows[0][0]})");
+            if (existing?.Rows.Count > 0)
+                return new Outcome(false, true, false, $"Booking {head.BookingId} มีในระบบแล้ว (#{existing.Rows[0][0]})")
+                    .Detail(head, rooms, Convert.ToInt32(existing.Rows[0][0]));
 
             // สถานะในเนื้ออีเมลต้องเป็น Confirmed (โปรแกรมเดิมเช็คไว้ — พอร์ตมาแล้วหายไป)
             // ถ้าไม่เช็ค อีเมลสถานะ Pending / Tentative / On Request จะถูกลงจองเป็นของจริง
             string bodyStatus = (head.BookingsStatus ?? "").Trim();
             if (bodyStatus.Length > 0 && !Has(bodyStatus, "Confirm") && !Has(bodyStatus, "Modif"))
-                return new Outcome(false, false, false, $"สถานะการจองในอีเมลเป็น '{bodyStatus}' ไม่ใช่ Confirmed — ไม่ลงจองอัตโนมัติ");
+                return new Outcome(false, false, false, $"สถานะการจองในอีเมลเป็น '{bodyStatus}' ไม่ใช่ Confirmed — ไม่ลงจองอัตโนมัติ")
+                    .Detail(head, rooms).Because("สถานะยังไม่ยืนยัน");
 
             // validate
             if (head.CheckIn == default || head.CheckOut == default || head.CheckOut <= head.CheckIn)
-                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ไม่ถูกต้อง");
+                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ไม่ถูกต้อง").Detail(head, rooms).Because("ข้อมูลวันที่ไม่ถูกต้อง");
             int stayDays = (int)(head.CheckOut - head.CheckIn).TotalDays;
-            if (stayDays > _maxStayDays) return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
-            if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture) return new Outcome(false, false, false, "จองล่วงหน้าเกินกำหนด");
+            if (stayDays > _maxStayDays)
+                return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกินที่ตั้งไว้ ({_maxStayDays})").Detail(head, rooms).Because("จำนวนคืนเกินกำหนด");
+            if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture)
+                return new Outcome(false, false, false, $"จองล่วงหน้าเกิน {_maxDaysFuture} วัน").Detail(head, rooms).Because("จองล่วงหน้าเกินกำหนด");
 
             var (resId, reason) = SaveReservation(rooms, stayDays);
-            if (resId <= 0) return new Outcome(false, false, false, "บันทึกการจองไม่สำเร็จ — " + reason);
+            if (resId <= 0)
+                return new Outcome(false, false, false, reason).Detail(head, rooms)
+                    .Because(reason.StartsWith("ไม่มี mapping") ? "ไม่มี mapping ห้องพัก"
+                           : reason.StartsWith("ห้องไม่ว่าง") ? "ห้องไม่ว่าง" : "บันทึกลงฐานข้อมูลไม่สำเร็จ");
 
             if (_createDocument) TryEnqueueDocument(resId, head);
-            return new Outcome(true, false, false, $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}");
+            return new Outcome(true, false, false,
+                $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}")
+                .Detail(head, rooms, resId);
         }
 
         // ── Save (SERIALIZABLE txn, ตรงตาม external app) ──────────────────────────
@@ -438,6 +492,7 @@ namespace Take_Time_BangPhra.Services
                     {
                         var plan = new List<(int accomId, int adults, double amt)>();
                         var chosen = new HashSet<int>();
+                        var assignedNames = new List<string>();
                         foreach (var r in rooms)
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
@@ -458,7 +513,7 @@ namespace Take_Time_BangPhra.Services
                                 _code.Logs(_conn, "EmailReservation", "not enough rooms — " + why, "SYSTEM");
                                 return (0, why);
                             }
-                            foreach (var x in avail) { chosen.Add(x.Id); plan.Add((x.Id, r.Adults, r.NetAmount)); }
+                            foreach (var x in avail) { chosen.Add(x.Id); assignedNames.Add(x.Name); plan.Add((x.Id, r.Adults, r.NetAmount)); }
                         }
 
                         // gross รวม (ราคาขายจริง) → TotalPrice/Deposit; net รวม → OTA_Net_Amount
@@ -503,7 +558,9 @@ namespace Take_Time_BangPhra.Services
                                 cmd.ExecuteNonQuery();
                             }
                         tx.Commit();
-                        _code.Logs(_conn, "EmailReservation", $"created reservation {resId} ({plan.Count} rooms) booking={head.BookingId}", "SYSTEM");
+                        head.AssignedRooms = assignedNames;   // ไว้แจ้ง Telegram ว่าได้ห้องไหนจริง
+                        _code.Logs(_conn, "EmailReservation",
+                            $"created reservation {resId} ({plan.Count} rooms: {string.Join(", ", assignedNames)}) booking={head.BookingId}", "SYSTEM");
                         return (resId, "ok");
                     }
                     catch (Exception ex)
@@ -968,9 +1025,10 @@ namespace Take_Time_BangPhra.Services
         /// </summary>
         private Outcome ProcessModification(List<RoomBooking> rooms)
         {
-            if (rooms.Count == 0) return new Outcome(false, false, false, "แยกข้อมูลจากอีเมลแก้ไขไม่ได้ (format เปลี่ยน?)");
+            if (rooms.Count == 0) return new Outcome(false, false, false, "แยกข้อมูลจากอีเมลแก้ไขไม่ได้ (format เปลี่ยน?)").Because("อ่านอีเมลไม่ออก");
             var head = rooms[0];
-            if (string.IsNullOrWhiteSpace(head.BookingId)) return new Outcome(false, false, false, "ไม่พบ Booking ID ในอีเมลแก้ไข");
+            if (string.IsNullOrWhiteSpace(head.BookingId))
+                return new Outcome(false, false, false, "ไม่พบ Booking ID ในอีเมลแก้ไข").Detail(head, rooms).Because("อ่านอีเมลไม่ออก");
 
             // หาการจองเดิมที่ยังใช้งานอยู่
             var dt = _code.DatabaseQuerySafe(_conn,
@@ -998,7 +1056,7 @@ namespace Take_Time_BangPhra.Services
                               $"(ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
                 if (_notifyTelegram) Notify(warn, true);
-                return new Outcome(false, false, false, warn, park: true);
+                return new Outcome(false, false, false, warn, park: true).Detail(head, rooms, resId);
             }
 
             var rcpt = _code.DatabaseQuerySafe(_conn,
@@ -1010,26 +1068,32 @@ namespace Take_Time_BangPhra.Services
                               $"กรุณาปรับเอกสาร/ยอดเงินเอง (ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
                 if (_notifyTelegram) Notify(warn, true);
-                return new Outcome(false, false, false, warn, park: true);
+                return new Outcome(false, false, false, warn, park: true).Detail(head, rooms, resId);
             }
 
             // ── validate ข้อมูลใหม่ ────────────────────────────────────────────
             if (head.CheckIn == default || head.CheckOut == default || head.CheckOut <= head.CheckIn)
-                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ในอีเมลแก้ไขไม่ถูกต้อง");
+                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ในอีเมลแก้ไขไม่ถูกต้อง").Detail(head, rooms, resId).Because("ข้อมูลวันที่ไม่ถูกต้อง");
             int stayDays = (int)(head.CheckOut - head.CheckIn).TotalDays;
-            if (stayDays > _maxStayDays) return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
+            if (stayDays > _maxStayDays)
+                return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกินที่ตั้งไว้ ({_maxStayDays})").Detail(head, rooms, resId).Because("จำนวนคืนเกินกำหนด");
 
             DateTime oldIn = Convert.ToDateTime(dt.Rows[0]["CheckinDate"]);
             DateTime oldOut = Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]);
             decimal oldTotal = dt.Rows[0]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["TotalPrice"]) : 0m;
 
             var (ok, msg) = UpdateReservation(resId, rooms, stayDays);
-            if (!ok) return new Outcome(false, false, false, msg);
+            if (!ok)
+                return new Outcome(false, false, false, msg).Detail(head, rooms, resId)
+                    .Because(msg.Contains("ห้องไม่ว่าง") ? "ห้องไม่ว่างตามวันที่ใหม่" : "แก้ไขไม่สำเร็จ");
 
             string changes = BuildChangeSummary(oldIn, oldOut, oldTotal, head, stayDays);
             string done = $"แก้ไขการจอง #{resId} ({head.BookingId}) เรียบร้อย — {changes}";
             _code.Logs(_conn, "EmailReservation", done, "SYSTEM");
-            return new Outcome(true, false, false, done);
+            var okOut = new Outcome(true, false, false, done).Detail(head, rooms, resId);
+            okOut.Changes = changes;
+            okOut.OldDates = $"{oldIn:dd/MM/yyyy}-{oldOut:dd/MM/yyyy}";
+            return okOut;
         }
 
         private static string BuildChangeSummary(DateTime oldIn, DateTime oldOut, decimal oldTotal,
@@ -1197,18 +1261,22 @@ namespace Take_Time_BangPhra.Services
         private Outcome ProcessCancellation(List<RoomBooking> rooms)
         {
             string bookingId = rooms.Count > 0 ? rooms[0].BookingId : null;
-            if (string.IsNullOrWhiteSpace(bookingId)) return new Outcome(false, false, true, "ไม่พบ Booking ID ในอีเมลยกเลิก");
+            var chead = rooms.Count > 0 ? rooms[0] : null;
+            if (string.IsNullOrWhiteSpace(bookingId))
+                return new Outcome(false, false, true, "ไม่พบ Booking ID ในอีเมลยกเลิก").Because("อ่านอีเมลไม่ออก");
 
             var dt = _code.DatabaseQuerySafe(_conn,
                 "SELECT TOP 1 ID, Status FROM Reservation WHERE OTA_Booking_ID = @b OR Remark LIKE @p ORDER BY ID DESC",
                 new Dictionary<string, object> { { "@b", bookingId }, { "@p", "%" + bookingId + "%" } });
             // ไม่พบ = อาจเป็นอีเมลมาก่อนใบจอง (out-of-order) — ปล่อยเป็น fail ให้ retry loop
             // วนกลับมา: พอใบจองถูกสร้างจาก folder Failed แล้ว รอบถัดไปใบยกเลิกจะเจอและยกเลิกเอง
-            if (dt == null || dt.Rows.Count == 0) return new Outcome(false, false, true, $"ไม่พบการจอง {bookingId} ในระบบ");
+            if (dt == null || dt.Rows.Count == 0)
+                return new Outcome(false, false, true, $"ไม่พบการจอง {bookingId} ในระบบ (อาจยังลงจองไม่สำเร็จ — ระบบจะยกเลิกให้เองหลังใบจองถูกสร้าง)")
+                    .Detail(chead).Because("ไม่พบการจองในระบบ");
             int resId = Convert.ToInt32(dt.Rows[0]["ID"]);
             string status = dt.Rows[0]["Status"]?.ToString() ?? "";
             if (status == "ยกเลิก" || status == "ยกเลิกคืนเงิน" || status == "ยกเลิกไม่คืนเงิน")
-                return new Outcome(false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว");
+                return new Outcome(false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว").Detail(chead, null, resId);
 
             // ── guard: เช็คอิน/เช็คเอาท์แล้ว → ห้ามยกเลิกเอง (แขกอยู่ในห้อง/เข้าพักจบแล้ว) ──
             if (status.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0
@@ -1218,7 +1286,7 @@ namespace Take_Time_BangPhra.Services
                               "ไม่ยกเลิกอัตโนมัติ กรุณาตรวจสอบกับ OTA แล้วจัดการเอง";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
                 if (_notifyTelegram) Notify(warn, true);
-                return new Outcome(false, false, true, warn, park: true);
+                return new Outcome(false, false, true, warn, park: true).Detail(chead, null, resId);
             }
 
             // ── guard: ออกใบเสร็จแล้ว → ยกเลิกเฉย ๆ จะทิ้งใบเสร็จ/เอกสารบัญชีค้างสถานะปกติ ──
@@ -1231,7 +1299,7 @@ namespace Take_Time_BangPhra.Services
                               "ไม่ยกเลิกอัตโนมัติ กรุณายกเลิกใบเสร็จ/เอกสารบัญชีก่อน แล้วยกเลิกการจองเอง";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
                 if (_notifyTelegram) Notify(warn, true);
-                return new Outcome(false, false, true, warn, park: true);
+                return new Outcome(false, false, true, warn, park: true).Detail(chead, null, resId);
             }
 
             _code.DatabaseInsertSafe(_conn,
@@ -1247,7 +1315,8 @@ namespace Take_Time_BangPhra.Services
                 "DELETE FROM Reservation_Accommodation WHERE Reservation_ID = @id",
                 new Dictionary<string, object> { { "@id", resId } });
             _code.Logs(_conn, "EmailReservation", $"cancelled reservation {resId} booking={bookingId} status={_cancelStatus}", "SYSTEM");
-            return new Outcome(true, false, true, $"ยกเลิกการจอง #{resId} ({bookingId}) → สถานะ \"{_cancelStatus}\"");
+            return new Outcome(true, false, true, $"ยกเลิกการจอง #{resId} ({bookingId}) → สถานะ \"{_cancelStatus}\"")
+                .Detail(chead, null, resId);
         }
 
         // ── สร้างเอกสาร (toggle) ──────────────────────────────────────────────────
@@ -1279,6 +1348,131 @@ namespace Take_Time_BangPhra.Services
             }
             return _hasModifiedDate == 1 ? ", Modified_Date = GETDATE()" : "";
         }
+
+        // ── ข้อความแจ้งเตือน Telegram ────────────────────────────────────────────
+        // TelegramBot2 ส่งด้วย parse_mode=HTML อยู่แล้ว → จัดรูปแบบให้อ่านง่ายบนมือถือ
+        // (ข้อความบรรทัดเดียวแบบเดิมอ่านยาก ต้องเปิดระบบดูทุกครั้งว่าใบไหน ห้องอะไร)
+        private string BuildNotification(string kind, Outcome o, string subject, bool isRetry)
+        {
+            var h = o.Head;
+            var sb = new StringBuilder();
+            string tag = isRetry ? "  <i>(ลองใหม่อัตโนมัติ)</i>" : "";
+
+            if (o.Ok && o.Cancelled) sb.AppendLine("<b>🚫 ยกเลิกการจองแล้ว</b>" + tag);
+            else if (o.Ok && kind == "แก้ไข") sb.AppendLine("<b>✏️ แก้ไขการจองแล้ว</b>" + tag);
+            else if (o.Ok) sb.AppendLine("<b>✅ การจองสำเร็จ</b>" + tag);
+            else if (o.Cancelled) sb.AppendLine("<b>❌ ยกเลิกไม่สำเร็จ</b>" + tag);
+            else sb.AppendLine($"<b>❌ {E(kind)}ไม่สำเร็จ</b>" + tag);
+            sb.AppendLine();
+
+            if (!o.Ok)
+            {
+                sb.AppendLine($"⚠️ <b>สาเหตุ:</b> {E(o.Reason ?? "ไม่ทราบสาเหตุ")}");
+                sb.AppendLine($"📝 <b>รายละเอียด:</b> {E(Trunc(o.Msg, 700))}");
+                if (!string.IsNullOrWhiteSpace(subject))
+                    sb.AppendLine($"✉️ <b>อีเมล:</b> {E(Trunc(subject, 120))}");
+                sb.AppendLine();
+            }
+
+            if (o.ResId > 0) sb.AppendLine($"📋 <b>เลขที่จองในระบบ:</b> {o.ResId}");
+            if (h != null)
+            {
+                if (!string.IsNullOrWhiteSpace(h.BookingId)) sb.AppendLine($"🔖 <b>Booking ID:</b> {E(h.BookingId)}");
+                if (!string.IsNullOrWhiteSpace(h.ChannelName)) sb.AppendLine($"🌐 <b>ช่องทาง:</b> {E(h.ChannelName)}");
+                if (!string.IsNullOrWhiteSpace(h.GuestName) || !string.IsNullOrWhiteSpace(h.MobilePhone))
+                {
+                    sb.AppendLine();
+                    if (!string.IsNullOrWhiteSpace(h.GuestName)) sb.AppendLine($"👤 <b>ผู้เข้าพัก:</b> {E(h.GuestName)}");
+                    if (!string.IsNullOrWhiteSpace(h.MobilePhone)) sb.AppendLine($"📞 <b>เบอร์โทร:</b> {E(h.MobilePhone)}");
+                }
+                if (h.CheckIn != default && h.CheckOut != default)
+                {
+                    int nights = (int)(h.CheckOut - h.CheckIn).TotalDays;
+                    sb.AppendLine();
+                    if (!string.IsNullOrEmpty(o.OldDates)) sb.AppendLine($"📅 <b>เดิม:</b> {E(o.OldDates)}");
+                    sb.AppendLine($"📅 <b>เช็คอิน:</b> {h.CheckIn:dd/MM/yyyy}");
+                    sb.AppendLine($"📅 <b>เช็คเอาท์:</b> {h.CheckOut:dd/MM/yyyy}");
+                    if (nights > 0) sb.AppendLine($"🌙 <b>จำนวนคืน:</b> {nights} คืน");
+                }
+            }
+
+            if (o.Rooms != null && o.Rooms.Count > 0)
+            {
+                int nights = Math.Max(1, (int)(h.CheckOut - h.CheckIn).TotalDays);
+                sb.AppendLine();
+                sb.AppendLine("<b>🏨 ห้องที่จอง:</b>");
+                int totalRooms = 0;
+                foreach (var r in o.Rooms)
+                {
+                    sb.AppendLine($"  • {E(r.RoomType)} × {r.NoOfRooms} ({r.Adults} คน, {r.NetAmount:N0} THB/คืน)");
+                    totalRooms += r.NoOfRooms;
+                }
+                if (h.AssignedRooms != null && h.AssignedRooms.Count > 0)
+                    sb.AppendLine($"🛏 <b>จัดให้ห้อง:</b> {E(string.Join(", ", h.AssignedRooms))}");
+                else if (totalRooms > 0)
+                    sb.AppendLine($"🛏 <b>จำนวนห้อง:</b> {totalRooms}");
+
+                double gross = h.GrossTotal > 0 ? h.GrossTotal : o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
+                double net = o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
+                sb.AppendLine();
+                sb.AppendLine($"💰 <b>ยอดลูกค้าจ่าย OTA:</b> {gross:N0} THB");
+                if (net > 0 && Math.Abs(net - gross) > 1)
+                    sb.AppendLine($"🏦 <b>ยอดที่ OTA จะโอน:</b> {net:N0} THB  <i>(ส่วนต่าง {gross - net:N0})</i>");
+                bool channelCollect = (h.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || string.IsNullOrEmpty(h.PaymentType);
+                sb.AppendLine($"💳 <b>การชำระ:</b> {(channelCollect ? "OTA เก็บเงินแล้ว (Channel Collect)" : "เก็บเงินหน้างาน (Hotel Collect)")}");
+            }
+
+            if (!string.IsNullOrEmpty(o.Changes))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"🔄 <b>สิ่งที่เปลี่ยน:</b> {E(o.Changes)}");
+            }
+
+            if (o.Ok && o.Cancelled)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"<i>สถานะในระบบ: {E(_cancelStatus)} — ห้องถูกปล่อยคืนแล้ว</i>");
+            }
+            else if (!o.Ok)
+            {
+                sb.AppendLine();
+                sb.AppendLine(_retryFailed && _moveFailed
+                    ? $"<i>♻️ ระบบจะลองใหม่ให้เองทุกรอบภายใน {_retryHours} ชม. — แก้ mapping หรือปล่อยห้องแล้วไม่ต้องทำอะไรเพิ่ม</i>"
+                    : "<i>⚠️ ระบบไม่ลองใหม่ให้ (ปิดไว้) — ต้องจัดการเอง</i>");
+            }
+
+            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
+            return sb.ToString();
+        }
+
+        /// <summary>สรุปท้ายรอบ — ส่งเฉพาะเมื่อรอบนั้นมีอีเมลให้ทำจริง (กันสแปมทุก 5 นาที)</summary>
+        private void NotifySummary(IntakeResult res)
+        {
+            if (!_notifyTelegram || Cfg("Email_Rsv_NotifySummary", "1") != "1") return;
+            if (res.Fetched == 0 && res.Retried == 0) return;
+            // อีเมลใบเดียวจบในตัวอยู่แล้ว (แจ้งไปแล้วละเอียดกว่า) — สรุปมีค่าเมื่อทำหลายฉบับ
+            if (res.Fetched + res.Retried < 2 && res.Failed == 0 && res.Manual == 0) return;
+
+            string emoji = (res.Failed > 0 || res.Manual > 0) ? "⚠️" : "✅";
+            var sb = new StringBuilder();
+            sb.AppendLine($"<b>{emoji} สรุปการอ่านอีเมลจอง OTA</b>");
+            sb.AppendLine();
+            sb.AppendLine($"📧 <b>อีเมลที่ดึง:</b> {res.Fetched}");
+            if (res.Created > 0) sb.AppendLine($"✅ <b>จองใหม่/แก้ไขสำเร็จ:</b> {res.Created}");
+            if (res.Cancelled > 0) sb.AppendLine($"🚫 <b>ยกเลิก:</b> {res.Cancelled}");
+            if (res.Duplicate > 0) sb.AppendLine($"🔁 <b>ซ้ำ (มีในระบบแล้ว):</b> {res.Duplicate}");
+            if (res.Failed > 0) sb.AppendLine($"❌ <b>ล้มเหลว:</b> {res.Failed}");
+            if (res.Manual > 0) sb.AppendLine($"🖐 <b>ต้องตรวจเอง:</b> {res.Manual}");
+            if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
+            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
+            Notify(sb.ToString(), true);
+        }
+
+        private static string E(string s) =>
+            string.IsNullOrEmpty(s) ? "" : s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        private static string Trunc(string s, int max) =>
+            string.IsNullOrEmpty(s) || s.Length <= max ? s : s.Substring(0, max) + "…";
 
         // ── helpers ──────────────────────────────────────────────────────────────
         private IMailFolder GetOrCreateFolder(ImapClient client, string name)

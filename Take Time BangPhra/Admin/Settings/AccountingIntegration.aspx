@@ -587,9 +587,14 @@
                     <label style="display:block; font-weight:600; margin-bottom:6px;">Port</label>
                     <input type="number" id="cfgEmailRsvImapPort" value="993" style="width:100%; padding:8px;" />
                 </div>
-                <div style="min-width:120px;">
-                    <label style="display:block; font-weight:600; margin-bottom:6px;">ดึงทุก (นาที)</label>
-                    <input type="number" id="cfgEmailRsvPollMinutes" value="5" min="1" style="width:100%; padding:8px;" />
+                <div style="min-width:200px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">
+                        ⏱ ความถี่ในการดึงอีเมล (ทุกกี่นาที)
+                    </label>
+                    <input type="number" id="cfgEmailRsvPollMinutes" value="5" min="1" max="1440" style="width:100%; padding:8px;" />
+                    <div style="font-size:11px; color:#777; margin-top:4px;">
+                        ระบบดึงเองอัตโนมัติตามรอบนี้ (5 = ทุก 5 นาที) — ต่ำสุด 1 นาที
+                    </div>
                 </div>
             </div>
 
@@ -688,6 +693,7 @@
                 <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
                 <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
+                <button type="button" class="btn-default" onclick="getAction('emailIntakeTestTelegram','emailRsvResult')"><i class="fab fa-telegram"></i> ทดสอบข้อความ Telegram</button>
                 <button type="button" class="btn-default" onclick="loadEmailLog()"><i class="fas fa-list-alt"></i> ดู logs ล่าสุด</button>
             </div>
             <div class="help-text" style="margin-top:8px;">
