@@ -128,6 +128,11 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsOtaRoomRevenueEnabled => GetConfig("Nexaacc_OtaRoomRevenue", "0") == "1";
 
+        /// <summary>อ่านอีเมลตอบกลับจากกรมสรรพากรแล้วมาร์ค e-Tax ว่านำส่งสำเร็จ (PHASE18_28). default ปิด</summary>
+        public bool IsEtaxRdWatchEnabled => GetConfig("Etax_Rd_Watch_Enabled", "0") == "1";
+        /// <summary>โดเมน/คำในผู้ส่งที่ถือว่าเป็นอีเมลจากกรมสรรพากร (คั่นจุลภาค)</summary>
+        public string EtaxRdFromContains => GetConfig("Etax_Rd_FromContains", "rd.go.th, etax, teda.th");
+
         /// <summary>ดันจำนวนสต๊อก (ขาออก) TakeTime → NextAcc /product/stock/adjust (qty-only). default ปิด</summary>
         public bool IsStockQtySyncEnabled => GetConfig("Nexaacc_StockQtySync", "0") == "1";
         /// <summary>ดึงจำนวนสต๊อก (ขากลับ) NextAcc → TakeTime (ปรับสต๊อกฝั่ง NextAcc เอง). default ปิด</summary>

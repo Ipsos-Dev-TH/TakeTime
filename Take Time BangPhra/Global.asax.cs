@@ -130,6 +130,14 @@ namespace Take_Time_BangPhra
                 try { SendDailyLineReportIfDue(); }
                 catch (Exception lex) { System.Diagnostics.Trace.TraceError($"DailyLineReport timer error: {(lex.InnerException ?? lex).Message}"); }
 
+                // อ่านอีเมลตอบกลับจากกรมสรรพากร → มาร์คใบกำกับว่านำส่ง e-Tax สำเร็จ (no-op ถ้าปิด)
+                try
+                {
+                    string rdConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    EtaxRdConfirmService.PollIfDue(rdConn);
+                }
+                catch (Exception rdx) { System.Diagnostics.Trace.TraceError($"EtaxRdConfirm timer error: {rdx.Message}"); }
+
                 // แชทลูกค้า OTA ผ่านอีเมล: ดึงอีเมลจาก relay ของ OTA เข้า OmniChannel inbox
                 // — gate ด้วยสวิตช์ channel EMAIL + รอบเวลาใน PollIfDue; no-op ถ้าปิด
                 try

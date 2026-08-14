@@ -138,6 +138,12 @@ namespace Take_Time_BangPhra.Account
                     sb.Append("<td style='padding:8px 10px; text-align:center;'>" + (sent
                         ? "<span style='background:#e8f5e9;color:#1e7e42;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;'>ส่งแล้ว</span>"
                         : "<span style='background:#fff3e0;color:#e65100;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;'>ยังไม่ส่ง</span>") + "</td>");
+                    // สถานะจากกรมสรรพากร (มาจากอีเมลตอบกลับ — PHASE18_28)
+                    bool rdOk = dt.Columns.Contains("Rd_Confirmed_Date") && r["Rd_Confirmed_Date"] != DBNull.Value;
+                    sb.Append("<td style='padding:8px 10px; text-align:center;'>" + (rdOk
+                        ? "<span style='background:#e8f5e9;color:#1e7e42;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;' title='"
+                          + Convert.ToDateTime(r["Rd_Confirmed_Date"]).ToString("dd/MM/yyyy HH:mm") + "'>✅ สรรพากรรับแล้ว</span>"
+                        : "<span style='background:#eceff1;color:#78909c;padding:3px 9px;border-radius:11px;font-size:11px;'>รอยืนยัน</span>") + "</td>");
                     sb.Append("<td style='padding:8px 10px; text-align:right;'><a class='btn btn-primary btn-sm' href='?receipt=" +
                         Server.UrlEncode(rc) + "'>" + (sent ? "ส่งอีกครั้ง" : "✉ ส่งอีเมล") + "</a></td>");
                     sb.Append("</tr>");
@@ -145,7 +151,7 @@ namespace Take_Time_BangPhra.Account
             }
 
             litEtaxRows.Text = sb.Length > 0 ? sb.ToString()
-                : "<tr><td colspan='7' style='padding:16px; color:#90a4ae;'>ยังไม่มีเอกสาร e-Tax ที่ออกแล้ว " +
+                : "<tr><td colspan='8' style='padding:16px; color:#90a4ae;'>ยังไม่มีเอกสาร e-Tax ที่ออกแล้ว " +
                   "— e-Tax จะถูกสร้างอัตโนมัติเมื่อออกใบเสร็จที่ติ๊ก \"ต้องการ e-Tax\" และ NextAcc ประมวลผลเสร็จ</td></tr>";
         }
 

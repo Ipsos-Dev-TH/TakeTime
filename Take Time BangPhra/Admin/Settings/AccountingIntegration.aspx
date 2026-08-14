@@ -214,6 +214,21 @@
                     </div>
                 </div>
                 <div class="config-item">
+                    <label>อ่านอีเมลตอบกลับจากกรมสรรพากร → มาร์ค e-Tax สำเร็จ</label>
+                    <select id="cfgEtaxRdWatch">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — อ่านอีเมลตอบกลับแล้วมาร์คใบกำกับว่า "สรรพากรรับแล้ว"</option>
+                    </select>
+                    <div class="help-text">
+                        ใช้กล่องอีเมลเดียวกับระบบอ่านอีเมลจอง (ตั้งค่าด้านล่าง) — ระบบจะอ่านอีเมลจากผู้ส่งที่ระบุ
+                        หาเลขเอกสาร/เลขใบเสร็จในอีเมล แล้วมาร์คใบนั้นว่านำส่งสำเร็จ
+                        <b>แสดงผลที่หน้า ส่ง e-Tax และหน้าผู้เข้าพักรายวัน</b><br />
+                        มาร์คเฉพาะอีเมลที่มีคำยืนยันความสำเร็จ — อีเมลแจ้งข้อผิดพลาดจะไม่ถูกนับ
+                    </div>
+                    <label style="margin-top:8px;">อีเมลผู้ส่งที่ถือว่าเป็นกรมสรรพากร (คั่นจุลภาค)</label>
+                    <input type="text" id="cfgEtaxRdFrom" placeholder="rd.go.th, etax, teda.th" />
+                </div>
+                <div class="config-item">
                     <label>รูมเซอร์วิส (สั่งอาหารผ่าน Guest Portal) → ลงบัญชี</label>
                     <select id="cfgRoomServiceRevenue">
                         <option value="false">ปิด — ไม่ลงบัญชี (ออเดอร์ที่ลูกค้าจ่ายเองจะไม่มีรายได้ในระบบบัญชี และไม่ตัดต้นทุน)</option>
@@ -1208,6 +1223,8 @@
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
                 document.getElementById('cfgPosDailyRollup').value = cfg.posDailyRollup ? 'true' : 'false';
                 document.getElementById('cfgRoomServiceRevenue').value = cfg.roomServiceRevenue ? 'true' : 'false';
+                document.getElementById('cfgEtaxRdWatch').value = cfg.etaxRdWatch ? 'true' : 'false';
+                document.getElementById('cfgEtaxRdFrom').value = cfg.etaxRdFrom || '';
                 document.getElementById('cfgOtaRoomRevenue').value = cfg.otaRoomRevenue ? 'true' : 'false';
                 document.getElementById('cfgStockQtySync').value = cfg.stockQtySync ? 'true' : 'false';
                 document.getElementById('cfgStockQtyPull').value = cfg.stockQtyPull ? 'true' : 'false';
@@ -1324,6 +1341,8 @@
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
                 posDailyRollup: document.getElementById('cfgPosDailyRollup').value === 'true',
                 roomServiceRevenue: document.getElementById('cfgRoomServiceRevenue').value === 'true',
+                etaxRdWatch: document.getElementById('cfgEtaxRdWatch').value === 'true',
+                etaxRdFrom: document.getElementById('cfgEtaxRdFrom').value.trim(),
                 otaRoomRevenue: document.getElementById('cfgOtaRoomRevenue').value === 'true',
                 stockQtySync: document.getElementById('cfgStockQtySync').value === 'true',
                 stockQtyPull: document.getElementById('cfgStockQtyPull').value === 'true',

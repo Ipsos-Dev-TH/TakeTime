@@ -72,6 +72,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "payrollSyncMode", config.PayrollSyncMode },
                     { "posDailyRollup", config.IsPosDailyRollupEnabled },
                     { "roomServiceRevenue", config.IsRoomServiceRevenueEnabled },
+                    { "etaxRdWatch", config.IsEtaxRdWatchEnabled },
+                    { "etaxRdFrom", config.EtaxRdFromContains },
                     { "otaRoomRevenue", config.IsOtaRoomRevenueEnabled },
                     { "stockInUseGRNI", config.IsStockInUseGRNI },
                     { "stockInSkipJournal", config.IsStockInSkipJournal },
@@ -347,6 +349,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("payrollSyncMode")) config.SetConfig("Nexaacc_SyncMode_Payroll", data["payrollSyncMode"]?.ToString() ?? "");
                 if (data.ContainsKey("posDailyRollup")) config.SetConfig("Nexaacc_PosDailyRollup", BoolToFlag(data["posDailyRollup"]));
                 if (data.ContainsKey("roomServiceRevenue")) config.SetConfig("Nexaacc_RoomServiceRevenue", BoolToFlag(data["roomServiceRevenue"]));
+                if (data.ContainsKey("etaxRdWatch")) config.SetConfig("Etax_Rd_Watch_Enabled", BoolToFlag(data["etaxRdWatch"]));
+                if (data.ContainsKey("etaxRdFrom")) config.SetConfig("Etax_Rd_FromContains", data["etaxRdFrom"]?.ToString() ?? "rd.go.th, etax, teda.th");
                 if (data.ContainsKey("otaRoomRevenue")) config.SetConfig("Nexaacc_OtaRoomRevenue", BoolToFlag(data["otaRoomRevenue"]));
                 if (data.ContainsKey("stockInUseGRNI")) config.SetConfig("Nexaacc_StockIn_UseGRNI", BoolToFlag(data["stockInUseGRNI"]));
                 if (data.ContainsKey("stockInSkipJournal")) config.SetConfig("Nexaacc_StockIn_SkipJournal", BoolToFlag(data["stockInSkipJournal"]));

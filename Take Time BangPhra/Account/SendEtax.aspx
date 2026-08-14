@@ -41,6 +41,7 @@
                         <th style="text-align:right; padding:9px 10px; border-bottom:2px solid #e3e9ed;">ยอด</th>
                         <th style="text-align:left; padding:9px 10px; border-bottom:2px solid #e3e9ed;">วันที่ออก</th>
                         <th style="text-align:center; padding:9px 10px; border-bottom:2px solid #e3e9ed;">สถานะอีเมล</th>
+                        <th style="text-align:center; padding:9px 10px; border-bottom:2px solid #e3e9ed;">กรมสรรพากร</th>
                         <th style="border-bottom:2px solid #e3e9ed;"></th>
                     </tr>
                     <asp:Literal ID="litEtaxRows" runat="server" />

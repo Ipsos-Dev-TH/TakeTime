@@ -2052,7 +2052,8 @@ namespace Take_Time_BangPhra.Integration
                              MAX(c.Email) AS CustomerEmail,
                              MAX(r.Total_Amount) AS Amount,
                              MAX(CASE WHEN ISNULL(l.Email_Sent, 0) = 1 THEN 1 ELSE 0 END) AS EmailSent,
-                             MAX(l.Status) AS EtaxStatus
+                             MAX(l.Status) AS EtaxStatus,
+                             MAX(l.Rd_Confirmed_Date) AS Rd_Confirmed_Date
                         FROM Accounting_ETax_Log l
                         LEFT JOIN Reservation res ON res.ID = l.Reservation_ID
                         LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone

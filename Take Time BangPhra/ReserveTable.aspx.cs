@@ -125,6 +125,51 @@ namespace Take_Time_BangPhra
             catch { return null; }
         }
 
+        // ── สถานะ e-Tax ต่อการจอง (รวมผลยืนยันจากกรมสรรพากร) ────────────────────
+        private class EtaxState { public bool HasEtax; public bool RdConfirmed; public DateTime? RdDate; }
+        private Dictionary<long, EtaxState> _etaxByRes;
+
+        private EtaxState GetEtaxState(object resIdObj)
+        {
+            try
+            {
+                if (_etaxByRes == null)
+                {
+                    _etaxByRes = new Dictionary<long, EtaxState>();
+                    var dt = code2.DatabaseQuerySafe(conn,
+                        @"SELECT Reservation_ID,
+                                 MAX(CASE WHEN Nexaacc_Etax_Id IS NOT NULL THEN 1 ELSE 0 END) AS HasEtax,
+                                 MAX(CASE WHEN Rd_Confirmed_Date IS NOT NULL THEN 1 ELSE 0 END) AS RdOk,
+                                 MAX(Rd_Confirmed_Date) AS RdDate
+                            FROM Accounting_ETax_Log
+                           WHERE Reservation_ID IS NOT NULL
+                           GROUP BY Reservation_ID", null);
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                            _etaxByRes[Convert.ToInt64(r["Reservation_ID"])] = new EtaxState
+                            {
+                                HasEtax = Convert.ToInt32(r["HasEtax"]) == 1,
+                                RdConfirmed = Convert.ToInt32(r["RdOk"]) == 1,
+                                RdDate = r["RdDate"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(r["RdDate"])
+                            };
+                }
+                EtaxState st;
+                return _etaxByRes.TryGetValue(Convert.ToInt64(resIdObj), out st) ? st : null;
+            }
+            catch { return null; }   // ยังไม่รัน PHASE18_28 → ไม่แสดงป้าย
+        }
+
+        /// <summary>ป้ายสถานะ e-Tax บนแถวการจอง (ว่าง = ใบนี้ไม่มี e-Tax)</summary>
+        protected string EtaxBadge(object resIdObj)
+        {
+            var st = GetEtaxState(resIdObj);
+            if (st == null || !st.HasEtax) return "";
+            return st.RdConfirmed
+                ? "<span title='กรมสรรพากรรับเอกสารแล้ว " + (st.RdDate.HasValue ? st.RdDate.Value.ToString("dd/MM/yyyy HH:mm") : "") +
+                  "' style='display:inline-block;background:#e8f5e9;color:#1e7e42;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;'>✅ e-Tax สรรพากรรับแล้ว</span>"
+                : "<span title='ออก e-Tax แล้ว รอผลตอบกลับจากกรมสรรพากร' style='display:inline-block;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;'>🧾 e-Tax รอสรรพากรยืนยัน</span>";
+        }
+
         /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม)</summary>
         protected long GuestChatConvId(object resIdObj)
         {

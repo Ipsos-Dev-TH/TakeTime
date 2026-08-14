@@ -546,9 +546,13 @@
                                     HeaderStyle-Width="6%" HeaderStyle-CssClass="header-center" 
                                     ItemStyle-CssClass="header-center" />
 
-                                <asp:BoundField DataField="Status" HeaderText="สถานะ" 
-                                    HeaderStyle-Width="6%" HeaderStyle-CssClass="header-center" 
-                                    ItemStyle-CssClass="header-center" />
+                                <asp:TemplateField HeaderText="สถานะ" HeaderStyle-Width="8%"
+                                    HeaderStyle-CssClass="header-center" ItemStyle-CssClass="header-center">
+                                    <ItemTemplate>
+                                        <%# Eval("Status") %>
+                                        <%# EtaxBadge(Eval("ID")) == "" ? "" : "<div style='margin-top:4px;'>" + EtaxBadge(Eval("ID")) + "</div>" %>
+                                    </ItemTemplate>
+                                </asp:TemplateField>
 
                                 <asp:TemplateField HeaderText="ดำเนินการ" HeaderStyle-Width="15%" HeaderStyle-CssClass="header-center">
                                     <ItemTemplate>
