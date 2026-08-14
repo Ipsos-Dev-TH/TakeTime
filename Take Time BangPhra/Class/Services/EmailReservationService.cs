@@ -273,6 +273,65 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        // ── ลายเซ็นประจำ instance ─────────────────────────────────────────────────
+        // ใส่ท้ายทุกข้อความ Telegram: เครื่อง/ชื่อไซต์/เวลา build ของ DLL
+        // → เมื่อมี deployment เก่าค้างรันแข่งกัน (เคยเกิด: build เก่าตีอีเมลตกก่อน แล้ว build
+        //   ใหม่ค่อยกู้จาก retry) จะดูออกทันทีว่าข้อความไหนมาจากตัวไหน โดยไม่ต้องเดา
+        //   (ข้อความที่ "ไม่มีลายเซ็น" = build เก่าก่อนมีฟีเจอร์นี้)
+        private static string _instanceStamp;
+        private static string InstanceStamp()
+        {
+            if (_instanceStamp != null) return _instanceStamp;
+            try
+            {
+                var asm = typeof(EmailReservationService).Assembly;
+                DateTime built = DateTime.MinValue;
+                try
+                {
+                    string appPath = System.Web.Hosting.HostingEnvironment.ApplicationPhysicalPath;
+                    string dll = System.IO.Path.Combine(appPath ?? "", "bin", asm.GetName().Name + ".dll");
+                    if (System.IO.File.Exists(dll)) built = System.IO.File.GetLastWriteTime(dll);
+                }
+                catch { }
+                if (built == DateTime.MinValue && !string.IsNullOrEmpty(asm.Location))
+                    built = System.IO.File.GetLastWriteTime(asm.Location);
+
+                string site = "";
+                try { site = System.Web.Hosting.HostingEnvironment.SiteName ?? ""; } catch { }
+                _instanceStamp = Environment.MachineName
+                    + (string.IsNullOrEmpty(site) ? "" : "/" + site)
+                    + (built == DateTime.MinValue ? "" : $" · build {built:dd/MM HH:mm}");
+            }
+            catch { _instanceStamp = Environment.MachineName; }
+            return _instanceStamp;
+        }
+
+        /// <summary>
+        /// ล็อกระดับฐานข้อมูล (sp_getapplock, Session owner) — กันหลายตัวดึงกล่องเมลเดียวกันพร้อมกัน
+        /// ครอบทั้ง timer ชนปุ่ม "ดึงตอนนี้", app pool ซ้อนตอน recycle, และ deployment ใหม่หลายชุด
+        /// ที่ชี้ DB เดียวกัน (ตัวเก่าที่ไม่มีโค้ดนี้ล็อกไม่ได้ — ต้องปิดทิ้งสถานเดียว)
+        /// ล็อกปล่อยเองเมื่อ connection ปิด
+        /// </summary>
+        private static bool TryAcquireIntakeLock(SqlConnection con)
+        {
+            try
+            {
+                using (var cmd = new SqlCommand("sp_getapplock", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@Resource", "TakeTime_EmailRsvIntake");
+                    cmd.Parameters.AddWithValue("@LockMode", "Exclusive");
+                    cmd.Parameters.AddWithValue("@LockOwner", "Session");
+                    cmd.Parameters.AddWithValue("@LockTimeout", 0);
+                    var ret = cmd.Parameters.Add("@Result", SqlDbType.Int);
+                    ret.Direction = ParameterDirection.ReturnValue;
+                    cmd.ExecuteNonQuery();
+                    return Convert.ToInt32(ret.Value) >= 0;
+                }
+            }
+            catch { return true; }   // ล็อกใช้ไม่ได้ (สิทธิ์/รุ่น SQL) → ทำงานต่อแบบไม่ล็อกดีกว่าหยุดทั้งระบบ
+        }
+
         /// <summary>ดึง+ประมวลผลอีเมลจองทั้งหมดที่ยังไม่อ่าน. ปลอดภัยเรียกซ้ำ (idempotent ด้วย dedup).</summary>
         public IntakeResult ProcessEmails()
         {
@@ -282,6 +341,16 @@ namespace Take_Time_BangPhra.Services
                 res.Error = "ยังไม่ได้ตั้งค่าอีเมล/รหัสผ่าน (หน้า Admin)";
                 return res;
             }
+
+            using (var gate = new SqlConnection(_conn))
+            {
+                try { gate.Open(); } catch { /* DB ล่ม — ปล่อยไปตายที่ขั้นตอนปกติเพื่อได้ error เดิม */ }
+                if (gate.State == ConnectionState.Open && !TryAcquireIntakeLock(gate))
+                {
+                    res.Error = "มีการดึงอีเมลรอบอื่นกำลังทำงานอยู่ — ข้ามรอบนี้ (กันประมวลผลซ้อน)";
+                    _code.Logs(_conn, "EmailReservation", $"intake skipped: lock held elsewhere [{InstanceStamp()}]", "SYSTEM");
+                    return res;
+                }
 
             try
             {
@@ -325,8 +394,9 @@ namespace Take_Time_BangPhra.Services
             {
                 res.Error = ex.Message;
                 _code.Logs(_conn, "EmailReservation", $"IMAP error: {ex.Message}", "SYSTEM");
-                if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message);
+                if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message + $"\n🖥 <i>{E(InstanceStamp())}</i>");
             }
+            }   // gate — ปล่อย applock เมื่อ connection ปิด
             return res;
         }
 
@@ -1607,7 +1677,7 @@ namespace Take_Time_BangPhra.Services
                     : "<i>⚠️ ระบบไม่ลองใหม่ให้ (ปิดไว้) — ต้องจัดการเอง</i>");
             }
 
-            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
+            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm} · 🖥 {E(InstanceStamp())}</i>");
             return sb.ToString();
         }
 
@@ -1633,7 +1703,7 @@ namespace Take_Time_BangPhra.Services
             if (res.Manual > 0) sb.AppendLine($"🖐 <b>ต้องตรวจเอง:</b> {res.Manual}");
             if (res.Ignored > 0) sb.AppendLine($"📭 <b>ไม่ใช่อีเมลการจอง (ข้าม):</b> {res.Ignored}");
             if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
-            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
+            sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm} · 🖥 {E(InstanceStamp())}</i>");
             Notify(sb.ToString(), true);
         }
 
