@@ -15,9 +15,11 @@ namespace Take_Time_BangPhra.Account
         {
             if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Check authentication
-            if (Session["Name"] == null)
+            // เดิมเช็ค Session["Name"] ซึ่งไม่มีที่ไหนตั้งค่าเลย และ redirect ไป ~/Login.aspx
+            // ที่ไม่มีอยู่จริง → เข้าหน้านี้ไม่ได้ตลอด. ใช้เกณฑ์เดียวกับทั้งระบบ
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Login.aspx");
+                Response.Redirect("~/Admin/Login");
                 return;
             }
 
@@ -208,7 +210,7 @@ namespace Take_Time_BangPhra.Account
             // Log action
             codeInstance.Logs(conn, "Slip Approved",
                 $"SlipID: {slipId}, AdminID: {adminId}",
-                Session["Name"]?.ToString() ?? "SYSTEM");
+                Session["UserName"]?.ToString() ?? "SYSTEM");
         }
 
         /// <summary>
@@ -239,7 +241,7 @@ namespace Take_Time_BangPhra.Account
             // Log action
             codeInstance.Logs(conn, "Slip Rejected",
                 $"SlipID: {slipId}, AdminID: {adminId}, Reason: {reason}",
-                Session["Name"]?.ToString() ?? "SYSTEM");
+                Session["UserName"]?.ToString() ?? "SYSTEM");
         }
 
         /// <summary>

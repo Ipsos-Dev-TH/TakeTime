@@ -1,4 +1,4 @@
-<%@ Page Title="ส่ง e-Tax ทางอีเมล" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="SendEtax.aspx.cs" Inherits="Take_Time_BangPhra.Account.SendEtax" %>
+﻿<%@ Page Title="ส่ง e-Tax ทางอีเมล" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="SendEtax.aspx.cs" Inherits="Take_Time_BangPhra.Account.SendEtax" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
         .etax-mail { max-width: 760px; margin: 20px auto; background:#fff; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.08); overflow:hidden; }
@@ -23,6 +23,30 @@
         <div class="hd">📧 ส่งใบกำกับภาษีอิเล็กทรอนิกส์ (e-Tax) ทางอีเมล</div>
         <div class="bd">
             <asp:Literal ID="litMsg" runat="server" />
+
+            <asp:Panel ID="pnlList" runat="server" Visible="false">
+                <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <asp:TextBox ID="txtSearchEtax" runat="server" placeholder="ค้นหา เลขใบเสร็จ / เลขจอง / ชื่อลูกค้า"
+                        style="padding:9px 12px; border:1.5px solid #dbe2e7; border-radius:8px; min-width:260px;" />
+                    <asp:Button ID="btnSearchEtax" runat="server" Text="🔍 ค้นหา" CssClass="btn btn-default"
+                        OnClick="btnSearchEtax_Click" />
+                    <span style="font-size:12.5px; color:#90a4ae;">แสดงเอกสาร e-Tax ที่ออกแล้ว — กด "ส่งอีเมล" เพื่อไปหน้าส่ง</span>
+                </div>
+                <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:13.5px;">
+                    <tr style="background:#f5f7f9;">
+                        <th style="text-align:left; padding:9px 10px; border-bottom:2px solid #e3e9ed;">เลขที่ใบเสร็จ</th>
+                        <th style="text-align:left; padding:9px 10px; border-bottom:2px solid #e3e9ed;">การจอง</th>
+                        <th style="text-align:left; padding:9px 10px; border-bottom:2px solid #e3e9ed;">ลูกค้า</th>
+                        <th style="text-align:right; padding:9px 10px; border-bottom:2px solid #e3e9ed;">ยอด</th>
+                        <th style="text-align:left; padding:9px 10px; border-bottom:2px solid #e3e9ed;">วันที่ออก</th>
+                        <th style="text-align:center; padding:9px 10px; border-bottom:2px solid #e3e9ed;">สถานะอีเมล</th>
+                        <th style="border-bottom:2px solid #e3e9ed;"></th>
+                    </tr>
+                    <asp:Literal ID="litEtaxRows" runat="server" />
+                </table>
+                </div>
+            </asp:Panel>
 
             <asp:Panel ID="pnlForm" runat="server">
                 <div class="etax-meta">

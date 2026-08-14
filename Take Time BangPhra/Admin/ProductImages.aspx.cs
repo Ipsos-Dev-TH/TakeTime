@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysSettings)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Check admin authentication
             if (Session["UserID"] == null || (Session["permission"] != null ? Session["permission"].ToString() : "") != "True")
             {

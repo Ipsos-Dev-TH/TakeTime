@@ -1,4 +1,4 @@
-<%@ Page Title="" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PostponeList.aspx.cs" Inherits="Take_Time_BangPhra.PostponeList" validateRequest="false" enableEventValidation="false"  %>
+﻿<%@ Page Title="" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PostponeList.aspx.cs" Inherits="Take_Time_BangPhra.PostponeList" validateRequest="false" enableEventValidation="false"  %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <link rel="stylesheet" href="/Content/style.css">
@@ -284,6 +284,32 @@
                 </ItemTemplate>
                 <HeaderStyle CssClass="header-center" />
                 <ItemStyle CssClass="header-center" />
+            </asp:TemplateField>
+
+            <asp:TemplateField HeaderText="การจองเดิม (ก่อนเลื่อน)" HeaderStyle-CssClass="header-center">
+                <ItemTemplate>
+                    <%# Eval("OrigCheckin") == DBNull.Value ? "<span style='color:#b0bec5;'>ไม่มีประวัติ</span>"
+                        : string.Format("<b>{0:dd/MM/yyyy}</b> → {1:dd/MM/yyyy}<br/><small style='color:#7a8794;'>{2} คืน</small>",
+                            Eval("OrigCheckin"), Eval("OrigCheckout"),
+                            Eval("OrigStayDays") == DBNull.Value ? "-" : Eval("OrigStayDays")) %>
+                </ItemTemplate>
+            </asp:TemplateField>
+
+            <asp:TemplateField HeaderText="วันที่ขอเลื่อน" HeaderStyle-CssClass="header-center">
+                <ItemTemplate>
+                    <%# Eval("LastRescheduledDate") == DBNull.Value
+                        ? (Eval("PostponedDate") == DBNull.Value ? "<span style='color:#b0bec5;'>-</span>"
+                            : string.Format("{0:dd/MM/yyyy HH:mm}", Eval("PostponedDate")))
+                        : string.Format("{0:dd/MM/yyyy HH:mm}", Eval("LastRescheduledDate")) %>
+                    <%# Eval("LastRescheduledBy") == DBNull.Value || Eval("LastRescheduledBy").ToString() == ""
+                        ? "" : "<br/><small style='color:#7a8794;'>โดย " + Eval("LastRescheduledBy") + "</small>" %>
+                </ItemTemplate>
+            </asp:TemplateField>
+
+            <asp:TemplateField HeaderText="วันที่จองเข้ามา" HeaderStyle-CssClass="header-center">
+                <ItemTemplate>
+                    <%# Eval("Created_Date") == DBNull.Value ? "-" : string.Format("{0:dd/MM/yyyy}", Eval("Created_Date")) %>
+                </ItemTemplate>
             </asp:TemplateField>
 
             <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ" HeaderStyle-CssClass="header-center">

@@ -639,11 +639,10 @@
                         </a></li>
                         </asp:PlaceHolder>
 
-                        <asp:PlaceHolder ID="phNavGuestPortal" runat="server">
-                        <li><a runat="server" href="~/Guest/Portal">
-                            <i class="fas fa-mobile-alt"></i> Guest Portal
-                        </a></li>
-                        </asp:PlaceHolder>
+                        <%-- Guest Portal ไม่อยู่ในเมนูสาธารณะ: ต้องเข้าผ่าน QR ในห้องที่มีรหัสห้องกำกับ
+                             กดจากเมนูตรง ๆ จะเจอ "Invalid QR code" เสมอ (ยังคง placeholder ไว้ให้
+                             โค้ดเดิมที่อ้างถึงทำงานได้ตามปกติ) --%>
+                        <asp:PlaceHolder ID="phNavGuestPortal" runat="server" Visible="false" />
 
                         <!-- Admin Mega Menu -->
                         <asp:PlaceHolder ID="pnlAdminNav" runat="server" Visible="false">
@@ -703,6 +702,9 @@
                                                     <i class="fas fa-utensils"></i> ออเดอร์รูมเซอร์วิส
                                                 </a></li>
                                                 </asp:PlaceHolder>
+                                                <li><a runat="server" href="~/Admin/RoomQRGenerator">
+                                                    <i class="fas fa-qrcode"></i> QR Code ประจำห้อง
+                                                </a></li>
                                                 <asp:PlaceHolder ID="phNavActivityMgmt" runat="server">
                                                 <li><a runat="server" href="~/Admin/Settings/ActivityManagement">
                                                     <i class="fas fa-person-hiking"></i> กิจกรรม & การจองรอบ

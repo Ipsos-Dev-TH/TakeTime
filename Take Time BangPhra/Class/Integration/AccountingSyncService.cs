@@ -2028,6 +2028,46 @@ namespace Take_Time_BangPhra.Integration
             public string PdfUrl { get; set; }   // ลิงก์ดูใบ (จาก log) — เผื่อกดพรีวิวก่อนส่ง
         }
 
+        /// <summary>
+        /// รายการ e-Tax ที่ออกแล้วและส่งอีเมลได้ — ใช้เป็นหน้ารายการเมื่อเข้าเมนู "ส่ง e-Tax" ตรง ๆ
+        /// (ไม่ได้ส่ง ?receipt= มา) เรียงล่าสุดก่อน พร้อมสถานะว่าเคยส่งอีเมลแล้วหรือยัง
+        /// </summary>
+        public DataTable GetEtaxSendableList(int limit = 100, string search = null)
+        {
+            try
+            {
+                var ps = new Dictionary<string, object> { { "@n", limit } };
+                string where = "";
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    where = " AND (l.Receipt_Number LIKE @q OR CAST(l.Reservation_ID AS NVARCHAR(20)) LIKE @q OR c.Name LIKE @q)";
+                    ps["@q"] = "%" + search.Trim() + "%";
+                }
+
+                return _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP (@n)
+                             l.Receipt_Number, l.Reservation_ID, l.Nexaacc_Etax_Id, l.Pdf_Url,
+                             MAX(l.Created_Date) AS Created_Date,
+                             MAX(c.Name) AS GuestName,
+                             MAX(c.Email) AS CustomerEmail,
+                             MAX(r.Total_Amount) AS Amount,
+                             MAX(CASE WHEN ISNULL(l.Email_Sent, 0) = 1 THEN 1 ELSE 0 END) AS EmailSent,
+                             MAX(l.Status) AS EtaxStatus
+                        FROM Accounting_ETax_Log l
+                        LEFT JOIN Reservation res ON res.ID = l.Reservation_ID
+                        LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone
+                        LEFT JOIN Account_Receipt r ON r.ID = l.Receipt_Number
+                       WHERE l.Nexaacc_Etax_Id IS NOT NULL" + where + @"
+                       GROUP BY l.Receipt_Number, l.Reservation_ID, l.Nexaacc_Etax_Id, l.Pdf_Url
+                       ORDER BY MAX(l.Created_Date) DESC", ps);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", "GetEtaxSendableList: " + ex.Message, "SYSTEM");
+                return null;
+            }
+        }
+
         /// <summary>เตรียมข้อมูลหน้าส่ง e-Tax ของใบเสร็จ — คืน HasEtax=false ถ้ายังไม่มี e-Tax</summary>
         public EtaxComposeInfo GetEtaxComposeInfo(string receiptNumber)
         {

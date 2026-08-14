@@ -67,6 +67,9 @@ namespace Take_Time_BangPhra.Account.Report
                     var Parameterx = new ReportParameter("status", "Cancel");
                     ReportViewer2.LocalReport.SetParameters(new ReportParameter[] { Parameterx });
                     ReportViewer2.LocalReport.DisplayName = "Receipt";
+                    // รายงานมีรูปโลโก้/ลายเซ็นจาก path ภายนอก — ต้องอนุญาตก่อน ไม่งั้น
+                    // ขึ้น "contains external images. The EnableExternalImages property has not been set"
+                    ReportViewer2.LocalReport.EnableExternalImages = true;
                     ReportViewer2.LocalReport.DataSources.Add(new ReportDataSource("DataSet1", dtbusinessinfo));
                     ReportViewer2.LocalReport.DataSources.Add(new ReportDataSource("DataSet2", dtcustomer));
                     ReportViewer2.LocalReport.DataSources.Add(new ReportDataSource("DataSet3", dtReceiptDetail));

@@ -615,7 +615,7 @@ namespace Take_Time_BangPhra.Services
                                 [TotalPrice] = @Total, [Deposit] = @Dep,
                                 OTA_Gross_Amount = @Gross, OTA_Net_Amount = @Net,
                                 OTA_Payment_Type = @Pay, OTA_Guest_Name = @Guest,
-                                [Remark] = @Remark, Modified_Date = GETDATE()
+                                [Remark] = @Remark" + ModifiedDateSql() + @"
                               WHERE ID = @id", con, tx))
                         {
                             cmd.Parameters.AddWithValue("@id", resId);
@@ -681,7 +681,7 @@ namespace Take_Time_BangPhra.Services
                 return (false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว");
 
             _code.DatabaseInsertSafe(_conn,
-                "UPDATE Reservation SET Status = N'ยกเลิก', Modified_Date = GETDATE() WHERE ID = @id",
+                "UPDATE Reservation SET Status = N'ยกเลิก'" + ModifiedDateSql() + " WHERE ID = @id",
                 new Dictionary<string, object> { { "@id", resId } });
             _code.DatabaseInsertSafe(_conn,
                 "DELETE FROM Reservation_Accommodation WHERE Reservation_ID = @id",
@@ -697,6 +697,27 @@ namespace Take_Time_BangPhra.Services
             // ตอนนี้ log เจตนาไว้ กันเงียบ; เมื่อ processor พร้อมจะ enqueue OTA_AR_INVOICE ที่นี่.
             _code.Logs(_conn, "EmailReservation",
                 $"createDocument=on: reservation {resId} booking={head.BookingId} — OTA AR invoice จะ enqueue เมื่อ processor พร้อม (ดู OTA_Settlement_Design.md)", "SYSTEM");
+        }
+
+        // คอลัมน์ Modified_Date มาจาก PHASE18_27 — ฐานที่ยังไม่รันจะขึ้น
+        // "Invalid column name 'Modified_Date'" ตอนอีเมลแก้ไข/ยกเลิกเข้ามา → ตรวจก่อนใช้
+        private static int _hasModifiedDate;   // 0 = ยังไม่ตรวจ, 1 = มี, -1 = ไม่มี
+        private string ModifiedDateSql()
+        {
+            if (_hasModifiedDate == 0)
+            {
+                bool exists = false;
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_conn,
+                        @"SELECT TOP 1 1 FROM INFORMATION_SCHEMA.COLUMNS
+                           WHERE TABLE_NAME = 'Reservation' AND COLUMN_NAME = 'Modified_Date'", null);
+                    exists = dt != null && dt.Rows.Count > 0;
+                }
+                catch { }
+                _hasModifiedDate = exists ? 1 : -1;
+            }
+            return _hasModifiedDate == 1 ? ", Modified_Date = GETDATE()" : "";
         }
 
         // ── helpers ──────────────────────────────────────────────────────────────

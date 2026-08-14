@@ -25,8 +25,11 @@ namespace Take_Time_BangPhra.Account
                 string receipt = (Request.QueryString["receipt"] ?? "").Trim();
                 if (string.IsNullOrEmpty(receipt))
                 {
-                    ShowError("ไม่ระบุเลขที่ใบเสร็จ");
+                    // เข้าเมนูตรง ๆ (ไม่ได้มาจากหน้าเอกสาร) → แสดง "รายการ e-Tax ที่ออกแล้ว"
+                    // ให้เลือกส่งได้เลย แทนที่จะขึ้น "ไม่ระบุเลขที่ใบเสร็จ" แล้วจบ
                     pnlForm.Visible = false;
+                    pnlList.Visible = true;
+                    BindEtaxList(null);
                     return;
                 }
 
@@ -104,5 +107,53 @@ namespace Take_Time_BangPhra.Account
         {
             litMsg.Text = "<div class='msg-err'>⚠ " + Server.HtmlEncode(message ?? "") + "</div>";
         }
-    }
+    
+        /// <summary>รายการ e-Tax ที่ออกแล้ว — กดส่งอีเมลได้จากที่นี่</summary>
+        private void BindEtaxList(string search)
+        {
+            var svc = new AccountingSyncService(conn);
+            var dt = svc.GetEtaxSendableList(100, search);
+            var sb = new System.Text.StringBuilder();
+
+            if (dt != null)
+            {
+                foreach (System.Data.DataRow r in dt.Rows)
+                {
+                    string rc = r["Receipt_Number"]?.ToString() ?? "";
+                    bool sent = r["EmailSent"] != DBNull.Value && Convert.ToInt32(r["EmailSent"]) == 1;
+                    string email = r["CustomerEmail"] == DBNull.Value ? "" : r["CustomerEmail"].ToString();
+
+                    sb.Append("<tr style='border-bottom:1px solid #f0f3f5;'>");
+                    sb.Append("<td style='padding:8px 10px;'><b>" + Server.HtmlEncode(rc) + "</b></td>");
+                    sb.Append("<td style='padding:8px 10px;'>" +
+                        (r["Reservation_ID"] == DBNull.Value ? "-" : "#" + r["Reservation_ID"]) + "</td>");
+                    sb.Append("<td style='padding:8px 10px;'>" +
+                        Server.HtmlEncode(r["GuestName"] == DBNull.Value ? "-" : r["GuestName"].ToString()) +
+                        (string.IsNullOrEmpty(email) ? "<div style='font-size:11.5px;color:#e65100;'>ยังไม่มีอีเมล</div>"
+                            : "<div style='font-size:11.5px;color:#90a4ae;'>" + Server.HtmlEncode(email) + "</div>") + "</td>");
+                    sb.Append("<td style='padding:8px 10px; text-align:right;'>" +
+                        (r["Amount"] == DBNull.Value ? "-" : Convert.ToDecimal(r["Amount"]).ToString("N2")) + "</td>");
+                    sb.Append("<td style='padding:8px 10px;'>" +
+                        (r["Created_Date"] == DBNull.Value ? "-" : Convert.ToDateTime(r["Created_Date"]).ToString("dd/MM/yy HH:mm")) + "</td>");
+                    sb.Append("<td style='padding:8px 10px; text-align:center;'>" + (sent
+                        ? "<span style='background:#e8f5e9;color:#1e7e42;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;'>ส่งแล้ว</span>"
+                        : "<span style='background:#fff3e0;color:#e65100;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:700;'>ยังไม่ส่ง</span>") + "</td>");
+                    sb.Append("<td style='padding:8px 10px; text-align:right;'><a class='btn btn-primary btn-sm' href='?receipt=" +
+                        Server.UrlEncode(rc) + "'>" + (sent ? "ส่งอีกครั้ง" : "✉ ส่งอีเมล") + "</a></td>");
+                    sb.Append("</tr>");
+                }
+            }
+
+            litEtaxRows.Text = sb.Length > 0 ? sb.ToString()
+                : "<tr><td colspan='7' style='padding:16px; color:#90a4ae;'>ยังไม่มีเอกสาร e-Tax ที่ออกแล้ว " +
+                  "— e-Tax จะถูกสร้างอัตโนมัติเมื่อออกใบเสร็จที่ติ๊ก \"ต้องการ e-Tax\" และ NextAcc ประมวลผลเสร็จ</td></tr>";
+        }
+
+        protected void btnSearchEtax_Click(object sender, EventArgs e)
+        {
+            pnlForm.Visible = false;
+            pnlList.Visible = true;
+            BindEtaxList(txtSearchEtax.Text);
+        }
+}
 }
