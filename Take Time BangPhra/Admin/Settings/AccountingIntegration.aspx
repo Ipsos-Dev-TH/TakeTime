@@ -644,6 +644,27 @@
                 </div>
             </div>
 
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลองใหม่อีเมลที่ล้มเหลวอัตโนมัติ</label>
+                    <select id="cfgEmailRsvRetryFailed" style="width:100%; padding:8px;">
+                        <option value="true">ลองใหม่ทุกรอบจนสำเร็จ</option>
+                        <option value="false">ไม่ลองใหม่ (ต้องลากอีเมลกลับเอง)</option>
+                    </select>
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลองใหม่ภายใน (ชั่วโมง)</label>
+                    <input type="number" id="cfgEmailRsvRetryHours" value="72" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:260px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ถ้าชื่อ Agency ไม่ตรงตาราง map</label>
+                    <select id="cfgEmailRsvMapAnyChannel" style="width:100%; padding:8px;">
+                        <option value="true">ยอม match ด้วยชื่อห้องอย่างเดียว (กันจองหล่น)</option>
+                        <option value="false">ต้องตรง Agency เท่านั้น</option>
+                    </select>
+                </div>
+            </div>
+
             <div style="margin-top:16px;">
                 <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
@@ -654,6 +675,42 @@
                 ⓘ เปิด IMAP: Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP. สร้าง App Password: Google Account → Security → 2-Step Verification → App passwords.
                 ระบบดึงอัตโนมัติทุก N นาทีตามที่ตั้ง (อาศัย background timer เดียวกับ accounting sync). dedup ด้วย Booking ID — รันคู่โปรแกรมเดิมได้ไม่สร้างซ้ำ.
             </div>
+
+            <!-- 🔎 ตรวจว่าทำไมอีเมลลงจองไม่ได้ (map ห้อง / ห้องว่าง) -->
+            <div style="margin-top:16px; padding:12px; background:#f7f9fc; border:1px solid #dde5ef; border-radius:8px;">
+                <div style="font-weight:600; margin-bottom:8px;">
+                    <i class="fas fa-stethoscope"></i> ตรวจสอบ mapping / ห้องว่าง (ทำไมอีเมลลงจองไม่สำเร็จ)
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                    <div style="min-width:170px; flex:1;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">Channel Name (ในอีเมล)</label>
+                        <input type="text" id="dgChannel" placeholder="Booking.com" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:190px; flex:1;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">ROOM TYPE (ในอีเมล)</label>
+                        <input type="text" id="dgRoomType" placeholder="Nordic Tent" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:140px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">เช็คอิน</label>
+                        <input type="date" id="dgCheckin" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:140px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">เช็คเอาท์</label>
+                        <input type="date" id="dgCheckout" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:90px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">กี่ห้อง</label>
+                        <input type="number" id="dgRooms" value="1" min="1" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <button type="button" class="btn-default" onclick="diagnoseEmailIntake()"><i class="fas fa-search"></i> ตรวจสอบ</button>
+                    </div>
+                </div>
+                <div class="help-text" style="margin-top:6px;">
+                    บอกว่า map ไปห้องจริงห้องไหนบ้าง และห้องที่ไม่ว่างติดใบจองเลขที่เท่าไร — ใช้เงื่อนไขเดียวกับตัวอ่านอีเมลเป๊ะ ๆ (ไม่บันทึกอะไร)
+                </div>
+            </div>
+
             <div class="test-result" id="emailRsvResult"></div>
             <div id="emailRsvLog" style="margin-top:12px;"></div>
         </div>
@@ -1278,6 +1335,9 @@
                 setVal('cfgEmailRsvMaxDaysFuture', cfg.emailRsvMaxDaysFuture || 365);
                 setVal('cfgEmailRsvNotifyTelegram', cfg.emailRsvNotifyTelegram ? 'true' : 'false');
                 setVal('cfgEmailRsvMoveFailed', cfg.emailRsvMoveFailed ? 'true' : 'false');
+                setVal('cfgEmailRsvRetryFailed', cfg.emailRsvRetryFailed ? 'true' : 'false');
+                setVal('cfgEmailRsvRetryHours', cfg.emailRsvRetryHours || 72);
+                setVal('cfgEmailRsvMapAnyChannel', cfg.emailRsvMapAnyChannel ? 'true' : 'false');
                 var pwStat = document.getElementById('cfgEmailRsvPwStatus');
                 if (pwStat) {
                     if (cfg.emailRsvHasPassword) {
@@ -1423,13 +1483,41 @@
                 emailRsvMaxStayDays: document.getElementById('cfgEmailRsvMaxStayDays').value,
                 emailRsvMaxDaysFuture: document.getElementById('cfgEmailRsvMaxDaysFuture').value,
                 emailRsvNotifyTelegram: document.getElementById('cfgEmailRsvNotifyTelegram').value === 'true',
-                emailRsvMoveFailed: document.getElementById('cfgEmailRsvMoveFailed').value === 'true'
+                emailRsvMoveFailed: document.getElementById('cfgEmailRsvMoveFailed').value === 'true',
+                emailRsvRetryFailed: document.getElementById('cfgEmailRsvRetryFailed').value === 'true',
+                emailRsvRetryHours: document.getElementById('cfgEmailRsvRetryHours').value,
+                emailRsvMapAnyChannel: document.getElementById('cfgEmailRsvMapAnyChannel').value === 'true'
             };
             postAction(data, 'emailRsvResult');
         }
 
         function testEmailIntake() {
             getAction('emailIntakeTest', 'emailRsvResult');
+        }
+
+        function diagnoseEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            var rt = document.getElementById('dgRoomType').value.trim();
+            if (!rt) { alert('ใส่ชื่อห้อง (ROOM TYPE ในอีเมล) ก่อน'); return; }
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตรวจสอบ...';
+            var q = '?action=emailIntakeDiagnose'
+                  + '&channel=' + encodeURIComponent(document.getElementById('dgChannel').value.trim())
+                  + '&roomType=' + encodeURIComponent(rt)
+                  + '&checkin=' + encodeURIComponent(document.getElementById('dgCheckin').value)
+                  + '&checkout=' + encodeURIComponent(document.getElementById('dgCheckout').value)
+                  + '&rooms=' + encodeURIComponent(document.getElementById('dgRooms').value)
+                  + '&_=' + Date.now();
+            fetch(pageUrl + q)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = '<pre style="margin:0; white-space:pre-wrap; font-size:12px;">' + escHtml(data.message || '') + '</pre>';
+                })
+                .catch(function(err) {
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                });
         }
 
         function runEmailIntake() {

@@ -27,8 +27,8 @@ namespace Take_Time_BangPhra.Services
 
         // config (โหลดครั้งเดียวตอนสร้าง)
         private readonly string _imapServer, _imapUser, _imapPassword, _processedLabel, _failedLabel, _fromContains;
-        private readonly int _imapPort, _maxStayDays, _maxDaysFuture;
-        private readonly bool _moveFailed, _notifyTelegram, _createDocument;
+        private readonly int _imapPort, _maxStayDays, _maxDaysFuture, _retryHours, _retryMax;
+        private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
 
         public EmailReservationService(string connectionString)
         {
@@ -45,6 +45,10 @@ namespace Take_Time_BangPhra.Services
             _moveFailed = Cfg("Email_Rsv_MoveFailed", "1") == "1";
             _notifyTelegram = Cfg("Email_Rsv_NotifyTelegram", "1") == "1";
             _createDocument = Cfg("Email_Rsv_CreateDocument", "0") == "1";
+            _retryFailed = Cfg("Email_Rsv_RetryFailed", "1") == "1";
+            _retryHours = int.TryParse(Cfg("Email_Rsv_RetryHours", "72"), out var rh) ? rh : 72;
+            _retryMax = int.TryParse(Cfg("Email_Rsv_RetryMaxPerRun", "20"), out var rm) ? rm : 20;
+            _mapAnyChannel = Cfg("Email_Rsv_MapAnyChannel", "1") == "1";
         }
 
         private string Cfg(string key, string def)
@@ -78,12 +82,13 @@ namespace Take_Time_BangPhra.Services
 
         public class IntakeResult
         {
-            public int Fetched, Created, Duplicate, Cancelled, Failed;
+            public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded;
             public List<string> Messages = new List<string>();
             public string Error;
             public override string ToString() =>
                 Error != null ? "ผิดพลาด: " + Error
-                : $"ดึง {Fetched} อีเมล → สร้าง {Created}, ซ้ำ {Duplicate}, ยกเลิก {Cancelled}, ล้มเหลว {Failed}";
+                : $"ดึง {Fetched} อีเมล → สร้าง {Created}, ซ้ำ {Duplicate}, ยกเลิก {Cancelled}, ล้มเหลว {Failed}"
+                  + (Retried > 0 ? $" | ลองใหม่ {Retried} ฉบับ สำเร็จ {RetrySucceeded}" : "");
         }
 
         /// <summary>ทดสอบเชื่อมต่อ IMAP + auth (ไม่แตะอีเมล). ใช้จากปุ่ม "ทดสอบการเชื่อมต่อ".</summary>
@@ -142,40 +147,15 @@ namespace Take_Time_BangPhra.Services
                     res.Fetched = uids.Count;
 
                     foreach (var uid in uids)
-                    {
-                        MimeMessage msg = null;
-                        string subject = "";
-                        bool ok = false, dup = false;
-                        try
-                        {
-                            msg = inbox.GetMessage(uid);
-                            subject = msg.Subject ?? "";
-                            string kind;
-                            var (success, isDup, cancelled, message) = ProcessOne(msg, subject, out kind);
-                            ok = success; dup = isDup;
-                            if (success && cancelled) res.Cancelled++;
-                            else if (success) res.Created++;
-                            else if (isDup) res.Duplicate++;
-                            else res.Failed++;
-                            res.Messages.Add($"[{kind}] {message}");
-                            if (_notifyTelegram && (success || !isDup))
-                                Notify($"{(success ? "✅" : "⚠️")} STAAH {kind}: {message}");
-                        }
-                        catch (Exception ex)
-                        {
-                            res.Failed++;
-                            res.Messages.Add($"[error] {subject}: {ex.Message}");
-                            _code.Logs(_conn, "EmailReservation", $"process email failed: {ex.Message}", "SYSTEM");
-                        }
+                        HandleOne(inbox, uid, processed, failed, res, false);
 
-                        try
-                        {
-                            if (ok || dup) inbox.MoveTo(uid, processed);
-                            else if (_moveFailed && failed != null) inbox.MoveTo(uid, failed);
-                            else inbox.AddFlags(uid, MessageFlags.Seen, true);
-                        }
-                        catch { }
-                    }
+                    // ── ลองใหม่อัตโนมัติ: อีเมลที่เคยล้มเหลว (mapping/ห้องไม่ว่าง) ─────────────
+                    // เดิมอีเมลที่ล้มเหลวถูกย้ายเข้า folder Failed แล้ว "จบ" — รอบถัดไปค้นหาเฉพาะ
+                    // INBOX + ยังไม่อ่าน จึงไม่มีวันถูกหยิบมาทำอีก ต่อให้แก้ mapping/ปล่อยห้องแล้ว
+                    // ตอนนี้จะวนกลับมาลองใหม่ให้เองภายใน Email_Rsv_RetryHours ชั่วโมง
+                    if (_retryFailed && failed != null)
+                        RetryFailedFolder(failed, processed, res);
+
                     client.Disconnect(true);
                 }
             }
@@ -186,6 +166,87 @@ namespace Take_Time_BangPhra.Services
                 if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message);
             }
             return res;
+        }
+
+        /// <summary>ประมวลผลอีเมล 1 ฉบับ + ย้าย folder ตามผล. isRetry = อยู่ใน folder Failed อยู่แล้ว.</summary>
+        private void HandleOne(IMailFolder source, UniqueId uid, IMailFolder processed, IMailFolder failed,
+            IntakeResult res, bool isRetry)
+        {
+            string subject = "";
+            bool ok = false, dup = false;
+            _inRetry = isRetry;      // กัน Notify ซ้ำจากชั้นใน (ProcessModification ฯลฯ) ตอนวนลองใหม่
+            try
+            {
+                var msg = source.GetMessage(uid);
+                subject = msg.Subject ?? "";
+                string kind;
+                var (success, isDup, cancelled, message) = ProcessOne(msg, subject, out kind);
+                ok = success; dup = isDup;
+                if (isRetry)
+                {
+                    res.Retried++;
+                    if (success || isDup) res.RetrySucceeded++;
+                }
+                if (success && cancelled) res.Cancelled++;
+                else if (success) res.Created++;
+                else if (isDup) res.Duplicate++;
+                else if (!isRetry) res.Failed++;
+                res.Messages.Add($"[{(isRetry ? "ลองใหม่/" : "")}{kind}] {message}");
+
+                // รอบลองใหม่: แจ้งเฉพาะตอนสำเร็จ (ไม่งั้นจะเตือนซ้ำทุก 5 นาทีจนกว่าจะแก้)
+                if (_notifyTelegram && (success || (!isDup && !isRetry)))
+                    Notify($"{(success ? "✅" : "⚠️")} STAAH {kind}{(isRetry ? " (ลองใหม่)" : "")}: {message}", true);
+            }
+            catch (Exception ex)
+            {
+                if (!isRetry) res.Failed++;
+                res.Messages.Add($"[error] {subject}: {ex.Message}");
+                _code.Logs(_conn, "EmailReservation", $"process email failed: {ex.Message}", "SYSTEM");
+            }
+            finally { _inRetry = false; }
+
+            try
+            {
+                if (ok || dup) source.MoveTo(uid, processed);
+                else if (isRetry) { /* คาไว้ใน Failed รอรอบหน้า */ }
+                else if (_moveFailed && failed != null) source.MoveTo(uid, failed);
+                else source.AddFlags(uid, MessageFlags.Seen, true);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// วนอ่าน folder Failed แล้วลองลงจองใหม่ — ทำให้ระบบ "หายเอง" หลังผู้ใช้แก้ mapping
+        /// หรือปล่อยห้องว่างแล้ว โดยไม่ต้องลากอีเมลกลับ INBOX เอง.
+        /// จำกัดอายุ (Email_Rsv_RetryHours) + จำนวนต่อรอบ (Email_Rsv_RetryMaxPerRun) กันวนไม่รู้จบ.
+        /// </summary>
+        private void RetryFailedFolder(IMailFolder failed, IMailFolder processed, IntakeResult res)
+        {
+            try
+            {
+                failed.Open(FolderAccess.ReadWrite);
+                if (failed.Count == 0) return;
+
+                var cutoff = DateTime.Now.AddHours(-Math.Max(1, _retryHours));
+                IList<UniqueId> uids;
+                try { uids = failed.Search(SearchQuery.DeliveredAfter(cutoff.Date)); }
+                catch { uids = failed.Search(SearchQuery.All); }
+
+                int done = 0;
+                foreach (var uid in uids)
+                {
+                    if (done >= _retryMax) break;
+                    done++;
+                    HandleOne(failed, uid, processed, null, res, true);
+                }
+                if (res.Retried > 0)
+                    _code.Logs(_conn, "EmailReservation",
+                        $"retry failed folder: ลองใหม่ {res.Retried} ฉบับ สำเร็จ {res.RetrySucceeded}", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_conn, "EmailReservation", $"retry failed folder error: {ex.Message}", "SYSTEM");
+            }
         }
 
         // คืน (success, isDuplicate, isCancellation, message)
@@ -315,15 +376,16 @@ namespace Take_Time_BangPhra.Services
             if (stayDays > _maxStayDays) return (false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
             if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture) return (false, false, false, "จองล่วงหน้าเกินกำหนด");
 
-            int resId = SaveReservation(rooms, stayDays);
-            if (resId <= 0) return (false, false, false, "บันทึกการจองไม่สำเร็จ (ห้องไม่ว่าง/ไม่มี mapping)");
+            var (resId, reason) = SaveReservation(rooms, stayDays);
+            if (resId <= 0) return (false, false, false, "บันทึกการจองไม่สำเร็จ — " + reason);
 
             if (_createDocument) TryEnqueueDocument(resId, head);
             return (true, false, false, $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}");
         }
 
         // ── Save (SERIALIZABLE txn, ตรงตาม external app) ──────────────────────────
-        private int SaveReservation(List<RoomBooking> rooms, int stayDays)
+        /// <summary>คืน (reservationId, reason). reservationId ≤ 0 = ไม่สำเร็จ, reason = สาเหตุจริงแบบอ่านออก.</summary>
+        private (int Id, string Reason) SaveReservation(List<RoomBooking> rooms, int stayDays)
         {
             var head = rooms[0];
             using (var con = new SqlConnection(_conn))
@@ -338,10 +400,22 @@ namespace Take_Time_BangPhra.Services
                         foreach (var r in rooms)
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
-                            if (map.Count == 0) { tx.Rollback(); _code.Logs(_conn, "EmailReservation", $"no mapping Channel='{r.ChannelName}' Room='{r.RoomType}'", "SYSTEM"); return 0; }
+                            if (map.Ids.Count == 0)
+                            {
+                                tx.Rollback();
+                                string why = map.Describe(r.ChannelName, r.RoomType);
+                                _code.Logs(_conn, "EmailReservation", "no mapping — " + why, "SYSTEM");
+                                return (0, why);
+                            }
                             var reserved = OverlappingAccomIds(con, tx, r.CheckIn, r.CheckOut);
-                            var avail = map.Where(id => !reserved.Contains(id) && !chosen.Contains(id)).Take(r.NoOfRooms).ToList();
-                            if (avail.Count < r.NoOfRooms) { tx.Rollback(); _code.Logs(_conn, "EmailReservation", $"not enough rooms {r.RoomType}: need {r.NoOfRooms} have {avail.Count}", "SYSTEM"); return 0; }
+                            var avail = map.Ids.Where(id => !reserved.Contains(id) && !chosen.Contains(id)).Take(r.NoOfRooms).ToList();
+                            if (avail.Count < r.NoOfRooms)
+                            {
+                                string why = DescribeUnavailable(con, tx, map, r, chosen);
+                                tx.Rollback();
+                                _code.Logs(_conn, "EmailReservation", "not enough rooms — " + why, "SYSTEM");
+                                return (0, why);
+                            }
                             foreach (var id in avail) { chosen.Add(id); plan.Add((id, r.Adults, r.NetAmount)); }
                         }
 
@@ -390,39 +464,151 @@ namespace Take_Time_BangPhra.Services
                             }
                         tx.Commit();
                         _code.Logs(_conn, "EmailReservation", $"created reservation {resId} ({plan.Count} rooms) booking={head.BookingId}", "SYSTEM");
-                        return resId;
+                        return (resId, "ok");
                     }
                     catch (Exception ex)
                     {
                         try { tx.Rollback(); } catch { }
                         _code.Logs(_conn, "EmailReservation", $"save failed booking={head.BookingId}: {ex.Message}", "SYSTEM");
-                        return 0;
+                        return (0, "เกิดข้อผิดพลาดขณะบันทึก: " + ex.Message);
                     }
                 }
             }
         }
 
-        private List<int> MappedAccommodations(SqlConnection con, SqlTransaction tx, string channel, string roomType)
+        // ── Mapping ห้อง OTA → ห้องจริง ────────────────────────────────────────────
+        private class MapResult
         {
-            var ids = new List<int>();
-            channel = CleanEntities(channel); roomType = CleanEntities(roomType);
-            // ตรงก่อน แล้ว fallback LIKE (ตาม external: MapDataWithSTAAH: Agency + ROOM_TYPE)
-            foreach (var (sql, exact) in new[] {
-                ("SELECT Accommodation_ID FROM MapDataWithSTAAH WHERE Agency = @c AND ROOM_TYPE = @r", true),
-                ("SELECT Accommodation_ID FROM MapDataWithSTAAH WHERE Agency = @c AND ROOM_TYPE LIKE @rp", false) })
+            public readonly List<int> Ids = new List<int>();          // ห้องที่เปิดใช้งาน
+            public readonly Dictionary<int, string> Names = new Dictionary<int, string>();
+            public string MatchedBy = "";                              // ชั้นที่ match (ไว้ log)
+            public int DisabledCount;                                  // mapping ชี้ห้องที่ปิดใช้งาน
+            public List<string> KnownRoomTypes = new List<string>();   // ROOM_TYPE ที่มีในตารางของ channel นี้
+            public List<string> KnownChannels = new List<string>();
+
+            public string Describe(string channel, string roomType)
+            {
+                if (DisabledCount > 0 && Ids.Count == 0)
+                    return $"mapping ห้อง '{roomType}' ({channel}) ชี้ไปห้องที่ปิดใช้งานอยู่ {DisabledCount} ห้อง — เปิดใช้งานห้องในเมนู ที่พัก หรือแก้ MapDataWithSTAAH";
+                string hint = KnownRoomTypes.Count > 0
+                    ? " | ROOM_TYPE ที่มีของ channel นี้: " + string.Join(", ", KnownRoomTypes.Take(12))
+                    : (KnownChannels.Count > 0
+                        ? $" | ไม่พบ Agency '{channel}' — Agency ที่มีในตาราง: " + string.Join(", ", KnownChannels.Take(12))
+                        : " | ตาราง MapDataWithSTAAH ยังว่าง");
+                return $"ไม่มี mapping ห้องพัก: Agency='{channel}' ROOM_TYPE='{roomType}' (ตาราง MapDataWithSTAAH)" + hint;
+            }
+        }
+
+        private MapResult MappedAccommodations(SqlConnection con, SqlTransaction tx, string channel, string roomType)
+        {
+            var res = new MapResult();
+            channel = Norm(CleanEntities(channel));
+            roomType = Norm(CleanEntities(roomType));
+
+            // OTA ส่งชื่อห้องมาหลายทรง — "Nordic Tent", "Nordic Tent - Room no breakfast",
+            // "Studio with Mountain View (Nordic Tent)" ฯลฯ ลองทุกทรงก่อนยอมแพ้
+            var variants = new List<string> { roomType };
+            int dash = roomType.IndexOf(" - ", StringComparison.Ordinal);
+            if (dash > 0) variants.Add(roomType.Substring(0, dash).Trim());
+            int paren = roomType.IndexOf('(');
+            if (paren > 0) variants.Add(roomType.Substring(0, paren).Trim());
+            var inner = Regex.Match(roomType, @"\(([^)]+)\)");
+            if (inner.Success) variants.Add(inner.Groups[1].Value.Trim());
+
+            // ⚠️ ทุกเงื่อนไขที่ใช้ ROOM_TYPE เป็น "ส่วนหนึ่ง" ต้องกันแถวที่ ROOM_TYPE ว่าง/สั้นเกินไป
+            // ไม่งั้น '%' + '' + '%' จะ match ทุกแถว = คว้าห้องมั่ว
+            const string RtSub = "(LEN(LTRIM(RTRIM(m.ROOM_TYPE))) > 2 AND @r LIKE '%' + LTRIM(RTRIM(m.ROOM_TYPE)) + '%')";
+            var tiers = new List<(string Where, string How)>
+            {
+                ("m.Agency = @c AND m.ROOM_TYPE = @r",                    "ตรงทั้ง Agency+ROOM_TYPE"),
+                ("m.Agency = @c AND m.ROOM_TYPE LIKE @rp",                "ROOM_TYPE คล้ายกัน"),
+                ("m.Agency = @c AND " + RtSub,                            "ROOM_TYPE เป็นส่วนหนึ่งของชื่อในอีเมล"),
+                ("@c <> '' AND m.Agency LIKE @cp AND (m.ROOM_TYPE = @r OR m.ROOM_TYPE LIKE @rp OR " + RtSub + ")",
+                                                                          "Agency คล้ายกัน"),
+            };
+            if (_mapAnyChannel)
+                tiers.Add(("(m.ROOM_TYPE = @r OR " + RtSub + ")", "ROOM_TYPE ตรง (ข้าม Agency)"));
+
+            foreach (var rt in variants.Where(v => !string.IsNullOrWhiteSpace(v)).Distinct())
+            {
+                foreach (var tier in tiers)
+                {
+                    LoadMapping(con, tx, res, tier.Where, channel, rt);
+                    if (res.Ids.Count > 0)
+                    {
+                        res.MatchedBy = tier.How + (rt == roomType ? "" : $" (ใช้ชื่อ '{rt}')");
+                        if (tier.How.StartsWith("ROOM_TYPE ตรง (ข้าม") || tier.How.StartsWith("Agency คล้าย"))
+                            _code.Logs(_conn, "EmailReservation",
+                                $"mapping fallback: Agency='{channel}' ROOM_TYPE='{roomType}' → {res.MatchedBy} ({res.Ids.Count} ห้อง)", "SYSTEM");
+                        return res;
+                    }
+                }
+            }
+
+            // ไม่เจอ → เก็บข้อมูลไว้บอกผู้ใช้ว่าตารางมีอะไรอยู่บ้าง
+            res.KnownRoomTypes = ScalarList(con, tx,
+                "SELECT DISTINCT ROOM_TYPE FROM MapDataWithSTAAH WHERE Agency = @c OR Agency LIKE @cp ORDER BY ROOM_TYPE",
+                channel);
+            if (res.KnownRoomTypes.Count == 0)
+                res.KnownChannels = ScalarList(con, tx,
+                    "SELECT DISTINCT Agency FROM MapDataWithSTAAH ORDER BY Agency", channel);
+            return res;
+        }
+
+        private void LoadMapping(SqlConnection con, SqlTransaction tx, MapResult res, string where,
+            string channel, string roomType)
+        {
+            res.Ids.Clear(); res.Names.Clear(); res.DisabledCount = 0;
+            string sql = @"SELECT DISTINCT m.Accommodation_ID, ISNULL(a.AccomName, N''), ISNULL(CONVERT(nvarchar(10), a.Status), '0'), a.OrderID
+                             FROM MapDataWithSTAAH m
+                             LEFT JOIN Accommodation a ON a.ID = m.Accommodation_ID
+                            WHERE " + where + " ORDER BY a.OrderID";
+            using (var cmd = new SqlCommand(sql, con, tx))
+            {
+                cmd.Parameters.AddWithValue("@c", channel ?? "");
+                cmd.Parameters.AddWithValue("@cp", "%" + (channel ?? "") + "%");
+                cmd.Parameters.AddWithValue("@r", roomType ?? "");
+                cmd.Parameters.AddWithValue("@rp", "%" + (roomType ?? "") + "%");
+                using (var rd = cmd.ExecuteReader())
+                    while (rd.Read())
+                    {
+                        if (rd[0] == DBNull.Value) continue;
+                        int id = Convert.ToInt32(rd[0]);
+                        string st = rd[2]?.ToString() ?? "0";
+                        bool active = st == "1" || st.Equals("True", StringComparison.OrdinalIgnoreCase);
+                        if (!active) { res.DisabledCount++; continue; }
+                        if (res.Names.ContainsKey(id)) continue;
+                        res.Ids.Add(id);
+                        res.Names[id] = rd[1]?.ToString() ?? ("#" + id);
+                    }
+            }
+        }
+
+        private List<string> ScalarList(SqlConnection con, SqlTransaction tx, string sql, string channel)
+        {
+            var list = new List<string>();
+            try
             {
                 using (var cmd = new SqlCommand(sql, con, tx))
                 {
-                    cmd.Parameters.AddWithValue("@c", channel);
-                    if (exact) cmd.Parameters.AddWithValue("@r", roomType);
-                    else cmd.Parameters.AddWithValue("@rp", "%" + roomType + "%");
+                    cmd.Parameters.AddWithValue("@c", channel ?? "");
+                    cmd.Parameters.AddWithValue("@cp", "%" + (channel ?? "") + "%");
                     using (var rd = cmd.ExecuteReader())
-                        while (rd.Read()) if (rd[0] != DBNull.Value) ids.Add(Convert.ToInt32(rd[0]));
+                        while (rd.Read()) if (rd[0] != DBNull.Value) list.Add(rd[0].ToString());
                 }
-                if (ids.Count > 0) break;
             }
-            return ids;
+            catch { }
+            return list;
         }
+
+        // ── ห้องว่าง ────────────────────────────────────────────────────────────
+        // ⚠️ ต้องตรงกับที่หน้าจอโชว์ (Default.aspx / AccommodationAvailabilityService) ไม่งั้นจะเกิดเคส
+        // "หน้าจอบอกว่าง แต่ระบบอ่านอีเมลบอกไม่ว่าง":
+        //   1) เทียบ "เฉพาะวัน" (CAST AS date) — ถ้า CheckinDate/CheckoutDate มีเวลาติดมา (เช่น 14:00)
+        //      การเทียบแบบ datetime จะทำให้การจองที่ "ออกวันนั้น" หรือ "เข้าช่วงบ่ายวันนั้น" กลายเป็นทับกัน
+        //   2) ตัดสถานะที่ระบบถือว่าห้องคืนแล้วออกให้ครบชุดเดียวกับ AccommodationAvailabilityService
+        private const string FreeStatusFilter =
+            @"r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')";
 
         /// <param name="excludeReservationId">ไม่นับห้องของการจองนี้ (ใช้ตอนแก้ไข — ย้ายวันทับตัวเองได้)</param>
         private HashSet<int> OverlappingAccomIds(SqlConnection con, SqlTransaction tx, DateTime ci, DateTime co,
@@ -432,17 +618,83 @@ namespace Take_Time_BangPhra.Services
             using (var cmd = new SqlCommand(@"SELECT ra.Accommodation_ID
                 FROM Reservation r WITH (HOLDLOCK)
                 INNER JOIN Reservation_Accommodation ra ON r.ID = ra.Reservation_ID
-                WHERE r.CheckinDate < @co AND r.CheckoutDate > @ci
+                WHERE CAST(r.CheckinDate AS date) < @co AND CAST(r.CheckoutDate AS date) > @ci
                   AND r.ID <> @exclude
-                  AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", con, tx))
+                  AND " + FreeStatusFilter, con, tx))
             {
                 cmd.Parameters.AddWithValue("@exclude", excludeReservationId);
-                cmd.Parameters.AddWithValue("@ci", ci);
-                cmd.Parameters.AddWithValue("@co", co);
+                cmd.Parameters.Add("@ci", SqlDbType.Date).Value = ci.Date;
+                cmd.Parameters.Add("@co", SqlDbType.Date).Value = co.Date;
                 using (var rd = cmd.ExecuteReader())
                     while (rd.Read()) if (rd[0] != DBNull.Value) set.Add(Convert.ToInt32(rd[0]));
             }
             return set;
+        }
+
+        /// <summary>อธิบายว่า "ไม่ว่าง" เพราะห้องไหนติดการจองใด — ให้ผู้ใช้ตรวจได้ทันทีจาก Telegram/log.</summary>
+        private string DescribeUnavailable(SqlConnection con, SqlTransaction tx, MapResult map, RoomBooking r,
+            HashSet<int> chosen)
+        {
+            var parts = new List<string>();
+            foreach (int id in map.Ids)
+            {
+                string name = map.Names.ContainsKey(id) ? map.Names[id] : "#" + id;
+                if (chosen.Contains(id)) { parts.Add($"{name}=ใช้ในใบจองนี้แล้ว"); continue; }
+                string blocker = null;
+                using (var cmd = new SqlCommand(@"SELECT TOP 1 r.ID, r.Status, r.CheckinDate, r.CheckoutDate
+                        FROM Reservation r
+                        INNER JOIN Reservation_Accommodation ra ON r.ID = ra.Reservation_ID
+                        WHERE ra.Accommodation_ID = @a
+                          AND CAST(r.CheckinDate AS date) < @co AND CAST(r.CheckoutDate AS date) > @ci
+                          AND " + FreeStatusFilter + " ORDER BY r.ID", con, tx))
+                {
+                    cmd.Parameters.AddWithValue("@a", id);
+                    cmd.Parameters.Add("@ci", SqlDbType.Date).Value = r.CheckIn.Date;
+                    cmd.Parameters.Add("@co", SqlDbType.Date).Value = r.CheckOut.Date;
+                    using (var rd = cmd.ExecuteReader())
+                        if (rd.Read())
+                            blocker = $"ติดจอง #{rd[0]} ({rd[1]}) {Convert.ToDateTime(rd[2]):dd/MM}-{Convert.ToDateTime(rd[3]):dd/MM}";
+                }
+                parts.Add($"{name}=" + (blocker ?? "ว่าง"));
+            }
+            int free = parts.Count(p => p.EndsWith("=ว่าง"));
+            return $"ห้องไม่ว่าง: '{r.RoomType}' ({r.ChannelName}) วันที่ {r.CheckIn:dd/MM/yyyy}-{r.CheckOut:dd/MM/yyyy} " +
+                   $"ต้องการ {r.NoOfRooms} ห้อง ว่าง {free} จาก {map.Ids.Count} ห้องที่ map ไว้"
+                   + (string.IsNullOrEmpty(map.MatchedBy) ? "" : $" [{map.MatchedBy}]")
+                   + " | " + string.Join(", ", parts);
+        }
+
+        /// <summary>
+        /// ตรวจ mapping + ห้องว่างแบบไม่บันทึกอะไร — ใช้จากปุ่ม "ตรวจสอบ mapping/ห้องว่าง" หน้า Admin
+        /// เพื่อตอบคำถาม "ทำไมหน้าจอบอกว่าง แต่อีเมลลงจองไม่ได้"
+        /// </summary>
+        public string Diagnose(string channel, string roomType, DateTime checkIn, DateTime checkOut, int noOfRooms)
+        {
+            if (checkOut <= checkIn) checkOut = checkIn.AddDays(1);
+            if (noOfRooms <= 0) noOfRooms = 1;
+            try
+            {
+                using (var con = new SqlConnection(_conn))
+                {
+                    con.Open();
+                    var map = MappedAccommodations(con, null, channel, roomType);
+                    if (map.Ids.Count == 0) return "❌ " + map.Describe(channel, roomType);
+
+                    var r = new RoomBooking
+                    {
+                        ChannelName = channel, RoomType = roomType,
+                        CheckIn = checkIn, CheckOut = checkOut, NoOfRooms = noOfRooms
+                    };
+                    var reserved = OverlappingAccomIds(con, null, checkIn, checkOut);
+                    var avail = map.Ids.Where(id => !reserved.Contains(id)).ToList();
+                    string head = $"map เจอ {map.Ids.Count} ห้อง [{map.MatchedBy}]: " +
+                                  string.Join(", ", map.Ids.Select(id => map.Names.ContainsKey(id) ? map.Names[id] : "#" + id));
+                    if (avail.Count >= noOfRooms)
+                        return $"✅ ลงจองได้ — {head} | ว่าง {avail.Count} ห้อง (ต้องการ {noOfRooms})";
+                    return "❌ " + DescribeUnavailable(con, null, map, r, new HashSet<int>()) + "\n" + head;
+                }
+            }
+            catch (Exception ex) { return "ตรวจสอบไม่สำเร็จ: " + ex.Message; }
         }
 
         private void EnsureCustomer(SqlConnection con, SqlTransaction tx, string phone, string name, string paymentType)
@@ -577,19 +829,20 @@ namespace Take_Time_BangPhra.Services
                         foreach (var r in rooms)
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
-                            if (map.Count == 0)
+                            if (map.Ids.Count == 0)
                             {
                                 tx.Rollback();
-                                return (false, $"ไม่มี mapping ห้อง '{r.RoomType}' ของ {r.ChannelName} — แก้ไขไม่สำเร็จ");
+                                return (false, "แก้ไขไม่สำเร็จ — " + map.Describe(r.ChannelName, r.RoomType));
                             }
                             var reserved = OverlappingAccomIds(con, tx, r.CheckIn, r.CheckOut, resId);
-                            var avail = map.Where(id => !reserved.Contains(id) && !chosen.Contains(id))
+                            var avail = map.Ids.Where(id => !reserved.Contains(id) && !chosen.Contains(id))
                                            .OrderByDescending(id => currentRooms.Contains(id))   // ห้องเดิมมาก่อน
                                            .Take(r.NoOfRooms).ToList();
                             if (avail.Count < r.NoOfRooms)
                             {
+                                string why = DescribeUnavailable(con, tx, map, r, chosen);
                                 tx.Rollback();
-                                return (false, $"ห้องไม่ว่างตามวันที่ใหม่ ({r.RoomType} ต้องการ {r.NoOfRooms} ว่าง {avail.Count}) — ต้องจัดห้องเอง");
+                                return (false, "ห้องไม่ว่างตามวันที่ใหม่ — ต้องจัดห้องเอง | " + why);
                             }
                             foreach (var id in avail) { chosen.Add(id); plan.Add((id, r.Adults, r.NetAmount)); }
                         }
@@ -728,8 +981,10 @@ namespace Take_Time_BangPhra.Services
             catch (FolderNotFoundException) { return personal.Create(name, true); }
         }
 
-        private void Notify(string text)
+        private bool _inRetry;   // อยู่ในรอบ "ลองใหม่" — งดแจ้งเตือนซ้ำ (แจ้งเฉพาะตอนสำเร็จ)
+        private void Notify(string text, bool always = false)
         {
+            if (_inRetry && !always) return;
             try
             {
                 string token = AppCfg.Get("TelegramTokenTakeTime");
@@ -753,6 +1008,9 @@ namespace Take_Time_BangPhra.Services
         }
         private static string CleanEntities(string s) =>
             string.IsNullOrEmpty(s) ? s : s.Replace("&amp;", "&").Replace("&#39;", "'").Replace("&nbsp;", " ").Trim();
+        /// <summary>ยุบช่องว่างซ้ำ/ตัดหัวท้าย — ชื่อห้องจาก HTML มักติด \r\n และเว้นวรรคหลายตัว จนเทียบกับตาราง map ไม่ตรง</summary>
+        private static string Norm(string s) =>
+            string.IsNullOrEmpty(s) ? "" : Regex.Replace(s.Replace('\u00A0', ' '), @"\s+", " ").Trim();
         private static string SanitizePhone(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return "";

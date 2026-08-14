@@ -118,6 +118,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "emailRsvCreateDocument", config.EmailRsvCreateDocument },
                     { "emailRsvMoveFailed", config.EmailRsvMoveFailed },
                     { "emailRsvFromContains", config.EmailRsvFromContains },
+                    { "emailRsvRetryFailed", config.EmailRsvRetryFailed },
+                    { "emailRsvRetryHours", config.EmailRsvRetryHours },
+                    { "emailRsvMapAnyChannel", config.EmailRsvMapAnyChannel },
                     // Daily reservation board → LINE
                     { "lineDailyEnabled", config.IsDailyLineReportEnabled },
                     { "lineDailyRecipients", config.LineDailyRecipients },
@@ -239,6 +242,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
                 case "emailIntakeLog":
                     result = GetEmailIntakeLog();
+                    break;
+                case "emailIntakeDiagnose":
+                    result = DiagnoseEmailIntake();
                     break;
                 case "lineDailySend":
                     result = SendDailyLineNow();
@@ -530,6 +536,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("emailRsvCreateDocument")) config.SetConfig("Email_Rsv_CreateDocument", BoolToFlag(data["emailRsvCreateDocument"]));
                 if (data.ContainsKey("emailRsvMoveFailed")) config.SetConfig("Email_Rsv_MoveFailed", BoolToFlag(data["emailRsvMoveFailed"]));
                 if (data.ContainsKey("emailRsvFromContains")) config.SetConfig("Email_Rsv_FromContains", data["emailRsvFromContains"]?.ToString() ?? "staah");
+                if (data.ContainsKey("emailRsvRetryFailed")) config.SetConfig("Email_Rsv_RetryFailed", BoolToFlag(data["emailRsvRetryFailed"]));
+                if (data.ContainsKey("emailRsvRetryHours")) config.SetConfig("Email_Rsv_RetryHours", data["emailRsvRetryHours"]?.ToString() ?? "72");
+                if (data.ContainsKey("emailRsvMapAnyChannel")) config.SetConfig("Email_Rsv_MapAnyChannel", BoolToFlag(data["emailRsvMapAnyChannel"]));
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกการตั้งค่าอ่านอีเมลจองแล้ว" } };
             }
@@ -557,6 +566,39 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Run Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        /// <summary>
+        /// ตอบคำถาม "ทำไมหน้าจอบอกห้องว่าง แต่อีเมล OTA ลงจองไม่ได้" — จำลองการ map + เช็คห้องว่าง
+        /// ด้วยเงื่อนไขเดียวกับตัวอ่านอีเมล แล้วบอกว่าติดห้องไหน/ติดใบจองไหน (ไม่บันทึกอะไร)
+        /// </summary>
+        private Dictionary<string, object> DiagnoseEmailIntake()
+        {
+            try
+            {
+                string channel = Request.QueryString["channel"] ?? "";
+                string roomType = Request.QueryString["roomType"] ?? "";
+                if (string.IsNullOrWhiteSpace(roomType))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ระบุชื่อห้อง (ROOM TYPE ในอีเมล) ก่อน" } };
+
+                DateTime ci, co;
+                if (!DateTime.TryParse(Request.QueryString["checkin"], out ci)) ci = DateTime.Today;
+                if (!DateTime.TryParse(Request.QueryString["checkout"], out co)) co = ci.AddDays(1);
+                int rooms;
+                if (!int.TryParse(Request.QueryString["rooms"], out rooms) || rooms <= 0) rooms = 1;
+
+                var svc = new EmailReservationService(ConnStr);
+                string report = svc.Diagnose(channel, roomType, ci, co, rooms);
+                return new Dictionary<string, object>
+                {
+                    { "success", !report.StartsWith("❌") },
+                    { "message", report }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Diagnose Error: " + (ex.InnerException ?? ex).Message } };
             }
         }
 

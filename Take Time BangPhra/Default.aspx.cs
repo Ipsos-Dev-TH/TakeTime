@@ -372,10 +372,13 @@ namespace Take_Time_BangPhra
                 {
                     { "@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd") }
                 };
+                // ⚠️ ต้องใช้เงื่อนไขชุดเดียวกับ AccommodationAvailabilityService / ตัวอ่านอีเมล OTA
+                // (ตัดสถานะที่ห้องคืนแล้ว + เทียบเฉพาะวัน) ไม่งั้นหน้าจอกับระบบจองจะเห็นห้องว่างไม่ตรงกัน
                 DataTable dtReservation = DatabaseQuerySafe(conn,
                     code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
                     "INNER JOIN Accommodation ON Accommodation.ID = Reservation_Accommodation.Accommodation_ID " +
-                    "WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate"),
+                    "WHERE @SelectedDate >= CAST(CheckinDate AS date) AND @SelectedDate < CAST(CheckoutDate AS date) " +
+                    "AND ISNULL(Reservation.Status, N'') NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')"),
                     reservationParams);
                 DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by OrderID asc"));
                 try
