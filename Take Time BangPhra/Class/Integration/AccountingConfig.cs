@@ -321,6 +321,8 @@ namespace Take_Time_BangPhra.Integration
         public int EmailRsvPollMinutes => int.TryParse(GetConfig("Email_Rsv_PollMinutes", "5"), out var v) ? v : 5;
         public string EmailRsvProcessedLabel => GetConfig("Email_Rsv_ProcessedLabel", "STAAH-Processed");
         public string EmailRsvFailedLabel => GetConfig("Email_Rsv_FailedLabel", "STAAH-Failed");
+        /// <summary>folder เก็บอีเมล STAAH ที่ไม่เกี่ยวกับการจอง (จดหมายข่าว/รายงาน) — แยกจาก Failed</summary>
+        public string EmailRsvIgnoredLabel => GetConfig("Email_Rsv_IgnoredLabel", "STAAH-Other");
         public int EmailRsvMaxStayDays => int.TryParse(GetConfig("Email_Rsv_MaxStayDays", "30"), out var v) ? v : 30;
         public int EmailRsvMaxDaysFuture => int.TryParse(GetConfig("Email_Rsv_MaxDaysFuture", "365"), out var v) ? v : 365;
         public bool EmailRsvNotifyTelegram => GetConfig("Email_Rsv_NotifyTelegram", "1") == "1";

@@ -112,6 +112,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "emailRsvPollMinutes", config.EmailRsvPollMinutes },
                     { "emailRsvProcessedLabel", config.EmailRsvProcessedLabel },
                     { "emailRsvFailedLabel", config.EmailRsvFailedLabel },
+                    { "emailRsvIgnoredLabel", config.EmailRsvIgnoredLabel },
                     { "emailRsvMaxStayDays", config.EmailRsvMaxStayDays },
                     { "emailRsvMaxDaysFuture", config.EmailRsvMaxDaysFuture },
                     { "emailRsvNotifyTelegram", config.EmailRsvNotifyTelegram },
@@ -539,6 +540,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("emailRsvPollMinutes")) config.SetConfig("Email_Rsv_PollMinutes", data["emailRsvPollMinutes"]?.ToString() ?? "5");
                 if (data.ContainsKey("emailRsvProcessedLabel")) config.SetConfig("Email_Rsv_ProcessedLabel", data["emailRsvProcessedLabel"]?.ToString() ?? "STAAH-Processed");
                 if (data.ContainsKey("emailRsvFailedLabel")) config.SetConfig("Email_Rsv_FailedLabel", data["emailRsvFailedLabel"]?.ToString() ?? "STAAH-Failed");
+                if (data.ContainsKey("emailRsvIgnoredLabel")) config.SetConfig("Email_Rsv_IgnoredLabel", data["emailRsvIgnoredLabel"]?.ToString() ?? "STAAH-Other");
                 if (data.ContainsKey("emailRsvMaxStayDays")) config.SetConfig("Email_Rsv_MaxStayDays", data["emailRsvMaxStayDays"]?.ToString() ?? "30");
                 if (data.ContainsKey("emailRsvMaxDaysFuture")) config.SetConfig("Email_Rsv_MaxDaysFuture", data["emailRsvMaxDaysFuture"]?.ToString() ?? "365");
                 if (data.ContainsKey("emailRsvNotifyTelegram")) config.SetConfig("Email_Rsv_NotifyTelegram", BoolToFlag(data["emailRsvNotifyTelegram"]));

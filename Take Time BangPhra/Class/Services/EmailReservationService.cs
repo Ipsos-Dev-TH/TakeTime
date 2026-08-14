@@ -27,6 +27,7 @@ namespace Take_Time_BangPhra.Services
 
         // config (โหลดครั้งเดียวตอนสร้าง)
         private readonly string _imapServer, _imapUser, _imapPassword, _processedLabel, _failedLabel, _fromContains;
+        private readonly string _ignoredLabel;      // folder เก็บอีเมล STAAH ที่ไม่เกี่ยวกับการจอง
         private readonly int _imapPort, _maxStayDays, _maxDaysFuture, _retryHours, _retryMax;
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
@@ -42,6 +43,7 @@ namespace Take_Time_BangPhra.Services
             _imapPassword = _code.Derypt(Cfg("Email_Rsv_Password_Encrypted", ""));
             _processedLabel = Cfg("Email_Rsv_ProcessedLabel", "STAAH-Processed");
             _failedLabel = Cfg("Email_Rsv_FailedLabel", "STAAH-Failed");
+            _ignoredLabel = Cfg("Email_Rsv_IgnoredLabel", "STAAH-Other");
             _fromContains = Cfg("Email_Rsv_FromContains", "staah");
             _maxStayDays = int.TryParse(Cfg("Email_Rsv_MaxStayDays", "30"), out var m) ? m : 30;
             _maxDaysFuture = int.TryParse(Cfg("Email_Rsv_MaxDaysFuture", "365"), out var f) ? f : 365;
@@ -93,13 +95,14 @@ namespace Take_Time_BangPhra.Services
 
         public class IntakeResult
         {
-            public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded, Manual;
+            public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded, Manual, Ignored;
             public List<string> Messages = new List<string>();
             public string Error;
             public override string ToString() =>
                 Error != null ? "ผิดพลาด: " + Error
                 : $"ดึง {Fetched} อีเมล → สร้าง {Created}, ซ้ำ {Duplicate}, ยกเลิก {Cancelled}, ล้มเหลว {Failed}"
                   + (Manual > 0 ? $", ต้องตรวจเอง {Manual}" : "")
+                  + (Ignored > 0 ? $", ไม่ใช่ใบจอง {Ignored}" : "")
                   + (Retried > 0 ? $" | ลองใหม่ {Retried} ฉบับ สำเร็จ {RetrySucceeded}" : "");
         }
 
@@ -110,6 +113,7 @@ namespace Take_Time_BangPhra.Services
         private class Outcome
         {
             public bool Ok, Dup, Cancelled, Park;
+            public bool Ignored;               // ไม่ใช่อีเมลการจอง — ข้ามเงียบ ๆ ไม่นับล้มเหลว ไม่ลองซ้ำ
             public string Msg;                 // ข้อความสั้น (log / หน้า Admin)
             public Outcome(bool ok, bool dup, bool cancelled, string msg, bool park = false)
             { Ok = ok; Dup = dup; Cancelled = cancelled; Msg = msg; Park = park; }
@@ -177,7 +181,7 @@ namespace Take_Time_BangPhra.Services
 
                     // ดูทั้ง INBOX และ folder ที่ประมวลผลไปแล้ว (อีเมลส่วนใหญ่ถูกย้ายไปแล้ว)
                     var folders = new List<IMailFolder> { client.Inbox };
-                    foreach (var name in new[] { _processedLabel, _failedLabel })
+                    foreach (var name in new[] { _processedLabel, _failedLabel, _ignoredLabel })
                     {
                         try { folders.Add(client.GetFolder(client.PersonalNamespaces[0]).GetSubfolder(name)); }
                         catch { }
@@ -289,6 +293,9 @@ namespace Take_Time_BangPhra.Services
 
                     var processed = GetOrCreateFolder(client, _processedLabel);
                     var failed = _moveFailed ? GetOrCreateFolder(client, _failedLabel) : null;
+                    // แยก folder ให้อีเมลที่ไม่เกี่ยวกับการจอง — STAAH-Failed จะได้เหลือแต่ปัญหาจริง
+                    IMailFolder ignored = null;
+                    try { ignored = GetOrCreateFolder(client, _ignoredLabel); } catch { }
 
                     // กรองแค่ผู้ส่ง + ยังไม่อ่าน — ไม่กรองหัวเรื่อง เพราะอีเมล "แก้ไข" ของ STAAH
                     // ใช้หัวเรื่อง "New Reservation ..." เหมือนจองใหม่ (สถานะจริงอยู่ในเนื้อเมล)
@@ -300,14 +307,14 @@ namespace Take_Time_BangPhra.Services
                     res.Fetched = uids.Count;
 
                     foreach (var uid in uids)
-                        HandleOne(inbox, uid, processed, failed, res, false);
+                        HandleOne(inbox, uid, processed, failed, ignored, res, false);
 
                     // ── ลองใหม่อัตโนมัติ: อีเมลที่เคยล้มเหลว (mapping/ห้องไม่ว่าง) ─────────────
                     // เดิมอีเมลที่ล้มเหลวถูกย้ายเข้า folder Failed แล้ว "จบ" — รอบถัดไปค้นหาเฉพาะ
                     // INBOX + ยังไม่อ่าน จึงไม่มีวันถูกหยิบมาทำอีก ต่อให้แก้ mapping/ปล่อยห้องแล้ว
                     // ตอนนี้จะวนกลับมาลองใหม่ให้เองภายใน Email_Rsv_RetryHours ชั่วโมง
                     if (_retryFailed && failed != null)
-                        RetryFailedFolder(failed, processed, res);
+                        RetryFailedFolder(failed, processed, ignored, res);
 
                     client.Disconnect(true);
                 }
@@ -324,10 +331,11 @@ namespace Take_Time_BangPhra.Services
 
         /// <summary>ประมวลผลอีเมล 1 ฉบับ + ย้าย folder ตามผล. isRetry = อยู่ใน folder Failed อยู่แล้ว.</summary>
         private void HandleOne(IMailFolder source, UniqueId uid, IMailFolder processed, IMailFolder failed,
-            IntakeResult res, bool isRetry)
+            IMailFolder ignored, IntakeResult res, bool isRetry)
         {
             string subject = "";
-            bool done = false;   // ok/dup/park = จบเคสแล้ว ย้ายออกจากคิว
+            bool done = false;              // ok/dup/park/ignored = จบเคสแล้ว ย้ายออกจากคิว
+            IMailFolder movedTo = processed;
             _inRetry = isRetry;      // กัน Notify ซ้ำจากชั้นใน (ProcessModification ฯลฯ) ตอนวนลองใหม่
             try
             {
@@ -335,13 +343,15 @@ namespace Take_Time_BangPhra.Services
                 subject = msg.Subject ?? "";
                 string kind;
                 var o = ProcessOne(msg, subject, out kind);
-                done = o.Ok || o.Dup || o.Park;
+                done = o.Ok || o.Dup || o.Park || o.Ignored;
+                movedTo = o.Ignored ? ignored : processed;
                 if (isRetry)
                 {
                     res.Retried++;
-                    if (done) res.RetrySucceeded++;
+                    if (done && !o.Ignored) res.RetrySucceeded++;
                 }
-                if (o.Ok && o.Cancelled) res.Cancelled++;
+                if (o.Ignored) res.Ignored++;
+                else if (o.Ok && o.Cancelled) res.Cancelled++;
                 else if (o.Ok) res.Created++;
                 else if (o.Dup) res.Duplicate++;
                 else if (o.Park) res.Manual++;
@@ -350,7 +360,7 @@ namespace Take_Time_BangPhra.Services
 
                 // รอบลองใหม่: แจ้งเฉพาะตอนสำเร็จ (ไม่งั้นจะเตือนซ้ำทุก 5 นาทีจนกว่าจะแก้)
                 // เคส Park แจ้งจากข้างใน Process* ไปแล้ว (ข้อความละเอียดกว่า) — ไม่แจ้งซ้ำ
-                if (_notifyTelegram && !o.Park && (o.Ok || (!o.Dup && !isRetry)))
+                if (_notifyTelegram && !o.Park && !o.Ignored && (o.Ok || (!o.Dup && !isRetry)))
                     Notify(BuildNotification(kind, o, subject, isRetry), true);
             }
             catch (Exception ex)
@@ -363,7 +373,8 @@ namespace Take_Time_BangPhra.Services
 
             try
             {
-                if (done) source.MoveTo(uid, processed);
+                if (done && movedTo != null && movedTo != source) source.MoveTo(uid, movedTo);
+                else if (done) source.AddFlags(uid, MessageFlags.Seen, true);   // ไม่มี folder ปลายทาง
                 else if (isRetry) { /* คาไว้ใน Failed รอรอบหน้า */ }
                 else if (_moveFailed && failed != null) source.MoveTo(uid, failed);
                 else source.AddFlags(uid, MessageFlags.Seen, true);
@@ -376,7 +387,7 @@ namespace Take_Time_BangPhra.Services
         /// หรือปล่อยห้องว่างแล้ว โดยไม่ต้องลากอีเมลกลับ INBOX เอง.
         /// จำกัดอายุ (Email_Rsv_RetryHours) + จำนวนต่อรอบ (Email_Rsv_RetryMaxPerRun) กันวนไม่รู้จบ.
         /// </summary>
-        private void RetryFailedFolder(IMailFolder failed, IMailFolder processed, IntakeResult res)
+        private void RetryFailedFolder(IMailFolder failed, IMailFolder processed, IMailFolder ignored, IntakeResult res)
         {
             try
             {
@@ -393,7 +404,7 @@ namespace Take_Time_BangPhra.Services
                 {
                     if (done >= _retryMax) break;
                     done++;
-                    HandleOne(failed, uid, processed, null, res, true);
+                    HandleOne(failed, uid, processed, null, ignored, res, true);
                 }
                 if (res.Retried > 0)
                     _code.Logs(_conn, "EmailReservation",
@@ -407,25 +418,65 @@ namespace Take_Time_BangPhra.Services
 
         private Outcome ProcessOne(MimeMessage msg, string subject, out string kind)
         {
+            var rooms = ExtractRoomBookings(msg.HtmlBody);
+
+            // ── ด่านแรก: อีเมลนี้เกี่ยวกับการจองหรือเปล่า ───────────────────────────
+            // ตัวกรองขาเข้าใช้แค่ "ผู้ส่งมีคำว่า staah" → จดหมายข่าว/รายงาน/แจ้งเตือนระบบ
+            // ของ STAAH ก็เข้ามาด้วย พอ parse ไม่ได้เลยถูกนับเป็น "ล้มเหลว" กองใน STAAH-Failed
+            // แล้ว retry ไล่ลองซ้ำทุกรอบ 72 ชม. โดยเปล่าประโยชน์
+            if (!LooksLikeBookingEmail(subject, msg.HtmlBody, rooms))
+            {
+                kind = "ไม่ใช่ใบจอง";
+                return new Outcome(false, false, false,
+                    $"ข้าม — ไม่ใช่อีเมลการจอง: {Trunc(subject ?? "(ไม่มีหัวเรื่อง)", 120)}") { Ignored = true };
+            }
+
             // ⚠️ สถานะจริงอยู่ใน "เนื้ออีเมล" (Bookings Status: Confirmed/Modified/Cancelled)
             // ไม่ใช่หัวเรื่อง — อีเมลแก้ไขของ STAAH ใช้หัวเรื่อง "New Reservation ..." เหมือนเดิม
             // ถ้าดูแต่หัวเรื่องจะถูกมองเป็นจองใหม่ แล้ว dedup ตัดทิ้ง = การแก้ไขหายเงียบ ๆ
-            var rooms = ExtractRoomBookings(msg.HtmlBody);
-            string bodyStatus = rooms.Count > 0 ? (rooms[0].BookingsStatus ?? "") : "";
-            string signal = bodyStatus + " | " + (subject ?? "");
+            string bodyStatus = rooms.Count > 0 ? (rooms[0].BookingsStatus ?? "").Trim() : "";
 
-            if (Has(signal, "Cancel"))
+            // สถานะในเนื้อเมลเชื่อถือได้ที่สุด — ใช้ก่อนเสมอ
+            if (bodyStatus.Length > 0)
             {
-                kind = "ยกเลิก";
-                return ProcessCancellation(rooms);
+                if (Has(bodyStatus, "Cancel")) { kind = "ยกเลิก"; return ProcessCancellation(rooms); }
+                if (Has(bodyStatus, "Modif") || Has(bodyStatus, "Amend") || Has(bodyStatus, "Change"))
+                { kind = "แก้ไข"; return ProcessModification(rooms); }
+                kind = "จองใหม่";
+                return ProcessNewReservation(rooms);
             }
-            if (Has(signal, "Modif") || Has(signal, "Amend") || Has(signal, "Change") || Has(signal, "Update"))
-            {
-                kind = "แก้ไข";
-                return ProcessModification(rooms);
-            }
+
+            // อ่านสถานะจากเนื้อเมลไม่ได้ → ใช้หัวเรื่องเป็นตัวสำรอง
+            // ใช้เฉพาะคำที่ STAAH ใช้จริง ไม่เอาคำกว้าง ๆ อย่าง "Update"/"Change"
+            // (จดหมายข่าวหัวเรื่อง "... Update" เคยถูกตีเป็นอีเมลแก้ไขการจอง)
+            string subj = subject ?? "";
+            if (Has(subj, "Cancel")) { kind = "ยกเลิก"; return ProcessCancellation(rooms); }
+            if (Has(subj, "Modif") || Has(subj, "Amend")) { kind = "แก้ไข"; return ProcessModification(rooms); }
             kind = "จองใหม่";
             return ProcessNewReservation(rooms);
+        }
+
+        /// <summary>
+        /// อีเมลนี้เป็นใบจอง/แก้ไข/ยกเลิก หรือเป็นอีเมลอื่นของ STAAH (จดหมายข่าว/รายงาน/แจ้งเตือน)
+        /// เกณฑ์ตั้งไว้ "หลวมเข้าไว้" ฝั่งที่บอกว่าใช่ — ถ้าเป็นใบจองจริงแต่ format เปลี่ยนจน parse
+        /// ไม่ได้ ต้องยังถูกจับเป็นความล้มเหลวให้คนเห็น ไม่ใช่เงียบหายไป
+        /// จะตัดทิ้งก็ต่อเมื่อ "ไม่มีร่องรอยของใบจองเลยสักอย่าง"
+        /// </summary>
+        private static bool LooksLikeBookingEmail(string subject, string html, List<RoomBooking> rooms)
+        {
+            if (rooms != null && rooms.Count > 0) return true;          // แยกข้อมูลได้ = ใบจองแน่นอน
+
+            string body = html ?? "";
+            foreach (var marker in new[] { "Booking Id", "Bookings Status", "ROOM TYPE", "CHECK-IN", "CHECK-OUT" })
+                if (body.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+
+            // หัวเรื่องที่ STAAH ใช้จริงกับใบจอง (ตรงกับตัวกรองของโปรแกรมเดิม)
+            string subj = subject ?? "";
+            foreach (var kw in new[] { "New Reservation", "Reservation", "Cancelled", "Cancellation",
+                                       "Modified", "Modification", "Amended" })
+                if (subj.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+
+            return false;
         }
 
         private static bool Has(string haystack, string needle) =>
@@ -1566,6 +1617,8 @@ namespace Take_Time_BangPhra.Services
             if (res.Fetched == 0 && res.Retried == 0) return;
             // อีเมลใบเดียวจบในตัวอยู่แล้ว (แจ้งไปแล้วละเอียดกว่า) — สรุปมีค่าเมื่อทำหลายฉบับ
             if (res.Fetched + res.Retried < 2 && res.Failed == 0 && res.Manual == 0) return;
+            // รอบที่เจอแต่อีเมลที่ไม่เกี่ยวกับการจอง = ไม่มีอะไรให้รายงาน
+            if (res.Created + res.Cancelled + res.Duplicate + res.Failed + res.Manual == 0) return;
 
             string emoji = (res.Failed > 0 || res.Manual > 0) ? "⚠️" : "✅";
             var sb = new StringBuilder();
@@ -1577,6 +1630,7 @@ namespace Take_Time_BangPhra.Services
             if (res.Duplicate > 0) sb.AppendLine($"🔁 <b>ซ้ำ (มีในระบบแล้ว):</b> {res.Duplicate}");
             if (res.Failed > 0) sb.AppendLine($"❌ <b>ล้มเหลว:</b> {res.Failed}");
             if (res.Manual > 0) sb.AppendLine($"🖐 <b>ต้องตรวจเอง:</b> {res.Manual}");
+            if (res.Ignored > 0) sb.AppendLine($"📭 <b>ไม่ใช่อีเมลการจอง (ข้าม):</b> {res.Ignored}");
             if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
             sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
             Notify(sb.ToString(), true);
