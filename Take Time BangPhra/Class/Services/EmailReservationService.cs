@@ -16,8 +16,8 @@ namespace Take_Time_BangPhra.Services
     /// <summary>
     /// อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) → ลงจองในระบบ TakeTime.
     /// พอร์ตจาก external console app (Wachira-d/GetReservationfromGmail) เข้าระบบ:
-    /// config อยู่ใน Accounting_Integration_Config (แก้ผ่านหน้า Admin), เก็บ gross(refsell_amt)/
-    /// net(AMOUNT)/paymentType เพื่อต่อกับ OTA settlement, เลือกได้ว่าจะยิงสร้างเอกสารหรือแค่ลงจอง.
+    /// config อยู่ใน Accounting_Integration_Config (แก้ผ่านหน้า Admin), เก็บ refsell_amt (ระดับ booking) /
+    /// AMOUNT (เรตต่อคืน) / paymentType แยกกันไว้ต่อกับ OTA settlement — อีเมลไม่ได้บอกค่าคอม.
     /// เรียกจาก timer (Global.asax) หรือปุ่ม "ดึงตอนนี้" ในหน้า Admin. dedup ด้วย OTA_Booking_ID/Remark.
     /// </summary>
     public class EmailReservationService
@@ -155,6 +155,93 @@ namespace Take_Time_BangPhra.Services
                    + BuildNotification("จองใหม่", bad, "New Reservation - Booking.com", false), true);
 
             return (true, "ส่งตัวอย่าง 2 ข้อความเข้า Telegram แล้ว (สำเร็จ + ล้มเหลว) — เปิดดูในกลุ่มได้เลย");
+        }
+
+        /// <summary>
+        /// อ่านอีเมล STAAH ล่าสุด N ฉบับแบบ read-only แล้วรายงานว่า "แยกอะไรออกมาได้บ้าง"
+        /// — ตอบคำถามอย่าง "ในอีเมลมีบอกยอดที่ OTA จะโอนไหม" ด้วยข้อมูลจริง ไม่ใช่การเดา
+        /// เปิด folder แบบ ReadOnly + ไม่ move/ไม่ mark seen → ไม่กระทบคิวประมวลผลปกติ
+        /// </summary>
+        public string PreviewLatest(int count = 3)
+        {
+            if (count <= 0 || count > 10) count = 3;
+            if (string.IsNullOrWhiteSpace(_imapUser) || string.IsNullOrWhiteSpace(_imapPassword))
+                return "ยังไม่ได้ตั้งค่าอีเมล/รหัสผ่าน";
+            var sb = new StringBuilder();
+            try
+            {
+                using (var client = new ImapClient())
+                {
+                    client.Connect(_imapServer, _imapPort, true);
+                    client.Authenticate(_imapUser, _imapPassword);
+
+                    // ดูทั้ง INBOX และ folder ที่ประมวลผลไปแล้ว (อีเมลส่วนใหญ่ถูกย้ายไปแล้ว)
+                    var folders = new List<IMailFolder> { client.Inbox };
+                    foreach (var name in new[] { _processedLabel, _failedLabel })
+                    {
+                        try { folders.Add(client.GetFolder(client.PersonalNamespaces[0]).GetSubfolder(name)); }
+                        catch { }
+                    }
+
+                    int shown = 0;
+                    foreach (var folder in folders)
+                    {
+                        if (shown >= count) break;
+                        try { folder.Open(FolderAccess.ReadOnly); } catch { continue; }
+                        var uids = folder.Search(SearchQuery.FromContains(_fromContains));
+                        for (int i = uids.Count - 1; i >= 0 && shown < count; i--)
+                        {
+                            var msg = folder.GetMessage(uids[i]);
+                            shown++;
+                            sb.AppendLine($"══ [{folder.Name}] {msg.Date:dd/MM/yyyy HH:mm} — {msg.Subject}");
+                            sb.AppendLine(DescribeParse(msg.HtmlBody));
+                            sb.AppendLine();
+                        }
+                    }
+                    client.Disconnect(true);
+                    if (shown == 0) sb.AppendLine("ไม่พบอีเมลจากผู้ส่งที่มีคำว่า '" + _fromContains + "'");
+                }
+            }
+            catch (Exception ex) { return "อ่านอีเมลไม่สำเร็จ: " + ex.Message; }
+            return sb.ToString();
+        }
+
+        /// <summary>รายงานฟิลด์ที่ parser หาเจอ/ไม่เจอ จาก HTML ของอีเมล 1 ฉบับ</summary>
+        private string DescribeParse(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return "  (อีเมลไม่มีเนื้อหา HTML)";
+            var doc = new HtmlDocument();
+            doc.LoadHtml(html);
+            string text = doc.DocumentNode.InnerText;
+
+            var sb = new StringBuilder();
+            Func<string, string> f = v => string.IsNullOrWhiteSpace(v) ? "— ไม่พบ —" : v;
+            sb.AppendLine($"  Channel Name   : {f(Rx(text, @"Channel Name:\s*(.+?)\s*(?:\n|Bookings Status)"))}");
+            sb.AppendLine($"  Bookings Status: {f(Rx(text, @"Bookings Status:\s*(.+?)\s*(?:\n|Booking Id)"))}");
+            sb.AppendLine($"  Booking Id     : {f(Rx(text, @"Booking Id#?:\s*(.+?)\s*(?:\n|$)"))}");
+            sb.AppendLine($"  Payment Type   : {f(Rx(text, @"Payment Type:\s*(.+?)\s*(?:\n|$)"))}");
+
+            string refsell = Rx(text, @"refsell_amt\s*:?\s*([\d,\.]+)");
+            string allIncl = Rx(text, @"Total\s*\(All Inclusive\)\s*:?\s*THB\s*([\d,\.]+)");
+            sb.AppendLine($"  refsell_amt    : {f(refsell)}");
+            sb.AppendLine($"  Total (All Inclusive): {f(allIncl)}");
+
+            var rooms = ExtractRoomBookings(html);
+            sb.AppendLine($"  แยก room row ได้: {rooms.Count} แถว");
+            foreach (var r in rooms)
+                sb.AppendLine($"    • ROOM TYPE='{r.RoomType}' | NO OF ROOMS={r.NoOfRooms} | ADULTS={r.Adults} " +
+                              $"| AMOUNT={r.NetAmount:N2} | {r.CheckIn:dd/MM/yyyy}-{r.CheckOut:dd/MM/yyyy}");
+            if (rooms.Count > 0)
+                sb.AppendLine($"  ผู้เข้าพัก='{rooms[0].GuestName}' เบอร์='{rooms[0].MobilePhone}'");
+
+            // คำที่บ่งชี้ค่าคอม/ยอดโอน — ถ้าไม่เจอ แปลว่าอีเมลไม่ได้บอกมา
+            var hints = new List<string>();
+            foreach (var kw in new[] { "commission", "ค่าคอม", "net rate", "netrate", "payout", "remit", "transfer amount" })
+                if (text.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) hints.Add(kw);
+            sb.AppendLine(hints.Count > 0
+                ? "  คำที่เกี่ยวกับค่าคอม/ยอดโอนที่พบ: " + string.Join(", ", hints)
+                : "  ⚠️ ไม่พบคำที่เกี่ยวกับค่าคอมมิชชั่น/ยอดที่ OTA จะโอนในอีเมลนี้");
+            return sb.ToString();
         }
 
         /// <summary>ทดสอบเชื่อมต่อ IMAP + auth (ไม่แตะอีเมล). ใช้จากปุ่ม "ทดสอบการเชื่อมต่อ".</summary>
@@ -349,8 +436,12 @@ namespace Take_Time_BangPhra.Services
         {
             public string ChannelName, BookingsStatus, BookingId, GuestName, MobilePhone, RoomType, PaymentType;
             public int NoOfRooms = 1, Adults = 1;
-            public double NetAmount;      // AMOUNT ต่อคืน (net ที่ OTA จะโอน)
-            public double GrossTotal;     // refsell_amt (ราคาลูกค้าจ่าย OTA — ระดับ booking)
+            // ⚠️ อีเมล STAAH ให้ตัวเลขมาแค่ 2 ตัว และ **ไม่มีค่าคอมมิชชั่น/ยอดที่ OTA จะโอนจริง**
+            //    - AMOUNT      = เรตต่อคืนของ room row นั้น (ตัวที่โปรแกรมเดิมใช้คิดยอดรวมทั้งใบ)
+            //    - refsell_amt = ราคาขายอ้างอิงระดับ booking (บางอีเมลไม่มี → fallback Total (All Inclusive))
+            //    ยอดที่ OTA โอนจริงต้องรอ statement/settlement จาก OTA ห้ามเดาจากอีเมลนี้
+            public double NetAmount;      // AMOUNT ต่อคืน (ต่อ room row)
+            public double GrossTotal;     // refsell_amt / Total (All Inclusive) — ระดับ booking
             public DateTime CheckIn, CheckOut;
             public List<string> AssignedRooms;   // ชื่อห้องจริงที่ระบบจัดให้ (ไว้แจ้ง Telegram)
         }
@@ -1412,12 +1503,19 @@ namespace Take_Time_BangPhra.Services
                 else if (totalRooms > 0)
                     sb.AppendLine($"🛏 <b>จำนวนห้อง:</b> {totalRooms}");
 
-                double gross = h.GrossTotal > 0 ? h.GrossTotal : o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
-                double net = o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
+                // ⚠️ ห้ามเรียกตัวไหนว่า "ยอดที่ OTA จะโอน" — อีเมลไม่ได้บอกค่าคอมมิชชั่นมาด้วย
+                // มีแค่ refsell_amt (ระดับ booking) กับ AMOUNT (เรตต่อคืนต่อห้อง) ถ้าสองตัวไม่เท่ากัน
+                // แปลว่าอาจมีภาษี/ส่วนลด/ค่าคอมรวมอยู่ — แจ้งให้คนดู ไม่สรุปแทน
+                double refSell = h.GrossTotal;
+                double sumRows = o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
+                double booked = refSell > 0 ? refSell : sumRows;
                 sb.AppendLine();
-                sb.AppendLine($"💰 <b>ยอดลูกค้าจ่าย OTA:</b> {gross:N0} THB");
-                if (net > 0 && Math.Abs(net - gross) > 1)
-                    sb.AppendLine($"🏦 <b>ยอดที่ OTA จะโอน:</b> {net:N0} THB  <i>(ส่วนต่าง {gross - net:N0})</i>");
+                sb.AppendLine($"💰 <b>ยอดรวมที่บันทึก:</b> {booked:N0} THB");
+                if (refSell > 0 && sumRows > 0 && Math.Abs(refSell - sumRows) > 1)
+                {
+                    sb.AppendLine($"   ├ refsell_amt (ในอีเมล): {refSell:N0}");
+                    sb.AppendLine($"   └ AMOUNT รวมรายห้อง: {sumRows:N0}  <i>ต่าง {Math.Abs(refSell - sumRows):N0} — อาจเป็นภาษี/ส่วนลด/ค่าคอม ตรวจกับ OTA</i>");
+                }
                 bool channelCollect = (h.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                       || string.IsNullOrEmpty(h.PaymentType);
                 sb.AppendLine($"💳 <b>การชำระ:</b> {(channelCollect ? "OTA เก็บเงินแล้ว (Channel Collect)" : "เก็บเงินหน้างาน (Hotel Collect)")}");

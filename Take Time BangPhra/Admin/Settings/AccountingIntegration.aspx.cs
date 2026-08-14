@@ -252,6 +252,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakeTestTelegram":
                     result = TestEmailIntakeTelegram();
                     break;
+                case "emailIntakePreview":
+                    result = PreviewEmailIntake();
+                    break;
                 case "lineDailySend":
                     result = SendDailyLineNow();
                     break;
@@ -609,6 +612,23 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Diagnose Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        /// <summary>ดูว่า parser แยกอะไรออกมาได้บ้างจากอีเมลจริง (read-only ไม่กระทบคิว)</summary>
+        private Dictionary<string, object> PreviewEmailIntake()
+        {
+            try
+            {
+                int n;
+                if (!int.TryParse(Request.QueryString["count"], out n)) n = 3;
+                var svc = new EmailReservationService(ConnStr);
+                string report = System.Threading.Tasks.Task.Run(() => svc.PreviewLatest(n)).Result;
+                return new Dictionary<string, object> { { "success", true }, { "message", report } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Preview Error: " + (ex.InnerException ?? ex).Message } };
             }
         }
 

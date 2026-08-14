@@ -557,7 +557,9 @@
             <h3><i class="fas fa-envelope-open-text"></i> อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ</h3>
             <p style="font-size:13px; color:#666; margin-bottom:15px;">
                 อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) จาก Gmail แล้วลงจองในระบบให้อัตโนมัติ — แทนโปรแกรมภายนอกเดิม.<br/>
-                เก็บ <b>ราคาขายจริง (gross/refsell_amt)</b> แยกจาก <b>ยอดที่ OTA จะโอน (net)</b> เพื่อให้รายได้/VAT/ลูกหนี้ OTA ถูกต้อง.
+                เก็บตัวเลขทั้งสองตัวที่อีเมลให้มา — <b>refsell_amt</b> (ระดับ booking) และ <b>AMOUNT</b> (เรตต่อคืนต่อห้อง) —
+    แยกกันไว้ให้กระทบยอดได้. <b>หมายเหตุ:</b> อีเมล STAAH <u>ไม่ได้บอกค่าคอมมิชชั่นหรือยอดที่ OTA จะโอนจริง</u>
+    ยอดโอนต้องกระทบกับ statement ของ OTA อีกที (กดปุ่ม "ดูข้อมูลที่อ่านได้จากอีเมลจริง" เพื่อตรวจ).
                 ต้องใช้ <b>Gmail App Password</b> (ไม่ใช่รหัสผ่านปกติ) และเปิด IMAP ในบัญชี Gmail.
             </p>
 
@@ -694,6 +696,7 @@
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
                 <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
                 <button type="button" class="btn-default" onclick="getAction('emailIntakeTestTelegram','emailRsvResult')"><i class="fab fa-telegram"></i> ทดสอบข้อความ Telegram</button>
+                <button type="button" class="btn-default" onclick="previewEmailIntake()"><i class="fas fa-eye"></i> ดูข้อมูลที่อ่านได้จากอีเมลจริง</button>
                 <button type="button" class="btn-default" onclick="loadEmailLog()"><i class="fas fa-list-alt"></i> ดู logs ล่าสุด</button>
             </div>
             <div class="help-text" style="margin-top:8px;">
@@ -1528,6 +1531,24 @@
 
         function testEmailIntake() {
             getAction('emailIntakeTest', 'emailRsvResult');
+        }
+
+        // อ่านอีเมล STAAH ล่าสุดแบบ read-only แล้วโชว์ว่า parser แยกฟิลด์อะไรออกมาได้บ้าง
+        // ใช้ยืนยันว่าอีเมลมี/ไม่มีข้อมูลบางอย่างจริง ๆ (เช่น ค่าคอมมิชชั่น) แทนการเดา
+        function previewEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังอ่านอีเมลล่าสุด...';
+            fetch(pageUrl + '?action=emailIntakePreview&count=3&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = '<pre style="margin:0; white-space:pre-wrap; font-size:12px;">' + escHtml(data.message || '') + '</pre>';
+                })
+                .catch(function(err) {
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                });
         }
 
         function diagnoseEmailIntake() {
