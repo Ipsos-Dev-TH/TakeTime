@@ -75,7 +75,7 @@ namespace Take_Time_BangPhra
                             (SELECT TOP 1 RH.Reason FROM Reservation_Reschedule_History RH
                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate DESC) AS LastRescheduleReason,
                             -- ข้อมูลการจองเดิมก่อนขอเลื่อน (จากประวัติการเลื่อนครั้งแรกสุด)
-                            -- ถ้ายังไม่มีประวัติ (ข้อมูลเก่าก่อนมีตารางนี้) จะเป็น NULL → แสดง "-"
+                            -- ถ้ายังไม่มีประวัติ (ข้อมูลเก่าก่อนมีตารางนี้) จะเป็น NULL แล้วแสดงขีดแทน
                             (SELECT TOP 1 RH.OldCheckinDate FROM Reservation_Reschedule_History RH
                               WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate ASC) AS OrigCheckin,
                             (SELECT TOP 1 RH.OldCheckoutDate FROM Reservation_Reschedule_History RH

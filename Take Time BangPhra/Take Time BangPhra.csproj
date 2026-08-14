@@ -359,6 +359,39 @@
       <HintPath>..\packages\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.2.0.1\lib\net45\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.dll</HintPath>
     </Reference>
   </ItemGroup>
+  <!--
+    อ่านอีเมลจอง OTA / แชทอีเมล / ยืนยัน e-Tax  →  MailKit + MimeKit (ต้อง 2.15.0 เท่านั้น
+    ห้าม 4.x เพราะชน BouncyCastle 1.8.9 ที่ใช้เซ็น e-Tax) และ HtmlAgilityPack สำหรับ parse HTML
+    ส่งรูปตารางจองเข้า LINE  →  HtmlRenderer.WinForms (+ HtmlRenderer.Core)
+    ใช้ Include แบบชื่อล้วน + HintPath หลายทาง (Condition) เพื่อให้ตรงกับ lib folder ของแต่ละแพ็กเกจ
+    ถ้า restore แล้วยังไม่เจอ ให้รัน: Update-Package -reinstall <ชื่อแพ็กเกจ> ใน Package Manager Console
+  -->
+  <ItemGroup>
+    <Reference Include="MimeKit">
+      <HintPath Condition="Exists('..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll')">..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll</HintPath>
+      <HintPath Condition="!Exists('..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll')">..\packages\MimeKit.2.15.0\lib\net47\MimeKit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="MailKit">
+      <HintPath Condition="Exists('..\packages\MailKit.2.15.0\lib\net48\MailKit.dll')">..\packages\MailKit.2.15.0\lib\net48\MailKit.dll</HintPath>
+      <HintPath Condition="!Exists('..\packages\MailKit.2.15.0\lib\net48\MailKit.dll')">..\packages\MailKit.2.15.0\lib\net47\MailKit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlAgilityPack">
+      <HintPath Condition="Exists('..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll')">..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll</HintPath>
+      <HintPath Condition="!Exists('..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll')">..\packages\HtmlAgilityPack.1.11.72\lib\net45\HtmlAgilityPack.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlRenderer.Core">
+      <HintPath>..\packages\HtmlRenderer.Core.1.5.0.6\lib\net45\HtmlRenderer.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlRenderer.WinForms">
+      <HintPath>..\packages\HtmlRenderer.WinForms.1.5.0.6\lib\net45\HtmlRenderer.WinForms.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
   <ItemGroup>
     <Content Include="API\FileHandler.ashx" />
     <Content Include="API\TaxInvoiceAPI.ashx" />
