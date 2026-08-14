@@ -28,7 +28,31 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_MapAnyChannel')
         INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue) VALUES ('Email_Rsv_MapAnyChannel', '1');
 
+    -- ลำดับห้องที่จัดให้ก่อน — โปรแกรมเดิม (SelectAccommodations) hard-code ไว้ 16,15,3,1,2,4,5
+    -- เว้นว่าง = เรียงตาม Accommodation.OrderID
+    IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_RoomPriority')
+        INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue) VALUES ('Email_Rsv_RoomPriority', '');
+
+    -- เบอร์สำรองเมื่ออีเมลไม่มีเบอร์ (เบอร์คือ key ของตาราง Customer) เว้นว่าง = OTA_{BookingID}
+    IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_DefaultPhone')
+        INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue) VALUES ('Email_Rsv_DefaultPhone', '');
+
     PRINT 'Email intake retry/mapping config keys ready';
+END
+GO
+
+-- ── ห้องแบบคิดตามจำนวนคน (LimitWithPeople) ที่ผูกกับ mapping OTA ────────────────
+-- ตัวอ่านอีเมลรุ่นก่อนหน้าถือว่า "มีคนจอง = เต็ม" ทำให้ห้องรวมที่ยังมีที่ว่างถูกปฏิเสธ
+-- (หน้าจอโชว์ว่าง แต่อีเมลลงจองไม่ได้) — แก้ในโค้ดแล้ว ตรงนี้แค่รายงานว่ามีห้องแบบนี้กี่ห้อง
+IF OBJECT_ID('dbo.MapDataWithSTAAH', 'U') IS NOT NULL AND OBJECT_ID('dbo.Accommodation', 'U') IS NOT NULL
+BEGIN
+    DECLARE @limitRooms INT;
+    SELECT @limitRooms = COUNT(DISTINCT a.ID)
+      FROM MapDataWithSTAAH m
+      INNER JOIN Accommodation a ON a.ID = m.Accommodation_ID
+     WHERE ISNULL(CONVERT(NVARCHAR(10), a.LimitWithPeople), 'False') IN ('1', 'True');
+    PRINT 'OTA-mapped rooms using LimitWithPeople (per-person capacity) = '
+        + CONVERT(VARCHAR(10), ISNULL(@limitRooms, 0));
 END
 GO
 

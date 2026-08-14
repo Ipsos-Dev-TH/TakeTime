@@ -121,6 +121,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "emailRsvRetryFailed", config.EmailRsvRetryFailed },
                     { "emailRsvRetryHours", config.EmailRsvRetryHours },
                     { "emailRsvMapAnyChannel", config.EmailRsvMapAnyChannel },
+                    { "emailRsvRoomPriority", config.EmailRsvRoomPriority },
+                    { "emailRsvDefaultPhone", config.EmailRsvDefaultPhone },
                     // Daily reservation board → LINE
                     { "lineDailyEnabled", config.IsDailyLineReportEnabled },
                     { "lineDailyRecipients", config.LineDailyRecipients },
@@ -539,6 +541,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("emailRsvRetryFailed")) config.SetConfig("Email_Rsv_RetryFailed", BoolToFlag(data["emailRsvRetryFailed"]));
                 if (data.ContainsKey("emailRsvRetryHours")) config.SetConfig("Email_Rsv_RetryHours", data["emailRsvRetryHours"]?.ToString() ?? "72");
                 if (data.ContainsKey("emailRsvMapAnyChannel")) config.SetConfig("Email_Rsv_MapAnyChannel", BoolToFlag(data["emailRsvMapAnyChannel"]));
+                if (data.ContainsKey("emailRsvRoomPriority")) config.SetConfig("Email_Rsv_RoomPriority", data["emailRsvRoomPriority"]?.ToString() ?? "");
+                if (data.ContainsKey("emailRsvDefaultPhone")) config.SetConfig("Email_Rsv_DefaultPhone", data["emailRsvDefaultPhone"]?.ToString() ?? "");
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกการตั้งค่าอ่านอีเมลจองแล้ว" } };
             }
@@ -585,11 +589,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 DateTime ci, co;
                 if (!DateTime.TryParse(Request.QueryString["checkin"], out ci)) ci = DateTime.Today;
                 if (!DateTime.TryParse(Request.QueryString["checkout"], out co)) co = ci.AddDays(1);
-                int rooms;
+                int rooms, adults;
                 if (!int.TryParse(Request.QueryString["rooms"], out rooms) || rooms <= 0) rooms = 1;
+                if (!int.TryParse(Request.QueryString["adults"], out adults) || adults <= 0) adults = 1;
 
                 var svc = new EmailReservationService(ConnStr);
-                string report = svc.Diagnose(channel, roomType, ci, co, rooms);
+                string report = svc.Diagnose(channel, roomType, ci, co, rooms, adults);
                 return new Dictionary<string, object>
                 {
                     { "success", !report.StartsWith("❌") },

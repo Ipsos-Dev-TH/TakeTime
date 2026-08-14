@@ -332,6 +332,9 @@ namespace Take_Time_BangPhra.Integration
         public int EmailRsvRetryHours => int.TryParse(GetConfig("Email_Rsv_RetryHours", "72"), out var v) ? v : 72;
         /// <summary>ถ้า Agency ในอีเมลไม่ตรงตาราง map ให้ยอม match ด้วยชื่อห้องอย่างเดียว (กันจองหล่น)</summary>
         public bool EmailRsvMapAnyChannel => GetConfig("Email_Rsv_MapAnyChannel", "1") == "1";
+        /// <summary>ลำดับห้องที่จัดให้ก่อน (Accommodation ID คั่นจุลภาค) — เดิม hard-code 16,15,3,1,2,4,5</summary>
+        public string EmailRsvRoomPriority => GetConfig("Email_Rsv_RoomPriority", "");
+        public string EmailRsvDefaultPhone => GetConfig("Email_Rsv_DefaultPhone", "");
 
         // ── Daily reservation board → LINE ───────────────────────────────────────
         public bool IsDailyLineReportEnabled => GetConfig("Line_DailyReport_Enabled", "0") == "1";

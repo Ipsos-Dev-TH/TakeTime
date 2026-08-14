@@ -665,6 +665,17 @@
                 </div>
             </div>
 
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลำดับห้องที่จัดให้ก่อน (ID คั่นจุลภาค)</label>
+                    <input type="text" id="cfgEmailRsvRoomPriority" placeholder="เช่น 16,15,3,1,2,4,5 — เว้นว่าง = เรียงตามลำดับที่พัก" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เบอร์สำรองเมื่ออีเมลไม่มีเบอร์</label>
+                    <input type="text" id="cfgEmailRsvDefaultPhone" placeholder="เว้นว่าง = ใช้ OTA_{BookingID}" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
             <div style="margin-top:16px;">
                 <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
@@ -698,9 +709,13 @@
                         <label style="display:block; font-size:12px; margin-bottom:4px;">เช็คเอาท์</label>
                         <input type="date" id="dgCheckout" style="width:100%; padding:8px;" />
                     </div>
-                    <div style="min-width:90px;">
+                    <div style="min-width:80px;">
                         <label style="display:block; font-size:12px; margin-bottom:4px;">กี่ห้อง</label>
                         <input type="number" id="dgRooms" value="1" min="1" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:80px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">กี่คน</label>
+                        <input type="number" id="dgAdults" value="1" min="1" style="width:100%; padding:8px;" />
                     </div>
                     <div>
                         <button type="button" class="btn-default" onclick="diagnoseEmailIntake()"><i class="fas fa-search"></i> ตรวจสอบ</button>
@@ -1338,6 +1353,8 @@
                 setVal('cfgEmailRsvRetryFailed', cfg.emailRsvRetryFailed ? 'true' : 'false');
                 setVal('cfgEmailRsvRetryHours', cfg.emailRsvRetryHours || 72);
                 setVal('cfgEmailRsvMapAnyChannel', cfg.emailRsvMapAnyChannel ? 'true' : 'false');
+                setVal('cfgEmailRsvRoomPriority', cfg.emailRsvRoomPriority || '');
+                setVal('cfgEmailRsvDefaultPhone', cfg.emailRsvDefaultPhone || '');
                 var pwStat = document.getElementById('cfgEmailRsvPwStatus');
                 if (pwStat) {
                     if (cfg.emailRsvHasPassword) {
@@ -1486,7 +1503,9 @@
                 emailRsvMoveFailed: document.getElementById('cfgEmailRsvMoveFailed').value === 'true',
                 emailRsvRetryFailed: document.getElementById('cfgEmailRsvRetryFailed').value === 'true',
                 emailRsvRetryHours: document.getElementById('cfgEmailRsvRetryHours').value,
-                emailRsvMapAnyChannel: document.getElementById('cfgEmailRsvMapAnyChannel').value === 'true'
+                emailRsvMapAnyChannel: document.getElementById('cfgEmailRsvMapAnyChannel').value === 'true',
+                emailRsvRoomPriority: document.getElementById('cfgEmailRsvRoomPriority').value,
+                emailRsvDefaultPhone: document.getElementById('cfgEmailRsvDefaultPhone').value
             };
             postAction(data, 'emailRsvResult');
         }
@@ -1507,6 +1526,7 @@
                   + '&checkin=' + encodeURIComponent(document.getElementById('dgCheckin').value)
                   + '&checkout=' + encodeURIComponent(document.getElementById('dgCheckout').value)
                   + '&rooms=' + encodeURIComponent(document.getElementById('dgRooms').value)
+                  + '&adults=' + encodeURIComponent(document.getElementById('dgAdults').value)
                   + '&_=' + Date.now();
             fetch(pageUrl + q)
                 .then(function(r) { return r.json(); })
