@@ -31,6 +31,7 @@ namespace Take_Time_BangPhra.Services
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
+        private readonly int _customerTypeId;       // Customer_Type_ID ของลูกค้าที่สร้างอัตโนมัติ (2 = บุคคลธรรมดา)
 
         public EmailReservationService(string connectionString)
         {
@@ -58,6 +59,7 @@ namespace Take_Time_BangPhra.Services
             // สถานะยกเลิก — รับเฉพาะค่าที่ระบบรู้จัก กันพิมพ์ผิดแล้วหลุดสถานะแปลก
             string cs = Cfg("Email_Rsv_CancelStatus", "ยกเลิก");
             _cancelStatus = (cs == "ยกเลิกคืนเงิน" || cs == "ยกเลิกไม่คืนเงิน") ? cs : "ยกเลิก";
+            _customerTypeId = int.TryParse(Cfg("Email_Rsv_CustomerTypeId", "2"), out var ct) ? ct : 2;
         }
 
         private string Cfg(string key, string def)
@@ -467,17 +469,12 @@ namespace Take_Time_BangPhra.Services
                                               || string.IsNullOrEmpty(head.PaymentType); // STAAH default = channel collect
 
                         int resId;
-                        using (var cmd = new SqlCommand(@"INSERT INTO [dbo].[Reservation]
-                            ([Customer_MobilePhone],[CheckinDate],[CheckoutDate],[StayDays],[Status],[TotalPrice],[Deposit],
-                             [Remark],[Reserve_By],[Created_Date],NoCreateReceipt,NoNameinReceipt,
-                             OTA_Channel,OTA_Booking_ID,OTA_Gross_Amount,OTA_Net_Amount,OTA_Payment_Type,OTA_Guest_Name)
-                            VALUES (@Phone,@In,@Out,@Days,N'มัดจำแล้ว',@Total,@Dep,@Remark,N'System(Email)',GETDATE(),1,1,
-                             @Ch,@Bk,@Gross,@Net,@Pay,@Guest); SELECT SCOPE_IDENTITY();", con, tx))
+                        using (var cmd = new SqlCommand(ReservationInsertSql(), con, tx))
                         {
                             // ⚠️ "??" ไม่ทำงานกับสตริงว่าง — เคยหลุดเป็น Customer_MobilePhone = '' ที่ไม่มีลูกค้าผูก
                             string phone = string.IsNullOrWhiteSpace(head.MobilePhone)
                                 ? "OTA_" + head.BookingId : head.MobilePhone;
-                            EnsureCustomer(con, tx, phone, head.GuestName, head.PaymentType);
+                            EnsureCustomer(con, tx, phone, head.GuestName, head.ChannelName);
                             cmd.Parameters.AddWithValue("@Phone", phone);
                             cmd.Parameters.AddWithValue("@In", head.CheckIn);
                             cmd.Parameters.AddWithValue("@Out", head.CheckOut);
@@ -837,7 +834,8 @@ namespace Take_Time_BangPhra.Services
             catch (Exception ex) { return "ตรวจสอบไม่สำเร็จ: " + ex.Message; }
         }
 
-        private void EnsureCustomer(SqlConnection con, SqlTransaction tx, string phone, string name, string paymentType)
+        /// <param name="comeFrom">ที่มาของลูกค้า (ชื่อ channel) — ลงคอลัมน์ ComeFrom ถ้าตารางมี</param>
+        private void EnsureCustomer(SqlConnection con, SqlTransaction tx, string phone, string name, string comeFrom)
         {
             if (string.IsNullOrWhiteSpace(phone)) return;
             using (var chk = new SqlCommand("SELECT COUNT(*) FROM Customer WHERE MobilePhone = @p", con, tx))
@@ -845,13 +843,120 @@ namespace Take_Time_BangPhra.Services
                 chk.Parameters.AddWithValue("@p", phone);
                 if (Convert.ToInt32(chk.ExecuteScalar()) > 0) return;
             }
-            using (var ins = new SqlCommand(
-                "INSERT INTO Customer (MobilePhone, Name, Created_Date) VALUES (@p, @n, GETDATE())", con, tx))
+            using (var ins = new SqlCommand(CustomerInsertSql(), con, tx))
             {
                 ins.Parameters.AddWithValue("@p", phone);
-                ins.Parameters.AddWithValue("@n", (object)name ?? phone);
+                ins.Parameters.AddWithValue("@n", string.IsNullOrWhiteSpace(name) ? phone : name);
+                ins.Parameters.AddWithValue("@from", (object)(comeFrom ?? "") ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@ctype", _customerTypeId);
                 ins.ExecuteNonQuery();
             }
+        }
+
+        // ── สร้าง SQL ตามคอลัมน์ที่มีจริง ────────────────────────────────────────
+        // schema ของแต่ละ deployment ไม่เท่ากัน (Customer ไม่มี Created_Date, Reservation อาจยัง
+        // ไม่ได้รัน migration ที่เพิ่ม OTA_*) — hard-code ชื่อคอลัมน์แล้วพังทั้งใบจองเป็นเรื่องใหญ่
+        // จึงอ่าน INFORMATION_SCHEMA ครั้งเดียว แล้วประกอบ statement เฉพาะคอลัมน์ที่มี
+        private HashSet<string> TableColumns(string table)
+        {
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @t",
+                    new Dictionary<string, object> { { "@t", table } });
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        if (r[0] != DBNull.Value) cols.Add(r[0].ToString());
+            }
+            catch { }
+            return cols;
+        }
+
+        private static string _reservationInsertSql;
+        private string ReservationInsertSql()
+        {
+            if (_reservationInsertSql != null) return _reservationInsertSql;
+            var cols = TableColumns("Reservation");
+
+            var names = new List<string> { "[Customer_MobilePhone]", "[CheckinDate]", "[CheckoutDate]",
+                                           "[StayDays]", "[Status]", "[TotalPrice]", "[Deposit]", "[Remark]" };
+            var vals = new List<string> { "@Phone", "@In", "@Out", "@Days", "N'มัดจำแล้ว'", "@Total", "@Dep", "@Remark" };
+            Action<string, string> opt = (col, val) =>
+            {
+                if (cols.Count == 0 || cols.Contains(col)) { names.Add("[" + col + "]"); vals.Add(val); }
+            };
+            opt("Reserve_By", "N'System(Email)'");
+            opt("Created_Date", "GETDATE()");
+            // ⚠️ คอลัมน์นี้เก็บเป็นข้อความ 'True'/'False' (โค้ดอื่นอ่านด้วย .ToString().ToLower())
+            // ถ้าใส่ 1 จะได้ '1' ซึ่งไม่ตรงทั้ง "true" และ "false" → logic ใบเสร็จเพี้ยน
+            opt("NoCreateReceipt", "N'True'");
+            opt("NoNameinReceipt", "N'True'");
+            opt("OTA_Channel", "@Ch");
+            opt("OTA_Booking_ID", "@Bk");
+            opt("OTA_Gross_Amount", "@Gross");
+            opt("OTA_Net_Amount", "@Net");
+            opt("OTA_Payment_Type", "@Pay");
+            opt("OTA_Guest_Name", "@Guest");
+
+            _reservationInsertSql = $"INSERT INTO [dbo].[Reservation] ({string.Join(",", names)}) " +
+                                    $"VALUES ({string.Join(",", vals)}); SELECT SCOPE_IDENTITY();";
+            _code.Logs(_conn, "EmailReservation", "reservation insert columns: " + string.Join(",", names), "SYSTEM");
+            return _reservationInsertSql;
+        }
+
+        /// <summary>ชุด SET ของ UPDATE ตอนแก้ไข — ข้ามคอลัมน์ OTA_* ที่ยังไม่ได้ migrate</summary>
+        private static string _reservationUpdateSet;
+        private string ReservationUpdateSet()
+        {
+            if (_reservationUpdateSet != null) return _reservationUpdateSet;
+            var cols = TableColumns("Reservation");
+            var sets = new List<string>
+            {
+                "[CheckinDate] = @In", "[CheckoutDate] = @Out", "[StayDays] = @Days",
+                "[TotalPrice] = @Total", "[Deposit] = @Dep", "[Remark] = @Remark"
+            };
+            Action<string, string> opt = (col, expr) =>
+            {
+                if (cols.Count == 0 || cols.Contains(col)) sets.Add(expr);
+            };
+            opt("OTA_Gross_Amount", "OTA_Gross_Amount = @Gross");
+            opt("OTA_Net_Amount", "OTA_Net_Amount = @Net");
+            opt("OTA_Payment_Type", "OTA_Payment_Type = @Pay");
+            opt("OTA_Guest_Name", "OTA_Guest_Name = @Guest");
+            opt("Modified_Date", "Modified_Date = GETDATE()");
+            _reservationUpdateSet = string.Join(", ", sets);
+            return _reservationUpdateSet;
+        }
+
+        private static string _customerInsertSql;
+        private string CustomerInsertSql()
+        {
+            if (_customerInsertSql != null) return _customerInsertSql;
+            var cols = TableColumns("Customer");
+
+            var names = new List<string> { "MobilePhone", "Name" };
+            var vals = new List<string> { "@p", "@n" };
+            Action<string, string> opt = (col, val) =>
+            {
+                if (cols.Contains(col)) { names.Add("[" + col + "]"); vals.Add(val); }
+            };
+            opt("FullName", "@n");
+            opt("ComeFrom", "@from");
+            opt("NickName", "N''");
+            opt("Remark", "N''");
+            opt("Address", "N''");
+            opt("Address1", "N''");
+            opt("IDNumber", "N''");
+            opt("Email", "N''");
+            opt("Branch_Number", "N'00000'");
+            opt("Address_ID", "0");
+            opt("Customer_Type_ID", "@ctype");
+            opt("Created_Date", "GETDATE()");
+
+            _customerInsertSql = $"INSERT INTO Customer ({string.Join(", ", names)}) VALUES ({string.Join(", ", vals)})";
+            _code.Logs(_conn, "EmailReservation", "customer insert columns: " + string.Join(",", names), "SYSTEM");
+            return _customerInsertSql;
         }
 
         // ── Modification (อีเมล "Bookings Status: Modified") ──────────────────────
@@ -1019,7 +1124,7 @@ namespace Take_Time_BangPhra.Services
                             }
                             if (curPhone != head.MobilePhone)
                             {
-                                EnsureCustomer(con, tx, head.MobilePhone, head.GuestName, head.PaymentType);
+                                EnsureCustomer(con, tx, head.MobilePhone, head.GuestName, head.ChannelName);
                                 using (var up = new SqlCommand(
                                     "UPDATE Reservation SET Customer_MobilePhone = @p WHERE ID = @id", con, tx))
                                 {
@@ -1032,13 +1137,8 @@ namespace Take_Time_BangPhra.Services
                             }
                         }
 
-                        using (var cmd = new SqlCommand(@"UPDATE [dbo].[Reservation] SET
-                                [CheckinDate] = @In, [CheckoutDate] = @Out, [StayDays] = @Days,
-                                [TotalPrice] = @Total, [Deposit] = @Dep,
-                                OTA_Gross_Amount = @Gross, OTA_Net_Amount = @Net,
-                                OTA_Payment_Type = @Pay, OTA_Guest_Name = @Guest,
-                                [Remark] = @Remark" + ModifiedDateSql() + @"
-                              WHERE ID = @id", con, tx))
+                        using (var cmd = new SqlCommand(
+                            "UPDATE [dbo].[Reservation] SET " + ReservationUpdateSet() + " WHERE ID = @id", con, tx))
                         {
                             cmd.Parameters.AddWithValue("@id", resId);
                             cmd.Parameters.AddWithValue("@In", head.CheckIn);
