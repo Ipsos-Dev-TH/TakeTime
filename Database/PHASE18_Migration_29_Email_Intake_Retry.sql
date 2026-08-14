@@ -37,6 +37,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_DefaultPhone')
         INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue) VALUES ('Email_Rsv_DefaultPhone', '');
 
+    -- สถานะที่ตั้งเมื่อยกเลิกจากอีเมล OTA (ยกเลิก / ยกเลิกคืนเงิน / ยกเลิกไม่คืนเงิน)
+    -- โปรแกรมเดิมใช้ 'ยกเลิกคืนเงิน' — ค่าเริ่มต้นที่นี่คือ 'ยกเลิก' (กลาง ๆ) เปลี่ยนได้ที่หน้า Admin
+    IF NOT EXISTS (SELECT 1 FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_CancelStatus')
+        INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue) VALUES ('Email_Rsv_CancelStatus', N'ยกเลิก');
+
     PRINT 'Email intake retry/mapping config keys ready';
 END
 GO

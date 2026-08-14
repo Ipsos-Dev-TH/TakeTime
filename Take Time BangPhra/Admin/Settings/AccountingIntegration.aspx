@@ -674,6 +674,14 @@
                     <label style="display:block; font-weight:600; margin-bottom:6px;">เบอร์สำรองเมื่ออีเมลไม่มีเบอร์</label>
                     <input type="text" id="cfgEmailRsvDefaultPhone" placeholder="เว้นว่าง = ใช้ OTA_{BookingID}" style="width:100%; padding:8px;" />
                 </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะเมื่อยกเลิกจากอีเมล</label>
+                    <select id="cfgEmailRsvCancelStatus" style="width:100%; padding:8px;">
+                        <option value="ยกเลิก">ยกเลิก</option>
+                        <option value="ยกเลิกคืนเงิน">ยกเลิกคืนเงิน (แบบโปรแกรมเดิม)</option>
+                        <option value="ยกเลิกไม่คืนเงิน">ยกเลิกไม่คืนเงิน</option>
+                    </select>
+                </div>
             </div>
 
             <div style="margin-top:16px;">
@@ -1355,6 +1363,7 @@
                 setVal('cfgEmailRsvMapAnyChannel', cfg.emailRsvMapAnyChannel ? 'true' : 'false');
                 setVal('cfgEmailRsvRoomPriority', cfg.emailRsvRoomPriority || '');
                 setVal('cfgEmailRsvDefaultPhone', cfg.emailRsvDefaultPhone || '');
+                setVal('cfgEmailRsvCancelStatus', cfg.emailRsvCancelStatus || 'ยกเลิก');
                 var pwStat = document.getElementById('cfgEmailRsvPwStatus');
                 if (pwStat) {
                     if (cfg.emailRsvHasPassword) {
@@ -1505,7 +1514,8 @@
                 emailRsvRetryHours: document.getElementById('cfgEmailRsvRetryHours').value,
                 emailRsvMapAnyChannel: document.getElementById('cfgEmailRsvMapAnyChannel').value === 'true',
                 emailRsvRoomPriority: document.getElementById('cfgEmailRsvRoomPriority').value,
-                emailRsvDefaultPhone: document.getElementById('cfgEmailRsvDefaultPhone').value
+                emailRsvDefaultPhone: document.getElementById('cfgEmailRsvDefaultPhone').value,
+                emailRsvCancelStatus: document.getElementById('cfgEmailRsvCancelStatus').value
             };
             postAction(data, 'emailRsvResult');
         }

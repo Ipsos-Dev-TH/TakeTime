@@ -335,6 +335,8 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>ลำดับห้องที่จัดให้ก่อน (Accommodation ID คั่นจุลภาค) — เดิม hard-code 16,15,3,1,2,4,5</summary>
         public string EmailRsvRoomPriority => GetConfig("Email_Rsv_RoomPriority", "");
         public string EmailRsvDefaultPhone => GetConfig("Email_Rsv_DefaultPhone", "");
+        /// <summary>สถานะที่ตั้งเมื่อยกเลิกจากอีเมล OTA (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)</summary>
+        public string EmailRsvCancelStatus => GetConfig("Email_Rsv_CancelStatus", "ยกเลิก");
 
         // ── Daily reservation board → LINE ───────────────────────────────────────
         public bool IsDailyLineReportEnabled => GetConfig("Line_DailyReport_Enabled", "0") == "1";

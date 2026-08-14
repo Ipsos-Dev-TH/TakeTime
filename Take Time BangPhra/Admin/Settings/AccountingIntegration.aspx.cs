@@ -123,6 +123,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "emailRsvMapAnyChannel", config.EmailRsvMapAnyChannel },
                     { "emailRsvRoomPriority", config.EmailRsvRoomPriority },
                     { "emailRsvDefaultPhone", config.EmailRsvDefaultPhone },
+                    { "emailRsvCancelStatus", config.EmailRsvCancelStatus },
                     // Daily reservation board → LINE
                     { "lineDailyEnabled", config.IsDailyLineReportEnabled },
                     { "lineDailyRecipients", config.LineDailyRecipients },
@@ -543,6 +544,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("emailRsvMapAnyChannel")) config.SetConfig("Email_Rsv_MapAnyChannel", BoolToFlag(data["emailRsvMapAnyChannel"]));
                 if (data.ContainsKey("emailRsvRoomPriority")) config.SetConfig("Email_Rsv_RoomPriority", data["emailRsvRoomPriority"]?.ToString() ?? "");
                 if (data.ContainsKey("emailRsvDefaultPhone")) config.SetConfig("Email_Rsv_DefaultPhone", data["emailRsvDefaultPhone"]?.ToString() ?? "");
+                if (data.ContainsKey("emailRsvCancelStatus")) config.SetConfig("Email_Rsv_CancelStatus", data["emailRsvCancelStatus"]?.ToString() ?? "ยกเลิก");
 
                 return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกการตั้งค่าอ่านอีเมลจองแล้ว" } };
             }

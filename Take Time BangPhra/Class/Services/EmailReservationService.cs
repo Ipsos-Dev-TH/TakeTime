@@ -30,6 +30,7 @@ namespace Take_Time_BangPhra.Services
         private readonly int _imapPort, _maxStayDays, _maxDaysFuture, _retryHours, _retryMax;
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
+        private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
 
         public EmailReservationService(string connectionString)
         {
@@ -54,6 +55,9 @@ namespace Take_Time_BangPhra.Services
                 .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => int.TryParse(x.Trim(), out var v) ? v : -1)
                 .Where(v => v > 0).ToList();
+            // สถานะยกเลิก — รับเฉพาะค่าที่ระบบรู้จัก กันพิมพ์ผิดแล้วหลุดสถานะแปลก
+            string cs = Cfg("Email_Rsv_CancelStatus", "ยกเลิก");
+            _cancelStatus = (cs == "ยกเลิกคืนเงิน" || cs == "ยกเลิกไม่คืนเงิน") ? cs : "ยกเลิก";
         }
 
         private string Cfg(string key, string def)
@@ -87,13 +91,26 @@ namespace Take_Time_BangPhra.Services
 
         public class IntakeResult
         {
-            public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded;
+            public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded, Manual;
             public List<string> Messages = new List<string>();
             public string Error;
             public override string ToString() =>
                 Error != null ? "ผิดพลาด: " + Error
                 : $"ดึง {Fetched} อีเมล → สร้าง {Created}, ซ้ำ {Duplicate}, ยกเลิก {Cancelled}, ล้มเหลว {Failed}"
+                  + (Manual > 0 ? $", ต้องตรวจเอง {Manual}" : "")
                   + (Retried > 0 ? $" | ลองใหม่ {Retried} ฉบับ สำเร็จ {RetrySucceeded}" : "");
+        }
+
+        /// <summary>
+        /// ผลประมวลอีเมล 1 ฉบับ. Park = "จบเคสด้วยมนุษย์" — แจ้งเตือนแล้ว ไม่ลองซ้ำอีก
+        /// (ย้ายเข้า Processed ไม่ใช่ Failed เพื่อไม่ให้ retry loop วนเคสที่คนต้องตัดสินใจ)
+        /// </summary>
+        private class Outcome
+        {
+            public bool Ok, Dup, Cancelled, Park;
+            public string Msg;
+            public Outcome(bool ok, bool dup, bool cancelled, string msg, bool park = false)
+            { Ok = ok; Dup = dup; Cancelled = cancelled; Msg = msg; Park = park; }
         }
 
         /// <summary>ทดสอบเชื่อมต่อ IMAP + auth (ไม่แตะอีเมล). ใช้จากปุ่ม "ทดสอบการเชื่อมต่อ".</summary>
@@ -178,29 +195,31 @@ namespace Take_Time_BangPhra.Services
             IntakeResult res, bool isRetry)
         {
             string subject = "";
-            bool ok = false, dup = false;
+            bool done = false;   // ok/dup/park = จบเคสแล้ว ย้ายออกจากคิว
             _inRetry = isRetry;      // กัน Notify ซ้ำจากชั้นใน (ProcessModification ฯลฯ) ตอนวนลองใหม่
             try
             {
                 var msg = source.GetMessage(uid);
                 subject = msg.Subject ?? "";
                 string kind;
-                var (success, isDup, cancelled, message) = ProcessOne(msg, subject, out kind);
-                ok = success; dup = isDup;
+                var o = ProcessOne(msg, subject, out kind);
+                done = o.Ok || o.Dup || o.Park;
                 if (isRetry)
                 {
                     res.Retried++;
-                    if (success || isDup) res.RetrySucceeded++;
+                    if (done) res.RetrySucceeded++;
                 }
-                if (success && cancelled) res.Cancelled++;
-                else if (success) res.Created++;
-                else if (isDup) res.Duplicate++;
+                if (o.Ok && o.Cancelled) res.Cancelled++;
+                else if (o.Ok) res.Created++;
+                else if (o.Dup) res.Duplicate++;
+                else if (o.Park) res.Manual++;
                 else if (!isRetry) res.Failed++;
-                res.Messages.Add($"[{(isRetry ? "ลองใหม่/" : "")}{kind}] {message}");
+                res.Messages.Add($"[{(isRetry ? "ลองใหม่/" : "")}{kind}] {o.Msg}");
 
                 // รอบลองใหม่: แจ้งเฉพาะตอนสำเร็จ (ไม่งั้นจะเตือนซ้ำทุก 5 นาทีจนกว่าจะแก้)
-                if (_notifyTelegram && (success || (!isDup && !isRetry)))
-                    Notify($"{(success ? "✅" : "⚠️")} STAAH {kind}{(isRetry ? " (ลองใหม่)" : "")}: {message}", true);
+                // เคส Park แจ้งจากข้างใน Process* ไปแล้ว (ข้อความละเอียดกว่า) — ไม่แจ้งซ้ำ
+                if (_notifyTelegram && !o.Park && (o.Ok || (!o.Dup && !isRetry)))
+                    Notify($"{(o.Ok ? "✅" : "⚠️")} STAAH {kind}{(isRetry ? " (ลองใหม่)" : "")}: {o.Msg}", true);
             }
             catch (Exception ex)
             {
@@ -212,7 +231,7 @@ namespace Take_Time_BangPhra.Services
 
             try
             {
-                if (ok || dup) source.MoveTo(uid, processed);
+                if (done) source.MoveTo(uid, processed);
                 else if (isRetry) { /* คาไว้ใน Failed รอรอบหน้า */ }
                 else if (_moveFailed && failed != null) source.MoveTo(uid, failed);
                 else source.AddFlags(uid, MessageFlags.Seen, true);
@@ -254,8 +273,7 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
-        // คืน (success, isDuplicate, isCancellation, message)
-        private (bool, bool, bool, string) ProcessOne(MimeMessage msg, string subject, out string kind)
+        private Outcome ProcessOne(MimeMessage msg, string subject, out string kind)
         {
             // ⚠️ สถานะจริงอยู่ใน "เนื้ออีเมล" (Bookings Status: Confirmed/Modified/Cancelled)
             // ไม่ใช่หัวเรื่อง — อีเมลแก้ไขของ STAAH ใช้หัวเรื่อง "New Reservation ..." เหมือนเดิม
@@ -318,7 +336,19 @@ namespace Take_Time_BangPhra.Services
                 "//table[@border='0' and @cellpadding='5' and @width='100%' and @style='border-collapse:collapse;']//tr[.//span[contains(text(), 'CHECK-IN')]]");
             var adultRows = doc.DocumentNode.SelectNodes(
                 "//table[@border='0' and @cellpadding='5' and @width='100%' and @style='border-collapse:collapse;']//tr[.//span[contains(text(), 'ADULTS')]]");
-            if (roomRows == null || roomRows.Count == 0) return list;
+            if (roomRows == null || roomRows.Count == 0)
+            {
+                // อีเมลบางแบบ (โดยเฉพาะใบยกเลิก) อาจไม่มีตารางห้อง/format เพี้ยน — ถ้า header
+                // ยังอ่านได้ ให้คืนข้อมูลหัวอย่างเดียว เส้นทางยกเลิกใช้แค่ Booking Id ก็ทำงานต่อได้
+                // (เส้นจองใหม่/แก้ไขจะติด validate วันเช็คอินเองตามปกติ)
+                if (!string.IsNullOrWhiteSpace(bookingId))
+                    list.Add(new RoomBooking
+                    {
+                        ChannelName = channel, BookingsStatus = status, BookingId = bookingId,
+                        GuestName = guest, MobilePhone = phone, PaymentType = paymentType, GrossTotal = gross
+                    });
+                return list;
+            }
 
             for (int a = 0; a < roomRows.Count; a++)
             {
@@ -358,38 +388,38 @@ namespace Take_Time_BangPhra.Services
         }
 
         // ── New reservation ─────────────────────────────────────────────────────
-        private (bool, bool, bool, string) ProcessNewReservation(List<RoomBooking> rooms)
+        private Outcome ProcessNewReservation(List<RoomBooking> rooms)
         {
-            if (rooms.Count == 0) return (false, false, false, "แยกข้อมูลจากอีเมลไม่ได้ (format เปลี่ยน?)");
+            if (rooms.Count == 0) return new Outcome(false, false, false, "แยกข้อมูลจากอีเมลไม่ได้ (format เปลี่ยน?)");
             var head = rooms[0];
-            if (string.IsNullOrWhiteSpace(head.BookingId)) return (false, false, false, "ไม่พบ Booking ID");
+            if (string.IsNullOrWhiteSpace(head.BookingId)) return new Outcome(false, false, false, "ไม่พบ Booking ID");
 
-            // dedup — ข้ามการจองที่ถูกยกเลิกแล้ว เพื่อให้ Modified (cancel เดิม+สร้างใหม่) สร้างใหม่ได้
+            // dedup — ข้ามการจองที่ถูกยกเลิกแล้ว (ทุกแบบ) เพื่อให้จองใหม่ด้วยเลขเดิมสร้างได้
             var existing = _code.DatabaseQuerySafe(_conn,
                 @"SELECT TOP 1 ID FROM Reservation
                   WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)
-                    AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน')",
+                    AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')",
                 new Dictionary<string, object> { { "@b", head.BookingId }, { "@p", "%" + head.BookingId + "%" } });
-            if (existing?.Rows.Count > 0) return (false, true, false, $"Booking {head.BookingId} มีในระบบแล้ว (#{existing.Rows[0][0]})");
+            if (existing?.Rows.Count > 0) return new Outcome(false, true, false, $"Booking {head.BookingId} มีในระบบแล้ว (#{existing.Rows[0][0]})");
 
             // สถานะในเนื้ออีเมลต้องเป็น Confirmed (โปรแกรมเดิมเช็คไว้ — พอร์ตมาแล้วหายไป)
             // ถ้าไม่เช็ค อีเมลสถานะ Pending / Tentative / On Request จะถูกลงจองเป็นของจริง
             string bodyStatus = (head.BookingsStatus ?? "").Trim();
             if (bodyStatus.Length > 0 && !Has(bodyStatus, "Confirm") && !Has(bodyStatus, "Modif"))
-                return (false, false, false, $"สถานะการจองในอีเมลเป็น '{bodyStatus}' ไม่ใช่ Confirmed — ไม่ลงจองอัตโนมัติ");
+                return new Outcome(false, false, false, $"สถานะการจองในอีเมลเป็น '{bodyStatus}' ไม่ใช่ Confirmed — ไม่ลงจองอัตโนมัติ");
 
             // validate
             if (head.CheckIn == default || head.CheckOut == default || head.CheckOut <= head.CheckIn)
-                return (false, false, false, "วันเช็คอิน/เอาท์ไม่ถูกต้อง");
+                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ไม่ถูกต้อง");
             int stayDays = (int)(head.CheckOut - head.CheckIn).TotalDays;
-            if (stayDays > _maxStayDays) return (false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
-            if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture) return (false, false, false, "จองล่วงหน้าเกินกำหนด");
+            if (stayDays > _maxStayDays) return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
+            if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture) return new Outcome(false, false, false, "จองล่วงหน้าเกินกำหนด");
 
             var (resId, reason) = SaveReservation(rooms, stayDays);
-            if (resId <= 0) return (false, false, false, "บันทึกการจองไม่สำเร็จ — " + reason);
+            if (resId <= 0) return new Outcome(false, false, false, "บันทึกการจองไม่สำเร็จ — " + reason);
 
             if (_createDocument) TryEnqueueDocument(resId, head);
-            return (true, false, false, $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}");
+            return new Outcome(true, false, false, $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}");
         }
 
         // ── Save (SERIALIZABLE txn, ตรงตาม external app) ──────────────────────────
@@ -564,7 +594,8 @@ namespace Take_Time_BangPhra.Services
             var res = new MapResult();
             string ch = Norm(CleanEntities(channel));
             var variants = RoomTypeCandidates(roomType);
-            if (variants.Count == 0) variants.Add("");
+            // ชื่อห้องว่าง → ห้าม match อะไรเลย (LIKE '%%' จะจับทุกแถวของ Agency = คว้าห้องมั่ว)
+            if (variants.Count == 0) return res;
 
             // ⚠️ เงื่อนไขที่ใช้ ROOM_TYPE เป็น "ส่วนหนึ่ง" ต้องกันแถวที่ ROOM_TYPE ว่าง/สั้นเกินไป
             // ไม่งั้น '%' + '' + '%' จะ match ทุกแถว = คว้าห้องมั่ว
@@ -830,11 +861,11 @@ namespace Take_Time_BangPhra.Services
         /// ไม่ใช้วิธี "ยกเลิกเดิม + สร้างใหม่" เพราะจะได้เลขจองใหม่ และประวัติเงิน/เอกสารขาดจากกัน
         /// เคสที่แก้อัตโนมัติไม่ปลอดภัย (เช็คอินแล้ว / ออกใบเสร็จแล้ว) → ไม่แตะ + แจ้งให้คนตรวจ
         /// </summary>
-        private (bool, bool, bool, string) ProcessModification(List<RoomBooking> rooms)
+        private Outcome ProcessModification(List<RoomBooking> rooms)
         {
-            if (rooms.Count == 0) return (false, false, false, "แยกข้อมูลจากอีเมลแก้ไขไม่ได้ (format เปลี่ยน?)");
+            if (rooms.Count == 0) return new Outcome(false, false, false, "แยกข้อมูลจากอีเมลแก้ไขไม่ได้ (format เปลี่ยน?)");
             var head = rooms[0];
-            if (string.IsNullOrWhiteSpace(head.BookingId)) return (false, false, false, "ไม่พบ Booking ID ในอีเมลแก้ไข");
+            if (string.IsNullOrWhiteSpace(head.BookingId)) return new Outcome(false, false, false, "ไม่พบ Booking ID ในอีเมลแก้ไข");
 
             // หาการจองเดิมที่ยังใช้งานอยู่
             var dt = _code.DatabaseQuerySafe(_conn,
@@ -853,14 +884,16 @@ namespace Take_Time_BangPhra.Services
             string curStatus = dt.Rows[0]["Status"]?.ToString() ?? "";
 
             // ── ตรวจความปลอดภัยก่อนแก้ ─────────────────────────────────────────
+            // เคสเหล่านี้ "จบด้วยคน" (Park) — แจ้ง Telegram แล้วย้ายอีเมลเข้า Processed เลย
+            // ไม่ส่งเข้า Failed เพราะ retry loop จะวนลองซ้ำทั้งที่ระบบตั้งใจไม่แก้อัตโนมัติ
             if (curStatus.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0
                 || curStatus.IndexOf("เช็คเอาท์", StringComparison.Ordinal) >= 0)
             {
                 string warn = $"⚠️ Booking {head.BookingId} (จอง #{resId}) มีอีเมลแก้ไข แต่สถานะเป็น \"{curStatus}\" แล้ว — ไม่แก้อัตโนมัติ กรุณาตรวจสอบเอง " +
                               $"(ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
-                if (_notifyTelegram) Notify(warn);
-                return (false, false, false, warn);
+                if (_notifyTelegram) Notify(warn, true);
+                return new Outcome(false, false, false, warn, park: true);
             }
 
             var rcpt = _code.DatabaseQuerySafe(_conn,
@@ -871,27 +904,27 @@ namespace Take_Time_BangPhra.Services
                 string warn = $"⚠️ Booking {head.BookingId} (จอง #{resId}) มีอีเมลแก้ไข แต่ออกใบเสร็จไปแล้ว ({rcpt.Rows[0][0]}) — ไม่แก้อัตโนมัติ " +
                               $"กรุณาปรับเอกสาร/ยอดเงินเอง (ข้อมูลใหม่: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {head.GrossTotal:N2})";
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
-                if (_notifyTelegram) Notify(warn);
-                return (false, false, false, warn);
+                if (_notifyTelegram) Notify(warn, true);
+                return new Outcome(false, false, false, warn, park: true);
             }
 
             // ── validate ข้อมูลใหม่ ────────────────────────────────────────────
             if (head.CheckIn == default || head.CheckOut == default || head.CheckOut <= head.CheckIn)
-                return (false, false, false, "วันเช็คอิน/เอาท์ในอีเมลแก้ไขไม่ถูกต้อง");
+                return new Outcome(false, false, false, "วันเช็คอิน/เอาท์ในอีเมลแก้ไขไม่ถูกต้อง");
             int stayDays = (int)(head.CheckOut - head.CheckIn).TotalDays;
-            if (stayDays > _maxStayDays) return (false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
+            if (stayDays > _maxStayDays) return new Outcome(false, false, false, $"จำนวนคืน {stayDays} เกิน {_maxStayDays}");
 
             DateTime oldIn = Convert.ToDateTime(dt.Rows[0]["CheckinDate"]);
             DateTime oldOut = Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]);
             decimal oldTotal = dt.Rows[0]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["TotalPrice"]) : 0m;
 
             var (ok, msg) = UpdateReservation(resId, rooms, stayDays);
-            if (!ok) return (false, false, false, msg);
+            if (!ok) return new Outcome(false, false, false, msg);
 
             string changes = BuildChangeSummary(oldIn, oldOut, oldTotal, head, stayDays);
             string done = $"แก้ไขการจอง #{resId} ({head.BookingId}) เรียบร้อย — {changes}";
             _code.Logs(_conn, "EmailReservation", done, "SYSTEM");
-            return (true, false, false, done);
+            return new Outcome(true, false, false, done);
         }
 
         private static string BuildChangeSummary(DateTime oldIn, DateTime oldOut, decimal oldTotal,
@@ -972,6 +1005,33 @@ namespace Take_Time_BangPhra.Services
                         bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                               || string.IsNullOrEmpty(head.PaymentType);
 
+                        // เบอร์ผู้จองเปลี่ยนในอีเมลแก้ไข → ย้ายการจองไปผูกลูกค้าเบอร์ใหม่
+                        // (เฉพาะเบอร์จริง — ไม่ใช่ค่า fallback OTA_xxx และไม่ใช่ค่าว่าง)
+                        if (!string.IsNullOrWhiteSpace(head.MobilePhone) && head.MobilePhone.Length >= 9
+                            && !head.MobilePhone.StartsWith("OTA_"))
+                        {
+                            string curPhone = "";
+                            using (var ph = new SqlCommand(
+                                "SELECT ISNULL(Customer_MobilePhone, N'') FROM Reservation WHERE ID = @id", con, tx))
+                            {
+                                ph.Parameters.AddWithValue("@id", resId);
+                                curPhone = ph.ExecuteScalar()?.ToString() ?? "";
+                            }
+                            if (curPhone != head.MobilePhone)
+                            {
+                                EnsureCustomer(con, tx, head.MobilePhone, head.GuestName, head.PaymentType);
+                                using (var up = new SqlCommand(
+                                    "UPDATE Reservation SET Customer_MobilePhone = @p WHERE ID = @id", con, tx))
+                                {
+                                    up.Parameters.AddWithValue("@p", head.MobilePhone);
+                                    up.Parameters.AddWithValue("@id", resId);
+                                    up.ExecuteNonQuery();
+                                }
+                                _code.Logs(_conn, "EmailReservation",
+                                    $"modification: จอง #{resId} เปลี่ยนเบอร์ผู้จอง {curPhone} → {head.MobilePhone}", "SYSTEM");
+                            }
+                        }
+
                         using (var cmd = new SqlCommand(@"UPDATE [dbo].[Reservation] SET
                                 [CheckinDate] = @In, [CheckoutDate] = @Out, [StayDays] = @Days,
                                 [TotalPrice] = @Total, [Deposit] = @Dep,
@@ -1028,28 +1088,66 @@ namespace Take_Time_BangPhra.Services
         }
 
         // ── Cancellation ─────────────────────────────────────────────────────────
-        private (bool, bool, bool, string) ProcessCancellation(List<RoomBooking> rooms)
+        /// <summary>
+        /// ยกเลิกจากอีเมล OTA — มี guard ชุดเดียวกับฝั่งแก้ไข:
+        /// เช็คอิน/เช็คเอาท์แล้ว หรือออกใบเสร็จแล้ว → ไม่ยกเลิกอัตโนมัติ (เงิน/เอกสารจะขัดกัน)
+        /// แจ้งคนแล้วจบเคส (Park). สถานะที่ตั้งเมื่อยกเลิกเลือกได้ผ่าน Email_Rsv_CancelStatus
+        /// (โปรแกรมเดิมใช้ 'ยกเลิกคืนเงิน' — channel collect เงินอยู่ฝั่ง OTA)
+        /// </summary>
+        private Outcome ProcessCancellation(List<RoomBooking> rooms)
         {
             string bookingId = rooms.Count > 0 ? rooms[0].BookingId : null;
-            if (string.IsNullOrWhiteSpace(bookingId)) return (false, false, true, "ไม่พบ Booking ID ในอีเมลยกเลิก");
+            if (string.IsNullOrWhiteSpace(bookingId)) return new Outcome(false, false, true, "ไม่พบ Booking ID ในอีเมลยกเลิก");
 
             var dt = _code.DatabaseQuerySafe(_conn,
                 "SELECT TOP 1 ID, Status FROM Reservation WHERE OTA_Booking_ID = @b OR Remark LIKE @p ORDER BY ID DESC",
                 new Dictionary<string, object> { { "@b", bookingId }, { "@p", "%" + bookingId + "%" } });
-            if (dt == null || dt.Rows.Count == 0) return (false, false, true, $"ไม่พบการจอง {bookingId} ในระบบ");
+            // ไม่พบ = อาจเป็นอีเมลมาก่อนใบจอง (out-of-order) — ปล่อยเป็น fail ให้ retry loop
+            // วนกลับมา: พอใบจองถูกสร้างจาก folder Failed แล้ว รอบถัดไปใบยกเลิกจะเจอและยกเลิกเอง
+            if (dt == null || dt.Rows.Count == 0) return new Outcome(false, false, true, $"ไม่พบการจอง {bookingId} ในระบบ");
             int resId = Convert.ToInt32(dt.Rows[0]["ID"]);
-            string status = dt.Rows[0]["Status"]?.ToString();
-            if (status == "ยกเลิก" || status == "ยกเลิกคืนเงิน")
-                return (false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว");
+            string status = dt.Rows[0]["Status"]?.ToString() ?? "";
+            if (status == "ยกเลิก" || status == "ยกเลิกคืนเงิน" || status == "ยกเลิกไม่คืนเงิน")
+                return new Outcome(false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว");
+
+            // ── guard: เช็คอิน/เช็คเอาท์แล้ว → ห้ามยกเลิกเอง (แขกอยู่ในห้อง/เข้าพักจบแล้ว) ──
+            if (status.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0
+                || status.IndexOf("เช็คเอาท์", StringComparison.Ordinal) >= 0)
+            {
+                string warn = $"⚠️ Booking {bookingId} (จอง #{resId}) มีอีเมลยกเลิก แต่สถานะเป็น \"{status}\" แล้ว — " +
+                              "ไม่ยกเลิกอัตโนมัติ กรุณาตรวจสอบกับ OTA แล้วจัดการเอง";
+                _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
+                if (_notifyTelegram) Notify(warn, true);
+                return new Outcome(false, false, true, warn, park: true);
+            }
+
+            // ── guard: ออกใบเสร็จแล้ว → ยกเลิกเฉย ๆ จะทิ้งใบเสร็จ/เอกสารบัญชีค้างสถานะปกติ ──
+            var rcpt = _code.DatabaseQuerySafe(_conn,
+                "SELECT TOP 1 ID FROM Account_Receipt WHERE Reservation_ID = @id AND Status = 'Normal'",
+                new Dictionary<string, object> { { "@id", resId } });
+            if (rcpt?.Rows.Count > 0)
+            {
+                string warn = $"⚠️ Booking {bookingId} (จอง #{resId}) มีอีเมลยกเลิก แต่ออกใบเสร็จไปแล้ว ({rcpt.Rows[0][0]}) — " +
+                              "ไม่ยกเลิกอัตโนมัติ กรุณายกเลิกใบเสร็จ/เอกสารบัญชีก่อน แล้วยกเลิกการจองเอง";
+                _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
+                if (_notifyTelegram) Notify(warn, true);
+                return new Outcome(false, false, true, warn, park: true);
+            }
 
             _code.DatabaseInsertSafe(_conn,
-                "UPDATE Reservation SET Status = N'ยกเลิก'" + ModifiedDateSql() + " WHERE ID = @id",
-                new Dictionary<string, object> { { "@id", resId } });
+                @"UPDATE Reservation SET Status = @st,
+                         Remark = ISNULL(Remark, N'') + @note" + ModifiedDateSql() + " WHERE ID = @id",
+                new Dictionary<string, object>
+                {
+                    { "@id", resId },
+                    { "@st", _cancelStatus },
+                    { "@note", $"\r\n(ยกเลิกจากอีเมล OTA {DateTime.Now:dd/MM/yyyy HH:mm})" }
+                });
             _code.DatabaseInsertSafe(_conn,
                 "DELETE FROM Reservation_Accommodation WHERE Reservation_ID = @id",
                 new Dictionary<string, object> { { "@id", resId } });
-            _code.Logs(_conn, "EmailReservation", $"cancelled reservation {resId} booking={bookingId}", "SYSTEM");
-            return (true, false, true, $"ยกเลิกการจอง #{resId} ({bookingId})");
+            _code.Logs(_conn, "EmailReservation", $"cancelled reservation {resId} booking={bookingId} status={_cancelStatus}", "SYSTEM");
+            return new Outcome(true, false, true, $"ยกเลิกการจอง #{resId} ({bookingId}) → สถานะ \"{_cancelStatus}\"");
         }
 
         // ── สร้างเอกสาร (toggle) ──────────────────────────────────────────────────
