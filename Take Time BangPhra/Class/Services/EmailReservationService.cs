@@ -759,9 +759,13 @@ namespace Take_Time_BangPhra.Services
             if (_mapAnyChannel)
                 tiers.Add(("(m.ROOM_TYPE = @r OR m.ROOM_TYPE LIKE @r15 OR " + RtSub + ")", "ROOM_TYPE ตรง (ข้าม Agency)"));
 
-            foreach (var rt in variants)
+            // ⚠️ วน "ชั้นความแม่นยำ" เป็นวงนอก และ "รูปของชื่อห้อง" เป็นวงใน
+            // ถ้าสลับกัน (วนชื่อเป็นวงนอก) การ match แบบหลวมของชื่อเต็มจะชนะการ match แบบตรงเป๊ะ
+            // ของชื่อสั้น เช่น "Nordic Tent - RNB - Nordic Tent - Double - Room no breakfast"
+            // จะไปเข้าเงื่อนไข "ROOM_TYPE เป็นส่วนหนึ่งของชื่อในอีเมล" ก่อนที่ "Nordic Tent" จะได้ลองแบบตรง
+            foreach (var tier in tiers)
             {
-                foreach (var tier in tiers)
+                foreach (var rt in variants)
                 {
                     LoadMapping(con, tx, res, tier.Where, ch, rt);
                     if (res.Rooms.Count > 0)
@@ -1462,6 +1466,11 @@ namespace Take_Time_BangPhra.Services
                 sb.AppendLine($"📝 <b>รายละเอียด:</b> {E(Trunc(o.Msg, 700))}");
                 if (!string.IsNullOrWhiteSpace(subject))
                     sb.AppendLine($"✉️ <b>อีเมล:</b> {E(Trunc(subject, 120))}");
+                // ตอนล้มเหลวต้องเห็น ROOM TYPE "ตัวเต็มดิบ ๆ" เพราะเป็นค่าที่ต้องเอาไปใส่ตาราง
+                // MapDataWithSTAAH ให้ตรง — ย่อแล้วจะแก้ mapping ไม่ได้
+                if (o.Rooms != null)
+                    foreach (var r in o.Rooms.Where(x => !string.IsNullOrWhiteSpace(x.RoomType)))
+                        sb.AppendLine($"🏷 <b>ROOM TYPE ในอีเมล:</b> <code>{E(r.RoomType)}</code>");
                 sb.AppendLine();
             }
 
@@ -1495,7 +1504,13 @@ namespace Take_Time_BangPhra.Services
                 int totalRooms = 0;
                 foreach (var r in o.Rooms)
                 {
-                    sb.AppendLine($"  • {E(r.RoomType)} × {r.NoOfRooms} ({r.Adults} คน, {r.NetAmount:N0} THB/คืน)");
+                    // ROOM TYPE จาก OTA ยาวมาก เช่น
+                    // "Nordic Tent - RNB - Nordic Tent - Double - Room no breakfast"
+                    // → แยกชื่อห้องกับแผนราคาคนละบรรทัด ไม่งั้นบนมือถืออ่านไม่ออก
+                    var (baseName, ratePlan) = SplitRoomType(r.RoomType);
+                    sb.AppendLine($"  • {E(baseName)} × {r.NoOfRooms} ({r.Adults} คน, {r.NetAmount:N0} THB/คืน)");
+                    if (!string.IsNullOrEmpty(ratePlan))
+                        sb.AppendLine($"     ↳ <i>แผนราคา: {E(Trunc(ratePlan, 80))}</i>");
                     totalRooms += r.NoOfRooms;
                 }
                 if (h.AssignedRooms != null && h.AssignedRooms.Count > 0)
@@ -1565,6 +1580,14 @@ namespace Take_Time_BangPhra.Services
             if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
             sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm}</i>");
             Notify(sb.ToString(), true);
+        }
+
+        /// <summary>แยก "Nordic Tent - RNB - ... - Room no breakfast" → ("Nordic Tent", "RNB - ... - Room no breakfast")</summary>
+        private static (string Name, string RatePlan) SplitRoomType(string roomType)
+        {
+            string rt = Norm(CleanEntities(roomType ?? ""));
+            int i = rt.IndexOf(" - ", StringComparison.Ordinal);
+            return i > 0 ? (rt.Substring(0, i).Trim(), rt.Substring(i + 3).Trim()) : (rt, "");
         }
 
         private static string E(string s) =>
