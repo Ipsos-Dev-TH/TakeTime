@@ -366,28 +366,59 @@
     ใช้ Include แบบชื่อล้วน + HintPath หลายทาง (Condition) เพื่อให้ตรงกับ lib folder ของแต่ละแพ็กเกจ
     ถ้า restore แล้วยังไม่เจอ ให้รัน: Update-Package -reinstall <ชื่อแพ็กเกจ> ใน Package Manager Console
   -->
+  <!--
+    เลือก lib folder ให้ตรงกับ TargetFramework (net472) เอง
+    ⚠️ ห้ามชี้ไป net48 — MSBuild จะปฏิเสธด้วย "built against .NETFramework v4.8 ...
+    higher than the currently targeted framework v4.7.2" แล้ว reference หลุดทั้งตัว
+    ไล่จากสูงสุดที่ใช้ได้ (net47) ลงไป กันกรณีแพ็กเกจรุ่นอื่นไม่มีโฟลเดอร์นั้น
+  -->
+  <PropertyGroup>
+    <_PkgRoot>$(MSBuildThisFileDirectory)..\packages\</_PkgRoot>
+    <_MimeKitLib>$(_PkgRoot)MimeKit.2.15.0\lib\net47\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\net46\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\net45\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\netstandard2.0\</_MimeKitLib>
+    <_MailKitLib>$(_PkgRoot)MailKit.2.15.0\lib\net47\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\net46\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\net45\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\netstandard2.0\</_MailKitLib>
+    <_HapLib>$(_PkgRoot)HtmlAgilityPack.1.11.72\lib\Net45\</_HapLib>
+    <_HapLib Condition="!Exists('$(_HapLib)HtmlAgilityPack.dll')">$(_PkgRoot)HtmlAgilityPack.1.11.72\lib\net45\</_HapLib>
+    <_HrCoreLib>$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net45\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net40\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net35\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net20\</_HrCoreLib>
+    <_HrWinLib>$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net45\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net40\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net35\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net20\</_HrWinLib>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="MimeKit">
-      <HintPath Condition="Exists('..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll')">..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll</HintPath>
-      <HintPath Condition="!Exists('..\packages\MimeKit.2.15.0\lib\net48\MimeKit.dll')">..\packages\MimeKit.2.15.0\lib\net47\MimeKit.dll</HintPath>
+      <HintPath>$(_MimeKitLib)MimeKit.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="MailKit">
-      <HintPath Condition="Exists('..\packages\MailKit.2.15.0\lib\net48\MailKit.dll')">..\packages\MailKit.2.15.0\lib\net48\MailKit.dll</HintPath>
-      <HintPath Condition="!Exists('..\packages\MailKit.2.15.0\lib\net48\MailKit.dll')">..\packages\MailKit.2.15.0\lib\net47\MailKit.dll</HintPath>
+      <HintPath>$(_MailKitLib)MailKit.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="HtmlAgilityPack">
-      <HintPath Condition="Exists('..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll')">..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll</HintPath>
-      <HintPath Condition="!Exists('..\packages\HtmlAgilityPack.1.11.72\lib\Net45\HtmlAgilityPack.dll')">..\packages\HtmlAgilityPack.1.11.72\lib\net45\HtmlAgilityPack.dll</HintPath>
+      <HintPath>$(_HapLib)HtmlAgilityPack.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="HtmlRenderer.Core">
-      <HintPath>..\packages\HtmlRenderer.Core.1.5.0.6\lib\net45\HtmlRenderer.Core.dll</HintPath>
+    <!-- แพ็กเกจ HtmlRenderer.Core ตั้งชื่อไฟล์ต่างกันตามรุ่น (HtmlRenderer.Core.dll หรือ
+         HtmlRenderer.dll) — ชื่อใน Include ต้องตรงกับชื่อ assembly จริง ไม่งั้น resolve ไม่ผ่าน
+         จึงประกาศสองแบบแล้วเลือกด้วย Condition ตามไฟล์ที่มีอยู่จริง -->
+    <Reference Include="HtmlRenderer.Core" Condition="Exists('$(_HrCoreLib)HtmlRenderer.Core.dll')">
+      <HintPath>$(_HrCoreLib)HtmlRenderer.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlRenderer" Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And Exists('$(_HrCoreLib)HtmlRenderer.dll')">
+      <HintPath>$(_HrCoreLib)HtmlRenderer.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="HtmlRenderer.WinForms">
-      <HintPath>..\packages\HtmlRenderer.WinForms.1.5.0.6\lib\net45\HtmlRenderer.WinForms.dll</HintPath>
+      <HintPath>$(_HrWinLib)HtmlRenderer.WinForms.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="System.Windows.Forms" />
