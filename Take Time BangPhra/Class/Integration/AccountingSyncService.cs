@@ -10315,29 +10315,31 @@ namespace Take_Time_BangPhra.Integration
         {
             try
             {
-                // ข้อมูลผู้ซื้ออยู่ที่ตาราง Customer — ใบเสร็จโยงผ่าน Reservation.Customer_MobilePhone
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1 ISNULL(c.TaxID, N'')   AS TaxId,
-                                   ISNULL(c.Address, N'') AS Addr,
-                                   ISNULL(NULLIF(LTRIM(RTRIM(c.FullName)), N''), ISNULL(c.Name, N'')) AS Nm
-                        FROM Account_Receipt r
-                        LEFT JOIN Reservation res ON res.ID = r.Reservation_ID
-                        LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone
-                       WHERE r.ID = @id",
+                    "SELECT TOP 1 ISNULL(Reservation_ID, 0) FROM Account_Receipt WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", receiptNumber } });
                 if (dt == null || dt.Rows.Count == 0) return (false, "ไม่พบใบเสร็จเลขที่นี้");
+                int resId = Convert.ToInt32(dt.Rows[0][0]);
+                if (resId <= 0) return (false, "ใบเสร็จนี้ไม่ได้ผูกกับการจอง — ตรวจข้อมูลผู้ซื้อไม่ได้");
 
-                string taxId = new string((dt.Rows[0]["TaxId"]?.ToString() ?? "").Where(char.IsDigit).ToArray());
-                string addr = (dt.Rows[0]["Addr"]?.ToString() ?? "").Trim();
-                string name = (dt.Rows[0]["Nm"]?.ToString() ?? "").Trim();
+                // ⚠️ ต้องใช้ "ตัวอ่านชุดเดียวกับตอน sync จริง" ไม่ใช่ query ของตัวเอง
+                //    เลขผู้เสียภาษีที่หน้าใบเสร็จบันทึกลง Customer.IDNumber (ไม่ใช่ Customer.TaxID)
+                //    และที่อยู่ถูกประกอบจาก Address + Address1 + ตำบล/อำเภอ/จังหวัด
+                //    ถ้าตรวจคนละทางจะบอกผู้ใช้ว่า "ข้อมูลไม่ครบ" ทั้งที่ระบบออกใบกำกับเต็มรูปให้ได้
+                var contact = LookupCustomerFromReservation(resId);
+                if (contact == null) return (false, "ไม่พบข้อมูลลูกค้าของการจองนี้");
+                if (HasFullBuyerTaxData(contact))
+                    return (true, "ข้อมูลผู้ซื้อครบ — ออกใบกำกับเต็มรูปได้");
 
                 var missing = new List<string>();
-                if (string.IsNullOrWhiteSpace(name)) missing.Add("ชื่อผู้ซื้อ");
-                if (taxId.Length != 13) missing.Add("เลขประจำตัวผู้เสียภาษี 13 หลัก");
-                if (string.IsNullOrWhiteSpace(addr)) missing.Add("ที่อยู่ผู้ซื้อ");
-                return missing.Count == 0
-                    ? (true, "ข้อมูลผู้ซื้อครบ — ออกใบกำกับเต็มรูปได้")
-                    : (false, "ยังขาด: " + string.Join(", ", missing) + " — แก้ในหน้าใบเสร็จก่อน");
+                string taxId = (contact.TaxId ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(contact.Name)) missing.Add("ชื่อผู้ซื้อ");
+                if (!System.Text.RegularExpressions.Regex.IsMatch(taxId, @"^\d{13}$"))
+                    missing.Add(string.IsNullOrWhiteSpace(taxId)
+                        ? "เลขประจำตัวผู้เสียภาษี 13 หลัก"
+                        : $"เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก (ตอนนี้ '{taxId}')");
+                if (string.IsNullOrWhiteSpace(contact.Address)) missing.Add("ที่อยู่ผู้ซื้อ");
+                return (false, "ยังขาด: " + string.Join(", ", missing) + " — แก้ในหน้าใบเสร็จแล้วบันทึก");
             }
             catch (Exception ex) { return (false, "ตรวจข้อมูลผู้ซื้อไม่ได้: " + ex.Message); }
         }
