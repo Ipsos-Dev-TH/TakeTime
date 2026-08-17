@@ -58,6 +58,7 @@
     </style>
 
     <asp:HiddenField ID="hfChannels" runat="server" />
+    <asp:HiddenField ID="hfLoadError" runat="server" />
 
     <div class="ch-page">
         <div class="page-header">
@@ -80,6 +81,21 @@
 
         $(document).ready(function () {
             try { allChannels = JSON.parse($('#<%= hfChannels.ClientID %>').val() || '[]'); } catch (e) { }
+            // ไม่มีช่องทางให้แสดง → บอกสาเหตุจริงแทนหน้าจอเปล่า พร้อมปุ่มสร้างช่องทางเริ่มต้น
+            var loadErr = $('#<%= hfLoadError.ClientID %>').val() || '';
+            if (!allChannels.length) {
+                $('#channelSections').html(
+                    '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:18px;">' +
+                    '<div style="font-weight:700;margin-bottom:6px;">⚠️ ยังไม่มีช่องทางให้ตั้งค่า</div>' +
+                    '<div style="font-size:13px;color:#6b5e3c;margin-bottom:12px;">' +
+                    (loadErr ? $('<div>').text(loadErr).html()
+                             : 'ระบบอ่านรายการช่องทางได้ แต่ตารางว่าง') +
+                    '<br>ถ้าเป็น "Invalid object name" ให้รัน <code>Database/PHASE15_Migration_01_OmniChannel.sql</code> ก่อน' +
+                    '</div>' +
+                    '<button type="button" class="btn-check" onclick="seedChannels()">➕ สร้างช่องทางเริ่มต้น</button>' +
+                    '<div class="save-result" id="seedResult"></div></div>');
+                return;
+            }
             baseWebhookUrl = window.location.origin + '<%= ResolveUrl("~/API/OmniChannelWebhook.ashx") %>';
             $('#webhookUrl').text(baseWebhookUrl + '?channel={CHANNEL_CODE}');
             renderChannels();
@@ -265,6 +281,22 @@
                 error: function (x) {
                     el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show();
                 }
+            });
+        }
+
+        // สร้างแถวช่องทางมาตรฐานให้ครบ (ข้ามตัวที่มีแล้ว) — ใช้เมื่อ seed ของ migration ไม่ผ่าน
+        function seedChannels() {
+            var el = $('#seedResult');
+            el.removeClass('ok err').text('กำลังสร้าง...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=seedChannels',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err')
+                      .text((r && r.message) || '').show();
+                    if (r && r.success) setTimeout(function () { location.reload(); }, 1200);
+                },
+                error: function (x) { el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show(); }
             });
         }
 

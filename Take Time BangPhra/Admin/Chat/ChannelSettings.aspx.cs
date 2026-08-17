@@ -12,6 +12,7 @@ namespace Take_Time_BangPhra.Admin.Chat
     public partial class ChannelSettings : Page
     {
         private string ConnStr => ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString ?? "";
+        private readonly code _code = new code();
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -66,10 +67,69 @@ namespace Take_Time_BangPhra.Admin.Chat
                 }
 
                 hfChannels.Value = serializer.Serialize(list);
+                // ตารางมีอยู่แต่ยังไม่มีข้อมูล (migration สร้างตารางแต่ seed ไม่ผ่าน) — บอกให้กดสร้างได้
+                hfLoadError.Value = list.Count == 0
+                    ? "ตาราง OmniChannel_Channels ยังไม่มีช่องทางใด ๆ — กด \"สร้างช่องทางเริ่มต้น\" ด้านล่าง"
+                    : "";
             }
-            catch
+            catch (Exception ex)
             {
+                // ⚠️ เดิม catch เปล่า ๆ แล้วตั้ง "[]" → หน้าจอขึ้นแต่หัวเรื่องกับ Webhook URL
+                // ไม่มีอะไรให้ตั้งค่า และไม่บอกสาเหตุ (เช่นยังไม่ได้รัน migration) — ต้องแสดงจริง
                 hfChannels.Value = "[]";
+                hfLoadError.Value = "อ่านรายการช่องทางไม่สำเร็จ: " + (ex.InnerException ?? ex).Message;
+            }
+        }
+
+        /// <summary>
+        /// สร้างแถวช่องทางมาตรฐานให้ครบ (idempotent — ข้ามตัวที่มีแล้ว)
+        /// ใช้กรณีตารางว่างเพราะ seed ของ migration ไม่ผ่าน หรือมีช่องทางใหม่เพิ่มภายหลัง
+        /// </summary>
+        private Dictionary<string, object> SeedChannels()
+        {
+            var rows = new[]
+            {
+                new[]{ "GUEST_PORTAL", "Guest Portal",          "INTERNAL", "fas fa-hotel",                "#667eea" },
+                new[]{ "WEBCHAT",      "แชทหน้าเว็บ",             "WEB",      "fas fa-comments",             "#8D9F7F" },
+                new[]{ "LINE",         "LINE Official Account",  "SOCIAL",   "fab fa-line",                 "#06C755" },
+                new[]{ "FACEBOOK",     "Facebook Messenger",     "SOCIAL",   "fab fa-facebook-messenger",   "#0084FF" },
+                new[]{ "INSTAGRAM",    "Instagram DM",           "SOCIAL",   "fab fa-instagram",            "#E4405F" },
+                new[]{ "WHATSAPP",     "WhatsApp Business",      "SOCIAL",   "fab fa-whatsapp",             "#25D366" },
+                new[]{ "TIKTOK",       "TikTok",                 "SOCIAL",   "fab fa-tiktok",               "#000000" },
+                new[]{ "TELEGRAM",     "Telegram",               "SOCIAL",   "fab fa-telegram",             "#0088CC" },
+                new[]{ "AGODA",        "Agoda",                  "OTA",      "fas fa-bed",                  "#5542F6" },
+                new[]{ "BOOKING",      "Booking.com",            "OTA",      "fas fa-globe",                "#003580" },
+                new[]{ "TRIP",         "Trip.com",               "OTA",      "fas fa-plane",                "#287DFA" },
+                new[]{ "EXPEDIA",      "Expedia",                "OTA",      "fas fa-suitcase",             "#FBAF17" },
+                new[]{ "EMAIL",        "Email (แชท OTA)",         "EMAIL",    "fas fa-envelope",             "#EA4335" },
+                new[]{ "SMS",          "SMS",                    "SMS",      "fas fa-sms",                  "#4CAF50" },
+            };
+            try
+            {
+                int added = 0;
+                foreach (var r in rows)
+                {
+                    int n = _code.DatabaseInsertSafe(ConnStr,
+                        @"IF NOT EXISTS (SELECT 1 FROM OmniChannel_Channels WHERE ChannelCode = @c)
+                          INSERT INTO OmniChannel_Channels
+                                (ChannelCode, ChannelName, ChannelType, IconClass, BrandColor, IsEnabled)
+                          VALUES (@c, @n, @t, @i, @b, 0)",
+                        new Dictionary<string, object>
+                        { { "@c", r[0] }, { "@n", r[1] }, { "@t", r[2] }, { "@i", r[3] }, { "@b", r[4] } });
+                    if (n > 0) added++;
+                }
+                return new Dictionary<string, object>
+                { { "success", true }, { "message", $"สร้างช่องทางเพิ่ม {added} รายการ — รีเฟรชหน้านี้" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", "สร้างไม่สำเร็จ: " + (ex.InnerException ?? ex).Message
+                                 + " — ถ้าเป็น \"Invalid object name\" แปลว่ายังไม่ได้รัน "
+                                 + "Database/PHASE15_Migration_01_OmniChannel.sql" }
+                };
             }
         }
 
@@ -93,6 +153,9 @@ namespace Take_Time_BangPhra.Admin.Chat
                     break;
                 case "emailChatCheck":
                     result = EmailChatSelfCheck();
+                    break;
+                case "seedChannels":
+                    result = SeedChannels();
                     break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown" } };
