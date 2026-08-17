@@ -172,6 +172,9 @@ namespace Take_Time_BangPhra.Admin.Chat
                 case "seedChannels":
                     result = SeedChannels();
                     break;
+                case "emailChatPoll":
+                    result = EmailChatPollNow();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown" } };
                     break;
@@ -181,6 +184,29 @@ namespace Take_Time_BangPhra.Admin.Chat
             Response.ContentType = "application/json";
             Response.Write(new JavaScriptSerializer().Serialize(result));
             Response.End();
+        }
+
+        /// <summary>ดึงอีเมลแชท OTA เดี๋ยวนี้ (ไม่ต้องรอรอบ timer) — ใช้ตอนทดสอบ</summary>
+        private Dictionary<string, object> EmailChatPollNow()
+        {
+            try
+            {
+                var svc = new Take_Time_BangPhra.Services.EmailChatService(ConnStr);
+                var r = System.Threading.Tasks.Task.Run(() => svc.PollInbox()).Result;
+                if (!string.IsNullOrEmpty(r.Error))
+                    return new Dictionary<string, object> { { "success", false }, { "message", r.Error } };
+                string msg = $"ดึง {r.Fetched} ฉบับ → เข้าแชท {r.Received}, ซ้ำ {r.Duplicate}, ล้มเหลว {r.Failed}";
+                if (r.Fetched == 0)
+                    msg += "\n(ค้นเฉพาะอีเมล \"ยังไม่อ่าน\" จากโดเมนที่ตั้งไว้ — ถ้าทดสอบกับเมลเก่า ให้ mark unread ใน Gmail ก่อน)";
+                if (r.Messages != null && r.Messages.Count > 0)
+                    msg += "\n" + string.Join("\n", r.Messages);
+                return new Dictionary<string, object> { { "success", true }, { "message", msg } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object>
+                { { "success", false }, { "message", "ดึงไม่สำเร็จ: " + (ex.InnerException ?? ex).Message } };
+            }
         }
 
         /// <summary>ตรวจว่าแชท OTA (อีเมล) พร้อมใช้งานหรือยัง — ไล่ทีละเงื่อนไข ไม่แตะอีเมล</summary>

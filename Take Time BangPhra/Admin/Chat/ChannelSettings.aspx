@@ -223,6 +223,8 @@
                 if (ch.code === 'EMAIL') {
                 html += '<button type="button" class="btn-check" onclick="checkEmailChat()" ' +
                         'style="margin-left:8px;">🩺 ตรวจสถานะแชท OTA</button>';
+                html += '<button type="button" class="btn-check" onclick="pollEmailChat()" ' +
+                        'style="margin-left:6px;">📥 ดึงแชทตอนนี้</button>';
             }
             html += '<div class="save-result" id="result_' + ch.code + '"></div>';
                 html += '</div>';
@@ -294,6 +296,22 @@
                     el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err')
                       .text((r && r.message) || '').show();
                     if (r && r.success) setTimeout(function () { location.reload(); }, 1200);
+                },
+                error: function (x) { el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show(); }
+            });
+        }
+
+        // ดึงอีเมลแชทเดี๋ยวนี้ — ใช้ทดสอบโดยไม่ต้องรอรอบ timer
+        function pollEmailChat() {
+            var el = $('#result_EMAIL');
+            el.removeClass('ok err').text('กำลังดึงอีเมล...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=emailChatPoll',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err');
+                    el.html('<pre style="margin:0;white-space:pre-wrap;font-size:12px;text-align:left;">' +
+                            $('<div>').text((r && r.message) || '').html() + '</pre>').show();
                 },
                 error: function (x) { el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show(); }
             });

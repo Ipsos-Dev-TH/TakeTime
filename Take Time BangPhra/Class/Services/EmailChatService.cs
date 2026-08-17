@@ -605,32 +605,45 @@ namespace Take_Time_BangPhra.Services
         {
             try
             {
-                // ตัวเลขที่มีป้ายกำกับชัดเจนมาก่อน (format จริงของ Agoda: "หมายเลขการจอง: 2038656748")
-                var candidates = new List<string>();
+                // แยกความมั่นใจ 2 ระดับ — คนละกติกาในการจับคู่
+                //  labeled = เลขที่มีป้ายกำกับชัดเจน ("หมายเลขการจอง: 1986747240") → เชื่อถือได้
+                //  bare    = เลขลอย ๆ ในข้อความ → อาจพ้องกับราคา/เบอร์/เลขอื่น
+                var labeled = new List<string>();
                 foreach (Match m in Regex.Matches(text ?? "",
-                    @"(?:หมายเลขการจอง|Booking\s*(?:Id|Number)|การจอง)\s*[#:：]?\s*(\d{6,14})", RegexOptions.IgnoreCase))
-                    candidates.Add(m.Groups[1].Value);
+                    @"(?:หมายเลขการจอง|เลขที่การจอง|Booking\s*(?:Id|Number|Reference)|Reservation\s*(?:Id|Number)|การจอง)\s*[#:：]?\s*(\d{6,14})",
+                    RegexOptions.IgnoreCase))
+                    labeled.Add(m.Groups[1].Value);
+                var bare = new List<string>();
                 foreach (Match m in Regex.Matches(text ?? "", @"\b(\d{7,12})\b"))
-                    candidates.Add(m.Groups[1].Value);
+                    bare.Add(m.Groups[1].Value);
 
-                var seen = new HashSet<string>();
-                foreach (string cand in candidates)
+                // ⚠️ ต้องหาใน Remark ด้วย ไม่ใช่แค่ OTA_Booking_ID —
+                //    การจองที่โปรแกรมภายนอกตัวเดิมสร้างไว้ (ก่อนมีคอลัมน์ OTA_*) เก็บเลขจองไว้ใน
+                //    Remark อย่างเดียว ("Agoda Booking ID:xxx (yyy)") ถ้าดูแต่ OTA_Booking_ID
+                //    แชทของแขกกลุ่มนี้จะไม่มีวันผูกกับใบจอง = ปุ่มแชทไม่ขึ้นบนตารางจองรายวัน
+                const string baseSql =
+                    @"SELECT TOP 1 ID FROM [dbo].[Reservation]
+                       WHERE (OTA_Booking_ID LIKE @b OR Remark LIKE @b)
+                         AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')";
+
+                // เลขที่มีป้ายกำกับตรงตัวพอที่จะเชื่อได้ → ไม่จำกัดช่วงวัน (แขกทักล่วงหน้า/ย้อนหลัง
+                // ได้หลายเดือน และตอนทดสอบมักใช้อีเมลเก่า) ส่วนเลขลอย ๆ ยังจำกัดใบที่จบไม่เกิน 60 วัน
+                var passes = new[]
                 {
-                    if (!seen.Add(cand)) continue;
-                    if (seen.Count > 8) break;
-                    // ⚠️ ต้องหาใน Remark ด้วย ไม่ใช่แค่ OTA_Booking_ID —
-                    //    การจองที่โปรแกรมภายนอกตัวเดิมสร้างไว้ (ก่อนมีคอลัมน์ OTA_*) เก็บเลขจองไว้ใน
-                    //    Remark อย่างเดียว ("Booking ID:xxx") ถ้าดูแต่ OTA_Booking_ID แชทของแขกกลุ่มนี้
-                    //    จะไม่มีวันผูกกับใบจอง = ปุ่มแชทไม่ขึ้นบนตารางจองรายวัน
-                    // ตัดใบที่ยกเลิก/จบไปนานแล้วออก กันเลขไปพ้องกับใบเก่า
-                    var dt = _code.DatabaseQuerySafe(_conn,
-                        @"SELECT TOP 1 ID FROM [dbo].[Reservation]
-                           WHERE (OTA_Booking_ID LIKE @b OR Remark LIKE @b)
-                             AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
-                             AND CheckoutDate >= DATEADD(day, -30, GETDATE())
-                           ORDER BY ID DESC",
-                        new Dictionary<string, object> { { "@b", "%" + cand + "%" } });
-                    if (dt?.Rows.Count > 0) return Convert.ToInt64(dt.Rows[0][0]);
+                    new { Nums = labeled, Sql = baseSql + " ORDER BY ID DESC" },
+                    new { Nums = bare,    Sql = baseSql + " AND CheckoutDate >= DATEADD(day, -60, GETDATE()) ORDER BY ID DESC" }
+                };
+                foreach (var pass in passes)
+                {
+                    var seen = new HashSet<string>();
+                    foreach (string cand in pass.Nums)
+                    {
+                        if (!seen.Add(cand)) continue;
+                        if (seen.Count > 8) break;
+                        var dt = _code.DatabaseQuerySafe(_conn, pass.Sql,
+                            new Dictionary<string, object> { { "@b", "%" + cand + "%" } });
+                        if (dt?.Rows.Count > 0) return Convert.ToInt64(dt.Rows[0][0]);
+                    }
                 }
             }
             catch { } // คอลัมน์ OTA ยังไม่มี (migration ยังไม่รัน) → ข้ามการจับคู่
