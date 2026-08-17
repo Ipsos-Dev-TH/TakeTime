@@ -58,7 +58,6 @@
     </style>
 
     <asp:HiddenField ID="hfChannels" runat="server" />
-    <asp:HiddenField ID="hfLoadError" runat="server" />
 
     <div class="ch-page">
         <div class="page-header">
@@ -82,7 +81,7 @@
         $(document).ready(function () {
             try { allChannels = JSON.parse($('#<%= hfChannels.ClientID %>').val() || '[]'); } catch (e) { }
             // ไม่มีช่องทางให้แสดง → บอกสาเหตุจริงแทนหน้าจอเปล่า พร้อมปุ่มสร้างช่องทางเริ่มต้น
-            var loadErr = $('#<%= hfLoadError.ClientID %>').val() || '';
+            var loadErr = window.__channelLoadError || '';
             if (!allChannels.length) {
                 $('#channelSections').html(
                     '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:18px;">' +

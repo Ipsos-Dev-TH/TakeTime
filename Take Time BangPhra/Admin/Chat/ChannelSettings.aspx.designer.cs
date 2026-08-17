@@ -9,8 +9,5 @@ namespace Take_Time_BangPhra.Admin.Chat
     public partial class ChannelSettings
     {
         protected global::System.Web.UI.WebControls.HiddenField hfChannels;
-
-        /// <summary>ข้อความสาเหตุเมื่อโหลดรายการช่องทางไม่ได้/ว่าง — แสดงบนหน้าแทนหน้าจอเปล่า</summary>
-        protected global::System.Web.UI.WebControls.HiddenField hfLoadError;
     }
 }

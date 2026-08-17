@@ -44,7 +44,7 @@ namespace Take_Time_BangPhra.Admin.Chat
                 var serializer = new JavaScriptSerializer();
                 var list = new List<object>();
 
-                foreach (DataRow row in dt.Rows)
+                foreach (DataRow row in (dt?.Rows ?? new DataTable().Rows))
                 {
                     Dictionary<string, object> config = new Dictionary<string, object>();
                     if (row["Config"] != DBNull.Value && !string.IsNullOrEmpty(row["Config"].ToString()))
@@ -68,17 +68,32 @@ namespace Take_Time_BangPhra.Admin.Chat
 
                 hfChannels.Value = serializer.Serialize(list);
                 // ตารางมีอยู่แต่ยังไม่มีข้อมูล (migration สร้างตารางแต่ seed ไม่ผ่าน) — บอกให้กดสร้างได้
-                hfLoadError.Value = list.Count == 0
+                SetLoadError(list.Count == 0
                     ? "ตาราง OmniChannel_Channels ยังไม่มีช่องทางใด ๆ — กด \"สร้างช่องทางเริ่มต้น\" ด้านล่าง"
-                    : "";
+                    : "");
             }
             catch (Exception ex)
             {
                 // ⚠️ เดิม catch เปล่า ๆ แล้วตั้ง "[]" → หน้าจอขึ้นแต่หัวเรื่องกับ Webhook URL
                 // ไม่มีอะไรให้ตั้งค่า และไม่บอกสาเหตุ (เช่นยังไม่ได้รัน migration) — ต้องแสดงจริง
-                hfChannels.Value = "[]";
-                hfLoadError.Value = "อ่านรายการช่องทางไม่สำเร็จ: " + (ex.InnerException ?? ex).Message;
+                if (hfChannels != null) hfChannels.Value = "[]";
+                SetLoadError("อ่านรายการช่องทางไม่สำเร็จ: " + (ex.InnerException ?? ex).Message);
             }
+        }
+
+        /// <summary>
+        /// ส่งข้อความสาเหตุไปให้หน้าเว็บผ่านตัวแปร JS ไม่ผ่าน server control
+        /// — control ใหม่จะเป็น null ถ้า .aspx บนเซิร์ฟเวอร์ยังเป็นไฟล์เก่า (deploy DLL อย่างเดียว)
+        ///   แล้ว handler ที่ควรอธิบาย error จะพังเสียเอง กลายเป็น NullReferenceException
+        /// </summary>
+        private void SetLoadError(string message)
+        {
+            try
+            {
+                ClientScript.RegisterStartupScript(GetType(), "chLoadErr",
+                    "window.__channelLoadError = " + new JavaScriptSerializer().Serialize(message ?? "") + ";", true);
+            }
+            catch { }
         }
 
         /// <summary>
