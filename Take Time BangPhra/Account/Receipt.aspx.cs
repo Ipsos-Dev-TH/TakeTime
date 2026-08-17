@@ -378,19 +378,14 @@ namespace Take_Time_BangPhra.Account.Report
                     Session["dtDetail"] = dtReceiptDetail;
 
                     Panel1.Visible = true;
-                    string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                    string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString("00");
-                    string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
-                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
-                    if (File.Exists(path + "\\" + Year + "\\" + Month + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + ".pdf"))
-                    {
-                        myFrame.Attributes["src"] = "/Documents/Receipt/" + Year + "/" + Month + "/" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid+ ".pdf";
-                    }
-                    else
-                    {
-                        myFrame.Attributes["src"] = "/Documents/Receipt/" + Year + "/" + Month + "/" + dtReceipt.Rows[0]["ID"].ToString() + ".pdf";
-                    }
-                        
+                    // เอกสารที่ต้องโชว์คือ "ตัวทางการ" — ถ้า sync ขึ้น NextAcc แล้วต้องเป็นใบของ NextAcc
+                    // ไม่ใช่ PDF ที่ระบบ render เอง (เลขที่/รูปแบบ/สถานะอาจต่างกัน ลูกค้าถือคนละใบกับบัญชี)
+                    // ViewReceiptDoc.ashx จัดลำดับให้แล้ว: NextAcc (smart cache) → fallback ไฟล์ local
+                    string recId = dtReceipt.Rows[0]["ID"].ToString();
+                    myFrame.Attributes["src"] =
+                        ResolveUrl("~/API/ViewReceiptDoc.ashx") + "?doc=" + HttpUtility.UrlEncode(recId)
+                        + "&_=" + DateTime.Now.Ticks;   // กัน browser cache ใบเก่าหลังแก้ไข
+
 
                 }
 

@@ -10269,6 +10269,79 @@ namespace Take_Time_BangPhra.Integration
                 || m.Contains("vat return") || m.Contains("tax filed") || m.Contains("already filed");
         }
 
+        /// <summary>
+        /// ส่งใบเสร็จเลขที่ระบุขึ้น NextAcc ใหม่ด้วย logic ปัจจุบัน — ใช้กับเคส "ลูกค้าขอใบกำกับ
+        /// ภาษีย้อนหลัง": พนักงานเติมเลขผู้เสียภาษี + ที่อยู่ในใบเสร็จก่อน แล้วกดปุ่มนี้
+        /// ระบบจะ route ไปทางใบกำกับเต็มรูปเอง (HasFullBuyerTaxData) แทนใบเสร็จรับเงินธรรมดา
+        ///
+        /// อาศัยเส้นเดียวกับปุ่ม Retry ในคิว: resync in-place ถ้า NextAcc ยอม
+        /// (เลขเอกสารคงเดิม) → ถ้าไม่ยอมค่อย void + สร้างใหม่
+        /// คืนค่าเหมือน RepostReceiptWithCurrentLogic: 0 = แก้ในที่เดิม, >0 = queue id ใหม่, -1 = ไม่สำเร็จ
+        /// </summary>
+        public long RepostReceiptByNumber(string receiptNumber)
+        {
+            LastRepostMessage = null;
+            if (string.IsNullOrWhiteSpace(receiptNumber))
+            {
+                LastRepostMessage = "ไม่ได้ระบุเลขที่ใบเสร็จ";
+                return -1;
+            }
+
+            // หา queue ของการสร้างเอกสารใบนี้ (ตัวล่าสุดที่สำเร็จ) — เป็น input ของ repost เดิม
+            var dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                   WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                     AND Entity_ID = @r
+                     AND Status = 'COMPLETED'
+                   ORDER BY ID DESC",
+                new Dictionary<string, object> { { "@r", receiptNumber } });
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                LastRepostMessage =
+                    $"ยังไม่พบเอกสารของใบเสร็จ {receiptNumber} บน NextAcc (ยังไม่ได้ sync หรือ sync ไม่สำเร็จ) — " +
+                    "ให้ sync ใบนี้ให้ผ่านก่อน แล้วค่อยออกใบกำกับเต็มรูป";
+                return -1;
+            }
+
+            return RepostReceiptWithCurrentLogic(Convert.ToInt64(dt.Rows[0][0]));
+        }
+
+        /// <summary>
+        /// ใบเสร็จนี้มีข้อมูลผู้ซื้อครบพอจะออกใบกำกับภาษีเต็มรูป (§86/4) หรือยัง
+        /// — เลขผู้เสียภาษี 13 หลัก + ที่อยู่ ต้องมีทั้งคู่ ไม่งั้น NextAcc จะออกให้เป็น
+        /// "ลูกค้าไม่ประสงค์รับใบกำกับภาษี" เหมือนเดิม
+        /// </summary>
+        public (bool Ready, string Reason) CheckBuyerTaxDataForReceipt(string receiptNumber)
+        {
+            try
+            {
+                // ข้อมูลผู้ซื้ออยู่ที่ตาราง Customer — ใบเสร็จโยงผ่าน Reservation.Customer_MobilePhone
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ISNULL(c.TaxID, N'')   AS TaxId,
+                                   ISNULL(c.Address, N'') AS Addr,
+                                   ISNULL(NULLIF(LTRIM(RTRIM(c.FullName)), N''), ISNULL(c.Name, N'')) AS Nm
+                        FROM Account_Receipt r
+                        LEFT JOIN Reservation res ON res.ID = r.Reservation_ID
+                        LEFT JOIN Customer c ON c.MobilePhone = res.Customer_MobilePhone
+                       WHERE r.ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber } });
+                if (dt == null || dt.Rows.Count == 0) return (false, "ไม่พบใบเสร็จเลขที่นี้");
+
+                string taxId = new string((dt.Rows[0]["TaxId"]?.ToString() ?? "").Where(char.IsDigit).ToArray());
+                string addr = (dt.Rows[0]["Addr"]?.ToString() ?? "").Trim();
+                string name = (dt.Rows[0]["Nm"]?.ToString() ?? "").Trim();
+
+                var missing = new List<string>();
+                if (string.IsNullOrWhiteSpace(name)) missing.Add("ชื่อผู้ซื้อ");
+                if (taxId.Length != 13) missing.Add("เลขประจำตัวผู้เสียภาษี 13 หลัก");
+                if (string.IsNullOrWhiteSpace(addr)) missing.Add("ที่อยู่ผู้ซื้อ");
+                return missing.Count == 0
+                    ? (true, "ข้อมูลผู้ซื้อครบ — ออกใบกำกับเต็มรูปได้")
+                    : (false, "ยังขาด: " + string.Join(", ", missing) + " — แก้ในหน้าใบเสร็จก่อน");
+            }
+            catch (Exception ex) { return (false, "ตรวจข้อมูลผู้ซื้อไม่ได้: " + ex.Message); }
+        }
+
         public long RepostReceiptWithCurrentLogic(long queueId)
         {
             LastRepostMessage = null;

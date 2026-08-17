@@ -1765,6 +1765,49 @@ namespace Take_Time_BangPhra.Account
                 return;
             }
 
+            // ปุ่ม "🧾 ออกใบกำกับเต็มรูป" — เคสลูกค้าขอใบกำกับภาษีย้อนหลัง
+            // พนักงานเติมเลขผู้เสียภาษี + ที่อยู่ในใบเสร็จก่อน แล้วกดปุ่มนี้เพื่อส่งขึ้น NextAcc ใหม่
+            // ระบบจะ route ไปทางใบกำกับเต็มรูปเอง (HasFullBuyerTaxData) แทนใบเสร็จรับเงินธรรมดา
+            // — resync in-place ก่อน (เลขเอกสารคงเดิม) ถ้า NextAcc ไม่ยอมค่อย void + ออกใหม่
+            if (e.CommandName == "fulltaxinvoice")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    string docNum = gvDetails.DataKeys[rowIndex]?["ID"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                    var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (!naCfg.IsConfigured || !naCfg.Enabled)
+                    { ShowError("ยังไม่ได้เปิดใช้ NextAcc"); return; }
+
+                    var svc = new AccountingSyncService(conn);
+
+                    // กันยิงทิ้ง: ถ้าข้อมูลผู้ซื้อไม่ครบ NextAcc จะออกให้เป็น "ไม่ประสงค์รับใบกำกับ" เหมือนเดิม
+                    var chk = svc.CheckBuyerTaxDataForReceipt(docNum);
+                    if (!chk.Ready)
+                    {
+                        ShowError("ยังออกใบกำกับเต็มรูปไม่ได้ — " + chk.Reason);
+                        return;
+                    }
+
+                    Server.ScriptTimeout = 300;
+                    long r = svc.RepostReceiptByNumber(docNum);
+                    string detail = svc.LastRepostMessage ?? "";
+
+                    if (r == 0)
+                        ShowInfo($"✅ อัปเดตเอกสาร {docNum} บน NextAcc เป็นใบกำกับภาษีเต็มรูปแล้ว (เลขเอกสารเดิม) {detail}");
+                    else if (r > 0)
+                        ShowInfo($"✅ ออกใบกำกับภาษีเต็มรูปใหม่ให้ {docNum} แล้ว (คิวที่ {r}) — รอ sync สักครู่แล้วกด \"ดึงล่าสุด\" {detail}");
+                    else
+                        ShowError("ออกใบกำกับเต็มรูปไม่สำเร็จ: " + (string.IsNullOrEmpty(detail)
+                            ? "NextAcc ปฏิเสธ (อาจปิดงวดบัญชี/ยื่น ภ.พ.30 แล้ว หรือใบนี้ชำระ/มีใบลดหนี้แล้ว)" : detail));
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception ex) { ShowError("ออกใบกำกับเต็มรูปไม่สำเร็จ: " + ex.Message); }
+                return;
+            }
+
             // ปุ่ม "🔄 ดึงล่าสุด" — บังคับดึง PDF สดจาก NextAcc ข้าม cache ทุกชั้น (ใช้หลังแก้ไข/
             // ยกเลิกเอกสารแล้วอยากได้ไฟล์รุ่นปัจจุบันทันที ไม่รอ cache หมดอายุ)
             if (e.CommandName == "refreshpdf")
@@ -1996,6 +2039,13 @@ namespace Take_Time_BangPhra.Account
             // (หน้า CheckPayment_New ใช้วิธีเดียวกันอยู่แล้ว)
             string safe = System.Web.HttpUtility.JavaScriptStringEncode(message ?? "");
             ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{safe}');", true);
+        }
+
+        /// <summary>แจ้งผลสำเร็จ — escape เหมือน ShowError กันข้อความมี ' หรือขึ้นบรรทัดใหม่แล้ว JS พัง</summary>
+        private void ShowInfo(string message)
+        {
+            string safe = System.Web.HttpUtility.JavaScriptStringEncode(message ?? "");
+            ScriptManager.RegisterStartupScript(this, GetType(), "info", $"alert('{safe}');", true);
         }
 
         /// <summary>

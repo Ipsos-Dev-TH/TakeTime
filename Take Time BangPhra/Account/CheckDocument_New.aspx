@@ -505,6 +505,17 @@
                                 Visible="false" />
                         </ItemTemplate>
                     </asp:TemplateField>
+                    <asp:TemplateField HeaderText="ใบกำกับเต็มรูป">
+                        <ItemTemplate>
+                            <asp:Button ID="btnFullTaxInvoice" runat="server" Text="🧾 ออกใบกำกับเต็มรูป"
+                                CommandName="fulltaxinvoice"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ลูกค้าขอใบกำกับภาษีย้อนหลัง — เติมเลขผู้เสียภาษี+ที่อยู่ในใบเสร็จก่อน แล้วกดปุ่มนี้เพื่อส่ง NextAcc ใหม่เป็นใบกำกับเต็มรูป (งวดบัญชีต้องยังไม่ปิด)"
+                                OnClientClick="return confirm('ออกใบกำกับภาษีเต็มรูปสำหรับใบนี้บน NextAcc?\n\nระบบจะพยายามแก้เอกสารเดิมในที่เดิมก่อน ถ้า NextAcc ไม่ยอมจะยกเลิกใบเดิมแล้วออกใหม่\nต้องกรอกเลขผู้เสียภาษี 13 หลัก + ที่อยู่ของลูกค้าในใบเสร็จแล้ว');"
+                                UseSubmitBehavior="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
                     <asp:TemplateField HeaderText="อัพเดทไฟล์">
                         <ItemTemplate>
                             <asp:Button ID="btnRefreshPdf" runat="server" Text="🔄 ดึงล่าสุด"
