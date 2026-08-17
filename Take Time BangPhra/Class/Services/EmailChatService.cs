@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Mail;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Hosting;
 using System.Web.Script.Serialization;
@@ -239,6 +240,87 @@ namespace Take_Time_BangPhra.Services
             return res;
         }
 
+        /// <summary>
+        /// ตรวจว่าแชท OTA พร้อมใช้งานหรือยัง — ไล่ทีละเงื่อนไขที่จำเป็นแล้วบอกว่าข้อไหนยังไม่ผ่าน
+        /// ใช้จากปุ่ม "ตรวจสถานะแชท OTA" หน้า Admin → Chat → ตั้งค่าช่องทาง (ไม่แตะอีเมล ไม่ส่งอะไร)
+        /// </summary>
+        public string SelfCheck()
+        {
+            var sb = new StringBuilder();
+            bool ready = true;
+            Action<bool, string, string> chk = (ok, label, detail) =>
+            {
+                if (!ok) ready = false;
+                sb.AppendLine((ok ? "✅ " : "❌ ") + label + (string.IsNullOrEmpty(detail) ? "" : " — " + detail));
+            };
+
+            chk(_enabled, "เปิดช่องทาง EMAIL แล้ว",
+                _enabled ? "" : "ไปที่ Admin → Chat → ตั้งค่าช่องทาง แล้วเปิดสวิตช์ช่องทาง EMAIL");
+            chk(!string.IsNullOrWhiteSpace(_imapUser) && !string.IsNullOrWhiteSpace(_imapPassword),
+                "ตั้งค่ากล่องอีเมล IMAP แล้ว",
+                string.IsNullOrWhiteSpace(_imapUser) ? "ตั้งที่ Admin → Accounting Integration (ใช้กล่องเดียวกับอีเมลจอง)" : _imapUser);
+            chk(_fromDomains.Length > 0, "กำหนดโดเมนอีเมลลูกค้า OTA แล้ว",
+                _fromDomains.Length > 0 ? string.Join(", ", _fromDomains) : "ยังไม่ได้ตั้ง fromDomains");
+
+            // เชื่อมต่อจริง + นับอีเมลที่เข้าเกณฑ์ในกล่อง
+            int matched = -1;
+            try
+            {
+                using (var client = new ImapClient())
+                {
+                    client.Connect(_imapServer, _imapPort, true);
+                    client.Authenticate(_imapUser, _imapPassword);
+                    var inbox = client.Inbox;
+                    inbox.Open(FolderAccess.ReadOnly);
+                    chk(true, "เชื่อมต่อ IMAP สำเร็จ", $"{_imapServer} — INBOX มี {inbox.Count} ฉบับ");
+                    matched = 0;
+                    foreach (var d in _fromDomains)
+                    {
+                        try { matched += inbox.Search(SearchQuery.FromContains(d)).Count; } catch { }
+                    }
+                    client.Disconnect(true);
+                }
+            }
+            catch (Exception ex) { chk(false, "เชื่อมต่อ IMAP", ex.Message); }
+
+            if (matched >= 0)
+                chk(matched > 0, "พบอีเมลจากโดเมนลูกค้า OTA ใน INBOX",
+                    matched > 0 ? $"{matched} ฉบับ"
+                    : "ยังไม่มี — ปกติถ้าลูกค้ายังไม่เคยทักผ่าน OTA (ทดสอบได้โดยเพิ่มโดเมนของตัวเองชั่วคราวแล้วส่งเมลเข้ามา)");
+
+            // สถิติที่เกิดขึ้นจริงในระบบ
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT
+                        (SELECT COUNT(*) FROM OmniChannel_Conversations WHERE ChannelCode = 'EMAIL') AS Convs,
+                        (SELECT COUNT(*) FROM OmniChannel_Messages m
+                           JOIN OmniChannel_Conversations c ON c.ID = m.ConversationID
+                          WHERE c.ChannelCode = 'EMAIL') AS Msgs,
+                        (SELECT COUNT(*) FROM OmniChannel_Conversations c
+                           JOIN OmniChannel_Contacts ct ON ct.ID = c.ContactID
+                          WHERE c.ChannelCode = 'EMAIL' AND ct.Reservation_ID IS NOT NULL) AS Linked", null);
+                if (dt?.Rows.Count > 0)
+                {
+                    int convs = Convert.ToInt32(dt.Rows[0]["Convs"]);
+                    int msgs = Convert.ToInt32(dt.Rows[0]["Msgs"]);
+                    int linked = Convert.ToInt32(dt.Rows[0]["Linked"]);
+                    sb.AppendLine();
+                    sb.AppendLine($"📊 บทสนทนาช่องทาง EMAIL: {convs} | ข้อความ: {msgs} | ผูกกับใบจองแล้ว: {linked}");
+                    if (convs > 0 && linked == 0)
+                        sb.AppendLine("   ⚠️ มีบทสนทนาแต่ยังไม่ผูกใบจองเลย → ปุ่ม 💬 จะไม่ขึ้นบนตารางจองรายวัน " +
+                                      "(ระบบผูกจากเลขจองในอีเมล/เบอร์โทร — ถ้าอีเมลไม่มีเลขจอง ต้องผูกเองในหน้ากล่องแชท)");
+                }
+            }
+            catch (Exception ex) { sb.AppendLine("อ่านสถิติไม่ได้: " + ex.Message); }
+
+            sb.AppendLine();
+            sb.AppendLine(ready
+                ? $"🎉 พร้อมใช้งาน — ระบบจะดึงอีเมลทุก {_pollMinutes} นาที เก็บเข้าโฟลเดอร์ '{_processedLabel}'"
+                : "⚠️ ยังไม่พร้อม — แก้ข้อที่เป็น ❌ ด้านบนก่อน");
+            return sb.ToString();
+        }
+
         private enum IngestOutcome { Received, Duplicate, Failed }
 
         private IngestOutcome IngestMessage(MimeMessage msg)
@@ -307,6 +389,13 @@ namespace Take_Time_BangPhra.Services
                         new Dictionary<string, object> { { "@T", "จอง #" + reservationId }, { "@Id", result.ConversationID } });
             }
             catch { }
+
+            // จับคู่กับใบจองรอบสอง — เลขจองในอีเมลหาไม่เจอก็ยังผูกได้จากสัญญาณอื่น
+            // (เบอร์โทรที่ลูกค้าพิมพ์, contact ที่มีเบอร์อยู่แล้ว, การจองที่เกิดในแชทนี้)
+            // ต้องผูกให้ได้ ไม่งั้น OmniChannel_Contacts.Reservation_ID เป็น NULL แล้ว
+            // ปุ่ม 💬 บนตารางจองรายวันจะไม่ขึ้น (หน้านั้น query เฉพาะ Reservation_ID IS NOT NULL)
+            try { new ChatBookingLinker(_conn).TryLink(result.ConversationID, subject + "\n" + text); }
+            catch (Exception ex) { _code.Logs(_conn, "EmailChat", $"link booking failed: {ex.Message}", "SYSTEM"); }
 
             // ไฟล์แนบ (รูป/เอกสาร) → ข้อความแยกในแชท
             foreach (var f in files)
@@ -529,9 +618,17 @@ namespace Take_Time_BangPhra.Services
                 {
                     if (!seen.Add(cand)) continue;
                     if (seen.Count > 8) break;
+                    // ⚠️ ต้องหาใน Remark ด้วย ไม่ใช่แค่ OTA_Booking_ID —
+                    //    การจองที่โปรแกรมภายนอกตัวเดิมสร้างไว้ (ก่อนมีคอลัมน์ OTA_*) เก็บเลขจองไว้ใน
+                    //    Remark อย่างเดียว ("Booking ID:xxx") ถ้าดูแต่ OTA_Booking_ID แชทของแขกกลุ่มนี้
+                    //    จะไม่มีวันผูกกับใบจอง = ปุ่มแชทไม่ขึ้นบนตารางจองรายวัน
+                    // ตัดใบที่ยกเลิก/จบไปนานแล้วออก กันเลขไปพ้องกับใบเก่า
                     var dt = _code.DatabaseQuerySafe(_conn,
                         @"SELECT TOP 1 ID FROM [dbo].[Reservation]
-                          WHERE OTA_Booking_ID LIKE @b ORDER BY ID DESC",
+                           WHERE (OTA_Booking_ID LIKE @b OR Remark LIKE @b)
+                             AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                             AND CheckoutDate >= DATEADD(day, -30, GETDATE())
+                           ORDER BY ID DESC",
                         new Dictionary<string, object> { { "@b", "%" + cand + "%" } });
                     if (dt?.Rows.Count > 0) return Convert.ToInt64(dt.Rows[0][0]);
                 }

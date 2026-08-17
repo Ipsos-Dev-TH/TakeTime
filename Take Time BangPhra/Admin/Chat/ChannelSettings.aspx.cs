@@ -91,6 +91,9 @@ namespace Take_Time_BangPhra.Admin.Chat
                 case "saveConfig":
                     result = SaveConfig(data);
                     break;
+                case "emailChatCheck":
+                    result = EmailChatSelfCheck();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown" } };
                     break;
@@ -100,6 +103,26 @@ namespace Take_Time_BangPhra.Admin.Chat
             Response.ContentType = "application/json";
             Response.Write(new JavaScriptSerializer().Serialize(result));
             Response.End();
+        }
+
+        /// <summary>ตรวจว่าแชท OTA (อีเมล) พร้อมใช้งานหรือยัง — ไล่ทีละเงื่อนไข ไม่แตะอีเมล</summary>
+        private Dictionary<string, object> EmailChatSelfCheck()
+        {
+            try
+            {
+                var svc = new Take_Time_BangPhra.Services.EmailChatService(ConnStr);
+                string report = System.Threading.Tasks.Task.Run(() => svc.SelfCheck()).Result;
+                return new Dictionary<string, object>
+                {
+                    { "success", !report.Contains("⚠️ ยังไม่พร้อม") },
+                    { "message", report }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object>
+                { { "success", false }, { "message", "ตรวจสอบไม่สำเร็จ: " + (ex.InnerException ?? ex).Message } };
+            }
         }
 
         private Dictionary<string, object> ToggleChannel(Dictionary<string, object> data)

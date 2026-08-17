@@ -47,6 +47,9 @@
         .btn-save:hover { background: #4E342E; }
         .btn-test { padding: 7px 14px; background: white; color: #5D4037; border: 1px solid #5D4037; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: 'Prompt',sans-serif; }
         .btn-test:hover { background: #EFEBE9; }
+        .btn-check { background: #fff; border: 1px solid #8D9F7F; color: #4C5B3C; border-radius: 6px;
+                     padding: 6px 12px; font-size: 13px; cursor: pointer; }
+        .btn-check:hover { background: #F1F5EC; }
         .save-result { font-size: 12px; margin-top: 8px; padding: 6px 10px; border-radius: 6px; display: none; }
         .save-result.ok { display: block; background: #E8F5E9; color: #2E7D32; }
         .save-result.err { display: block; background: #FFEBEE; color: #C62828; }
@@ -202,7 +205,11 @@
                     html += '<button type="button" class="btn-test" onclick="copyChannelWebhook(\'' + ch.code + '\')"><i class="fas fa-link"></i> Webhook URL</button>';
                 }
                 html += '</div>';
-                html += '<div class="save-result" id="result_' + ch.code + '"></div>';
+                if (ch.code === 'EMAIL') {
+                html += '<button type="button" class="btn-check" onclick="checkEmailChat()" ' +
+                        'style="margin-left:8px;">🩺 ตรวจสถานะแชท OTA</button>';
+            }
+            html += '<div class="save-result" id="result_' + ch.code + '"></div>';
                 html += '</div>';
             }
 
@@ -238,6 +245,25 @@
                     if (r && r.success) el.removeClass('err').addClass('ok').text('✅ บันทึกสำเร็จ').show();
                     else el.removeClass('ok').addClass('err').text('❌ ' + (r ? r.message : 'Error')).show();
                     setTimeout(function () { el.fadeOut(); }, 3000);
+                }
+            });
+        }
+
+        // ไล่ตรวจทีละเงื่อนไขว่าแชท OTA พร้อมใช้หรือยัง (เปิดช่องทาง / IMAP / โดเมน /
+        // เชื่อมต่อได้จริง / มีอีเมลเข้าเกณฑ์ / ผูกกับใบจองแล้วกี่ราย)
+        function checkEmailChat() {
+            var el = $('#result_EMAIL');
+            el.removeClass('ok err').text('กำลังตรวจสอบ...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=emailChatCheck',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err');
+                    el.html('<pre style="margin:0;white-space:pre-wrap;font-size:12px;text-align:left;">' +
+                            $('<div>').text((r && r.message) || 'ไม่มีข้อมูล').html() + '</pre>').show();
+                },
+                error: function (x) {
+                    el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show();
                 }
             });
         }
