@@ -660,6 +660,18 @@ namespace Take_Time_BangPhra.Account.Report
                     addressId = 0; // Fallback on error
                 }
 
+                // กรอกชื่อผู้ซื้อจริงแล้ว = ต้องการใบกำกับ → ปลดติ๊ก "ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" ให้เอง
+                // (เดิมต้องปลดเอง ลืมแล้วได้ผลขัดกัน: NextAcc ออกใบกำกับเต็มรูป แต่ PDF ในระบบไม่โชว์ชื่อ)
+                string buyerNameForFlag = (TextBox10.Text ?? "").Trim();
+                if (CheckBox3.Checked && buyerNameForFlag.Length > 0
+                    && buyerNameForFlag.IndexOf("ไม่รับใบกำกับ", StringComparison.Ordinal) < 0
+                    && buyerNameForFlag.IndexOf("ไม่ประสงค์", StringComparison.Ordinal) < 0)
+                {
+                    CheckBox3.Checked = false;
+                    code2.Logs(conn, "Receipt",
+                        $"ปลดติ๊ก 'ประสงค์ไม่ระบุชื่อในใบกำกับภาษี' อัตโนมัติ เพราะกรอกชื่อผู้ซื้อ '{buyerNameForFlag}'", "SYSTEM");
+                }
+
                 // Upsert customer data (insert or update) - ensures no duplicates and always latest data
                 // ALWAYS matches by MobilePhone - ensures only 1 record per phone number
                 // If customer type changes from Individual to Corporate (or vice versa), it updates the existing record
@@ -1636,9 +1648,14 @@ namespace Take_Time_BangPhra.Account.Report
                         {
                             string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
                             string payAccId = sync.LookupPaidHowAccountId(paidMethod);
+                            // ส่งเบอร์ "ผู้ซื้อบนใบเสร็จ" ไปด้วย — อาจไม่ใช่ลูกค้าของการจอง
+                            // (จองในนามบริษัท แต่ออกใบให้ผู้ติดต่อ / แก้ผู้ซื้อในหน้านี้)
+                            // ถ้าไม่ส่ง ตัว sync จะอ่านลูกค้าจากการจองอย่างเดียว การแก้ชื่อ/เลขภาษี/
+                            // ที่อยู่ตรงนี้จะไม่มีผลกับเอกสารบน NextAcc เลย
                             sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
                                 isDeposit: CheckBox1.Checked, paymentMethod: paidMethod,
-                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId);
+                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId,
+                                customerPhone: TextBox13.Text);
                         }
                     }
                 }

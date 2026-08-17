@@ -367,10 +367,16 @@ namespace Take_Time_BangPhra.Integration
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
+        /// <param name="customerPhone">
+        /// เบอร์ของ "ผู้ซื้อบนใบเสร็จ" — อาจไม่ใช่คนเดียวกับผู้จอง (เช่น จองในนามบริษัท แต่ออกใบ
+        /// ให้ผู้ติดต่อ หรือแก้ผู้ซื้อในหน้าใบเสร็จ) ถ้าไม่ส่งมาจะ fallback ไปใช้ลูกค้าของการจอง
+        /// ⚠️ จำเป็นต่อการออกใบกำกับ: ถ้าอ่านลูกค้าจากการจองอย่างเดียว การแก้ชื่อ/เลขภาษี/ที่อยู่
+        ///    ในหน้าใบเสร็จจะไม่มีผลกับเอกสารบน NextAcc เลย
+        /// </param>
         public long EnqueueReceipt(int reservationId, string receiptNumber, decimal totalAmount, decimal vatAmount, DateTime receiptDate, string customerName,
             bool isDeposit = false, string paymentMethod = null,
             string revenueType = null, string paymentAccountId = null,
-            decimal depositApplied = 0)
+            decimal depositApplied = 0, string customerPhone = null)
         {
             if (!_config.IsConfigured) return -1;
             if (totalAmount <= 0) return -1;  // กันใบเสร็จยอด 0/ติดลบ ไม่ให้เข้า queue (จะ fail ที่ processor)
@@ -398,6 +404,7 @@ namespace Take_Time_BangPhra.Integration
                 { "vatAmount", vatAmount },
                 { "receiptDate", AcctDate(receiptDate) },
                 { "customerName", customerName },
+                { "customerPhone", (customerPhone ?? "").Trim() },
                 { "isDeposit", isDeposit },
                 { "paymentMethod", paymentMethod ?? "CASH" }
             };
@@ -4782,6 +4789,25 @@ namespace Take_Time_BangPhra.Integration
             if (_config.IsReceiptDocumentMode)
             {
                 customerContact = await EnsureCustomerContactAsync(reservationId, forceRefresh: !isDeposit);
+
+                // ผู้ซื้อบนใบเสร็จอาจไม่ใช่ลูกค้าของการจอง (จองในนามบริษัท / แก้ผู้ซื้อในหน้าใบเสร็จ)
+                // → ยึดเบอร์ที่บันทึกมากับใบเสร็จก่อนเสมอ ไม่งั้นการแก้ชื่อ/เลขภาษี/ที่อยู่จะไม่ถึง NextAcc
+                string buyerPhone = (p.ContainsKey("customerPhone") ? p["customerPhone"]?.ToString() : "") ?? "";
+                buyerPhone = buyerPhone.Trim();
+                if (buyerPhone.Length > 0
+                    && !string.Equals(buyerPhone, customerContact?.Phone ?? "", StringComparison.Ordinal))
+                {
+                    var buyer = LookupCustomerByPhone(buyerPhone);
+                    if (buyer != null && !string.IsNullOrEmpty(buyer.ExternalId))
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument: ผู้ซื้อบนใบเสร็จ ({buyerPhone}) ต่างจากผู้จอง " +
+                            $"({customerContact?.Phone ?? "-"}) → ใช้ผู้ซื้อของใบเสร็จออกเอกสาร", "SYSTEM");
+                        // push ข้อมูลล่าสุดของผู้ซื้อคนนี้ขึ้น contact ก่อน (ผ่านตัวกลางเดียวกับคิว SYNC_CUSTOMER_CONTACT)
+                        await PushCustomerContactAsync(buyer, "ProcessReceiptDocument(buyer)");
+                        customerContact = buyer;
+                    }
+                }
             }
 
             if (isDeposit)
