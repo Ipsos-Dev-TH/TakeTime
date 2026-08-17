@@ -1783,28 +1783,27 @@ namespace Take_Time_BangPhra.Account
 
                     var svc = new AccountingSyncService(conn);
 
-                    // กันยิงทิ้ง: ถ้าข้อมูลผู้ซื้อไม่ครบ NextAcc จะออกให้เป็น "ไม่ประสงค์รับใบกำกับ" เหมือนเดิม
+                    // ข้อมูลผู้ซื้อครบ = จะได้ใบกำกับเต็มรูป, ไม่ครบ = ได้ใบเสร็จรับเงินเหมือนเดิม
+                    // ⚠️ ไม่บล็อก — ปุ่มนี้ใช้ส่ง "การแก้ไขทุกชนิด" (ยอด/รายการ/แหล่งเงิน/ลูกค้า)
+                    //    ถ้าบล็อกเมื่อไม่มีเลขภาษี จะใช้ push แก้ไขทั่วไปไม่ได้เลย
                     var chk = svc.CheckBuyerTaxDataForReceipt(docNum);
-                    if (!chk.Ready)
-                    {
-                        ShowError("ยังออกใบกำกับเต็มรูปไม่ได้ — " + chk.Reason);
-                        return;
-                    }
+                    string docKind = chk.Ready ? "ใบกำกับภาษีเต็มรูป" : "ใบเสร็จรับเงิน (ข้อมูลผู้ซื้อไม่ครบ)";
 
                     Server.ScriptTimeout = 300;
                     long r = svc.RepostReceiptByNumber(docNum);
                     string detail = svc.LastRepostMessage ?? "";
+                    string note = chk.Ready ? "" : "\n\nℹ️ " + chk.Reason;
 
                     if (r == 0)
-                        ShowInfo($"✅ อัปเดตเอกสาร {docNum} บน NextAcc เป็นใบกำกับภาษีเต็มรูปแล้ว (เลขเอกสารเดิม) {detail}");
+                        ShowInfo($"✅ อัปเดตเอกสาร {docNum} บน NextAcc แล้ว — ได้เป็น{docKind} (เลขเอกสารเดิม) {detail}{note}");
                     else if (r > 0)
-                        ShowInfo($"✅ ออกใบกำกับภาษีเต็มรูปใหม่ให้ {docNum} แล้ว (คิวที่ {r}) — รอ sync สักครู่แล้วกด \"ดึงล่าสุด\" {detail}");
+                        ShowInfo($"✅ ส่ง {docNum} ขึ้น NextAcc ใหม่แล้ว — จะได้เป็น{docKind} (คิวที่ {r}) รอ sync สักครู่แล้วกด \"ดึงล่าสุด\" {detail}{note}");
                     else
-                        ShowError("ออกใบกำกับเต็มรูปไม่สำเร็จ: " + (string.IsNullOrEmpty(detail)
+                        ShowError("ส่งขึ้น NextAcc ไม่สำเร็จ: " + (string.IsNullOrEmpty(detail)
                             ? "NextAcc ปฏิเสธ (อาจปิดงวดบัญชี/ยื่น ภ.พ.30 แล้ว หรือใบนี้ชำระ/มีใบลดหนี้แล้ว)" : detail));
                 }
                 catch (System.Threading.ThreadAbortException) { throw; }
-                catch (Exception ex) { ShowError("ออกใบกำกับเต็มรูปไม่สำเร็จ: " + ex.Message); }
+                catch (Exception ex) { ShowError("ส่งขึ้น NextAcc ไม่สำเร็จ: " + ex.Message); }
                 return;
             }
 
