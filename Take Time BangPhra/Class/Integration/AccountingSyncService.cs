@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.10 · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.11 · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -4795,10 +4795,54 @@ namespace Take_Time_BangPhra.Integration
                     catch (Exception vx) { verify = "อ่าน contact กลับมาตรวจไม่ได้: " + vx.Message; }
                 }
 
+                // ── contact ซ้ำ? ────────────────────────────────────────────────
+                // อาการ "แก้แล้วชื่อไม่เปลี่ยน" อธิบายได้ด้วยการมี contact หลายตัวที่เลขภาษี/เบอร์
+                // เดียวกัน — เราอัปเดตตัวที่ upsert คืนมา แต่ผู้ใช้เปิดดูอีกตัวที่ค้างชื่อเก่า
+                string dupNote = null;
+                try
+                {
+                    var all = Task.Run(() => _apiClient.GetIntegrationContactsAsync(
+                        new OutboundQueryParams { Page = 1, PageSize = 200 })).GetAwaiter().GetResult();
+                    var list = all?.Items;
+                    if (list != null)
+                    {
+                        string tid = (buyer.TaxId ?? "").Trim();
+                        string ph = (buyer.Phone ?? "").Trim();
+                        var same = list.Where(c =>
+                            (tid.Length == 13 && string.Equals((c.TaxId ?? "").Trim(), tid, StringComparison.Ordinal))
+                            || (ph.Length > 0 && string.Equals((c.Phone ?? "").Trim(), ph, StringComparison.Ordinal))).ToList();
+
+                        if (same.Count > 1)
+                        {
+                            var lines = same.Select(c =>
+                                $"      • {c.Name}  [id={c.Id}] taxId={(string.IsNullOrEmpty(c.TaxId) ? "-" : c.TaxId)} " +
+                                $"type={(string.IsNullOrEmpty(c.ContactType) ? "-" : c.ContactType)} " +
+                                $"branch={(string.IsNullOrEmpty(c.BranchCode) ? "-" : c.BranchCode)}" +
+                                (c.Id == buyer.NexaaccContactId ? "   ← ตัวที่ระบบอัปเดต" : ""));
+                            dupNote = $"⚠ พบ contact ซ้ำ {same.Count} ตัวที่ใช้เลขภาษี/เบอร์เดียวกัน:\n"
+                                + string.Join("\n", lines)
+                                + "\n      ⇒ ที่เห็นว่า \"แก้แล้วไม่เปลี่ยน\" น่าจะเป็นเพราะเปิดดูคนละตัว "
+                                + "— รวม/ลบตัวซ้ำบน NextAcc ให้เหลือตัวเดียว (ตัวที่ไม่มีเอกสารผูก) แล้วลองใหม่";
+                        }
+                        else if (same.Count == 1 && same[0].Id != buyer.NexaaccContactId)
+                        {
+                            dupNote = $"⚠ contact ที่ NextAcc คืนจากการค้นด้วยเลขภาษี/เบอร์ คือ id={same[0].Id} "
+                                + $"({same[0].Name}) ซึ่ง**ไม่ใช่** ตัวที่ upsert คืนมา ({buyer.NexaaccContactId})";
+                        }
+                        else if (same.Count == 1)
+                        {
+                            dupNote = $"contact บน NextAcc มีตัวเดียว: {same[0].Name} [type={same[0].ContactType ?? "-"} "
+                                + $"branch={same[0].BranchCode ?? "-"}]";
+                        }
+                    }
+                }
+                catch (Exception dx) { dupNote = "ค้น contact ซ้ำไม่ได้: " + dx.Message; }
+
                 return (true, sb.ToString()
                     + $"✅ สร้าง/อัปเดต contact บน NextAcc แล้ว\n   contactId = {buyer.NexaaccContactId}\n"
                     + (string.IsNullOrEmpty(_lastContactPatchNote) ? "" : "   " + _lastContactPatchNote + "\n")
                     + (string.IsNullOrEmpty(verify) ? "" : "   " + verify + "\n")
+                    + (string.IsNullOrEmpty(dupNote) ? "" : "   " + dupNote + "\n")
                     + "   ตรวจในรายการผู้ติดต่อของ NextAcc ได้เลย แล้วค่อยกด \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบเสร็จ");
             }
             catch (Exception ex)
