@@ -2513,7 +2513,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.4 · queue-payload-refresh + receipt-buyer-from-Customer_ID + dbd-lookup + server-down-cooldown";
+            "2026-08-18.5 · unified-receipt-buyer (sync+repost+checker) + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -5286,13 +5286,8 @@ namespace Take_Time_BangPhra.Integration
                 string buyerPhone = (p.ContainsKey("customerPhone") ? p["customerPhone"]?.ToString() : "") ?? "";
                 buyerPhone = buyerPhone.Trim();
 
-                var buyer = LookupReceiptBuyer(receiptNumber);
-                string buyerSrc = "Account_Receipt.Customer_ID";
-                if (buyer == null && buyerPhone.Length > 0)
-                {
-                    buyer = LookupCustomerByPhone(buyerPhone);
-                    buyerSrc = "payload customerPhone";
-                }
+                string buyerSrc;
+                var buyer = ResolveReceiptBuyer(receiptNumber, 0, buyerPhone, out buyerSrc);
 
                 if (buyer != null && !string.IsNullOrEmpty(buyer.ExternalId)
                     && !string.Equals(buyer.ExternalId, customerContact?.ExternalId ?? "", StringComparison.Ordinal))
@@ -8595,6 +8590,35 @@ namespace Take_Time_BangPhra.Integration
             return null;
         }
 
+        /// <summary>
+        /// 🎯 จุดเดียวที่ตัดสินว่า "ใบเสร็จใบนี้ออกในนามใคร" — ทุกเส้นทางต้องเรียกตัวนี้
+        /// (sync ปกติ / repost ผ่านปุ่ม 🔁 / ตัวตรวจข้อมูลผู้ซื้อ) ไม่งั้นตัวตรวจบอกอย่าง
+        /// แต่ตอนออกเอกสารใช้อีกอย่าง — เคยเกิดจริง: ทั้ง repost และตัวตรวจอ่านจาก
+        /// "ผู้จอง" (Reservation.Customer_MobilePhone) ทั้งที่ใบเสร็จออกในนามบริษัท
+        /// ลำดับ: ผู้ซื้อของใบเสร็จ → เบอร์ใน payload → ผู้จอง
+        /// </summary>
+        private ContactInfo ResolveReceiptBuyer(string receiptNumber, int reservationId,
+            string payloadPhone, out string source)
+        {
+            var c = LookupReceiptBuyer(receiptNumber);
+            if (c != null) { source = "ผู้ซื้อของใบเสร็จ (Account_Receipt.Customer_ID)"; return c; }
+
+            if (!string.IsNullOrWhiteSpace(payloadPhone))
+            {
+                c = LookupCustomerByPhone(payloadPhone.Trim());
+                if (c != null) { source = $"เบอร์ผู้ซื้อในคิว ({payloadPhone.Trim()})"; return c; }
+            }
+
+            if (reservationId > 0)
+            {
+                c = LookupCustomerFromReservation(reservationId);
+                if (c != null) { source = $"ผู้จอง (การจอง #{reservationId})"; return c; }
+            }
+
+            source = "ไม่พบข้อมูลลูกค้า";
+            return null;
+        }
+
         /// <summary>ดึงข้อมูลลูกค้าจากเบอร์โทรตรง ๆ (ใช้กับคิว SYNC_CUSTOMER_CONTACT ที่ hook จากทุกจุด
         /// ที่แก้ข้อมูลลูกค้า: จอง/เช็คอิน/เช็คเอาท์/ใบเสร็จ/แอดมิน/API) — คอลัมน์ชุดเดียวกับ
         /// LookupCustomerFromReservation เป๊ะ เพื่อให้ contact บน NextAcc ตรงกันทุกเส้นทาง</summary>
@@ -11018,20 +11042,32 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 ISNULL(Reservation_ID, 0) FROM Account_Receipt WHERE ID = @id",
+                    @"SELECT TOP 1 ISNULL(Reservation_ID, 0) AS ResId,
+                             ISNULL(CAST(Customer_ID AS NVARCHAR(30)), '') AS CustId
+                      FROM Account_Receipt WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", receiptNumber } });
                 if (dt == null || dt.Rows.Count == 0) return (false, "ไม่พบใบเสร็จเลขที่นี้");
-                int resId = Convert.ToInt32(dt.Rows[0][0]);
-                if (resId <= 0) return (false, "ใบเสร็จนี้ไม่ได้ผูกกับการจอง — ตรวจข้อมูลผู้ซื้อไม่ได้");
+                int resId = Convert.ToInt32(dt.Rows[0]["ResId"]);
+                string custIdRaw = dt.Rows[0]["CustId"]?.ToString() ?? "";
 
-                // ⚠️ ต้องใช้ "ตัวอ่านชุดเดียวกับตอน sync จริง" ไม่ใช่ query ของตัวเอง
+                // ⚠️ ต้องใช้ "ตัวอ่านชุดเดียวกับตอน sync จริง" (ResolveReceiptBuyer) ไม่ใช่ query ของตัวเอง
+                //    ไม่งั้นตัวตรวจบอกว่าครบ แต่ตอนออกเอกสารใช้คนละคน (เคยเกิดจริง: ตรวจจากผู้จอง)
                 //    เลขผู้เสียภาษีที่หน้าใบเสร็จบันทึกลง Customer.IDNumber (ไม่ใช่ Customer.TaxID)
                 //    และที่อยู่ถูกประกอบจาก Address + Address1 + ตำบล/อำเภอ/จังหวัด
-                //    ถ้าตรวจคนละทางจะบอกผู้ใช้ว่า "ข้อมูลไม่ครบ" ทั้งที่ระบบออกใบกำกับเต็มรูปให้ได้
-                var contact = LookupCustomerFromReservation(resId);
-                if (contact == null) return (false, "ไม่พบข้อมูลลูกค้าของการจองนี้");
+                string src;
+                var contact = ResolveReceiptBuyer(receiptNumber, resId, null, out src);
+                if (contact == null)
+                    return (false, "ไม่พบข้อมูลลูกค้าของใบเสร็จนี้"
+                        + (string.IsNullOrEmpty(custIdRaw) || custIdRaw == "0"
+                            ? " — Account_Receipt.Customer_ID ว่าง (เปิดหน้าใบเสร็จ กรอกผู้ซื้อแล้วกดบันทึกหนึ่งครั้ง)"
+                            : $" — Customer_ID = {custIdRaw} แต่ไม่มีแถวนี้ในตาราง Customer"));
+
+                string head = $"ผู้ซื้อที่จะใช้ออกเอกสาร: {contact.Name} ({contact.Phone}) · ที่มา: {src}";
                 if (HasFullBuyerTaxData(contact))
-                    return (true, "ข้อมูลผู้ซื้อครบ — ออกใบกำกับเต็มรูปได้");
+                    return (true, head + "\nข้อมูลครบ — ออกใบกำกับเต็มรูปได้"
+                        + (_config.IsCashSaleUseReceipt
+                            ? "\n⚠ แต่ Nexaacc_CashSale_UseReceipt ยังเปิดอยู่ → หัวเอกสารจะเป็น \"ใบเสร็จรับเงิน\" อยู่ดี (ปิด flag นี้ในหน้าตั้งค่า NextAcc)"
+                            : ""));
 
                 var missing = new List<string>();
                 string taxId = (contact.TaxId ?? "").Trim();
@@ -11041,7 +11077,10 @@ namespace Take_Time_BangPhra.Integration
                         ? "เลขประจำตัวผู้เสียภาษี 13 หลัก"
                         : $"เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก (ตอนนี้ '{taxId}')");
                 if (string.IsNullOrWhiteSpace(contact.Address)) missing.Add("ที่อยู่ผู้ซื้อ");
-                return (false, "ยังขาด: " + string.Join(", ", missing) + " — แก้ในหน้าใบเสร็จแล้วบันทึก");
+                return (false, head + "\nยังขาด: " + string.Join(", ", missing)
+                    + (src.StartsWith("ผู้จอง", StringComparison.Ordinal)
+                        ? "\n💡 ระบบใช้ \"ผู้จอง\" เพราะใบเสร็จยังไม่มีผู้ซื้อของตัวเอง — เปิดหน้าใบเสร็จ กรอกชื่อ/เลขภาษี/ที่อยู่ แล้ว**กดบันทึก** (ปุ่ม 🔁 อย่างเดียวไม่พอ เพราะไม่ได้บันทึกผู้ซื้อ)"
+                        : "\n— แก้ในหน้าใบเสร็จแล้วกดบันทึก"));
             }
             catch (Exception ex) { return (false, "ตรวจข้อมูลผู้ซื้อไม่ได้: " + ex.Message); }
         }
@@ -11469,7 +11508,16 @@ namespace Take_Time_BangPhra.Integration
                 invoice.ResyncUpdate = true;
 
                 // นโยบายผู้ซื้อเดียวกับ sync ปกติ: ข้อมูลภาษีครบ → ใบเต็มรูป / ไม่ครบ → ไม่ประสงค์รับใบกำกับ
-                var repostContact = LookupCustomerFromReservation(reservationId);
+                // ⚠ ต้องใช้ตัว resolve ชุดเดียวกับ ProcessReceiptDocument — เดิมอ่าน "ผู้จาก" อย่างเดียว
+                //   ทำให้กดปุ่ม 🔁 แล้วยังได้ชื่อผู้จองแทนผู้ซื้อของใบเสร็จ
+                string repostBuyerSrc;
+                string repostPhone = p.ContainsKey("customerPhone") ? p["customerPhone"]?.ToString() : null;
+                var repostContact = ResolveReceiptBuyer(receiptNumber, reservationId, repostPhone, out repostBuyerSrc);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"BuildCorrectedReceiptInvoice: receipt={receiptNumber} ผู้ซื้อ = {repostContact?.Name ?? "-"} " +
+                    $"[{repostBuyerSrc}] taxId={(string.IsNullOrWhiteSpace(repostContact?.TaxId) ? "✗" : repostContact.TaxId)} " +
+                    $"address={(string.IsNullOrWhiteSpace(repostContact?.Address) ? "✗" : "✓")} " +
+                    $"→ {(HasFullBuyerTaxData(repostContact) ? "ใบกำกับเต็มรูป" : "ไม่ประสงค์รับใบกำกับ")}", "SYSTEM");
                 if (HasFullBuyerTaxData(repostContact))
                 {
                     invoice.CustomerExternalId = repostContact.ExternalId;

@@ -1792,7 +1792,9 @@ namespace Take_Time_BangPhra.Account
                     Server.ScriptTimeout = 300;
                     long r = svc.RepostReceiptByNumber(docNum);
                     string detail = svc.LastRepostMessage ?? "";
-                    string note = chk.Ready ? "" : "\n\nℹ️ " + chk.Reason;
+                    // แสดงเสมอ (ไม่ใช่เฉพาะตอนไม่ครบ) — บอกว่าใช้ผู้ซื้อคนไหนและมาจากไหน
+                    // ผู้ใช้จะเห็นทันทีว่าทำไมได้ชื่อผู้จองแทนบริษัท โดยไม่ต้องเปิด log
+                    string note = string.IsNullOrEmpty(chk.Reason) ? "" : "\n\nℹ️ " + chk.Reason;
 
                     if (r == 0)
                         ShowInfo($"✅ อัปเดตเอกสาร {docNum} บน NextAcc แล้ว — ได้เป็น{docKind} (เลขเอกสารเดิม) {detail}{note}");
