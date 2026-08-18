@@ -219,6 +219,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "relinkDoc":
                     result = RelinkReceiptDocument();
                     break;
+                case "inspectReceipt":
+                    result = InspectReceiptBuyer();
+                    break;
                 case "updateMapping":
                     result = UpdateAccountMapping();
                     break;
@@ -1593,6 +1596,70 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "build", Integration.AccountingSyncService.SyncBuildTag },
                     { "buildDate", GetDeployedBuildDate() },
                     { "issues", issues }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>
+        /// 🔎 ตรวจว่า "ใบเสร็จใบนี้ ระบบจะออกเอกสารในนามใคร" — อ่านจากตัว resolve ชุดเดียว
+        /// กับตอน sync จริง (ResolveReceiptBuyer) พร้อมข้อมูลดิบจาก Account_Receipt
+        /// เพื่อตัดการเดาออกทั้งหมด: local ถูกแต่เอกสารผิด = ต้องรู้ว่าอ่านได้อะไรจริง ๆ
+        /// </summary>
+        private Dictionary<string, object> InspectReceiptBuyer()
+        {
+            try
+            {
+                string receipt = (Request.QueryString["receipt"] ?? "").Trim();
+                if (receipt.Length == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ใส่เลขใบเสร็จก่อน" } };
+
+                var sb = new System.Text.StringBuilder();
+
+                var raw = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 1 ar.ID, ISNULL(CAST(ar.Customer_ID AS NVARCHAR(30)), '(null)') AS CustId,
+                             ISNULL(CAST(ar.Reservation_ID AS NVARCHAR(30)), '(null)') AS ResId,
+                             ISNULL(CAST(ar.Nexaacc_Doc_Number AS NVARCHAR(60)), '(ยังไม่ได้ผูก)') AS DocNo,
+                             ISNULL(ar.Nexaacc_Receipt_Payment_Id, '(ว่าง)') AS Marker,
+                             ISNULL(c.FullName, '(ไม่พบลูกค้า)') AS BuyerName,
+                             ISNULL(c.MobilePhone, '') AS BuyerPhone,
+                             ISNULL(NULLIF(LTRIM(RTRIM(c.IDNumber)), ''), ISNULL(c.TaxID, '')) AS BuyerTax,
+                             ISNULL(c.Address, '') AS BuyerAddr,
+                             ISNULL(r.Customer_MobilePhone, '') AS GuestPhone,
+                             ISNULL(g.FullName, '') AS GuestName
+                      FROM Account_Receipt ar
+                      LEFT JOIN Customer c ON c.ID = ar.Customer_ID
+                      LEFT JOIN Reservation r ON r.ID = ar.Reservation_ID
+                      LEFT JOIN Customer g ON g.MobilePhone = r.Customer_MobilePhone
+                      WHERE ar.ID = @id",
+                    new Dictionary<string, object> { { "@id", receipt } });
+
+                if (raw == null || raw.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"ไม่พบใบเสร็จ {receipt} ในระบบ" } };
+
+                var w = raw.Rows[0];
+                sb.AppendLine("── ข้อมูลดิบในตาราง ──");
+                sb.AppendLine($"Account_Receipt.Customer_ID = {w["CustId"]}   (การจอง {w["ResId"]})");
+                sb.AppendLine($"ผู้ซื้อที่ผูกไว้ : {w["BuyerName"]} ({w["BuyerPhone"]})");
+                sb.AppendLine($"   เลขภาษี      : {(string.IsNullOrWhiteSpace(w["BuyerTax"].ToString()) ? "✗ ไม่มี" : w["BuyerTax"].ToString())}");
+                sb.AppendLine($"   ที่อยู่        : {(string.IsNullOrWhiteSpace(w["BuyerAddr"].ToString()) ? "✗ ไม่มี" : "✓ มี")}");
+                sb.AppendLine($"ผู้จอง (เทียบ)  : {w["GuestName"]} ({w["GuestPhone"]})");
+                sb.AppendLine($"เอกสาร NextAcc ที่ผูก : {w["DocNo"]}   marker = {w["Marker"]}");
+                sb.AppendLine();
+
+                var svc = new Integration.AccountingSyncService(ConnStr);
+                var chk = svc.CheckBuyerTaxDataForReceipt(receipt);
+                sb.AppendLine("── ตัว resolve ชุดเดียวกับตอน sync ──");
+                sb.AppendLine(chk.Reason);
+                sb.AppendLine();
+                sb.AppendLine($"รุ่นโค้ดที่รันอยู่: {Integration.AccountingSyncService.SyncBuildTag}");
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true }, { "message", sb.ToString() }
                 };
             }
             catch (Exception ex)
