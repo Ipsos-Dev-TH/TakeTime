@@ -891,10 +891,16 @@ namespace Take_Time_BangPhra.Admin.Settings
                 cfg.SetConfig("Nexaacc_SyncMode_Receipt", "DOCUMENT");
                 cfg.SetConfig("Nexaacc_SyncMode_Voucher", "DOCUMENT");
                 cfg.SetConfig("Nexaacc_Company_Endpoints", "1");
-                // ✅ เส้นเอกสารรับ B2B = company Receipt(3) (UseReceipt=1) — render "ใบกำกับภาษี/ใบเสร็จรับเงิน",
-                //    หักมัดจำในใบ (native), ออก e-Tax T03 ได้. **แก้ต้นเหตุ Bug: เดิม (=0) ไปเส้น isCashSale
-                //    integration invoice → หัวขึ้น "ใบเสร็จรับเงิน" + มัดจำไม่หักในใบ (6,400 เต็ม)**
-                cfg.SetConfig("Nexaacc_CashSale_UseReceipt", "1");
+                // ⚠️ แก้ความเข้าใจผิดเดิม (ส.ค. 2026) — ตรวจกับ Wachira-d/Accounting @HEAD แล้ว:
+                //    หัวเอกสารคำนวณที่ `PdfGenerationService.ComputeDocumentTitle` จาก **flag บน Document**
+                //    ไม่ใช่จาก DocumentType: ขายสด (IssuedAsCashReceipt) → "ใบกำกับภาษี/ใบเสร็จรับเงิน",
+                //    BuyerDeclinedTaxInvoice → "ใบเสร็จรับเงิน" (ไม่ upgrade).
+                //    ⇒ **Receipt(3) หัวเป็น "ใบเสร็จรับเงิน" เสมอ** ต่อให้ผู้ซื้อมีเลขภาษีครบ
+                //    เหตุที่เคยคิดว่า UseReceipt=0 ทำหัวผิด คือตอนนั้นผู้ซื้อยังเป็น "คนจอง" (ไม่มีเลขภาษี)
+                //    → โดน MarkBuyerDeclinedTaxInvoice → หัว downgrade เอง ไม่ใช่ความผิดของเส้น isCashSale
+                //    (ต้นเหตุจริงแก้แล้ว: ผู้ซื้ออ่านจาก Account_Receipt.Customer_ID)
+                //    ⇒ ตั้ง 0 เพื่อไปเส้น isCashSale integration invoice = ได้ "ใบกำกับภาษี/ใบเสร็จรับเงิน" + e-Tax
+                cfg.SetConfig("Nexaacc_CashSale_UseReceipt", "0");
                 // หักมัดจำ = drives (JE เดียว self-contained, Dr แหล่งเงินสุทธิ + Dr 21510) — เส้น verified
                 cfg.SetConfig("Nexaacc_Deposit_Drives_Journal", "1");
                 cfg.SetConfig("Nexaacc_Drives_Journal_Ref", "1");
@@ -1481,10 +1487,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                         add("warn", "ยังไม่ได้ตั้ง Company ID",
                             "ฟีเจอร์ที่ใช้ company endpoints (OCR, override บัญชีเงิน, ลายเซ็นผู้จ่าย, มัดจำ deferred VAT) จะถูกข้าม");
                     if (cfg.IsCashSaleUseReceipt)
-                        add("warn", "เปิด Nexaacc_CashSale_UseReceipt อยู่ — จะไม่ได้ใบกำกับภาษี",
-                            "flag นี้บังคับให้เช็คเอาท์/รับชำระออกเป็น 'ใบเสร็จรับเงิน' (type 3) เสมอ แม้ลูกค้ามีเลขผู้เสียภาษีครบ "
-                            + "→ ไม่ได้ใบกำกับภาษี และไม่ออก e-Tax. เปิดไว้ชั่วคราวเพื่อรอ NextAcc รองรับ isCashSale เท่านั้น "
-                            + "— ถ้าลูกค้าขอใบกำกับภาษี ต้องปิด flag นี้");
+                        add("error", "เปิด Nexaacc_CashSale_UseReceipt อยู่ — หัวเอกสารจะเป็น 'ใบเสร็จรับเงิน' เสมอ",
+                            "flag นี้บังคับให้เช็คเอาท์/รับชำระออกเป็นเอกสาร Receipt (type 3) แม้ผู้ซื้อมีเลขผู้เสียภาษีครบ\n\n"
+                            + "NextAcc คำนวณหัวเอกสารจาก flag บนตัวเอกสาร (PdfGenerationService.ComputeDocumentTitle) "
+                            + "ไม่ใช่จากข้อมูลผู้ซื้อ:\n"
+                            + "  • ขายสด (IssuedAsCashReceipt) → \"ใบกำกับภาษี/ใบเสร็จรับเงิน\"\n"
+                            + "  • ไม่ประสงค์รับใบกำกับ → \"ใบเสร็จรับเงิน\"\n"
+                            + "  • Receipt (type 3) → \"ใบเสร็จรับเงิน\" เสมอ\n\n"
+                            + "ต้องการใบกำกับภาษี/ใบเสร็จรับเงิน + e-Tax → ตั้ง flag นี้เป็น 0 "
+                            + "(ระบบจะออกเป็นใบกำกับขายสดใบเดียว หักมัดจำในใบ) แล้วกด 'ส่งแก้ไขขึ้น NextAcc' ที่ใบนั้น");
                 }
 
                 // ── 7) ใบเสร็จที่ผู้ซื้อกรอกข้อมูลภาษีครบแล้ว แต่เอกสารยังค้างคิว/ไม่เคยขึ้น ─────

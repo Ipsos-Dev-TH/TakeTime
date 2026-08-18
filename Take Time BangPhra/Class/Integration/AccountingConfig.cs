@@ -228,6 +228,10 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_CashSale_Deposit_NativeA", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// ⚠️ ตรวจกับ NextAcc @HEAD แล้ว (ส.ค. 2026): หัวเอกสารมาจาก flag บน Document
+        /// (`PdfGenerationService.ComputeDocumentTitle`) ไม่ใช่ชนิดเอกสาร —
+        /// **Receipt (type 3) หัวเป็น "ใบเสร็จรับเงิน" เสมอ** ต่อให้ผู้ซื้อมีเลขภาษีครบ
+        /// จะได้ "ใบกำกับภาษี/ใบเสร็จรับเงิน" ต้องเป็น TaxInvoice + IssuedAsCashReceipt (flag นี้ = 0)
         /// true = เช็คเอาท์ลูกค้ามีเลขภาษี ให้ออกเป็น **Receipt (type 3)** แทน TaxInvoice+isCashSale.
         /// NextAcc AutoPost Receipt branch = **Dr เงินสดตรง / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้**
         /// (ทำงานบน production ปัจจุบันเลย ไม่ต้องรอ isCashSale deploy) + หัวเอกสาร "ใบกำกับภาษี/ใบเสร็จรับเงิน"
