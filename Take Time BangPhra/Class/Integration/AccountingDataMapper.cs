@@ -14,6 +14,14 @@ namespace Take_Time_BangPhra.Integration
     {
         private readonly code _Code = new code();
         private readonly string _connectionString;
+
+        /// <summary>เตือนเมื่อ mapping บัญชีที่ "ตั้งใจจะใช้" หายไป แล้วโค้ด fallback เงียบ ๆ —
+        /// fallback แบบเงียบทำให้ GL ไปลงบัญชีผิดโดยไม่มีใครรู้จนกว่าจะดูงบ</summary>
+        private void LogMappingWarn(string mappingKey, string detail)
+        {
+            try { _Code.Logs(_connectionString, "AccountingSync", $"⚠ mapping '{mappingKey}': {detail}", "SYSTEM"); }
+            catch { }
+        }
         private Dictionary<string, Guid> _accountMappingCache;
         private Dictionary<string, string> _accountCodeCache;
         private Dictionary<Guid, string> _accountIdToCodeCache;
@@ -256,6 +264,13 @@ namespace Take_Time_BangPhra.Integration
                 Guid deferredVatId = Guid.Empty;
                 bool useDeferred = deferOutputVat
                     && TryGetAccountId("OUTPUT_VAT_DEFERRED", out deferredVatId) && deferredVatId != Guid.Empty;
+                // ⚠ ขอ defer แต่ map ไม่ได้ = VAT มัดจำหล่นไปเข้า 21911 ทันที (เข้า ภ.พ.30 เร็วไป 1 งวด)
+                //   เดิมเงียบสนิท ผู้ใช้รู้ตัวตอนดูงบ — ต้องดังพอให้เห็นในหน้าคิว/Logs
+                if (deferOutputVat && !useDeferred)
+                    LogMappingWarn("OUTPUT_VAT_DEFERRED",
+                        $"ตั้งค่าให้พัก VAT มัดจำที่ 'ภาษีขายรอเรียกเก็บ' (21913) แล้ว แต่ยังไม่ได้ผูกบัญชี OUTPUT_VAT_DEFERRED " +
+                        $"(หรือรหัสที่ผูกไม่มีในผังบัญชี NextAcc) → VAT มัดจำการจอง #{reservationId} ถูกลง 'ภาษีขาย' (21911) ทันทีแทน " +
+                        $"— ผูกบัญชี 21913 ที่ Admin → NextAcc → ผังบัญชี/Mapping แล้วออกใบมัดจำใหม่");
                 var outputVatAccountId = useDeferred ? deferredVatId : GetAccountId("OUTPUT_VAT");
 
                 lines.Add(new JournalEntryLineRequest

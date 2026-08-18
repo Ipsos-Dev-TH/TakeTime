@@ -910,9 +910,16 @@ namespace Take_Time_BangPhra.Admin.Settings
                 cfg.SetConfig("Nexaacc_TaxReceipt_SingleDoc", "0");   // ⚠ dead toggle (ไม่มีโค้ดใช้) — ตั้ง 0 กันสับสน
                 cfg.SetConfig("Nexaacc_CashSale_Deposit", "0");        // ⚠ dead toggle
                 cfg.SetConfig("Nexaacc_CashSale_Deposit_NativeA", "0");
-                // มัดจำ VAT: รับรู้ตอนเช็คเอาท์ ใบกำกับใบเดียวเต็มยอด (แนะนำ hotel — ตรงเวลา ภ.พ.30, ไม่ซ้อน)
-                cfg.SetConfig("Deposit_Vat_Recognition", "CHECKOUT");
-                cfg.SetConfig("Deposit_Defer_Output_Vat", "0");
+                // ── มัดจำ VAT = "นโยบายบัญชี" ไม่ใช่ toggle เทคนิค ────────────────────────
+                // ⚠ ห้ามเขียนทับค่าที่ผู้ทำบัญชีตั้งไว้ (เคยเกิดจริง: กดปุ่มนี้เพื่อแก้เรื่องอื่น
+                //   แล้ว Deposit_Defer_Output_Vat ถูกรีเซ็ตเป็น 0 เงียบ ๆ → VAT มัดจำเลิกเข้า 21913)
+                //   ตั้งให้เฉพาะกรณี "ยังไม่เคยตั้ง" เท่านั้น
+                string keptVatPolicy = null;
+                if (!HasConfigValue("Deposit_Vat_Recognition")) cfg.SetConfig("Deposit_Vat_Recognition", "CHECKOUT");
+                else keptVatPolicy = cfg.DepositVatRecognition;
+                if (!HasConfigValue("Deposit_Defer_Output_Vat")) cfg.SetConfig("Deposit_Defer_Output_Vat", "0");
+                else keptVatPolicy = (keptVatPolicy ?? cfg.DepositVatRecognition)
+                    + (cfg.IsDepositOutputVatDeferred ? " + พัก VAT ที่ 21913" : " + ไม่พัก VAT");
                 // safety-net: กัน GL เพี้ยน/มัดจำค้าง อัตโนมัติ
                 cfg.SetConfig("Nexaacc_Auto_Recover_Deposit", "1");
                 cfg.SetConfig("Nexaacc_Auto_Reconcile_Deposit", "1");
@@ -926,7 +933,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "message",
                         "✅ ตั้งค่าแนะนำเรียบร้อย — เอกสารรับ B2B = company Receipt(3) หัว 'ใบกำกับภาษี/ใบเสร็จรับเงิน' + หักมัดจำในใบ + e-Tax T03 " +
                         "(แก้ต้นเหตุที่เดิมไปเส้น isCashSale → หัวขึ้น 'ใบเสร็จรับเงิน' + มัดจำไม่หักในใบ 6,400 เต็ม), " +
-                        "หักมัดจำ = drives (JE เดียว Dr แหล่งเงินสุทธิ + Dr 21510), มัดจำ VAT = CHECKOUT, เปิด safety-net. " +
+                        "หักมัดจำ = drives (JE เดียว Dr แหล่งเงินสุทธิ + Dr 21510), เปิด safety-net. " +
+                        (keptVatPolicy != null
+                            ? $"🔒 คงนโยบาย VAT มัดจำเดิมไว้ ({keptVatPolicy}) — ปุ่มนี้ไม่แตะค่าที่ตั้งไว้แล้ว. "
+                            : "มัดจำ VAT = CHECKOUT (ค่าเริ่มต้น). ") +
                         "โหลดหน้าใหม่เพื่อดูค่าที่อัปเดต แล้ว rebuild+deploy บน Windows" }
                 };
             }
@@ -1502,6 +1512,51 @@ namespace Take_Time_BangPhra.Admin.Settings
                             + "(ระบบจะออกเป็นใบกำกับขายสดใบเดียว หักมัดจำในใบ) แล้วกด 'ส่งแก้ไขขึ้น NextAcc' ที่ใบนั้น");
                 }
 
+                // ── 6b) นโยบาย VAT เงินมัดจำ กับ mapping 21913 สอดคล้องกันไหม ─────────────
+                // ตั้งให้พัก VAT ที่ 21913 แต่ไม่ได้ผูกบัญชี = โค้ด fallback ลง 21911 "เงียบ ๆ"
+                // → VAT เข้า ภ.พ.30 เร็วไป 1 งวด โดยไม่มีใครรู้จนกว่าจะดูงบ
+                try
+                {
+                    string vatMode = cfg.DepositVatRecognition;
+                    bool wantDefer = cfg.IsDepositOutputVatDeferred;
+                    bool deferMapped = false;
+                    var dv = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 1 m.Nexaacc_AccountCode,
+                                 CASE WHEN EXISTS (SELECT 1 FROM Accounting_Nexaacc_Accounts a
+                                                   WHERE a.Account_Code = m.Nexaacc_AccountCode)
+                                      THEN 1 ELSE 0 END AS CodeExists
+                          FROM Accounting_Account_Mapping m
+                          WHERE m.TakeTime_Code = 'OUTPUT_VAT_DEFERRED'
+                            AND ISNULL(m.Is_Active, 1) = 1
+                            AND ISNULL(m.Nexaacc_AccountCode, '') <> ''", null);
+                    string deferCode = null;
+                    if (dv != null && dv.Rows.Count > 0)
+                    {
+                        deferCode = dv.Rows[0]["Nexaacc_AccountCode"]?.ToString();
+                        deferMapped = !haveCoa || Convert.ToInt32(dv.Rows[0]["CodeExists"]) == 1;
+                    }
+
+                    if (wantDefer && !deferMapped)
+                        add("error", "ตั้งให้พัก VAT มัดจำที่ 21913 แต่บัญชียังใช้ไม่ได้",
+                            (deferCode == null
+                                ? "ยังไม่ได้ผูก mapping OUTPUT_VAT_DEFERRED"
+                                : $"ผูกไว้ที่รหัส {deferCode} แต่ผังบัญชี NextAcc ไม่มีรหัสนี้")
+                            + "\n\nผลที่เกิดขึ้นเงียบ ๆ: VAT ของเงินมัดจำจะถูกลง \"ภาษีขาย 21911\" ทันที "
+                            + "→ เข้า ภ.พ.30 เร็วไป 1 งวด (ไม่ใช่ \"ภาษีขายรอเรียกเก็บ\" ตามที่ตั้งไว้)\n"
+                            + "วิธีแก้: ผูก OUTPUT_VAT_DEFERRED กับบัญชี 21913 ในหัวข้อผังบัญชี/Mapping ของหน้านี้ "
+                            + "→ Sync บัญชี → ออกใบมัดจำใหม่ (ใบที่ออกไปแล้วต้องแก้ด้วยใบปรับปรุง)");
+                    else if (wantDefer && !vatMode.Equals("RECEIPT", StringComparison.OrdinalIgnoreCase))
+                        add("warn", "ตั้ง \"พัก VAT ที่ 21913\" ไว้ แต่โหมดเป็น CHECKOUT — ไม่มีผล",
+                            $"Deposit_Vat_Recognition = {vatMode} แปลว่าใบมัดจำ**ไม่แยก VAT เลย** (Cr เงินรับล่วงหน้าเต็มก้อน) "
+                            + "VAT ทั้งหมดรับรู้ตอนเช็คเอาท์ → ไม่มี VAT ให้พักที่ 21913\n"
+                            + "ต้องการให้มัดจำลง 21913 จริง ต้องตั้ง Deposit_Vat_Recognition = RECEIPT ด้วย");
+                    else if (!wantDefer && vatMode.Equals("RECEIPT", StringComparison.OrdinalIgnoreCase))
+                        add("warn", "โหมด RECEIPT + ไม่พัก VAT — มัดจำเข้า ภ.พ.30 ทันที",
+                            "ใบมัดจำจะ Cr ภาษีขาย 21911 ตั้งแต่วันรับเงิน (เคร่ง §78/1) "
+                            + "ถ้าต้องการให้เข้า ภ.พ.30 ตอนเช็คเอาท์แทน ให้เปิด Deposit_Defer_Output_Vat = 1");
+                }
+                catch { }
+
                 // ── 7) ใบเสร็จที่ผู้ซื้อกรอกข้อมูลภาษีครบแล้ว แต่เอกสารยังค้างคิว/ไม่เคยขึ้น ─────
                 try
                 {
@@ -1541,6 +1596,19 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
+        }
+
+        /// <summary>ค่านี้ถูกตั้งไว้ในตาราง config แล้วหรือยัง (ต่างจาก "อ่านแล้วได้ค่า default")</summary>
+        private bool HasConfigValue(string key)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 1 FROM Accounting_Integration_Config WHERE ConfigKey = @k AND ISNULL(ConfigValue,'') <> ''",
+                    new Dictionary<string, object> { { "@k", key } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return true; }   // อ่านไม่ได้ → ถือว่ามีค่า (ปลอดภัยกว่า: ไม่เขียนทับ)
         }
 
         /// <summary>วันเวลาที่ DLL ใน bin ถูก deploy — ใช้ยืนยันว่าโค้ดที่รันอยู่เป็นรุ่นล่าสุดจริง</summary>

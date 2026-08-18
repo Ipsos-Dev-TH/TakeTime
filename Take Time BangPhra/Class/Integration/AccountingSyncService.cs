@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.6 · cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.7 · deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
