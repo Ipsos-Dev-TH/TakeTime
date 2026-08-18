@@ -489,10 +489,21 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrWhiteSpace(mobilePhone)) return -1;
             mobilePhone = mobilePhone.Trim();
 
-            // dedup: มีคิวค้างของเบอร์นี้อยู่แล้ว → ใช้ตัวเดิม (processor อ่านข้อมูลสดจาก DB ตอนประมวลผล
+            // dedup: มีคิวของเบอร์นี้ค้างอยู่แล้ว → ใช้ตัวเดิม (processor อ่านข้อมูลสดจาก DB ตอนประมวลผล
             // อยู่แล้ว การกดบันทึกซ้ำหลายรอบจึงไม่ต้องเข้าคิวซ้ำ)
-            long existing = FindPendingEntry("CUSTOMER", "SYNC_CUSTOMER_CONTACT", "mobilePhone", mobilePhone);
-            if (existing > 0) return existing;
+            // ⚠ ต้องรวม FAILED ด้วย: ช่วง NextAcc ล่ม คิว sync contact ตายค้างเป็นสิบแถว
+            //   ถ้าไม่นับ จะได้แถวใหม่ทุกครั้งที่บันทึก แล้วแถวตายก็ค้างในคิวไปเรื่อย ๆ
+            //   เจอ FAILED → ปลุกกลับเป็น PENDING (payload มีแค่เบอร์ ไม่ต้องแก้อะไร)
+            string unsentStatus;
+            long existing = FindUnsentEntry("CUSTOMER", "SYNC_CUSTOMER_CONTACT", "mobilePhone", mobilePhone, out unsentStatus);
+            if (existing > 0)
+            {
+                if (string.Equals(unsentStatus, "FAILED", StringComparison.OrdinalIgnoreCase))
+                    TryRefreshQueuePayload(existing,
+                        new Dictionary<string, object> { { "mobilePhone", mobilePhone } },
+                        $"SYNC_CUSTOMER_CONTACT {mobilePhone}");
+                return existing;
+            }
 
             return InsertQueue("CUSTOMER", 0, "SYNC_CUSTOMER_CONTACT", new Dictionary<string, object>
             {
