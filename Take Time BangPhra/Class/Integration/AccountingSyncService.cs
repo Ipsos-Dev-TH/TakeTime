@@ -9283,12 +9283,14 @@ namespace Take_Time_BangPhra.Integration
 
             return new InboundCustomerRequest
             {
-                ExternalId = info.ExternalId,
-                Name = info.Name,
-                TaxId = info.TaxId,
-                Email = info.Email,
-                Phone = info.Phone,
-                Address = info.Address,
+                // trim ทุกช่อง — ข้อมูลที่พิมพ์มือมักติดช่องว่างท้าย (เจอจริง: อีเมลลงท้ายด้วยเว้นวรรค
+                // ไปโผล่บน contact ของ NextAcc) และเว้นวรรคท้ายทำให้เทียบค่าไม่ตรงเวลาตรวจซ้ำ
+                ExternalId = (info.ExternalId ?? "").Trim(),
+                Name = (info.Name ?? "").Trim(),
+                TaxId = (info.TaxId ?? "").Trim(),
+                Email = (info.Email ?? "").Trim(),
+                Phone = (info.Phone ?? "").Trim(),
+                Address = (info.Address ?? "").Trim(),
                 // โครงสร้างที่อยู่ → NextAcc render เอกสาร §86/4 ครบ (ตำบล/อำเภอ/จังหวัด/ไปรษณีย์/สาขา)
                 BuildingNumber = info.BuildingNumber,
                 Moo = info.Moo,
