@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
@@ -481,7 +481,25 @@ namespace Take_Time_BangPhra.Integration
                     if (typeof(T) == typeof(object) && string.IsNullOrWhiteSpace(responseBody))
                         return default(T);
 
-                    return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
+                    // ⚠ ถึงตรงนี้ = NextAcc ทำงานสำเร็จแล้ว (2xx) เหลือแค่แปลง response
+                    //   ถ้าแปลงไม่ได้ **ห้าม retry เด็ดขาด** — ยิงซ้ำ = ทำงานซ้ำฝั่งเซิร์ฟเวอร์
+                    //   (POST สร้างเอกสารจะได้เอกสารซ้ำ 5 ใบ). โยนชนิดแยกให้ผู้เรียกรู้ว่า
+                    //   "งานสำเร็จแล้ว แต่เราอ่านคำตอบไม่ออก"
+                    try
+                    {
+                        return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
+                    }
+                    catch (Exception dex)
+                    {
+                        string preview = (responseBody ?? "").Length > 500 ? responseBody.Substring(0, 500) + "…" : responseBody;
+                        throw new ResponseParseException(
+                            $"NextAcc ทำรายการสำเร็จแล้ว (HTTP {(int)response.StatusCode} {method.Method} {path}) " +
+                            $"แต่ระบบอ่านคำตอบไม่ได้: {dex.Message}\nResponse: {preview}", responseBody, dex);
+                    }
+                }
+                catch (ResponseParseException)
+                {
+                    throw; // เซิร์ฟเวอร์ทำงานไปแล้ว — ยิงซ้ำมีแต่จะทำซ้ำ
                 }
                 catch (ServerUnavailableException)
                 {
@@ -1933,6 +1951,18 @@ namespace Take_Time_BangPhra.Integration
     public class AuthenticationFailedException : Exception
     {
         public AuthenticationFailedException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// NextAcc ตอบ 2xx (ทำงานสำเร็จแล้ว) แต่ client แปลง response ไม่ได้
+    /// **ห้าม retry** — งานฝั่งเซิร์ฟเวอร์เกิดขึ้นแล้ว ยิงซ้ำจะได้ผลลัพธ์ซ้ำ
+    /// ผู้เรียกควรถือว่า "อาจสำเร็จ" แล้วไปตรวจสถานะจริง ไม่ใช่ทำใหม่
+    /// </summary>
+    public class ResponseParseException : Exception
+    {
+        public string ResponseBody { get; }
+        public ResponseParseException(string message, string responseBody, Exception inner)
+            : base(message, inner) { ResponseBody = responseBody; }
     }
 
     /// <summary>

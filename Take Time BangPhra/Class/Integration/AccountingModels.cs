@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
@@ -322,6 +322,7 @@ namespace Take_Time_BangPhra.Integration
         public string Name { get; set; }
         public string TaxId { get; set; }
         public string BranchCode { get; set; }
+        [JsonConverter(typeof(ContactTypeConverter))]
         public int ContactType { get; set; }
         public bool IsCustomer { get; set; }
         public bool IsSupplier { get; set; }
@@ -604,6 +605,43 @@ namespace Take_Time_BangPhra.Integration
         public const int Individual = 1;        // บุคคลธรรมดา → ภ.ง.ด.3
         public const int JuristicPerson = 2;    // นิติบุคคล → ภ.ง.ด.53
         public const int GovernmentAgency = 3;  // หน่วยงานราชการ
+    }
+
+    /// <summary>
+    /// NextAcc คืน contactType ใน response เป็นชื่อ enum ("JuristicPerson") ไม่ใช่ int
+    /// → ต้องรับได้ทั้งสองแบบ ไม่งั้น deserialize พังทั้ง response ทั้งที่ฝั่ง NextAcc ทำงานสำเร็จแล้ว
+    /// (เคสจริง: PUT contacts สำเร็จ แต่ client อ่าน response ไม่ได้ → นับเป็นล้มเหลว + retry 5 รอบ
+    ///  → รายงานว่าอัปเดตชนิดผู้ติดต่อไม่สำเร็จ ทั้งที่อัปเดตไปแล้ว)
+    /// ไม่ throw ถ้าไม่รู้จัก (คืน 0) เพื่อไม่ให้ response พังทั้งก้อน
+    /// </summary>
+    public class ContactTypeConverter : JsonConverter<int>
+    {
+        private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Individual", NexaaccContactType.Individual },
+            { "JuristicPerson", NexaaccContactType.JuristicPerson },
+            { "GovernmentAgency", NexaaccContactType.GovernmentAgency }
+        };
+
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer) return Convert.ToInt32(reader.Value);
+            if (reader.TokenType == JsonToken.Null) return 0;
+            if (reader.TokenType == JsonToken.String)
+            {
+                var str = (string)reader.Value;
+                int v;
+                if (_nameToValue.TryGetValue(str ?? "", out v)) return v;
+                if (int.TryParse(str, out v)) return v;
+                return 0;
+            }
+            return 0;
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
     }
 
     /// <summary>

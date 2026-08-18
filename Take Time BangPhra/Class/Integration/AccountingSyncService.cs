@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.8 · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.9 · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -2791,6 +2791,16 @@ namespace Take_Time_BangPhra.Integration
                     infrastructureFailed = true;
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessQueueAsync halted: API Key authentication failed — all items paused until key is fixed. Error: {ex.Message}", "SYSTEM");
+                }
+                catch (ResponseParseException ex)
+                {
+                    // NextAcc ทำรายการไปแล้ว แต่เราอ่านคำตอบไม่ได้ → **ห้ามยิงใหม่อัตโนมัติ**
+                    // (จะได้เอกสารซ้ำ) ให้คนมาตรวจว่าเกิดอะไรขึ้นจริงบน NextAcc ก่อน
+                    string parseMsg = $"Queue #{queueId} [{actionType}] ⚠ NextAcc ทำรายการสำเร็จแล้ว แต่ระบบอ่านคำตอบไม่ได้ "
+                        + $"— ตรวจบน NextAcc ก่อนกด Retry (ยิงซ้ำอาจได้เอกสารซ้ำ): {ex.Message}";
+                    UpdateQueueStatus(queueId, "FAILED", parseMsg, null);
+                    IncrementRetry(queueId, _config.MaxRetries);   // ตรึงไว้ ไม่ให้ retry อัตโนมัติ
+                    _code.Logs(_connectionString, "AccountingSync", parseMsg, "SYSTEM");
                 }
                 catch (ServerUnavailableException ex)
                 {
