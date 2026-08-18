@@ -4768,9 +4768,31 @@ namespace Take_Time_BangPhra.Integration
                 if (buyer.NexaaccContactId == null)
                     return (false, sb.ToString() + "❌ NextAcc ตอบสำเร็จแต่ไม่คืน contactId — contact อาจไม่ถูกสร้างจริง");
 
+                // อ่าน contact กลับมาดิบ ๆ — พิสูจน์ว่า NextAcc เก็บ contactType/branchCode จริงไหม
+                // (ฟอร์มแก้ไขผู้ติดต่อบน NextAcc เคยขึ้น "ประเภทผู้ติดต่อ" ว่าง ทั้งที่เราส่งไปแล้ว)
+                string verify = null;
+                if (_config.CanUseCompanyEndpoints)
+                {
+                    try
+                    {
+                        string rawJson = Task.Run(() => _apiClient.GetContactRawAsync(buyer.NexaaccContactId.Value))
+                            .GetAwaiter().GetResult();
+                        if (!string.IsNullOrEmpty(rawJson))
+                        {
+                            var mt = System.Text.RegularExpressions.Regex.Match(rawJson, "\"contactType\"\\s*:\\s*(\"[^\"]*\"|[0-9]+|null)");
+                            var mb = System.Text.RegularExpressions.Regex.Match(rawJson, "\"branchCode\"\\s*:\\s*(\"[^\"]*\"|null)");
+                            verify = "ค่าที่ NextAcc เก็บจริงตอนนี้: contactType="
+                                + (mt.Success ? mt.Groups[1].Value : "(ไม่พบในคำตอบ)")
+                                + "  branchCode=" + (mb.Success ? mb.Groups[1].Value : "(ไม่พบในคำตอบ)");
+                        }
+                    }
+                    catch (Exception vx) { verify = "อ่าน contact กลับมาตรวจไม่ได้: " + vx.Message; }
+                }
+
                 return (true, sb.ToString()
                     + $"✅ สร้าง/อัปเดต contact บน NextAcc แล้ว\n   contactId = {buyer.NexaaccContactId}\n"
                     + (string.IsNullOrEmpty(_lastContactPatchNote) ? "" : "   " + _lastContactPatchNote + "\n")
+                    + (string.IsNullOrEmpty(verify) ? "" : "   " + verify + "\n")
                     + "   ตรวจในรายการผู้ติดต่อของ NextAcc ได้เลย แล้วค่อยกด \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบเสร็จ");
             }
             catch (Exception ex)

@@ -144,6 +144,15 @@ namespace Take_Time_BangPhra.Integration
             return await ExecuteWithRetryAsync<T>(HttpMethod.Get, path, null);
         }
 
+        /// <summary>GET แล้วคืน JSON ดิบเป็นข้อความ — ไม่ deserialize
+        /// ใช้ตรวจว่า NextAcc เก็บค่าอะไรไว้จริง โดยไม่ให้ model/converter ฝั่งเราบัง</summary>
+        public async Task<string> GetRawAsync(string path)
+        {
+            // JsonRaw ให้ ExecuteWithRetryAsync คืน responseBody ตรง ๆ (ดู deserialize step)
+            return await ExecuteWithRetryAsync<JsonRaw>(HttpMethod.Get, path, null)
+                is JsonRaw r ? r.Body : null;
+        }
+
         public async Task<TResponse> PostAsync<TRequest, TResponse>(string path, TRequest body)
         {
             var json = JsonConvert.SerializeObject(body, _jsonSettings);
@@ -480,6 +489,10 @@ namespace Take_Time_BangPhra.Integration
 
                     if (typeof(T) == typeof(object) && string.IsNullOrWhiteSpace(responseBody))
                         return default(T);
+
+                    // ขอ JSON ดิบ (ตรวจสอบ/ดีบัก) — ไม่ต้องแปลงเป็น model
+                    if (typeof(T) == typeof(JsonRaw))
+                        return (T)(object)new JsonRaw { Body = responseBody };
 
                     // ⚠ ถึงตรงนี้ = NextAcc ทำงานสำเร็จแล้ว (2xx) เหลือแค่แปลง response
                     //   ถ้าแปลงไม่ได้ **ห้าม retry เด็ดขาด** — ยิงซ้ำ = ทำงานซ้ำฝั่งเซิร์ฟเวอร์
@@ -1451,6 +1464,14 @@ namespace Take_Time_BangPhra.Integration
             await PostActionAsync($"{CompanyPath}/document/payments/{paymentId}/void");
         }
 
+        /// <summary>อ่าน contact กลับมาจาก NextAcc แบบดิบ (JSON ทั้งก้อน) — ใช้พิสูจน์ว่า
+        /// ฟิลด์ที่เราส่งไป (โดยเฉพาะ contactType/branchCode) ถูกบันทึกจริงหรือไม่
+        /// อ่านเป็น string ไม่ deserialize เพื่อไม่ให้ converter ฝั่งเราบังความจริง</summary>
+        public async Task<string> GetContactRawAsync(Guid contactId)
+        {
+            return await GetRawAsync($"{CompanyPath}/document/contacts/{contactId}");
+        }
+
         // Contact: Smart Defaults & Parse Address
         public async Task<ApiResponse<ContactResponse>> GetContactSmartDefaultsAsync(string name)
         {
@@ -1952,6 +1973,9 @@ namespace Take_Time_BangPhra.Integration
     {
         public AuthenticationFailedException(string message) : base(message) { }
     }
+
+    /// <summary>ตัวห่อ JSON ดิบ — ใช้กับ GetRawAsync เพื่อข้ามการ deserialize</summary>
+    public class JsonRaw { public string Body { get; set; } }
 
     /// <summary>
     /// NextAcc ตอบ 2xx (ทำงานสำเร็จแล้ว) แต่ client แปลง response ไม่ได้
