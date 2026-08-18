@@ -1106,6 +1106,22 @@
                 <div id="healthResult" style="margin-top:10px;"></div>
             </div>
 
+            <!-- 🔗 เครื่องมือผูก/ปลดการจับคู่เอกสาร — ไม่ต้องพึ่งแถวในหน้าเอกสาร
+                 (ปุ่มที่นั่นขึ้นกับช่วงวันที่ที่ค้นและสถานะจับคู่ พอพันกันจะไม่โผล่เลย) -->
+            <div style="margin-bottom:14px; border:1px solid #d0d7de; border-radius:6px; padding:10px;">
+                <div style="font-weight:600; font-size:13px; margin-bottom:6px;">🔗 ผูก / ปลดการจับคู่เอกสาร</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <input type="text" id="rlReceipt" placeholder="เลขใบเสร็จในระบบ เช่น REC260809004" style="padding:6px; min-width:250px;" />
+                    <input type="text" id="rlDoc" placeholder="เลขเอกสาร NextAcc เช่น REC-20260809-0004 (ว่าง = ปลดการผูก)" style="padding:6px; min-width:330px;" />
+                    <button type="button" class="btn-primary" onclick="relinkDoc()"><i class="fas fa-link"></i> ผูก / ปลด</button>
+                </div>
+                <div style="font-size:11px; color:#888; margin-top:5px;">
+                    แก้เฉพาะการจับคู่ — ไม่แตะบัญชี ไม่สร้าง/ลบเอกสารใด ๆ ·
+                    เลขใบในระบบไม่มีขีดคั่น (REC260809004) เลขเอกสาร NextAcc มีขีด (REC-20260809-0004)
+                </div>
+                <div id="rlResult" style="margin-top:8px;"></div>
+            </div>
+
             <div class="queue-stats" id="queueStats">
                 <div class="queue-stat" onclick="filterByStatus('')" id="qsAll"><div class="num" id="qsTotal" style="color:#333;">-</div><div class="lbl">ทั้งหมด</div></div>
                 <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
@@ -2361,6 +2377,23 @@
                     loadQueueData();
                 })
                 .catch(function(err) { alert(err.message); });
+        }
+
+        function relinkDoc() {
+            var el = document.getElementById('rlResult');
+            var r = document.getElementById('rlReceipt').value.trim();
+            var d = document.getElementById('rlDoc').value.trim();
+            if (!r) { el.innerHTML = '<div class="test-result error" style="display:block;">ใส่เลขใบเสร็จในระบบก่อน</div>'; return; }
+            el.innerHTML = '<div class="test-result loading">กำลังดำเนินการ...</div>';
+            fetch(pageUrl + '?action=relinkDoc&receipt=' + encodeURIComponent(r) + '&doc=' + encodeURIComponent(d) + '&_=' + Date.now())
+                .then(function (x) { return x.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<div class="test-result ' + (data.success ? 'success' : 'error') + '" style="display:block; white-space:pre-wrap;">'
+                                 + (data.success ? '✅ ' : '❌ ') + escapeHtml(data.message) + '</div>';
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>';
+                });
         }
 
         function runHealthCheck() {

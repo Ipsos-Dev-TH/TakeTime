@@ -4704,6 +4704,73 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>
+        /// ผูก/ปลดการจับคู่ด้วย "เลขเอกสาร" แทน GUID — ใช้จากหน้าเครื่องมือโดยตรง
+        /// ไม่ต้องพึ่งแถวในตารางเอกสาร (ซึ่งขึ้นกับช่วงวันที่ที่ค้นและสถานะการจับคู่
+        /// ⇒ พอสายจับคู่พันกัน ปุ่มอาจไม่โผล่เลย แล้วผู้ใช้แก้อะไรไม่ได้)
+        ///
+        /// <paramref name="nexaaccDocNumber"/> ว่าง = **ปลดการผูก** ของใบนั้น
+        /// </summary>
+        public (bool Ok, string Message) RelinkReceiptByDocumentNumber(string receiptNumber, string nexaaccDocNumber)
+        {
+            try
+            {
+                receiptNumber = (receiptNumber ?? "").Trim();
+                nexaaccDocNumber = (nexaaccDocNumber ?? "").Trim();
+                if (receiptNumber.Length == 0) return (false, "ยังไม่ได้ใส่เลขใบเสร็จในระบบ");
+
+                var rec = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Created_Date FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber } });
+                if (rec == null || rec.Rows.Count == 0)
+                    return (false, $"ไม่พบใบเสร็จ {receiptNumber} ในระบบ (เลขใบในระบบไม่มีขีดคั่น เช่น REC260809004)");
+
+                // ── ปลดการผูก ──────────────────────────────────────────────────
+                if (nexaaccDocNumber.Length == 0)
+                {
+                    var q0 = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                          WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                            AND Payload LIKE @pat ORDER BY ID DESC",
+                        new Dictionary<string, object> { { "@pat", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                    if (q0 != null && q0.Rows.Count > 0)
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Accounting_Sync_Queue SET Nexaacc_Response_Id = NULL, Nexaacc_Document_Number = NULL WHERE ID = @id",
+                            new Dictionary<string, object> { { "@id", Convert.ToInt64(q0.Rows[0]["ID"]) } });
+                    SetReceiptPaymentMarker(receiptNumber, null);
+                    _code.Logs(_connectionString, "AccountingSync", $"RelinkReceiptByDocumentNumber: ปลดการผูกของใบ {receiptNumber}", "SYSTEM");
+                    return (true, $"ปลดการผูกของใบ {receiptNumber} แล้ว — ใบนี้จะไม่ผูกกับเอกสาร NextAcc ใด ๆ");
+                }
+
+                // ── หา GUID จากเลขเอกสาร (ค้นรอบวันที่ของใบเสร็จ ±90 วัน) ──────
+                DateTime baseDate = rec.Rows[0]["Created_Date"] != DBNull.Value
+                    ? Convert.ToDateTime(rec.Rows[0]["Created_Date"]) : DateTime.Now;
+                List<NextAccPaymentDoc> docs;
+                try
+                {
+                    docs = Task.Run(() => FetchNextAccReceiptDocumentsAsync(baseDate.AddDays(-90), baseDate.AddDays(90)))
+                        .GetAwaiter().GetResult();
+                }
+                catch (Exception fx)
+                {
+                    return (false, "ดึงรายการเอกสารจาก NextAcc ไม่ได้: " + fx.Message);
+                }
+
+                var hit = docs?.FirstOrDefault(d =>
+                    string.Equals((d.DocumentNumber ?? "").Trim(), nexaaccDocNumber, StringComparison.OrdinalIgnoreCase));
+                if (hit == null)
+                    return (false, $"ไม่พบเอกสารเลขที่ {nexaaccDocNumber} บน NextAcc ในช่วง "
+                        + $"{baseDate.AddDays(-90):dd/MM/yyyy}–{baseDate.AddDays(90):dd/MM/yyyy} "
+                        + $"(พบทั้งหมด {docs?.Count ?? 0} ใบ) — ตรวจเลขเอกสารอีกครั้ง");
+
+                return RelinkReceiptToNextAccDoc(receiptNumber, hit.Id.ToString(), hit.DocumentNumber);
+            }
+            catch (Exception ex)
+            {
+                return (false, "ผูกเอกสารไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
         /// <summary>แปลงรหัสสถานะเอกสาร NextAcc (int) เป็นข้อความไทยสำหรับแสดงผล</summary>
         private static string DescribeDocumentStatus(int status)
         {

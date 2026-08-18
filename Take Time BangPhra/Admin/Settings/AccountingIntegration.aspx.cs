@@ -216,6 +216,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "healthCheck":
                     result = RunIntegrationHealthCheck();
                     break;
+                case "relinkDoc":
+                    result = RelinkReceiptDocument();
+                    break;
                 case "updateMapping":
                     result = UpdateAccountMapping();
                     break;
@@ -1591,6 +1594,27 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "buildDate", GetDeployedBuildDate() },
                     { "issues", issues }
                 };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>
+        /// 🔗 ผูก/ปลดการจับคู่ใบเสร็จในระบบ ↔ เอกสารบน NextAcc ด้วยเลขเอกสารตรง ๆ
+        /// ใช้เมื่อสายจับคู่พันกัน (void→สร้างใหม่หลายรอบ / เคยผูกผิดใบ) จนปุ่มในหน้าเอกสารไม่โผล่
+        /// ปล่อยช่องเลขเอกสาร NextAcc ว่าง = ปลดการผูก
+        /// </summary>
+        private Dictionary<string, object> RelinkReceiptDocument()
+        {
+            try
+            {
+                string receipt = Request.QueryString["receipt"] ?? "";
+                string docNum = Request.QueryString["doc"] ?? "";
+                var svc = new Integration.AccountingSyncService(ConnStr);
+                var (ok, msg) = svc.RelinkReceiptByDocumentNumber(receipt, docNum);
+                return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
             }
             catch (Exception ex)
             {
