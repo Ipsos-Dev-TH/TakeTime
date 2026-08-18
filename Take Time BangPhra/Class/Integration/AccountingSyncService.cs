@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.11 · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.12 · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -5710,6 +5710,25 @@ namespace Take_Time_BangPhra.Integration
                     $"→ {(HasFullBuyerTaxData(customerContact) ? "ใบกำกับภาษี/ใบเสร็จรับเงิน (เต็มรูป §86/4)" : "ใบเสร็จรับเงิน (ข้อมูลภาษีผู้ซื้อไม่ครบ)")}" +
                     $"{(_config.IsCashSaleUseReceipt ? " ⚠ แต่ Nexaacc_CashSale_UseReceipt=1 บังคับออกเป็นใบเสร็จรับเงิน (ไม่ได้ใบกำกับ/e-Tax) — ปิด flag นี้ถ้าต้องการใบกำกับ" : "")}",
                     "SYSTEM");
+
+                // ── 🛡 กันออกเอกสารผิดชื่อ ────────────────────────────────────────
+                // ใบเสร็จระบุผู้ซื้อไว้ชัดเจนแล้ว (Account_Receipt.Customer_ID + เลขภาษีครบ)
+                // แต่ contact ที่กำลังจะใช้ออกเอกสารเป็นคนละคน = ออกใบผิดชื่อแน่นอน
+                // เคสนี้เกิดจริงหลายรอบ (contact ผู้ซื้อ push ไม่ขึ้น → ตกไปใช้ผู้จองเงียบ ๆ)
+                // แล้วต้องมาไล่ยกเลิกเอกสารทีหลัง → หยุดไว้ก่อนดีกว่า ให้คิวฟ้องพร้อมวิธีแก้
+                var declaredBuyer = LookupReceiptBuyer(receiptNumber);
+                if (declaredBuyer != null && HasFullBuyerTaxData(declaredBuyer)
+                    && !string.Equals(declaredBuyer.ExternalId ?? "", customerContact?.ExternalId ?? "", StringComparison.Ordinal))
+                {
+                    throw new Exception(
+                        $"หยุดออกเอกสารกันผิดชื่อ: ใบเสร็จ {receiptNumber} ระบุผู้ซื้อเป็น "
+                        + $"\"{declaredBuyer.Name}\" ({declaredBuyer.Phone}) เลขภาษี {declaredBuyer.TaxId} "
+                        + $"แต่ระบบกำลังจะออกเอกสารในนาม \"{customerContact?.Name ?? "-"}\" ({customerContact?.Phone ?? "-"}) "
+                        + $"contactId={customerContact?.NexaaccContactId?.ToString() ?? "ว่าง"}\n"
+                        + "สาเหตุที่พบบ่อย: สร้าง/อัปเดต contact ของผู้ซื้อบน NextAcc ไม่สำเร็จ → ระบบตกไปใช้ contact ของผู้จอง\n"
+                        + "วิธีแก้: Admin → ตั้งค่า → NextAcc → กล่อง 🔗 → ใส่เลขใบเสร็จ → กด \"📤 ส่งผู้ติดต่อขึ้น NextAcc\" "
+                        + "ให้ขึ้น ✅ ก่อน แล้วค่อยกด Retry รายการนี้");
+                }
             }
 
             if (isDeposit)
