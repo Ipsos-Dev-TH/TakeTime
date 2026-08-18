@@ -121,7 +121,14 @@ namespace Take_Time_BangPhra.Account.Report
                     DataTable dtcustomer = new DataTable();
                     try
                     {
-                        if( Convert.ToInt32(dtReceipt.Rows[0]["Customer_ID"].ToString()) > 0)
+                        // ⚠ Customer_ID เป็น NULL → ToString() = "" → Convert.ToInt32 โยน FormatException
+                        //   ตกไป catch แล้วโหลด "ผู้จอง" มาแทนแบบเงียบ ๆ ⇒ กดบันทึกทับเป็นผู้จอง
+                        //   ทุกครั้งที่เปิดแก้ไข (วนไม่จบ) → ต้องเช็คให้ชัดก่อนแปลง
+                        long editCustId;
+                        var custIdCell = dtReceipt.Rows[0]["Customer_ID"];
+                        bool hasCustId = custIdCell != DBNull.Value
+                            && long.TryParse(custIdCell.ToString(), out editCustId) && editCustId > 0;
+                        if (hasCustId)
                         {
                             // SECURE: Get customer by ID with parameterized query
                             var customerIdParams = new Dictionary<string, object>
@@ -1682,9 +1689,50 @@ namespace Take_Time_BangPhra.Account.Report
                     code2.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
                 }
 
+                // ── ตรวจซ้ำว่า "ผู้ซื้อ" ถูกผูกกับใบนี้จริง ────────────────────────────────
+                // เส้นทางบันทึกมี try/catch ที่กลืน error หลายจุด (UPDATE Account_Receipt,
+                // UpsertCustomer) ⇒ ถ้าเขียน Customer_ID ไม่ลง ทุกอย่างจะ fallback ไป "ผู้จอง"
+                // เงียบ ๆ: หน้าแก้ไขโหลดผู้จองมาให้ → บันทึกทับเป็นผู้จอง → เอกสารออกชื่อผู้จอง
+                // วนแบบนี้ไปเรื่อย ๆ โดยผู้ใช้ไม่มีทางรู้ → ต้องฟ้องบนหน้าจอทันที
+                string saveWarn = "";
+                try
+                {
+                    var vrf = code2.DatabaseQuerySafe(conn,
+                        @"SELECT TOP 1 ISNULL(CAST(ar.Customer_ID AS NVARCHAR(30)), '') AS CustId,
+                                 ISNULL(c.FullName, '') AS BuyerName, ISNULL(c.MobilePhone, '') AS BuyerPhone,
+                                 ISNULL(NULLIF(LTRIM(RTRIM(c.IDNumber)), ''), ISNULL(c.TaxID, '')) AS BuyerTax
+                          FROM Account_Receipt ar
+                          LEFT JOIN Customer c ON c.ID = ar.Customer_ID
+                          WHERE ar.ID = @id",
+                        new Dictionary<string, object> { { "@id", docNum } });
+                    if (vrf != null && vrf.Rows.Count > 0)
+                    {
+                        string custId = vrf.Rows[0]["CustId"].ToString();
+                        string bName = vrf.Rows[0]["BuyerName"].ToString();
+                        string bPhone = vrf.Rows[0]["BuyerPhone"].ToString();
+                        string wantPhone = (TextBox13.Text ?? "").Trim();
+
+                        if (string.IsNullOrEmpty(custId) || custId == "0")
+                            saveWarn = "⚠ บันทึกแล้วแต่ยังไม่ได้ผูกผู้ซื้อกับใบนี้ (Customer_ID ว่าง) — เอกสารบน NextAcc จะออกในนามผู้จองแทน";
+                        else if (!string.IsNullOrEmpty(wantPhone) && !string.Equals(bPhone, wantPhone, StringComparison.Ordinal))
+                            saveWarn = $"⚠ ผู้ซื้อที่ผูกกับใบนี้คือ {bName} ({bPhone}) ไม่ตรงกับเบอร์ที่กรอก ({wantPhone}) — เอกสารจะออกในนามนี้";
+
+                        if (!string.IsNullOrEmpty(saveWarn))
+                            code2.Logs(conn, "Receipt",
+                                $"{saveWarn} | receipt={docNum} Customer_ID={custId} form(name={TextBox10.Text}, phone={wantPhone}, tax={TextBox12.Text})", "SYSTEM");
+                        else
+                            code2.Logs(conn, "Receipt",
+                                $"บันทึกใบ {docNum}: ผู้ซื้อ = {bName} ({bPhone}) เลขภาษี {vrf.Rows[0]["BuyerTax"]}", "SYSTEM");
+                    }
+                }
+                catch { }
+
                 // Show success message then redirect
+                string okMsg = string.IsNullOrEmpty(saveWarn)
+                    ? "✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว"
+                    : "✅ บันทึกใบเสร็จรับเงินแล้ว\n\n" + saveWarn.Replace("'", "");
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
+                    "alert('" + okMsg + "'); window.location.href='/Account/Receipt';", true);
             }
             else
             {
