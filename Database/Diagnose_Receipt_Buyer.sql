@@ -77,33 +77,34 @@ PRINT '--- 4) คิว CREATE_RECEIPT_DOCUMENT ของใบนี้ (ให
 SELECT TOP 10
     q.ID, q.Status, q.Retry_Count, q.Max_Retries,
     q.Nexaacc_Response_Id, q.Nexaacc_Document_Number,
-    CASE WHEN q.Payload LIKE '%"customerPhone"%' THEN N'มี' ELSE N'✗ ไม่มี (คิวเก่า)' END AS HasCustomerPhone,
-    q.Payload,
-    LEFT(ISNULL(q.Error_Message, ''), 400) AS Error_Message,
+    CASE WHEN CAST(q.Payload AS NVARCHAR(MAX)) LIKE '%"customerPhone"%' THEN N'มี' ELSE N'✗ ไม่มี (คิวเก่า)' END AS HasCustomerPhone,
+    CAST(q.Payload AS NVARCHAR(MAX)) AS Payload,
+    LEFT(CAST(ISNULL(q.Error_Message, '') AS NVARCHAR(MAX)), 400) AS Error_Message,
     q.Created_Date, q.Processed_Date
 FROM Accounting_Sync_Queue q
 WHERE q.Action_Type = 'CREATE_RECEIPT_DOCUMENT'
-  AND q.Payload LIKE '%"receiptNumber":"' + @Receipt + '"%'
+  AND CAST(q.Payload AS NVARCHAR(MAX)) LIKE '%"receiptNumber":"' + @Receipt + '"%'
 ORDER BY q.ID DESC;
 
 -- ── 5) คิว sync ผู้ติดต่อของเบอร์ผู้ซื้อ ─────────────────────────────────────
 PRINT '';
 PRINT '--- 5) คิว SYNC_CUSTOMER_CONTACT ของเบอร์ผู้ซื้อ ---';
 SELECT TOP 10 q.ID, q.Status, q.Retry_Count, q.Max_Retries,
-       q.Payload, LEFT(ISNULL(q.Error_Message, ''), 400) AS Error_Message, q.Created_Date
+       CAST(q.Payload AS NVARCHAR(MAX)) AS Payload,
+       LEFT(CAST(ISNULL(q.Error_Message, '') AS NVARCHAR(MAX)), 400) AS Error_Message, q.Created_Date
 FROM Accounting_Sync_Queue q
 WHERE q.Action_Type = 'SYNC_CUSTOMER_CONTACT'
-  AND q.Payload LIKE '%' + (SELECT TOP 1 c.MobilePhone FROM Account_Receipt ar
+  AND CAST(q.Payload AS NVARCHAR(MAX)) LIKE '%' + (SELECT TOP 1 c.MobilePhone FROM Account_Receipt ar
                             JOIN Customer c ON c.ID = ar.Customer_ID WHERE ar.ID = @Receipt) + '%'
 ORDER BY q.ID DESC;
 
 -- ── 6) บรรทัดตัดสินใจจาก log (ถ้า DLL ที่รันมีบรรทัดนี้แล้ว) ─────────────────
 PRINT '';
 PRINT '--- 6) log การตัดสินใจของ sync (ถ้ามี) ---';
-SELECT TOP 20 l.LogDateTime, LEFT(l.LogDetail, 700) AS LogDetail
+SELECT TOP 20 l.LogDateTime, LEFT(CAST(l.LogDetail AS NVARCHAR(MAX)), 700) AS LogDetail
 FROM Logs l
 WHERE l.LogAction = 'AccountingSync'
-  AND l.LogDetail LIKE '%' + @Receipt + '%'
+  AND CAST(l.LogDetail AS NVARCHAR(MAX)) LIKE '%' + @Receipt + '%'
   AND l.LogDateTime >= DATEADD(DAY, -3, GETDATE())
 ORDER BY l.LogDateTime DESC;
 
@@ -111,7 +112,8 @@ ORDER BY l.LogDateTime DESC;
 PRINT '';
 PRINT '--- 7) API call ของ contact ล่าสุด — ดูว่าส่งชื่อไปไหม และ NextAcc ตอบชื่ออะไร ---';
 SELECT TOP 10 g.Created_Date, g.Action, g.HTTP_Status, g.Success,
-       g.Request_Payload, g.Response_Payload
+       CAST(g.Request_Payload AS NVARCHAR(MAX)) AS Request_Payload,
+       CAST(g.Response_Payload AS NVARCHAR(MAX)) AS Response_Payload
 FROM Accounting_Sync_Log g
 WHERE g.Action LIKE '%integration/customers%' OR g.Action LIKE '%document/contacts%'
 ORDER BY g.ID DESC;

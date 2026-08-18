@@ -47,23 +47,23 @@ GO
 -- ── Backfill จากคิว: เอาคิว CREATE ที่ COMPLETED ล่าสุดของแต่ละใบ ───────────
 ;WITH q AS (
     SELECT
-        REPLACE(SUBSTRING(Payload,
-                CHARINDEX('"receiptNumber":"', Payload) + 17,
-                CHARINDEX('"', Payload, CHARINDEX('"receiptNumber":"', Payload) + 17)
-                    - (CHARINDEX('"receiptNumber":"', Payload) + 17)), '', '') AS ReceiptNo,
+        REPLACE(SUBSTRING(CAST(Payload AS NVARCHAR(MAX)),
+                CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17,
+                CHARINDEX('"', CAST(Payload AS NVARCHAR(MAX)), CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17)
+                    - (CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17)), '', '') AS ReceiptNo,
         Nexaacc_Response_Id, Nexaacc_Document_Number,
         ROW_NUMBER() OVER (
-            PARTITION BY SUBSTRING(Payload,
-                CHARINDEX('"receiptNumber":"', Payload) + 17,
-                CHARINDEX('"', Payload, CHARINDEX('"receiptNumber":"', Payload) + 17)
-                    - (CHARINDEX('"receiptNumber":"', Payload) + 17))
+            PARTITION BY SUBSTRING(CAST(Payload AS NVARCHAR(MAX)),
+                CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17,
+                CHARINDEX('"', CAST(Payload AS NVARCHAR(MAX)), CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17)
+                    - (CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) + 17))
             ORDER BY ID DESC) AS rn
     FROM Accounting_Sync_Queue
     WHERE Entity_Type = 'RECEIPT'
       AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
       AND Status = 'COMPLETED'
       AND Nexaacc_Response_Id IS NOT NULL
-      AND CHARINDEX('"receiptNumber":"', Payload) > 0
+      AND CHARINDEX('"receiptNumber":"', CAST(Payload AS NVARCHAR(MAX))) > 0
 )
 UPDATE ar
 SET ar.Nexaacc_Doc_Id = TRY_CAST(q.Nexaacc_Response_Id AS UNIQUEIDENTIFIER),
