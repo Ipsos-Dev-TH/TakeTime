@@ -336,6 +336,24 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    admin toggles. ข้อจำกัด: pull เป็น per-product polling (รอ NextAcc เพิ่ม global `?since=` cursor),
    inbound Product_Out omit Account_Paid_How_ID. Needs Windows build + live test.
 
+## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
+
+NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Program.cs`) → ทุก endpoint ตอบ HTTP 500
+เป็น **หน้า HTML developer-exception page**. สิ่งที่พังตามมาฝั่ง TakeTime และวิธีที่แก้ไว้แล้ว:
+
+| อาการ | สาเหตุจริง | สิ่งที่ทำ |
+|-------|-----------|----------|
+| ทุกรายการในคิวตกเป็น FAILED ถาวร | 5xx ถูกโยนเป็น `Exception` ธรรมดา คิวจึงนับเป็น "ข้อมูลผิด" แล้วเผา Retry_Count 5/5 | `ServerUnavailableException` + `AccountingApiClient.LooksLikeServerDown` → คิวคง **PENDING ไม่นับ retry** แล้วหยุดรอบ (เหมือน DNS/Auth) |
+| retry storm | 5 attempts × ทุกรายการ ทั้งที่ปลายทางล่ม | fail-fast บน 5xx+HTML + **server-down cooldown** (`Nexaacc_ServerDown_Cooldown_Min`, default 5 นาที) กันไว้ที่ `IsApiReachable` — call สำเร็จหนึ่งครั้ง `ClearServerDown()` เอง; ปุ่ม Test/Retry/Process now ล้าง cooldown ให้ก่อนเสมอ |
+| เสี่ยงเอกสารซ้ำใน NextAcc | (ก) orphan cleanup วัดจาก `Created_Date` ไม่ใช่เวลาที่เริ่มยิง → ดึงรายการที่กำลังยิงอยู่กลับเป็น PENDING (ข) `_isSyncing` เป็น in-process + `task.Wait(2 min)` ทิ้ง task แล้วปลดล็อก (ค) ไม่มี guard ข้าม process | คอลัมน์ **`Processing_Started`** (PHASE18_31) + `Nexaacc_Stuck_Processing_Min` (15) / **atomic claim** `TryClaimQueueItem` (UPDATE…WHERE Status IN (PENDING,FAILED) + `@@ROWCOUNT`) / **`sp_getapplock`** ครอบทั้งรอบ (`ProcessQueueAsync` → `ProcessQueueCoreAsync`) / Global.asax ไม่ปลด `_isSyncing` เมื่องานยังวิ่ง + watchdog 30 นาที |
+| ปุ่ม Log ในหน้าคิวค้าง | `LogDetail LIKE '%…%'` ไม่จำกัดช่วงเวลา = scan ทั้งตาราง Logs | จำกัดช่วงเวลาตามอายุคิว + `CommandTimeout` 20 วิ + AbortController 40 วิ + index (PHASE18_30) |
+| DB โต/ช้า | `Accounting_Sync_Log` เก็บ req+res ทุก call ไม่มีวันลบ; Logs โตไม่จำกัด | `PurgeOldSyncLogsIfDue` (วันละครั้ง, `Nexaacc_SyncLog_Retention_Days` 90) + `LogThrottled` (log ซ้ำ 1 ครั้ง/30 นาที) |
+| ไม่มีใครรู้ว่าคิวพัง | ต้องเปิดหน้าคิวดูเอง | `NotifyQueueHealthIfNeeded` → Telegram (`Nexaacc_Queue_Alert`, ทุก `Nexaacc_Queue_Alert_Hours` 6 ชม.) |
+| รู้ว่า mapping ผิดตอน sync ไม่ผ่านแล้ว (`ไม่พบผังบัญชี: 21240`) | ไม่มี pre-flight | ปุ่ม **🩺 ตรวจสุขภาพการเชื่อมต่อ** (`action=healthCheck`) เทียบ `Accounting_Account_Mapping` กับ `Accounting_Nexaacc_Accounts` + แหล่งเงินที่ยังไม่ผูก + คิวตายค้าง + ชนิดคีย์ |
+
+`BuildApiErrorHint` เพิ่ม hint: `ไม่พบผังบัญชี: <code>` (สร้างบัญชี/แก้ mapping/ปิด GR/IR) และ NextAcc-ล่ม
+Migrations: **PHASE18_30** (index Logs) และ **PHASE18_31** (`Processing_Started` + config + คืนคิวที่ล้มเพราะ NextAcc ล่ม)
+
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
 `claude/restructure-system-architecture-szeM0`). Remote: `Ipsos-Dev-TH/TakeTime`

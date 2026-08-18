@@ -1075,6 +1075,18 @@
         <div class="journey-card">
             <h3><i class="fas fa-tasks"></i> Sync Queue Monitor</h3>
 
+            <!-- 🩺 ตรวจสุขภาพ integration: จับปัญหา (mapping ชี้บัญชีที่ไม่มี, แหล่งเงินยังไม่ผูก,
+                 คิวตายค้าง, NextAcc ล่ม) ก่อนที่เอกสารจริงจะ sync ไม่ผ่าน -->
+            <div style="margin-bottom:14px;">
+                <button type="button" class="btn-default" onclick="runHealthCheck()">
+                    <i class="fas fa-stethoscope"></i> ตรวจสุขภาพการเชื่อมต่อ
+                </button>
+                <span style="font-size:11.5px; color:#888; margin-left:8px;">
+                    ตรวจ mapping/ผังบัญชี/แหล่งเงิน/คิว — ทำก่อนออกเอกสารจริงจะได้ไม่ค้างคิว
+                </span>
+                <div id="healthResult" style="margin-top:10px;"></div>
+            </div>
+
             <div class="queue-stats" id="queueStats">
                 <div class="queue-stat" onclick="filterByStatus('')" id="qsAll"><div class="num" id="qsTotal" style="color:#333;">-</div><div class="lbl">ทั้งหมด</div></div>
                 <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
@@ -2328,6 +2340,42 @@
                     loadQueueData();
                 })
                 .catch(function(err) { alert(err.message); });
+        }
+
+        function runHealthCheck() {
+            var el = document.getElementById('healthResult');
+            el.innerHTML = '<div class="test-result loading">กำลังตรวจ...</div>';
+            fetch(pageUrl + '?action=healthCheck&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error" style="display:block;">ตรวจไม่สำเร็จ: ' + escapeHtml(data.message) + '</div>';
+                        return;
+                    }
+                    var list = data.issues || [];
+                    if (!list.length) {
+                        el.innerHTML = '<div class="test-result success" style="display:block;"><i class="fas fa-check-circle"></i> '
+                                     + 'ไม่พบปัญหา — mapping/ผังบัญชี/แหล่งเงิน/คิว ปกติทั้งหมด '
+                                     + '<span style="color:#888;font-size:11px;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
+                        return;
+                    }
+                    var html = '<div style="font-size:12px; color:#666; margin-bottom:6px;">พบ ' + list.length
+                             + ' เรื่องที่ควรดู <span style="color:#999;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
+                    list.forEach(function (it) {
+                        var err = it.level === 'error';
+                        html += '<div style="border-left:4px solid ' + (err ? '#C62828' : '#F9A825')
+                              + '; background:' + (err ? '#FFF5F5' : '#FFFDF3')
+                              + '; border-radius:5px; padding:9px 12px; margin-bottom:7px;">'
+                              + '<div style="font-weight:600; color:' + (err ? '#C62828' : '#8a6d3b') + '; font-size:13px;">'
+                              + (err ? '❌ ' : '⚠️ ') + escapeHtml(it.title) + '</div>'
+                              + '<div style="font-size:12px; color:#555; white-space:pre-wrap; margin-top:3px;">'
+                              + escapeHtml(it.detail) + '</div></div>';
+                    });
+                    el.innerHTML = html;
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">ตรวจไม่สำเร็จ: ' + escapeHtml(err.message) + '</div>';
+                });
         }
 
         function retryAllFailed() {

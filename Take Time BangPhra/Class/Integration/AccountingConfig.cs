@@ -73,6 +73,28 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>timeout สำหรับ OCR upload โดยเฉพาะ — OCR ประมวลผลรูป/PDF นานกว่า call ปกติมาก (default 180s)</summary>
         public int OcrTimeoutSeconds => int.TryParse(GetConfig("Nexaacc_OcrTimeoutSec", "180"), out var v) && v > 0 ? v : 180;
 
+        // ── ความทนทานของคิว (resilience) ────────────────────────────────────────
+        /// <summary>NextAcc ล่ม (5xx/หน้า error page) → พักไม่ยิงกี่นาที ก่อนลองใหม่ (default 5)
+        /// กัน retry storm: แอปล่มทีนึงเดิมยิงซ้ำ 5 ครั้ง × ทุกรายการในคิว</summary>
+        public int ServerDownCooldownMinutes =>
+            int.TryParse(GetConfig("Nexaacc_ServerDown_Cooldown_Min", "5"), out var v) && v > 0 ? v : 5;
+
+        /// <summary>รายการที่ค้างสถานะ PROCESSING เกินกี่นาที ถือว่า worker ตายกลางคัน → คืนเป็น PENDING
+        /// (default 15) ต้องมากกว่าเวลาที่ยิง 1 รายการนานสุดจริง ๆ ไม่งั้นเสี่ยงโพสต์ซ้ำ</summary>
+        public int StuckProcessingMinutes =>
+            int.TryParse(GetConfig("Nexaacc_Stuck_Processing_Min", "15"), out var v) && v >= 5 ? v : 15;
+
+        /// <summary>เก็บ Accounting_Sync_Log ย้อนหลังกี่วัน (default 90; 0 = ไม่ลบ)</summary>
+        public int SyncLogRetentionDays =>
+            int.TryParse(GetConfig("Nexaacc_SyncLog_Retention_Days", "90"), out var v) && v >= 0 ? v : 90;
+
+        /// <summary>แจ้งเตือน Telegram เมื่อคิวมีรายการล้มเหลวค้าง / NextAcc ล่ม (default เปิด)</summary>
+        public bool QueueAlertEnabled => GetConfig("Nexaacc_Queue_Alert", "1").Equals("1", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>เตือนซ้ำได้ทุกกี่ชั่วโมง (default 6) — กันสแปมกลุ่ม</summary>
+        public int QueueAlertHours =>
+            int.TryParse(GetConfig("Nexaacc_Queue_Alert_Hours", "6"), out var v) && v > 0 ? v : 6;
+
         /// <summary>
         /// JOURNAL_ONLY = บันทึกสมุดบัญชีอย่างเดียว (debit/credit journal entries)
         /// DOCUMENT = สร้างเอกสาร (ใบกำกับภาษี/ใบสำคัญจ่าย) + ระบบสร้าง journal ให้อัตโนมัติ

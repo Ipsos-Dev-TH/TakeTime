@@ -84,21 +84,48 @@ namespace Take_Time_BangPhra
 
         private static int _consecutiveTimerErrors = 0;
 
+        private static DateTime _syncStartedAt = DateTime.MinValue;
+
         private static void ProcessAccountingSyncQueue(object state)
         {
+            // watchdog: ถ้า _isSyncing ค้างเกิน 30 นาที (task ที่ทิ้งไว้ไม่จบสักที) ให้ปลดล็อก
+            // ไม่งั้น timer จะเงียบถาวรจนกว่าจะ restart app pool
+            if (_isSyncing && _syncStartedAt != DateTime.MinValue
+                && (DateTime.Now - _syncStartedAt).TotalMinutes > 30)
+            {
+                lock (_syncLock) { _isSyncing = false; }
+                System.Diagnostics.Trace.TraceWarning("Accounting sync watchdog: รอบก่อนค้างเกิน 30 นาที — ปลดล็อกให้เริ่มรอบใหม่");
+            }
+
             if (_isSyncing) return;
 
             lock (_syncLock)
             {
                 if (_isSyncing) return;
                 _isSyncing = true;
+                _syncStartedAt = DateTime.Now;
             }
 
+            bool queueStillRunning = false;
             try
             {
                 var syncService = new AccountingSyncService();
                 var task = syncService.ProcessQueueAsync(20);
-                task.Wait(TimeSpan.FromMinutes(2));
+                // Wait() หมดเวลาแล้ว "งานยังวิ่งอยู่" — ของเดิมปล่อย _isSyncing = false ทันที
+                // รอบถัดไป (30 วิ) จึงเริ่มทับงานเดิมได้ → เสี่ยงยิงเอกสารซ้ำ
+                // (ตอนนี้มี app lock ระดับ DB กันอีกชั้นแล้ว แต่ไม่ควรพึ่งชั้นเดียว)
+                if (!task.Wait(TimeSpan.FromMinutes(2)))
+                {
+                    queueStillRunning = true;
+                    task.ContinueWith(t =>
+                    {
+                        lock (_syncLock) { _isSyncing = false; }
+                        if (t.IsFaulted)
+                            System.Diagnostics.Trace.TraceError(
+                                $"Accounting sync (background) error: {(t.Exception?.InnerException ?? t.Exception)?.Message}");
+                    });
+                    System.Diagnostics.Trace.TraceWarning("Accounting sync: รอบนี้ยังไม่จบใน 2 นาที — ปล่อยทำงานต่อเบื้องหลัง (งานอื่นของรอบนี้ยังทำตามปกติ)");
+                }
 
                 // รวบยอดขายหน้าร้านที่ไม่ออกใบกำกับเป็นใบรับเงินสดสรุปรายวัน (auto, ไม่ต้องกด)
                 // — no-op ถ้า config ปิด; แยก try กันพังเฉพาะส่วนนี้ ไม่กระทบ queue หลัก
@@ -165,7 +192,8 @@ namespace Take_Time_BangPhra
             }
             finally
             {
-                _isSyncing = false;
+                // ถ้าคิวยังวิ่งอยู่เบื้องหลัง ปล่อยให้ ContinueWith เป็นคนปลดล็อกเอง
+                if (!queueStillRunning) _isSyncing = false;
             }
         }
 

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
+using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -2318,25 +2319,158 @@ namespace Take_Time_BangPhra.Integration
             return "";
         }
 
+        // ── กันรันซ้อน ─────────────────────────────────────────────────────────────
+        // _isSyncing ใน Global.asax กันได้แค่ "ภายใน process เดียว" และยัง abandon task
+        // เมื่อ Wait(2 นาที) หมดเวลา → รอบถัดไปเริ่มทับได้. ถ้ามีหลาย worker process /
+        // หลายเซิร์ฟเวอร์ / staging ชี้ DB เดียวกัน จะยิงเอกสารซ้ำเข้า NextAcc
+        // → ใช้ sp_getapplock ของ SQL Server เป็นตัวกันข้าม process
+        private const string QueueLockName = "TakeTime_AccountingSyncQueue";
+        private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
+        private static DateTime _lastLogPurge = DateTime.MinValue;
+        private static DateTime _lastQueueAlert = DateTime.MinValue;
+        private static DateTime _lastQueueHealthCheck = DateTime.MinValue;
+
+        /// <summary>เขียน log ซ้ำ ๆ ได้ไม่เกิน 1 ครั้งต่อ <paramref name="minutes"/> นาที ต่อ key —
+        /// ช่วง NextAcc ล่ม timer เดินทุก 30 วิ จะเขียน "API unreachable" วันละ 2,880 บรรทัด</summary>
+        private void LogThrottled(string key, string message, int minutes = 30)
+        {
+            lock (_lastThrottledLog)
+            {
+                DateTime last;
+                if (_lastThrottledLog.TryGetValue(key, out last) && (DateTime.Now - last).TotalMinutes < minutes) return;
+                _lastThrottledLog[key] = DateTime.Now;
+            }
+            _code.Logs(_connectionString, "AccountingSync", message, "SYSTEM");
+        }
+
         /// <summary>
         /// Process pending items in the sync queue.
         /// Should be called periodically by a timer or scheduled task.
+        /// ครอบด้วย app lock ระดับฐานข้อมูล — worker ตัวที่สองจะข้ามรอบไปเลย ไม่ยิงซ้อน
         /// </summary>
+        /// <summary>เหตุผลที่รอบล่าสุด "ไม่ได้ทำงาน" (lock ชนกัน / NextAcc ไม่พร้อม) —
+        /// ให้ UI แสดงแทนข้อความ "ประมวลผลสำเร็จ 0 รายการ" ที่ทำให้เข้าใจผิดว่าคิวว่าง</summary>
+        public string LastRunSkippedReason { get; private set; }
+
         public async Task<int> ProcessQueueAsync(int batchSize = 20)
         {
-            if (!_config.IsReadyToSync) return 0;
+            LastRunSkippedReason = null;
+            if (!_config.IsReadyToSync)
+            {
+                LastRunSkippedReason = "ยังตั้งค่า NextAcc ไม่ครบ (Base URL / API Key / Company ID)";
+                return 0;
+            }
 
+            SqlConnection lockCon = null;
+            try
+            {
+                lockCon = new SqlConnection(_connectionString);
+                lockCon.Open();
+                if (!TryAcquireQueueLock(lockCon))
+                {
+                    lockCon.Dispose();
+                    LastRunSkippedReason = "มีรอบประมวลผลอื่นทำงานอยู่ (timer เบื้องหลัง หรืออีกเซิร์ฟเวอร์) — ลองใหม่อีกครู่";
+                    LogThrottled("queuelock",
+                        "ProcessQueueAsync skipped: มี worker อื่นถือ lock คิวอยู่ (อีก process/เซิร์ฟเวอร์ หรือรอบก่อนยังไม่จบ)");
+                    return 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                // ขอ lock ไม่ได้ (สิทธิ์ DB/เชื่อมต่อไม่ได้) → ทำงานต่อ ดีกว่าคิวหยุดนิ่งถาวร
+                try { if (lockCon != null) lockCon.Dispose(); } catch { }
+                lockCon = null;
+                LogThrottled("queuelock-fail", $"ProcessQueueAsync: ขอ app lock ไม่สำเร็จ ({ex.Message}) — ทำงานต่อโดยไม่มี lock");
+            }
+
+            try
+            {
+                return await ProcessQueueCoreAsync(batchSize).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (lockCon != null)
+                {
+                    try
+                    {
+                        using (var rel = new SqlCommand("sp_releaseapplock", lockCon) { CommandType = CommandType.StoredProcedure })
+                        {
+                            rel.Parameters.AddWithValue("@Resource", QueueLockName);
+                            rel.Parameters.AddWithValue("@LockOwner", "Session");
+                            rel.ExecuteNonQuery();
+                        }
+                    }
+                    catch { }
+                    try { lockCon.Dispose(); } catch { }
+                }
+            }
+        }
+
+        /// <summary>ขอ app lock แบบไม่รอ (@LockTimeout=0) — คืน false ถ้ามีคนถืออยู่</summary>
+        private bool TryAcquireQueueLock(SqlConnection con)
+        {
+            using (var cmd = new SqlCommand("sp_getapplock", con) { CommandType = CommandType.StoredProcedure })
+            {
+                cmd.Parameters.AddWithValue("@Resource", QueueLockName);
+                cmd.Parameters.AddWithValue("@LockMode", "Exclusive");
+                cmd.Parameters.AddWithValue("@LockOwner", "Session");
+                cmd.Parameters.AddWithValue("@LockTimeout", 0);
+                var ret = cmd.Parameters.Add("@ret", SqlDbType.Int);
+                ret.Direction = ParameterDirection.ReturnValue;
+                cmd.ExecuteNonQuery();
+                return Convert.ToInt32(ret.Value) >= 0;   // 0 = ได้ทันที, 1 = ได้หลังรอ, <0 = ไม่ได้
+            }
+        }
+
+        /// <summary>
+        /// จองรายการคิวแบบ atomic (UPDATE … WHERE Status IN ('PENDING','FAILED')).
+        /// ถ้ามี worker อื่นคว้าไปแล้วจะได้ 0 แถว → ข้ามรายการนี้ กันโพสต์เอกสารซ้ำเข้า NextAcc.
+        /// </summary>
+        private bool TryClaimQueueItem(long queueId)
+        {
+            var pars = new Dictionary<string, object> { { "@id", queueId } };
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'PROCESSING', Processing_Started = GETDATE()
+                      WHERE ID = @id AND Status IN ('PENDING', 'FAILED');
+                      SELECT @@ROWCOUNT AS N;", pars);
+                if (dt != null && dt.Rows.Count > 0) return Convert.ToInt32(dt.Rows[0]["N"]) > 0;
+            }
+            catch { /* ยังไม่ได้รัน migration ที่เพิ่มคอลัมน์ Processing_Started */ }
+
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'PROCESSING'
+                      WHERE ID = @id AND Status IN ('PENDING', 'FAILED');
+                      SELECT @@ROWCOUNT AS N;", pars);
+                if (dt != null && dt.Rows.Count > 0) return Convert.ToInt32(dt.Rows[0]["N"]) > 0;
+            }
+            catch { }
+
+            return true;   // จองไม่ได้เพราะ DB error → ทำต่อแบบเดิม (พฤติกรรมก่อนหน้า)
+        }
+
+        private async Task<int> ProcessQueueCoreAsync(int batchSize = 20)
+        {
             // Pre-flight connectivity check — skip entire batch if API unreachable
             string connectError;
             if (!_apiClient.IsApiReachable(out connectError))
             {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessQueueAsync skipped: API unreachable — {connectError}", "SYSTEM");
+                // ช่วง outage timer เดินทุก 30 วิ — เขียน log ทุกครั้งจะท่วมตาราง Logs
+                LastRunSkippedReason = "เชื่อมต่อ NextAcc ไม่ได้ — " + connectError;
+                LogThrottled("unreachable", $"ProcessQueueAsync skipped: API unreachable — {connectError}");
                 return 0;
             }
 
-            // Cleanup orphaned PROCESSING items — ถ้าค้างเกิน 10 นาที (process crash หรือ timeout)
-            // ให้กลับไปเป็น PENDING เพื่อให้ retry ในรอบถัดไป
+            // Cleanup orphaned PROCESSING items — worker ตายกลางคัน/timeout ให้กลับเป็น PENDING
+            // ⚠ ต้องวัดจาก Processing_Started (เวลาที่เริ่มยิง) ไม่ใช่ Created_Date:
+            //   ของเดิมใช้ Created_Date → รายการที่สร้างไว้นานแล้วและ "กำลังยิงอยู่จริง ๆ" จะถูก
+            //   worker อีกตัวดึงกลับเป็น PENDING ทันที แล้วยิงซ้ำ = เอกสารซ้ำใน NextAcc
+            int stuckMin = _config.StuckProcessingMinutes;
             try
             {
                 _code.DatabaseInsertSafe(_connectionString,
@@ -2344,14 +2478,29 @@ namespace Take_Time_BangPhra.Integration
                       SET Status = 'PENDING',
                           Error_Message = ISNULL(Error_Message, '') + N' | recovered from orphaned PROCESSING'
                       WHERE Status = 'PROCESSING'
-                        AND Created_Date < DATEADD(MINUTE, -10, GETDATE())",
-                    null);
+                        AND ISNULL(Processing_Started, Created_Date) < DATEADD(MINUTE, -@min, GETDATE())",
+                    new Dictionary<string, object> { { "@min", stuckMin } });
             }
-            catch (Exception ex)
+            catch
             {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessQueueAsync orphan cleanup failed: {ex.Message}", "SYSTEM");
+                // ยังไม่ได้รัน migration ที่เพิ่ม Processing_Started → ใช้เกณฑ์เดิม แต่ยืดเวลาให้ปลอดภัยขึ้น
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"UPDATE Accounting_Sync_Queue
+                          SET Status = 'PENDING',
+                              Error_Message = ISNULL(Error_Message, '') + N' | recovered from orphaned PROCESSING'
+                          WHERE Status = 'PROCESSING'
+                            AND Created_Date < DATEADD(MINUTE, -@min, GETDATE())",
+                        new Dictionary<string, object> { { "@min", Math.Max(stuckMin, 30) } });
+                }
+                catch (Exception ex2)
+                {
+                    LogThrottled("orphan-cleanup", $"ProcessQueueAsync orphan cleanup failed: {ex2.Message}");
+                }
             }
+
+            PurgeOldSyncLogsIfDue();
 
             // Cleanup deprecated/skipped entries เก่ากว่า 7 วัน — ลด queue ขยะ
             try
@@ -2373,10 +2522,17 @@ namespace Take_Time_BangPhra.Integration
                   ORDER BY Created_Date ASC, ID ASC",
                 new Dictionary<string, object> { { "@batchSize", batchSize } });
 
-            if (pending == null || pending.Rows.Count == 0) return 0;
+            if (pending == null || pending.Rows.Count == 0)
+            {
+                // รายการที่ retry หมดแล้วถูกกันออกจาก pending — ถ้าไม่เช็คตรงนี้ คิวที่ตายทั้งหมด
+                // จะเงียบสนิท ไม่มีใครรู้จนกว่าจะเปิดหน้าคิวดูเอง
+                NotifyQueueHealthIfNeeded(false);
+                return 0;
+            }
 
             int processed = 0;
             bool infrastructureFailed = false;
+            bool serverDown = false;
 
             foreach (DataRow row in pending.Rows)
             {
@@ -2387,8 +2543,9 @@ namespace Take_Time_BangPhra.Integration
                 string actionType = row["Action_Type"]?.ToString();
                 string payload = row["Payload"]?.ToString();
 
-                // Mark as processing
-                UpdateQueueStatus(queueId, "PROCESSING", null, null);
+                // จองรายการแบบ atomic — ถ้ามีตัวอื่นคว้าไปแล้ว (คนละ process หรือรอบซ้อน) ให้ข้าม
+                // ห้ามใช้ UpdateQueueStatus เฉย ๆ เพราะเขียนทับสถานะโดยไม่ตรวจว่าใครถืออยู่
+                if (!TryClaimQueueItem(queueId)) continue;
 
                 try
                 {
@@ -2433,6 +2590,16 @@ namespace Take_Time_BangPhra.Integration
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessQueueAsync halted: API Key authentication failed — all items paused until key is fixed. Error: {ex.Message}", "SYSTEM");
                 }
+                catch (ServerUnavailableException ex)
+                {
+                    // NextAcc ล่มทั้งแอป — ไม่ใช่ปัญหาข้อมูลของรายการนี้ ห้ามนับ retry
+                    UpdateQueueStatus(queueId, "PENDING",
+                        $"NextAcc ไม่พร้อมใช้งาน (ไม่นับ retry): {ex.Message} — จะลองใหม่อัตโนมัติเมื่อ NextAcc กลับมา", null);
+                    infrastructureFailed = true;
+                    serverDown = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessQueueAsync halted: NextAcc application is unavailable — รายการที่เหลือคง PENDING ไว้รอรอบถัดไป. {ex.Message}", "SYSTEM");
+                }
                 catch (ArgumentException ex)
                 {
                     string errorDetail = $"Queue #{queueId} [{actionType}] validation error: {ex.Message}";
@@ -2454,6 +2621,7 @@ namespace Take_Time_BangPhra.Integration
                                        + "จะลองใหม่อัตโนมัติเมื่อ NextAcc กลับมา";
                         UpdateQueueStatus(queueId, "PENDING", downMsg, null);
                         infrastructureFailed = true;
+                        serverDown = true;
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessQueueAsync halted: NextAcc application is down (HTTP {ex.StatusCode}, HTML error page) — "
                             + "รายการที่เหลือคง PENDING ไว้รอรอบถัดไป", "SYSTEM");
@@ -2484,8 +2652,9 @@ namespace Take_Time_BangPhra.Integration
                             "NextAcc ไม่พร้อมใช้งาน (ไม่นับ retry): เซิร์ฟเวอร์ NextAcc start ไม่ขึ้น/ตอบหน้า error page — "
                             + "จะลองใหม่อัตโนมัติเมื่อ NextAcc กลับมา", null);
                         infrastructureFailed = true;
+                        serverDown = true;
                         _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessQueueAsync halted: NextAcc application is down — รายการที่เหลือคง PENDING ไว้รอรอบถัดไป", "SYSTEM");
+                            "ProcessQueueAsync halted: NextAcc application is down — รายการที่เหลือคง PENDING ไว้รอรอบถัดไป", "SYSTEM");
                     }
                     else
                     {
@@ -2498,7 +2667,78 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            NotifyQueueHealthIfNeeded(serverDown);
             return processed;
+        }
+
+        /// <summary>
+        /// ลบ Accounting_Sync_Log เก่าตามอายุที่ตั้งไว้ (วันละครั้ง). ตารางนี้เก็บ request+response
+        /// ของ **ทุก** API call — ช่วง NextAcc ล่มจะโตเร็วมาก ทำให้ DB อืดและหน้า log ค้าง
+        /// </summary>
+        private void PurgeOldSyncLogsIfDue()
+        {
+            int days = _config.SyncLogRetentionDays;
+            if (days <= 0) return;
+            if ((DateTime.Now - _lastLogPurge).TotalHours < 24) return;
+            _lastLogPurge = DateTime.Now;
+            try
+            {
+                // ลบเป็นก้อนเล็ก กันล็อกตารางนาน
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"DELETE TOP (5000) FROM Accounting_Sync_Log WHERE Created_Date < DATEADD(DAY, -@d, GETDATE())",
+                    new Dictionary<string, object> { { "@d", days } });
+            }
+            catch { /* best effort */ }
+        }
+
+        /// <summary>
+        /// แจ้งเตือน Telegram เมื่อคิวมีปัญหาที่ "ต้องมีคนมาดู" — เดิมรายการล้มเหลวเงียบอยู่ในหน้าคิว
+        /// จนกว่าจะมีคนเปิดดูเอง. จำกัดความถี่ด้วย Nexaacc_Queue_Alert_Hours (default 6 ชม.)
+        /// </summary>
+        private void NotifyQueueHealthIfNeeded(bool serverDown)
+        {
+            try
+            {
+                if (!_config.QueueAlertEnabled) return;
+                if ((DateTime.Now - _lastQueueAlert).TotalHours < _config.QueueAlertHours) return;
+                // timer เดินทุก 30 วิ — อย่าไปนับคิวใหม่ทุกรอบ
+                if ((DateTime.Now - _lastQueueHealthCheck).TotalMinutes < 15) return;
+                _lastQueueHealthCheck = DateTime.Now;
+
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        SUM(CASE WHEN Status = 'FAILED' AND Retry_Count >= Max_Retries THEN 1 ELSE 0 END) AS Dead,
+                        SUM(CASE WHEN Status IN ('PENDING','FAILED')
+                                  AND Created_Date < DATEADD(HOUR, -6, GETDATE()) THEN 1 ELSE 0 END) AS Stale
+                      FROM Accounting_Sync_Queue
+                      WHERE Status IN ('PENDING', 'FAILED')", null);
+                if (dt == null || dt.Rows.Count == 0) return;
+
+                int dead = dt.Rows[0]["Dead"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Dead"]) : 0;
+                int stale = dt.Rows[0]["Stale"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Stale"]) : 0;
+                if (dead == 0 && stale == 0 && !serverDown) return;
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("<b>⚠️ คิวบัญชี NextAcc ต้องตรวจสอบ</b>");
+                sb.AppendLine();
+                if (serverDown)
+                    sb.AppendLine("🔴 <b>NextAcc ไม่พร้อมใช้งาน</b> — เซิร์ฟเวอร์ตอบ error ระดับแอป\n     ระบบพักการยิงชั่วคราวและจะยิงต่อเองเมื่อกลับมา");
+                if (dead > 0)
+                    sb.AppendLine($"❌ <b>ล้มเหลวจนหมด retry:</b> {dead} รายการ (ต้องกด Retry เอง)");
+                if (stale > 0)
+                    sb.AppendLine($"🕐 <b>ค้างคิวเกิน 6 ชม.:</b> {stale} รายการ");
+                sb.AppendLine();
+                sb.Append("<i>ดูรายละเอียด: Admin → ตั้งค่า → NextAcc → คิว</i>");
+
+                _lastQueueAlert = DateTime.Now;   // ตั้งก่อนส่ง — ส่งไม่ได้ก็ไม่ต้องพยายามซ้ำทุกรอบ
+
+                string token = AppCfg.Get("TelegramTokenTakeTime");
+                if (string.IsNullOrEmpty(token)) return;
+                new TelegramBot2(token)
+                    .SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), sb.ToString())
+                    .GetAwaiter().GetResult();
+            }
+            catch { /* การแจ้งเตือนพังต้องไม่ทำให้คิวพัง */ }
         }
 
         /// <summary>NextAcc ตอบเป็นหน้า HTML error page / startup failure = แอปฝั่งนั้นล่มทั้งแอป
@@ -2507,19 +2747,12 @@ namespace Take_Time_BangPhra.Integration
         {
             string b = body ?? "";
             if (b.Length == 0) return false;
-            if (b.IndexOf("An error occurred while starting the application", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (b.IndexOf("A circular dependency was detected", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (b.IndexOf("Some services are not able to be constructed", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (b.IndexOf("HTTP Error 502", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (b.IndexOf("HTTP Error 503", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            // 5xx ที่ตอบกลับเป็น HTML (ไม่ใช่ JSON ของ API) = เว็บเซิร์ฟเวอร์/แอปพัง ไม่ใช่ validation
-            bool isHtml = b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0
-                       || b.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (isHtml && (b.IndexOf("InternalServerError", StringComparison.OrdinalIgnoreCase) >= 0
-                        || b.IndexOf("ServiceUnavailable", StringComparison.OrdinalIgnoreCase) >= 0
-                        || b.IndexOf("BadGateway", StringComparison.OrdinalIgnoreCase) >= 0
-                        || b.IndexOf("Exception", StringComparison.Ordinal) >= 0)) return true;
-            return false;
+            if (AccountingApiClient.LooksLikeServerDown(b)) return true;
+            // เคสที่ error ถูกห่อเป็นข้อความแล้ว (ไม่เหลือ body ดิบ)
+            return b.IndexOf("Server error InternalServerError", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("Server error BadGateway", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("Server error ServiceUnavailable", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("Server error GatewayTimeout", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsDnsError(Exception ex)

@@ -54,6 +54,13 @@ namespace Take_Time_BangPhra.Integration
         private static DateTime _authFailedUntil = DateTime.MinValue;
         private static string _lastAuthError = null;
 
+        // Server-down tracking — NextAcc ทั้งแอปล่ม (start ไม่ขึ้น / 502-503) ตอบ 5xx เป็นหน้า HTML
+        // ทุก endpoint. เดิมทุกรายการในคิวยิงซ้ำ 5 ครั้ง × N รายการ = retry storm ที่ไม่มีทางสำเร็จ
+        // และเผา Retry_Count จนรายการตกเป็น FAILED ถาวรทั้งที่ข้อมูลไม่ผิด
+        private static DateTime _serverDownUntil = DateTime.MinValue;
+        private static string _lastServerDownError = null;
+        private static readonly object _serverDownLock = new object();
+
         /// <summary>
         /// NextAcc X-Acting-User header — ระบุว่าผู้ใดทำรายการจริง
         /// NextAcc จะ resolve เป็น user จริงในบริษัท เพื่อแสดงชื่อผู้สร้างเอกสาร
@@ -246,6 +253,55 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>NextAcc ล่มทั้งแอป → พักการยิงชั่วคราว (คิวจะข้ามทั้ง batch แทนที่จะยิงรัว)</summary>
+        private void SetServerDown(string errorMessage)
+        {
+            lock (_serverDownLock)
+            {
+                _serverDownUntil = DateTime.Now.AddMinutes(_config.ServerDownCooldownMinutes);
+                _lastServerDownError = errorMessage;
+            }
+        }
+
+        /// <summary>เคลียร์สถานะ "NextAcc ล่ม" — เรียกเมื่อมี call สำเร็จ หรือผู้ใช้กด Test Connection</summary>
+        public static void ClearServerDown()
+        {
+            lock (_serverDownLock)
+            {
+                _serverDownUntil = DateTime.MinValue;
+                _lastServerDownError = null;
+            }
+        }
+
+        /// <summary>true ถ้าตอนนี้อยู่ในช่วงพักเพราะ NextAcc ล่ม</summary>
+        public static bool IsServerDown(out DateTime until, out string lastError)
+        {
+            lock (_serverDownLock)
+            {
+                until = _serverDownUntil;
+                lastError = _lastServerDownError;
+                return DateTime.Now < _serverDownUntil;
+            }
+        }
+
+        /// <summary>
+        /// body ที่ตอบกลับเป็นหน้า HTML error page / startup failure = แอปฝั่ง NextAcc ล่มทั้งแอป
+        /// ไม่ใช่ปัญหาข้อมูลของ request นี้ → ยิงซ้ำกี่ครั้งก็ไม่สำเร็จ ต้อง fail fast + พัก
+        /// </summary>
+        internal static bool LooksLikeServerDown(string body)
+        {
+            string b = body ?? "";
+            if (b.Length == 0) return false;
+            if (b.IndexOf("An error occurred while starting the application", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("A circular dependency was detected", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("Some services are not able to be constructed", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 502", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 503", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            bool isHtml = b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0
+                       || b.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0;
+            return isHtml && b.IndexOf("Exception", StringComparison.Ordinal) >= 0;
+        }
+
         /// <summary>
         /// Check if auth is in cooldown due to recent 401 failure.
         /// </summary>
@@ -287,6 +343,16 @@ namespace Take_Time_BangPhra.Integration
             {
                 errorDetail = ex.Message;
                 return false;
+            }
+
+            // NextAcc ล่มทั้งแอปเมื่อกี้ → ข้าม batch นี้ทั้งก้อน (ไม่เผา retry ของรายการในคิว)
+            lock (_serverDownLock)
+            {
+                if (DateTime.Now < _serverDownUntil)
+                {
+                    errorDetail = $"NextAcc ไม่พร้อมใช้งาน (พักถึง {_serverDownUntil:HH:mm:ss}) — {_lastServerDownError}";
+                    return false;
+                }
             }
 
             // Check auth cooldown
@@ -394,14 +460,32 @@ namespace Take_Time_BangPhra.Integration
                                 status, responseBody);
                         }
 
+                        // 5xx ที่ตอบเป็นหน้า HTML error page = แอป NextAcc ล่มทั้งแอป (start ไม่ขึ้น /
+                        // 502-503 จาก reverse proxy) → ยิงซ้ำอีก 4 ครั้งก็ได้ผลเดิม เสียเวลาและเผา
+                        // Retry_Count ของรายการในคิวทิ้งเปล่า ๆ. fail fast + พักทั้ง client
+                        if (status >= 500 && LooksLikeServerDown(responseBody))
+                        {
+                            string downMsg = $"NextAcc ไม่พร้อมใช้งาน: HTTP {status} ตอบกลับเป็นหน้า error page "
+                                           + "(แอปฝั่ง NextAcc start ไม่ขึ้น) — ไม่ใช่ปัญหาข้อมูลของรายการนี้";
+                            SetServerDown(downMsg);
+                            throw new ServerUnavailableException(downMsg, status, responseBody);
+                        }
+
                         // 408/429/5xx errors: retry
                         throw new HttpRequestException($"Server error {response.StatusCode}: {responseBody}");
                     }
+
+                    // call สำเร็จ → NextAcc กลับมาแล้ว เคลียร์สถานะพัก
+                    ClearServerDown();
 
                     if (typeof(T) == typeof(object) && string.IsNullOrWhiteSpace(responseBody))
                         return default(T);
 
                     return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
+                }
+                catch (ServerUnavailableException)
+                {
+                    throw; // แอปปลายทางล่ม — ยิงซ้ำไม่ช่วย
                 }
                 catch (AccountingApiException)
                 {
@@ -450,6 +534,19 @@ namespace Take_Time_BangPhra.Integration
             string diagnostic = lastException?.Message ?? "unknown error";
             if (lastException?.InnerException != null)
                 diagnostic += $" | Inner: {lastException.InnerException.Message}";
+
+            // 5xx ที่ยิงครบทุกครั้งแล้วยังพัง = ปลายทางล่ม ไม่ใช่ข้อมูลผิด → ให้คิวรู้ชนิดที่ถูกต้อง
+            // (เดิมโยน Exception ธรรมดา คิวจึงนับเป็นความผิดของรายการ แล้วเผา Retry_Count จนตาย)
+            if (LooksLikeServerDown(diagnostic)
+                || diagnostic.IndexOf("Server error InternalServerError", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error BadGateway", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error ServiceUnavailable", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error GatewayTimeout", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string downMsg = $"NextAcc ไม่พร้อมใช้งาน: ยิง {method.Method} {path} ครบ {MaxRetries + 1} ครั้งแล้วยังตอบ error ฝั่งเซิร์ฟเวอร์ — {diagnostic}";
+                SetServerDown(downMsg);
+                throw new ServerUnavailableException(downMsg, 0, diagnostic);
+            }
 
             throw new Exception(
                 $"Accounting API call failed after {MaxRetries + 1} attempts to {method.Method} {path}: {diagnostic}",
@@ -1715,6 +1812,14 @@ namespace Take_Time_BangPhra.Integration
                     $"ซึ่งเป็นปัญหาฝั่งเซิร์ฟเวอร์ NextAcc ไม่เกี่ยวกับ Integration Key\n" +
                     $"รายละเอียด: {ex.ResponseBody}");
             }
+            catch (ServerUnavailableException ex)
+            {
+                return new ConnectionTestResult(false,
+                    "🔴 เซิร์ฟเวอร์ NextAcc ไม่พร้อมใช้งาน (ไม่ใช่ปัญหา API Key หรือการตั้งค่าฝั่งเรา)\n\n" +
+                    $"URL: {targetUrl}\n{ex.Message}\n\n" +
+                    "แอปฝั่ง NextAcc ตอบกลับเป็นหน้า error page = start ไม่ขึ้น/ล่ม → ทุก endpoint จะใช้ไม่ได้\n" +
+                    "แจ้งผู้ดูแล NextAcc ให้แก้ก่อน แล้วค่อยกด Retry ในหน้าคิว", ex.StatusCode, ex.ResponseBody);
+            }
             catch (Exception ex)
             {
                 return new ConnectionTestResult(false, $"เชื่อมต่อไม่ได้: {ex.Message}\nURL: {targetUrl}");
@@ -1804,6 +1909,24 @@ namespace Take_Time_BangPhra.Integration
     public class AuthenticationFailedException : Exception
     {
         public AuthenticationFailedException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// ปลายทาง (NextAcc) ล่มทั้งแอป — 5xx / หน้า HTML error page / start ไม่ขึ้น.
+    /// **ไม่ใช่ความผิดของข้อมูลในรายการคิว** → คิวต้องคง PENDING ไม่นับ retry
+    /// แล้วหยุดรอบ รอ NextAcc กลับมาแล้วยิงต่อเอง (เหมือน DNS/Auth failure).
+    /// </summary>
+    public class ServerUnavailableException : Exception
+    {
+        public int StatusCode { get; }
+        public string ResponseBody { get; }
+
+        public ServerUnavailableException(string message, int statusCode, string responseBody)
+            : base(message)
+        {
+            StatusCode = statusCode;
+            ResponseBody = responseBody;
+        }
     }
 
     /// <summary>

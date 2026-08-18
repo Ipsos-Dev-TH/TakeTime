@@ -212,6 +212,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "mappings":
                     result = GetAccountMappings();
                     break;
+                case "healthCheck":
+                    result = RunIntegrationHealthCheck();
+                    break;
                 case "updateMapping":
                     result = UpdateAccountMapping();
                     break;
@@ -419,6 +422,9 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
+                // ทดสอบเอง = ต้องยิงจริงเสมอ ไม่ใช่ตอบจากสถานะ "พักเพราะ NextAcc ล่ม" ที่ค้างอยู่
+                Integration.AccountingApiClient.ClearServerDown();
+
                 var config = new Integration.AccountingConfig(ConnStr);
                 var client = new Integration.AccountingApiClient(config, ConnStr);
 
@@ -507,13 +513,24 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
+                // ผู้ใช้กดเอง = ตั้งใจลองใหม่ → ล้างสถานะ "พักเพราะ NextAcc ล่ม" ให้ยิงจริง
+                Integration.AccountingApiClient.ClearServerDown();
+
                 var sync = new Integration.AccountingSyncService(ConnStr);
                 int processed = System.Threading.Tasks.Task.Run(() => sync.ProcessQueueAsync(50)).Result;
+
+                // "0 รายการ" กำกวมมาก — แยกให้ชัดว่าคิวว่างจริง หรือรอบนี้ถูกข้าม
+                if (processed == 0 && !string.IsNullOrEmpty(sync.LastRunSkippedReason))
+                    return new Dictionary<string, object>
+                    {
+                        { "success", false },
+                        { "message", "ยังไม่ได้ประมวลผล: " + sync.LastRunSkippedReason }
+                    };
 
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"ประมวลผลสำเร็จ {processed} รายการ" }
+                    { "message", processed > 0 ? $"ประมวลผลสำเร็จ {processed} รายการ" : "ไม่มีรายการรอประมวลผล" }
                 };
             }
             catch (Exception ex)
@@ -1185,6 +1202,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
                 if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
+
+                // ผู้ใช้กด Retry เอง → ล้างสถานะพัก ไม่งั้นรายการจะถูกข้ามเงียบ ๆ
+                Integration.AccountingApiClient.ClearServerDown();
+
                 var sync = new Integration.AccountingSyncService(ConnStr);
 
                 // Retry บนใบเสร็จที่ COMPLETED แล้ว = "re-post ตามหลักการบัญชีปัจจุบัน":
@@ -1329,6 +1350,151 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
+        /// <summary>
+        /// 🩺 ตรวจสุขภาพ integration ก่อนเจอปัญหาตอน sync จริง
+        /// เกิดจากเคส "ไม่พบผังบัญชี: 21240" ที่รู้ตัวตอนเอกสารยิงไม่ผ่านแล้วเท่านั้น
+        /// ตรวจ: mapping ที่ชี้รหัสบัญชีที่ NextAcc ไม่มี / แหล่งเงินที่ยังไม่ได้ผูกบัญชี /
+        ///       ผังบัญชีเก่าค้าง / คิวที่ตายค้าง / สถานะ "NextAcc ล่ม"
+        /// </summary>
+        private Dictionary<string, object> RunIntegrationHealthCheck()
+        {
+            var issues = new List<Dictionary<string, object>>();
+            Action<string, string, string> add = (level, title, detail) =>
+                issues.Add(new Dictionary<string, object> { { "level", level }, { "title", title }, { "detail", detail } });
+
+            try
+            {
+                // ── 1) NextAcc ล่มอยู่ตอนนี้ไหม ────────────────────────────────
+                DateTime downUntil; string downErr;
+                if (Integration.AccountingApiClient.IsServerDown(out downUntil, out downErr))
+                    add("error", "NextAcc ไม่พร้อมใช้งาน",
+                        $"ระบบพักการยิงถึง {downUntil:HH:mm:ss} — {downErr}");
+
+                // ── 2) ผังบัญชีถูกดึงมาแล้วหรือยัง / เก่าแค่ไหน ────────────────
+                bool haveCoa = false;
+                DataTable coa = null;
+                try
+                {
+                    coa = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT COUNT(*) AS N, MAX(Last_Synced) AS LastSync FROM Accounting_Nexaacc_Accounts", null);
+                }
+                catch
+                {
+                    add("warn", "ยังไม่มีตารางเก็บผังบัญชี",
+                        "กดปุ่ม 'ดึงผังบัญชี' หนึ่งครั้ง ระบบจะสร้างตารางและดึงผังบัญชีจาก NextAcc ให้");
+                }
+                if (coa != null && coa.Rows.Count > 0)
+                {
+                    int n = coa.Rows[0]["N"] != DBNull.Value ? Convert.ToInt32(coa.Rows[0]["N"]) : 0;
+                    haveCoa = n > 0;
+                    if (n == 0)
+                        add("warn", "ยังไม่ได้ดึงผังบัญชีจาก NextAcc",
+                            "กดปุ่ม 'ดึงผังบัญชี' ก่อน ระบบจึงจะตรวจ mapping ให้ได้ และ dropdown เลือกบัญชีจะว่าง");
+                    else if (coa.Rows[0]["LastSync"] != DBNull.Value)
+                    {
+                        var last = Convert.ToDateTime(coa.Rows[0]["LastSync"]);
+                        if ((DateTime.Now - last).TotalDays > 30)
+                            add("warn", "ผังบัญชีเก่ากว่า 30 วัน",
+                                $"ดึงล่าสุด {last:dd/MM/yyyy HH:mm} — ถ้ามีการเพิ่ม/แก้บัญชีฝั่ง NextAcc ควรกด 'ดึงผังบัญชี' ใหม่");
+                    }
+                }
+
+                // ── 3) mapping ที่ชี้รหัสบัญชีที่ NextAcc ไม่มี (เคส 21240) ─────
+                if (haveCoa)
+                {
+                    try
+                    {
+                    var bad = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT m.TakeTime_Code, m.TakeTime_Description, m.Nexaacc_AccountCode
+                          FROM Accounting_Account_Mapping m
+                          WHERE ISNULL(m.Is_Active, 1) = 1
+                            AND ISNULL(m.Nexaacc_AccountCode, '') <> ''
+                            AND NOT EXISTS (SELECT 1 FROM Accounting_Nexaacc_Accounts a
+                                            WHERE a.Account_Code = m.Nexaacc_AccountCode)
+                          ORDER BY m.TakeTime_Code", null);
+                    if (bad != null && bad.Rows.Count > 0)
+                    {
+                        var lines = new List<string>();
+                        foreach (DataRow r in bad.Rows)
+                            lines.Add($"{r["TakeTime_Code"]} → {r["Nexaacc_AccountCode"]} ({r["TakeTime_Description"]})");
+                        add("error", $"mapping ชี้รหัสบัญชีที่ NextAcc ไม่มี ({bad.Rows.Count} รายการ)",
+                            string.Join("\n", lines)
+                            + "\n\nวิธีแก้: สร้างบัญชีรหัสนี้ใน NextAcc แล้วกด 'ดึงผังบัญชี' หรือแก้ mapping ให้ชี้รหัสที่มีจริง"
+                            + " — ถ้าไม่แก้ เอกสารที่ใช้ mapping นี้จะ sync ไม่ผ่าน (API 400 'ไม่พบผังบัญชี')");
+                    }
+                    }
+                    catch { /* ตาราง mapping ยังไม่มี */ }
+                }
+
+                // ── 4) แหล่งรับ/จ่ายเงินที่ยังไม่ได้ผูกบัญชี NextAcc ────────────
+                try
+                {
+                    var noAcc = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT Paid_How FROM Account_Paid_How
+                          WHERE Status = 'True'
+                            AND ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') = ''", null);
+                    if (noAcc != null && noAcc.Rows.Count > 0)
+                    {
+                        var names = new List<string>();
+                        foreach (DataRow r in noAcc.Rows) names.Add(r["Paid_How"]?.ToString() ?? "");
+                        add("warn", $"แหล่งเงินยังไม่ได้ผูกบัญชี NextAcc ({noAcc.Rows.Count} รายการ)",
+                            string.Join(", ", names)
+                            + "\n\nผลที่ตามมา: NextAcc จะเดาบัญชีเงินสด/ธนาคารเองตามวิธีชำระ (เช่น จ่ายผ่านกสิกร แต่ลงกรุงไทย)"
+                            + " — ผูกได้ที่หัวข้อ 'แหล่งเงิน' ในหน้านี้");
+                    }
+                }
+                catch { /* ตารางอาจยังไม่มีคอลัมน์นี้ */ }
+
+                // ── 5) คิวที่ตายค้าง / ค้างนาน ─────────────────────────────────
+                var q = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT
+                        SUM(CASE WHEN Status = 'FAILED' AND Retry_Count >= Max_Retries THEN 1 ELSE 0 END) AS Dead,
+                        SUM(CASE WHEN Status = 'PROCESSING' THEN 1 ELSE 0 END) AS Busy,
+                        SUM(CASE WHEN Status IN ('PENDING','FAILED')
+                                  AND Created_Date < DATEADD(HOUR, -6, GETDATE()) THEN 1 ELSE 0 END) AS Stale
+                      FROM Accounting_Sync_Queue", null);
+                if (q != null && q.Rows.Count > 0)
+                {
+                    int dead = q.Rows[0]["Dead"] != DBNull.Value ? Convert.ToInt32(q.Rows[0]["Dead"]) : 0;
+                    int busy = q.Rows[0]["Busy"] != DBNull.Value ? Convert.ToInt32(q.Rows[0]["Busy"]) : 0;
+                    int stale = q.Rows[0]["Stale"] != DBNull.Value ? Convert.ToInt32(q.Rows[0]["Stale"]) : 0;
+                    if (dead > 0)
+                        add("error", $"คิวล้มเหลวจนหมด retry: {dead} รายการ",
+                            "เอกสารเหล่านี้ยังไม่ขึ้น NextAcc — เปิดดูสาเหตุที่ตารางคิวด้านล่าง แก้ต้นเหตุแล้วกด 'Retry ทั้งหมด'");
+                    if (stale > 0)
+                        add("warn", $"คิวค้างเกิน 6 ชั่วโมง: {stale} รายการ", "ตรวจว่า timer ทำงานอยู่และ NextAcc ตอบปกติ");
+                    if (busy > 3)
+                        add("warn", $"รายการค้างสถานะ PROCESSING: {busy} รายการ",
+                            "ปกติควรมีไม่กี่รายการ — ถ้าค้างนานแปลว่า worker ตายกลางคัน ระบบจะคืนเป็น PENDING ให้เองตามเวลาที่ตั้งไว้");
+                }
+
+                // ── 6) การตั้งค่าคีย์ ──────────────────────────────────────────
+                var cfg = new Integration.AccountingConfig(ConnStr);
+                if (!cfg.IsConfigured)
+                    add("error", "ยังตั้งค่า NextAcc ไม่ครบ", "ต้องมี Base URL + API Key (+ Company ID สำหรับ company endpoints)");
+                else
+                {
+                    if (!cfg.IsIntegrationKey)
+                        add("error", "Integration Key ไม่ใช่คีย์ขึ้นต้น int_",
+                            "endpoint /api/integration/* ต้องใช้คีย์ int_ เท่านั้น — คีย์ acc_ จะ TestConnection ไม่ผ่าน (401) และ sync หลักใช้ไม่ได้");
+                    if (cfg.CompanyId == Guid.Empty)
+                        add("warn", "ยังไม่ได้ตั้ง Company ID",
+                            "ฟีเจอร์ที่ใช้ company endpoints (OCR, override บัญชีเงิน, ลายเซ็นผู้จ่าย, มัดจำ deferred VAT) จะถูกข้าม");
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "checkedAt", DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss") },
+                    { "issues", issues }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
         /// <summary>ยิง query แบบมี CommandTimeout — คืน null + timedOut=true แทนที่จะค้างรอ</summary>
         private DataTable QueryWithTimeout(string sql, Dictionary<string, object> pars, int seconds, out bool timedOut)
         {
@@ -1387,6 +1553,8 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
+                Integration.AccountingApiClient.ClearServerDown();
+
                 bool isOwner = Session["User"]?.ToString() == "Owner";
                 string sql = @"UPDATE Accounting_Sync_Queue
                       SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
