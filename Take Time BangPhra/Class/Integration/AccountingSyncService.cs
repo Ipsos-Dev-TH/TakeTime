@@ -4634,6 +4634,45 @@ namespace Take_Time_BangPhra.Integration
                     return (false, $"ไม่พบประวัติ sync ของใบ {receiptNumber} — กด \"ส่งแก้ไขขึ้น NextAcc\" หนึ่งครั้งเพื่อสร้างประวัติก่อน");
 
                 long qid = Convert.ToInt64(q.Rows[0]["ID"]);
+
+                // เอกสารหนึ่งใบต้องมีคู่ได้ใบเดียว — ถ้ามีใบเสร็จอื่นชี้มาที่เอกสารนี้อยู่
+                // (เช่นเคยกดผูกผิดใบ) ต้องปลดของเดิมออกก่อน ไม่งั้นทั้งสองใบจะแย่งคู่กัน
+                string stolenFrom = null;
+                try
+                {
+                    var dup = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ID, Payload FROM Accounting_Sync_Queue
+                          WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                            AND Nexaacc_Response_Id = @rid AND ID <> @qid",
+                        new Dictionary<string, object> { { "@rid", docId.ToString() }, { "@qid", qid } });
+                    if (dup != null && dup.Rows.Count > 0)
+                    {
+                        var names = new List<string>();
+                        foreach (DataRow dr in dup.Rows)
+                        {
+                            var m = System.Text.RegularExpressions.Regex.Match(
+                                dr["Payload"]?.ToString() ?? "", "\"receiptNumber\"\\s*:\\s*\"([^\"]*)\"");
+                            string other = m.Success ? m.Groups[1].Value : null;
+                            if (!string.IsNullOrEmpty(other) && other != receiptNumber)
+                            {
+                                names.Add(other);
+                                // ปลด marker ของใบที่ถูกแย่งคู่ ให้กลับไปสถานะ "ยังไม่ผูก"
+                                SetReceiptPaymentMarker(other, null);
+                            }
+                            _code.DatabaseInsertSafe(_connectionString,
+                                "UPDATE Accounting_Sync_Queue SET Nexaacc_Response_Id = NULL, Nexaacc_Document_Number = NULL WHERE ID = @id",
+                                new Dictionary<string, object> { { "@id", Convert.ToInt64(dr["ID"]) } });
+                        }
+                        if (names.Count > 0)
+                        {
+                            stolenFrom = string.Join(", ", names.Distinct());
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"RelinkReceiptToNextAccDoc: ปลดการผูกเดิมของใบ {stolenFrom} ออกจากเอกสาร {docId} ก่อนผูกให้ {receiptNumber}", "SYSTEM");
+                        }
+                    }
+                }
+                catch { /* best effort — การผูกใบใหม่สำคัญกว่า */ }
+
                 _code.DatabaseInsertSafe(_connectionString,
                     @"UPDATE Accounting_Sync_Queue
                       SET Status = 'COMPLETED', Nexaacc_Response_Id = @rid, Nexaacc_Document_Number = @num,
@@ -4652,6 +4691,9 @@ namespace Take_Time_BangPhra.Integration
                     + $"(สถานะ {statusText}) — ปุ่มแก้ไข/ส่งแก้ไขกลับมาใช้ได้";
                 if (isDraft)
                     msg += "\n⚠ เอกสารยังเป็นฉบับร่าง ยังไม่ลงบัญชี — กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อให้ระบบอัปเดตข้อมูลแล้วอนุมัติให้";
+                if (stolenFrom != null)
+                    msg += $"\n🔧 ปลดการผูกเดิมของใบ {stolenFrom} ออกแล้ว (เอกสารหนึ่งใบผูกได้กับใบเสร็จเดียว) "
+                        + $"— ถ้าใบ {stolenFrom} เคยมีเอกสารของตัวเองบน NextAcc ให้กดผูกคืนที่แถวเอกสารนั้น";
                 _code.Logs(_connectionString, "AccountingSync",
                     $"RelinkReceiptToNextAccDoc: {receiptNumber} → {docId} ({nexaaccDocNumber}) status={statusText}({statusCode}) queue#{qid}", "SYSTEM");
                 return (true, msg);

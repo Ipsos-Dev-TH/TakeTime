@@ -1029,18 +1029,28 @@ namespace Take_Time_BangPhra.Account
                 nr["IsNaPaymentDoc"] = IsNextAccPaymentReceipt(nd) ? "1" : "0";
                 // หาใบ local ของการจองเดียวกัน — แถวนี้ไม่มีปุ่มแก้ไขเพราะไม่ใช่ใบของระบบเรา
                 // แต่ผู้ใช้มักกำลังตามหา "ใบที่แก้ไขได้" อยู่ → ชี้ให้เลยว่าอยู่แถวไหน
+                // ⚠ การจองหนึ่งมีใบเสร็จได้หลายใบ (มัดจำ + เช็คเอาท์) — ห้ามหยิบ "ใบแรกที่เจอ"
+                //   (เคยผูกใบมัดจำเข้ากับเอกสารเช็คเอาท์มาแล้ว = ขโมยสายจับคู่ของใบอื่น)
+                //   เงื่อนไข: ต้องเป็นใบที่ "ยังไม่มีคู่บน NextAcc" และต้องเหลือผู้สมัครเพียงใบเดียว
+                //   เท่านั้น ถ้ากำกวมให้ไม่เสนอปุ่มผูก ปลอดภัยกว่าเดาผิด
                 nr["LocalTwinId"] = "";
                 if (dt.Columns.Contains("Reservation_ID") && nr["Reservation_ID"] != DBNull.Value)
                 {
                     string naRes = nr["Reservation_ID"].ToString();
+                    string onlyCandidate = null;
+                    int candidates = 0;
                     foreach (DataRow lr in dt.Rows)
                     {
                         if ((lr["IsNextAccOnly"]?.ToString() ?? "0") != "0") continue;
                         if (lr["Reservation_ID"] == DBNull.Value) continue;
                         if (lr["Reservation_ID"].ToString() != naRes) continue;
-                        nr["LocalTwinId"] = lr["ID"]?.ToString() ?? "";
-                        break;
+                        // จับคู่กับเอกสาร NextAcc ใบอื่นอยู่แล้ว → ไม่ใช่ใบที่ขาดคู่
+                        if (!string.IsNullOrEmpty(lr["NextAccId"]?.ToString())) continue;
+                        candidates++;
+                        onlyCandidate = lr["ID"]?.ToString() ?? "";
                     }
+                    if (candidates == 1) nr["LocalTwinId"] = onlyCandidate;
+                    else if (candidates > 1) nr["LocalTwinId"] = "*AMBIGUOUS*";
                 }
                 dt.Rows.Add(nr);
                 added++;
@@ -1936,6 +1946,12 @@ namespace Take_Time_BangPhra.Account
                         // "สายจับคู่ขาด" (void→สร้างใหม่หลายรอบ / ลบเอกสารอื่นทิ้งบน NextAcc)
                         // → ผูกกลับให้ ไม่ต้องสร้างใบซ้ำ (ซึ่งจะทำให้ยอดมัดจำ/ชำระเบิล)
                         string twinLocal = dkEdit["LocalTwinId"]?.ToString() ?? "";
+                        if (twinLocal == "*AMBIGUOUS*")
+                        {
+                            ShowError("การจองนี้มีใบเสร็จหลายใบที่ยังไม่มีคู่บน NextAcc — ระบบเลือกให้เองไม่ได้ "
+                                + "กรุณาใช้ปุ่ม \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบที่ต้องการแทน");
+                            return;
+                        }
                         if (!string.IsNullOrEmpty(twinLocal))
                         {
                             var linkSvc = new AccountingSyncService(conn);
@@ -2289,9 +2305,11 @@ namespace Take_Time_BangPhra.Account
                 // ถ้าการจองเดียวกันมีใบ local อยู่ → ชี้ไปที่แถวนั้น (ผู้ใช้มักหาไม่เจอแล้วคิดว่าแก้ไม่ได้แล้ว)
                 string twin = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
                 if (!voided)
-                    lblSync.Text += string.IsNullOrEmpty(twin)
-                        ? "<div style='font-size:10px;color:#888;margin-top:2px;'>ไม่มีใบนี้ในระบบ TakeTime จึงแก้ไขไม่ได้</div>"
-                        : $"<div style='font-size:10px;color:#888;margin-top:2px;'>แก้ไขได้ที่ใบ <b>{Server.HtmlEncode(twin)}</b> (การจองเดียวกัน)</div>";
+                    lblSync.Text += twin == "*AMBIGUOUS*"
+                        ? "<div style='font-size:10px;color:#888;margin-top:2px;'>การจองนี้มีใบเสร็จหลายใบที่ยังไม่มีคู่ — ผูกอัตโนมัติไม่ได้ ใช้ปุ่ม \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบที่ต้องการแทน</div>"
+                        : string.IsNullOrEmpty(twin)
+                            ? "<div style='font-size:10px;color:#888;margin-top:2px;'>ไม่มีใบนี้ในระบบ TakeTime จึงแก้ไขไม่ได้</div>"
+                            : $"<div style='font-size:10px;color:#888;margin-top:2px;'>แก้ไขได้ที่ใบ <b>{Server.HtmlEncode(twin)}</b> (การจองเดียวกัน)</div>";
                 btnSync.Visible = false;
                 try
                 {
@@ -2318,7 +2336,8 @@ namespace Take_Time_BangPhra.Account
                             // ปุ่ม "ดึงกลับ": สร้าง Account_Receipt/Payment_History + คืนมัดจำเข้าการจอง
                             // มีใบ local ของการจองนี้อยู่แล้ว → ปุ่มนี้คือ "ผูกกลับ" ไม่ใช่ "สร้างใบใหม่"
                             string twinId = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
-                            if (!string.IsNullOrEmpty(twinId))
+                            if (twinId == "*AMBIGUOUS*") { bEdit.Visible = false; }
+                            else if (!string.IsNullOrEmpty(twinId))
                             {
                                 bEdit.Text = "🔗 ผูกกับใบในระบบ";
                                 bEdit.ToolTip = $"ผูกเอกสารนี้กลับเข้ากับใบ {twinId} — ปุ่มแก้ไข/ส่งแก้ไขจะกลับมาใช้ได้ (ไม่แตะบัญชี ไม่สร้างเอกสารใหม่)";
