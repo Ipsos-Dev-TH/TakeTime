@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.9 · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.10 · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -4779,11 +4779,17 @@ namespace Take_Time_BangPhra.Integration
                             .GetAwaiter().GetResult();
                         if (!string.IsNullOrEmpty(rawJson))
                         {
-                            var mt = System.Text.RegularExpressions.Regex.Match(rawJson, "\"contactType\"\\s*:\\s*(\"[^\"]*\"|[0-9]+|null)");
-                            var mb = System.Text.RegularExpressions.Regex.Match(rawJson, "\"branchCode\"\\s*:\\s*(\"[^\"]*\"|null)");
-                            verify = "ค่าที่ NextAcc เก็บจริงตอนนี้: contactType="
-                                + (mt.Success ? mt.Groups[1].Value : "(ไม่พบในคำตอบ)")
-                                + "  branchCode=" + (mb.Success ? mb.Groups[1].Value : "(ไม่พบในคำตอบ)");
+                            Func<string, string> pick = key =>
+                            {
+                                var m = System.Text.RegularExpressions.Regex.Match(rawJson,
+                                    "\"" + key + "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[0-9]+|null|true|false)");
+                                return m.Success ? m.Groups[1].Value : "(ไม่พบ)";
+                            };
+                            verify = "ค่าที่ NextAcc เก็บจริงตอนนี้:"
+                                + "\n      name        = " + pick("name")
+                                + "\n      taxId       = " + pick("taxId")
+                                + "\n      contactType = " + pick("contactType")
+                                + "\n      branchCode  = " + pick("branchCode");
                         }
                     }
                     catch (Exception vx) { verify = "อ่าน contact กลับมาตรวจไม่ได้: " + vx.Message; }
@@ -9169,16 +9175,23 @@ namespace Take_Time_BangPhra.Integration
                             string patchBranch = (info.BranchCode ?? "").Trim();
                             if (!System.Text.RegularExpressions.Regex.IsMatch(patchBranch, @"^\d{5}$"))
                                 patchBranch = isJuristic ? "00000" : null;
-                            // ⚠ ต้องแพตช์ "ทุกครั้ง" ไม่ใช่เฉพาะนิติบุคคล — upsert ของ integration
-                            //   ไม่เคยทับ ContactType เลย ⇒ ลูกค้าที่เปลี่ยนชนิด (บุคคล↔นิติบุคคล)
-                            //   จะค้างชนิดเดิมตลอด. เดิมข้ามเคส "เปลี่ยนกลับเป็นบุคคลธรรมดา"
+                            // ⚠ ต้องแพตช์ "ทุกครั้ง" และต้องส่ง **ทุกฟิลด์ที่แก้ได้** ไม่ใช่แค่ 2 ตัว
+                            //   upsert ของ integration ไม่ทับข้อมูล contact ที่มีอยู่แล้ว (พบจริง:
+                            //   ทั้งชื่อและชนิดผู้ติดต่อค้างเป็นค่าเก่า ทั้งที่ส่งค่าใหม่ไปแล้ว)
+                            //   ⇒ ใช้ company PUT เป็นตัวอัปเดตหลักเมื่อเรียกได้ (verified ว่าทับจริง)
+                            //   ส่งเฉพาะค่าที่มี — null = ไม่แตะ (กันลบข้อมูลเดิมทิ้งโดยไม่ตั้งใจ)
                             await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
                             {
+                                Name = string.IsNullOrWhiteSpace(info.Name) ? null : info.Name.Trim(),
+                                TaxId = taxIdOk ? info.TaxId.Trim() : null,
+                                Address = string.IsNullOrWhiteSpace(info.Address) ? null : info.Address.Trim(),
+                                Phone = string.IsNullOrWhiteSpace(info.Phone) ? null : info.Phone.Trim(),
+                                Email = string.IsNullOrWhiteSpace(info.Email) ? null : info.Email.Trim(),
                                 BranchCode = patchBranch,
                                 ContactType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual
                             });
-                            _lastContactPatchNote = $"อัปเดตชนิดผู้ติดต่อเป็น {(isJuristic ? "นิติบุคคล" : "บุคคลธรรมดา")}"
-                                + $" สาขา {(patchBranch ?? "-")} สำเร็จ (company PUT)";
+                            _lastContactPatchNote = $"อัปเดตผ่าน company PUT: ชื่อ/เลขภาษี/ที่อยู่ + ชนิด "
+                                + $"{(isJuristic ? "นิติบุคคล" : "บุคคลธรรมดา")} สาขา {(patchBranch ?? "-")}";
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"{logPrefix}: patch contact {info.NexaaccContactId} branch={patchBranch ?? "-"} " +
                                 $"type={(isJuristic ? "Juristic" : "Individual")} ผ่าน company PUT (int_ upsert ไม่ทับ field เดิม)", "SYSTEM");
