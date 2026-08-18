@@ -88,6 +88,20 @@ namespace Take_Time_BangPhra.Integration
         public int SyncLogRetentionDays =>
             int.TryParse(GetConfig("Nexaacc_SyncLog_Retention_Days", "90"), out var v) && v >= 0 ? v : 90;
 
+        /// <summary>
+        /// ขายเงินสด B2B ให้ออก **เอกสารใบเดียว** ผ่าน company /document
+        /// (<c>DocumentType=TaxInvoice + IssuedAsCashReceipt=true</c>) แทนเส้น integration invoice
+        ///
+        /// เหตุผล: production NextAcc ยังไม่ honor <c>isCashSale</c> บน /api/integration/invoices
+        /// → ใบกำกับเปิดลูกหนี้ แล้วระบบต้องปิดด้วย payment ทีละงวด ⇒ ลูกค้าได้ **3 ใบ**
+        /// (ใบกำกับ 1 + ใบเสร็จรับชำระ 2 — ใบหนึ่งเป็นยอดมัดจำที่เคยออกใบเสร็จไปแล้ว ดูเหมือนซ้ำ)
+        /// เส้น company /document ลง Dr เงินสด + กลับมัดจำในใบเดียว ไม่เปิดลูกหนี้ ไม่มีใบเสร็จแยก
+        ///
+        /// default 0 (ปิด) — เปิดแล้วต้องตรวจ JE ใบแรกจริงก่อนใช้ต่อ; ระบบมี verify + fallback
+        /// (BalanceDue ไม่เป็น 0 = NextAcc ไม่ลงแบบเงินสด → settle ตามเส้นเดิม GL ยังถูก)
+        /// </summary>
+        public bool IsCashSaleCompanyDoc => GetConfig("Nexaacc_CashSale_CompanyDoc", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>แจ้งเตือน Telegram เมื่อคิวมีรายการล้มเหลวค้าง / NextAcc ล่ม (default เปิด)</summary>
         public bool QueueAlertEnabled => GetConfig("Nexaacc_Queue_Alert", "1").Equals("1", StringComparison.OrdinalIgnoreCase);
 

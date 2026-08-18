@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -1976,7 +1976,9 @@ namespace Take_Time_BangPhra.Integration
             string paymentMethod, DateTime paymentDate, string customerName, Guid contactId,
             string paymentAccountId, bool hasVat, string receiptNumber,
             bool isDeposit = false, bool depositVatAtReceipt = false, bool deferOutputVat = false,
-            int documentType = NexaaccDocumentType.Receipt)
+            int documentType = NexaaccDocumentType.Receipt,
+            bool issuedAsCashReceipt = false, decimal depositApplied = 0m, string depositRef = null,
+            bool depositDrivesJournal = false)
         {
             var docLines = new List<DocumentLineRequest>();
 
@@ -2016,7 +2018,10 @@ namespace Take_Time_BangPhra.Integration
             // TaxInvoice = เอกสารเปิดลูกหนี้ ปิดด้วย payment แยก (SettleReceiptInNextAcc) —
             // ห้ามส่ง PaymentDate/PaymentAccountId (ฟิลด์เงินสดของ Receipt/ReceiptVoucher)
             // กัน NextAcc ตีความเป็นรับเงินสดในใบ → เงินสดเบิลกับ payment ที่ settle ตามมา
-            bool isArDoc = documentType == NexaaccDocumentType.TaxInvoice;
+            // ⚠ ยกเว้น "ขายเงินสดใบเดียว": TaxInvoice + IssuedAsCashReceipt = NextAcc ลง Dr เงินสด
+            //   ในใบเลย ไม่เปิดลูกหนี้ และไม่ออกใบเสร็จรับชำระแยก → ต้องส่ง PaymentDate/PaymentAccountId
+            bool cashSaleSingleDoc = documentType == NexaaccDocumentType.TaxInvoice && issuedAsCashReceipt;
+            bool isArDoc = documentType == NexaaccDocumentType.TaxInvoice && !cashSaleSingleDoc;
 
             return new CreateDocumentRequest
             {
@@ -2045,6 +2050,13 @@ namespace Take_Time_BangPhra.Integration
                 Notes = isDeposit
                     ? $"รับมัดจำ - การจอง #{reservationId} ({customerName})"
                     : $"รับชำระ - การจอง #{reservationId} ({customerName})",
+                // ขายเงินสดใบเดียว: หัวเอกสาร upgrade เป็น "ใบกำกับภาษี/ใบเสร็จรับเงิน" + ไม่มีใบเสร็จแยก
+                IssuedAsCashReceipt = cashSaleSingleDoc ? (bool?)true : null,
+                // หักมัดจำในใบ — DepositAppliedDrivesJournal=true ให้ NextAcc กลับ 217xx/21913 ใน JE ของใบเอง
+                // (ต้องเลิกโพสต์ JV ฝั่งเราพร้อมกัน ไม่งั้นกลับ 2 รอบ); false = display-only ฝั่งเราโพสต์ JV
+                DepositAppliedAmount = depositApplied > 0.005m ? (decimal?)depositApplied : null,
+                DepositAppliedRef = depositApplied > 0.005m ? depositRef : null,
+                DepositAppliedDrivesJournal = depositApplied > 0.005m && depositDrivesJournal,
                 Lines = docLines
             };
         }

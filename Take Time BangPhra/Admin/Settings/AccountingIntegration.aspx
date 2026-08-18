@@ -388,6 +388,22 @@
                         <br/><small style="color:#999;">(toggle ทดลอง isCashSale เดิม — TaxReceipt_SingleDoc / CashSale_Deposit / NativeA — <b>เอาออกแล้ว</b>: ตัวแรก 2 ตัวไม่มีผลต่อโค้ด, การหักมัดจำใช้ drives ผ่านค่าแนะนำแทน)</small>
                     </div>
                 </div>
+                <div class="config-item" style="background:#e8f5e9; border:1px solid #a5d6a7; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleCompanyDoc" />
+                        📄 ขายสด B2B ออก <b>เอกสารใบเดียว</b> (ใบกำกับภาษี/ใบเสร็จรับเงิน) — แก้ปัญหาได้ 3 ใบ
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #43a047; padding-left:8px;">
+                        ปิดอยู่ = ใช้เส้น integration invoice ซึ่ง production NextAcc <b>ยังไม่ honor isCashSale</b>
+                        → ใบกำกับเปิดลูกหนี้ แล้วระบบต้องปิดด้วยใบรับชำระทีละงวด ⇒ ลูกค้าได้ <b>3 ใบ</b>
+                        (ใบกำกับ 1 + ใบรับชำระ 2 ซึ่งใบยอดมัดจำดูเหมือนออกซ้ำกับใบเสร็จมัดจำเดิม)
+                        <br />เปิด = ยิงผ่าน company <code>/document</code> ด้วย <code>TaxInvoice + IssuedAsCashReceipt</code>
+                        → NextAcc ลง <b>Dr เงินสด + กลับมัดจำ ในใบเดียว ไม่เปิดลูกหนี้ ไม่มีใบรับชำระแยก</b>
+                        + หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + e-Tax
+                        <br /><strong style="color:#c0392b;">⚠ ต้องตรวจ JE ใบแรกจริงก่อนใช้ต่อ</strong> — ถ้า NextAcc
+                        ยังเปิดลูกหนี้ ระบบจะ fallback settle ให้เอง (GL ยังถูก แต่ได้ใบเสร็จเพิ่มเหมือนเดิม) และเขียน log ไว้
+                    </div>
+                </div>
                 <div class="config-item" style="background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px;">
                     <label>
                         <input type="checkbox" id="cfgCashSaleUseReceipt" />
@@ -1345,6 +1361,7 @@
                 document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
                 document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
+                document.getElementById('cfgCashSaleCompanyDoc').checked = !!cfg.cashSaleCompanyDoc;
                 document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
                 document.getElementById('cfgStockInSkipJournal').checked = !!cfg.stockInSkipJournal;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
@@ -1470,6 +1487,7 @@
                 postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
                 autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
                 cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
+                cashSaleCompanyDoc: document.getElementById('cfgCashSaleCompanyDoc').checked,
                 stockInUseGRNI: document.getElementById('cfgStockInUseGRNI').checked,
                 stockInSkipJournal: document.getElementById('cfgStockInSkipJournal').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,

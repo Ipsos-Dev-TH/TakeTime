@@ -200,6 +200,20 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>ลายเซ็นผู้ทำเอกสาร/ผู้รับเงิน (data-URI หรือ base64) — NextAcc field
         /// "preparerSignatureBase64". คู่กับ PreparerName สำหรับช่อง "ผู้รับเงิน/ผู้จัดทำ".</summary>
         public string PreparerSignatureBase64 { get; set; }
+
+        /// <summary>
+        /// ขายเงินสด "ใบเดียวจบ" — verified vs Wachira-d/Accounting (CreateDocumentRequest):
+        /// <c>DocumentType=TaxInvoice + IssuedAsCashReceipt=true</c> → AutoPost ลงแบบเงินสด
+        /// (<b>Dr เงินสด/ธนาคาร (PaymentAccountId) + กลับมัดจำ 217xx/21913 ถ้ามี /
+        /// Cr รายได้ + Cr 21911 — ไม่ตั้งลูกหนี้</b>) และ <b>ไม่ออกใบเสร็จหลักฐานแยก</b>
+        /// หัวเอกสาร upgrade เป็น "ใบกำกับภาษี/ใบเสร็จรับเงิน" (ComputeDocumentTitle) + e-Tax T03
+        /// ⇒ แก้ปัญหา "1 ใบกำกับ + ใบเสร็จรับชำระอีก 2 ใบ" ที่เกิดจากเส้น integration
+        /// (production ยังไม่รองรับ isCashSale จึงเปิดลูกหนี้แล้วปิดด้วย payment ทีละงวด)
+        /// </summary>
+        public bool? IssuedAsCashReceipt { get; set; }
+
+        /// <summary>ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี → ยกเว้น gate §86/4 + หัวคงเป็น "ใบเสร็จรับเงิน"</summary>
+        public bool? BuyerDeclinedTaxInvoice { get; set; }
     }
 
     public class DocumentLineRequest

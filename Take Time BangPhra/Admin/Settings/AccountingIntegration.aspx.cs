@@ -89,6 +89,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "postSyncVerify", config.IsPostSyncVerifyEnabled },
                     { "autoReconcileDeposit", config.IsAutoReconcileDeposit },
                     { "cashSaleUseReceipt", config.IsCashSaleUseReceipt },
+                    { "cashSaleCompanyDoc", config.IsCashSaleCompanyDoc },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -395,6 +396,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // toggle ทดลอง isCashSale (TaxReceipt_SingleDoc / CashSale_Deposit / NativeA) เอา UI ออกแล้ว
                 // (2 ตัวแรกไม่มีผลต่อโค้ด; การหักมัดจำใช้ drives ผ่านค่าแนะนำ). preset ตั้งค่าให้ = 0
                 if (data.ContainsKey("cashSaleUseReceipt")) config.SetConfig("Nexaacc_CashSale_UseReceipt", BoolToFlag(data["cashSaleUseReceipt"]));
+                if (data.ContainsKey("cashSaleCompanyDoc")) config.SetConfig("Nexaacc_CashSale_CompanyDoc", BoolToFlag(data["cashSaleCompanyDoc"]));
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));

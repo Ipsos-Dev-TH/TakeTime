@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.5 · unified-receipt-buyer (sync+repost+checker) + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.6 · cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -5611,6 +5611,42 @@ namespace Take_Time_BangPhra.Integration
                     //   (ใบขายสดลง Cr 21911 เต็มยอด, JV ย้าย 21913→net กับ 21911 เอง) กัน NextAcc ตีความซ้ำ.
                     //   Option A: ส่ง deferred flag ให้ NextAcc drives กลับ 21913 ในใบเอง.
                     bool csInvoiceDefer = csNativeA && hasVat && _config.IsDepositVatAtReceipt && _config.IsDepositOutputVatDeferred;
+
+                    // ── เส้น "ใบเดียวจบ" ผ่าน company /document (Nexaacc_CashSale_CompanyDoc=1) ──
+                    // production ยังไม่ honor isCashSale บน /api/integration/invoices → ใบกำกับเปิดลูกหนี้
+                    // แล้วปิดด้วย payment ทีละงวด ⇒ ลูกค้าได้ 3 ใบ (ใบกำกับ + ใบเสร็จรับชำระ 2 ใบ ซึ่งใบ
+                    // ยอดมัดจำดูเหมือนออกซ้ำกับใบเสร็จมัดจำเดิม). company /document รองรับ
+                    // TaxInvoice + IssuedAsCashReceipt → Dr เงินสด + กลับมัดจำในใบเดียว ไม่เปิดลูกหนี้
+                    if (_config.IsCashSaleCompanyDoc)
+                    {
+                        var csDoc = _mapper.MapReceiptToDocument(reservationId, useMultiLine ? lines : null,
+                            totalAmount, revenueType, paymentMethod, receiptDate, customerName,
+                            customerContact.NexaaccContactId.Value, paymentAccountId, hasVat, receiptNumber,
+                            isDeposit: false, depositVatAtReceipt: false, deferOutputVat: false,
+                            documentType: NexaaccDocumentType.TaxInvoice,
+                            issuedAsCashReceipt: true,
+                            depositApplied: depositApplied, depositRef: csDepositRef,
+                            depositDrivesJournal: csNativeA);
+
+                        Guid csDocId = await EnsureRevenueDocCreatedApprovedAsync(csDoc, receiptNumber);
+                        _lastDocType = "RECEIPT";   // company document → repost ใช้เส้น void→recreate
+                        await UploadReceiptSlipsAsync(csDocId, attachments, receiptNumber);
+
+                        // verify + fallback ชุดเดียวกับเส้น integration: BalanceDue = 0 → เงินสดในใบจริง
+                        // (โพสต์ JV กลับมัดจำ Option B ให้ถ้าจำเป็น) / ไม่ 0 → settle ปิดลูกหนี้ตามเดิม
+                        bool csDocCash = await EnsureCashSaleDocSettledAsync(csDocId, receiptNumber, totalAmount,
+                            depositApplied, paymentMethod, receiptDate, customerName, hasVat, reservationId,
+                            paymentAccountId, csNativeA);
+
+                        await TryAutoGenerateEtaxAsync(csDocId, receiptNumber, reservationId, totalAmount, customerName);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessReceiptDocument(cash-sale COMPANY doc): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
+                            $"docId={csDocId} หักมัดจำ={depositApplied:N2} " +
+                            $"→ {(csDocCash ? "ใบเดียวจบ (Dr เงินสด ไม่มีลูกหนี้ ไม่มีใบเสร็จรับชำระแยก)" : "⚠ NextAcc ยังเปิดลูกหนี้ → settle ตามเดิม (ได้ใบเสร็จรับชำระเพิ่ม) — ปิด Nexaacc_CashSale_CompanyDoc ได้ถ้าไม่ช่วย")}",
+                            "SYSTEM");
+                        return csDocId.ToString();
+                    }
+
                     var csInv = _mapper.MapReceiptToCashSaleTaxInvoice(reservationId, useMultiLine ? lines : null,
                         totalAmount, revenueType, paymentMethod, receiptDate, customerName,
                         customerContact.ExternalId, customerContact.TaxId, paymentAccountId, hasVat, receiptNumber,
