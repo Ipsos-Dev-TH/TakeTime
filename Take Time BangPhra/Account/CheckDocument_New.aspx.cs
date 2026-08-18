@@ -901,6 +901,8 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
             if (!dt.Columns.Contains("NextAccDocStatus")) dt.Columns.Add("NextAccDocStatus", typeof(string));
+            // ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ (ไม่ใช่เอกสารขายของเราเอง) — ห้ามให้กด "ดึงกลับ"
+            if (!dt.Columns.Contains("IsNaPaymentDoc")) dt.Columns.Add("IsNaPaymentDoc", typeof(string));
 
             foreach (DataRow r in dt.Rows)
             {
@@ -909,6 +911,7 @@ namespace Take_Time_BangPhra.Account
                 r["NextAccId"] = "";
                 r["NextAccViewUrl"] = "";
                 r["NextAccDocStatus"] = "";
+                r["IsNaPaymentDoc"] = "0";
             }
 
             System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
@@ -1020,12 +1023,27 @@ namespace Take_Time_BangPhra.Account
                 nr["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
                 nr["NextAccViewUrl"] = "";
                 nr["NextAccDocStatus"] = nd.Status ?? "";   // สถานะจริงบน NextAcc (Draft/Approved/...) — ใช้ตอน "ดึงกลับ"
+                nr["IsNaPaymentDoc"] = IsNextAccPaymentReceipt(nd) ? "1" : "0";
                 dt.Rows.Add(nr);
                 added++;
             }
 
             System.Diagnostics.Debug.WriteLine($"   ➕ MergeNextAccReceiptDocs: matched {matched.Count}, added {added} NextAcc-only row(s) from {naDocs.Count} doc(s)");
             lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc: จับคู่ {matched.Count}, เพิ่ม {added})</span>";
+        }
+
+        /// <summary>
+        /// เอกสารนี้เป็น "ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับใบอื่น" หรือไม่
+        /// (เช่น TIV-xxxx เปิดลูกหนี้ แล้ว NextAcc ออก REC-xxxx ปิดลูกหนี้ให้ทีละงวด)
+        /// เอกสารพวกนี้ไม่ใช่ "ใบขายที่หายไปจากระบบเรา" — ถ้าปล่อยให้กด "↩️ ดึงกลับ"
+        /// จะสร้าง Account_Receipt ปลอม + บวกยอดชำระ/มัดจำเข้าการจองซ้ำ (ยอดเบิ้ล)
+        /// </summary>
+        private static bool IsNextAccPaymentReceipt(Take_Time_BangPhra.Integration.NextAccPaymentDoc nd)
+        {
+            string notes = nd?.Notes ?? "";
+            return notes.IndexOf("รับชำระเงินตามใบกำกับ", StringComparison.Ordinal) >= 0
+                || notes.IndexOf("รับชำระเงินตามใบแจ้งหนี้", StringComparison.Ordinal) >= 0
+                || System.Text.RegularExpressions.Regex.IsMatch(notes, @"ตามใบกำกับภาษีเลขที่\s*\S+");
         }
 
         /// <summary>ปุ่ม "🔍 ตรวจยอดชำระ NextAcc" — ตรวจทุกใบในช่วงวันที่ที่เลือก: รับเงินซ้อน (ชำระเกินยอด)
@@ -2230,9 +2248,12 @@ namespace Take_Time_BangPhra.Account
             if (isNaOnly == "1")
             {
                 bool voided = docStatus == "Cancel";
+                bool isNaPayment = (DataBinder.Eval(e.Row.DataItem, "IsNaPaymentDoc")?.ToString() ?? "0") == "1";
                 lblSync.Text = voided
                     ? "<span class='sync-badge failed' title='เอกสารถูกยกเลิกบน NextAcc'>❌ ยกเลิก (NextAcc)</span>"
-                    : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
+                    : isNaPayment
+                        ? "<span class='sync-badge completed' title='ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ — ไม่ใช่ใบขายของระบบเรา'>💵 ใบรับชำระ (NextAcc)</span>"
+                        : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
                 btnSync.Visible = false;
                 try
                 {
@@ -2247,6 +2268,12 @@ namespace Take_Time_BangPhra.Account
                     if (bEdit != null)
                     {
                         if (voided) bEdit.Visible = false;                // ใบยกเลิก — ไม่มีอะไรให้ทำ
+                        else if (isNaPayment)
+                        {
+                            // ใบรับชำระของ NextAcc (คู่กับใบกำกับใบอื่น) — ไม่ใช่ใบขายที่หายไปจากระบบเรา
+                            // "ดึงกลับ" ที่นี่ = สร้างใบเสร็จปลอม + บวกยอดชำระเข้าการจองซ้ำ → ซ่อนปุ่มทิ้ง
+                            bEdit.Visible = false;
+                        }
                         else
                         {
                             // ใบ active ที่ไม่มีคู่ใน local (เช่น ลบในระบบแล้วไปกู้คืนบน NextAcc) →
