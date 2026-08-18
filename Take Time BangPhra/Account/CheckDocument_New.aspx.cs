@@ -1931,6 +1931,18 @@ namespace Take_Time_BangPhra.Account
                         string restoreNaId = dkEdit["NextAccId"]?.ToString() ?? "";
                         string restoreDocNum = dkEdit["ID"]?.ToString() ?? "";
                         string restoreNaStatus = dkEdit["NextAccDocStatus"]?.ToString() ?? "";
+
+                        // ใบ local ของการจองนี้ยังอยู่ → ไม่ใช่เคส "ถูกลบแล้วกู้คืน" แต่เป็น
+                        // "สายจับคู่ขาด" (void→สร้างใหม่หลายรอบ / ลบเอกสารอื่นทิ้งบน NextAcc)
+                        // → ผูกกลับให้ ไม่ต้องสร้างใบซ้ำ (ซึ่งจะทำให้ยอดมัดจำ/ชำระเบิล)
+                        string twinLocal = dkEdit["LocalTwinId"]?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(twinLocal))
+                        {
+                            var linkSvc = new AccountingSyncService(conn);
+                            var (lOk, lMsg) = linkSvc.RelinkReceiptToNextAccDoc(twinLocal, restoreNaId, restoreDocNum);
+                            ShowError((lOk ? "🔗 " : "") + lMsg + (lOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
+                            return;
+                        }
                         // เลขการจองของเอกสาร (จาก Reference RES-{id}) — บังคับ snapshot ต้องเป็นการจองเดียวกัน
                         int restoreResId = 0;
                         int.TryParse(dkEdit["Reservation_ID"]?.ToString() ?? "0", out restoreResId);
@@ -2304,9 +2316,20 @@ namespace Take_Time_BangPhra.Account
                         {
                             // ใบ active ที่ไม่มีคู่ใน local (เช่น ลบในระบบแล้วไปกู้คืนบน NextAcc) →
                             // ปุ่ม "ดึงกลับ": สร้าง Account_Receipt/Payment_History + คืนมัดจำเข้าการจอง
+                            // มีใบ local ของการจองนี้อยู่แล้ว → ปุ่มนี้คือ "ผูกกลับ" ไม่ใช่ "สร้างใบใหม่"
+                            string twinId = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
+                            if (!string.IsNullOrEmpty(twinId))
+                            {
+                                bEdit.Text = "🔗 ผูกกับใบในระบบ";
+                                bEdit.ToolTip = $"ผูกเอกสารนี้กลับเข้ากับใบ {twinId} — ปุ่มแก้ไข/ส่งแก้ไขจะกลับมาใช้ได้ (ไม่แตะบัญชี ไม่สร้างเอกสารใหม่)";
+                                bEdit.OnClientClick = $"return confirm('ผูกเอกสารนี้เข้ากับใบ {twinId} ในระบบ?\\n\\nแก้เฉพาะการจับคู่ ไม่แตะบัญชีและไม่สร้าง/ลบเอกสารใด ๆ');";
+                            }
+                            else
+                            {
                             bEdit.Text = "↩️ ดึงกลับ";
                             bEdit.ToolTip = "ดึงใบเสร็จกลับเข้าระบบ (กู้ข้อมูลการจอง/มัดจำจากประวัติ sync)";
                             bEdit.OnClientClick = "return confirm('ดึงเอกสารนี้กลับเข้าระบบ?\\n\\nระบบจะสร้างใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำเข้าการจองให้ (กู้จากประวัติ sync)');";
+                            }
                         }
                     }
                 }

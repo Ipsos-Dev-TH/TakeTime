@@ -4571,6 +4571,95 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>
+        /// 🔗 ผูกใบเสร็จในระบบกลับเข้ากับเอกสารที่มีอยู่บน NextAcc
+        ///
+        /// ใช้เมื่อ "สายจับคู่ขาด": หน้าเอกสารจับคู่ local ↔ NextAcc ผ่าน
+        /// <c>Accounting_Sync_Queue.Nexaacc_Response_Id</c> ของคิว CREATE ล่าสุด
+        /// พอ void→สร้างใหม่หลายรอบ (หรือลบเอกสารทิ้งบน NextAcc เอง) ตัวชี้จะไปค้างที่เอกสาร
+        /// ที่ไม่มีแล้ว → ใบที่เหลือกลายเป็นแถว "NextAcc-only" กดแก้ไข/ส่งแก้ไขไม่ได้
+        ///
+        /// ฟังก์ชันนี้ชี้คิวกลับมาที่เอกสารที่ระบุ + ตั้ง marker ให้ตรงสถานะจริง
+        /// (Draft → DOC: / อนุมัติแล้ว → APR:) ⇒ ปุ่มแก้ไขและ 🔁 กลับมาใช้ได้ทันที
+        /// **ไม่แตะ GL และไม่สร้าง/ลบเอกสารใด ๆ** — แก้แค่การจับคู่ฝั่งเรา
+        /// </summary>
+        public (bool Ok, string Message) RelinkReceiptToNextAccDoc(string receiptNumber, string nexaaccDocId, string nexaaccDocNumber)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(receiptNumber))
+                    return (false, "ไม่ได้ระบุเลขใบเสร็จในระบบ");
+                Guid docId;
+                if (!Guid.TryParse((nexaaccDocId ?? "").Trim(), out docId) || docId == Guid.Empty)
+                    return (false, "ไม่ได้ระบุเอกสาร NextAcc ที่จะผูก (ไม่มี document id)");
+
+                var chk = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 1 FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber } });
+                if (chk == null || chk.Rows.Count == 0)
+                    return (false, $"ไม่พบใบเสร็จ {receiptNumber} ในระบบ — ใช้ปุ่ม \"ดึงกลับ\" เพื่อสร้างใบขึ้นมาก่อน");
+
+                // สถานะจริงบน NextAcc → marker ต้องตรง ไม่งั้น flow อนุมัติ/settle จะเข้าใจผิด
+                string status = null;
+                try
+                {
+                    var d = Task.Run(() => _apiClient.GetDocumentAsync(docId)).GetAwaiter().GetResult();
+                    status = d?.data?.Status;
+                    if (string.IsNullOrEmpty(nexaaccDocNumber)) nexaaccDocNumber = d?.data?.DocumentNumber;
+                }
+                catch (Exception ex)
+                {
+                    return (false, "อ่านเอกสารจาก NextAcc ไม่ได้ (เอกสารถูกลบไปแล้ว หรือ NextAcc ไม่พร้อม): " + ex.Message);
+                }
+
+                bool isDraft = string.IsNullOrEmpty(status)
+                    || status.IndexOf("Draft", StringComparison.OrdinalIgnoreCase) >= 0
+                    || status.IndexOf("Pending", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isVoid = !string.IsNullOrEmpty(status)
+                    && (status.IndexOf("Void", StringComparison.OrdinalIgnoreCase) >= 0
+                        || status.IndexOf("Cancel", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (isVoid)
+                    return (false, $"เอกสาร {nexaaccDocNumber ?? docId.ToString()} ถูกยกเลิกบน NextAcc — ผูกกับใบที่ยกเลิกแล้วไม่ได้ ให้กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อสร้างใบใหม่แทน");
+
+                // ชี้คิว CREATE ล่าสุดของใบนี้กลับมาที่เอกสารนี้ (คิวคือกุญแจจับคู่ของหน้าเอกสาร)
+                var q = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND Payload LIKE @pat
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@pat", "%\"receiptNumber\":\"" + receiptNumber + "\"%" } });
+                if (q == null || q.Rows.Count == 0)
+                    return (false, $"ไม่พบประวัติ sync ของใบ {receiptNumber} — กด \"ส่งแก้ไขขึ้น NextAcc\" หนึ่งครั้งเพื่อสร้างประวัติก่อน");
+
+                long qid = Convert.ToInt64(q.Rows[0]["ID"]);
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'COMPLETED', Nexaacc_Response_Id = @rid, Nexaacc_Document_Number = @num,
+                          Error_Message = NULL, Processed_Date = GETDATE()
+                      WHERE ID = @qid",
+                    new Dictionary<string, object>
+                    {
+                        { "@qid", qid }, { "@rid", docId.ToString() },
+                        { "@num", (object)nexaaccDocNumber ?? DBNull.Value }
+                    });
+
+                // marker: Draft = ยังไม่อนุมัติ (DOC:) / อนุมัติแล้ว = APR:
+                SetReceiptPaymentMarker(receiptNumber, (isDraft ? "DOC:" : "APR:") + docId);
+
+                string msg = $"ผูกใบ {receiptNumber} เข้ากับเอกสาร {nexaaccDocNumber ?? docId.ToString()} บน NextAcc แล้ว "
+                    + $"(สถานะ {status ?? "-"}) — ปุ่มแก้ไข/ส่งแก้ไขกลับมาใช้ได้";
+                if (isDraft)
+                    msg += "\n⚠ เอกสารยังเป็นฉบับร่าง ยังไม่ลงบัญชี — กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อให้ระบบอัปเดตข้อมูลแล้วอนุมัติให้";
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RelinkReceiptToNextAccDoc: {receiptNumber} → {docId} ({nexaaccDocNumber}) status={status} queue#{qid}", "SYSTEM");
+                return (true, msg);
+            }
+            catch (Exception ex)
+            {
+                return (false, "ผูกเอกสารไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
         private void BackfillNextAccRefToPayment(string docNumber, string nexaaccId, string nexaaccDocNumber)
         {
             if (string.IsNullOrEmpty(docNumber)) return;

@@ -1,4 +1,4 @@
-<%@ Page MaintainScrollPositionOnPostback="true" Title="ตรวจสอบเอกสารและรายได้" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="CheckDocument_New.aspx.cs" Inherits="Take_Time_BangPhra.Account.CheckDocument_New" %>
+﻿<%@ Page MaintainScrollPositionOnPostback="true" Title="ตรวจสอบเอกสารและรายได้" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="CheckDocument_New.aspx.cs" Inherits="Take_Time_BangPhra.Account.CheckDocument_New" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <style>
@@ -458,7 +458,7 @@
             </div>
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
-                DataKeyNames="ID,Status,IsNextAccOnly,NextAccId,NextAccViewUrl,NextAccDocStatus,Reservation_ID"
+                DataKeyNames="ID,Status,IsNextAccOnly,NextAccId,NextAccViewUrl,NextAccDocStatus,Reservation_ID,LocalTwinId"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"
