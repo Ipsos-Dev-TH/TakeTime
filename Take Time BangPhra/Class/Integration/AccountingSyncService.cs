@@ -120,7 +120,7 @@ namespace Take_Time_BangPhra.Integration
             var noAcc = System.Text.RegularExpressions.Regex.Match(b, @"ไม่พบผังบัญชี\s*:?\s*([0-9\-\.]+)");
             if (noAcc.Success)
                 return "\n💡 วิธีแก้: ผังบัญชีของ NextAcc ไม่มีรหัส " + noAcc.Groups[1].Value + " ที่ TakeTime map ไว้ — เลือกอย่างใดอย่างหนึ่ง " +
-                       "(1) สร้างบัญชีรหัสนี้ใน NextAcc (Chart of Accounts) แล้วกด 'ดึงผังบัญชี' ในหน้าตั้งค่า NextAcc แล้ว Retry หรือ " +
+                       "(1) กดปุ่ม \"Sync บัญชี\" ในหน้าตั้งค่า NextAcc (ผังบัญชีที่เทียบอาจเก่า) — ยังไม่หายค่อยสร้างบัญชีรหัสนี้ใน NextAcc แล้ว Sync ซ้ำ + Retry หรือ " +
                        "(2) แก้ mapping ให้ชี้รหัสที่มีจริง ที่ Admin → NextAcc → ผังบัญชี/Mapping " +
                        "(รหัส 21240 = GRNI เจ้าหนี้-รับสินค้ายังไม่วางบิล ใช้กับ 'รับของเข้าสต๊อก' — ถ้าไม่ต้องการใช้ GR/IR ปิด flag ได้ในหน้าเดียวกัน)";
             // NextAcc ตอบเป็นหน้า HTML error page = แอปฝั่งนั้นพังทั้งแอป ไม่ใช่ปัญหาข้อมูลของเรา

@@ -1387,7 +1387,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 catch
                 {
                     add("warn", "ยังไม่มีตารางเก็บผังบัญชี",
-                        "กดปุ่ม 'ดึงผังบัญชี' หนึ่งครั้ง ระบบจะสร้างตารางและดึงผังบัญชีจาก NextAcc ให้");
+                        "กดปุ่ม \"Sync บัญชี\" (ปุ่มสีน้ำเงินด้านบนสุดของหน้านี้) หนึ่งครั้ง ระบบจะสร้างตารางและดึงผังบัญชีจาก NextAcc ให้");
                 }
                 if (coa != null && coa.Rows.Count > 0)
                 {
@@ -1395,13 +1395,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                     haveCoa = n > 0;
                     if (n == 0)
                         add("warn", "ยังไม่ได้ดึงผังบัญชีจาก NextAcc",
-                            "กดปุ่ม 'ดึงผังบัญชี' ก่อน ระบบจึงจะตรวจ mapping ให้ได้ และ dropdown เลือกบัญชีจะว่าง");
+                            "กดปุ่ม \"Sync บัญชี\" (ปุ่มสีน้ำเงินด้านบนสุดของหน้านี้) ก่อน ระบบจึงจะตรวจ mapping ให้ได้ และ dropdown เลือกบัญชีจะว่าง");
                     else if (coa.Rows[0]["LastSync"] != DBNull.Value)
                     {
                         var last = Convert.ToDateTime(coa.Rows[0]["LastSync"]);
                         if ((DateTime.Now - last).TotalDays > 30)
                             add("warn", "ผังบัญชีเก่ากว่า 30 วัน",
-                                $"ดึงล่าสุด {last:dd/MM/yyyy HH:mm} — ถ้ามีการเพิ่ม/แก้บัญชีฝั่ง NextAcc ควรกด 'ดึงผังบัญชี' ใหม่");
+                                $"ดึงล่าสุด {last:dd/MM/yyyy HH:mm} — กดปุ่ม \"Sync บัญชี\" (สีน้ำเงิน ด้านบนสุดของหน้านี้) เพื่อดึงผังบัญชีล่าสุด "
+                                + "แล้วกดตรวจสุขภาพซ้ำ — รหัสบัญชีที่ขึ้นว่า \"ไม่มี\" อาจถูกสร้างใน NextAcc ไปแล้ว");
                     }
                 }
 
@@ -1425,7 +1426,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                             lines.Add($"{r["TakeTime_Code"]} → {r["Nexaacc_AccountCode"]} ({r["TakeTime_Description"]})");
                         add("error", $"mapping ชี้รหัสบัญชีที่ NextAcc ไม่มี ({bad.Rows.Count} รายการ)",
                             string.Join("\n", lines)
-                            + "\n\nวิธีแก้: สร้างบัญชีรหัสนี้ใน NextAcc แล้วกด 'ดึงผังบัญชี' หรือแก้ mapping ให้ชี้รหัสที่มีจริง"
+                            + "\n\nวิธีแก้: (1) กดปุ่ม \"Sync บัญชี\" ด้านบนสุดของหน้านี้ก่อนเสมอ — ผังบัญชีที่ใช้เทียบอาจเก่า "
+                            + "(2) ยังไม่หาย = สร้างบัญชีรหัสนี้ใน NextAcc แล้ว Sync บัญชี อีกครั้ง หรือแก้ mapping ให้ชี้รหัสที่มีจริง"
                             + " — ถ้าไม่แก้ เอกสารที่ใช้ mapping นี้จะ sync ไม่ผ่าน (API 400 'ไม่พบผังบัญชี')");
                     }
                     }
