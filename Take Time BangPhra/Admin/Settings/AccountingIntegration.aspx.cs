@@ -1517,6 +1517,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     { "success", true },
                     { "checkedAt", DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss") },
+                    { "build", Integration.AccountingSyncService.SyncBuildTag },
+                    { "buildDate", GetDeployedBuildDate() },
                     { "issues", issues }
                 };
             }
@@ -1524,6 +1526,26 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
+        }
+
+        /// <summary>วันเวลาที่ DLL ใน bin ถูก deploy — ใช้ยืนยันว่าโค้ดที่รันอยู่เป็นรุ่นล่าสุดจริง</summary>
+        private string GetDeployedBuildDate()
+        {
+            try
+            {
+                string dll = Server.MapPath("~/bin/Take Time BangPhra.dll");
+                if (File.Exists(dll))
+                    return File.GetLastWriteTime(dll).ToString("dd/MM/yyyy HH:mm:ss");
+            }
+            catch { }
+            try
+            {
+                var asm = typeof(Integration.AccountingSyncService).Assembly;
+                if (!string.IsNullOrEmpty(asm.Location) && File.Exists(asm.Location))
+                    return File.GetLastWriteTime(asm.Location).ToString("dd/MM/yyyy HH:mm:ss") + " (shadow copy)";
+            }
+            catch { }
+            return "?";
         }
 
         /// <summary>ยิง query แบบมี CommandTimeout — คืน null + timedOut=true แทนที่จะค้างรอ</summary>

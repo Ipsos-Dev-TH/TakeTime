@@ -2352,14 +2352,22 @@
                         el.innerHTML = '<div class="test-result error" style="display:block;">ตรวจไม่สำเร็จ: ' + escapeHtml(data.message) + '</div>';
                         return;
                     }
+                    // แถบรุ่นโค้ดที่รันอยู่จริง — ใช้ยืนยันว่า deploy DLL ใหม่แล้วหรือยัง
+                    var build = '<div style="font-size:11px; color:#555; background:#F3F4F6; border:1px solid #E5E7EB;'
+                              + ' border-radius:5px; padding:6px 9px; margin-bottom:8px;">'
+                              + '<b>รุ่นโค้ดที่รันอยู่:</b> ' + escapeHtml(data.build || '?')
+                              + ' <span style="color:#888;">· DLL deploy เมื่อ ' + escapeHtml(data.buildDate || '?') + '</span></div>';
+
                     var list = data.issues || [];
                     if (!list.length) {
-                        el.innerHTML = '<div class="test-result success" style="display:block;"><i class="fas fa-check-circle"></i> '
+                        el.innerHTML = build
+                                     + '<div class="test-result success" style="display:block;"><i class="fas fa-check-circle"></i> '
                                      + 'ไม่พบปัญหา — mapping/ผังบัญชี/แหล่งเงิน/คิว ปกติทั้งหมด '
                                      + '<span style="color:#888;font-size:11px;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
                         return;
                     }
-                    var html = '<div style="font-size:12px; color:#666; margin-bottom:6px;">พบ ' + list.length
+                    var html = build
+                             + '<div style="font-size:12px; color:#666; margin-bottom:6px;">พบ ' + list.length
                              + ' เรื่องที่ควรดู <span style="color:#999;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
                     list.forEach(function (it) {
                         var err = it.level === 'error';

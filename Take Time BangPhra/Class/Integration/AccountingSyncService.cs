@@ -2507,6 +2507,14 @@ namespace Take_Time_BangPhra.Integration
         // เมื่อ Wait(2 นาที) หมดเวลา → รอบถัดไปเริ่มทับได้. ถ้ามีหลาย worker process /
         // หลายเซิร์ฟเวอร์ / staging ชี้ DB เดียวกัน จะยิงเอกสารซ้ำเข้า NextAcc
         // → ใช้ sp_getapplock ของ SQL Server เป็นตัวกันข้าม process
+        /// <summary>
+        /// ป้ายรุ่นของตรรกะ sync — เพิ่มเลข/ข้อความทุกครั้งที่แก้พฤติกรรมสำคัญ
+        /// หน้า 🩺 ตรวจสุขภาพ แสดงค่านี้ ⇒ เห็นได้ทันทีว่า DLL ที่รันอยู่บนเซิร์ฟเวอร์
+        /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
+        /// </summary>
+        public const string SyncBuildTag =
+            "2026-08-18.4 · queue-payload-refresh + receipt-buyer-from-Customer_ID + dbd-lookup + server-down-cooldown";
+
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
         private static DateTime _lastLogPurge = DateTime.MinValue;
@@ -5270,34 +5278,54 @@ namespace Take_Time_BangPhra.Integration
 
                 // ผู้ซื้อบนใบเสร็จอาจไม่ใช่ลูกค้าของการจอง (จองในนามบริษัท / แก้ผู้ซื้อในหน้าใบเสร็จ)
                 // → ยึดเบอร์ที่บันทึกมากับใบเสร็จก่อนเสมอ ไม่งั้นการแก้ชื่อ/เลขภาษี/ที่อยู่จะไม่ถึง NextAcc
+                // ลำดับความน่าเชื่อถือของ "ผู้ซื้อ":
+                //   1) Account_Receipt.Customer_ID — ลูกค้าที่หน้าใบเสร็จบันทึกไว้กับใบนี้โดยตรง
+                //      (ถูกต้องเสมอ ไม่ขึ้นกับ payload → ใช้ได้กับคิวเก่าที่ยังไม่มี customerPhone)
+                //   2) payload customerPhone — เบอร์ผู้ซื้อที่ส่งมาตอน enqueue
+                //   3) ผู้จอง (EnsureCustomerContactAsync ด้านบน) — fallback สุดท้าย
                 string buyerPhone = (p.ContainsKey("customerPhone") ? p["customerPhone"]?.ToString() : "") ?? "";
                 buyerPhone = buyerPhone.Trim();
-                if (buyerPhone.Length > 0
-                    && !string.Equals(buyerPhone, customerContact?.Phone ?? "", StringComparison.Ordinal))
+
+                var buyer = LookupReceiptBuyer(receiptNumber);
+                string buyerSrc = "Account_Receipt.Customer_ID";
+                if (buyer == null && buyerPhone.Length > 0)
                 {
-                    var buyer = LookupCustomerByPhone(buyerPhone);
-                    if (buyer != null && !string.IsNullOrEmpty(buyer.ExternalId))
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessReceiptDocument: ผู้ซื้อบนใบเสร็จ ({buyerPhone}) ต่างจากผู้จอง " +
-                            $"({customerContact?.Phone ?? "-"}) → ใช้ผู้ซื้อของใบเสร็จออกเอกสาร", "SYSTEM");
-                        // push ข้อมูลล่าสุดของผู้ซื้อคนนี้ขึ้น contact ก่อน (ผ่านตัวกลางเดียวกับคิว SYNC_CUSTOMER_CONTACT)
-                        // ⚠ ห้ามกลืน error: push ล้ม = ไม่มี NexaaccContactId → เอกสารจะตกไปเส้นใบเสร็จธรรมดา
-                        //   ด้วยผู้ซื้อคนเก่า (ผู้ใช้เห็นว่า "แก้แล้วไม่เปลี่ยน") ต้องโยนให้คิว retry แทน
-                        string pushErr = await PushCustomerContactAsync(buyer, "ProcessReceiptDocument(buyer)");
-                        if (pushErr != null || buyer.NexaaccContactId == null)
-                            throw new Exception(
-                                $"อัปเดตข้อมูลผู้ซื้อ ({buyer.Name} / {buyerPhone}) ไปยัง NextAcc ไม่สำเร็จ → " +
-                                $"ยังออกเอกสารด้วยข้อมูลใหม่ไม่ได้ (จะลองใหม่อัตโนมัติ): {pushErr ?? "contact id ว่าง"}");
-                        customerContact = buyer;
-                    }
-                    else
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"⚠ ProcessReceiptDocument: receipt={receiptNumber} ระบุผู้ซื้อเบอร์ {buyerPhone} " +
-                            $"แต่ไม่พบลูกค้าเบอร์นี้ในตาราง Customer → ใช้ผู้จองออกเอกสารแทน " +
-                            $"(ตรวจว่าเบอร์ในหน้าใบเสร็จตรงกับลูกค้าที่บันทึกไว้)", "SYSTEM");
-                    }
+                    buyer = LookupCustomerByPhone(buyerPhone);
+                    buyerSrc = "payload customerPhone";
+                }
+
+                if (buyer != null && !string.IsNullOrEmpty(buyer.ExternalId)
+                    && !string.Equals(buyer.ExternalId, customerContact?.ExternalId ?? "", StringComparison.Ordinal))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessReceiptDocument: receipt={receiptNumber} ผู้ซื้อบนใบเสร็จ = {buyer.Name} ({buyer.Phone}) " +
+                        $"[{buyerSrc}] ต่างจากผู้จอง ({customerContact?.Name ?? "-"} / {customerContact?.Phone ?? "-"}) " +
+                        $"→ ออกเอกสารในนามผู้ซื้อของใบเสร็จ", "SYSTEM");
+                    // push ข้อมูลล่าสุดของผู้ซื้อคนนี้ขึ้น contact ก่อน (ผ่านตัวกลางเดียวกับคิว SYNC_CUSTOMER_CONTACT)
+                    // ⚠ ห้ามกลืน error: push ล้ม = ไม่มี NexaaccContactId → เอกสารจะตกไปเส้นใบเสร็จธรรมดา
+                    //   ด้วยผู้ซื้อคนเก่า (ผู้ใช้เห็นว่า "แก้แล้วไม่เปลี่ยน") ต้องโยนให้คิว retry แทน
+                    string pushErr = await PushCustomerContactAsync(buyer, "ProcessReceiptDocument(buyer)");
+                    if (pushErr != null || buyer.NexaaccContactId == null)
+                        throw new Exception(
+                            $"อัปเดตข้อมูลผู้ซื้อ ({buyer.Name} / {buyer.Phone}) ไปยัง NextAcc ไม่สำเร็จ → " +
+                            $"ยังออกเอกสารด้วยข้อมูลใหม่ไม่ได้ (จะลองใหม่อัตโนมัติ): {pushErr ?? "contact id ว่าง"}");
+                    customerContact = buyer;
+                }
+                else if (buyer == null)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"⚠ ProcessReceiptDocument: receipt={receiptNumber} หาผู้ซื้อของใบเสร็จไม่เจอ " +
+                        $"(Account_Receipt.Customer_ID ว่าง/ชี้ลูกค้าที่ถูกลบ" +
+                        $"{(buyerPhone.Length > 0 ? $", เบอร์ใน payload {buyerPhone} ก็ไม่พบใน Customer" : ", payload ไม่มี customerPhone — คิวนี้ enqueue จากบิลด์เก่า")}) " +
+                        $"→ ใช้ผู้จองออกเอกสารแทน", "SYSTEM");
+                }
+                else if (customerContact != null
+                         && string.Equals(buyer.ExternalId, customerContact.ExternalId, StringComparison.Ordinal))
+                {
+                    // ผู้ซื้อ = ผู้จอง แต่ข้อมูลในตาราง Customer อาจถูกแก้ใหม่ (เติมเลขภาษี/ที่อยู่)
+                    // → ใช้แถวสด ๆ ที่เพิ่งอ่าน กัน cache/ค่าที่ resolve มาก่อนหน้าค้าง
+                    if (buyer.NexaaccContactId == null) buyer.NexaaccContactId = customerContact.NexaaccContactId;
+                    customerContact = buyer;
                 }
 
                 // log การตัดสินใจชนิดเอกสารให้ชัด — เดิมต้องเดาเองว่าทำไมได้ใบเสร็จแทนใบกำกับ
@@ -8533,6 +8561,36 @@ namespace Take_Time_BangPhra.Integration
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"LookupCustomerFromReservation failed for resId={reservationId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// ผู้ซื้อ "ของใบเสร็จใบนี้" จาก <c>Account_Receipt.Customer_ID</c> — แหล่งข้อมูลที่ถูกต้องที่สุด
+        /// หน้าใบเสร็จเขียนคอลัมน์นี้ทุกครั้งที่บันทึก (ทั้งสร้างใหม่และแก้ไข) จากลูกค้าที่ upsert ไว้
+        /// ⇒ ไม่ขึ้นกับ payload ในคิว จึงถูกต้องแม้กับรายการที่ enqueue มาจากบิลด์เก่า
+        /// (ก่อนหน้านี้ใช้ผู้จอง (Reservation.Customer_MobilePhone) เป็นหลัก — ออกใบให้บริษัท
+        ///  ทั้งที่คนจองเป็นบุคคล จึงได้ชื่อผู้จองบนใบกำกับ)
+        /// </summary>
+        private ContactInfo LookupReceiptBuyer(string receiptNumber)
+        {
+            if (string.IsNullOrWhiteSpace(receiptNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 " + CustomerContactSelectColumns + @"
+                      FROM Account_Receipt R
+                      INNER JOIN Customer C ON C.ID = R.Customer_ID
+                      LEFT JOIN Address A ON A.ID = C.Address_ID
+                      LEFT JOIN Customer_Type CT ON CT.ID = C.Customer_Type_ID
+                      WHERE R.ID = @rid",
+                    new Dictionary<string, object> { { "@rid", receiptNumber.Trim() } });
+                if (dt?.Rows.Count > 0) return BuildContactInfoFromCustomerRow(dt.Rows[0]);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptBuyer failed for receipt={receiptNumber}: {ex.Message}", "SYSTEM");
             }
             return null;
         }
