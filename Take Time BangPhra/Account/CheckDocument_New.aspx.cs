@@ -672,9 +672,9 @@ namespace Take_Time_BangPhra.Account
                 SELECT ar.ID, ar.Reservation_ID, ar.Created_Date, ar.Paid_Type,
                        ar.Total_Amount, ar.Vat, ar.IsDeposit, ar.UseDeposit,
                        ar.Status,
-                       -- ⚠ ผู้ซื้อของ "ใบเสร็จใบนี้" (Account_Receipt.Customer_ID) มาก่อนเสมอ
-                       -- เดิม join จาก r.Customer_MobilePhone = ผู้จอง ⇒ ออกใบในนามบริษัท
-                       -- แต่คอลัมน์นี้ยังโชว์ชื่อผู้จองตลอด ทำให้เข้าใจผิดว่า "แก้แล้วไม่เปลี่ยน"
+                       -- ผู้ซื้อของใบเสร็จใบนี้ (Account_Receipt.Customer_ID) มาก่อนเสมอ
+                       -- เดิม join จาก r.Customer_MobilePhone = ผู้จอง จึงโชว์ชื่อผู้จองตลอด
+                       -- แม้ใบจะออกในนามบริษัทแล้ว ทำให้เข้าใจผิดว่าแก้ไขไม่ติด
                        ISNULL(cb.FullName, c.FullName) as CustomerName,
                        ISNULL(cb.MobilePhone, r.Customer_MobilePhone) as Customer_MobilePhone,
                        r.Remark,
