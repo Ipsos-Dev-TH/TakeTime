@@ -1985,6 +1985,115 @@ namespace Take_Time_BangPhra.Account.Report
             }
         }
 
+        /// <summary>
+        /// 🔍 ดึงข้อมูลนิติบุคคลจากเลขผู้เสียภาษี 13 หลัก (กรมพัฒนาธุรกิจการค้า ผ่าน NextAcc)
+        /// เติมชื่อจดทะเบียน + ที่อยู่สำนักงานใหญ่ + ชนิดลูกค้า + รหัสสาขา ให้อัตโนมัติ
+        /// ผู้ใช้ตรวจ/แก้ได้ก่อนกดบันทึก — ไม่บันทึกอะไรเองทั้งสิ้น
+        /// </summary>
+        protected void btnDbdLookup_Click(object sender, EventArgs e)
+        {
+            string taxId = (TextBox12.Text ?? "").Trim();
+
+            Action<bool, string> show = (ok, html) =>
+            {
+                divDbdResult.Visible = true;
+                divDbdResult.Attributes["style"] =
+                    "margin-top:6px; font-size:12px; padding:7px 10px; border-radius:5px; "
+                    + (ok ? "background:#E8F5E9; border:1px solid #A5D6A7; color:#1B5E20;"
+                          : "background:#FFF5F5; border:1px solid #FFCDD2; color:#C62828;");
+                divDbdResult.InnerHtml = html;
+            };
+
+            AccountingSyncService.DbdLookupResult r;
+            try
+            {
+                r = new AccountingSyncService(conn).LookupDbdCompany(taxId);
+            }
+            catch (Exception ex)
+            {
+                show(false, "ค้นข้อมูลไม่สำเร็จ: " + Server.HtmlEncode(ex.Message));
+                return;
+            }
+
+            if (!r.Ok)
+            {
+                show(false, "❌ " + Server.HtmlEncode(r.Message ?? "ไม่พบข้อมูล")
+                          + " <span style=\"color:#888;\">— กรอกข้อมูลเองได้ตามปกติ</span>");
+                return;
+            }
+
+            // ── ชื่อจดทะเบียน + ชนิดลูกค้า = นิติบุคคล ──────────────────────────
+            TextBox10.Text = r.Name;
+            try
+            {
+                var dtType = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 CAST(ID AS NVARCHAR(20)) AS ID FROM Customer_Type WHERE Customer_Code = 'TXID'", null);
+                if (dtType != null && dtType.Rows.Count > 0)
+                {
+                    var item = DropDownList8.Items.FindByValue(dtType.Rows[0]["ID"].ToString());
+                    if (item != null)
+                    {
+                        DropDownList8.ClearSelection();
+                        item.Selected = true;
+                        TextBox7.Visible = true;   // นิติบุคคล → โชว์ช่องรหัสสาขา
+                    }
+                }
+            }
+            catch { }
+
+            // DBD คืนที่อยู่ "สำนักงานใหญ่" เสมอ → รหัสสาขา 00000 (แก้เองได้ถ้าออกใบให้สาขาอื่น)
+            if (string.IsNullOrWhiteSpace(TextBox7.Text)) TextBox7.Text = "00000";
+
+            // ── ที่อยู่ ────────────────────────────────────────────────────────
+            if (!string.IsNullOrWhiteSpace(r.BuildingNumber)) TextBox11.Text = r.BuildingNumber;
+            if (!string.IsNullOrWhiteSpace(r.Moo)) TextBox18.Text = "หมู่ " + r.Moo;
+
+            bool addrOk = false;
+            if (!string.IsNullOrWhiteSpace(r.PostalCode))
+            {
+                TextBox16.Text = r.PostalCode;
+                Button5_Click(null, null);   // bind จังหวัด/อำเภอ/ตำบล จากรหัสไปรษณีย์
+                SelectAddressItem(DropDownList5, r.Province);
+                SelectAddressItem(DropDownList6, r.District);
+                SelectAddressItem(DropDownList7, r.SubDistrict);
+                addrOk = DropDownList5.Items.Count > 0;
+            }
+
+            // มีชื่อผู้ซื้อจริงแล้ว = ต้องการใบกำกับ → ปลดติ๊ก "ไม่ระบุชื่อในใบกำกับภาษี"
+            if (CheckBox3.Checked) CheckBox3.Checked = false;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("✅ พบข้อมูล: <b>").Append(Server.HtmlEncode(r.Name)).Append("</b>");
+            if (!string.IsNullOrEmpty(r.JuristicType)) sb.Append(" (").Append(Server.HtmlEncode(r.JuristicType)).Append(")");
+            if (!string.IsNullOrEmpty(r.Status)) sb.Append(" · สถานะ: ").Append(Server.HtmlEncode(r.Status));
+            sb.Append("<br/>ที่อยู่จดทะเบียน: ").Append(Server.HtmlEncode(r.RawAddress ?? "-"));
+            if (!addrOk)
+                sb.Append("<br/><span style=\"color:#C62828;\">⚠ แยกจังหวัด/อำเภอ/ตำบล จากที่อยู่ไม่สำเร็จ — เลือกเองด้านบน</span>");
+            sb.Append("<br/><span style=\"color:#666;\">ตรวจความถูกต้องแล้วกด \"บันทึก\" — ข้อมูลจะถูกส่งไปอัปเดตผู้ติดต่อบน NextAcc ให้เอง</span>");
+            show(true, sb.ToString());
+        }
+
+        /// <summary>เลือกค่าใน dropdown ที่อยู่แบบยืดหยุ่น (ตรงเป๊ะ → ขึ้นต้นเหมือนกัน → มีคำนี้อยู่)</summary>
+        private static void SelectAddressItem(DropDownList ddl, string value)
+        {
+            if (ddl == null || ddl.Items.Count == 0 || string.IsNullOrWhiteSpace(value)) return;
+            string v = value.Trim();
+
+            var exact = ddl.Items.FindByText(v) ?? ddl.Items.FindByValue(v);
+            if (exact == null)
+                foreach (ListItem it in ddl.Items)
+                {
+                    string t = (it.Text ?? "").Trim();
+                    if (t.StartsWith(v, StringComparison.Ordinal) || v.StartsWith(t, StringComparison.Ordinal)
+                        || t.IndexOf(v, StringComparison.Ordinal) >= 0)
+                    { exact = it; break; }
+                }
+            if (exact == null) return;
+
+            ddl.ClearSelection();
+            exact.Selected = true;
+        }
+
         protected void Button5_Click(object sender, EventArgs e)
         {
             TextBox16.Enabled = false;

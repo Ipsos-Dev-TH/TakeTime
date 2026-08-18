@@ -455,6 +455,24 @@ namespace Take_Time_BangPhra.Integration
         public string Color { get; set; }
     }
 
+    /// <summary>
+    /// ผลค้นข้อมูลนิติบุคคลจากกรมพัฒนาธุรกิจการค้า (DBD) ผ่าน NextAcc
+    /// ตรงกับ record <c>DbdCompanyResult</c> ใน Wachira-d/Accounting
+    /// (Services/Interfaces/IDbdLookupService.cs) — GET /api/dbd/juristic/{juristicId}
+    /// NextAcc cache ผล 24 ชม. (ข้อมูลราชการเปลี่ยนช้า)
+    /// </summary>
+    public class DbdCompanyResult
+    {
+        public string JuristicId { get; set; }          // เลขทะเบียนนิติบุคคล 13 หลัก
+        public string NameTh { get; set; }              // ชื่อนิติบุคคล (ไทย) — ชื่อที่จดทะเบียนจริง
+        public string NameEn { get; set; }              // ชื่อนิติบุคคล (อังกฤษ)
+        public string JuristicType { get; set; }        // บริษัทจำกัด / ห้างหุ้นส่วนจำกัด / ฯลฯ
+        public string Status { get; set; }              // สถานะนิติบุคคล (ยังดำเนินกิจการอยู่ / เลิก)
+        public decimal? RegisteredCapital { get; set; } // ทุนจดทะเบียน (บาท)
+        public string Address { get; set; }             // ที่ตั้งสำนักงานใหญ่ (ข้อความไทยเต็ม)
+        public string RegisterDate { get; set; }        // วันที่จดทะเบียน
+    }
+
     // ──────────────────────────────────────────────
     // Products (ตรงตาม Nexaacc ProductDtos.cs)
     // ──────────────────────────────────────────────

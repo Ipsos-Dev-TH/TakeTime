@@ -1448,6 +1448,30 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // DBD lookup (กรมพัฒนาธุรกิจการค้า) — /api/dbd/*
+        // verified vs Wachira-d/Accounting: DbdLookupController [Route("api/dbd")] [Authorize]
+        //   GET  /api/dbd/juristic/{juristicId}  → ApiResponse<DbdCompanyResult>
+        //   GET  /api/dbd/search?q=&limit=       → ApiResponse<List<DbdCompanyResult>>
+        // เส้นทางนี้ไม่ได้ขึ้นต้นด้วย /api/integration/ → client ส่ง X-Api-Key ให้เอง
+        // (ApiKeyMiddleware ของ NextAcc ทำงานทุก path ก่อน JWT และ fallback ไป ExternalIntegration
+        //  ⇒ ใช้ได้ทั้งคีย์ acc_ และ int_)
+        // ──────────────────────────────────────────────
+
+        /// <summary>ดึงข้อมูลนิติบุคคลจากเลขทะเบียน/เลขผู้เสียภาษี 13 หลัก (NextAcc cache 24 ชม.)</summary>
+        public async Task<ApiResponse<DbdCompanyResult>> GetDbdCompanyAsync(string juristicId)
+        {
+            string id = (juristicId ?? "").Trim();
+            return await GetAsync<ApiResponse<DbdCompanyResult>>($"/api/dbd/juristic/{Uri.EscapeDataString(id)}");
+        }
+
+        /// <summary>ค้นหานิติบุคคลจากชื่อ (autocomplete)</summary>
+        public async Task<ApiResponse<List<DbdCompanyResult>>> SearchDbdByNameAsync(string query, int limit = 10)
+        {
+            string q = Uri.EscapeDataString((query ?? "").Trim());
+            return await GetAsync<ApiResponse<List<DbdCompanyResult>>>($"/api/dbd/search?q={q}&limit={limit}");
+        }
+
+        // ──────────────────────────────────────────────
         // Payroll System (/api/companies/{companyId}/payroll/*)
         // ใช้ X-Api-Key (acc_) — Integration Key (int_) ใช้ไม่ได้
         // ──────────────────────────────────────────────

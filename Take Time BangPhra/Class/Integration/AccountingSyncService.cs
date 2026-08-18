@@ -1901,6 +1901,144 @@ namespace Take_Time_BangPhra.Integration
         // Account ID Lookup Helpers (for caller pages)
         // ──────────────────────────────────────────────
 
+        // ──────────────────────────────────────────────
+        // DBD lookup สำหรับหน้าเว็บ (WebForms เรียกแบบ sync ได้เลย ไม่ต้องจัดการ async)
+        // ──────────────────────────────────────────────
+
+        /// <summary>ข้อมูลนิติบุคคลจาก DBD ที่แตกที่อยู่เป็นฟิลด์ย่อยพร้อมกรอกลงฟอร์มแล้ว</summary>
+        public class DbdLookupResult
+        {
+            public bool Ok;
+            public string Message;
+            public string TaxId;
+            public string Name;              // ชื่อจดทะเบียน (ไทย)
+            public string NameEn;
+            public string JuristicType;      // บริษัทจำกัด / ห้างหุ้นส่วนจำกัด …
+            public string Status;            // สถานะนิติบุคคล
+            public string RawAddress;        // ที่อยู่เต็มตามที่ DBD คืนมา
+            public string BuildingNumber;    // บ้านเลขที่/อาคาร/ถนน (ส่วนหน้าก่อน ตำบล/แขวง)
+            public string Moo;
+            public string SubDistrict;
+            public string District;
+            public string Province;
+            public string PostalCode;
+        }
+
+        /// <summary>
+        /// ค้นข้อมูลนิติบุคคลจากเลขผู้เสียภาษี 13 หลัก ผ่าน NextAcc (/api/dbd/juristic/{id})
+        /// แล้วแตกที่อยู่ข้อความไทยเป็นฟิลด์ย่อยให้พร้อมเติมลงฟอร์ม
+        /// ไม่โยน exception — หน้าเว็บเอา Ok/Message ไปแสดงได้ตรง ๆ
+        /// </summary>
+        public DbdLookupResult LookupDbdCompany(string taxId)
+        {
+            var r = new DbdLookupResult { TaxId = (taxId ?? "").Trim() };
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(r.TaxId, @"^\d{13}$"))
+            {
+                r.Message = "เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก";
+                return r;
+            }
+            if (!_config.IsConfigured)
+            {
+                r.Message = "ยังตั้งค่าการเชื่อมต่อ NextAcc ไม่ครบ (Base URL / API Key / Company ID)";
+                return r;
+            }
+
+            try
+            {
+                var resp = Task.Run(() => _apiClient.GetDbdCompanyAsync(r.TaxId)).GetAwaiter().GetResult();
+                var d = resp?.data;
+                if (d == null || string.IsNullOrWhiteSpace(d.NameTh))
+                {
+                    r.Message = string.IsNullOrEmpty(resp?.message)
+                        ? "ไม่พบข้อมูลนิติบุคคลของเลขนี้ในฐานข้อมูลกรมพัฒนาธุรกิจการค้า"
+                        : resp.message;
+                    return r;
+                }
+
+                r.Ok = true;
+                r.Name = (d.NameTh ?? "").Trim();
+                r.NameEn = d.NameEn;
+                r.JuristicType = d.JuristicType;
+                r.Status = d.Status;
+                r.RawAddress = (d.Address ?? "").Trim();
+                SplitThaiAddress(r.RawAddress, r);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DBD lookup {r.TaxId} → {r.Name} ({r.JuristicType ?? "-"}, {r.Status ?? "-"}) " +
+                    $"ที่อยู่: {(string.IsNullOrEmpty(r.RawAddress) ? "-" : r.RawAddress)}", "SYSTEM");
+                return r;
+            }
+            catch (ServerUnavailableException)
+            {
+                r.Message = "เซิร์ฟเวอร์ NextAcc ไม่พร้อมใช้งานตอนนี้ — กรอกข้อมูลเองไปก่อนได้ แล้วค่อยลองใหม่";
+                return r;
+            }
+            catch (AccountingApiException ax) when (ax.StatusCode == 404)
+            {
+                r.Message = "ไม่พบข้อมูลนิติบุคคลของเลขนี้ (อาจเป็นบุคคลธรรมดา หรือเลขไม่ถูกต้อง)";
+                return r;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"DBD lookup {r.TaxId} ล้มเหลว: {ex.Message}", "SYSTEM");
+                r.Message = "ค้นข้อมูลไม่สำเร็จ: " + ex.Message;
+                return r;
+            }
+        }
+
+        /// <summary>
+        /// แตกที่อยู่ข้อความไทยจาก DBD เป็นฟิลด์ย่อย เช่น
+        /// "450 ซอยจรัญสนิทวงศ์ 67 แขวงบางพลัด เขตบางพลัด กรุงเทพมหานคร 10700"
+        /// → BuildingNumber="450 ซอยจรัญสนิทวงศ์ 67", SubDistrict="บางพลัด",
+        ///   District="บางพลัด", Province="กรุงเทพมหานคร", PostalCode="10700"
+        /// DBD คืนคำนำหน้าได้ทั้งติดกันและเว้นวรรค ("ตำบลสุรศักดิ์" / "ตำบล สุรศักดิ์")
+        /// </summary>
+        internal static void SplitThaiAddress(string raw, DbdLookupResult r)
+        {
+            if (r == null || string.IsNullOrWhiteSpace(raw)) return;
+            string s = System.Text.RegularExpressions.Regex.Replace(raw.Replace('\u00A0', ' '), @"\s+", " ").Trim();
+
+            Func<string, string> take = pattern =>
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(s, pattern);
+                if (!m.Success) return "";
+                string val = m.Groups[1].Value.Trim();
+                s = (s.Substring(0, m.Index) + " " + s.Substring(m.Index + m.Length)).Trim();
+                s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+                return val;
+            };
+
+            // รหัสไปรษณีย์ = เลข 5 หลักท้ายสุด (ตัดออกก่อน กันไปปนกับเลขที่บ้าน)
+            var zip = System.Text.RegularExpressions.Regex.Match(s, @"(?<!\d)(\d{5})(?!\d)\s*$");
+            if (zip.Success)
+            {
+                r.PostalCode = zip.Groups[1].Value;
+                s = s.Substring(0, zip.Index).Trim();
+            }
+
+            r.SubDistrict = take(@"(?:ตำบล|ต\.|แขวง)\s*([^\s]+)");
+            r.District    = take(@"(?:อำเภอ|อ\.|เขต)\s*([^\s]+)");
+            r.Province    = take(@"(?:จังหวัด|จ\.)\s*([^\s]+)");
+            r.Moo         = take(@"(?:หมู่ที่|หมู่|ม\.)\s*(\d+)");
+
+            // กรุงเทพฯ มักเขียนลอย ๆ ไม่มีคำว่า "จังหวัด"
+            if (string.IsNullOrEmpty(r.Province))
+            {
+                foreach (string bkk in new[] { "กรุงเทพมหานคร", "กรุงเทพฯ", "กรุงเทพ" })
+                {
+                    int i = s.IndexOf(bkk, StringComparison.Ordinal);
+                    if (i >= 0)
+                    {
+                        r.Province = "กรุงเทพมหานคร";
+                        s = (s.Substring(0, i) + " " + s.Substring(i + bkk.Length)).Trim();
+                        break;
+                    }
+                }
+            }
+
+            r.BuildingNumber = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim(' ', ',');
+        }
+
         public string LookupPaidHowAccountId(string paidHowText)
         {
             if (string.IsNullOrEmpty(paidHowText)) return null;
