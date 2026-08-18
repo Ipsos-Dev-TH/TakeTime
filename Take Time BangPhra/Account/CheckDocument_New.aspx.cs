@@ -675,6 +675,7 @@ namespace Take_Time_BangPhra.Account
                        -- ผู้ซื้อของใบเสร็จใบนี้ (Account_Receipt.Customer_ID) มาก่อนเสมอ
                        -- เดิม join จาก r.Customer_MobilePhone = ผู้จอง จึงโชว์ชื่อผู้จองตลอด
                        -- แม้ใบจะออกในนามบริษัทแล้ว ทำให้เข้าใจผิดว่าแก้ไขไม่ติด
+                       " + LinkedDocIdSelect() + @"
                        ISNULL(cb.FullName, c.FullName) as CustomerName,
                        ISNULL(cb.MobilePhone, r.Customer_MobilePhone) as Customer_MobilePhone,
                        r.Remark,
@@ -972,7 +973,16 @@ namespace Take_Time_BangPhra.Account
                 if (string.IsNullOrEmpty(lid)) continue;
 
                 Take_Time_BangPhra.Integration.NextAccPaymentDoc nd = null;
-                if (_syncStatusCache != null && _syncStatusCache.TryGetValue(lid, out var qrow))
+
+                // (0) การจับคู่ที่เก็บบนใบเสร็จเอง (PHASE18_32) — แหล่งจริง ไม่หายเวลาคิวถูกแก้
+                if (dt.Columns.Contains("LinkedDocId"))
+                {
+                    Guid lg;
+                    if (Guid.TryParse(r["LinkedDocId"]?.ToString() ?? "", out lg) && lg != Guid.Empty)
+                        byId.TryGetValue(lg, out nd);
+                }
+
+                if (nd == null && _syncStatusCache != null && _syncStatusCache.TryGetValue(lid, out var qrow))
                 {
                     string respId = qrow.Table.Columns.Contains("Nexaacc_Response_Id") ? qrow["Nexaacc_Response_Id"]?.ToString() : null;
                     if (Guid.TryParse(respId, out var g)) byId.TryGetValue(g, out nd);
@@ -2237,6 +2247,31 @@ namespace Take_Time_BangPhra.Account
 
         private Dictionary<string, DataRow> _syncStatusCache;
         private HashSet<string> _etaxReceipts;   // เลขใบเสร็จที่มี e-Tax แล้ว (ในช่วงวันที่) → โชว์ปุ่มส่ง e-Tax
+
+        private static int _hasLinkCol = -1;   // -1 = ยังไม่ตรวจ, 1 = มี, 0 = ไม่มี
+
+        /// <summary>
+        /// คอลัมน์การจับคู่ (PHASE18_32) อาจยังไม่ถูก migrate บนบางเครื่อง —
+        /// ถ้าใส่ชื่อคอลัมน์ที่ไม่มีลงไปตรง ๆ query หลักจะพังทั้งหน้า
+        /// จึงตรวจครั้งเดียวแล้วเลือกส่ง ชื่อคอลัมน์จริง หรือค่าว่าง
+        /// </summary>
+        private string LinkedDocIdSelect()
+        {
+            if (_hasLinkCol < 0)
+            {
+                try
+                {
+                    var chk = codeInstance.DatabaseQuerySafe(conn,
+                        @"SELECT TOP 1 1 FROM INFORMATION_SCHEMA.COLUMNS
+                          WHERE TABLE_NAME = 'Account_Receipt' AND COLUMN_NAME = 'Nexaacc_Doc_Id'", null);
+                    _hasLinkCol = (chk != null && chk.Rows.Count > 0) ? 1 : 0;
+                }
+                catch { _hasLinkCol = 0; }
+            }
+            return _hasLinkCol == 1
+                ? "ISNULL(CAST(ar.Nexaacc_Doc_Id AS NVARCHAR(50)), '') AS LinkedDocId,"
+                : "CAST('' AS NVARCHAR(50)) AS LinkedDocId,";
+        }
 
         private void LoadSyncStatusCache()
         {

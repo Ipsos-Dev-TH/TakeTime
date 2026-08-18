@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.7 · deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-18.8 · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -4656,8 +4656,9 @@ namespace Take_Time_BangPhra.Integration
                             if (!string.IsNullOrEmpty(other) && other != receiptNumber)
                             {
                                 names.Add(other);
-                                // ปลด marker ของใบที่ถูกแย่งคู่ ให้กลับไปสถานะ "ยังไม่ผูก"
+                                // ปลด marker + คอลัมน์จับคู่ของใบที่ถูกแย่งคู่
                                 SetReceiptPaymentMarker(other, null);
+                                SetReceiptNextAccDoc(other, null, null);
                             }
                             _code.DatabaseInsertSafe(_connectionString,
                                 "UPDATE Accounting_Sync_Queue SET Nexaacc_Response_Id = NULL, Nexaacc_Document_Number = NULL WHERE ID = @id",
@@ -4683,6 +4684,9 @@ namespace Take_Time_BangPhra.Integration
                         { "@qid", qid }, { "@rid", docId.ToString() },
                         { "@num", (object)nexaaccDocNumber ?? DBNull.Value }
                     });
+
+                // เก็บการจับคู่ไว้บนใบเสร็จ (ที่เก็บจริง) — คิวเป็นแค่ประวัติ
+                SetReceiptNextAccDoc(receiptNumber, docId.ToString(), nexaaccDocNumber);
 
                 // marker: Draft = ยังไม่อนุมัติ (DOC:) / อนุมัติแล้ว = APR:
                 SetReceiptPaymentMarker(receiptNumber, (isDraft ? "DOC:" : "APR:") + docId);
@@ -4738,6 +4742,7 @@ namespace Take_Time_BangPhra.Integration
                             "UPDATE Accounting_Sync_Queue SET Nexaacc_Response_Id = NULL, Nexaacc_Document_Number = NULL WHERE ID = @id",
                             new Dictionary<string, object> { { "@id", Convert.ToInt64(q0.Rows[0]["ID"]) } });
                     SetReceiptPaymentMarker(receiptNumber, null);
+                    SetReceiptNextAccDoc(receiptNumber, null, null);
                     _code.Logs(_connectionString, "AccountingSync", $"RelinkReceiptByDocumentNumber: ปลดการผูกของใบ {receiptNumber}", "SYSTEM");
                     return (true, $"ปลดการผูกของใบ {receiptNumber} แล้ว — ใบนี้จะไม่ผูกกับเอกสาร NextAcc ใด ๆ");
                 }
@@ -10045,6 +10050,40 @@ namespace Take_Time_BangPhra.Integration
                 ? Convert.ToInt64(dt.Rows[0]["NewID"]) : -1;
         }
 
+        /// <summary>
+        /// บันทึก "การจับคู่ ใบเสร็จ ↔ เอกสาร NextAcc" ลงบน Account_Receipt โดยตรง
+        /// (PHASE18_32) — เดิมเก็บไว้ที่ Accounting_Sync_Queue.Nexaacc_Response_Id ซึ่งเป็น
+        /// ตารางบันทึกงาน ไม่ใช่ข้อเท็จจริงของเอกสาร: void→สร้างใหม่ / ลบเอกสาร / ล้างคิว
+        /// ทำให้ตัวชี้หลุดแล้วใบกลายเป็น "NextAcc-only" กดแก้ไขไม่ได้
+        /// docId ว่าง = ปลดการผูก
+        /// </summary>
+        internal void SetReceiptNextAccDoc(string receiptNumber, string docId, string docNumber)
+        {
+            if (string.IsNullOrWhiteSpace(receiptNumber)) return;
+            try
+            {
+                Guid g;
+                bool ok = Guid.TryParse((docId ?? "").Trim(), out g) && g != Guid.Empty;
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Account_Receipt
+                      SET Nexaacc_Doc_Id = @gid,
+                          Nexaacc_Doc_Number = @num,
+                          Nexaacc_Doc_LinkedAt = CASE WHEN @gid IS NULL THEN NULL ELSE GETDATE() END
+                      WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", receiptNumber.Trim() },
+                        { "@gid", ok ? (object)g : DBNull.Value },
+                        { "@num", string.IsNullOrWhiteSpace(docNumber) ? (object)DBNull.Value : docNumber.Trim() }
+                    });
+            }
+            catch (Exception ex)
+            {
+                // ยังไม่ได้รัน migration 32 → ข้าม (ระบบ fallback ไปอ่านจากคิวเหมือนเดิม)
+                LogThrottled("link-col", $"SetReceiptNextAccDoc: เขียนคอลัมน์การจับคู่ไม่ได้ ({ex.Message}) — ยังไม่ได้รัน PHASE18_32?");
+            }
+        }
+
         private void UpdateQueueStatus(long queueId, string status, string errorMessage, string nexaaccResponseId,
             string documentNumber = null, string documentType = null)
         {
@@ -10067,6 +10106,26 @@ namespace Take_Time_BangPhra.Integration
                       Nexaacc_Document_Type = COALESCE(@docType, Nexaacc_Document_Type)
                   WHERE ID = @id",
                 parameters);
+
+            // CREATE ใบเสร็จสำเร็จ → บันทึกคู่ลงบนใบเสร็จเลย (จุดเดียวที่ทุกเส้นทางผ่าน)
+            if (status == "COMPLETED" && !string.IsNullOrEmpty(nexaaccResponseId))
+            {
+                try
+                {
+                    var qr = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT TOP 1 Action_Type, Payload FROM Accounting_Sync_Queue WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", queueId } });
+                    if (qr != null && qr.Rows.Count > 0
+                        && string.Equals(qr.Rows[0]["Action_Type"]?.ToString(), "CREATE_RECEIPT_DOCUMENT", StringComparison.Ordinal))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(
+                            qr.Rows[0]["Payload"]?.ToString() ?? "", "\"receiptNumber\"\\s*:\\s*\"([^\"]*)\"");
+                        if (m.Success && m.Groups[1].Value.Length > 0)
+                            SetReceiptNextAccDoc(m.Groups[1].Value, nexaaccResponseId, documentNumber);
+                    }
+                }
+                catch { }
+            }
         }
 
         private void IncrementRetry(long queueId, int currentRetryCount)
