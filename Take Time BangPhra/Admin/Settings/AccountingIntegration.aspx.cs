@@ -1038,6 +1038,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     foreach (DataRow row in items.Rows)
                     {
+                      // แถวเดียวที่ข้อมูลเพี้ยน (Entity_ID ไม่ใช่ตัวเลข / ค่า NULL) ต้องไม่ทำให้
+                      // ทั้งหน้าล้ม — เดิมพังทั้ง GetQueueData แล้วหน้านั้นเปิดไม่ได้เลย
+                      try
+                      {
                         string actionType = row["Action_Type"]?.ToString() ?? "";
                         string entityType = row["Entity_Type"]?.ToString() ?? "";
                         bool isPayroll = actionType == "CREATE_PAYROLL_ENTRY"
@@ -1081,17 +1085,24 @@ namespace Take_Time_BangPhra.Admin.Settings
                         if (mask && !string.IsNullOrEmpty(errorMsg))
                             errorMsg = "🔒 ข้อมูลถูกจำกัดการเข้าถึง";
 
+                        // Error_Message ของแถว FAILED เป็น response ดิบของ API ซึ่งยาวมากได้
+                        // หน้าเว็บโชว์แค่ย่อ ๆ อยู่แล้ว → ตัดก่อนส่งกัน payload บวมจนทะลุลิมิต serialize
+                        const int MaxErrChars = 4000;
+                        if (errorMsg.Length > MaxErrChars)
+                            errorMsg = errorMsg.Substring(0, MaxErrChars) + "… (ตัดแสดง — กด Log เพื่อดูเต็ม)";
+
                         itemList.Add(new Dictionary<string, object>
                         {
-                            { "id", Convert.ToInt64(row["ID"]) },
+                            { "id", ToLongSafe(row["ID"]) },
                             { "entityType", mask ? "PAYROLL" : entityType },
-                            { "entityId", mask ? 0 : Convert.ToInt32(row["Entity_ID"]) },
+                            { "entityId", mask ? 0 : ToIntSafe(row["Entity_ID"]) },
                             { "actionType", actionType },
                             { "status", row["Status"]?.ToString() },
-                            { "retryCount", Convert.ToInt32(row["Retry_Count"]) },
-                            { "maxRetries", Convert.ToInt32(row["Max_Retries"]) },
+                            { "retryCount", ToIntSafe(row["Retry_Count"]) },
+                            { "maxRetries", ToIntSafe(row["Max_Retries"]) },
                             { "error", errorMsg },
-                            { "created", Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") },
+                            { "created", row["Created_Date"] == DBNull.Value ? ""
+                                        : Convert.ToDateTime(row["Created_Date"]).ToString("dd/MM HH:mm") },
                             { "nexaaccId", mask ? "" : nexaaccId },
                             { "nexaaccDocNumber", mask ? "🔒" : nexaaccDocNum },
                             { "nexaaccDocType", mask ? "" : nexaaccDocType },
@@ -1100,6 +1111,26 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "verifyDetail", mask ? "" : (row.Table.Columns.Contains("Verify_Detail") && row["Verify_Detail"] != DBNull.Value ? row["Verify_Detail"].ToString() : "") },
                             { "sensitive", isSensitive }
                         });
+                      }
+                      catch (Exception rowEx)
+                      {
+                          // ยังส่งแถวนี้กลับไป แต่บอกว่าอ่านไม่ได้ เพื่อให้ผู้ใช้เห็นว่ามีปัญหาที่แถวไหน
+                          itemList.Add(new Dictionary<string, object>
+                          {
+                              { "id", ToLongSafe(row["ID"]) },
+                              { "entityType", row["Entity_Type"]?.ToString() ?? "?" },
+                              { "entityId", 0 },
+                              { "actionType", row["Action_Type"]?.ToString() ?? "?" },
+                              { "status", row["Status"]?.ToString() ?? "?" },
+                              { "retryCount", 0 }, { "maxRetries", 0 },
+                              { "error", "⚠️ อ่านรายการนี้ไม่ได้: " + rowEx.Message },
+                              { "created", "" }, { "nexaaccId", "" }, { "nexaaccDocNumber", "" },
+                              { "nexaaccDocType", "" }, { "nexaaccUrl", "" },
+                              { "verifyStatus", "" }, { "verifyDetail", "" }, { "sensitive", false }
+                          });
+                          try { _code.Logs(ConnStr, "AccountingIntegration",
+                              $"GetQueueData row failed (ID={row["ID"]}): {rowEx.Message}", "SYSTEM"); } catch { }
+                      }
                     }
                 }
 
@@ -1991,10 +2022,47 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
+        /// <summary>แปลงค่าเป็นตัวเลขแบบไม่โยน exception — คอลัมน์ในคิวอาจเป็น NULL หรือข้อความ</summary>
+        private static int ToIntSafe(object v)
+        {
+            if (v == null || v == DBNull.Value) return 0;
+            int n;
+            return int.TryParse(v.ToString().Trim(), out n) ? n : 0;
+        }
+
+        private static long ToLongSafe(object v)
+        {
+            if (v == null || v == DBNull.Value) return 0;
+            long n;
+            return long.TryParse(v.ToString().Trim(), out n) ? n : 0;
+        }
+
         private void WriteJson(Dictionary<string, object> data)
         {
             Response.ContentType = "application/json";
-            Response.Write(new JavaScriptSerializer().Serialize(data));
+            string json;
+            try
+            {
+                // ⚠️ JavaScriptSerializer จำกัดผลลัพธ์ที่ 2 MB by default — คิว 1 หน้าที่มีแถว FAILED
+                // ซึ่ง Error_Message เป็น response ดิบของ API ยาว ๆ จะทะลุลิมิตแล้วโยน exception
+                // ออกไปนอก try ของ handler → ASP.NET ตอบเป็นหน้า HTML error → ฝั่ง JS ทำ r.json()
+                // ไม่ได้ → เข้า .catch ที่ log ลง console เฉย ๆ = ผู้ใช้เห็นแค่ "กดแล้วไม่ไปไหน"
+                var ser = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                json = ser.Serialize(data);
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(ConnStr, "AccountingIntegration", $"WriteJson serialize failed: {ex.Message}", "SYSTEM"); }
+                catch { }
+                // ต้องตอบเป็น JSON เสมอ ไม่งั้นหน้าเว็บจะเงียบโดยไม่มีสาเหตุให้ดู
+                var safe = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                json = safe.Serialize(new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", "ส่งข้อมูลกลับไม่สำเร็จ (serialize): " + ex.Message }
+                });
+            }
+            Response.Write(json);
             Response.End();
         }
 

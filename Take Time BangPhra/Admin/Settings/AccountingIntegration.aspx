@@ -2069,11 +2069,25 @@
                     queueState.page = data.page || 1;
                     queueState.totalPages = data.totalPages || 1;
 
+                    if (data.success === false && data.message) {
+                        // เซิร์ฟเวอร์ตอบว่าอ่านคิวไม่สำเร็จ — ต้องบอกผู้ใช้ ไม่ใช่เงียบ
+                        var tb = document.getElementById('queueBody');
+                        if (tb) tb.innerHTML = '<tr><td colspan="20" style="padding:16px;color:#C62828;">'
+                            + '⚠️ ' + escHtml(data.message) + '</td></tr>';
+                    }
                     renderQueue(data.items || []);
                     renderPagination(data.page, data.totalPages, data.totalItems);
                     updateFilterUI();
                 })
-                .catch(function(err) { console.error(err); });
+                .catch(function(err) {
+                    // เดิม log ลง console อย่างเดียว → หน้าที่โหลดไม่ได้จะดูเหมือน "กดแล้วไม่ไปไหน"
+                    console.error(err);
+                    var tb = document.getElementById('queueBody');
+                    if (tb) tb.innerHTML = '<tr><td colspan="20" style="padding:16px;color:#C62828;">'
+                        + '⚠️ โหลดหน้านี้ไม่สำเร็จ: ' + escHtml(err && err.message ? err.message : String(err))
+                        + '<br><span style="color:#666;font-size:12px;">ดูสาเหตุจริงได้ที่ Logs หมวด AccountingIntegration</span>'
+                        + '</td></tr>';
+                });
         }
 
         function renderQueue(items) {
