@@ -2176,9 +2176,23 @@
             body.innerHTML = '<div style="text-align:center; color:#999;">กำลังโหลด...</div>';
             modal.style.display = 'block';
 
-            fetch(pageUrl + '?action=itemLogs&queueId=' + queueId + '&_=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
+            // กันค้าง: ถ้าเซิร์ฟเวอร์ไม่ตอบใน 40 วิ ให้ยกเลิกและแจ้งผู้ใช้ (เดิมหมุนค้างไปเรื่อย ๆ)
+            var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            var giveUp = setTimeout(function () { if (ctrl) ctrl.abort(); }, 40000);
+
+            fetch(pageUrl + '?action=itemLogs&queueId=' + queueId + '&_=' + Date.now(),
+                  ctrl ? { signal: ctrl.signal } : undefined)
+                .then(function(r) { return r.text(); })
+                .then(function(txt) {
+                    clearTimeout(giveUp);
+                    var data;
+                    try { data = JSON.parse(txt); }
+                    catch (e) {
+                        body.innerHTML = '<div class="test-result error" style="display:block;">เซิร์ฟเวอร์ตอบไม่ใช่ JSON</div>'
+                                       + '<pre style="white-space:pre-wrap; word-break:break-word; font-size:11px; max-height:300px; overflow:auto;">'
+                                       + escapeHtml(txt.substring(0, 3000)) + '</pre>';
+                        return;
+                    }
                     if (!data.success) {
                         body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message) + '</div>';
                         return;
@@ -2195,6 +2209,10 @@
                     }
                     // Log lines
                     html += '<div style="font-weight:600; margin-bottom:6px;">AccountingSync log (' + (data.logs ? data.logs.length : 0) + ' บรรทัด):</div>';
+                    if (data.note) {
+                        html += '<div style="font-size:11.5px; color:#8a6d3b; background:#fcf8e3; border:1px solid #faebcc; border-radius:5px; padding:6px 8px; margin-bottom:8px;">'
+                              + escapeHtml(data.note) + '</div>';
+                    }
                     if (!data.logs || !data.logs.length) {
                         html += '<div style="color:#999; font-size:13px;">ไม่พบ log ที่เกี่ยวข้อง (ลองกด Retry ก่อนเพื่อให้เกิด log ใหม่ หรือค้นจากเลขใบเสร็จโดยตรง)</div>';
                     } else {
@@ -2211,7 +2229,11 @@
                     body.innerHTML = html;
                 })
                 .catch(function(err) {
-                    body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(err.message) + '</div>';
+                    clearTimeout(giveUp);
+                    var msg = (err && err.name === 'AbortError')
+                        ? 'โหลด log ไม่สำเร็จ: เกิน 40 วินาที (ตาราง Logs ใหญ่/DB ช้า) — ลองใหม่ หรือค้นจากหน้า Logs โดยตรง'
+                        : (err && err.message) || 'โหลด log ไม่สำเร็จ';
+                    body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(msg) + '</div>';
                 });
         }
 

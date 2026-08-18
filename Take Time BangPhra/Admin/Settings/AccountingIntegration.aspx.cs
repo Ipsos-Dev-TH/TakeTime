@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
+using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
@@ -1086,8 +1087,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                             errorMsg = "🔒 ข้อมูลถูกจำกัดการเข้าถึง";
 
                         // Error_Message ของแถว FAILED เป็น response ดิบของ API ซึ่งยาวมากได้
-                        // หน้าเว็บโชว์แค่ย่อ ๆ อยู่แล้ว → ตัดก่อนส่งกัน payload บวมจนทะลุลิมิต serialize
-                        const int MaxErrChars = 4000;
+                        // (บางครั้งเป็นหน้า HTML error page ทั้งหน้า) → ถอด tag + ตัดก่อนส่ง
+                        // กัน payload บวมจนทะลุลิมิต serialize และกันเบราว์เซอร์อืด
+                        const int MaxErrChars = 2000;
+                        if (!mask && errorMsg.Length > MaxErrChars)
+                            errorMsg = CondenseErrorForDisplay(errorMsg);
                         if (errorMsg.Length > MaxErrChars)
                             errorMsg = errorMsg.Substring(0, MaxErrChars) + "… (ตัดแสดง — กด Log เพื่อดูเต็ม)";
 
@@ -1235,7 +1239,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดูรายการเงินเดือน" } };
 
                 var dt = _code.DatabaseQuerySafe(ConnStr,
-                    "SELECT Payload, Entity_ID, Entity_Type, Error_Message FROM Accounting_Sync_Queue WHERE ID = @id",
+                    @"SELECT Payload, Entity_ID, Entity_Type, Error_Message, Created_Date, Processed_Date
+                      FROM Accounting_Sync_Queue WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", queueId } });
                 if (dt == null || dt.Rows.Count == 0)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบรายการคิวนี้" } };
@@ -1243,7 +1248,19 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var row = dt.Rows[0];
                 string payload = row["Payload"]?.ToString() ?? "";
                 string entityId = row["Entity_ID"]?.ToString() ?? "";
-                string errorMsg = row["Error_Message"]?.ToString() ?? "";
+                string errorMsg = CondenseErrorForDisplay(row["Error_Message"]?.ToString() ?? "");
+
+                // กรอบเวลาให้ SQL ใช้ index บน LogDateTime ได้ — ถ้าไม่จำกัด LIKE '%..%' จะ scan ทั้ง Logs
+                // (ตาราง Logs โตเป็นล้านแถว → หน้าจอ "กำลังโหลด..." ค้างยาว)
+                DateTime winFrom = DateTime.Now.AddDays(-30), winTo = DateTime.Now.AddDays(1);
+                if (row["Created_Date"] != DBNull.Value)
+                {
+                    var created = Convert.ToDateTime(row["Created_Date"]);
+                    winFrom = created.AddDays(-1);
+                    var last = row["Processed_Date"] != DBNull.Value ? Convert.ToDateTime(row["Processed_Date"]) : created;
+                    winTo = (last > created ? last : created).AddDays(7);
+                    if (winTo > DateTime.Now.AddDays(1)) winTo = DateTime.Now.AddDays(1);
+                }
 
                 // ── ดึงตัวระบุจาก payload เพื่อค้น log ─────────────────────────────
                 var tokens = new List<string>();
@@ -1259,29 +1276,42 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
 
                 var logs = new List<Dictionary<string, object>>();
+                string note = "";
                 if (tokens.Count > 0)
                 {
-                    // WHERE LogAction='AccountingSync' AND (LogDetail LIKE '%tok0%' OR ...) — เต็ม ไม่ตัด
+                    // WHERE LogAction='AccountingSync' AND ช่วงเวลา AND (LogDetail LIKE '%tok0%' OR ...)
                     var whereOr = new List<string>();
-                    var pars = new Dictionary<string, object>();
+                    var pars = new Dictionary<string, object>
+                    {
+                        { "@from", winFrom }, { "@to", winTo }
+                    };
                     for (int i = 0; i < tokens.Count; i++)
                     {
                         whereOr.Add($"LogDetail LIKE @t{i}");
                         pars.Add($"@t{i}", "%" + tokens[i] + "%");
                     }
-                    var logDt = _code.DatabaseQuerySafe(ConnStr,
-                        $@"SELECT TOP 300 LogDateTime, LogDetail
-                           FROM Logs
-                           WHERE LogAction = 'AccountingSync' AND ({string.Join(" OR ", whereOr)})
-                           ORDER BY LogDateTime DESC",
-                        pars);
-                    if (logDt != null)
+                    string sql = $@"SELECT TOP 300 LogDateTime, LogDetail
+                                    FROM Logs
+                                    WHERE LogAction = 'AccountingSync'
+                                      AND LogDateTime >= @from AND LogDateTime < @to
+                                      AND ({string.Join(" OR ", whereOr)})
+                                    ORDER BY LogDateTime DESC";
+
+                    bool timedOut;
+                    var logDt = QueryWithTimeout(sql, pars, 20, out timedOut);
+                    if (timedOut)
+                        note = "ค้นหา log ใช้เวลานานเกิน 20 วินาที (ตาราง Logs ใหญ่มาก) — แสดงเฉพาะ Error เต็มด้านบน "
+                             + "ถ้าต้องการ log ให้ค้นจากหน้า Logs ด้วยคำว่า \"" + string.Join("\" หรือ \"", tokens) + "\"";
+                    else if (logDt != null)
                         foreach (DataRow lr in logDt.Rows)
                             logs.Add(new Dictionary<string, object>
                             {
                                 { "time", lr["LogDateTime"] != DBNull.Value ? Convert.ToDateTime(lr["LogDateTime"]).ToString("dd/MM/yyyy HH:mm:ss") : "" },
-                                { "detail", lr["LogDetail"]?.ToString() ?? "" }
+                                { "detail", Truncate(lr["LogDetail"]?.ToString() ?? "", 8000) }
                             });
+
+                    if (note.Length == 0)
+                        note = "ช่วงที่ค้น: " + winFrom.ToString("dd/MM/yyyy HH:mm") + " – " + winTo.ToString("dd/MM/yyyy HH:mm");
                 }
 
                 return new Dictionary<string, object>
@@ -1289,6 +1319,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "success", true },
                     { "keys", tokens.Count > 0 ? string.Join(", ", tokens) : ("Entity #" + entityId) },
                     { "error", errorMsg },
+                    { "note", note },
                     { "logs", logs }
                 };
             }
@@ -1296,6 +1327,60 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
+        }
+
+        /// <summary>ยิง query แบบมี CommandTimeout — คืน null + timedOut=true แทนที่จะค้างรอ</summary>
+        private DataTable QueryWithTimeout(string sql, Dictionary<string, object> pars, int seconds, out bool timedOut)
+        {
+            timedOut = false;
+            try
+            {
+                var dt = new DataTable();
+                using (var con = new SqlConnection(ConnStr))
+                using (var cmd = new SqlCommand(sql, con))
+                {
+                    cmd.CommandTimeout = seconds;
+                    if (pars != null)
+                        foreach (var p in pars) cmd.Parameters.AddWithValue(p.Key, p.Value ?? DBNull.Value);
+                    con.Open();
+                    using (var rd = cmd.ExecuteReader()) dt.Load(rd);
+                }
+                return dt;
+            }
+            catch (SqlException ex) when (ex.Number == -2)   // timeout expired
+            {
+                timedOut = true;
+                return null;
+            }
+            catch { return null; }
+        }
+
+        private static string Truncate(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length <= max) return s ?? "";
+            return s.Substring(0, max) + "\n… (ตัดที่ " + max.ToString("N0") + " ตัวอักษร จากทั้งหมด " + s.Length.ToString("N0") + ")";
+        }
+
+        /// <summary>Error_Message บางครั้งเป็นหน้า HTML error page เต็ม ๆ ของ NextAcc (ASP.NET Core dev page)
+        /// ขนาดหลายแสนตัวอักษร → ถอด tag/script/style เหลือข้อความจริง แล้วตัดให้พอดีอ่าน</summary>
+        private static string CondenseErrorForDisplay(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            bool looksHtml = raw.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0
+                          || raw.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (looksHtml)
+            {
+                string t = raw;
+                t = System.Text.RegularExpressions.Regex.Replace(t, @"(?is)<(script|style)\b.*?</\1>", " ");
+                t = System.Text.RegularExpressions.Regex.Replace(t, @"(?i)<(br|/p|/div|/li|/h\d|/tr)\s*/?>", "\n");
+                t = System.Text.RegularExpressions.Regex.Replace(t, @"(?s)<[^>]+>", " ");
+                t = System.Net.WebUtility.HtmlDecode(t);
+                t = System.Text.RegularExpressions.Regex.Replace(t, @"[ \t]{2,}", " ");
+                t = System.Text.RegularExpressions.Regex.Replace(t, @"(\s*\n\s*){2,}", "\n");
+                raw = "⚠ NextAcc ตอบกลับเป็นหน้า HTML error page (แอปฝั่ง NextAcc start ไม่ขึ้น/พังทั้งแอป)\n"
+                    + "— ถอด HTML ให้อ่านง่ายแล้ว —\n\n" + t.Trim();
+            }
+            return Truncate(raw, 20000);
         }
 
         private Dictionary<string, object> RetryAllFailed()

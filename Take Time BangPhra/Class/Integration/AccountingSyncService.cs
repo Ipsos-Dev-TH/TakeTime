@@ -115,6 +115,20 @@ namespace Take_Time_BangPhra.Integration
                        "ต้องให้ NextAcc 'ปลดการหักมัดจำ' (clear DepositAppliedToDocumentId / un-realize) ของ JV-INT ใบนั้นก่อน " +
                        "(หรือแก้ให้ guard อนุญาตหักซ้ำเมื่อเอกสารที่อ้างถูกลบไปแล้ว) → แล้วกด Retry. " +
                        "เคสนี้เกิดจากการลบ+สร้างเอกสารซ้ำหลายรอบ (dev/test) — การใช้งานปกติออกใบครั้งเดียวไม่เจอ";
+            // ผังบัญชีฝั่ง NextAcc ไม่มีรหัสที่เรา map ไว้ (เช่น GRNI 21240 ที่ seed มาจาก PHASE18_10)
+            var noAcc = System.Text.RegularExpressions.Regex.Match(b, @"ไม่พบผังบัญชี\s*:?\s*([0-9\-\.]+)");
+            if (noAcc.Success)
+                return "\n💡 วิธีแก้: ผังบัญชีของ NextAcc ไม่มีรหัส " + noAcc.Groups[1].Value + " ที่ TakeTime map ไว้ — เลือกอย่างใดอย่างหนึ่ง " +
+                       "(1) สร้างบัญชีรหัสนี้ใน NextAcc (Chart of Accounts) แล้วกด 'ดึงผังบัญชี' ในหน้าตั้งค่า NextAcc แล้ว Retry หรือ " +
+                       "(2) แก้ mapping ให้ชี้รหัสที่มีจริง ที่ Admin → NextAcc → ผังบัญชี/Mapping " +
+                       "(รหัส 21240 = GRNI เจ้าหนี้-รับสินค้ายังไม่วางบิล ใช้กับ 'รับของเข้าสต๊อก' — ถ้าไม่ต้องการใช้ GR/IR ปิด flag ได้ในหน้าเดียวกัน)";
+            // NextAcc ตอบเป็นหน้า HTML error page = แอปฝั่งนั้นพังทั้งแอป ไม่ใช่ปัญหาข้อมูลของเรา
+            if (b.IndexOf("An error occurred while starting the application", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("A circular dependency was detected", StringComparison.OrdinalIgnoreCase) >= 0
+                || (b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0 && b.IndexOf("Exception", StringComparison.Ordinal) >= 0))
+                return "\n💡 วิธีแก้: นี่ไม่ใช่ปัญหาข้อมูลฝั่ง TakeTime — เซิร์ฟเวอร์ NextAcc start ไม่ขึ้น (ตอบเป็นหน้า error page ของ ASP.NET Core) " +
+                       "ทุก API ของ NextAcc จะ 500 หมดจนกว่าจะแก้ฝั่งนั้น. แจ้ง dev NextAcc ให้ดู Program.cs (DI/BuildServiceProvider) " +
+                       "→ พอ NextAcc กลับมา ค่อยกด 'Retry ทั้งหมด' ในหน้าคิวนี้";
             return "";
         }
 
@@ -2430,6 +2444,22 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // ถอด \uXXXX ให้อ่านเป็นภาษาไทย + เติมคำแนะนำสำหรับ error ที่รู้จัก (§86/4 ฯลฯ)
                     string bodyReadable = DecodeUnicodeEscapes(ex.ResponseBody);
+
+                    // NextAcc ทั้งแอปล่ม (ตอบหน้า HTML error page) → ไม่ใช่ปัญหาข้อมูลของรายการนี้
+                    // อย่าเผา retry ทิ้งทั้งคิว: คงสถานะ PENDING แล้วหยุดรอบ เหมือน DNS/Auth error
+                    if (IsServerDownBody(bodyReadable))
+                    {
+                        string downMsg = $"NextAcc ไม่พร้อมใช้งาน (ไม่นับ retry): API {ex.StatusCode} — "
+                                       + "เซิร์ฟเวอร์ NextAcc start ไม่ขึ้น/ตอบหน้า error page "
+                                       + "จะลองใหม่อัตโนมัติเมื่อ NextAcc กลับมา";
+                        UpdateQueueStatus(queueId, "PENDING", downMsg, null);
+                        infrastructureFailed = true;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessQueueAsync halted: NextAcc application is down (HTTP {ex.StatusCode}, HTML error page) — "
+                            + "รายการที่เหลือคง PENDING ไว้รอรอบถัดไป", "SYSTEM");
+                        continue;
+                    }
+
                     string hint = BuildApiErrorHint(bodyReadable);
                     string errorDetail = $"Queue #{queueId} [{actionType}] API {ex.StatusCode}: {bodyReadable}{hint}";
                     UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
@@ -2446,9 +2476,20 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessQueueAsync halted: infrastructure error detected — {ex.Message}", "SYSTEM");
                     }
+                    else if (IsServerDownBody(ex.Message) || IsServerDownBody(ex.InnerException?.Message))
+                    {
+                        // เคสเดียวกับด้านบน แต่ error ถูกห่อเป็น Exception ธรรมดา
+                        // (เช่น "sync contact ... ล้มเหลว: Accounting API call failed after N attempts ...")
+                        UpdateQueueStatus(queueId, "PENDING",
+                            "NextAcc ไม่พร้อมใช้งาน (ไม่นับ retry): เซิร์ฟเวอร์ NextAcc start ไม่ขึ้น/ตอบหน้า error page — "
+                            + "จะลองใหม่อัตโนมัติเมื่อ NextAcc กลับมา", null);
+                        infrastructureFailed = true;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessQueueAsync halted: NextAcc application is down — รายการที่เหลือคง PENDING ไว้รอรอบถัดไป", "SYSTEM");
+                    }
                     else
                     {
-                        string errorDetail = $"Queue #{queueId} [{actionType}] error: {ex.Message}";
+                        string errorDetail = $"Queue #{queueId} [{actionType}] error: {ex.Message}{BuildApiErrorHint(ex.Message)}";
                         int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
                         IncrementRetry(queueId, retryCount);
                         UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
@@ -2458,6 +2499,27 @@ namespace Take_Time_BangPhra.Integration
             }
 
             return processed;
+        }
+
+        /// <summary>NextAcc ตอบเป็นหน้า HTML error page / startup failure = แอปฝั่งนั้นล่มทั้งแอป
+        /// ไม่ใช่ปัญหาข้อมูลของรายการในคิว → ปฏิบัติเหมือน infrastructure error (ไม่นับ retry)</summary>
+        private static bool IsServerDownBody(string body)
+        {
+            string b = body ?? "";
+            if (b.Length == 0) return false;
+            if (b.IndexOf("An error occurred while starting the application", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("A circular dependency was detected", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("Some services are not able to be constructed", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 502", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 503", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            // 5xx ที่ตอบกลับเป็น HTML (ไม่ใช่ JSON ของ API) = เว็บเซิร์ฟเวอร์/แอปพัง ไม่ใช่ validation
+            bool isHtml = b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0
+                       || b.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isHtml && (b.IndexOf("InternalServerError", StringComparison.OrdinalIgnoreCase) >= 0
+                        || b.IndexOf("ServiceUnavailable", StringComparison.OrdinalIgnoreCase) >= 0
+                        || b.IndexOf("BadGateway", StringComparison.OrdinalIgnoreCase) >= 0
+                        || b.IndexOf("Exception", StringComparison.Ordinal) >= 0)) return true;
+            return false;
         }
 
         private static bool IsDnsError(Exception ex)
