@@ -4760,6 +4760,7 @@ namespace Take_Time_BangPhra.Integration
 
                 return (true, sb.ToString()
                     + $"✅ สร้าง/อัปเดต contact บน NextAcc แล้ว\n   contactId = {buyer.NexaaccContactId}\n"
+                    + (string.IsNullOrEmpty(_lastContactPatchNote) ? "" : "   " + _lastContactPatchNote + "\n")
                     + "   ตรวจในรายการผู้ติดต่อของ NextAcc ได้เลย แล้วค่อยกด \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบเสร็จ");
             }
             catch (Exception ex)
@@ -9087,8 +9088,16 @@ namespace Take_Time_BangPhra.Integration
         /// จากทุกจุดแก้ข้อมูลลูกค้า → กติกานิติ/บุคคล, สาขา, ที่อยู่ ตรงกันทั้งหมดแน่นอน.
         /// คืน null = สำเร็จ / ข้อความ error = ล้มเหลว (ผู้เรียกตัดสินใจเองว่า retry หรือกลืน)
         /// </summary>
+        /// <summary>ผลการแพตช์ ContactType/BranchCode ของการ push ครั้งล่าสุด — ให้เครื่องมือรายงานต่อ
+        /// (upsert ฝั่ง integration ไม่ทับสองฟิลด์นี้ การเปลี่ยนบุคคล↔นิติบุคคลจึงพึ่ง patch ตัวนี้ล้วน ๆ)</summary>
+        private string _lastContactPatchNote;
+
         private async Task<string> PushCustomerContactAsync(ContactInfo info, string logPrefix)
         {
+            _lastContactPatchNote = _config.CanUseCompanyEndpoints
+                ? null
+                : "⚠ company endpoint ปิดอยู่ → อัปเดต \"ชนิดผู้ติดต่อ/รหัสสาขา\" ของ contact เดิมไม่ได้ "
+                  + "(NextAcc ไม่ทับสองฟิลด์นี้ตอน upsert) — contact ที่เคยเป็นบุคคลธรรมดาจะค้างเป็นบุคคลธรรมดา";
             // ตรวจความครบถ้วนของข้อมูลผู้ซื้อก่อน upsert — เลขภาษี 13 หลัก + ที่อยู่ = ออกใบกำกับ §86/4 ได้
             // (log ให้ผู้ใช้เห็นชัดว่าดึงอะไรไป contact ก่อนออกเอกสาร)
             bool taxIdOk = !string.IsNullOrWhiteSpace(info.TaxId)
@@ -9128,20 +9137,24 @@ namespace Take_Time_BangPhra.Integration
                             string patchBranch = (info.BranchCode ?? "").Trim();
                             if (!System.Text.RegularExpressions.Regex.IsMatch(patchBranch, @"^\d{5}$"))
                                 patchBranch = isJuristic ? "00000" : null;
-                            if (!string.IsNullOrEmpty(patchBranch) || isJuristic)
+                            // ⚠ ต้องแพตช์ "ทุกครั้ง" ไม่ใช่เฉพาะนิติบุคคล — upsert ของ integration
+                            //   ไม่เคยทับ ContactType เลย ⇒ ลูกค้าที่เปลี่ยนชนิด (บุคคล↔นิติบุคคล)
+                            //   จะค้างชนิดเดิมตลอด. เดิมข้ามเคส "เปลี่ยนกลับเป็นบุคคลธรรมดา"
+                            await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
                             {
-                                await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
-                                {
-                                    BranchCode = patchBranch,
-                                    ContactType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual
-                                });
-                                _code.Logs(_connectionString, "AccountingSync",
-                                    $"{logPrefix}: patch contact {info.NexaaccContactId} branch={patchBranch ?? "-"} " +
-                                    $"type={(isJuristic ? "Juristic" : "Individual")} ผ่าน company PUT (int_ upsert ไม่ทับ field เดิม)", "SYSTEM");
-                            }
+                                BranchCode = patchBranch,
+                                ContactType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual
+                            });
+                            _lastContactPatchNote = $"อัปเดตชนิดผู้ติดต่อเป็น {(isJuristic ? "นิติบุคคล" : "บุคคลธรรมดา")}"
+                                + $" สาขา {(patchBranch ?? "-")} สำเร็จ (company PUT)";
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"{logPrefix}: patch contact {info.NexaaccContactId} branch={patchBranch ?? "-"} " +
+                                $"type={(isJuristic ? "Juristic" : "Individual")} ผ่าน company PUT (int_ upsert ไม่ทับ field เดิม)", "SYSTEM");
                         }
                         catch (Exception px)
                         {
+                            _lastContactPatchNote = "⚠ อัปเดตชนิดผู้ติดต่อ/รหัสสาขาไม่สำเร็จ: " + px.Message
+                                + " — ถ้า contact เดิมเป็นบุคคลธรรมดา จะยังค้างเป็นบุคคลธรรมดาและใบกำกับอาจถูกปัด §86/4";
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"{logPrefix}: patch branch/type ล้มเหลว (ไม่บล็อก): {px.Message}", "SYSTEM");
                         }
