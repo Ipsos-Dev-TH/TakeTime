@@ -383,21 +383,24 @@
                 <div class="config-item" style="background:#f1f3f4; border:1px dashed #bbb; border-radius:4px; padding:8px;">
                     <label style="color:#666;"><i class="fas fa-info-circle"></i> การออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำ</label>
                     <div class="help-text" style="padding-left:4px;">
-                        จัดการอัตโนมัติผ่าน<b>ปุ่ม "⭐ ใช้ค่าแนะนำ" ด้านบน</b> — route เอกสารรับ B2B ไปเส้น <b>company Receipt(3) + drives</b>
-                        (verified): ใบเดียว หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน", หักมัดจำในใบ (Dr 21510), e-Tax T03.
+                        จัดการอัตโนมัติผ่าน<b>ปุ่ม "⭐ ใช้ค่าแนะนำ" ด้านบน</b> — route เอกสารรับ B2B ไปเส้น
+                        <b>ใบกำกับขายสด (isCashSale)</b>: ใบเดียว หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน", หักมัดจำในใบ, ออก e-Tax ได้.
                         <br/><small style="color:#999;">(toggle ทดลอง isCashSale เดิม — TaxReceipt_SingleDoc / CashSale_Deposit / NativeA — <b>เอาออกแล้ว</b>: ตัวแรก 2 ตัวไม่มีผลต่อโค้ด, การหักมัดจำใช้ drives ผ่านค่าแนะนำแทน)</small>
                     </div>
                 </div>
                 <div class="config-item" style="background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px;">
                     <label>
                         <input type="checkbox" id="cfgCashSaleUseReceipt" />
-                        🚑 ใช้ "ใบเสร็จรับเงิน (Receipt)" แทนใบกำกับ — <b>Dr เงินสดตรง ไม่มีลูกหนี้ (ไม่ต้องรอ NextAcc)</b>
+                        🚑 ใช้ "ใบเสร็จรับเงิน (Receipt)" แทนใบกำกับ — <b>ปกติควรปิด</b>
                     </label>
                     <div class="help-text" style="border-left:3px solid #f57c00; padding-left:8px;">
-                        เช็คเอาท์ลูกค้ามีเลขภาษี → ออกเป็น <b>Receipt (type 3)</b> ซึ่ง NextAcc production ปัจจุบัน AutoPost เป็น
-                        <b>Dr เงินสด / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้การค้า ไม่มีใบเสร็จ settlement งอก</b>
-                        + หัวเอกสาร "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำในใบ (Dr 21510/21913). <b>ทำงานได้เลย ไม่ต้องรอ isCashSale deploy</b>.
-                        <br /><strong style="color:#c0392b;">⚠ ข้อแลก: Receipt(3) ไม่ออก e-Tax XML</strong> (ใบกระดาษ/PDF ใช้ได้ปกติ ลูกค้าเคลม VAT ด้วยใบนี้ได้).
+                        เช็คเอาท์ลูกค้ามีเลขภาษี → ออกเป็น <b>Receipt (type 3)</b> ซึ่ง NextAcc AutoPost เป็น
+                        <b>Dr เงินสด / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้การค้า</b> + หักมัดจำในใบ (Dr 21510/21913)
+                        <br /><strong style="color:#c0392b;">⚠ ข้อแลก: หัวเอกสารจะเป็น "ใบเสร็จรับเงิน" เสมอ และไม่ออก e-Tax XML</strong>
+                        — ตรวจกับ NextAcc แล้ว: หัวเอกสารมาจาก flag บนตัวเอกสาร
+                        (<code>ComputeDocumentTitle</code>: ขายสด/IssuedAsCashReceipt → "ใบกำกับภาษี/ใบเสร็จรับเงิน",
+                        ไม่ประสงค์รับใบกำกับ → "ใบเสร็จรับเงิน") <b>Receipt(3) จึงไม่ upgrade หัวไม่ว่าผู้ซื้อมีเลขภาษีครบแค่ไหน</b>
+                        <br /><b>ลูกค้าขอใบกำกับภาษี = ต้องปิด checkbox นี้</b> (ปิดแล้วไปเส้นใบกำกับขายสด ใบเดียว หักมัดจำในใบ + e-Tax)
                         <br />เปิด <b>ชั่วคราว</b> ระหว่างรอ NextAcc deploy isCashSale → deploy เสร็จให้ <b>ปิด flag นี้</b> กลับไปใช้ใบกำกับ+e-Tax.
                     </div>
                 </div>
