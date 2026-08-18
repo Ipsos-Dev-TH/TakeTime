@@ -4600,26 +4600,28 @@ namespace Take_Time_BangPhra.Integration
                     return (false, $"ไม่พบใบเสร็จ {receiptNumber} ในระบบ — ใช้ปุ่ม \"ดึงกลับ\" เพื่อสร้างใบขึ้นมาก่อน");
 
                 // สถานะจริงบน NextAcc → marker ต้องตรง ไม่งั้น flow อนุมัติ/settle จะเข้าใจผิด
-                string status = null;
+                // DocumentResponse.Status เป็น int (NexaaccDocumentStatus) ไม่ใช่ข้อความ
+                int statusCode = -1;
                 try
                 {
                     var d = Task.Run(() => _apiClient.GetDocumentAsync(docId)).GetAwaiter().GetResult();
-                    status = d?.data?.Status;
-                    if (string.IsNullOrEmpty(nexaaccDocNumber)) nexaaccDocNumber = d?.data?.DocumentNumber;
+                    if (d?.data == null)
+                        return (false, "ไม่พบเอกสารนี้บน NextAcc แล้ว (อาจถูกลบไป) — กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อสร้างใบใหม่แทน");
+                    statusCode = d.data.Status;
+                    if (string.IsNullOrEmpty(nexaaccDocNumber)) nexaaccDocNumber = d.data.DocumentNumber;
                 }
                 catch (Exception ex)
                 {
                     return (false, "อ่านเอกสารจาก NextAcc ไม่ได้ (เอกสารถูกลบไปแล้ว หรือ NextAcc ไม่พร้อม): " + ex.Message);
                 }
 
-                bool isDraft = string.IsNullOrEmpty(status)
-                    || status.IndexOf("Draft", StringComparison.OrdinalIgnoreCase) >= 0
-                    || status.IndexOf("Pending", StringComparison.OrdinalIgnoreCase) >= 0;
-                bool isVoid = !string.IsNullOrEmpty(status)
-                    && (status.IndexOf("Void", StringComparison.OrdinalIgnoreCase) >= 0
-                        || status.IndexOf("Cancel", StringComparison.OrdinalIgnoreCase) >= 0);
+                string statusText = DescribeDocumentStatus(statusCode);
+                bool isDraft = statusCode == NexaaccDocumentStatus.Draft
+                    || statusCode == NexaaccDocumentStatus.WaitingApproval;
+                bool isVoid = statusCode == NexaaccDocumentStatus.Voided
+                    || statusCode == NexaaccDocumentStatus.Rejected;
                 if (isVoid)
-                    return (false, $"เอกสาร {nexaaccDocNumber ?? docId.ToString()} ถูกยกเลิกบน NextAcc — ผูกกับใบที่ยกเลิกแล้วไม่ได้ ให้กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อสร้างใบใหม่แทน");
+                    return (false, $"เอกสาร {nexaaccDocNumber ?? docId.ToString()} ถูกยกเลิกบน NextAcc ({statusText}) — ผูกกับใบที่ยกเลิกแล้วไม่ได้ ให้กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อสร้างใบใหม่แทน");
 
                 // ชี้คิว CREATE ล่าสุดของใบนี้กลับมาที่เอกสารนี้ (คิวคือกุญแจจับคู่ของหน้าเอกสาร)
                 var q = _code.DatabaseQuerySafe(_connectionString,
@@ -4647,16 +4649,34 @@ namespace Take_Time_BangPhra.Integration
                 SetReceiptPaymentMarker(receiptNumber, (isDraft ? "DOC:" : "APR:") + docId);
 
                 string msg = $"ผูกใบ {receiptNumber} เข้ากับเอกสาร {nexaaccDocNumber ?? docId.ToString()} บน NextAcc แล้ว "
-                    + $"(สถานะ {status ?? "-"}) — ปุ่มแก้ไข/ส่งแก้ไขกลับมาใช้ได้";
+                    + $"(สถานะ {statusText}) — ปุ่มแก้ไข/ส่งแก้ไขกลับมาใช้ได้";
                 if (isDraft)
                     msg += "\n⚠ เอกสารยังเป็นฉบับร่าง ยังไม่ลงบัญชี — กด \"ส่งแก้ไขขึ้น NextAcc\" เพื่อให้ระบบอัปเดตข้อมูลแล้วอนุมัติให้";
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"RelinkReceiptToNextAccDoc: {receiptNumber} → {docId} ({nexaaccDocNumber}) status={status} queue#{qid}", "SYSTEM");
+                    $"RelinkReceiptToNextAccDoc: {receiptNumber} → {docId} ({nexaaccDocNumber}) status={statusText}({statusCode}) queue#{qid}", "SYSTEM");
                 return (true, msg);
             }
             catch (Exception ex)
             {
                 return (false, "ผูกเอกสารไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
+        /// <summary>แปลงรหัสสถานะเอกสาร NextAcc (int) เป็นข้อความไทยสำหรับแสดงผล</summary>
+        private static string DescribeDocumentStatus(int status)
+        {
+            switch (status)
+            {
+                case NexaaccDocumentStatus.Draft: return "ฉบับร่าง";
+                case NexaaccDocumentStatus.WaitingApproval: return "รออนุมัติ";
+                case NexaaccDocumentStatus.Approved: return "อนุมัติแล้ว";
+                case NexaaccDocumentStatus.Sent: return "ส่งแล้ว";
+                case NexaaccDocumentStatus.PartiallyPaid: return "ชำระบางส่วน";
+                case NexaaccDocumentStatus.Paid: return "ชำระแล้ว";
+                case NexaaccDocumentStatus.Voided: return "ยกเลิก";
+                case NexaaccDocumentStatus.Overdue: return "เกินกำหนดชำระ";
+                case NexaaccDocumentStatus.Rejected: return "ถูกปฏิเสธ";
+                default: return "ไม่ทราบสถานะ (" + status + ")";
             }
         }
 
