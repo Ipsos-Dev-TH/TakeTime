@@ -456,6 +456,9 @@
             <div style="margin-bottom: 10px;">
                 <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ (Delete)" />
             </div>
+            <%-- เลขใบเสร็จปลายทางของปุ่ม "ผูกกับใบในระบบ" — ผู้ใช้ยืนยัน/แก้ได้เอง
+                 (ระบบเดาให้ไม่ได้เสมอ: การจองหนึ่งมีใบเสร็จหลายใบ มัดจำ+เช็คเอาท์) --%>
+            <asp:HiddenField ID="hfRelinkTarget" runat="server" />
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
                 DataKeyNames="ID,Status,IsNextAccOnly,NextAccId,NextAccViewUrl,NextAccDocStatus,Reservation_ID,LocalTwinId"

@@ -1042,19 +1042,22 @@ namespace Take_Time_BangPhra.Account
                 {
                     string naRes = nr["Reservation_ID"].ToString();
                     string onlyCandidate = null;
-                    int candidates = 0;
+                    int candidates = 0, localRows = 0;
                     foreach (DataRow lr in dt.Rows)
                     {
                         if ((lr["IsNextAccOnly"]?.ToString() ?? "0") != "0") continue;
                         if (lr["Reservation_ID"] == DBNull.Value) continue;
                         if (lr["Reservation_ID"].ToString() != naRes) continue;
-                        // จับคู่กับเอกสาร NextAcc ใบอื่นอยู่แล้ว → ไม่ใช่ใบที่ขาดคู่
+                        localRows++;
+                        // จับคู่กับเอกสาร NextAcc ใบอื่นอยู่แล้ว → ไม่ใช่ใบที่ขาดคู่ (แต่ยังเลือกเองได้)
                         if (!string.IsNullOrEmpty(lr["NextAccId"]?.ToString())) continue;
                         candidates++;
                         onlyCandidate = lr["ID"]?.ToString() ?? "";
                     }
+                    // ค่าที่ใส่ให้เป็น "ค่าเริ่มต้นในช่องกรอก" เท่านั้น ผู้ใช้แก้ได้เสมอ
+                    // "" = การจองนี้ไม่มีใบเสร็จในระบบเลย → ปุ่มเป็น "ดึงกลับ" (สร้างใบใหม่)
                     if (candidates == 1) nr["LocalTwinId"] = onlyCandidate;
-                    else if (candidates > 1) nr["LocalTwinId"] = "*AMBIGUOUS*";
+                    else if (localRows > 0) nr["LocalTwinId"] = "*AMBIGUOUS*";
                 }
                 dt.Rows.Add(nr);
                 added++;
@@ -1949,13 +1952,9 @@ namespace Take_Time_BangPhra.Account
                         // ใบ local ของการจองนี้ยังอยู่ → ไม่ใช่เคส "ถูกลบแล้วกู้คืน" แต่เป็น
                         // "สายจับคู่ขาด" (void→สร้างใหม่หลายรอบ / ลบเอกสารอื่นทิ้งบน NextAcc)
                         // → ผูกกลับให้ ไม่ต้องสร้างใบซ้ำ (ซึ่งจะทำให้ยอดมัดจำ/ชำระเบิล)
-                        string twinLocal = dkEdit["LocalTwinId"]?.ToString() ?? "";
-                        if (twinLocal == "*AMBIGUOUS*")
-                        {
-                            ShowError("การจองนี้มีใบเสร็จหลายใบที่ยังไม่มีคู่บน NextAcc — ระบบเลือกให้เองไม่ได้ "
-                                + "กรุณาใช้ปุ่ม \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบที่ต้องการแทน");
-                            return;
-                        }
+                        // เลขใบปลายทางมาจากช่อง prompt ที่ผู้ใช้ยืนยัน (ไม่ให้ระบบเดาเอง)
+                        string twinLocal = (hfRelinkTarget.Value ?? "").Trim();
+                        hfRelinkTarget.Value = "";
                         if (!string.IsNullOrEmpty(twinLocal))
                         {
                             var linkSvc = new AccountingSyncService(conn);
@@ -2339,19 +2338,30 @@ namespace Take_Time_BangPhra.Account
                             // ใบ active ที่ไม่มีคู่ใน local (เช่น ลบในระบบแล้วไปกู้คืนบน NextAcc) →
                             // ปุ่ม "ดึงกลับ": สร้าง Account_Receipt/Payment_History + คืนมัดจำเข้าการจอง
                             // มีใบ local ของการจองนี้อยู่แล้ว → ปุ่มนี้คือ "ผูกกลับ" ไม่ใช่ "สร้างใบใหม่"
+                            // ระบบเดาใบปลายทางเองไม่ได้เสมอ (การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์)
+                            // → ให้ผู้ใช้ยืนยัน/แก้เลขใบเองในช่อง prompt แล้วส่งมากับ hidden field
                             string twinId = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
-                            if (twinId == "*AMBIGUOUS*") { bEdit.Visible = false; }
-                            else if (!string.IsNullOrEmpty(twinId))
+                            if (!string.IsNullOrEmpty(twinId))
                             {
+                                // การจองนี้มีใบเสร็จในระบบอยู่แล้ว → งานคือ "ผูกกลับ" ไม่ใช่สร้างใบใหม่
+                                // ระบบเดาใบปลายทางเองไม่ได้ (การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์
+                                // และใบที่ผูกผิดไว้ก่อนหน้าก็ต้องแก้ได้) → ให้ผู้ใช้ยืนยันเลขใบเอง
+                                string guess = twinId == "*AMBIGUOUS*" ? "" : twinId;
+                                string naNumShow = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
+                                string naAmt = DataBinder.Eval(e.Row.DataItem, "Total_Amount")?.ToString() ?? "";
                                 bEdit.Text = "🔗 ผูกกับใบในระบบ";
-                                bEdit.ToolTip = $"ผูกเอกสารนี้กลับเข้ากับใบ {twinId} — ปุ่มแก้ไข/ส่งแก้ไขจะกลับมาใช้ได้ (ไม่แตะบัญชี ไม่สร้างเอกสารใหม่)";
-                                bEdit.OnClientClick = $"return confirm('ผูกเอกสารนี้เข้ากับใบ {twinId} ในระบบ?\\n\\nแก้เฉพาะการจับคู่ ไม่แตะบัญชีและไม่สร้าง/ลบเอกสารใด ๆ');";
+                                bEdit.ToolTip = "ผูกเอกสารนี้เข้ากับใบเสร็จในระบบ — แก้เฉพาะการจับคู่ ไม่แตะบัญชี ไม่สร้าง/ลบเอกสาร";
+                                bEdit.OnClientClick =
+                                    "var v=prompt('ผูกเอกสาร " + naNumShow + " (ยอด " + naAmt + ") เข้ากับใบเสร็จเลขที่ใดในระบบ?\\n\\n"
+                                    + "ตรวจให้ตรงใบจริง — การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์', '" + guess + "');"
+                                    + "if(v===null||v.trim()===''){return false;}"
+                                    + "document.getElementById('" + hfRelinkTarget.ClientID + "').value=v.trim();return true;";
                             }
                             else
                             {
-                            bEdit.Text = "↩️ ดึงกลับ";
-                            bEdit.ToolTip = "ดึงใบเสร็จกลับเข้าระบบ (กู้ข้อมูลการจอง/มัดจำจากประวัติ sync)";
-                            bEdit.OnClientClick = "return confirm('ดึงเอกสารนี้กลับเข้าระบบ?\\n\\nระบบจะสร้างใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำเข้าการจองให้ (กู้จากประวัติ sync)');";
+                                bEdit.Text = "↩️ ดึงกลับ";
+                                bEdit.ToolTip = "ดึงใบเสร็จกลับเข้าระบบ (กู้ข้อมูลการจอง/มัดจำจากประวัติ sync)";
+                                bEdit.OnClientClick = "return confirm('ดึงเอกสารนี้กลับเข้าระบบ?\\n\\nระบบจะสร้างใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำเข้าการจองให้ (กู้จากประวัติ sync)');";
                             }
                         }
                     }
