@@ -127,3 +127,19 @@ FROM Accounting_Sync_Queue q
 WHERE q.Entity_ID = (SELECT TOP 1 Reservation_ID FROM Account_Receipt WHERE ID = @Receipt)
   AND q.Nexaacc_Document_Number IS NOT NULL
 ORDER BY q.ID DESC;
+
+-- ── 9) เลขเอกสาร NextAcc ที่ถูกใช้ซ้ำ (สำคัญ!) ───────────────────────────────
+-- NextAcc จ่ายเลขเดิมให้ใบใหม่ได้หลังยกเลิกใบเก่า ⇒ "เลขเดียวกัน" อาจเป็นคนละใบ
+-- ถ้าเลขหนึ่งมีหลาย GUID ให้ยึด GUID ล่าสุดเสมอ (ใบเก่าคือใบที่ถูกยกเลิกไปแล้ว)
+PRINT '';
+PRINT '--- 9) เลขเอกสารที่ถูกใช้ซ้ำหลาย GUID ---';
+SELECT q.Nexaacc_Document_Number,
+       COUNT(DISTINCT q.Nexaacc_Response_Id) AS GuidCount,
+       MIN(q.Created_Date) AS FirstUsed,
+       MAX(q.Created_Date) AS LastUsed
+FROM Accounting_Sync_Queue q
+WHERE q.Nexaacc_Document_Number IS NOT NULL
+  AND q.Nexaacc_Response_Id IS NOT NULL
+GROUP BY q.Nexaacc_Document_Number
+HAVING COUNT(DISTINCT q.Nexaacc_Response_Id) > 1
+ORDER BY LastUsed DESC;

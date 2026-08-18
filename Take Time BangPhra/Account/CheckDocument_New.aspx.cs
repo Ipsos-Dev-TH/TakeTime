@@ -955,10 +955,22 @@ namespace Take_Time_BangPhra.Account
             // index เอกสาร NextAcc: ตาม GUID และตามเลขเอกสาร (ใช้จับคู่ผ่าน sync queue)
             var byId = new Dictionary<Guid, Take_Time_BangPhra.Integration.NextAccPaymentDoc>();
             var byNum = new Dictionary<string, Take_Time_BangPhra.Integration.NextAccPaymentDoc>(StringComparer.OrdinalIgnoreCase);
+            // ⚠ เลขเอกสารบน NextAcc **ใช้ซ้ำได้** — ยกเลิกใบแล้วสร้างใหม่ เลขเดิมถูกจ่ายให้ใบใหม่
+            //   (พบจริง: REC-20260815-0006 เป็นทั้ง f74fc0db (17 ส.ค.) และ e3dccc9f (19 ส.ค.))
+            //   ⇒ index ตามเลขต้องเก็บ "ใบที่ยัง active และใหม่ที่สุด" ไม่ใช่ใบแรกที่เจอ
+            //   ไม่งั้นกดดู/จับคู่ด้วยเลข จะได้ใบเก่าที่ถูกยกเลิกไปแล้ว
             foreach (var d in naDocs)
             {
                 if (d.Id != Guid.Empty && !byId.ContainsKey(d.Id)) byId[d.Id] = d;
-                if (!string.IsNullOrEmpty(d.DocumentNumber) && !byNum.ContainsKey(d.DocumentNumber)) byNum[d.DocumentNumber] = d;
+                if (string.IsNullOrEmpty(d.DocumentNumber)) continue;
+
+                Take_Time_BangPhra.Integration.NextAccPaymentDoc prev;
+                if (!byNum.TryGetValue(d.DocumentNumber, out prev)) { byNum[d.DocumentNumber] = d; continue; }
+
+                bool prevVoid = IsVoidStatus(prev.Status), curVoid = IsVoidStatus(d.Status);
+                if (prevVoid && !curVoid) byNum[d.DocumentNumber] = d;               // active ชนะ voided
+                else if (prevVoid == curVoid && d.DocumentDate >= prev.DocumentDate)  // เท่ากัน → ใบใหม่กว่า
+                    byNum[d.DocumentNumber] = d;
             }
 
             if (_syncStatusCache == null) LoadSyncStatusCache();
