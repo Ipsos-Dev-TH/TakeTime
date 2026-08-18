@@ -4709,6 +4709,66 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// 📤 ยิงข้อมูล "ผู้ซื้อของใบเสร็จนี้" ขึ้น NextAcc contact เดี๋ยวนี้ (synchronous)
+        /// แล้วคืนผลดิบ — ใช้พิสูจน์ว่า contact ถูกสร้าง/อัปเดตจริงหรือไม่ และถ้าไม่ เพราะอะไร
+        /// (เคสที่เจอ: เอกสารออกในนามผู้จอง เพราะ contact ของบริษัทไม่เคยถูกสร้างบน NextAcc)
+        /// </summary>
+        public (bool Ok, string Message) PushReceiptBuyerContactNow(string receiptNumber)
+        {
+            try
+            {
+                receiptNumber = (receiptNumber ?? "").Trim();
+                if (receiptNumber.Length == 0) return (false, "ยังไม่ได้ใส่เลขใบเสร็จ");
+
+                int resId = 0;
+                try
+                {
+                    var rr = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 ISNULL(Reservation_ID, 0) FROM Account_Receipt WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", receiptNumber } });
+                    if (rr != null && rr.Rows.Count > 0) resId = Convert.ToInt32(rr.Rows[0][0]);
+                }
+                catch { }
+
+                string src;
+                var buyer = ResolveReceiptBuyer(receiptNumber, resId, null, out src);
+                if (buyer == null)
+                    return (false, $"หาผู้ซื้อของใบ {receiptNumber} ไม่เจอ — ตรวจ Account_Receipt.Customer_ID ก่อน");
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"ผู้ซื้อ: {buyer.Name} ({buyer.Phone})  [ที่มา: {src}]");
+                sb.AppendLine($"ExternalId ที่ใช้เป็นคีย์บน NextAcc: {buyer.ExternalId}");
+                sb.AppendLine($"เลขภาษี: {(string.IsNullOrWhiteSpace(buyer.TaxId) ? "(ไม่มี)" : buyer.TaxId)}");
+                sb.AppendLine($"ที่อยู่: {(string.IsNullOrWhiteSpace(buyer.Address) ? "(ไม่มี)" : buyer.Address)}");
+                sb.AppendLine($"ชนิด: {(buyer.ResolveIsJuristic() ? "นิติบุคคล" : "บุคคลธรรมดา")}  สาขา: {(string.IsNullOrWhiteSpace(buyer.BranchCode) ? "-" : buyer.BranchCode)}");
+                sb.AppendLine();
+
+                string err;
+                try
+                {
+                    err = Task.Run(() => PushCustomerContactAsync(buyer, "PushReceiptBuyerContactNow")).GetAwaiter().GetResult();
+                }
+                catch (Exception px)
+                {
+                    return (false, sb.ToString() + "❌ ยิงไม่สำเร็จ (exception): " + (px.InnerException ?? px).Message);
+                }
+
+                if (err != null)
+                    return (false, sb.ToString() + "❌ NextAcc ตอบกลับว่าไม่สำเร็จ: " + err);
+                if (buyer.NexaaccContactId == null)
+                    return (false, sb.ToString() + "❌ NextAcc ตอบสำเร็จแต่ไม่คืน contactId — contact อาจไม่ถูกสร้างจริง");
+
+                return (true, sb.ToString()
+                    + $"✅ สร้าง/อัปเดต contact บน NextAcc แล้ว\n   contactId = {buyer.NexaaccContactId}\n"
+                    + "   ตรวจในรายการผู้ติดต่อของ NextAcc ได้เลย แล้วค่อยกด \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบเสร็จ");
+            }
+            catch (Exception ex)
+            {
+                return (false, "ยิงข้อมูลผู้ติดต่อไม่สำเร็จ: " + ex.Message);
+            }
+        }
+
+        /// <summary>
         /// ผูก/ปลดการจับคู่ด้วย "เลขเอกสาร" แทน GUID — ใช้จากหน้าเครื่องมือโดยตรง
         /// ไม่ต้องพึ่งแถวในตารางเอกสาร (ซึ่งขึ้นกับช่วงวันที่ที่ค้นและสถานะการจับคู่
         /// ⇒ พอสายจับคู่พันกัน ปุ่มอาจไม่โผล่เลย แล้วผู้ใช้แก้อะไรไม่ได้)

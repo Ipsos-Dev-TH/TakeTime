@@ -1115,6 +1115,7 @@
                     <input type="text" id="rlDoc" placeholder="เลขเอกสาร NextAcc เช่น REC-20260809-0004 (ว่าง = ปลดการผูก)" style="padding:6px; min-width:330px;" />
                     <button type="button" class="btn-primary" onclick="relinkDoc()"><i class="fas fa-link"></i> ผูก / ปลด</button>
                     <button type="button" class="btn-default" onclick="inspectReceipt()"><i class="fas fa-search"></i> 🔎 ตรวจผู้ซื้อของใบนี้</button>
+                    <button type="button" class="btn-warning" onclick="pushBuyerContact()"><i class="fas fa-user-check"></i> 📤 ส่งผู้ติดต่อขึ้น NextAcc</button>
                 </div>
                 <div style="font-size:11px; color:#888; margin-top:5px;">
                     แก้เฉพาะการจับคู่ — ไม่แตะบัญชี ไม่สร้าง/ลบเอกสารใด ๆ ·
@@ -2378,6 +2379,23 @@
                     loadQueueData();
                 })
                 .catch(function(err) { alert(err.message); });
+        }
+
+        function pushBuyerContact() {
+            var el = document.getElementById('rlResult');
+            var r = document.getElementById('rlReceipt').value.trim();
+            if (!r) { el.innerHTML = '<div class="test-result error" style="display:block;">ใส่เลขใบเสร็จในระบบก่อน</div>'; return; }
+            el.innerHTML = '<div class="test-result loading">กำลังส่งข้อมูลผู้ติดต่อ...</div>';
+            fetch(pageUrl + '?action=pushBuyerContact&receipt=' + encodeURIComponent(r) + '&_=' + Date.now())
+                .then(function (x) { return x.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-word; padding:10px; border-radius:6px; font-size:12px; margin:0; '
+                                 + (data.success ? 'background:#E8F5E9;border:1px solid #A5D6A7;' : 'background:#FFF5F5;border:1px solid #FFCDD2;')
+                                 + '">' + escapeHtml(data.message) + '</pre>';
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>';
+                });
         }
 
         function inspectReceipt() {

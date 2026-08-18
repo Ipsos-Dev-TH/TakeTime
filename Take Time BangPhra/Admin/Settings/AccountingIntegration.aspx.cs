@@ -222,6 +222,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "inspectReceipt":
                     result = InspectReceiptBuyer();
                     break;
+                case "pushBuyerContact":
+                    result = PushBuyerContactNow();
+                    break;
                 case "updateMapping":
                     result = UpdateAccountMapping();
                     break;
@@ -1604,6 +1607,22 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
+        /// <summary>📤 บังคับยิงข้อมูลผู้ซื้อของใบเสร็จขึ้น NextAcc contact เดี๋ยวนี้ + คืนผลดิบ</summary>
+        private Dictionary<string, object> PushBuyerContactNow()
+        {
+            try
+            {
+                string receipt = (Request.QueryString["receipt"] ?? "").Trim();
+                var svc = new Integration.AccountingSyncService(ConnStr);
+                var (ok, msg) = svc.PushReceiptBuyerContactNow(receipt);
+                return new Dictionary<string, object> { { "success", ok }, { "message", msg } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
         /// <summary>
         /// 🔎 ตรวจว่า "ใบเสร็จใบนี้ ระบบจะออกเอกสารในนามใคร" — อ่านจากตัว resolve ชุดเดียว
         /// กับตอน sync จริง (ResolveReceiptBuyer) พร้อมข้อมูลดิบจาก Account_Receipt
@@ -1649,6 +1668,38 @@ namespace Take_Time_BangPhra.Admin.Settings
                 sb.AppendLine($"ผู้จอง (เทียบ)  : {w["GuestName"]} ({w["GuestPhone"]})");
                 sb.AppendLine($"เอกสาร NextAcc ที่ผูก : {w["DocNo"]}   marker = {w["Marker"]}");
                 sb.AppendLine();
+
+                // contact ของเบอร์ผู้ซื้อ ถูก sync ขึ้น NextAcc หรือยัง
+                string bph = w["BuyerPhone"].ToString();
+                if (!string.IsNullOrWhiteSpace(bph))
+                {
+                    sb.AppendLine("── สถานะ sync ผู้ติดต่อ (เบอร์ " + bph + ") ──");
+                    var cm = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 1 ISNULL(CAST(Nexaacc_Contact_Id AS NVARCHAR(50)), '(ยังไม่มี)') AS Cid,
+                                 ISNULL(Sync_Status, '-') AS St, ISNULL(Sync_Error, '') AS Er,
+                                 ISNULL(CONVERT(NVARCHAR(20), Last_Synced, 120), '-') AS Ls
+                          FROM Accounting_Contact_Map
+                          WHERE External_Id = @p AND Contact_Type = 'CUSTOMER'",
+                        new Dictionary<string, object> { { "@p", bph } });
+                    if (cm != null && cm.Rows.Count > 0)
+                        sb.AppendLine($"Accounting_Contact_Map: contactId={cm.Rows[0]["Cid"]} status={cm.Rows[0]["St"]} " +
+                                      $"sync ล่าสุด {cm.Rows[0]["Ls"]} {cm.Rows[0]["Er"]}");
+                    else
+                        sb.AppendLine("Accounting_Contact_Map: ✗ ไม่มีแถวของเบอร์นี้ = ยังไม่เคย push contact สำเร็จเลย");
+
+                    var cq = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 3 ID, Status, Retry_Count, Max_Retries, ISNULL(Error_Message, '') AS Er
+                          FROM Accounting_Sync_Queue
+                          WHERE Action_Type = 'SYNC_CUSTOMER_CONTACT' AND Payload LIKE @pat
+                          ORDER BY ID DESC",
+                        new Dictionary<string, object> { { "@pat", "%\"mobilePhone\":\"" + bph + "\"%" } });
+                    if (cq != null && cq.Rows.Count > 0)
+                        foreach (DataRow cr in cq.Rows)
+                            sb.AppendLine($"คิว #{cr["ID"]} {cr["Status"]} retry {cr["Retry_Count"]}/{cr["Max_Retries"]} {Truncate(cr["Er"].ToString(), 300)}");
+                    else
+                        sb.AppendLine("คิว SYNC_CUSTOMER_CONTACT: ✗ ไม่มีรายการของเบอร์นี้");
+                    sb.AppendLine();
+                }
 
                 var svc = new Integration.AccountingSyncService(ConnStr);
                 var chk = svc.CheckBuyerTaxDataForReceipt(receipt);
