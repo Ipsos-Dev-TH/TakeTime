@@ -903,6 +903,8 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("NextAccDocStatus")) dt.Columns.Add("NextAccDocStatus", typeof(string));
             // ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ (ไม่ใช่เอกสารขายของเราเอง) — ห้ามให้กด "ดึงกลับ"
             if (!dt.Columns.Contains("IsNaPaymentDoc")) dt.Columns.Add("IsNaPaymentDoc", typeof(string));
+            // ใบ local ของการจองเดียวกัน (ถ้ามี) — บอกผู้ใช้ว่า "แถวไหนคือใบที่กดแก้ไขได้"
+            if (!dt.Columns.Contains("LocalTwinId")) dt.Columns.Add("LocalTwinId", typeof(string));
 
             foreach (DataRow r in dt.Rows)
             {
@@ -912,6 +914,7 @@ namespace Take_Time_BangPhra.Account
                 r["NextAccViewUrl"] = "";
                 r["NextAccDocStatus"] = "";
                 r["IsNaPaymentDoc"] = "0";
+                r["LocalTwinId"] = "";
             }
 
             System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
@@ -1024,6 +1027,21 @@ namespace Take_Time_BangPhra.Account
                 nr["NextAccViewUrl"] = "";
                 nr["NextAccDocStatus"] = nd.Status ?? "";   // สถานะจริงบน NextAcc (Draft/Approved/...) — ใช้ตอน "ดึงกลับ"
                 nr["IsNaPaymentDoc"] = IsNextAccPaymentReceipt(nd) ? "1" : "0";
+                // หาใบ local ของการจองเดียวกัน — แถวนี้ไม่มีปุ่มแก้ไขเพราะไม่ใช่ใบของระบบเรา
+                // แต่ผู้ใช้มักกำลังตามหา "ใบที่แก้ไขได้" อยู่ → ชี้ให้เลยว่าอยู่แถวไหน
+                nr["LocalTwinId"] = "";
+                if (dt.Columns.Contains("Reservation_ID") && nr["Reservation_ID"] != DBNull.Value)
+                {
+                    string naRes = nr["Reservation_ID"].ToString();
+                    foreach (DataRow lr in dt.Rows)
+                    {
+                        if ((lr["IsNextAccOnly"]?.ToString() ?? "0") != "0") continue;
+                        if (lr["Reservation_ID"] == DBNull.Value) continue;
+                        if (lr["Reservation_ID"].ToString() != naRes) continue;
+                        nr["LocalTwinId"] = lr["ID"]?.ToString() ?? "";
+                        break;
+                    }
+                }
                 dt.Rows.Add(nr);
                 added++;
             }
@@ -2254,6 +2272,14 @@ namespace Take_Time_BangPhra.Account
                     : isNaPayment
                         ? "<span class='sync-badge completed' title='ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ — ไม่ใช่ใบขายของระบบเรา'>💵 ใบรับชำระ (NextAcc)</span>"
                         : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
+
+                // ทำไมแถวนี้ไม่มีปุ่ม "แก้ไข": เอกสารนี้อยู่บน NextAcc แต่ไม่มีใบคู่ในระบบเรา
+                // ถ้าการจองเดียวกันมีใบ local อยู่ → ชี้ไปที่แถวนั้น (ผู้ใช้มักหาไม่เจอแล้วคิดว่าแก้ไม่ได้แล้ว)
+                string twin = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
+                if (!voided)
+                    lblSync.Text += string.IsNullOrEmpty(twin)
+                        ? "<div style='font-size:10px;color:#888;margin-top:2px;'>ไม่มีใบนี้ในระบบ TakeTime จึงแก้ไขไม่ได้</div>"
+                        : $"<div style='font-size:10px;color:#888;margin-top:2px;'>แก้ไขได้ที่ใบ <b>{Server.HtmlEncode(twin)}</b> (การจองเดียวกัน)</div>";
                 btnSync.Visible = false;
                 try
                 {
