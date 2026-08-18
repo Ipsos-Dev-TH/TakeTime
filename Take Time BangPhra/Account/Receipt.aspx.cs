@@ -336,31 +336,24 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                     catch { }
 
-                    if (CheckBox3.Checked == true)
+                    // ⚠️ เดิม: ถ้าติ๊ก "ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" จะ "ไม่โหลด" ข้อมูลลูกค้าเข้าฟอร์มเลย
+                    //    → ฟอร์มว่างทั้งชื่อ/ที่อยู่/เลขภาษี/เบอร์โทร ทั้งที่ในฐานข้อมูลมีข้อมูลอยู่
+                    //    พอผู้ใช้กรอกเพิ่มแล้วบันทึก เบอร์โทร (ซึ่งเป็น key ผูกลูกค้า) ยังว่าง
+                    //    → UpsertCustomer ไปลงลูกค้า "เบอร์ว่าง" คนละแถวกับที่เอกสารใช้ = แก้ยังไงก็ไม่ติด
+                    //    ติ๊กนี้ควรมีผลแค่ "ไม่พิมพ์ชื่อบนเอกสาร" ไม่ใช่ซ่อนข้อมูลจากคนกรอก
+                    if (hasCustomerData)
                     {
-                        //TextBox10.Text = "ประสงค์ไม่รับใบกำกับภาษี";
-                        //TextBox11.Text = "";
-                        //TextBox12.Text = "";
-                        // TextBox13.Text = "";
-
+                        TextBox10.Text = dtcustomer.Rows[0]["FullName"]?.ToString() ?? "";
+                        TextBox11.Text = dtcustomer.Rows[0]["Address"]?.ToString() ?? "";
+                        TextBox12.Text = dtcustomer.Rows[0]["IDNumber"]?.ToString() ?? "";
+                        TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"]?.ToString() ?? "";
+                        TextBox17.Text = dtcustomer.Rows[0]["Email"]?.ToString() ?? "";
+                        TextBox18.Text = dtcustomer.Rows[0]["Address1"]?.ToString() ?? "";
                     }
                     else
                     {
-                        // 🔧 FIX: Check if customer data exists before loading
-                        if (hasCustomerData)
-                        {
-                            TextBox10.Text = dtcustomer.Rows[0]["FullName"]?.ToString() ?? "";
-                            TextBox11.Text = dtcustomer.Rows[0]["Address"]?.ToString() ?? "";
-                            TextBox12.Text = dtcustomer.Rows[0]["IDNumber"]?.ToString() ?? "";
-                            TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"]?.ToString() ?? "";
-                            TextBox17.Text = dtcustomer.Rows[0]["Email"]?.ToString() ?? "";
-                            TextBox18.Text = dtcustomer.Rows[0]["Address1"]?.ToString() ?? "";
-                        }
-                        else
-                        {
-                            // No customer found - use phone from reservation as default
-                            TextBox13.Text = dtReceipt.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
-                        }
+                        // ไม่มีลูกค้าในระบบ — อย่างน้อยต้องมีเบอร์จากการจองไว้เป็น key
+                        TextBox13.Text = dtReceipt.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
                     }
                     
 
@@ -658,6 +651,31 @@ namespace Take_Time_BangPhra.Account.Report
                 catch
                 {
                     addressId = 0; // Fallback on error
+                }
+
+                // เบอร์โทรคือ key ที่ใช้ผูกลูกค้าทุกที่ (UpsertCustomer / contact บน NextAcc)
+                // ถ้าปล่อยว่างจะไปสร้าง-แก้ลูกค้า "เบอร์ว่าง" ซึ่งไม่ใช่แถวที่เอกสารใช้
+                // → ข้อมูลภาษีที่กรอกจะไม่มีผลกับใบกำกับเลย จึง fallback ไปเบอร์ของการจองเสมอ
+                if (string.IsNullOrWhiteSpace(TextBox13.Text))
+                {
+                    // ⚠️ ตัวแปร reservation_id ยังไม่ถูกเซ็ต ณ จุดนี้ (เซ็ตทีหลังในเส้นบันทึก)
+                    //    ต้องอ่านเลขการจองจากช่องบนฟอร์มเอง
+                    int ridForPhone;
+                    if (int.TryParse((TextBox9.Text ?? "").Trim(), out ridForPhone) && ridForPhone > 0)
+                    {
+                        try
+                        {
+                            var phParams = new Dictionary<string, object> { { "@rid", ridForPhone } };
+                            var dtPh = code2.DatabaseQuerySafe(conn,
+                                "SELECT TOP 1 ISNULL(Customer_MobilePhone, N'') FROM Reservation WHERE ID = @rid", phParams);
+                            if (dtPh != null && dtPh.Rows.Count > 0)
+                                TextBox13.Text = dtPh.Rows[0][0]?.ToString() ?? "";
+                        }
+                        catch { }
+                    }
+                    if (!string.IsNullOrWhiteSpace(TextBox13.Text))
+                        code2.Logs(conn, "Receipt",
+                            $"ช่องเบอร์โทรว่าง → ใช้เบอร์ของการจอง {TextBox13.Text} เป็น key ผูกลูกค้า", "SYSTEM");
                 }
 
                 // กรอกชื่อผู้ซื้อจริงแล้ว = ต้องการใบกำกับ → ปลดติ๊ก "ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" ให้เอง
