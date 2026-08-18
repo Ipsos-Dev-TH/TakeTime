@@ -164,26 +164,6 @@ namespace Take_Time_BangPhra.Integration
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
 
-            if (!string.IsNullOrEmpty(documentNumber))
-            {
-                long existing = FindPendingEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber);
-                if (existing > 0) return existing;
-
-                // Anti-duplicate: if a COMPLETED entry exists within the window, return it
-                // (prevents form resubmission / browser refresh from creating duplicates)
-                // ยกเว้น edit flow: ถ้ามี VOID_VOUCHER ของเอกสารเดียวกันที่ใหม่กว่า CREATE เดิม
-                // แปลว่าเอกสารเดิมถูก void เพื่อสร้างใหม่ด้วยเลขเดิม — ต้องปล่อยให้สร้าง
-                // ไม่งั้นเอกสารจะโดน void แล้วหายจาก NextAcc ถาวร
-                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 86400);
-                if (recent > 0 && !HasNewerVoidEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber, recent))
-                {
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
-                        "SYSTEM");
-                    return recent;
-                }
-            }
-
             var payload = new Dictionary<string, object>
             {
                 { "voucherId", voucherId },
@@ -212,6 +192,45 @@ namespace Take_Time_BangPhra.Integration
                 payload["supplierExternalId"] = supplierExternalId;
             if (!string.IsNullOrEmpty(supplierTaxId))
                 payload["supplierTaxId"] = supplierTaxId;
+
+            if (!string.IsNullOrEmpty(documentNumber))
+            {
+                // เหมือนฝั่งใบเสร็จ: รายการที่ยังไม่สำเร็จ = เขียนทับ payload ด้วยข้อมูลล่าสุด
+                // (เดิมคืนรายการเดิมเฉย ๆ → แก้ผู้ขาย/ยอด/บัญชี แล้วข้อมูลใหม่หายไป)
+                string unsentStatus;
+                long existing = FindUnsentEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, out unsentStatus);
+                if (existing > 0)
+                {
+                    if (TryRefreshQueuePayload(existing, payload, $"CREATE_VOUCHER_JOURNAL doc={documentNumber}"))
+                        return existing;
+                    if (QueuePayloadEquivalent(existing, payload))
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"EnqueuePaymentVoucher: doc={documentNumber} มีคิว #{existing} ({unsentStatus}) ข้อมูลเดิม → ใช้รายการเดิม", "SYSTEM");
+                        return existing;
+                    }
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueuePaymentVoucher: doc={documentNumber} คิว #{existing} กำลังประมวลผลอยู่ ({unsentStatus}) แต่ข้อมูลถูกแก้ไข → เข้าคิวใหม่ตามหลัง", "SYSTEM");
+                }
+
+                // Anti-duplicate: COMPLETED ในหน้าต่างเวลา — กลืนเฉพาะเมื่อข้อมูลเหมือนเดิมเป๊ะ
+                // ยกเว้น edit flow: ถ้ามี VOID_VOUCHER ของเอกสารเดียวกันที่ใหม่กว่า CREATE เดิม
+                // แปลว่าเอกสารเดิมถูก void เพื่อสร้างใหม่ด้วยเลขเดิม — ต้องปล่อยให้สร้าง
+                long recent = FindRecentCompletedEntry("VOUCHER", "CREATE_VOUCHER_JOURNAL", "documentNumber", documentNumber, 86400);
+                if (recent > 0 && !HasNewerVoidEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber, recent))
+                {
+                    if (QueuePayloadEquivalent(recent, payload))
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"EnqueuePaymentVoucher: doc={documentNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window, payload เหมือนเดิม)",
+                            "SYSTEM");
+                        return recent;
+                    }
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueuePaymentVoucher: doc={documentNumber} มีคิว COMPLETED #{recent} แต่ข้อมูลถูกแก้ไข → เข้าคิวใหม่เพื่ออัปเดตเอกสารบน NextAcc",
+                        "SYSTEM");
+                }
+            }
 
             return InsertQueue("VOUCHER", voucherId, "CREATE_VOUCHER_JOURNAL", payload);
         }
@@ -396,21 +415,6 @@ namespace Take_Time_BangPhra.Integration
             if (!_config.IsConfigured) return -1;
             if (totalAmount <= 0) return -1;  // กันใบเสร็จยอด 0/ติดลบ ไม่ให้เข้า queue (จะ fail ที่ processor)
 
-            long existing = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
-            if (existing > 0) return existing;
-
-            // Anti-duplicate: if a COMPLETED entry exists within the window, return it
-            // (prevents form resubmission / browser refresh from creating duplicates)
-            // ยกเว้น edit flow (void → สร้างใหม่เลขเดิม): ถ้ามี VOID_RECEIPT ที่ใหม่กว่า ต้องปล่อยให้สร้าง
-            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 86400);
-            if (recent > 0 && !HasNewerVoidEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber, recent))
-            {
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window)",
-                    "SYSTEM");
-                return recent;
-            }
-
             var payload = new Dictionary<string, object>
             {
                 { "reservationId", reservationId },
@@ -429,6 +433,47 @@ namespace Take_Time_BangPhra.Integration
                 payload["paymentAccountId"] = paymentAccountId;
             if (depositApplied > 0)
                 payload["depositApplied"] = depositApplied;
+
+            // ── มีรายการของใบนี้ค้างคิวอยู่ (ยังไม่สำเร็จ) ────────────────────────────
+            // ⚠ เดิม `return existing` เฉย ๆ → payload เก่าค้างในคิว การแก้ไขข้อมูลผู้ซื้อ
+            //   (ชื่อ/เลขผู้เสียภาษี/ที่อยู่/เบอร์) ไม่ถูกส่งไป NextAcc เลย
+            // ตอนนี้: PENDING/FAILED = เขียนทับ payload ด้วยข้อมูลล่าสุด (ไม่สร้างรายการซ้ำ)
+            string unsentStatus;
+            long existing = FindUnsentEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, out unsentStatus);
+            if (existing > 0)
+            {
+                if (TryRefreshQueuePayload(existing, payload, $"CREATE_RECEIPT_DOCUMENT receipt={receiptNumber}"))
+                    return existing;
+
+                // PROCESSING = กำลังยิงอยู่ แก้ payload ไม่ได้ → ถ้าข้อมูลเหมือนเดิมก็จบ
+                // ต่างกัน = ผู้ใช้แก้จริง ต้องเข้าคิวใหม่ (edit flow มี VOID นำหน้าอยู่แล้ว)
+                if (QueuePayloadEquivalent(existing, payload))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueueReceipt: receipt={receiptNumber} มีคิว #{existing} ({unsentStatus}) ข้อมูลเดิม → ใช้รายการเดิม", "SYSTEM");
+                    return existing;
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReceipt: receipt={receiptNumber} คิว #{existing} กำลังประมวลผลอยู่ ({unsentStatus}) แต่ข้อมูลถูกแก้ไข → เข้าคิวใหม่ตามหลัง", "SYSTEM");
+            }
+
+            // Anti-duplicate: COMPLETED ภายในหน้าต่างเวลา = กัน submit ซ้ำ/กด F5
+            // ⚠ ต้องกลืนเฉพาะเมื่อ "ข้อมูลเหมือนเดิมเป๊ะ" — ถ้าผู้ใช้แก้ไขจริงแล้วกลืน
+            //   จะกลายเป็น "กดแก้ไขแล้วไม่มีอะไรเกิดขึ้น" (เคสที่เจอจริง)
+            long recent = FindRecentCompletedEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber, 86400);
+            if (recent > 0 && !HasNewerVoidEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber, recent))
+            {
+                if (QueuePayloadEquivalent(recent, payload))
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueueReceipt: receipt={receiptNumber} returned recent COMPLETED queueId={recent} (anti-duplicate within 86400s window, payload เหมือนเดิม)",
+                        "SYSTEM");
+                    return recent;
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueReceipt: receipt={receiptNumber} มีคิว COMPLETED #{recent} แต่ข้อมูลถูกแก้ไข (ผู้ซื้อ/ยอด/วันที่) → เข้าคิวใหม่เพื่ออัปเดตเอกสารบน NextAcc",
+                    "SYSTEM");
+            }
 
             return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
         }
@@ -5099,10 +5144,34 @@ namespace Take_Time_BangPhra.Integration
                             $"ProcessReceiptDocument: ผู้ซื้อบนใบเสร็จ ({buyerPhone}) ต่างจากผู้จอง " +
                             $"({customerContact?.Phone ?? "-"}) → ใช้ผู้ซื้อของใบเสร็จออกเอกสาร", "SYSTEM");
                         // push ข้อมูลล่าสุดของผู้ซื้อคนนี้ขึ้น contact ก่อน (ผ่านตัวกลางเดียวกับคิว SYNC_CUSTOMER_CONTACT)
-                        await PushCustomerContactAsync(buyer, "ProcessReceiptDocument(buyer)");
+                        // ⚠ ห้ามกลืน error: push ล้ม = ไม่มี NexaaccContactId → เอกสารจะตกไปเส้นใบเสร็จธรรมดา
+                        //   ด้วยผู้ซื้อคนเก่า (ผู้ใช้เห็นว่า "แก้แล้วไม่เปลี่ยน") ต้องโยนให้คิว retry แทน
+                        string pushErr = await PushCustomerContactAsync(buyer, "ProcessReceiptDocument(buyer)");
+                        if (pushErr != null || buyer.NexaaccContactId == null)
+                            throw new Exception(
+                                $"อัปเดตข้อมูลผู้ซื้อ ({buyer.Name} / {buyerPhone}) ไปยัง NextAcc ไม่สำเร็จ → " +
+                                $"ยังออกเอกสารด้วยข้อมูลใหม่ไม่ได้ (จะลองใหม่อัตโนมัติ): {pushErr ?? "contact id ว่าง"}");
                         customerContact = buyer;
                     }
+                    else
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠ ProcessReceiptDocument: receipt={receiptNumber} ระบุผู้ซื้อเบอร์ {buyerPhone} " +
+                            $"แต่ไม่พบลูกค้าเบอร์นี้ในตาราง Customer → ใช้ผู้จองออกเอกสารแทน " +
+                            $"(ตรวจว่าเบอร์ในหน้าใบเสร็จตรงกับลูกค้าที่บันทึกไว้)", "SYSTEM");
+                    }
                 }
+
+                // log การตัดสินใจชนิดเอกสารให้ชัด — เดิมต้องเดาเองว่าทำไมได้ใบเสร็จแทนใบกำกับ
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessReceiptDocument: receipt={receiptNumber} ผู้ซื้อที่ใช้ออกเอกสาร = " +
+                    $"{customerContact?.Name ?? "-"} ({customerContact?.Phone ?? "-"}) " +
+                    $"taxId={(string.IsNullOrWhiteSpace(customerContact?.TaxId) ? "✗" : customerContact.TaxId)} " +
+                    $"address={(string.IsNullOrWhiteSpace(customerContact?.Address) ? "✗" : "✓")} " +
+                    $"contactId={customerContact?.NexaaccContactId?.ToString() ?? "✗"} " +
+                    $"→ {(HasFullBuyerTaxData(customerContact) ? "ใบกำกับภาษี/ใบเสร็จรับเงิน (เต็มรูป §86/4)" : "ใบเสร็จรับเงิน (ข้อมูลภาษีผู้ซื้อไม่ครบ)")}" +
+                    $"{(_config.IsCashSaleUseReceipt ? " ⚠ แต่ Nexaacc_CashSale_UseReceipt=1 บังคับออกเป็นใบเสร็จรับเงิน (ไม่ได้ใบกำกับ/e-Tax) — ปิด flag นี้ถ้าต้องการใบกำกับ" : "")}",
+                    "SYSTEM");
             }
 
             if (isDeposit)
@@ -9278,6 +9347,119 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// หารายการของเอกสารเดียวกันที่ "ยังไม่สำเร็จ" — PENDING / PROCESSING / **FAILED**
+        /// FAILED ต้องนับด้วย ไม่งั้นกดบันทึกซ้ำตอนคิวยังล้มค้าง จะได้ 2 แถวของเอกสารเดียวกัน
+        /// (กด Retry ทีหลัง = เอกสารซ้ำใน NextAcc)
+        /// </summary>
+        private long FindUnsentEntry(string entityType, string actionType, string payloadKey, string payloadValue, out string status)
+        {
+            status = null;
+            if (string.IsNullOrEmpty(payloadValue)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Status FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = @entityType AND Action_Type = @actionType
+                        AND Status IN ('PENDING', 'PROCESSING', 'FAILED')
+                        AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@entityType", entityType },
+                        { "@actionType", actionType },
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                    });
+                if (dt?.Rows.Count > 0)
+                {
+                    status = dt.Rows[0]["Status"]?.ToString();
+                    return Convert.ToInt64(dt.Rows[0]["ID"]);
+                }
+            }
+            catch { }
+            return -1;
+        }
+
+        /// <summary>
+        /// มีรายการของเอกสารนี้ค้างคิวอยู่ → **แทนที่ payload ด้วยข้อมูลล่าสุด** แทนที่จะทิ้งข้อมูลใหม่
+        ///
+        /// บั๊กเดิม: EnqueueXxx เจอรายการค้าง (PENDING/FAILED) แล้ว `return existing` ทันที — payload เก่า
+        /// ยังอยู่ในคิว ⇒ ผู้ใช้แก้ชื่อผู้ซื้อ/เลขผู้เสียภาษี/ที่อยู่ในหน้าใบเสร็จแล้วกดบันทึก
+        /// **ข้อมูลใหม่ไม่ถูกส่งไป NextAcc เลย** พอคิวเดินก็ได้เอกสารด้วยข้อมูลเดิม
+        /// (เห็นชัดมากตอน NextAcc ล่ม เพราะคิวค้างทุกรายการ → ทุกการแก้ไขถูกกลืนหมด)
+        ///
+        /// คืน true = อัปเดต payload สำเร็จ (ผู้เรียกคืน queueId เดิมได้เลย)
+        /// </summary>
+        private bool TryRefreshQueuePayload(long queueId, Dictionary<string, object> payload, string logWhat)
+        {
+            try
+            {
+                CaptureOperatorUser(payload);   // ให้ X-Acting-User ตรงกับคนที่กดบันทึกครั้งล่าสุด
+                string json = _serializer.Serialize(payload);
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Payload = @p, Status = 'PENDING', Retry_Count = 0,
+                          Next_Retry_Date = NULL, Error_Message = NULL
+                      WHERE ID = @id AND Status IN ('PENDING', 'FAILED');
+                      SELECT @@ROWCOUNT AS N;",
+                    new Dictionary<string, object> { { "@id", queueId }, { "@p", json } });
+                bool ok = dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["N"]) > 0;
+                if (ok)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"Queue #{queueId} [{logWhat}]: อัปเดต payload ด้วยข้อมูลล่าสุดจากการบันทึกครั้งนี้ (ไม่สร้างรายการซ้ำ)", "SYSTEM");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"TryRefreshQueuePayload #{queueId} failed: {ex.Message}", "SYSTEM");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// payload ของคิวที่ระบุ "เหมือนกับ" ที่กำลังจะส่งไหม (ไม่นับ field ที่เปลี่ยนทุกครั้ง)
+        /// ใช้แยก "กด submit ซ้ำ/กด F5" (เหมือนเป๊ะ = กันซ้ำถูกต้อง) ออกจาก
+        /// "แก้ไขข้อมูลจริงแล้วบันทึกใหม่" (ต่างกัน = ต้องส่งใหม่ ห้ามกลืน)
+        /// </summary>
+        private bool QueuePayloadEquivalent(long queueId, Dictionary<string, object> payload)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Payload FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+
+                var old = _serializer.Deserialize<Dictionary<string, object>>(dt.Rows[0]["Payload"]?.ToString() ?? "{}");
+                if (old == null) return false;
+
+                // field ที่ไม่เกี่ยวกับเนื้อเอกสาร — เปลี่ยนได้โดยไม่ถือว่าเป็นการแก้ไข
+                var ignore = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "operatorUser" };
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var k in old.Keys) if (!ignore.Contains(k)) keys.Add(k);
+                foreach (var k in payload.Keys) if (!ignore.Contains(k)) keys.Add(k);
+
+                foreach (var k in keys)
+                {
+                    object a = old.ContainsKey(k) ? old[k] : null;
+                    object b = payload.ContainsKey(k) ? payload[k] : null;
+                    string sa = a == null ? "" : Convert.ToString(a, System.Globalization.CultureInfo.InvariantCulture).Trim();
+                    string sb = b == null ? "" : Convert.ToString(b, System.Globalization.CultureInfo.InvariantCulture).Trim();
+                    // ตัวเลขที่ serialize คนละรูป (5100 vs 5100.00) ให้ถือว่าเท่ากัน
+                    decimal da, db;
+                    if (decimal.TryParse(sa, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out da)
+                        && decimal.TryParse(sb, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out db))
+                    {
+                        if (da != db) return false;
+                    }
+                    else if (!string.Equals(sa, sb, StringComparison.Ordinal)) return false;
+                }
+                return true;
+            }
+            catch { return false; }   // เทียบไม่ได้ = ถือว่าต่าง (ปลอดภัยกว่า: ส่งใหม่ ดีกว่ากลืนการแก้ไข)
+        }
+
+        /// <summary>
         /// Find a recently COMPLETED entry within the given time window (seconds).
         /// Used as anti-duplicate guard against form resubmission / browser refresh.
         /// </summary>
@@ -9332,23 +9514,26 @@ namespace Take_Time_BangPhra.Integration
             catch { return false; }
         }
 
+        /// <summary>Capture operator user from HttpContext for X-Acting-User attribution on NextAcc</summary>
+        private static void CaptureOperatorUser(Dictionary<string, object> payload)
+        {
+            if (payload == null || payload.ContainsKey("operatorUser")) return;
+            try
+            {
+                var ctx = System.Web.HttpContext.Current;
+                if (ctx?.Session != null)
+                {
+                    string user = ctx.Session["User"]?.ToString();
+                    if (!string.IsNullOrEmpty(user))
+                        payload["operatorUser"] = user;
+                }
+            }
+            catch { /* background thread — no HttpContext */ }
+        }
+
         private long InsertQueue(string entityType, int entityId, string actionType, Dictionary<string, object> payload)
         {
-            // Capture operator user from HttpContext for X-Acting-User attribution on NextAcc
-            if (!payload.ContainsKey("operatorUser"))
-            {
-                try
-                {
-                    var ctx = System.Web.HttpContext.Current;
-                    if (ctx?.Session != null)
-                    {
-                        string user = ctx.Session["User"]?.ToString();
-                        if (!string.IsNullOrEmpty(user))
-                            payload["operatorUser"] = user;
-                    }
-                }
-                catch { /* background thread — no HttpContext */ }
-            }
+            CaptureOperatorUser(payload);
 
             var payloadJson = _serializer.Serialize(payload);
 

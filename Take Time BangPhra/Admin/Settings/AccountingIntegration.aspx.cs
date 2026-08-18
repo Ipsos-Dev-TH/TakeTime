@@ -1480,7 +1480,38 @@ namespace Take_Time_BangPhra.Admin.Settings
                     if (cfg.CompanyId == Guid.Empty)
                         add("warn", "ยังไม่ได้ตั้ง Company ID",
                             "ฟีเจอร์ที่ใช้ company endpoints (OCR, override บัญชีเงิน, ลายเซ็นผู้จ่าย, มัดจำ deferred VAT) จะถูกข้าม");
+                    if (cfg.IsCashSaleUseReceipt)
+                        add("warn", "เปิด Nexaacc_CashSale_UseReceipt อยู่ — จะไม่ได้ใบกำกับภาษี",
+                            "flag นี้บังคับให้เช็คเอาท์/รับชำระออกเป็น 'ใบเสร็จรับเงิน' (type 3) เสมอ แม้ลูกค้ามีเลขผู้เสียภาษีครบ "
+                            + "→ ไม่ได้ใบกำกับภาษี และไม่ออก e-Tax. เปิดไว้ชั่วคราวเพื่อรอ NextAcc รองรับ isCashSale เท่านั้น "
+                            + "— ถ้าลูกค้าขอใบกำกับภาษี ต้องปิด flag นี้");
                 }
+
+                // ── 7) ใบเสร็จที่ผู้ซื้อกรอกข้อมูลภาษีครบแล้ว แต่เอกสารยังค้างคิว/ไม่เคยขึ้น ─────
+                try
+                {
+                    var stuck = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 20 q.ID, q.Status, q.Retry_Count, q.Max_Retries, q.Payload
+                          FROM Accounting_Sync_Queue q
+                          WHERE q.Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                            AND q.Status IN ('PENDING', 'PROCESSING', 'FAILED')
+                          ORDER BY q.ID", null);
+                    if (stuck != null && stuck.Rows.Count > 0)
+                    {
+                        var lines = new List<string>();
+                        foreach (DataRow r in stuck.Rows)
+                        {
+                            var m = System.Text.RegularExpressions.Regex.Match(
+                                r["Payload"]?.ToString() ?? "", "\"receiptNumber\"\\s*:\\s*\"([^\"]*)\"");
+                            lines.Add($"#{r["ID"]} {r["Status"]} — ใบเสร็จ {(m.Success ? m.Groups[1].Value : "?")}");
+                        }
+                        add("warn", $"ใบเสร็จที่ยังไม่ขึ้น NextAcc: {stuck.Rows.Count} ใบ",
+                            string.Join("\n", lines)
+                            + "\n\nระหว่างที่ยังค้างคิว การกดแก้ไขใบเสร็จจะไปอัปเดต payload ของคิวเดิม "
+                            + "(ข้อมูลล่าสุดชนะ) แล้วยิงครั้งเดียวเมื่อ NextAcc พร้อม");
+                    }
+                }
+                catch { }
 
                 return new Dictionary<string, object>
                 {
