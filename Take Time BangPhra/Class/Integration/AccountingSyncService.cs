@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-18.12 · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-19.1 · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLockName = "TakeTime_AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -5556,13 +5556,27 @@ namespace Take_Time_BangPhra.Integration
                 //   Option A: NextAcc ลง Dr 21510 ใน JE ของใบเองแล้ว (drives) → ไม่ต้องโพสต์ JV
                 if (csHasDeposit && !csNativeA)
                 {
-                    // ref ที่จะโพสต์: ปกติ -CSDEPADJ; ถ้าคู่เดิมถูก self-heal undo ไปแล้ว (รอบที่ใบยังเป็น AR
-                    // แล้วต่อมาใบกลายเป็นเงินสด เช่น void→recreate หลังอัปเกรด NextAcc) คู่ ADJ+REV หักล้างกัน
-                    // → โพสต์ใหม่ด้วย ref -CSDEPADJ2 (idempotent แยกชุด)
-                    string csAdjRef = $"{receiptNumber}-CSDEPADJ";
-                    bool adjExists = await JournalExistsByReferenceAsync(csAdjRef);
-                    bool adjUndone = adjExists && await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV");
-                    string postRef = !adjExists ? csAdjRef : (adjUndone ? $"{receiptNumber}-CSDEPADJ2" : null);
+                    // ⚠ ref ต้องผูกกับ "เอกสารใบนั้น" ไม่ใช่แค่เลขใบเสร็จ
+                    //   ของเดิมมีแค่ 2 ช่อง (-CSDEPADJ, -CSDEPADJ2) ⇒ พอ void→สร้างใหม่ครบ 2 รอบ
+                    //   ช่องเต็ม แล้ว postRef กลายเป็น null ⇒ **เลิกโพสต์ JV หักมัดจำเงียบ ๆ**
+                    //   ผลคือ JE ของใบใหม่เป็น Dr เงินสดเต็มยอด (5,100) ไม่มี Dr 21510
+                    //   → เงินสดเกิน + หนี้สินมัดจำค้างถาวร (เจอจริงหลังแก้ใบ 8 รอบ)
+                    //   ใช้ GUID ของเอกสารต่อท้าย → ทุกใบใหม่มีช่องของตัวเอง ไม่มีวันเต็ม
+                    //   และยัง idempotent ต่อเอกสารเดิม (retry ซ้ำไม่โพสต์ซ้ำ)
+                    string docTag = csId.ToString("N").Substring(0, 8);
+                    string csAdjRef = $"{receiptNumber}-CSDEPADJ-{docTag}";
+
+                    // ของเก่าที่ยัง active อยู่ (ยังไม่ถูก undo) = ยังหักมัดจำให้อยู่ → อย่าโพสต์ซ้ำ
+                    bool legacyActive =
+                        (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")
+                         && !await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV"))
+                        || (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ2")
+                            && !await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ2-REV"));
+
+                    string postRef = legacyActive ? null : csAdjRef;
+                    if (postRef == null)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"CashSaleVerify: receipt={receiptNumber} มี JV หักมัดจำชุดเก่าที่ยัง active อยู่ → ไม่โพสต์ซ้ำ", "SYSTEM");
                     if (postRef != null && !await JournalExistsByReferenceAsync(postRef))
                     {
                         var csAdj = _mapper.MapDepositCashSaleReversal(reservationId, depositApplied, paymentMethod,
@@ -6606,6 +6620,31 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessVoidReceipt: cash-sale deposit JV (ชุด 2) กลับแล้ว receipt={receiptNumber} JE={id2}", "SYSTEM");
                 return true;
             }
+            // ชุดผูก GUID เอกสาร (-CSDEPADJ-{docId8}) — รูปแบบปัจจุบัน ต้องกลับก่อน
+            // marker เก็บ docId ของใบที่กำลัง void อยู่ → หา ref ของใบนั้นได้ตรง ๆ
+            string mkDoc = LookupReceiptPaymentMarker(receiptNumber) ?? "";
+            var mkGuid = ExtractGuid(mkDoc);
+            if (mkGuid != Guid.Empty)
+            {
+                string tag = mkGuid.ToString("N").Substring(0, 8);
+                string gRef = $"{receiptNumber}-CSDEPADJ-{tag}";
+                if (await JournalExistsByReferenceAsync(gRef))
+                {
+                    if (await JournalExistsByReferenceAsync($"{gRef}-REV")) return true;   // กลับแล้ว
+                    var undoG = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
+                        custName, paymentAccountId, receiptNumber,
+                        hasVat: LookupBusinessHasVat(), vatAtReceipt: _config.IsDepositVatAtReceipt,
+                        deferOutputVat: _config.IsDepositOutputVatDeferred);
+                    undoG.Reference = $"{gRef}-REV";
+                    var resG = await _apiClient.CreateJournalAsync(undoG);
+                    Guid idG = RequireValidDocId(resG?.data?.Id, $"CashSaleDepositReversalUndo({tag}) receipt={receiptNumber}");
+                    await SafePostJournalAsync(idG);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessVoidReceipt: cash-sale deposit JV ({gRef}) กลับแล้ว receipt={receiptNumber} JE={idG}", "SYSTEM");
+                    return true;
+                }
+            }
+
             if (!await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ")) return false;   // ไม่ใช่ Option B
             if (await JournalExistsByReferenceAsync($"{receiptNumber}-CSDEPADJ-REV")) return true; // กลับแล้ว
             var undo = _mapper.MapDepositCashSaleReversalUndo(resId, applied, paymentMethod, DateTime.Now,
