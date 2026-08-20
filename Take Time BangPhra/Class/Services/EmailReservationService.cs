@@ -98,6 +98,9 @@ namespace Take_Time_BangPhra.Services
         {
             public int Fetched, Created, Duplicate, Cancelled, Failed, Retried, RetrySucceeded, Manual, Ignored;
             public List<string> Messages = new List<string>();
+            /// <summary>เลขจองในโฟลเดอร์ Failed ที่ระบบนี้ "ไม่เคยประมวลผล" — หลักฐานว่ามี
+            /// ตัวอ่านเมลตัวอื่น (โปรแกรมเก่า GetReservationfromGmail / เซิร์ฟเวอร์เก่า) แย่งอ่านอยู่</summary>
+            public List<string> ForeignBookings = new List<string>();
             public string Error;
             public override string ToString() =>
                 Error != null ? "ผิดพลาด: " + Error
@@ -412,6 +415,39 @@ namespace Take_Time_BangPhra.Services
             {
                 var msg = source.GetMessage(uid);
                 subject = msg.Subject ?? "";
+
+                // จดเลขจองของอีเมลนี้ลง Logs เสมอ — เป็น "ลายเซ็นว่าเราเป็นคนอ่าน"
+                // ให้ตัวตรวจตัวอ่านแปลกปลอม (ด้านล่าง) แยกออกว่าอีเมลใน Failed ใบไหน
+                // ถูกย้ายมาโดยเรา ใบไหนถูกโปรแกรมอื่นย้ายมา
+                string traceBid = null;
+                try
+                {
+                    var traceRooms = ExtractRoomBookings(msg.HtmlBody);
+                    traceBid = traceRooms.Count > 0 ? (traceRooms[0].BookingId ?? "").Trim() : null;
+                    if (!string.IsNullOrEmpty(traceBid) && !isRetry)
+                        _code.Logs(_conn, "EmailReservation",
+                            $"อ่านอีเมล booking={traceBid} [{InstanceStamp()}]", "SYSTEM");
+                }
+                catch { }
+
+                // รอบลองใหม่: ถ้าเลขจองนี้ไม่เคยมีร่องรอยใน Logs เลย = เราไม่เคยอ่านฉบับนี้
+                // → มีตัวอ่านตัวอื่นเป็นคนย้ายเข้า Failed (โปรแกรมเก่า/เซิร์ฟเวอร์เก่า)
+                if (isRetry && !string.IsNullOrEmpty(traceBid))
+                {
+                    try
+                    {
+                        var seen = _code.DatabaseQuerySafe(_conn,
+                            @"SELECT TOP 1 1 FROM Logs
+                              WHERE LogAction = 'EmailReservation'
+                                AND LogDateTime >= DATEADD(DAY, -7, GETDATE())
+                                AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p",
+                            new Dictionary<string, object> { { "@p", "%" + traceBid + "%" } });
+                        if (seen == null || seen.Rows.Count == 0)
+                            res.ForeignBookings.Add(traceBid);
+                    }
+                    catch { }
+                }
+
                 string kind;
                 var o = ProcessOne(msg, subject, out kind);
                 done = o.Ok || o.Dup || o.Park || o.Ignored;
@@ -480,6 +516,27 @@ namespace Take_Time_BangPhra.Services
                 if (res.Retried > 0)
                     _code.Logs(_conn, "EmailReservation",
                         $"retry failed folder: ลองใหม่ {res.Retried} ฉบับ สำเร็จ {res.RetrySucceeded}", "SYSTEM");
+
+                // 🚨 พบอีเมลที่ระบบนี้ไม่เคยอ่าน แต่โผล่ใน Failed = มีตัวอ่านเมลตัวอื่นทำงานอยู่
+                //   (โปรแกรม GetReservationfromGmail ตัวเก่าใน Task Scheduler / เว็บอินสแตนซ์เก่า)
+                //   ตัวเก่าใช้ตรรกะ mapping รุ่นเก่า → จองไม่ติดทั้งที่ระบบใหม่ลงได้ + แย่งอีเมลไปก่อน
+                //   ระบบนี้กู้การจองคืนให้ผ่านรอบ retry แล้ว แต่ต้องปิดตัวเก่าถึงจะหายขาด
+                if (res.ForeignBookings.Count > 0)
+                {
+                    string ids = string.Join(", ", res.ForeignBookings.Distinct().Take(5));
+                    string warn = "🚨 <b>ตรวจพบโปรแกรมอ่านอีเมลจองตัวอื่น!</b>\n\n"
+                        + $"พบอีเมลจอง ({ids}) ในโฟลเดอร์ Failed ที่ระบบนี้ไม่เคยอ่าน\n"
+                        + "— แปลว่ามีตัวอ่านเมลตัวเก่ายังรันอยู่ (แย่งอ่านก่อนแล้วลงจองไม่สำเร็จ)\n\n"
+                        + "🔧 วิธีปิดให้หายขาด:\n"
+                        + "1. เปิด Task Scheduler บนเซิร์ฟเวอร์ → หา GetReservationfromGmail → Disable\n"
+                        + "2. ตรวจว่าไม่มีเว็บ/เซิร์ฟเวอร์สำรองที่ deploy โค้ดรุ่นเก่าแล้วยังชี้เมลกล่องเดียวกัน\n"
+                        + "3. สังเกตข้อความ Telegram: ของระบบใหม่มีบรรทัด 🖥 เครื่อง/เวลา build เสมอ — "
+                        + "ข้อความที่ไม่มี = มาจากตัวเก่า\n\n"
+                        + $"♻️ ระบบนี้ได้ลองลงจองคืนให้แล้วในรอบนี้\n🖥 <i>{E(InstanceStamp())}</i>";
+                    _code.Logs(_conn, "EmailReservation",
+                        $"foreign poller detected: bookings [{ids}] อยู่ใน Failed โดยไม่มีร่องรอยการอ่านของระบบนี้", "SYSTEM");
+                    if (_notifyTelegram) Notify(warn, true);
+                }
             }
             catch (Exception ex)
             {
