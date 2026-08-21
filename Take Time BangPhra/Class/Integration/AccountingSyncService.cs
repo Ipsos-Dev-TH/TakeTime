@@ -5433,20 +5433,46 @@ namespace Take_Time_BangPhra.Integration
                 "SYSTEM");
 
             // 5. approve → pay (gate ตามสถานะ → idempotent เมื่อ run เดิมถูก approve/pay ไปแล้ว)
-            if (!status.Equals("Approved", StringComparison.OrdinalIgnoreCase)
-                && !status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            //
+            // ⚠ ขั้นนำเข้า (ข้างบน) สำเร็จไปแล้ว ณ จุดนี้ — ข้อมูลเงินเดือนขึ้นบน NextAcc ครบถ้วนถูกต้อง
+            //   แต่ **GL ยังไม่ถูกลง** จนกว่า approve/pay จะผ่าน (NextAcc สร้าง JE ตอนนั้น)
+            //   ถ้าปล่อยให้ error ดิบเด้งขึ้นไปเฉย ๆ หน้าคิวจะขึ้นว่า "ล้มเหลว" ทั้งรายการ
+            //   ทำให้เข้าใจผิดว่า "ไม่มีอะไรขึ้น NextAcc เลย" ทั้งที่เปิดดูแล้วข้อมูลถูกต้องหมด
+            //   → ต้องบอกให้ชัดว่าสำเร็จถึงขั้นไหน และอะไรที่ยังขาด (JE)
+            string stage = "approve";
+            try
             {
-                var ap = await _apiClient.ApprovePayrollAsync(runId);
-                status = ap?.data?.Status ?? "Approved";
-                _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPayrollRunImport: approved run={runId} status={status}", "SYSTEM");
+                if (!status.Equals("Approved", StringComparison.OrdinalIgnoreCase)
+                    && !status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                {
+                    var ap = await _apiClient.ApprovePayrollAsync(runId);
+                    status = ap?.data?.Status ?? "Approved";
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPayrollRunImport: approved run={runId} status={status}", "SYSTEM");
+                }
+                stage = "pay";
+                if (!status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                {
+                    var pay = await _apiClient.PayPayrollAsync(runId);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPayrollRunImport: PAID run={runId} number={payrollNumber} gross={pay?.data?.TotalGrossSalary} wht={pay?.data?.TotalWithholdingTax} ssfEmp={pay?.data?.TotalSocialSecurityEmployee} ssfEr={pay?.data?.TotalSocialSecurityEmployer} net={pay?.data?.TotalNetPay}",
+                        "SYSTEM");
+                }
             }
-            if (!status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            catch (AccountingApiException apx)
             {
-                var pay = await _apiClient.PayPayrollAsync(runId);
+                string body = DecodeUnicodeEscapes(apx.ResponseBody ?? "");
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ProcessPayrollRunImport: PAID run={runId} number={payrollNumber} gross={pay?.data?.TotalGrossSalary} wht={pay?.data?.TotalWithholdingTax} ssfEmp={pay?.data?.TotalSocialSecurityEmployee} ssfEr={pay?.data?.TotalSocialSecurityEmployer} net={pay?.data?.TotalNetPay}",
-                    "SYSTEM");
+                    $"ProcessPayrollRunImport: {stage} FAILED run={runId} number={payrollNumber} status={status} — {body}", "SYSTEM");
+                throw new Exception(
+                    $"นำเข้าข้อมูลเงินเดือนขึ้น NextAcc **สำเร็จแล้ว** (งวด {periodName} เลขที่ {payrollNumber}, "
+                    + $"พนักงาน {lines.Count} คน) — ข้อมูลที่เห็นบน NextAcc จึงถูกต้องครบถ้วน\n"
+                    + $"แต่ขั้นตอน \"{stage}\" ล้มเหลว ⇒ **NextAcc ยังไม่ได้ลงบัญชี (JE) ให้** "
+                    + "เงินเดือนงวดนี้จึงยังไม่เข้างบการเงิน และยังออก ภ.ง.ด.1 / สปส.1-10 / 50ทวิ ไม่ได้\n"
+                    + $"สถานะ run ล่าสุด = {status}\n"
+                    + $"ข้อความจาก NextAcc: {body}\n"
+                    + "กด Retry ได้ปลอดภัย — ระบบจะไม่สร้าง run ซ้ำ (idempotent ด้วย ExternalRunRef) "
+                    + "แต่จะทำต่อจากขั้นที่ค้างเท่านั้น");
             }
 
             _lastDocNumber = payrollNumber;
