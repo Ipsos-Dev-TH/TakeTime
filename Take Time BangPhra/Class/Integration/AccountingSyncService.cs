@@ -2517,16 +2517,16 @@ namespace Take_Time_BangPhra.Integration
         // _isSyncing ใน Global.asax กันได้แค่ "ภายใน process เดียว" และยัง abandon task
         // เมื่อ Wait(2 นาที) หมดเวลา → รอบถัดไปเริ่มทับได้. ถ้ามีหลาย worker process /
         // หลายเซิร์ฟเวอร์ / staging ชี้ DB เดียวกัน จะยิงเอกสารซ้ำเข้า NextAcc
-        // → ใช้ sp_getapplock ของ SQL Server เป็นตัวกันข้าม process
+        // → ใช้ lease ในตาราง App_Run_Lease (มีวันหมดอายุ) เป็นตัวกันข้าม process
         /// <summary>
         /// ป้ายรุ่นของตรรกะ sync — เพิ่มเลข/ข้อความทุกครั้งที่แก้พฤติกรรมสำคัญ
         /// หน้า 🩺 ตรวจสุขภาพ แสดงค่านี้ ⇒ เห็นได้ทันทีว่า DLL ที่รันอยู่บนเซิร์ฟเวอร์
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-19.1 · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-21.1 · expiring-run-lease (แทน sp_getapplock ที่ค้างถาวรได้) · email-intake-stale-alert · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
-        private const string QueueLockName = "TakeTime_AccountingSyncQueue";
+        private const string QueueLeaseName = "AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
         private static DateTime _lastLogPurge = DateTime.MinValue;
         private static DateTime _lastQueueAlert = DateTime.MinValue;
@@ -2563,66 +2563,39 @@ namespace Take_Time_BangPhra.Integration
                 return 0;
             }
 
-            SqlConnection lockCon = null;
-            try
+            // ── ล็อกรอบทำงาน: lease มีวันหมดอายุ (ไม่ใช่ sp_getapplock อีกต่อไป) ─────────
+            // sp_getapplock @LockOwner='Session' ผูกกับ SQL session ของ connection ที่ pool ไว้
+            // → Dispose() ไม่ได้ปิด session จริง ล็อกจึงค้างจนกว่า connection นั้นจะถูกใช้ซ้ำ
+            // เมื่อ deploy DLL ใหม่ AppDomain เก่าถูกทิ้งพร้อม pool ที่ถือล็อกอยู่ = ล็อกค้างถาวร
+            // (เกิดจริงกับล็อกอ่านอีเมลจอง: หยุดทำงานเงียบ ๆ 2 วัน 19–21 ส.ค. 2026)
+            // lease หมดอายุเองเสมอ ⇒ อย่างแย่ที่สุดคิวหยุดไม่เกินอายุ lease แล้วเดินต่อเอง
+            int leaseMin = Math.Max(10, _config.StuckProcessingMinutes);
+            string heldBy;
+            var lease = Services.DbRunLease.TryAcquire(_connectionString, QueueLeaseName, leaseMin, out heldBy);
+            if (lease == null)
             {
-                lockCon = new SqlConnection(_connectionString);
-                lockCon.Open();
-                if (!TryAcquireQueueLock(lockCon))
-                {
-                    lockCon.Dispose();
-                    LastRunSkippedReason = "มีรอบประมวลผลอื่นทำงานอยู่ (timer เบื้องหลัง หรืออีกเซิร์ฟเวอร์) — ลองใหม่อีกครู่";
-                    LogThrottled("queuelock",
-                        "ProcessQueueAsync skipped: มี worker อื่นถือ lock คิวอยู่ (อีก process/เซิร์ฟเวอร์ หรือรอบก่อนยังไม่จบ)");
-                    return 0;
-                }
+                LastRunSkippedReason = "มีรอบประมวลผลอื่นทำงานอยู่ (timer เบื้องหลัง หรืออีกเซิร์ฟเวอร์) — ลองใหม่อีกครู่";
+                LogThrottled("queuelock",
+                    $"ProcessQueueAsync skipped: มี worker อื่นถือ lease คิวอยู่ → {heldBy}");
+                return 0;
             }
-            catch (Exception ex)
-            {
-                // ขอ lock ไม่ได้ (สิทธิ์ DB/เชื่อมต่อไม่ได้) → ทำงานต่อ ดีกว่าคิวหยุดนิ่งถาวร
-                try { if (lockCon != null) lockCon.Dispose(); } catch { }
-                lockCon = null;
-                LogThrottled("queuelock-fail", $"ProcessQueueAsync: ขอ app lock ไม่สำเร็จ ({ex.Message}) — ทำงานต่อโดยไม่มี lock");
-            }
+            if (lease.Degraded && !string.IsNullOrEmpty(heldBy))
+                LogThrottled("queuelock-fail", $"ProcessQueueAsync: {heldBy}");
 
+            _queueLease = lease;
             try
             {
                 return await ProcessQueueCoreAsync(batchSize).ConfigureAwait(false);
             }
             finally
             {
-                if (lockCon != null)
-                {
-                    try
-                    {
-                        using (var rel = new SqlCommand("sp_releaseapplock", lockCon) { CommandType = CommandType.StoredProcedure })
-                        {
-                            rel.Parameters.AddWithValue("@Resource", QueueLockName);
-                            rel.Parameters.AddWithValue("@LockOwner", "Session");
-                            rel.ExecuteNonQuery();
-                        }
-                    }
-                    catch { }
-                    try { lockCon.Dispose(); } catch { }
-                }
+                _queueLease = null;
+                lease.Dispose();
             }
         }
 
-        /// <summary>ขอ app lock แบบไม่รอ (@LockTimeout=0) — คืน false ถ้ามีคนถืออยู่</summary>
-        private bool TryAcquireQueueLock(SqlConnection con)
-        {
-            using (var cmd = new SqlCommand("sp_getapplock", con) { CommandType = CommandType.StoredProcedure })
-            {
-                cmd.Parameters.AddWithValue("@Resource", QueueLockName);
-                cmd.Parameters.AddWithValue("@LockMode", "Exclusive");
-                cmd.Parameters.AddWithValue("@LockOwner", "Session");
-                cmd.Parameters.AddWithValue("@LockTimeout", 0);
-                var ret = cmd.Parameters.Add("@ret", SqlDbType.Int);
-                ret.Direction = ParameterDirection.ReturnValue;
-                cmd.ExecuteNonQuery();
-                return Convert.ToInt32(ret.Value) >= 0;   // 0 = ได้ทันที, 1 = ได้หลังรอ, <0 = ไม่ได้
-            }
-        }
+        /// <summary>lease ของรอบคิวปัจจุบัน — ต่ออายุระหว่างวนรายการ กันหมดอายุทั้งที่ยังทำงานอยู่</summary>
+        private Services.DbRunLease _queueLease;
 
         /// <summary>
         /// จองรายการคิวแบบ atomic (UPDATE … WHERE Status IN ('PENDING','FAILED')).
@@ -2748,6 +2721,9 @@ namespace Take_Time_BangPhra.Integration
                 // จองรายการแบบ atomic — ถ้ามีตัวอื่นคว้าไปแล้ว (คนละ process หรือรอบซ้อน) ให้ข้าม
                 // ห้ามใช้ UpdateQueueStatus เฉย ๆ เพราะเขียนทับสถานะโดยไม่ตรวจว่าใครถืออยู่
                 if (!TryClaimQueueItem(queueId)) continue;
+
+                // ต่ออายุ lease ทุกรายการ — รอบที่ยาว (NextAcc ตอบช้า) จะได้ไม่ถูกยึดคืนกลางคัน
+                if (_queueLease != null) _queueLease.Renew();
 
                 try
                 {

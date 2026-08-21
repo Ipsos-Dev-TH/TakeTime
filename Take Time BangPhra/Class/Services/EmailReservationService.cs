@@ -30,6 +30,8 @@ namespace Take_Time_BangPhra.Services
         private readonly string _imapServer, _imapUser, _imapPassword, _processedLabel, _failedLabel, _fromContains;
         private readonly string _ignoredLabel;      // folder เก็บอีเมล STAAH ที่ไม่เกี่ยวกับการจอง
         private readonly int _imapPort, _maxStayDays, _maxDaysFuture, _retryHours, _retryMax;
+        private readonly int _leaseMinutes;          // อายุล็อกรอบอ่านอีเมล — ค้างเกินนี้ยึดคืนเอง
+        private readonly int _staleAlertMin;         // ไม่สำเร็จเกินกี่นาทีให้เตือน (0 = ปิด)
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
@@ -63,6 +65,32 @@ namespace Take_Time_BangPhra.Services
             string cs = Cfg("Email_Rsv_CancelStatus", "ยกเลิก");
             _cancelStatus = (cs == "ยกเลิกคืนเงิน" || cs == "ยกเลิกไม่คืนเงิน") ? cs : "ยกเลิก";
             _customerTypeId = int.TryParse(Cfg("Email_Rsv_CustomerTypeId", "2"), out var ct) ? ct : 2;
+            _leaseMinutes = int.TryParse(Cfg("Email_Rsv_LeaseMinutes", "15"), out var lm) && lm > 0 ? lm : 15;
+            _staleAlertMin = int.TryParse(Cfg("Email_Rsv_StaleAlertMin", "60"), out var sa) && sa >= 0 ? sa : 60;
+        }
+
+        /// <summary>เขียนค่าลง Accounting_Integration_Config (สร้างคีย์ถ้ายังไม่มี) — ใช้เก็บสถานะรอบล่าสุด</summary>
+        private void SetCfg(string key, string value, string desc)
+        {
+            try
+            {
+                using (var con = new SqlConnection(_conn))
+                {
+                    con.Open();
+                    using (var cmd = new SqlCommand(
+                        "UPDATE Accounting_Integration_Config SET ConfigValue=@v, Updated_Date=GETDATE() WHERE ConfigKey=@k; " +
+                        "IF @@ROWCOUNT = 0 INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description, Updated_Date) " +
+                        "VALUES (@k, @v, @d, GETDATE());", con))
+                    {
+                        cmd.CommandTimeout = 15;
+                        cmd.Parameters.AddWithValue("@k", key);
+                        cmd.Parameters.AddWithValue("@v", value ?? "");
+                        cmd.Parameters.AddWithValue("@d", desc ?? "");
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+            catch { }
         }
 
         private string Cfg(string key, string def)
@@ -180,6 +208,7 @@ namespace Take_Time_BangPhra.Services
             {
                 using (var client = new ImapClient())
                 {
+                    client.Timeout = ImapTimeoutMs;
                     client.Connect(_imapServer, _imapPort, true);
                     client.Authenticate(_imapUser, _imapPassword);
 
@@ -261,6 +290,7 @@ namespace Take_Time_BangPhra.Services
             {
                 using (var client = new ImapClient())
                 {
+                    client.Timeout = ImapTimeoutMs;
                     client.Connect(_imapServer, _imapPort, true);
                     client.Authenticate(_imapUser, _imapPassword);
                     var inbox = client.Inbox;
@@ -309,30 +339,47 @@ namespace Take_Time_BangPhra.Services
             return _instanceStamp;
         }
 
+        private const string IntakeLeaseName = "EmailReservationIntake";
+
+        /// <summary>เวลาสูงสุดต่อคำสั่ง IMAP (มิลลิวินาที) — กันเซิร์ฟเวอร์เมลค้างแล้วลากงานเบื้องหลังค้างตาม</summary>
+        private const int ImapTimeoutMs = 120000;
+
         /// <summary>
-        /// ล็อกระดับฐานข้อมูล (sp_getapplock, Session owner) — กันหลายตัวดึงกล่องเมลเดียวกันพร้อมกัน
-        /// ครอบทั้ง timer ชนปุ่ม "ดึงตอนนี้", app pool ซ้อนตอน recycle, และ deployment ใหม่หลายชุด
-        /// ที่ชี้ DB เดียวกัน (ตัวเก่าที่ไม่มีโค้ดนี้ล็อกไม่ได้ — ต้องปิดทิ้งสถานเดียว)
-        /// ล็อกปล่อยเองเมื่อ connection ปิด
+        /// เตือนเมื่อ "ไม่มีรอบอ่านอีเมลสำเร็จ" นานเกินกำหนด — เดิมเวลาระบบหยุดอ่านอีเมล
+        /// จะเงียบสนิท (เขียน log อย่างเดียว) กว่าจะรู้ตัวคือตอนลูกค้าโทรมาถามว่าทำไมไม่มีจอง
+        /// เตือนซ้ำได้ไม่เกินชั่วโมงละครั้ง
         /// </summary>
-        private static bool TryAcquireIntakeLock(SqlConnection con)
+        private void AlertIfIntakeStale(string why)
         {
+            if (_staleAlertMin <= 0 || !_notifyTelegram) return;
             try
             {
-                using (var cmd = new SqlCommand("sp_getapplock", con))
+                DateTime last;
+                if (!DateTime.TryParse(Cfg("Email_Rsv_LastSuccess", ""), CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out last))
                 {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@Resource", "TakeTime_EmailRsvIntake");
-                    cmd.Parameters.AddWithValue("@LockMode", "Exclusive");
-                    cmd.Parameters.AddWithValue("@LockOwner", "Session");
-                    cmd.Parameters.AddWithValue("@LockTimeout", 0);
-                    var ret = cmd.Parameters.Add("@Result", SqlDbType.Int);
-                    ret.Direction = ParameterDirection.ReturnValue;
-                    cmd.ExecuteNonQuery();
-                    return Convert.ToInt32(ret.Value) >= 0;
+                    // ยังไม่เคยบันทึกรอบสำเร็จ (เพิ่ง deploy) — เริ่มนับจากตอนนี้ ไม่เตือนย้อนหลัง
+                    SetCfg("Email_Rsv_LastSuccess", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                           "เวลาที่รอบอ่านอีเมลจองสำเร็จล่าสุด (ระบบเขียนเอง)");
+                    return;
                 }
+                double mins = (DateTime.Now - last).TotalMinutes;
+                if (mins < _staleAlertMin) return;
+
+                DateTime lastAlert;
+                if (DateTime.TryParse(Cfg("Email_Rsv_LastStaleAlert", ""), CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out lastAlert) && (DateTime.Now - lastAlert).TotalMinutes < 60)
+                    return;
+                SetCfg("Email_Rsv_LastStaleAlert", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                       "เวลาที่เตือน 'ไม่ได้อ่านอีเมลนาน' ล่าสุด (ระบบเขียนเอง)");
+
+                Notify("⛔️ <b>ระบบไม่ได้อ่านอีเมลจองมา " + (int)mins + " นาที</b>\n"
+                       + "รอบล่าสุดที่สำเร็จ: " + last.ToString("dd/MM/yyyy HH:mm") + "\n"
+                       + "สาเหตุรอบนี้: " + E(why ?? "-") + "\n"
+                       + "⚠️ การจองจาก OTA อาจไม่ถูกบันทึกเข้าระบบ — ตรวจหน้า Admin → อีเมลจอง\n"
+                       + "🖥 <i>" + E(InstanceStamp()) + "</i>", true);
             }
-            catch { return true; }   // ล็อกใช้ไม่ได้ (สิทธิ์/รุ่น SQL) → ทำงานต่อแบบไม่ล็อกดีกว่าหยุดทั้งระบบ
+            catch { }
         }
 
         /// <summary>ดึง+ประมวลผลอีเมลจองทั้งหมดที่ยังไม่อ่าน. ปลอดภัยเรียกซ้ำ (idempotent ด้วย dedup).</summary>
@@ -345,20 +392,32 @@ namespace Take_Time_BangPhra.Services
                 return res;
             }
 
-            using (var gate = new SqlConnection(_conn))
+            // ── ล็อกรอบทำงาน (lease มีวันหมดอายุ) ────────────────────────────────────
+            // เดิมใช้ sp_getapplock ผูกกับ SQL session ของ connection ที่ pool ไว้ — ล็อกค้าง
+            // ถาวรได้เมื่อ AppDomain เก่าถูกทิ้งพร้อม connection ที่ยังถือล็อกอยู่ (เกิดจริง:
+            // อีเมลจองไม่ถูกอ่านเลย 2 วัน 19–21 ส.ค. 2026). lease นี้หมดอายุเองเสมอ
+            string heldBy;
+            var lease = DbRunLease.TryAcquire(_conn, IntakeLeaseName, _leaseMinutes, out heldBy);
+            if (lease == null)
             {
-                try { gate.Open(); } catch { /* DB ล่ม — ปล่อยไปตายที่ขั้นตอนปกติเพื่อได้ error เดิม */ }
-                if (gate.State == ConnectionState.Open && !TryAcquireIntakeLock(gate))
-                {
-                    res.Error = "มีการดึงอีเมลรอบอื่นกำลังทำงานอยู่ — ข้ามรอบนี้ (กันประมวลผลซ้อน)";
-                    _code.Logs(_conn, "EmailReservation", $"intake skipped: lock held elsewhere [{InstanceStamp()}]", "SYSTEM");
-                    return res;
-                }
+                res.Error = "มีการดึงอีเมลรอบอื่นกำลังทำงานอยู่ — ข้ามรอบนี้ (กันประมวลผลซ้อน)";
+                _code.Logs(_conn, "EmailReservation",
+                    $"intake skipped: มีรอบอื่นถือ lease อยู่ → {heldBy} [{InstanceStamp()}]", "SYSTEM");
+                AlertIfIntakeStale("รอบอื่นถือล็อกอยู่: " + heldBy);
+                return res;
+            }
+            if (lease.Degraded && !string.IsNullOrEmpty(heldBy))
+                _code.Logs(_conn, "EmailReservation", $"intake lease degraded: {heldBy} [{InstanceStamp()}]", "SYSTEM");
 
+            using (lease)
+            {
             try
             {
                 using (var client = new ImapClient())
                 {
+                    // จำกัดเวลาทุก IMAP operation — กัน thread ค้างคาเซิร์ฟเวอร์เมล
+                    // (ค้างนานแค่ไหน lease ก็หมดอายุแล้วรอบถัดไปเดินต่อได้ แต่ไม่ควรปล่อยให้ค้างตั้งแต่แรก)
+                    client.Timeout = ImapTimeoutMs;
                     client.Connect(_imapServer, _imapPort, true);
                     client.Authenticate(_imapUser, _imapPassword);
                     var inbox = client.Inbox;
@@ -387,19 +446,26 @@ namespace Take_Time_BangPhra.Services
                     // INBOX + ยังไม่อ่าน จึงไม่มีวันถูกหยิบมาทำอีก ต่อให้แก้ mapping/ปล่อยห้องแล้ว
                     // ตอนนี้จะวนกลับมาลองใหม่ให้เองภายใน Email_Rsv_RetryHours ชั่วโมง
                     if (_retryFailed && failed != null)
+                    {
+                        lease.Renew();      // เฟสนี้อาจกินเวลานาน — ต่ออายุก่อน กัน lease หมดกลางคัน
                         RetryFailedFolder(failed, processed, ignored, res);
+                    }
 
                     client.Disconnect(true);
                 }
                 NotifySummary(res);
+                // จดว่ารอบนี้ "สำเร็จ" — ตัวชี้วัดเดียวที่บอกได้ว่าระบบยังอ่านอีเมลอยู่จริง
+                SetCfg("Email_Rsv_LastSuccess", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                       "เวลาที่รอบอ่านอีเมลจองสำเร็จล่าสุด (ระบบเขียนเอง)");
             }
             catch (Exception ex)
             {
                 res.Error = ex.Message;
                 _code.Logs(_conn, "EmailReservation", $"IMAP error: {ex.Message}", "SYSTEM");
                 if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message + $"\n🖥 <i>{E(InstanceStamp())}</i>");
+                AlertIfIntakeStale("อ่านอีเมลไม่สำเร็จ: " + ex.Message);
             }
-            }   // gate — ปล่อย applock เมื่อ connection ปิด
+            }   // lease — ปล่อยล็อกเมื่อออกจากบล็อก (และหมดอายุเองถ้า process ตายคางาน)
             return res;
         }
 
@@ -430,20 +496,47 @@ namespace Take_Time_BangPhra.Services
                 }
                 catch { }
 
-                // รอบลองใหม่: ถ้าเลขจองนี้ไม่เคยมีร่องรอยใน Logs เลย = เราไม่เคยอ่านฉบับนี้
-                // → มีตัวอ่านตัวอื่นเป็นคนย้ายเข้า Failed (โปรแกรมเก่า/เซิร์ฟเวอร์เก่า)
+                // รอบลองใหม่: ถ้าเลขจองนี้ไม่เคยมีร่องรอยใน Logs = เราไม่เคยอ่านฉบับนี้
+                // → อาจมีตัวอ่านตัวอื่นเป็นคนย้ายเข้า Failed (โปรแกรมเก่า/เซิร์ฟเวอร์เก่า)
+                //
+                // ⚠ "ไม่มีร่องรอย" อย่างเดียวยังสรุปไม่ได้ — อีเมลอาจเก่ากว่าวันที่เริ่มจดร่องรอย
+                //   หรือมาถึงตอนที่ระบบนี้หยุดทำงานอยู่ (เคสล็อกค้าง 19–21 ส.ค. 2026 ทำให้
+                //   ทั้งกอง Failed ดูเหมือนถูก "ตัวอื่น" ย้ายมา ทั้งที่ไม่มีตัวอื่นเลย)
+                //   จึงต้องได้เงื่อนไขครบทั้งสองข้อ: (ก) อีเมลมาถึงหลังเริ่มจดร่องรอย และ
+                //   (ข) ระบบนี้ยังอ่านอีเมลฉบับอื่นอยู่ในช่วง 24 ชม. หลังอีเมลฉบับนี้มาถึง
+                //   = เราตื่นอยู่แต่ไม่เคยเห็นใบนี้ ⇒ มีคนหยิบไปก่อนจริง ๆ
                 if (isRetry && !string.IsNullOrEmpty(traceBid))
                 {
                     try
                     {
-                        var seen = _code.DatabaseQuerySafe(_conn,
-                            @"SELECT TOP 1 1 FROM Logs
-                              WHERE LogAction = 'EmailReservation'
-                                AND LogDateTime >= DATEADD(DAY, -7, GETDATE())
-                                AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p",
-                            new Dictionary<string, object> { { "@p", "%" + traceBid + "%" } });
-                        if (seen == null || seen.Rows.Count == 0)
-                            res.ForeignBookings.Add(traceBid);
+                        DateTime arrived = msg.Date.LocalDateTime;
+                        var chk = _code.DatabaseQuerySafe(_conn,
+                            @"SELECT
+                                (SELECT TOP 1 1 FROM Logs
+                                  WHERE LogAction = 'EmailReservation'
+                                    AND LogDateTime >= DATEADD(DAY, -30, GETDATE())
+                                    AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p)        AS SeenThis,
+                                (SELECT MIN(LogDateTime) FROM Logs
+                                  WHERE LogAction = 'EmailReservation'
+                                    AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%อ่านอีเมล booking=%') AS TraceSince,
+                                (SELECT TOP 1 1 FROM Logs
+                                  WHERE LogAction = 'EmailReservation'
+                                    AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%อ่านอีเมล booking=%'
+                                    AND LogDateTime BETWEEN @arrived AND DATEADD(HOUR, 24, @arrived)) AS AwakeThen",
+                            new Dictionary<string, object>
+                            {
+                                { "@p", "%" + traceBid + "%" },
+                                { "@arrived", arrived }
+                            });
+                        if (chk != null && chk.Rows.Count > 0)
+                        {
+                            bool seenThis = chk.Rows[0]["SeenThis"] != DBNull.Value;
+                            bool tracedBefore = chk.Rows[0]["TraceSince"] != DBNull.Value
+                                && Convert.ToDateTime(chk.Rows[0]["TraceSince"]) < arrived;
+                            bool awakeThen = chk.Rows[0]["AwakeThen"] != DBNull.Value;
+                            if (!seenThis && tracedBefore && awakeThen)
+                                res.ForeignBookings.Add(traceBid);
+                        }
                     }
                     catch { }
                 }
@@ -524,9 +617,10 @@ namespace Take_Time_BangPhra.Services
                 if (res.ForeignBookings.Count > 0)
                 {
                     string ids = string.Join(", ", res.ForeignBookings.Distinct().Take(5));
-                    string warn = "🚨 <b>ตรวจพบโปรแกรมอ่านอีเมลจองตัวอื่น!</b>\n\n"
-                        + $"พบอีเมลจอง ({ids}) ในโฟลเดอร์ Failed ที่ระบบนี้ไม่เคยอ่าน\n"
-                        + "— แปลว่ามีตัวอ่านเมลตัวเก่ายังรันอยู่ (แย่งอ่านก่อนแล้วลงจองไม่สำเร็จ)\n\n"
+                    string warn = "🚨 <b>น่าจะมีโปรแกรมอ่านอีเมลจองตัวอื่นอยู่</b>\n\n"
+                        + $"พบอีเมลจอง ({ids}) ในโฟลเดอร์ Failed ที่ระบบนี้ไม่เคยอ่าน "
+                        + "ทั้งที่ตอนนั้นระบบนี้กำลังอ่านอีเมลฉบับอื่นอยู่\n"
+                        + "— แปลว่าน่าจะมีตัวอ่านเมลตัวเก่ายังรันอยู่ (แย่งอ่านก่อนแล้วลงจองไม่สำเร็จ)\n\n"
                         + "🔧 วิธีปิดให้หายขาด:\n"
                         + "1. เปิด Task Scheduler บนเซิร์ฟเวอร์ → หา GetReservationfromGmail → Disable\n"
                         + "2. ตรวจว่าไม่มีเว็บ/เซิร์ฟเวอร์สำรองที่ deploy โค้ดรุ่นเก่าแล้วยังชี้เมลกล่องเดียวกัน\n"

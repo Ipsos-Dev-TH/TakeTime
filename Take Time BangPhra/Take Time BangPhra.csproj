@@ -944,6 +944,7 @@
     <Compile Include="Class\Feature.cs" />
     <Compile Include="Class\Perm.cs" />
     <Compile Include="Class\UploadHelper.cs" />
+    <Compile Include="Class\Services\DbRunLease.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
     <Compile Include="Class\Services\EmailChatService.cs" />
     <Compile Include="Class\Services\ChatBookingLinker.cs" />

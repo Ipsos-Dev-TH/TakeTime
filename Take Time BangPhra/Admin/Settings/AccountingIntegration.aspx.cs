@@ -1592,6 +1592,57 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
                 catch { }
 
+                // ── 8) งานเบื้องหลังยังเดินอยู่จริงไหม (คิว / อ่านอีเมลจอง) ───────────────
+                // เคสจริง 19–21 ส.ค. 2026: ล็อกรอบอ่านอีเมลค้างถาวร (sp_getapplock ผูกกับ
+                // connection ที่ pool ไว้ แล้ว AppDomain เก่าถูกทิ้งทั้งที่ยังถือล็อก)
+                // → ระบบข้ามรอบเงียบ ๆ ทุก 5 นาที ไม่มีการจองจาก OTA เข้าเลย 2 วัน
+                // ตรงนี้ทำให้ "งานเบื้องหลังหยุด" มองเห็นได้จากหน้าเดียว
+                try
+                {
+                    var lease = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT Lock_Name, Owner, Acquired_At, Heartbeat_At, Expires_At
+                          FROM App_Run_Lease", null);
+                    if (lease != null)
+                        foreach (DataRow r in lease.Rows)
+                        {
+                            if (r["Expires_At"] == DBNull.Value) continue;
+                            var exp = Convert.ToDateTime(r["Expires_At"]);
+                            if (exp <= DateTime.Now) continue;          // ว่าง = ปกติ
+                            var since = r["Acquired_At"] != DBNull.Value
+                                ? Convert.ToDateTime(r["Acquired_At"]) : DateTime.Now;
+                            if ((DateTime.Now - since).TotalMinutes > 30)
+                                add("warn", $"งานเบื้องหลัง '{r["Lock_Name"]}' ถือล็อกมานาน",
+                                    $"เริ่มตั้งแต่ {since:dd/MM HH:mm} โดย {r["Owner"]} (หมดอายุ {exp:dd/MM HH:mm})\n"
+                                    + "ล็อกนี้หมดอายุเองเสมอ — ถ้าเลยเวลาหมดอายุแล้วยังค้าง แปลว่ามีรอบที่ทำงานนานผิดปกติ");
+                        }
+                }
+                catch { /* ยังไม่ได้รันไมเกรชัน 33 */ }
+
+                try
+                {
+                    var em = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT
+                            (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_Enabled')     AS Enabled,
+                            (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_LastSuccess') AS LastOk", null);
+                    if (em != null && em.Rows.Count > 0 && (em.Rows[0]["Enabled"]?.ToString() == "1"))
+                    {
+                        DateTime lastOk;
+                        string raw = em.Rows[0]["LastOk"]?.ToString() ?? "";
+                        if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out lastOk))
+                        {
+                            double mins = (DateTime.Now - lastOk).TotalMinutes;
+                            if (mins > 60)
+                                add(mins > 180 ? "error" : "warn",
+                                    $"ไม่ได้อ่านอีเมลจองมา {(int)mins} นาที",
+                                    $"รอบที่สำเร็จล่าสุด {lastOk:dd/MM/yyyy HH:mm}\n"
+                                    + "การจองจาก OTA (STAAH) อาจไม่ถูกบันทึกเข้าระบบระหว่างนี้ — "
+                                    + "ตรวจหน้า Admin → อีเมลจอง แล้วกด 'ดึงตอนนี้' เพื่อดูสาเหตุจริง");
+                        }
+                    }
+                }
+                catch { }
+
                 return new Dictionary<string, object>
                 {
                     { "success", true },
