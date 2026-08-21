@@ -64,8 +64,14 @@ namespace Take_Time_BangPhra.Services
             if (leaseMinutes < 1) leaseMinutes = 1;
             string owner = BuildOwner();
 
+            // ⚠ @got ต้องประกาศไว้ "ก่อน" UPDATE และรับค่า @@ROWCOUNT ในบรรทัดถัดจาก UPDATE ทันที
+            //   โดยไม่มีคำสั่งใดคั่น — คำสั่งที่คั่น (รวมถึง DECLARE) ทำให้ @@ROWCOUNT เพี้ยนได้
+            //   ถ้า @got กลายเป็น 0 เสมอ = ขอ lease ไม่ผ่านตลอดกาล = งานเบื้องหลังหยุดถาวร
+            //   ซึ่งคือความพังแบบเดียวกับที่ lease ตัวนี้ถูกสร้างมาเพื่อกำจัด
             const string sql = @"
 SET NOCOUNT ON;
+DECLARE @got INT = -1;
+
 IF OBJECT_ID('App_Run_Lease','U') IS NULL
 BEGIN
     SELECT -1 AS Got, CAST(NULL AS NVARCHAR(200)) AS Owner, CAST(NULL AS DATETIME) AS Expires_At;
@@ -84,8 +90,6 @@ BEGIN
            Expires_At = DATEADD(MINUTE, @m, GETDATE())
      WHERE Lock_Name = @n
        AND (Expires_At IS NULL OR Expires_At <= GETDATE());
-
-    DECLARE @got INT;
     SET @got = @@ROWCOUNT;
 
     SELECT @got AS Got, Owner, Expires_At FROM App_Run_Lease WHERE Lock_Name = @n;
