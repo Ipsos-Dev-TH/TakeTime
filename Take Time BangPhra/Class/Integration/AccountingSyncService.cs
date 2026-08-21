@@ -5432,6 +5432,28 @@ namespace Take_Time_BangPhra.Integration
                 $"ProcessPayrollRunImport: imported run={runId} number={payrollNumber} status={status} employees={lines.Count} gross={imp?.data?.TotalGrossSalary} net={imp?.data?.TotalNetPay}",
                 "SYSTEM");
 
+            // ── กับดัก: run เดิมพ้นสถานะ Calculated ไปแล้ว = แก้ยอดไม่ได้อีก ───────────
+            // import เป็น idempotent ด้วย ExternalRunRef ⇒ ยิงซ้ำจะได้ run เดิมกลับมา "ตามยอดเดิม"
+            // ไม่ใช่ยอดใหม่ที่เราเพิ่งส่ง. ดังนั้นถ้าผู้ใช้แก้ข้อมูล/เปิดสวิตช์ยุบยอดหักแล้ว retry
+            // ยอดบน NextAcc จะยังเป็นชุดเดิม แล้ว pay ก็จะพังด้วยเหตุผลเดิมอีก — วนไม่จบ
+            // ตรวจให้เจอตรงนี้แล้วบอกให้ชัดว่าต้องลบ/ยกเลิก run เดิมก่อน
+            decimal sentGross = lines.Sum(l => l.GrossIncome);
+            decimal sentNet = lines.Sum(l => l.NetPay);
+            decimal gotGross = imp?.data?.TotalGrossSalary ?? 0m;
+            decimal gotNet = imp?.data?.TotalNetPay ?? 0m;
+            bool amountsDiffer = (gotGross > 0 && Math.Abs(gotGross - sentGross) > 0.01m)
+                              || (gotNet > 0 && Math.Abs(gotNet - sentNet) > 0.01m);
+            if (amountsDiffer)
+                throw new Exception(
+                    $"NextAcc มี run เงินเดือนงวดนี้อยู่แล้ว (เลขที่ {payrollNumber}, สถานะ {status}) "
+                    + $"และ**ไม่ได้อัปเดตตามยอดใหม่ที่ส่งไป**\n"
+                    + $"  ยอดบน NextAcc : gross {gotGross:N2} / net {gotNet:N2}\n"
+                    + $"  ยอดที่ส่งไปรอบนี้: gross {sentGross:N2} / net {sentNet:N2}\n"
+                    + "การนำเข้าเป็นแบบ idempotent (อ้างอิง ExternalRunRef) — ยิงซ้ำจะได้ run เดิมเสมอ "
+                    + "แก้ยอดไม่ได้เมื่อ run พ้นสถานะ Calculated ไปแล้ว\n"
+                    + "วิธีแก้: ลบ/ยกเลิก run เงินเดือนงวดนี้บน NextAcc ก่อน แล้วค่อยกด Retry "
+                    + "ระบบจะนำเข้าใหม่ด้วยยอดที่ถูกต้อง");
+
             // 5. approve → pay (gate ตามสถานะ → idempotent เมื่อ run เดิมถูก approve/pay ไปแล้ว)
             //
             // ⚠ ขั้นนำเข้า (ข้างบน) สำเร็จไปแล้ว ณ จุดนี้ — ข้อมูลเงินเดือนขึ้นบน NextAcc ครบถ้วนถูกต้อง
