@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-21.1 · expiring-run-lease (แทน sp_getapplock ที่ค้างถาวรได้) · email-intake-stale-alert · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-21.2 · expiring-run-lease (แทน sp_getapplock ที่ค้างถาวรได้) · email-intake-stale-alert · email-backlog-recovery (กวาดทุก folder + ขยายหน้าต่าง retry ตามเวลาที่ระบบหลับ) · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLeaseName = "AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();

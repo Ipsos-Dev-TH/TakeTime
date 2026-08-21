@@ -270,6 +270,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakePreview":
                     result = PreviewEmailIntake();
                     break;
+                case "emailIntakeRecover":
+                    result = RecoverEmailBacklog();
+                    break;
                 case "lineDailySend":
                     result = SendDailyLineNow();
                     break;
@@ -609,6 +612,35 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "Run Error: " + (ex.InnerException ?? ex).Message } };
+            }
+        }
+
+        /// <summary>
+        /// ♻️ กู้อีเมลจองที่ตกหล่น — กวาดทุก folder ในกล่องเมลย้อนหลัง N วัน แล้วลงจองที่ยังไม่มี
+        /// ใช้เมื่อระบบเคยหยุดอ่าน (ล็อกค้าง/เซิร์ฟเวอร์ล่ม) หรือสงสัยว่ามีตัวอ่านอื่นแย่งอ่านไป
+        /// ปลอดภัย: dedup ด้วย Booking ID — ใบที่ลงแล้วนับเป็น "ซ้ำ" ไม่สร้างซ้อน
+        /// </summary>
+        private Dictionary<string, object> RecoverEmailBacklog()
+        {
+            try
+            {
+                int days;
+                if (!int.TryParse(Request.QueryString["days"], out days) || days <= 0) days = 7;
+                var svc = new EmailReservationService(ConnStr);
+                var r = System.Threading.Tasks.Task.Run(() => svc.RecoverBacklog(days)).Result;
+                if (r.Error != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", r.Error } };
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"กวาดย้อนหลัง {days} วัน → สร้างเพิ่ม {r.Created}, ยกเลิก {r.Cancelled}, "
+                                 + $"มีอยู่แล้ว {r.Duplicate}, ต้องตรวจเอง {r.Manual}, ไม่ใช่ใบจอง {r.Ignored}" },
+                    { "detail", string.Join("\n", r.Messages) }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Recover Error: " + (ex.InnerException ?? ex).Message } };
             }
         }
 
@@ -1623,9 +1655,19 @@ namespace Take_Time_BangPhra.Admin.Settings
                     var em = _code.DatabaseQuerySafe(ConnStr,
                         @"SELECT
                             (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_Enabled')     AS Enabled,
-                            (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_LastSuccess') AS LastOk", null);
+                            (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_LastSuccess') AS LastOk,
+                            (SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey='Email_Rsv_RetryHours')  AS RetryHrs", null);
                     if (em != null && em.Rows.Count > 0 && (em.Rows[0]["Enabled"]?.ToString() == "1"))
                     {
+                        // หน้าต่าง retry สั้นเกินไป = อีเมลที่ลงจองไม่สำเร็จตกขบวนถาวรภายในวันเดียว
+                        int retryHrs;
+                        if (int.TryParse(em.Rows[0]["RetryHrs"]?.ToString(), out retryHrs) && retryHrs < 24)
+                            add("warn", $"หน้าต่างลองใหม่สั้นผิดปกติ ({retryHrs} ชั่วโมง)",
+                                "อีเมลที่ลงจองไม่สำเร็จจะถูกลองใหม่เฉพาะที่อายุไม่เกินนี้ — "
+                                + $"ใบที่ล้มเหลวเมื่อวานจะไม่ถูกหยิบมาทำอีกเลย\n"
+                                + "แนะนำตั้ง 72 ชั่วโมง (ช่อง 'ลองใหม่ภายใน (ชั่วโมง)' ในหัวข้ออีเมลจอง)\n"
+                                + "ใบที่ตกไปแล้วกู้ได้ด้วยปุ่ม 'กู้อีเมลย้อนหลัง'");
+
                         DateTime lastOk;
                         string raw = em.Rows[0]["LastOk"]?.ToString() ?? "";
                         if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,

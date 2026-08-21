@@ -718,6 +718,7 @@
                 <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
                 <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
                 <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
+                <button type="button" class="btn-warning" onclick="recoverEmailBacklog()"><i class="fas fa-history"></i> กู้อีเมลย้อนหลัง</button>
                 <button type="button" class="btn-default" onclick="getAction('emailIntakeTestTelegram','emailRsvResult')"><i class="fab fa-telegram"></i> ทดสอบข้อความ Telegram</button>
                 <button type="button" class="btn-default" onclick="previewEmailIntake()"><i class="fas fa-eye"></i> ดูข้อมูลที่อ่านได้จากอีเมลจริง</button>
                 <button type="button" class="btn-default" onclick="loadEmailLog()"><i class="fas fa-list-alt"></i> ดู logs ล่าสุด</button>
@@ -1652,6 +1653,37 @@
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        // ♻️ กวาดทุก folder ในกล่องเมลย้อนหลัง N วัน แล้วลงจองที่ยังไม่มีในระบบ
+        // ใช้ตอนระบบเคยหยุดอ่าน หรือมีโปรแกรมอื่นแย่งอ่านอีเมลไป — ปลอดภัย ไม่สร้างซ้ำ (dedup Booking ID)
+        function recoverEmailBacklog() {
+            var days = prompt('กู้อีเมลจองย้อนหลังกี่วัน? (1-90)\n\nระบบจะกวาดทุกโฟลเดอร์ในกล่องเมล '
+                + 'แล้วลงจองใบที่ยังไม่มีในระบบ — ใบที่ลงแล้วจะถูกนับเป็น "ซ้ำ" ไม่สร้างซ้อน', '7');
+            if (days === null) return;
+            days = parseInt(days, 10);
+            if (!days || days < 1) { alert('ใส่จำนวนวันเป็นตัวเลข 1-90'); return; }
+            if (days > 90) days = 90;
+
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังกวาดกล่องเมลย้อนหลัง ' + days + ' วัน... (อาจใช้เวลาหลายนาที)';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 300000);
+            fetch(pageUrl + '?action=emailIntakeRecover&days=' + days + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 5 นาที (งานอาจยังทำต่อเบื้องหลัง ดู logs)' : err.message;
                     el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
                 });
         }

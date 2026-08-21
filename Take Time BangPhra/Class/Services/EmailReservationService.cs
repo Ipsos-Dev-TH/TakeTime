@@ -32,6 +32,9 @@ namespace Take_Time_BangPhra.Services
         private readonly int _imapPort, _maxStayDays, _maxDaysFuture, _retryHours, _retryMax;
         private readonly int _leaseMinutes;          // อายุล็อกรอบอ่านอีเมล — ค้างเกินนี้ยึดคืนเอง
         private readonly int _staleAlertMin;         // ไม่สำเร็จเกินกี่นาทีให้เตือน (0 = ปิด)
+        private readonly bool _recoverDaily;         // กวาดหาอีเมลจองที่ตกหล่นทุกวัน (ทุก folder)
+        private readonly int _recoverDays, _recoverMax;
+        private double _stallHours;                  // ระบบหยุดอ่านไปกี่ชั่วโมงก่อนรอบนี้ (ขยายหน้าต่าง retry)
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
@@ -67,6 +70,9 @@ namespace Take_Time_BangPhra.Services
             _customerTypeId = int.TryParse(Cfg("Email_Rsv_CustomerTypeId", "2"), out var ct) ? ct : 2;
             _leaseMinutes = int.TryParse(Cfg("Email_Rsv_LeaseMinutes", "15"), out var lm) && lm > 0 ? lm : 15;
             _staleAlertMin = int.TryParse(Cfg("Email_Rsv_StaleAlertMin", "60"), out var sa) && sa >= 0 ? sa : 60;
+            _recoverDaily = Cfg("Email_Rsv_RecoverDaily", "1") == "1";
+            _recoverDays = int.TryParse(Cfg("Email_Rsv_RecoverDays", "7"), out var rd) && rd > 0 ? rd : 7;
+            _recoverMax = int.TryParse(Cfg("Email_Rsv_RecoverMax", "100"), out var rx) && rx > 0 ? rx : 100;
         }
 
         /// <summary>เขียนค่าลง Accounting_Integration_Config (สร้างคีย์ถ้ายังไม่มี) — ใช้เก็บสถานะรอบล่าสุด</summary>
@@ -382,6 +388,17 @@ namespace Take_Time_BangPhra.Services
             catch { }
         }
 
+        /// <summary>ถึงเวลากวาดกู้อีเมลตกหล่นหรือยัง — วันละครั้ง หรือทันทีหลังระบบหยุดยาว ≥ 6 ชม.</summary>
+        private bool IsRecoverDue()
+        {
+            if (_stallHours >= 6) return true;
+            DateTime last;
+            if (!DateTime.TryParse(Cfg("Email_Rsv_LastRecover", ""), CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out last))
+                return true;                                   // ยังไม่เคยกวาด — กวาดรอบแรกเลย
+            return (DateTime.Now - last).TotalHours >= 24;
+        }
+
         /// <summary>ดึง+ประมวลผลอีเมลจองทั้งหมดที่ยังไม่อ่าน. ปลอดภัยเรียกซ้ำ (idempotent ด้วย dedup).</summary>
         public IntakeResult ProcessEmails()
         {
@@ -408,6 +425,17 @@ namespace Take_Time_BangPhra.Services
             }
             if (lease.Degraded && !string.IsNullOrEmpty(heldBy))
                 _code.Logs(_conn, "EmailReservation", $"intake lease degraded: {heldBy} [{InstanceStamp()}]", "SYSTEM");
+
+            // ระบบเพิ่งหลับไปนานแค่ไหน — ใช้ขยายหน้าต่าง retry และสั่งกวาดกู้ทันทีเมื่อกลับมา
+            _stallHours = 0;
+            try
+            {
+                DateTime prevOk;
+                if (DateTime.TryParse(Cfg("Email_Rsv_LastSuccess", ""), CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out prevOk))
+                    _stallHours = Math.Max(0, (DateTime.Now - prevOk).TotalHours);
+            }
+            catch { }
 
             using (lease)
             {
@@ -449,6 +477,26 @@ namespace Take_Time_BangPhra.Services
                     {
                         lease.Renew();      // เฟสนี้อาจกินเวลานาน — ต่ออายุก่อน กัน lease หมดกลางคัน
                         RetryFailedFolder(failed, processed, ignored, res);
+                    }
+
+                    // ── กวาดกู้อีเมลที่ตกหล่นทุก folder ─────────────────────────────────
+                    // วันละครั้ง และ "ทันที" เมื่อระบบเพิ่งกลับมาจากการหยุดยาว ≥ 6 ชม.
+                    // ปิดช่องที่รอบปกติมองไม่เห็น: อีเมลถูกตัวอื่นอ่าน/ย้ายไปแล้ว หรือเก่าเกินหน้าต่าง retry
+                    if (_recoverDaily && IsRecoverDue())
+                    {
+                        lease.Renew();
+                        // นับแยกจากรอบปกติ — ไม่งั้นยอด "ซ้ำ" จากการกวาด (ปกติมาก) จะไปโผล่
+                        // ในสรุปรายรอบจนดูน่าตกใจ. เอาเฉพาะที่กู้ได้จริงมารวม
+                        var rec = new IntakeResult();
+                        RecoverBacklogPass(client, rec, _recoverDays, _recoverMax);
+                        SetCfg("Email_Rsv_LastRecover", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                               "เวลาที่กวาดกู้อีเมลจองย้อนหลังล่าสุด (ระบบเขียนเอง)");
+                        if (rec.Created > 0 || rec.Cancelled > 0)
+                        {
+                            res.Created += rec.Created;
+                            res.Cancelled += rec.Cancelled;
+                            res.Messages.Add($"[กู้ย้อนหลัง {_recoverDays} วัน] สร้าง {rec.Created}, ยกเลิก {rec.Cancelled}");
+                        }
                     }
 
                     client.Disconnect(true);
@@ -594,7 +642,12 @@ namespace Take_Time_BangPhra.Services
                 failed.Open(FolderAccess.ReadWrite);
                 if (failed.Count == 0) return;
 
-                var cutoff = DateTime.Now.AddHours(-Math.Max(1, _retryHours));
+                // หน้าต่างเวลาปรับตามความจริง: ถ้าระบบเพิ่งหยุดอ่านไปหลายวัน (ล็อกค้าง/เซิร์ฟเวอร์ล่ม)
+                // อีเมลที่ล้มเหลวช่วงนั้นจะเก่ากว่า Email_Rsv_RetryHours ทันที แล้ว "ตกขบวนถาวร"
+                // (เคสจริง: RetryHours = 3 ชม. แต่ระบบหลับไป 2 วัน → ไม่มีใบไหนเข้าเกณฑ์เลย)
+                double hours = Math.Max(1, _retryHours);
+                if (_stallHours > hours) hours = _stallHours + 24;
+                var cutoff = DateTime.Now.AddHours(-hours);
                 IList<UniqueId> uids;
                 try { uids = failed.Search(SearchQuery.DeliveredAfter(cutoff.Date)); }
                 catch { uids = failed.Search(SearchQuery.All); }
@@ -636,6 +689,168 @@ namespace Take_Time_BangPhra.Services
             {
                 _code.Logs(_conn, "EmailReservation", $"retry failed folder error: {ex.Message}", "SYSTEM");
             }
+        }
+
+        /// <summary>
+        /// กวาดหา "อีเมลจองที่ตกหล่น" ทุก folder ในกล่องเมล แล้วลงจองให้ครบ
+        ///
+        /// จำเป็นเพราะรอบปกติอ่านเฉพาะ INBOX + ยังไม่อ่าน เท่านั้น ⇒ อีเมลหายเงียบได้หลายทาง:
+        ///   • มีโปรแกรมอ่านเมลตัวเก่าแย่งอ่านไปก่อน แล้วย้าย/มาร์คอ่านทิ้งไว้ที่ folder ของมัน
+        ///   • ระบบหยุดไปหลายวัน (ล็อกค้าง/เซิร์ฟเวอร์ล่ม) จนใบเก่าหลุดหน้าต่าง retry
+        ///   • ใบที่ล้มเหลวถูกย้ายเข้า Failed นานเกิน Email_Rsv_RetryHours
+        /// ปลอดภัยเพราะ dedup ด้วย OTA_Booking_ID — ใบที่ลงแล้วจะถูกนับเป็น "ซ้ำ" ไม่สร้างซ้อน
+        ///
+        /// ไม่ย้ายอีเมลใด ๆ (แค่มาร์คว่าอ่านแล้วเมื่อจบเคส) — เป็นเครื่องมือซ่อม ไม่ใช่รอบปกติ
+        /// เรียงตามวันที่เก่า→ใหม่ เพื่อให้ใบแก้ไข/ยกเลิกมาทีหลังใบจองเสมอ
+        /// </summary>
+        private void RecoverBacklogPass(ImapClient client, IntakeResult res, int days, int max)
+        {
+            var cutoff = DateTime.Today.AddDays(-Math.Max(1, days));
+            var candidates = new List<Tuple<DateTimeOffset, IMailFolder, UniqueId>>();
+
+            foreach (var folder in EnumerateSearchableFolders(client))
+            {
+                try
+                {
+                    try { folder.Open(FolderAccess.ReadWrite); }
+                    catch { folder.Open(FolderAccess.ReadOnly); }
+                    if (folder.Count == 0) continue;
+
+                    var uids = folder.Search(SearchQuery.And(
+                        SearchQuery.FromContains(_fromContains),
+                        SearchQuery.DeliveredAfter(cutoff)));
+                    if (uids.Count == 0) continue;
+
+                    foreach (var s in folder.Fetch(uids, MessageSummaryItems.InternalDate | MessageSummaryItems.Envelope))
+                    {
+                        var when = s.InternalDate ?? (s.Envelope != null && s.Envelope.Date.HasValue
+                            ? s.Envelope.Date.Value : DateTimeOffset.MinValue);
+                        candidates.Add(Tuple.Create(when, folder, s.UniqueId));
+                    }
+                }
+                catch { /* folder เปิดไม่ได้/ค้นไม่ได้ — ข้ามไป folder ถัดไป */ }
+            }
+
+            candidates.Sort((a, b) => a.Item1.CompareTo(b.Item1));
+            int done = 0;
+            foreach (var c in candidates)
+            {
+                if (done >= max) break;
+
+                // IMAP เลือกได้ทีละ folder — การเปิด folder ถัดไปจะปิดตัวก่อนหน้าโดยอัตโนมัติ
+                // เรียงตามวันที่แล้ว folder จึงสลับไปมาได้ ⇒ ต้องเปิดใหม่ก่อนอ่านทุกครั้งที่ไม่ได้เปิดอยู่
+                var folder = c.Item2;
+                if (!folder.IsOpen)
+                {
+                    try { folder.Open(FolderAccess.ReadWrite); }
+                    catch
+                    {
+                        try { folder.Open(FolderAccess.ReadOnly); }
+                        catch { continue; }
+                    }
+                }
+
+                done++;
+                // processed/failed/ignored = null ⇒ ไม่ย้ายอีเมลไปไหน, isRetry = true ⇒ ไม่แจ้งซ้ำ
+                HandleOne(folder, c.Item3, null, null, null, res, true);
+            }
+
+            _code.Logs(_conn, "EmailReservation",
+                $"recover backlog: กวาด {days} วัน พบ {candidates.Count} ฉบับ ประมวลผล {done} " +
+                $"→ สร้าง {res.Created}, ยกเลิก {res.Cancelled}, ซ้ำ {res.Duplicate} [{InstanceStamp()}]", "SYSTEM");
+        }
+
+        /// <summary>folder ทั้งหมดที่ควรค้นหาอีเมลจอง — ตัดถังขยะ/สแปม/ฉบับร่าง/ส่งแล้ว และ folder ที่เปิดไม่ได้</summary>
+        private IEnumerable<IMailFolder> EnumerateSearchableFolders(ImapClient client)
+        {
+            var list = new List<IMailFolder> { client.Inbox };
+            try
+            {
+                foreach (var ns in client.PersonalNamespaces)
+                    CollectFolders(client.GetFolder(ns), list);
+            }
+            catch { }
+
+            var skip = new[] { "trash", "bin", "spam", "junk", "draft", "sent", "ขยะ", "ถังขยะ" };
+            var seen = new HashSet<string>();
+            var result = new List<IMailFolder>();
+            foreach (var f in list)
+            {
+                if (f == null) continue;
+                if ((f.Attributes & FolderAttributes.NonExistent) != 0) continue;
+                if ((f.Attributes & FolderAttributes.NoSelect) != 0) continue;
+                if ((f.Attributes & (FolderAttributes.Trash | FolderAttributes.Junk
+                                     | FolderAttributes.Drafts | FolderAttributes.Sent)) != 0) continue;
+                string full = f.FullName ?? "";
+                if (skip.Any(s => full.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                if (!seen.Add(full)) continue;
+                result.Add(f);
+            }
+            return result;
+        }
+
+        private void CollectFolders(IMailFolder parent, List<IMailFolder> into)
+        {
+            try
+            {
+                foreach (var sub in parent.GetSubfolders(false))
+                {
+                    into.Add(sub);
+                    CollectFolders(sub, into);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// ปุ่ม "กู้อีเมลจองย้อนหลัง" — กวาดทุก folder หา booking ที่ยังไม่มีในระบบแล้วลงให้
+        /// ใช้ตอนสงสัยว่ามีอีเมลตกหล่น (ระบบเคยหยุด / มีตัวอ่านอื่นแย่งอ่าน / ใบเก่าเกินหน้าต่าง retry)
+        /// </summary>
+        public IntakeResult RecoverBacklog(int days)
+        {
+            var res = new IntakeResult();
+            if (string.IsNullOrWhiteSpace(_imapUser) || string.IsNullOrWhiteSpace(_imapPassword))
+            {
+                res.Error = "ยังไม่ได้ตั้งค่าอีเมล/รหัสผ่าน (หน้า Admin)";
+                return res;
+            }
+            if (days < 1) days = 1;
+            if (days > 90) days = 90;
+
+            string heldBy;
+            var lease = DbRunLease.TryAcquire(_conn, IntakeLeaseName, Math.Max(_leaseMinutes, 30), out heldBy);
+            if (lease == null)
+            {
+                res.Error = "มีรอบอ่านอีเมลกำลังทำงานอยู่ — ลองใหม่อีกครู่ (" + heldBy + ")";
+                return res;
+            }
+
+            using (lease)
+            {
+                try
+                {
+                    using (var client = new ImapClient())
+                    {
+                        client.Timeout = ImapTimeoutMs;
+                        client.Connect(_imapServer, _imapPort, true);
+                        client.Authenticate(_imapUser, _imapPassword);
+                        RecoverBacklogPass(client, res, days, _recoverMax);
+                        client.Disconnect(true);
+                    }
+                    if (_notifyTelegram && (res.Created > 0 || res.Cancelled > 0))
+                        Notify($"♻️ <b>กู้อีเมลจองย้อนหลัง {days} วัน</b>\n"
+                               + $"สร้างเพิ่ม {res.Created} · ยกเลิก {res.Cancelled} · มีอยู่แล้ว {res.Duplicate}\n"
+                               + $"🖥 <i>{E(InstanceStamp())}</i>", true);
+                    SetCfg("Email_Rsv_LastRecover", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                           "เวลาที่กวาดกู้อีเมลจองย้อนหลังล่าสุด (ระบบเขียนเอง)");
+                }
+                catch (Exception ex)
+                {
+                    res.Error = ex.Message;
+                    _code.Logs(_conn, "EmailReservation", $"recover backlog error: {ex.Message}", "SYSTEM");
+                }
+            }
+            return res;
         }
 
         private Outcome ProcessOne(MimeMessage msg, string subject, out string kind)
