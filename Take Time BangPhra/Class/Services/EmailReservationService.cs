@@ -35,6 +35,7 @@ namespace Take_Time_BangPhra.Services
         private readonly bool _recoverDaily;         // กวาดหาอีเมลจองที่ตกหล่นทุกวัน (ทุก folder)
         private readonly int _recoverDays, _recoverMax;
         private double _stallHours;                  // ระบบหยุดอ่านไปกี่ชั่วโมงก่อนรอบนี้ (ขยายหน้าต่าง retry)
+        private bool _sweepMode;                     // อยู่ในรอบกวาดกู้ — ห้ามย้อนแก้ไขการจองที่มีอยู่แล้ว
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
@@ -733,27 +734,32 @@ namespace Take_Time_BangPhra.Services
 
             candidates.Sort((a, b) => a.Item1.CompareTo(b.Item1));
             int done = 0;
-            foreach (var c in candidates)
+            _sweepMode = true;   // กันย้อนแก้ไข/เด้งเตือนซ้ำ จากการอ่านอีเมลเก่าที่เคยจบไปแล้ว
+            try
             {
-                if (done >= max) break;
-
-                // IMAP เลือกได้ทีละ folder — การเปิด folder ถัดไปจะปิดตัวก่อนหน้าโดยอัตโนมัติ
-                // เรียงตามวันที่แล้ว folder จึงสลับไปมาได้ ⇒ ต้องเปิดใหม่ก่อนอ่านทุกครั้งที่ไม่ได้เปิดอยู่
-                var folder = c.Item2;
-                if (!folder.IsOpen)
+                foreach (var c in candidates)
                 {
-                    try { folder.Open(FolderAccess.ReadWrite); }
-                    catch
-                    {
-                        try { folder.Open(FolderAccess.ReadOnly); }
-                        catch { continue; }
-                    }
-                }
+                    if (done >= max) break;
 
-                done++;
-                // processed/failed/ignored = null ⇒ ไม่ย้ายอีเมลไปไหน, isRetry = true ⇒ ไม่แจ้งซ้ำ
-                HandleOne(folder, c.Item3, null, null, null, res, true);
+                    // IMAP เลือกได้ทีละ folder — การเปิด folder ถัดไปจะปิดตัวก่อนหน้าโดยอัตโนมัติ
+                    // เรียงตามวันที่แล้ว folder จึงสลับไปมาได้ ⇒ ต้องเปิดใหม่ก่อนอ่านทุกครั้งที่ไม่ได้เปิดอยู่
+                    var folder = c.Item2;
+                    if (!folder.IsOpen)
+                    {
+                        try { folder.Open(FolderAccess.ReadWrite); }
+                        catch
+                        {
+                            try { folder.Open(FolderAccess.ReadOnly); }
+                            catch { continue; }
+                        }
+                    }
+
+                    done++;
+                    // processed/failed/ignored = null ⇒ ไม่ย้ายอีเมลไปไหน, isRetry = true ⇒ ไม่แจ้งซ้ำ
+                    HandleOne(folder, c.Item3, null, null, null, res, true);
+                }
             }
+            finally { _sweepMode = false; }
 
             _code.Logs(_conn, "EmailReservation",
                 $"recover backlog: กวาด {days} วัน พบ {candidates.Count} ฉบับ ประมวลผล {done} " +
@@ -1628,6 +1634,48 @@ namespace Take_Time_BangPhra.Services
 
             int resId = Convert.ToInt32(dt.Rows[0]["ID"]);
             string curStatus = dt.Rows[0]["Status"]?.ToString() ?? "";
+
+            // ── รอบกวาดกู้: ห้ามย้อนแก้ไขการจองที่มีอยู่แล้ว ─────────────────────
+            // การกวาดอ่านอีเมล "แก้ไข" เก่า (หลายวันก่อน ใน folder Processed) ซ้ำทุกวัน
+            // ถ้าปล่อยผ่านจะเขียนทับวันที่/ยอดที่พนักงานแก้เองทีหลังกลับเป็นค่าเก่าในอีเมล
+            // + เคส Park (เช็คอินแล้ว/มีใบเสร็จ) จะเด้ง Telegram ซ้ำทุกวัน
+            // นโยบาย: กวาดกู้มีหน้าที่ "เก็บการจองที่หาย" เท่านั้น — การจองที่มีอยู่แล้ว
+            // ถ้าข้อมูลในระบบต่างจากอีเมล ให้เตือนครั้งเดียว (กันซ้ำด้วย Logs) แล้วให้คนตัดสิน
+            if (_sweepMode)
+            {
+                DateTime curIn = Convert.ToDateTime(dt.Rows[0]["CheckinDate"]);
+                DateTime curOut = Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]);
+                decimal curTotal = dt.Rows[0]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["TotalPrice"]) : 0m;
+                decimal mailTotal = (decimal)(head.GrossTotal > 0 ? head.GrossTotal : 0);
+                bool differs = curIn.Date != head.CheckIn.Date || curOut.Date != head.CheckOut.Date
+                               || (mailTotal > 0 && Math.Abs(mailTotal - curTotal) > 0.01m);
+                if (differs)
+                {
+                    string marker = $"sweep-mod-mismatch {head.BookingId} {head.CheckIn:yyyyMMdd}-{head.CheckOut:yyyyMMdd} {mailTotal:0.##}";
+                    bool alertedBefore = false;
+                    try
+                    {
+                        var prev = _code.DatabaseQuerySafe(_conn,
+                            @"SELECT TOP 1 1 FROM Logs
+                              WHERE LogAction = 'EmailReservation'
+                                AND LogDateTime >= DATEADD(DAY, -14, GETDATE())
+                                AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p",
+                            new Dictionary<string, object> { { "@p", "%" + marker + "%" } });
+                        alertedBefore = prev != null && prev.Rows.Count > 0;
+                    }
+                    catch { }
+                    if (!alertedBefore)
+                    {
+                        string note = $"🔎 กวาดกู้พบอีเมลแก้ไข Booking {head.BookingId} (จอง #{resId}) ที่ข้อมูลไม่ตรงกับระบบ — "
+                            + $"อีเมล: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {mailTotal:N2} / "
+                            + $"ระบบ: {curIn:dd/MM/yyyy}-{curOut:dd/MM/yyyy} ยอด {curTotal:N2} — ไม่แก้อัตโนมัติ กรุณาตรวจสอบ | {marker}";
+                        _code.Logs(_conn, "EmailReservation", note, "SYSTEM");
+                        if (_notifyTelegram) Notify(note + $"\n🖥 <i>{E(InstanceStamp())}</i>", true);
+                    }
+                }
+                return new Outcome(false, true, false,
+                    $"กวาดกู้: การจอง #{resId} ({head.BookingId}) มีอยู่แล้ว — ไม่ย้อนแก้ไขซ้ำ").Detail(head, rooms, resId);
+            }
 
             // ── ตรวจความปลอดภัยก่อนแก้ ─────────────────────────────────────────
             // เคสเหล่านี้ "จบด้วยคน" (Park) — แจ้ง Telegram แล้วย้ายอีเมลเข้า Processed เลย
