@@ -273,6 +273,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "emailIntakeRecover":
                     result = RecoverEmailBacklog();
                     break;
+                case "closeQueueItem":
+                    result = CloseQueueItemManually();
+                    break;
                 case "lineDailySend":
                     result = SendDailyLineNow();
                     break;
@@ -1256,6 +1259,73 @@ namespace Take_Time_BangPhra.Admin.Settings
             string action = dt.Rows[0]["Action_Type"]?.ToString() ?? "";
             string entity = dt.Rows[0]["Entity_Type"]?.ToString() ?? "";
             return action == "CREATE_PAYROLL_ENTRY" || entity == "PAYROLL";
+        }
+
+        /// <summary>
+        /// ✔ ปิดรายการคิวด้วยมือ — "งานนี้เสร็จจริงบน NextAcc แล้ว แค่คิวฝั่งเราไม่รู้"
+        ///
+        /// จำเป็นเพราะมีเคสที่ปลายทางถูกต้องแล้วแต่คิวปิดตัวเองไม่ได้ เช่น
+        /// เอกสาร/ข้อมูลขึ้น NextAcc ครบแล้ว แต่ call สุดท้ายตอบ error, หรือมีคนจัดการต่อเองบน NextAcc
+        /// ถ้าไม่มีทางปิด รายการจะค้าง FAILED ถาวร → แจ้งเตือน "คิวต้องตรวจสอบ" ทุก 6 ชม.
+        /// จนกลบรายการที่มีปัญหาจริง
+        ///
+        /// **ไม่ยิง API ใด ๆ** — เปลี่ยนเฉพาะสถานะฝั่งเรา และเขียนกำกับไว้ว่าเป็นการปิดโดยคน
+        /// (Nexaacc_Response_Id = 'CLOSED_BY_USER') เพื่อให้ย้อนตรวจได้ว่าไม่ใช่ระบบปิดเอง
+        /// จำกัดเฉพาะ Owner เพราะเป็นการรับรองว่างานบัญชีเสร็จแล้ว
+        /// </summary>
+        private Dictionary<string, object> CloseQueueItemManually()
+        {
+            try
+            {
+                if (Session["User"]?.ToString() != "Owner")
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "เฉพาะเจ้าของระบบเท่านั้นที่ปิดรายการคิวด้วยมือได้" } };
+
+                long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
+                if (queueId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบรายการคิว" } };
+
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Status, Action_Type FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                if (dt == null || dt.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"ไม่พบคิว #{queueId}" } };
+
+                string st = dt.Rows[0]["Status"]?.ToString() ?? "";
+                if (st == "COMPLETED")
+                    return new Dictionary<string, object> { { "success", true }, { "message", $"คิว #{queueId} ปิดอยู่แล้ว" } };
+                if (st == "PROCESSING")
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", $"คิว #{queueId} กำลังทำงานอยู่ — รอให้จบก่อน" } };
+
+                string note = (Request.QueryString["note"] ?? "").Trim();
+                if (note.Length > 300) note = note.Substring(0, 300);
+                string who = Session["Username"]?.ToString() ?? Session["User"]?.ToString() ?? "Owner";
+                string stamp = $"✔ ปิดด้วยมือโดย {who} เมื่อ {DateTime.Now:dd/MM/yyyy HH:mm} "
+                             + $"(ยืนยันว่างานเสร็จบน NextAcc แล้ว — ไม่ได้ยิง API ซ้ำ)"
+                             + (note.Length > 0 ? $" · หมายเหตุ: {note}" : "");
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE Accounting_Sync_Queue
+                      SET Status = 'COMPLETED',
+                          Processed_Date = GETDATE(),
+                          Nexaacc_Response_Id = ISNULL(NULLIF(Nexaacc_Response_Id, ''), 'CLOSED_BY_USER'),
+                          Error_Message = CAST(@note AS NVARCHAR(MAX)) + CHAR(13) + CHAR(10)
+                                          + N'— เหตุผลเดิม —' + CHAR(13) + CHAR(10)
+                                          + CAST(ISNULL(Error_Message, N'') AS NVARCHAR(MAX))
+                      WHERE ID = @id AND Status <> 'PROCESSING'",
+                    new Dictionary<string, object> { { "@id", queueId }, { "@note", stamp } });
+
+                _code.Logs(ConnStr, "AccountingSync",
+                    $"ปิดคิว #{queueId} ({dt.Rows[0]["Action_Type"]}) ด้วยมือ — {stamp}", who);
+
+                return new Dictionary<string, object> { { "success", true },
+                    { "message", $"ปิดคิว #{queueId} แล้ว (ไม่ได้ยิง API ซ้ำ) — เหตุผลเดิมยังเก็บไว้ในรายการ" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "Close Error: " + ex.Message } };
+            }
         }
 
         private Dictionary<string, object> RetryQueueItem()

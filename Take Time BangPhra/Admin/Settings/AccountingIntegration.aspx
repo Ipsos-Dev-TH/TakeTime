@@ -1688,6 +1688,22 @@
                 });
         }
 
+        // ✔ ปิดรายการคิวที่งานเสร็จจริงบน NextAcc แล้ว — ไม่ยิง API ซ้ำ เปลี่ยนแค่สถานะฝั่งเรา
+        function closeItem(id) {
+            var note = prompt('ปิดรายการคิว #' + id + ' โดยไม่ยิง API ซ้ำ\n\n'
+                + 'ใช้เมื่อยืนยันแล้วว่างานนี้เสร็จถูกต้องบน NextAcc (เอกสาร/บัญชีขึ้นครบ) '
+                + 'แต่คิวฝั่งเราปิดตัวเองไม่ได้\n\nหมายเหตุ (ไม่บังคับ) — จะถูกเก็บไว้ในประวัติ:',
+                'ตรวจแล้วข้อมูลบน NextAcc ถูกต้องครบถ้วน');
+            if (note === null) return;
+            fetch(pageUrl + '?action=closeQueueItem&queueId=' + id + '&note=' + encodeURIComponent(note) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    alert(data.message || (data.success ? 'ปิดรายการแล้ว' : 'ปิดไม่สำเร็จ'));
+                    if (data.success) loadQueueData();
+                })
+                .catch(function(err) { alert('ปิดไม่สำเร็จ: ' + err.message); });
+        }
+
         function escHtml(s) {
             return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
@@ -2237,6 +2253,10 @@
                     }
                     if (item.status === 'COMPLETED' || item.status === 'FAILED') {
                         html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';
+                    }
+                    // ปิดรายการที่ "เสร็จจริงบน NextAcc แล้ว" โดยไม่ยิง API ซ้ำ
+                    if (item.status === 'FAILED') {
+                        html += '<button type="button" class="btn-success" style="padding:4px 10px; font-size:11px;" onclick="closeItem(' + item.id + ')" title="ปิดรายการ — งานเสร็จบน NextAcc แล้ว (ไม่ยิง API ซ้ำ)"><i class="fas fa-check"></i></button> ';
                     }
                     html += '<button type="button" class="btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.id + ')" title="ดู log ละเอียด (เต็ม ไม่ตัด)"><i class="fas fa-file-alt"></i> Log</button>';
                 }
