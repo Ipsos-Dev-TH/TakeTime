@@ -1693,7 +1693,20 @@ namespace Take_Time_BangPhra.Integration
             long existing = FindPendingEntry("VOUCHER", "VOID_VOUCHER", "documentNumber", documentNumber);
             if (existing > 0) return existing;
 
-            string nexaaccId = LookupNexaaccId(documentNumber, "VOUCHER");
+            // ⚠ ลำดับสำคัญ: เอา "รหัสเอกสารจริง" จากมาร์คบนตัวใบสำคัญจ่ายก่อนเสมอ
+            //   (Account_Payment.Nexaacc_Voucher_Doc_Marker = DOC:/APR:/{id} ที่ตั้งตอนสร้างเอกสาร)
+            //   LookupNexaaccId อ่าน Nexaacc_Response_Id ของคิว CREATE ล่าสุด ซึ่งในโหมด DOCUMENT
+            //   ที่มีการบันทึกรับชำระต่อท้าย อาจเป็น **paymentId ไม่ใช่ documentId** → ส่งไป void แล้ว
+            //   NextAcc ตอบ "ไม่พบเอกสารตามที่ระบุ" ทั้งที่เอกสารมีอยู่จริง (คิว #917 → EXP-202606-0005)
+            string nexaaccId = null;
+            Guid markerDocId;
+            string markerNote;
+            if (TryResolveVoidDocId(LookupVoucherDocMarker(documentNumber), out markerDocId, out markerNote))
+                nexaaccId = markerDocId.ToString();
+
+            if (string.IsNullOrEmpty(nexaaccId))
+                nexaaccId = LookupNexaaccId(documentNumber, "VOUCHER");
+
             if (string.IsNullOrEmpty(nexaaccId))
             {
                 // ไม่ใช่ใบสำคัญจ่ายทั่วไป — อาจเป็นใบจ่ายเงินเดือน (sync เป็น entity "PAYROLL")
@@ -3171,6 +3184,14 @@ namespace Take_Time_BangPhra.Integration
         ///     แต่คิวขึ้น COMPLETED = รายได้หายเงียบ
         /// จึงแยกออกมาเป็นเคสที่ "ต้องไปอ่านสถานะจริงก่อนตัดสิน" ไม่กลืนอัตโนมัติ
         /// </summary>
+        /// <summary>NextAcc ตอบว่า "ไม่พบเอกสารตามที่ระบุ" — คนละเรื่องกับเอกสารถูกยกเลิกไปแล้ว</summary>
+        private static bool IsDocumentNotFound(AccountingApiException ex)
+        {
+            if (ex.StatusCode != 400 && ex.StatusCode != 404) return false;
+            string b = DecodeUnicodeEscapes(ex.ResponseBody ?? "");
+            return b.Contains("ไม่พบเอกสาร") || b.Contains("not found");
+        }
+
         private static bool IsApproveStateConflict(AccountingApiException ex)
         {
             if (ex.StatusCode != 400 && ex.StatusCode != 409) return false;
@@ -7968,7 +7989,24 @@ namespace Take_Time_BangPhra.Integration
 
             Guid docId;
             string idNote;
-            if (!TryResolveVoidDocId(nexaaccId, out docId, out idNote))
+            bool haveId = TryResolveVoidDocId(nexaaccId, out docId, out idNote);
+
+            // มาร์คบนตัวใบสำคัญจ่ายเป็นแหล่งความจริง — ใช้แทนค่าที่ฝังมากับ payload เสมอถ้ามี
+            // (คิวเก่าที่ถูกสร้างก่อนแก้บั๊กยังฝัง paymentId ไว้ → retry ก็จะยังผิดถ้าไม่ override ตรงนี้)
+            Guid markerId;
+            string markerNote;
+            if (TryResolveVoidDocId(LookupVoucherDocMarker(documentNumber), out markerId, out markerNote)
+                && markerId != Guid.Empty && markerId != docId)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidVoucher: ใช้รหัสเอกสารจากมาร์คบนใบสำคัญจ่าย {markerId} แทนค่าใน payload '{nexaaccId}' doc={documentNumber}",
+                    "SYSTEM");
+                docId = markerId;
+                nexaaccId = markerId.ToString();
+                haveId = true;
+            }
+
+            if (!haveId)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ProcessVoidVoucher: ข้ามการยกเลิก doc={documentNumber} — {idNote}", "SYSTEM");
@@ -7994,6 +8032,29 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidVoucher(DOCUMENT): voided via integration endpoint doc={documentNumber} nexaaccId={nexaaccId}",
                             "SYSTEM");
+                        return $"VOIDED:{nexaaccId}";
+                    }
+                    // เฉพาะ 400 "ไม่พบเอกสาร" เท่านั้น — 404 ปล่อยให้ catch ถัดไปจัดการ
+                    // (404 = endpoint void ไม่มีใน NextAcc รุ่นเก่า → ต้อง fallback เป็นใบเพิ่มหนี้)
+                    catch (AccountingApiException nf) when (nf.StatusCode == 400 && IsDocumentNotFound(nf)
+                                                            && _config.CanUseCompanyEndpoints)
+                    {
+                        // เอกสารที่สร้างผ่าน company /document ไม่ได้ลงทะเบียน ExternalRef ไว้กับ
+                        // integration → /integration/documents/void หาไม่เจอ แม้เอกสารมีอยู่จริง
+                        // ยกเลิกด้วยช่องทางเดียวกับตอนสร้าง (company /document/{id}/void)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessVoidVoucher(DOCUMENT): integration void หาเอกสารไม่เจอ — ลองผ่าน company endpoint doc={documentNumber} id={docId}",
+                            "SYSTEM");
+                        try
+                        {
+                            await _apiClient.VoidDocumentAsync(docId);
+                        }
+                        catch (AccountingApiException cx) when (IsAlreadyPostedOrTerminal(cx))
+                        {
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidVoucher(DOCUMENT): doc {docId} ถูกยกเลิกไปแล้ว doc={documentNumber} ({cx.StatusCode})", "SYSTEM");
+                        }
+                        SetVoucherDocMarker(documentNumber, "VOIDED");
                         return $"VOIDED:{nexaaccId}";
                     }
                     catch (AccountingApiException voidEx) when (voidEx.StatusCode == 404)
