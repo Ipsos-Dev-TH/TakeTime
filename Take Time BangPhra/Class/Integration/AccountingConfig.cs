@@ -258,6 +258,21 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_CashSale_UseReceipt", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// เงินเดือน: ยุบ "หักลา + หักอื่น ๆ" เข้าไปเป็นการ**ลดยอดรายได้** แทนที่จะส่งเป็นรายการหัก
+        ///
+        /// ทำไมต้องมีสวิตช์นี้: `PayrollImportLine` ของ NextAcc ไม่มีช่องบัญชีสำหรับ "หักอื่น ๆ"
+        /// → ไม่มีที่ให้ Cr ยอดนั้น → JE ไม่สมดุล (Dr − Cr = ยอดหักอื่น ๆ พอดี) แล้ว NextAcc
+        /// ปฏิเสธทั้ง run ("Payroll journal unbalanced")
+        ///
+        /// เปิด (1) = ส่ง gross ที่หักลาแล้ว → JE สมดุล และเงินสุทธิเท่าเดิม
+        ///            **แต่ยอดเงินได้ที่ยื่น ภ.ง.ด.1 จะลดลงตามด้วย** — ถูกต้องสำหรับ "ลาไม่รับค่าจ้าง"
+        ///            (ลูกจ้างได้รับน้อยลงจริง) แต่ไม่ถูกถ้าเป็นการหักหนี้/ค่าปรับ (เงินได้ยังเท่าเดิม)
+        /// ปิด (0, ค่าตั้งต้น) = ตรวจพบแล้วหยุดก่อนส่ง พร้อมบอกยอดและสาเหตุ ให้ผู้ทำบัญชีตัดสิน
+        /// </summary>
+        public bool IsPayrollFoldDeductionsIntoGross =>
+            GetConfig("Nexaacc_Payroll_FoldDeductionsIntoGross", "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// true = ใช้ NextAcc "โหมดขับ JE" (spec §9.1): ใบกำกับ/ใบเสร็จเช็คเอาท์ที่หักมัดจำ ให้ NextAcc ลง
         /// JE self-contained ในใบเดียว (ส่ง <c>depositAppliedDrivesJournal=true</c>) + TakeTime **เลิกส่ง
         /// JV หักมัดจำแยก** — GL การกลับ 217xx/21913 อยู่ในใบเดียวจบ. false (default) = display-only:

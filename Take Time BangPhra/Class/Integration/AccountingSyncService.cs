@@ -2524,7 +2524,7 @@ namespace Take_Time_BangPhra.Integration
         /// เป็นรุ่นที่มีการแก้ล่าสุดแล้วหรือยัง (เลิกเดาว่า "deploy ไปหรือยัง")
         /// </summary>
         public const string SyncBuildTag =
-            "2026-08-21.2 · expiring-run-lease (แทน sp_getapplock ที่ค้างถาวรได้) · email-intake-stale-alert · email-backlog-recovery (กวาดทุก folder + ขยายหน้าต่าง retry ตามเวลาที่ระบบหลับ) · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
+            "2026-08-22.1 · idempotent-void (decode \\uXXXX ก่อนเทียบข้อความไทย) · void-id-marker-safe · approve-conflict-verified · payroll-preflight-gl-balance · expiring-run-lease (แทน sp_getapplock ที่ค้างถาวรได้) · email-intake-stale-alert · email-backlog-recovery (กวาดทุก folder + ขยายหน้าต่าง retry ตามเวลาที่ระบบหลับ) · cashsale-deposit-jv-per-document · block-wrong-buyer-document · duplicate-contact-detect · company-PUT-updates-all-contact-fields · contactType-parse-fix + no-retry-after-success · receipt-nextacc-link-on-receipt + relink-tool + deposit-vat-policy-guard + cash-sale-single-document + unified-receipt-buyer + queue-payload-refresh + dbd-lookup";
 
         private const string QueueLeaseName = "AccountingSyncQueue";
         private static readonly Dictionary<string, DateTime> _lastThrottledLog = new Dictionary<string, DateTime>();
@@ -2743,6 +2743,13 @@ namespace Take_Time_BangPhra.Integration
                     else if (nexaaccId == "SKIPPED_LOCAL_MODE")
                     {
                         UpdateQueueStatus(queueId, "COMPLETED", $"Skipped: SyncMode=LOCAL — ใช้เอกสารจากระบบ TakeTime", nexaaccId);
+                    }
+                    else if (nexaaccId == "SKIPPED_NO_DOCUMENT")
+                    {
+                        // ไม่มีเอกสารบน NextAcc ให้ยกเลิก (ยกเลิกไปแล้ว/ไม่เคยสร้าง/เก็บมาร์คไว้แทน id)
+                        // ปลายทางที่ต้องการเป็นจริงอยู่แล้ว → จบงาน ไม่ต้อง verify ต่อ
+                        UpdateQueueStatus(queueId, "COMPLETED",
+                            "ข้ามการยกเลิก: ไม่มีเอกสารบน NextAcc ให้ยกเลิก (ดูรายละเอียดใน log)", nexaaccId);
                     }
                     else
                     {
@@ -3112,13 +3119,18 @@ namespace Take_Time_BangPhra.Integration
         {
             if (ex.StatusCode == 404) return true;  // เอกสารไม่อยู่แล้ว = แล้วแต่ caller จัดการ
             if (ex.StatusCode != 400) return false;
-            string body = ex.ResponseBody ?? "";
+            // ⚠ ต้อง decode ก่อนเทียบ: NextAcc ส่ง JSON ที่ escape ไทยเป็น \uXXXX
+            //   ("message":"เอกสาร...") ⇒ Contains ภาษาไทย
+            //   บน body ดิบ **ไม่มีวันตรงเลย** — เป็นเหตุที่ VOID_RECEIPT ของเอกสารที่ถูก
+            //   ยกเลิกไปแล้วถูกนับเป็นล้มเหลวจนหมด retry (คิว #1875/#1899/#1905/#1232/#1287/#1288)
+            string body = DecodeUnicodeEscapes(ex.ResponseBody ?? "");
             return body.Contains("Draft")
                 || body.Contains("Posted")
                 || body.Contains("Voided")
                 || body.Contains("Reversed")
                 || body.Contains("Cancelled")
                 || body.Contains("ลงรายการแล้ว")
+                || body.Contains("ยกเลิกแล้ว")      // "เอกสารนี้ถูกยกเลิกแล้ว" — ข้อความจริงของ NextAcc
                 || body.Contains("ยกเลิกไปแล้ว");
         }
 
@@ -3130,7 +3142,7 @@ namespace Take_Time_BangPhra.Integration
         private static bool IsAlreadyApprovedOrPosted(AccountingApiException ex)
         {
             if (ex.StatusCode != 400 && ex.StatusCode != 409) return false;
-            string body = ex.ResponseBody ?? "";
+            string body = DecodeUnicodeEscapes(ex.ResponseBody ?? "");   // ไทยถูก escape เป็น \uXXXX
             return body.Contains("Approved")
                 || body.Contains("Posted")
                 || body.Contains("Sent")
@@ -3138,7 +3150,34 @@ namespace Take_Time_BangPhra.Integration
                 || body.Contains("Voided")
                 || body.Contains("อนุมัติแล้ว")
                 || body.Contains("ลงรายการแล้ว")
+                || body.Contains("ยกเลิกแล้ว")
                 || body.Contains("ยกเลิกไปแล้ว");
+        }
+
+        /// <summary>
+        /// "อนุมัติได้เฉพาะเอกสาร Draft หรือ WaitingApproval เท่านั้น" (คิว #1163) —
+        /// แปลว่าเอกสารพ้นสถานะรออนุมัติไปแล้ว ซึ่งมีได้ 2 ความหมายตรงข้ามกัน:
+        ///   • อนุมัติสำเร็จไปแล้วรอบก่อน (มาร์คไม่ทัน)  → ถือว่าสำเร็จได้
+        ///   • เอกสารถูก void/ปฏิเสธ                     → **ห้าม**ถือว่าสำเร็จ ไม่งั้น GL ไม่ถูกโพสต์
+        ///     แต่คิวขึ้น COMPLETED = รายได้หายเงียบ
+        /// จึงแยกออกมาเป็นเคสที่ "ต้องไปอ่านสถานะจริงก่อนตัดสิน" ไม่กลืนอัตโนมัติ
+        /// </summary>
+        private static bool IsApproveStateConflict(AccountingApiException ex)
+        {
+            if (ex.StatusCode != 400 && ex.StatusCode != 409) return false;
+            return DecodeUnicodeEscapes(ex.ResponseBody ?? "").Contains("อนุมัติได้เฉพาะเอกสาร");
+        }
+
+        /// <summary>อ่านสถานะเอกสารจริงจาก NextAcc — true = โพสต์ GL แล้วจริง (ไม่ใช่ร่าง/ถูกยกเลิก)</summary>
+        private async Task<bool> IsDocumentPostedAsync(Guid docId)
+        {
+            try
+            {
+                var d = await _apiClient.GetDocumentAsync(docId);
+                int st = d?.data?.Status ?? -1;
+                return IsPostedStatus(st);
+            }
+            catch { return false; }   // อ่านไม่ได้ = อย่าเดาว่าสำเร็จ
         }
 
         /// <summary>สถานะเอกสารถือว่า "โพสต์แล้วจริง" (ไม่ใช่ Draft/รออนุมัติ/ถูกปฏิเสธ)</summary>
@@ -3210,6 +3249,17 @@ namespace Take_Time_BangPhra.Integration
             catch (AccountingApiException ex) when (IsAlreadyApprovedOrPosted(ex))
             {
                 // อนุมัติ/ลงรายการไปแล้ว — ถือว่าสำเร็จ
+            }
+            catch (AccountingApiException ex) when (IsApproveStateConflict(ex))
+            {
+                // เอกสารพ้นสถานะรออนุมัติแล้ว — ต้องอ่านสถานะจริงก่อน ห้ามเดาว่าสำเร็จ
+                // เมธอดนี้เป็น best-effort (ผู้เรียกไม่ได้ดักข้อผิดพลาด) จึงไม่ throw แต่เขียน log ให้ชัด
+                bool posted = await IsDocumentPostedAsync(documentId);
+                _code.Logs(_connectionString, "AccountingSync", posted
+                    ? $"EnsureDocumentApproved: doc {documentId} อนุมัติไปแล้ว (ตรวจสถานะยืนยัน) {ctx}"
+                    : $"⚠️ EnsureDocumentApproved: doc {documentId} อนุมัติไม่ได้และตรวจแล้ว **ยังไม่ถูกโพสต์** "
+                      + $"(อาจถูกยกเลิก/ปฏิเสธบน NextAcc) {ctx} — {DecodeUnicodeEscapes(ex.ResponseBody ?? "")}",
+                    "SYSTEM");
             }
             catch (Exception ex)
             {
@@ -4113,6 +4163,15 @@ namespace Take_Time_BangPhra.Integration
                     _code.Logs(_connectionString, "AccountingSync",
                         $"SettleReceiptDoc: doc {docId} already approved/posted receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
                 }
+                catch (AccountingApiException ex) when (IsApproveStateConflict(ex))
+                {
+                    if (!await IsDocumentPostedAsync(docId))
+                        throw new Exception($"อนุมัติเอกสารไม่ได้และตรวจแล้วยังไม่ถูกโพสต์ (อาจถูกยกเลิกบน NextAcc) "
+                                            + $"receipt={receiptNumber} docId={docId} — {DecodeUnicodeEscapes(ex.ResponseBody ?? "")}");
+                    alreadyPosted = true;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"SettleReceiptDoc: doc {docId} อนุมัติไปแล้ว (ตรวจสถานะยืนยัน) receipt={receiptNumber}", "SYSTEM");
+                }
 
                 // เลขจริงยังไม่ได้ (เช่น already-posted path) → ดึงเอกสารมาอ่านเลข/สถานะยืนยัน
                 if (string.IsNullOrEmpty(_lastDocNumber) || _lastDocNumber.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase) || alreadyPosted)
@@ -4243,6 +4302,14 @@ namespace Take_Time_BangPhra.Integration
                 {
                     _code.Logs(_connectionString, "AccountingSync",
                         $"EnsureRevenueDoc: doc {docId} already approved receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                }
+                catch (AccountingApiException ex) when (IsApproveStateConflict(ex))
+                {
+                    if (!await IsDocumentPostedAsync(docId))
+                        throw new Exception($"อนุมัติใบกำกับไม่ได้และตรวจแล้วยังไม่ถูกโพสต์ (อาจถูกยกเลิกบน NextAcc) "
+                                            + $"receipt={receiptNumber} docId={docId} — {DecodeUnicodeEscapes(ex.ResponseBody ?? "")}");
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnsureRevenueDoc: doc {docId} อนุมัติไปแล้ว (ตรวจสถานะยืนยัน) receipt={receiptNumber}", "SYSTEM");
                 }
                 SetReceiptPaymentMarker(receiptNumber, "APR:" + docId);
             }
@@ -5215,6 +5282,7 @@ namespace Take_Time_BangPhra.Integration
 
             var lines = new List<PayrollImportLine>();
             var balanceErrors = new List<string>();
+            decimal unbalancedTotal = 0m;   // ยอดหักที่ไม่มีบัญชีรองรับ = ส่วนที่จะทำให้ JE ไม่สมดุล
             foreach (DataRow r in dtRec.Rows)
             {
                 int adminId = Convert.ToInt32(r["Admin_ID"]);
@@ -5234,6 +5302,26 @@ namespace Take_Time_BangPhra.Integration
                 // TakeTime มี "หักลา (LeaveDeduction)" ที่ไม่มีช่องตรงใน import → รวมเข้า OtherDeductions
                 // เพื่อให้สมการ balance (otherImport = other + leave). ProvidentFund/advance = 0
                 decimal otherImport = other + leave;
+
+                // ── ยอดหักที่ NextAcc ไม่มีบัญชีให้ Cr ──────────────────────────────
+                // PayrollImportLine มีช่องบัญชีแค่ SalaryExpense กับ PaymentAccount
+                // "หักอื่น ๆ" จึงไม่มีที่ลง → JE ขาด Cr เท่ากับยอดนี้พอดี แล้วทั้ง run ถูกปฏิเสธ
+                // (คิว #1010/#1536/#1537: "Payroll journal unbalanced: Dr=77,678.00 Cr=77,226.00"
+                //  ส่วนต่าง 452.00 = ยอดหักอื่น ๆ รวมของงวดนั้นเป๊ะ)
+                // เปิดสวิตช์ = ลดยอดรายได้ลงแทน (JE สมดุล เงินสุทธิเท่าเดิม)
+                if (_config.IsPayrollFoldDeductionsIntoGross && otherImport > 0)
+                {
+                    decimal cut = otherImport;
+                    // ลดจากเงินเดือนฐานก่อน แล้วค่อยไล่ลด OT/เบี้ยเลี้ยง/โบนัส ถ้าฐานไม่พอ
+                    decimal takeBase = Math.Min(baseSalary, cut); baseSalary -= takeBase; cut -= takeBase;
+                    decimal takeOt = Math.Min(ot, cut); ot -= takeOt; cut -= takeOt;
+                    decimal takeAllow = Math.Min(allowance, cut); allowance -= takeAllow; cut -= takeAllow;
+                    decimal takeBonus = Math.Min(bonus, cut); bonus -= takeBonus; cut -= takeBonus;
+                    gross -= (otherImport - cut);
+                    totalDed -= (otherImport - cut);
+                    otherImport = cut;          // ส่วนที่ลดจากรายได้ไม่ต้องส่งเป็นรายการหักอีก
+                }
+                unbalancedTotal += otherImport;
 
                 // pre-validate ฝั่งเรา: net == gross − (sso + wht + otherImport) ก่อนส่ง
                 // ถ้าไม่ตรง NextAcc จะ reject ทั้ง run ด้วย 422 แบบ opaque → ดักไว้พร้อมระบุพนักงาน
@@ -5270,6 +5358,24 @@ namespace Take_Time_BangPhra.Integration
                 throw new ArgumentException(
                     "ยอดเงินเดือนไม่ balance (net ≠ gross − หักฝั่งลูกจ้าง) — NextAcc จะปฏิเสธทั้ง run. แก้ที่ Payroll_Records ก่อน:\n"
                     + string.Join("\n", balanceErrors));
+
+            // ── ตรวจสมดุล GL ก่อนส่ง (คนละสมการกับ net ข้างบน) ─────────────────────
+            // NextAcc ลง: Dr เงินเดือน(gross) + Dr สมทบนายจ้าง / Cr ประกันสังคม(ลูกจ้าง+นายจ้าง)
+            //             + Cr ภ.ง.ด.1 + Cr เงินสดสุทธิ
+            // ⇒ Dr − Cr = ยอด "หักอื่น ๆ" เสมอ เพราะ import ไม่มีช่องบัญชีให้ Cr ยอดนั้น
+            // เดิมเราส่งไปแล้วโดน 400 หลัง NextAcc สร้าง run ไปแล้ว (ข้อความ opaque บอกแค่ผลรวม)
+            // ตรงนี้หยุดก่อนส่ง พร้อมบอกยอดและทางเลือก — ไม่ตัดสินนโยบายภาษีแทนผู้ทำบัญชี
+            if (unbalancedTotal > 0.01m)
+                throw new ArgumentException(
+                    $"งวดนี้มี \"หักลา/หักอื่น ๆ\" รวม {unbalancedTotal:N2} บาท ซึ่ง NextAcc ไม่มีบัญชีรองรับ "
+                    + $"→ ถ้าส่งไปจะได้ \"Payroll journal unbalanced\" (Dr เกิน Cr = {unbalancedTotal:N2} พอดี) "
+                    + "ทั้ง run ถูกปฏิเสธ\n\nเลือกทางใดทางหนึ่ง:\n"
+                    + "(1) ถ้าเป็น \"ลาไม่รับค่าจ้าง\" (ลูกจ้างได้รับน้อยลงจริง) → เปิดสวิตช์ "
+                    + "Nexaacc_Payroll_FoldDeductionsIntoGross = 1 ระบบจะลดยอดรายได้ลงแทนการส่งเป็นรายการหัก "
+                    + "เงินสุทธิเท่าเดิม JE สมดุล **และยอดยื่น ภ.ง.ด.1 จะลดลงตามจริง**\n"
+                    + "(2) ถ้าเป็นการหักหนี้/ค่าปรับ (เงินได้ยังเท่าเดิม) → ยอดนี้ต้องมีบัญชีเจ้าหนี้รองรับ "
+                    + "ซึ่ง NextAcc payroll import ยังไม่มีช่องให้ระบุ → ใช้โหมด JOURNAL_ONLY "
+                    + "(Nexaacc_SyncMode_Payroll = JOURNAL_ONLY) ที่เราลง JE ครบเองแทน");
 
             // 4. Import (Recalculate=false) — idempotent ด้วย ExternalRunRef
             var req = new PayrollImportRunRequest
@@ -7514,15 +7620,57 @@ namespace Take_Time_BangPhra.Integration
         // Void/Cancel Processors
         // ──────────────────────────────────────────────
 
+        /// <summary>
+        /// แปลงค่า nexaaccId ในคิว void ให้เป็น Guid เอกสารจริง
+        ///
+        /// ค่าที่เก็บไว้อาจไม่ใช่ Guid เปล่า ๆ: มาร์คสถานะของเราใช้รูปแบบ "DOC:{id}" / "APR:{id}" /
+        /// "ADJ:{jid}" และมีค่าปลายทางอย่าง "VOIDED" / "NOCASH" ปนได้ ถ้าเอาไปเข้า Guid.Parse ตรง ๆ
+        /// จะได้ FormatException แล้วคิวตายถาวร (คิว #1915: "Guid should contain 32 digits with 4 dashes")
+        ///
+        /// คืน false = ไม่มีเอกสารให้ยกเลิกจริง ๆ (ยกเลิกไปแล้ว/ไม่เคยสร้าง) — ผู้เรียกควรถือว่า "จบงาน"
+        /// ไม่ใช่ล้มเหลว เพราะปลายทางที่ต้องการ (ไม่มีเอกสารค้าง) เป็นจริงอยู่แล้ว
+        /// </summary>
+        private static bool TryResolveVoidDocId(string raw, out Guid docId, out string note)
+        {
+            docId = Guid.Empty;
+            note = null;
+            string v = (raw ?? "").Trim();
+            if (v.Length == 0) { note = "ไม่มีเลขเอกสาร"; return false; }
+
+            foreach (var prefix in new[] { "DOC:", "APR:", "ADJ:" })
+                if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    v = v.Substring(prefix.Length).Trim();
+
+            if (v.Equals("VOIDED", StringComparison.OrdinalIgnoreCase)
+                || v.Equals("NOCASH", StringComparison.OrdinalIgnoreCase))
+            { note = $"มาร์คเป็น '{v}' — ไม่มีเอกสารบน NextAcc ให้ยกเลิก"; return false; }
+
+            if (Guid.TryParse(v, out docId) && docId != Guid.Empty) return true;
+
+            docId = Guid.Empty;
+            note = $"ค่า '{raw}' ไม่ใช่รหัสเอกสาร NextAcc (อาจเป็นเลขเอกสารหรือมาร์คสถานะ)";
+            return false;
+        }
+
         private async Task<string> ProcessVoidReceipt(Dictionary<string, object> p)
         {
             string nexaaccId = p["nexaaccId"]?.ToString();
             if (string.IsNullOrEmpty(nexaaccId))
                 throw new ArgumentException("Cannot void receipt: nexaaccId is missing");
 
-            Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+
+            Guid docId;
+            string idNote;
+            if (!TryResolveVoidDocId(nexaaccId, out docId, out idNote))
+            {
+                // ไม่มีเอกสารให้ยกเลิก = ปลายทางที่ต้องการเป็นจริงอยู่แล้ว → จบงาน ไม่ใช่ล้มเหลว
+                SetReceiptPaymentMarker(receiptNumber, "VOIDED");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidReceipt: ข้ามการยกเลิก receipt={receiptNumber} — {idNote}", "SYSTEM");
+                return "SKIPPED_NO_DOCUMENT";
+            }
 
             // ล้างมาร์คเรียกใช้มัดจำ (PHASE18_05): void เอกสารเช็คเอาท์ = คืนมัดจำให้ว่างพร้อมใช้ใหม่
             // (edit=void→สร้างใหม่เลขเดิม → มาร์คใหม่ตอน create). ล้างเฉพาะแถวที่ใบนี้มาร์คไว้ → กันไปแตะใบอื่น.
@@ -7806,9 +7954,17 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(nexaaccId))
                 throw new ArgumentException("Cannot void voucher: nexaaccId is missing");
 
-            Guid docId = Guid.Parse(nexaaccId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string documentNumber = p.ContainsKey("documentNumber") ? p["documentNumber"]?.ToString() : null;
+
+            Guid docId;
+            string idNote;
+            if (!TryResolveVoidDocId(nexaaccId, out docId, out idNote))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidVoucher: ข้ามการยกเลิก doc={documentNumber} — {idNote}", "SYSTEM");
+                return "SKIPPED_NO_DOCUMENT";
+            }
 
             try
             {
