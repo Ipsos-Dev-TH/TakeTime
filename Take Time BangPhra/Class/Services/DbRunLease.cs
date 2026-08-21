@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 
@@ -110,12 +111,17 @@ END";
                             if (got < 0)
                             {
                                 // ยังไม่ได้รันไมเกรชัน — ทำงานต่อโดยไม่ล็อก
+                                lock (_failCounts) { _failCounts[name] = 0; }
                                 heldBy = "ยังไม่มีตาราง App_Run_Lease (ยังไม่ได้รันไมเกรชัน 33) — ทำงานต่อโดยไม่ล็อก";
                                 return new DbRunLease(connectionString, name, owner, leaseMinutes, true);
                             }
                             if (got > 0)
+                            {
+                                lock (_failCounts) { _failCounts[name] = 0; }
                                 return new DbRunLease(connectionString, name, owner, leaseMinutes, false);
+                            }
 
+                            lock (_failCounts) { _failCounts[name] = 0; }   // ติดต่อ DB ได้ = ไม่ใช่ความผิดพลาด
                             string holder = rd["Owner"] == DBNull.Value ? "(ไม่ทราบ)" : rd["Owner"].ToString();
                             string until = rd["Expires_At"] == DBNull.Value
                                 ? "(ไม่ทราบ)"
@@ -128,11 +134,33 @@ END";
             }
             catch (Exception ex)
             {
-                // DB มีปัญหา → อย่าหยุดงานเพราะล็อก ให้ไปตายที่ขั้นตอนจริงเพื่อได้ error ที่ถูกต้อง
-                heldBy = "ขอ lease ไม่สำเร็จ: " + ex.Message + " — ทำงานต่อโดยไม่ล็อก";
+                // ขอ lease ไม่สำเร็จเพราะ DB (timeout ตอนโหลดสูง / deadlock ชั่วคราว / สิทธิ์)
+                //
+                // "ทำงานต่อโดยไม่ล็อก" ทันทีนั้นอันตราย: dedup ของงานอ่านอีเมลเป็นแบบ
+                // SELECT-แล้ว-INSERT (ไม่ atomic) ⇒ ถ้าอีก worker กำลังทำรอบอยู่จริง
+                // จะลงจองซ้ำได้. แต่ "ข้ามตลอดไป" ก็อันตรายเท่ากัน — เป็นเหตุผลเดียวกับที่
+                // อีเมลจองหยุด 2 วัน. ทางสายกลาง: ข้ามรอบไปก่อน (ถือว่ามีคนถืออยู่)
+                // ถ้าพลาดติดกันหลายรอบ = ไม่ใช่ความบังเอิญชั่วคราว ค่อยยอมทำงานแบบไม่ล็อก
+                int fails;
+                lock (_failCounts)
+                {
+                    _failCounts.TryGetValue(name, out fails);
+                    fails++;
+                    _failCounts[name] = fails;
+                }
+                if (fails < DegradeAfterConsecutiveFailures)
+                {
+                    heldBy = $"ขอ lease ไม่สำเร็จ ({ex.Message}) — ข้ามรอบนี้ไว้ก่อน (ครั้งที่ {fails})";
+                    return null;
+                }
+                heldBy = $"ขอ lease ไม่สำเร็จติดกัน {fails} ครั้ง ({ex.Message}) — ทำงานต่อโดยไม่ล็อก";
                 return new DbRunLease(connectionString, name, owner, leaseMinutes, true);
             }
         }
+
+        /// <summary>พลาดติดกันกี่ครั้งจึงยอมทำงานแบบไม่ล็อก (กันงานหยุดถาวรเพราะปัญหา DB)</summary>
+        private const int DegradeAfterConsecutiveFailures = 3;
+        private static readonly Dictionary<string, int> _failCounts = new Dictionary<string, int>();
 
         /// <summary>ต่ออายุ lease ระหว่างทำงานยาว — เรียกเป็นระยะ กัน lease หมดอายุทั้งที่ยังทำงานอยู่</summary>
         public void Renew()

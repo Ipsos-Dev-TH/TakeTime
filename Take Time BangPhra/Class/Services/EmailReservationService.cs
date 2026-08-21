@@ -36,6 +36,40 @@ namespace Take_Time_BangPhra.Services
         private readonly int _recoverDays, _recoverMax;
         private double _stallHours;                  // ระบบหยุดอ่านไปกี่ชั่วโมงก่อนรอบนี้ (ขยายหน้าต่าง retry)
         private bool _sweepMode;                     // อยู่ในรอบกวาดกู้ — ห้ามย้อนแก้ไขการจองที่มีอยู่แล้ว
+        private readonly HashSet<string> _sweepCreated = new HashSet<string>();  // booking ที่เพิ่งกู้คืนในรอบกวาดนี้
+        private DbRunLease _activeLease;             // lease ของรอบปัจจุบัน — ต่ออายุระหว่างวนอีเมล
+        private DateTime _lastRenew = DateTime.MinValue;
+
+        /// <summary>
+        /// ต่ออายุ lease ระหว่างวนอีเมลทีละฉบับ (throttle 60 วิ) — รอบที่มีอีเมลค้างเป็นร้อยฉบับ
+        /// ใช้เวลาเกินอายุ lease ได้ง่าย ถ้าปล่อยหมดอายุกลางคัน worker ตัวถัดไปจะเริ่มรอบใหม่
+        /// ทับรอบที่ยังวิ่งอยู่ แล้วอ่าน UID เดียวกันพร้อมกัน → ลงจองซ้ำ (dedup ไม่ atomic)
+        /// </summary>
+        private void TouchLease()
+        {
+            if (_activeLease == null) return;
+            if ((DateTime.Now - _lastRenew).TotalSeconds < 60) return;
+            _lastRenew = DateTime.Now;
+            _activeLease.Renew();
+        }
+
+        /// <summary>เขียน log + แจ้ง Telegram ครั้งเดียวต่อ 14 วันต่อ key — กันรอบกวาดเตือนซ้ำทุกวัน</summary>
+        private void LogOnce(string key, string message)
+        {
+            try
+            {
+                var prev = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT TOP 1 1 FROM Logs
+                      WHERE LogAction = 'EmailReservation'
+                        AND LogDateTime >= DATEADD(DAY, -14, GETDATE())
+                        AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p",
+                    new Dictionary<string, object> { { "@p", "%| " + key + "%" } });
+                if (prev != null && prev.Rows.Count > 0) return;
+            }
+            catch { }
+            _code.Logs(_conn, "EmailReservation", message + " | " + key, "SYSTEM");
+            if (_notifyTelegram) Notify(message + $"\n🖥 <i>{E(InstanceStamp())}</i>", true);
+        }
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
@@ -438,6 +472,8 @@ namespace Take_Time_BangPhra.Services
             }
             catch { }
 
+            _activeLease = lease;
+            _lastRenew = DateTime.Now;
             using (lease)
             {
             try
@@ -468,7 +504,10 @@ namespace Take_Time_BangPhra.Services
                     res.Fetched = uids.Count;
 
                     foreach (var uid in uids)
+                    {
+                        TouchLease();
                         HandleOne(inbox, uid, processed, failed, ignored, res, false);
+                    }
 
                     // ── ลองใหม่อัตโนมัติ: อีเมลที่เคยล้มเหลว (mapping/ห้องไม่ว่าง) ─────────────
                     // เดิมอีเมลที่ล้มเหลวถูกย้ายเข้า folder Failed แล้ว "จบ" — รอบถัดไปค้นหาเฉพาะ
@@ -515,6 +554,7 @@ namespace Take_Time_BangPhra.Services
                 AlertIfIntakeStale("อ่านอีเมลไม่สำเร็จ: " + ex.Message);
             }
             }   // lease — ปล่อยล็อกเมื่อออกจากบล็อก (และหมดอายุเองถ้า process ตายคางาน)
+            _activeLease = null;
             return res;
         }
 
@@ -658,6 +698,7 @@ namespace Take_Time_BangPhra.Services
                 {
                     if (done >= _retryMax) break;
                     done++;
+                    TouchLease();
                     HandleOne(failed, uid, processed, null, ignored, res, true);
                 }
                 if (res.Retried > 0)
@@ -708,6 +749,8 @@ namespace Take_Time_BangPhra.Services
         {
             var cutoff = DateTime.Today.AddDays(-Math.Max(1, days));
             var candidates = new List<Tuple<DateTimeOffset, IMailFolder, UniqueId>>();
+            var seenMessageIds = new HashSet<string>();
+            _sweepCreated.Clear();
 
             foreach (var folder in EnumerateSearchableFolders(client))
             {
@@ -726,6 +769,9 @@ namespace Take_Time_BangPhra.Services
                     {
                         var when = s.InternalDate ?? (s.Envelope != null && s.Envelope.Date.HasValue
                             ? s.Envelope.Date.Value : DateTimeOffset.MinValue);
+                        // กันฉบับเดียวกันถูกนับซ้ำข้าม folder (Gmail แขวนหลายป้ายต่อฉบับ)
+                        string mid = s.Envelope != null ? (s.Envelope.MessageId ?? "") : "";
+                        if (mid.Length > 0 && !seenMessageIds.Add(mid)) continue;
                         candidates.Add(Tuple.Create(when, folder, s.UniqueId));
                     }
                 }
@@ -755,6 +801,7 @@ namespace Take_Time_BangPhra.Services
                     }
 
                     done++;
+                    TouchLease();
                     // processed/failed/ignored = null ⇒ ไม่ย้ายอีเมลไปไหน, isRetry = true ⇒ ไม่แจ้งซ้ำ
                     HandleOne(folder, c.Item3, null, null, null, res, true);
                 }
@@ -777,7 +824,11 @@ namespace Take_Time_BangPhra.Services
             }
             catch { }
 
-            var skip = new[] { "trash", "bin", "spam", "junk", "draft", "sent", "ขยะ", "ถังขยะ" };
+            // Gmail แขวน "ป้าย" ไม่ใช่ย้ายไฟล์ — อีเมลฉบับเดียวโผล่พร้อมกันทั้งใน INBOX,
+            // STAAH-Processed, [Gmail]/All Mail, Important และ Starred ⇒ ถ้าไม่ตัดออก
+            // รอบกวาดจะดึงอีเมลเดิมซ้ำ 2-3 รอบ กินโควตา _recoverMax จนใบที่หายจริงตกขอบ
+            var skip = new[] { "trash", "bin", "spam", "junk", "draft", "sent",
+                               "all mail", "important", "starred", "ขยะ", "ถังขยะ" };
             var seen = new HashSet<string>();
             var result = new List<IMailFolder>();
             foreach (var f in list)
@@ -786,7 +837,9 @@ namespace Take_Time_BangPhra.Services
                 if ((f.Attributes & FolderAttributes.NonExistent) != 0) continue;
                 if ((f.Attributes & FolderAttributes.NoSelect) != 0) continue;
                 if ((f.Attributes & (FolderAttributes.Trash | FolderAttributes.Junk
-                                     | FolderAttributes.Drafts | FolderAttributes.Sent)) != 0) continue;
+                                     | FolderAttributes.Drafts | FolderAttributes.Sent
+                                     | FolderAttributes.All | FolderAttributes.Important
+                                     | FolderAttributes.Flagged)) != 0) continue;
                 string full = f.FullName ?? "";
                 if (skip.Any(s => full.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                 if (!seen.Add(full)) continue;
@@ -831,6 +884,8 @@ namespace Take_Time_BangPhra.Services
                 return res;
             }
 
+            _activeLease = lease;
+            _lastRenew = DateTime.Now;
             using (lease)
             {
                 try
@@ -856,6 +911,7 @@ namespace Take_Time_BangPhra.Services
                     _code.Logs(_conn, "EmailReservation", $"recover backlog error: {ex.Message}", "SYSTEM");
                 }
             }
+            _activeLease = null;
             return res;
         }
 
@@ -1025,11 +1081,20 @@ namespace Take_Time_BangPhra.Services
             var head = rooms[0];
             if (string.IsNullOrWhiteSpace(head.BookingId)) return new Outcome(false, false, false, "ไม่พบ Booking ID");
 
-            // dedup — ข้ามการจองที่ถูกยกเลิกแล้ว (ทุกแบบ) เพื่อให้จองใหม่ด้วยเลขเดิมสร้างได้
-            var existing = _code.DatabaseQuerySafe(_conn,
-                @"SELECT TOP 1 ID FROM Reservation
-                  WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)
-                    AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')",
+            // dedup — ปกติข้ามเฉพาะการจองที่ยัง "ไม่ถูกยกเลิก" เพื่อให้จองใหม่ด้วยเลขเดิมสร้างได้
+            //
+            // ⚠ รอบกวาดกู้ (_sweepMode) ต้องเข้มกว่านั้น: มันอ่านอีเมลเก่าที่เคยประมวลผลไปแล้วซ้ำ
+            //   ทุกวัน ⇒ อีเมล "จองใหม่" ใบเดิมของ booking ที่ถูก "ยกเลิกไปแล้ว" จะแยกไม่ออกจาก
+            //   การจองซ้ำเลขเดิมของจริง แล้วปลุกการจองที่ยกเลิกแล้วขึ้นมาใหม่ทุกวัน
+            //   (เคสหนัก: พนักงานยกเลิกเองในระบบ → ห้องถูกจองคืนอัตโนมัติวันรุ่งขึ้น)
+            //   ในรอบกวาดกู้จึงถือว่า "มีเลขนี้ในระบบไม่ว่าสถานะใด = จบเคสแล้ว" — สร้างเฉพาะ
+            //   เลขที่ไม่มีอยู่เลยจริง ๆ ซึ่งตรงกับหน้าที่ของมันคือ "เก็บการจองที่หายไป"
+            string dedupSql = _sweepMode
+                ? @"SELECT TOP 1 ID FROM Reservation WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)"
+                : @"SELECT TOP 1 ID FROM Reservation
+                    WHERE (OTA_Booking_ID = @b OR Remark LIKE @p)
+                      AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')";
+            var existing = _code.DatabaseQuerySafe(_conn, dedupSql,
                 new Dictionary<string, object> { { "@b", head.BookingId }, { "@p", "%" + head.BookingId + "%" } });
             if (existing?.Rows.Count > 0)
                 return new Outcome(false, true, false, $"Booking {head.BookingId} มีในระบบแล้ว (#{existing.Rows[0][0]})")
@@ -1052,6 +1117,8 @@ namespace Take_Time_BangPhra.Services
                 return new Outcome(false, false, false, $"จองล่วงหน้าเกิน {_maxDaysFuture} วัน").Detail(head, rooms).Because("จองล่วงหน้าเกินกำหนด");
 
             var (resId, reason) = SaveReservation(rooms, stayDays);
+            if (resId > 0 && _sweepMode && !string.IsNullOrEmpty(head.BookingId))
+                _sweepCreated.Add(head.BookingId);   // ใบยกเลิกที่ตามมาในรอบเดียวกันมีสิทธิ์ยกเลิกใบนี้
             if (resId <= 0)
                 return new Outcome(false, false, false, reason).Detail(head, rooms)
                     .Because(reason.StartsWith("ไม่มี mapping") ? "ไม่มี mapping ห้องพัก"
@@ -1650,29 +1717,10 @@ namespace Take_Time_BangPhra.Services
                 bool differs = curIn.Date != head.CheckIn.Date || curOut.Date != head.CheckOut.Date
                                || (mailTotal > 0 && Math.Abs(mailTotal - curTotal) > 0.01m);
                 if (differs)
-                {
-                    string marker = $"sweep-mod-mismatch {head.BookingId} {head.CheckIn:yyyyMMdd}-{head.CheckOut:yyyyMMdd} {mailTotal:0.##}";
-                    bool alertedBefore = false;
-                    try
-                    {
-                        var prev = _code.DatabaseQuerySafe(_conn,
-                            @"SELECT TOP 1 1 FROM Logs
-                              WHERE LogAction = 'EmailReservation'
-                                AND LogDateTime >= DATEADD(DAY, -14, GETDATE())
-                                AND CAST(LogDetail AS NVARCHAR(MAX)) LIKE @p",
-                            new Dictionary<string, object> { { "@p", "%" + marker + "%" } });
-                        alertedBefore = prev != null && prev.Rows.Count > 0;
-                    }
-                    catch { }
-                    if (!alertedBefore)
-                    {
-                        string note = $"🔎 กวาดกู้พบอีเมลแก้ไข Booking {head.BookingId} (จอง #{resId}) ที่ข้อมูลไม่ตรงกับระบบ — "
-                            + $"อีเมล: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {mailTotal:N2} / "
-                            + $"ระบบ: {curIn:dd/MM/yyyy}-{curOut:dd/MM/yyyy} ยอด {curTotal:N2} — ไม่แก้อัตโนมัติ กรุณาตรวจสอบ | {marker}";
-                        _code.Logs(_conn, "EmailReservation", note, "SYSTEM");
-                        if (_notifyTelegram) Notify(note + $"\n🖥 <i>{E(InstanceStamp())}</i>", true);
-                    }
-                }
+                    LogOnce($"sweep-mod-mismatch {head.BookingId} {head.CheckIn:yyyyMMdd}-{head.CheckOut:yyyyMMdd} {mailTotal:0.##}",
+                        $"🔎 กวาดกู้พบอีเมลแก้ไข Booking {head.BookingId} (จอง #{resId}) ที่ข้อมูลไม่ตรงกับระบบ — "
+                        + $"อีเมล: {head.CheckIn:dd/MM/yyyy}-{head.CheckOut:dd/MM/yyyy} ยอด {mailTotal:N2} / "
+                        + $"ระบบ: {curIn:dd/MM/yyyy}-{curOut:dd/MM/yyyy} ยอด {curTotal:N2} — ไม่แก้อัตโนมัติ กรุณาตรวจสอบ");
                 return new Outcome(false, true, false,
                     $"กวาดกู้: การจอง #{resId} ({head.BookingId}) มีอยู่แล้ว — ไม่ย้อนแก้ไขซ้ำ").Detail(head, rooms, resId);
             }
@@ -1908,6 +1956,19 @@ namespace Take_Time_BangPhra.Services
             string status = dt.Rows[0]["Status"]?.ToString() ?? "";
             if (status == "ยกเลิก" || status == "ยกเลิกคืนเงิน" || status == "ยกเลิกไม่คืนเงิน")
                 return new Outcome(false, true, true, $"การจอง #{resId} ถูกยกเลิกไปแล้ว").Detail(chead, null, resId);
+
+            // ── รอบกวาดกู้: ห้ามยกเลิกซ้ำใบที่คนกู้คืนมาแล้ว ─────────────────────
+            // รอบกวาดอ่านอีเมลยกเลิกเก่า (ที่เคยทำไปแล้ว) ซ้ำทุกวัน ⇒ ถ้าพนักงานเปิดการจอง
+            // กลับมาเอง (OTA ยกเลิกผิด/ลูกค้าจองตรงแทน) รอบกวาดจะยกเลิกทิ้งพร้อมลบห้องที่จัดไว้
+            // ยกเว้นใบที่ "เพิ่งถูกสร้างในรอบกวาดรอบนี้เอง" — ใบยกเลิกที่ตามมาคือลำดับเหตุการณ์
+            // จริงที่ต้องเล่นต่อให้จบ (กู้ใบจอง → แล้วยกเลิกตามอีเมลที่มาทีหลัง)
+            if (_sweepMode && !_sweepCreated.Contains(bookingId))
+            {
+                string note = $"🔎 กวาดกู้พบอีเมลยกเลิก Booking {bookingId} (จอง #{resId}) แต่ในระบบสถานะเป็น \"{status}\" "
+                    + "(เคยยกเลิกแล้วเปิดกลับมา?) — ไม่ยกเลิกซ้ำอัตโนมัติ กรุณาตรวจสอบ";
+                LogOnce($"sweep-cancel-skip {bookingId} {status}", note);
+                return new Outcome(false, true, true, note).Detail(chead, null, resId);
+            }
 
             // ── guard: เช็คอิน/เช็คเอาท์แล้ว → ห้ามยกเลิกเอง (แขกอยู่ในห้อง/เข้าพักจบแล้ว) ──
             if (status.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0

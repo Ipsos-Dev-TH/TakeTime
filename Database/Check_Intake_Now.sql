@@ -19,6 +19,7 @@ FROM Logs l
 WHERE l.LogAction = 'EmailReservation'
   AND l.LogDateTime >= DATEADD(MINUTE, -30, GETDATE())
 ORDER BY l.LogDateTime DESC;
+GO
 
 -- ── 2) ล็อกเก่า (sp_getapplock) ยังค้างอยู่ไหม ───────────────────────────────
 --    มีแถว = ยังค้าง → DLL เก่าจะข้ามรอบตลอดไป · DLL ใหม่ (2026-08-21.1) ไม่สนล็อกนี้แล้ว
@@ -32,6 +33,7 @@ LEFT JOIN sys.dm_exec_sessions s ON s.session_id = l.request_session_id
 WHERE l.resource_type = 'APPLICATION'
   AND (l.resource_description LIKE '%EmailRsvIntake%'
        OR l.resource_description LIKE '%AccountingSyncQueue%');
+GO
 
 -- ── 3) config + รอบสำเร็จล่าสุด ──────────────────────────────────────────────
 PRINT '';
@@ -41,17 +43,21 @@ FROM Accounting_Integration_Config
 WHERE ConfigKey IN (N'Email_Rsv_Enabled', N'Email_Rsv_PollMinutes', N'Email_Rsv_RetryFailed',
                     N'Email_Rsv_RetryHours', N'Email_Rsv_LastSuccess', N'Email_Rsv_LeaseMinutes')
 ORDER BY ConfigKey;
+GO
 
 -- ── 4) lease ใหม่ (หลังไมเกรชัน 33) — สถานะล็อกปัจจุบันแบบอ่านง่าย ───────────
 PRINT '';
 PRINT '--- 4) App_Run_Lease (ถ้ายังไม่มีตาราง = ยังไม่ได้รันไมเกรชัน 33) ---';
 IF OBJECT_ID('App_Run_Lease', 'U') IS NOT NULL
+BEGIN
     SELECT Lock_Name, Owner, Acquired_At, Heartbeat_At, Expires_At,
            CASE WHEN Expires_At IS NULL OR Expires_At <= GETDATE()
                 THEN N'ว่าง' ELSE N'กำลังทำงาน' END AS Status
     FROM App_Run_Lease;
+END
 ELSE
     PRINT 'ยังไม่มีตาราง App_Run_Lease';
+GO
 
 -- ── 5) การจองที่เข้าวันนี้ (นับผลจริง) ───────────────────────────────────────
 PRINT '';
