@@ -748,7 +748,8 @@ namespace Take_Time_BangPhra.Services
         private void RecoverBacklogPass(ImapClient client, IntakeResult res, int days, int max)
         {
             var cutoff = DateTime.Today.AddDays(-Math.Max(1, days));
-            var candidates = new List<Tuple<DateTimeOffset, IMailFolder, UniqueId>>();
+            // Item1 = ยังไม่อ่าน(0)/อ่านแล้ว(1) · Item2 = วันที่ · Item3 = folder · Item4 = uid
+            var candidates = new List<Tuple<int, DateTimeOffset, IMailFolder, UniqueId>>();
             var seenMessageIds = new HashSet<string>();
             _sweepCreated.Clear();
 
@@ -765,20 +766,36 @@ namespace Take_Time_BangPhra.Services
                         SearchQuery.DeliveredAfter(cutoff)));
                     if (uids.Count == 0) continue;
 
-                    foreach (var s in folder.Fetch(uids, MessageSummaryItems.InternalDate | MessageSummaryItems.Envelope))
+                    foreach (var s in folder.Fetch(uids, MessageSummaryItems.InternalDate
+                                                       | MessageSummaryItems.Envelope
+                                                       | MessageSummaryItems.Flags))
                     {
                         var when = s.InternalDate ?? (s.Envelope != null && s.Envelope.Date.HasValue
                             ? s.Envelope.Date.Value : DateTimeOffset.MinValue);
                         // กันฉบับเดียวกันถูกนับซ้ำข้าม folder (Gmail แขวนหลายป้ายต่อฉบับ)
                         string mid = s.Envelope != null ? (s.Envelope.MessageId ?? "") : "";
                         if (mid.Length > 0 && !seenMessageIds.Add(mid)) continue;
-                        candidates.Add(Tuple.Create(when, folder, s.UniqueId));
+                        // "ยังไม่อ่าน" = ยังไม่มีใครจัดการ → ให้คิวก่อนเสมอ ไม่ให้ตกขอบโควตา
+                        bool alreadySeen = s.Flags.HasValue && (s.Flags.Value & MessageFlags.Seen) != 0;
+                        candidates.Add(Tuple.Create(alreadySeen ? 1 : 0, when, folder, s.UniqueId));
                     }
                 }
                 catch { /* folder เปิดไม่ได้/ค้นไม่ได้ — ข้ามไป folder ถัดไป */ }
             }
 
-            candidates.Sort((a, b) => a.Item1.CompareTo(b.Item1));
+            // ยังไม่อ่านมาก่อน แล้วค่อยเรียงเก่า→ใหม่ ในแต่ละกลุ่ม
+            // (เรียงตามวันที่ล้วน ๆ + โควตา _recoverMax = อีเมลเก่าที่เคยจัดการแล้วกินโควตาจนของใหม่
+            //  ไม่มีวันถูกแตะ เมื่อกล่องเมลมีอีเมลเกินโควตาใน 7 วัน)
+            // ใบที่ถูกจัดการในรอบก่อนถูกมาร์ค Seen แล้ว จึงถอยไปอยู่ท้ายแถวโดยอัตโนมัติ
+            candidates.Sort((a, b) =>
+            {
+                int cmp = a.Item1.CompareTo(b.Item1);
+                return cmp != 0 ? cmp : a.Item2.CompareTo(b.Item2);
+            });
+            if (candidates.Count > max)
+                _code.Logs(_conn, "EmailReservation",
+                    $"recover backlog: พบ {candidates.Count} ฉบับ เกินโควตา {max} ต่อรอบ — " +
+                    $"ทำ {max} ฉบับแรก (ยังไม่อ่านก่อน) ที่เหลือรอรอบถัดไป [{InstanceStamp()}]", "SYSTEM");
             int done = 0;
             _sweepMode = true;   // กันย้อนแก้ไข/เด้งเตือนซ้ำ จากการอ่านอีเมลเก่าที่เคยจบไปแล้ว
             try
@@ -789,7 +806,7 @@ namespace Take_Time_BangPhra.Services
 
                     // IMAP เลือกได้ทีละ folder — การเปิด folder ถัดไปจะปิดตัวก่อนหน้าโดยอัตโนมัติ
                     // เรียงตามวันที่แล้ว folder จึงสลับไปมาได้ ⇒ ต้องเปิดใหม่ก่อนอ่านทุกครั้งที่ไม่ได้เปิดอยู่
-                    var folder = c.Item2;
+                    var folder = c.Item3;
                     if (!folder.IsOpen)
                     {
                         try { folder.Open(FolderAccess.ReadWrite); }
@@ -803,7 +820,7 @@ namespace Take_Time_BangPhra.Services
                     done++;
                     TouchLease();
                     // processed/failed/ignored = null ⇒ ไม่ย้ายอีเมลไปไหน, isRetry = true ⇒ ไม่แจ้งซ้ำ
-                    HandleOne(folder, c.Item3, null, null, null, res, true);
+                    HandleOne(folder, c.Item4, null, null, null, res, true);
                 }
             }
             finally { _sweepMode = false; }
