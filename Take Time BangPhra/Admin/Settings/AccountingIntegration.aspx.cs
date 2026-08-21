@@ -1189,7 +1189,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "nexaaccUrl", mask ? "" : nexaaccUrl },
                             { "verifyStatus", mask ? "" : (row.Table.Columns.Contains("Verify_Status") && row["Verify_Status"] != DBNull.Value ? row["Verify_Status"].ToString() : "") },
                             { "verifyDetail", mask ? "" : (row.Table.Columns.Contains("Verify_Detail") && row["Verify_Detail"] != DBNull.Value ? row["Verify_Detail"].ToString() : "") },
-                            { "sensitive", isSensitive }
+                            // ⚠ ใช้ mask ไม่ใช่ isSensitive: หน้าเว็บซ่อน "ปุ่มทั้งแถว" เมื่อค่านี้เป็น true
+                            //   เดิมส่ง isSensitive → แถวเงินเดือนไม่มีปุ่ม Retry/Log **แม้แต่เจ้าของระบบ**
+                            //   ทั้งที่การปกปิดควรซ่อน "ข้อมูล" จากคนที่ไม่มีสิทธิ์ ไม่ใช่ริบ "เครื่องมือ"
+                            //   ของคนที่มีสิทธิ์ (คิวเงินเดือนที่ล้มเหลวจึงแก้ไม่ได้เลยผ่านหน้าจอ)
+                            { "sensitive", mask }
                         });
                       }
                       catch (Exception rowEx)

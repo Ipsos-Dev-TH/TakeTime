@@ -108,6 +108,15 @@ namespace Take_Time_BangPhra.Integration
                        "(2) ลูกค้าบุคคลทั่วไปไม่มีเลขภาษี → ปิด setting 'บังคับ §86/4 ครบทุก field' ในหน้าตั้งค่า NextAcc";
             if (b.Contains("งวดบัญชี") && (b.Contains("ปิด") || b.Contains("Closed")))
                 return "\n💡 วิธีแก้: งวดบัญชีเดือนนั้นปิดแล้ว — เปิดงวดชั่วคราวบน NextAcc หรือปรับผ่านใบลดหนี้/เพิ่มหนี้เดือนปัจจุบัน";
+            // ข้อผิดพลาดฝั่ง NextAcc เอง ไม่ใช่ข้อมูลที่เราส่ง — เปิด transaction ซ้อนบน connection เดียวกัน
+            // (คิว #1009) ข้อมูลเดิมส่งใหม่กี่ครั้งก็เจอเหมือนเดิมจนกว่า NextAcc จะแก้โค้ด
+            if (b.Contains("already in a transaction"))
+                return "\n💡 นี่เป็นบั๊กฝั่ง NextAcc (โค้ดสร้าง JE เงินเดือนเปิด transaction ซ้อนบน connection เดียวกัน) "
+                     + "ไม่ใช่ปัญหาข้อมูลของเรา — กด Retry กี่ครั้งก็ได้ผลเดิม\n"
+                     + "ทางออกที่ใช้ได้ทันที: เปลี่ยน Nexaacc_SyncMode_Payroll = JOURNAL_ONLY "
+                     + "(TakeTime คำนวณแล้วโพสต์ JE เงินเดือนครบสมดุลเองผ่าน /journals ไม่ต้องพึ่ง payroll run ของ NextAcc) "
+                     + "— แลกกับการที่ ภ.ง.ด.1 / สปส.1-10 / 50ทวิ ต้องออกจากข้อมูลฝั่ง TakeTime\n"
+                     + "ระยะยาว: แจ้งทีม NextAcc ให้แก้ nested transaction ใน payroll journal creation";
             // มัดจำถูก "หักไปกับเอกสารอื่นแล้ว" แต่เอกสารนั้นถูกลบ/void ไปแล้ว → มัดจำค้างสถานะ applied
             // (NextAcc ยังไม่ปลด DepositAppliedToDocumentId ตอนลบเอกสาร) → เช็คเอาท์ใหม่หักมัดจำเดิมไม่ได้
             if (b.Contains("ถูกนำไปหัก") || (b.Contains("หักมัดจำแบบขับ") && b.Contains("เอกสารอื่น")))
