@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Text;
 using System.Web.UI;
@@ -162,8 +163,43 @@ namespace Take_Time_BangPhra
                             + "<i class='fas fa-hand-pointer'></i> แตะที่หมุดเพื่อดูรายละเอียดและกดนำทาง</p>");
                 }
 
-                sb.Append("<div class='act-grid'>");
+                // จัดกลุ่มตามประเภท — หัวข้อกลุ่มเฉพาะที่มีของจริง
+                var cats = svc.GetCategories();
+                var seen = new List<string>();
+                foreach (DataRow c in cats.Rows)
+                {
+                    string code = Val(c, "Code");
+                    var rows = places.Select("Category = '" + code.Replace("'", "''") + "'");
+                    if (rows.Length == 0) continue;
+                    seen.Add(code);
+                    RenderNearbyGroup(sb, Val(c, "Icon"), Val(c, "Name"), rows);
+                }
+                // ประเภทที่ไม่มีในตารางประเภท (ข้อมูลเก่า) — รวมไว้ท้ายสุด ไม่ให้ตกหล่น
+                var leftovers = new List<DataRow>();
                 foreach (DataRow r in places.Rows)
+                    if (!seen.Contains(Val(r, "Category"))) leftovers.Add(r);
+                if (leftovers.Count > 0)
+                    RenderNearbyGroup(sb, "📍", "อื่น ๆ", leftovers.ToArray());
+
+                sb.Append("</div>");
+            }
+            catch (Exception ex)
+            {
+                // ส่วนสถานที่ล้มไม่ควรทำให้หน้ากิจกรรมทั้งหน้าพัง (เช่น ยังไม่ได้รันไมเกรชัน)
+                System.Diagnostics.Trace.TraceError("Nearby section error: " + ex.Message);
+            }
+        }
+
+        /// <summary>การ์ดสถานที่หนึ่งกลุ่มประเภท พร้อมหัวข้อกลุ่ม</summary>
+        private void RenderNearbyGroup(StringBuilder sb, string icon, string title, DataRow[] rows)
+        {
+            sb.Append("<div class='nb-group'>");
+            sb.Append("<h3 class='nb-group-title'><span>" + Server.HtmlEncode(string.IsNullOrWhiteSpace(icon) ? "📍" : icon)
+                    + "</span> " + Server.HtmlEncode(title)
+                    + " <small>(" + rows.Length + ")</small></h3>");
+            sb.Append("<div class='act-grid'>");
+            {
+                foreach (DataRow r in rows)
                 {
                     string name = Val(r, "Name");
                     string desc = Val(r, "Description");
@@ -187,18 +223,33 @@ namespace Take_Time_BangPhra
                         sb.Append("<div class='act-thumb'><span style='font-size:3em;'>"
                                 + Server.HtmlEncode(string.IsNullOrWhiteSpace(icon) ? "📍" : icon) + "</span>");
 
-                    if (!string.IsNullOrWhiteSpace(catName))
-                        sb.Append("<div class='act-badges'><span class='act-badge badge-nearby'>"
-                                + Server.HtmlEncode(catName) + "</span></div>");
+                    string badge = Val(r, "Badge_Text");
+                    string badgeColor = Val(r, "Badge_Color");
+                    if (string.IsNullOrWhiteSpace(badgeColor)) badgeColor = "#e67e22";
+                    bool featured = ToBool(r, "Is_Featured");
+
+                    sb.Append("<div class='act-badges'>");
+                    if (!string.IsNullOrWhiteSpace(badge))
+                        sb.Append("<span class='act-badge' style='background:" + Server.HtmlEncode(badgeColor) + "'>"
+                                + Server.HtmlEncode(badge) + "</span>");
+                    if (featured)
+                        sb.Append("<span class='act-badge badge-featured'>⭐ แนะนำ</span>");
+                    if (string.IsNullOrWhiteSpace(badge) && !featured && !string.IsNullOrWhiteSpace(catName))
+                        sb.Append("<span class='act-badge badge-nearby'>" + Server.HtmlEncode(catName) + "</span>");
+                    sb.Append("</div>");
                     sb.Append("</div>");
 
                     sb.Append("<div class='act-body'>");
                     sb.Append("<h3>" + Server.HtmlEncode(name) + "</h3>");
+                    // ข้อความโปรโมท "ที่นี่ดียังไง" — เด่นกว่าคำอธิบายทั่วไป
+                    string highlight = Val(r, "Highlight");
+                    if (!string.IsNullOrWhiteSpace(highlight))
+                        sb.Append("<div class='nb-highlight'>💡 " + Server.HtmlEncode(highlight) + "</div>");
                     if (!string.IsNullOrWhiteSpace(desc))
                         sb.Append("<div class='act-desc'>" + Server.HtmlEncode(desc) + "</div>");
 
                     if (!string.IsNullOrWhiteSpace(dist) || !string.IsNullOrWhiteSpace(time)
-                        || !string.IsNullOrWhiteSpace(hours))
+                        || !string.IsNullOrWhiteSpace(hours) || !string.IsNullOrWhiteSpace(Val(r, "Price_Range")))
                     {
                         sb.Append("<div class='act-meta'>");
                         if (!string.IsNullOrWhiteSpace(dist))
@@ -207,6 +258,9 @@ namespace Take_Time_BangPhra
                             sb.Append("<span><i class='fas fa-clock'></i>" + Server.HtmlEncode(time) + "</span>");
                         if (!string.IsNullOrWhiteSpace(hours))
                             sb.Append("<span><i class='fas fa-door-open'></i>" + Server.HtmlEncode(hours) + "</span>");
+                        string priceRange = Val(r, "Price_Range");
+                        if (!string.IsNullOrWhiteSpace(priceRange))
+                            sb.Append("<span><i class='fas fa-coins'></i>" + Server.HtmlEncode(priceRange) + "</span>");
                         sb.Append("</div>");
                     }
 
@@ -221,13 +275,8 @@ namespace Take_Time_BangPhra
 
                     sb.Append("</div></div>");
                 }
-                sb.Append("</div></div>");
             }
-            catch (Exception ex)
-            {
-                // ส่วนสถานที่ล้มไม่ควรทำให้หน้ากิจกรรมทั้งหน้าพัง (เช่น ยังไม่ได้รันไมเกรชัน)
-                System.Diagnostics.Trace.TraceError("Nearby section error: " + ex.Message);
-            }
+            sb.Append("</div></div>");
         }
 
         /// <summary>ลิงก์นำทาง — ใช้ลิงก์ที่ผู้ดูแลใส่เองก่อน ไม่มีก็สร้างจากพิกัด</summary>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -223,6 +223,11 @@ namespace Take_Time_BangPhra.Admin
             txtMarkerColor.Text = Val(row, "Marker_Color");
             txtLat.Text = Val(row, "Latitude");
             txtLng.Text = Val(row, "Longitude");
+            txtHighlight.Text = Val(row, "Highlight");
+            txtBadgeText.Text = Val(row, "Badge_Text");
+            txtBadgeColor.Text = Val(row, "Badge_Color");
+            SelectIfPresent(ddlPriceRange, Val(row, "Price_Range"));
+            chkFeatured.Checked = Val(row, "Is_Featured") == "True";
             chkActive.Checked = Val(row, "Status") != "False";
             SelectIfPresent(ddlZone, Val(row, "Zone_ID"));
 
@@ -269,7 +274,12 @@ namespace Take_Time_BangPhra.Admin
                     MarkerColor = txtMarkerColor.Text.Trim(),
                     Latitude = ParseDec(txtLat.Text),
                     Longitude = ParseDec(txtLng.Text),
-                    ZoneId = ParseInt(ddlZone.SelectedValue, 0)
+                    ZoneId = ParseInt(ddlZone.SelectedValue, 0),
+                    Highlight = txtHighlight.Text.Trim(),
+                    BadgeText = txtBadgeText.Text.Trim(),
+                    BadgeColor = txtBadgeColor.Text.Trim(),
+                    PriceRange = ddlPriceRange.SelectedValue,
+                    IsFeatured = chkFeatured.Checked
                 };
 
                 // รูปเดิม: เก็บไว้ ถ้าไม่ได้อัปโหลดใหม่และไม่ได้สั่งลบ
@@ -279,7 +289,11 @@ namespace Take_Time_BangPhra.Admin
 
                 int savedId = _svc.SavePlace(input);
 
-                if (!_svc.HasMapColumns)
+                if (_svc.HasMapColumns && !_svc.HasPromoColumns
+                    && (input.Highlight.Length > 0 || input.BadgeText.Length > 0 || input.IsFeatured))
+                    ShowMessage("บันทึกแล้ว — แต่ข้อความโปรโมท/ป้าย/ปักหมุด ยังไม่ถูกบันทึก "
+                              + "(รัน Database/PHASE19_Migration_03_Nearby_Highlight.sql แล้วบันทึกซ้ำ)", false);
+                else if (!_svc.HasMapColumns)
                     ShowMessage("บันทึกแล้ว — แต่ยังไม่ได้รันไมเกรชัน PHASE19_01 พิกัด/รูป/หมุด จึงยังไม่ถูกบันทึก "
                               + "(รัน Database/PHASE19_Migration_01_Nearby_Places_Map.sql แล้วบันทึกซ้ำ)", false);
                 else if (!input.Latitude.HasValue || !input.Longitude.HasValue)
@@ -530,6 +544,9 @@ namespace Take_Time_BangPhra.Admin
             txtAddress.Text = ""; txtOpenHours.Text = "";
             txtMarkerIcon.Text = ""; txtMarkerColor.Text = "";
             txtLat.Text = ""; txtLng.Text = "";
+            txtHighlight.Text = ""; txtBadgeText.Text = ""; txtBadgeColor.Text = "";
+            if (ddlPriceRange.Items.Count > 0) ddlPriceRange.SelectedIndex = 0;
+            chkFeatured.Checked = false;
             chkActive.Checked = true;
             pnlCurrentImage.Visible = false; chkRemoveImage.Checked = false;
             pnlCurrentMarker.Visible = false; chkRemoveMarkerImage.Checked = false;

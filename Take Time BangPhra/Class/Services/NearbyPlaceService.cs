@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -30,6 +30,7 @@ namespace Take_Time_BangPhra.Services
 
         // ── ตรวจสคีมา (cache ต่ออายุ process — ไมเกรชันรันครั้งเดียว) ────────────
         private static bool? _hasMapColumns;
+        private static bool? _hasPromoColumns;
         private static bool? _hasCategoryTable;
         private static bool? _hasZoneTable;
 
@@ -41,6 +42,17 @@ namespace Take_Time_BangPhra.Services
                 if (_hasMapColumns.HasValue) return _hasMapColumns.Value;
                 _hasMapColumns = ColumnExists("Guest_NearbyPlaces", "Latitude");
                 return _hasMapColumns.Value;
+            }
+        }
+
+        /// <summary>รันไมเกรชัน PHASE19_03 แล้วหรือยัง (ข้อความโปรโมท/ป้าย/ปักหมุด)</summary>
+        public bool HasPromoColumns
+        {
+            get
+            {
+                if (_hasPromoColumns.HasValue) return _hasPromoColumns.Value;
+                _hasPromoColumns = ColumnExists("Guest_NearbyPlaces", "Highlight");
+                return _hasPromoColumns.Value;
             }
         }
 
@@ -68,6 +80,7 @@ namespace Take_Time_BangPhra.Services
         public static void ResetSchemaCache()
         {
             _hasMapColumns = null;
+            _hasPromoColumns = null;
             _hasCategoryTable = null;
             _hasZoneTable = null;
         }
@@ -307,6 +320,13 @@ namespace Take_Time_BangPhra.Services
                             CAST(NULL AS INT) AS Zone_ID, CAST(NULL AS NVARCHAR(300)) AS Address,
                             CAST(NULL AS NVARCHAR(100)) AS Open_Hours, ");
 
+            if (HasPromoColumns)
+                sb.Append("p.Highlight, p.Badge_Text, p.Badge_Color, p.Is_Featured, p.Price_Range, ");
+            else
+                sb.Append(@"CAST(NULL AS NVARCHAR(300)) AS Highlight, CAST(NULL AS NVARCHAR(50)) AS Badge_Text,
+                            CAST(NULL AS NVARCHAR(20)) AS Badge_Color, CAST(0 AS BIT) AS Is_Featured,
+                            CAST(NULL AS NVARCHAR(10)) AS Price_Range, ");
+
             if (HasCategoryTable)
                 sb.Append(@"ISNULL(c.Name, p.Category) AS CategoryName,
                             ISNULL(c.Icon, N'📍') AS CategoryIcon,
@@ -329,7 +349,14 @@ namespace Take_Time_BangPhra.Services
                 sb.Append("AND p.Zone_ID = @zone ");
                 p.Add("@zone", zoneId);
             }
-            sb.Append("ORDER BY p.Sort_Order, p.Name");
+            // ปักหมุดแนะนำขึ้นก่อนเสมอ แล้วค่อยเรียงตามลำดับประเภทและลำดับที่ตั้งไว้
+            sb.Append(HasPromoColumns
+                ? (HasCategoryTable
+                    ? "ORDER BY p.Is_Featured DESC, ISNULL(c.Sort_Order, 99), p.Sort_Order, p.Name"
+                    : "ORDER BY p.Is_Featured DESC, p.Sort_Order, p.Name")
+                : (HasCategoryTable
+                    ? "ORDER BY ISNULL(c.Sort_Order, 99), p.Sort_Order, p.Name"
+                    : "ORDER BY p.Sort_Order, p.Name"));
 
             try { return _code.DatabaseQuerySafe(_conn, sb.ToString(), p.Count > 0 ? p : null); }
             catch { return new DataTable(); }
@@ -383,6 +410,19 @@ namespace Take_Time_BangPhra.Services
                             Zone_ID = @zone, Address = @addr, Open_Hours = @open";
                 colMap = ", Latitude, Longitude, Image_Path, Marker_Color, Marker_Icon, Marker_Image, Zone_ID, Address, Open_Hours";
                 valMap = ", @lat, @lng, @img, @mcolor, @micon, @mimg, @zone, @addr, @open";
+            }
+
+            if (HasPromoColumns)
+            {
+                p.Add("@hl", (object)input.Highlight ?? DBNull.Value);
+                p.Add("@btext", (object)input.BadgeText ?? DBNull.Value);
+                p.Add("@bcolor", (object)input.BadgeColor ?? DBNull.Value);
+                p.Add("@feat", input.IsFeatured ? 1 : 0);
+                p.Add("@prange", (object)input.PriceRange ?? DBNull.Value);
+                setMap += @", Highlight = @hl, Badge_Text = @btext, Badge_Color = @bcolor,
+                             Is_Featured = @feat, Price_Range = @prange";
+                colMap += ", Highlight, Badge_Text, Badge_Color, Is_Featured, Price_Range";
+                valMap += ", @hl, @btext, @bcolor, @feat, @prange";
             }
 
             if (input.Id > 0)
@@ -467,6 +507,10 @@ namespace Take_Time_BangPhra.Services
                     { "hours", Str(r, "Open_Hours") },
                     { "dist", Str(r, "Distance") },
                     { "time", Str(r, "Travel_Time") },
+                    { "highlight", Str(r, "Highlight") },
+                    { "badge", Str(r, "Badge_Text") },
+                    { "badgeColor", string.IsNullOrWhiteSpace(Str(r, "Badge_Color")) ? "#e67e22" : Str(r, "Badge_Color") },
+                    { "priceRange", Str(r, "Price_Range") },
                     { "nav", BuildNavUrl(lat, lng, Str(r, "Name"), Str(r, "Map_Url")) }
                 });
             }
@@ -555,5 +599,9 @@ namespace Take_Time_BangPhra.Services
         public decimal? Latitude, Longitude;
         public string ImagePath, MarkerColor, MarkerIcon, MarkerImage, Address, OpenHours;
         public int ZoneId;
+
+        // ฟิลด์ที่เพิ่มใน PHASE19_03
+        public string Highlight, BadgeText, BadgeColor, PriceRange;
+        public bool IsFeatured;
     }
 }

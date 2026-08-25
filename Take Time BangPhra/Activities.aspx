@@ -48,6 +48,24 @@
         }
         .act-price.free { color: #27ae60; }
         .badge-nearby { background: #16a085; }
+        .badge-featured { background: #d81b60; }
+
+        /* หัวข้อกลุ่มประเภทของสถานที่ใกล้เคียง */
+        .nb-group { margin-bottom: 26px; }
+        .nb-group-title {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 1.12em; font-weight: 700; color: #4a7c59;
+            margin: 0 0 14px; padding-bottom: 8px; border-bottom: 2px solid #eaf3ec;
+        }
+        .nb-group-title small { color: #9aa; font-weight: 400; font-size: .78em; }
+
+        /* ข้อความโปรโมท "ที่นี่ดียังไง" */
+        .nb-highlight {
+            background: #fff8e1; border-left: 3px solid #ffb300;
+            padding: 8px 11px; border-radius: 0 8px 8px 0;
+            font-size: 13px; color: #6d4c41; font-weight: 600;
+            margin-bottom: 10px; line-height: 1.5;
+        }
 
         /* แผนที่สถานที่ใกล้เคียง */
         .nb-map-wrap {
@@ -191,11 +209,18 @@
                 if (p.img) h += '<img src="' + esc(p.img) + '" alt="" />';
                 h += '<h4>' + esc(p.name) + '</h4>';
                 if (p.catName) h += '<div class="cat">' + esc(p.icon) + ' ' + esc(p.catName) + '</div>';
+                if (p.badge) h += '<div style="display:inline-block;background:' + esc(p.badgeColor)
+                                + ';color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;margin-bottom:6px">'
+                                + esc(p.badge) + '</div>';
+                if (p.highlight) h += '<div style="background:#fff8e1;border-left:3px solid #ffb300;padding:6px 9px;'
+                                + 'border-radius:0 6px 6px 0;font-size:12px;color:#6d4c41;font-weight:600;margin-bottom:6px">💡 '
+                                + esc(p.highlight) + '</div>';
                 if (p.desc) h += '<p>' + esc(p.desc) + '</p>';
                 var meta = [];
                 if (p.dist) meta.push('📍 ' + esc(p.dist));
                 if (p.time) meta.push('⏱ ' + esc(p.time));
                 if (p.hours) meta.push('🕒 ' + esc(p.hours));
+                if (p.priceRange) meta.push('💰 ' + esc(p.priceRange));
                 if (meta.length) h += '<p>' + meta.join(' · ') + '</p>';
                 if (p.nav) h += '<a class="nb-nav" target="_blank" rel="noopener" href="' + esc(p.nav) + '">นำทางด้วย Google Maps</a>';
                 return h + '</div>';

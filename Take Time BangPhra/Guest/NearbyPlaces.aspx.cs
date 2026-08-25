@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
@@ -70,14 +70,47 @@ namespace Take_Time_BangPhra.Guest
 
             if (DtPlaces != null && DtPlaces.Rows.Count > 0)
             {
-                rptPlaces.DataSource = DtPlaces;
-                rptPlaces.DataBind();
+                rptGroups.DataSource = CategoriesInUse();
+                rptGroups.DataBind();
                 pnlNoData.Visible = false;
             }
             else
             {
                 pnlNoData.Visible = true;
             }
+        }
+
+        /// <summary>ประเภทที่ "มีสถานที่จริง" เท่านั้น — ไม่โชว์หัวข้อกลุ่มว่าง ๆ</summary>
+        protected DataTable CategoriesInUse()
+        {
+            var result = new DataTable();
+            result.Columns.Add("Code", typeof(string));
+            result.Columns.Add("Name", typeof(string));
+            result.Columns.Add("Icon", typeof(string));
+            result.Columns.Add("Count", typeof(int));
+            if (DtCategories == null || DtPlaces == null) return result;
+
+            foreach (DataRow c in DtCategories.Rows)
+            {
+                string code = c["Code"] == DBNull.Value ? "" : c["Code"].ToString();
+                int n = PlacesIn(code).Length;
+                if (n == 0) continue;
+                var r = result.NewRow();
+                r["Code"] = code;
+                r["Name"] = c["Name"] == DBNull.Value ? code : c["Name"].ToString();
+                r["Icon"] = c["Icon"] == DBNull.Value ? "📍" : c["Icon"].ToString();
+                r["Count"] = n;
+                result.Rows.Add(r);
+            }
+            return result;
+        }
+
+        /// <summary>สถานที่ในประเภทนั้น — ใช้เป็น DataSource ของ Repeater ชั้นใน</summary>
+        protected DataRow[] PlacesIn(object categoryCode)
+        {
+            if (DtPlaces == null) return new DataRow[0];
+            string code = categoryCode == null ? "" : categoryCode.ToString();
+            return DtPlaces.Select("Category = '" + code.Replace("'", "''") + "'");
         }
 
         // ── helper สำหรับ markup ──────────────────────────────────────────────────
@@ -104,6 +137,49 @@ namespace Take_Time_BangPhra.Guest
         protected string Esc(object v)
         {
             return v == null || v == DBNull.Value ? "" : Server.HtmlEncode(v.ToString());
+        }
+
+        protected bool IsFeatured(object v)
+        {
+            if (v == null || v == DBNull.Value) return false;
+            if (v is bool b) return b;
+            string s = v.ToString();
+            return s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>ป้ายมุมรูป — ป้ายที่ตั้งเอง และป้าย "แนะนำ" เมื่อปักหมุดไว้</summary>
+        protected string BadgeHtml(object text, object color, object featured)
+        {
+            string html = "";
+            string t = Esc(text);
+            if (t.Length > 0)
+            {
+                string c = color == null || color == DBNull.Value ? "" : color.ToString().Trim();
+                if (c.Length == 0) c = "#e67e22";
+                html += "<span class='place-badge' style='background:" + Server.HtmlEncode(c) + "'>" + t + "</span>";
+            }
+            if (IsFeatured(featured))
+                html += "<span class='place-badge feat'>⭐ แนะนำ</span>";
+            return html;
+        }
+
+        /// <summary>ข้อความโปรโมท "ที่นี่ดียังไง" — ไม่ได้ใส่ก็ไม่ต้องเว้นที่ว่างไว้</summary>
+        protected string HighlightHtml(object highlight)
+        {
+            string h = Esc(highlight);
+            return h.Length == 0 ? "" : "<div class='place-highlight'>💡 " + h + "</div>";
+        }
+
+        /// <summary>บรรทัดข้อมูลย่อย — แสดงเฉพาะช่องที่กรอกไว้ ไม่โชว์ไอคอนลอย ๆ</summary>
+        protected string MetaHtml(object distance, object travelTime, object hours, object priceRange)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            string d = Esc(distance), t = Esc(travelTime), o = Esc(hours), pr = Esc(priceRange);
+            if (d.Length > 0) parts.Add("<span class='distance'><i class='fas fa-map-marker-alt'></i> " + d + "</span>");
+            if (t.Length > 0) parts.Add("<span class='travel-time'><i class='fas fa-clock'></i> " + t + "</span>");
+            if (o.Length > 0) parts.Add("<span><i class='fas fa-door-open'></i> " + o + "</span>");
+            if (pr.Length > 0) parts.Add("<span><i class='fas fa-coins'></i> " + pr + "</span>");
+            return string.Join("", parts);
         }
 
         private bool ValidateGuestSession()

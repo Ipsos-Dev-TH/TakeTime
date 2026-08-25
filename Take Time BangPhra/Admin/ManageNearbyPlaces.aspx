@@ -497,11 +497,39 @@
                         <asp:TextBox ID="txtMarkerColor" runat="server" MaxLength="20" placeholder="#0288D1"></asp:TextBox>
                     </div>
 
+                    <!-- ป้ายโปรโมท -->
+                    <div class="form-group">
+                        <label>ป้ายมุมรูป</label>
+                        <asp:TextBox ID="txtBadgeText" runat="server" MaxLength="50" placeholder="เช่น ยอดนิยม / ต้องลอง / ใหม่"></asp:TextBox>
+                    </div>
+                    <div class="form-group">
+                        <label>สีป้าย</label>
+                        <asp:TextBox ID="txtBadgeColor" runat="server" MaxLength="20" placeholder="#e67e22"></asp:TextBox>
+                    </div>
+                    <div class="form-group">
+                        <label>ระดับราคา</label>
+                        <asp:DropDownList ID="ddlPriceRange" runat="server">
+                            <asp:ListItem Value="" Text="— ไม่ระบุ —" />
+                            <asp:ListItem Value="฿" Text="฿ (ประหยัด)" />
+                            <asp:ListItem Value="฿฿" Text="฿฿ (ปานกลาง)" />
+                            <asp:ListItem Value="฿฿฿" Text="฿฿฿ (สูง)" />
+                        </asp:DropDownList>
+                    </div>
+
                     <!-- เปิดใช้งาน -->
                     <div class="form-group">
                         <label>สถานะ</label>
-                        <asp:CheckBox ID="chkActive" runat="server" Checked="true" Text=" แสดงให้แขกเห็น" />
+                        <asp:CheckBox ID="chkActive" runat="server" Checked="true" Text=" แสดงให้แขกเห็น" /><br />
+                        <asp:CheckBox ID="chkFeatured" runat="server" Text=" ⭐ ปักหมุดแนะนำ (ขึ้นก่อนในกลุ่ม)" />
                     </div>
+                </div>
+
+                <!-- ข้อความโปรโมท -->
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>ข้อความโปรโมท — "ที่นี่ดียังไง"</label>
+                    <asp:TextBox ID="txtHighlight" runat="server" MaxLength="300"
+                        placeholder="เช่น เมนูเด็ด: ไก่อบโอ่งสูตรโบราณ 40 ปี · ชมพระอาทิตย์ตกได้สวยที่สุดในย่านนี้"></asp:TextBox>
+                    <small style="color:#777;">แสดงเด่นกว่าคำอธิบาย ทั้งบนการ์ดและในป๊อปอัพหมุดบนแผนที่ — เว้นว่างได้</small>
                 </div>
 
                 <!-- ── พิกัด + ตัวเลือกจากแผนที่ ───────────────────────────────── -->

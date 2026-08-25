@@ -91,6 +91,39 @@
             width: 100%; height: 150px; object-fit: cover;
             border-radius: 12px 12px 0 0; display: block;
         }
+        .place-thumb-icon {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 46px; background: linear-gradient(135deg, #e8f5f1, #d6ece3);
+        }
+        .place-thumb-wrap { position: relative; }
+
+        /* ป้ายโปรโมทมุมรูป */
+        .place-badge {
+            position: absolute; top: 10px; left: 10px;
+            font-size: 11.5px; font-weight: 700; color: #fff;
+            padding: 4px 11px; border-radius: 20px; box-shadow: 0 2px 6px rgba(0,0,0,.25);
+        }
+        .place-badge.feat { left: auto; right: 10px; background: #d81b60; }
+
+        /* ข้อความโปรโมท — "ที่นี่ดียังไง" ให้เด่นกว่าคำอธิบายทั่วไป */
+        .place-highlight {
+            background: #fff8e1; border-left: 3px solid #ffb300;
+            padding: 7px 10px; border-radius: 0 8px 8px 0;
+            font-size: 13px; color: #6d4c41; font-weight: 600;
+            margin: 0 0 8px; line-height: 1.5;
+        }
+
+        /* หัวข้อกลุ่มประเภท */
+        .cat-group { margin-bottom: 26px; }
+        .cat-title {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 17px; font-weight: 700; color: #2e5d3a;
+            margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #eaf3ec;
+        }
+        .cat-title .cat-ico { font-size: 20px; }
+        .cat-title small { color: #9aa; font-weight: 400; font-size: 13px; }
+
+        .place-card.featured { box-shadow: 0 4px 16px rgba(216,27,96,.18); border: 1.5px solid #f8bbd0; }
 
         .category-tabs {
             display: flex;
@@ -477,33 +510,49 @@
             <% } } %>
         </div>
 
-        <!-- Places from Database -->
-        <div class="places-grid">
-            <asp:Repeater ID="rptPlaces" runat="server">
-                <ItemTemplate>
-                    <div class="place-card" data-category='<%# Eval("Category") %>' data-id='<%# Eval("ID") %>'>
-                        <%# !string.IsNullOrEmpty(PlaceImage(Eval("Image_Path")))
-                            ? "<img src='" + PlaceImage(Eval("Image_Path")) + "' class='place-thumb' alt='' loading='lazy' />"
-                            : "" %>
-                        <div class="place-icon"><%# Eval("Icon") %></div>
-                        <div class="place-info">
-                            <h3><%# Eval("Name") %></h3>
-                            <p><%# Eval("Description") %></p>
-                            <div class="place-meta">
-                                <span class="distance"><i class="fas fa-map-marker-alt"></i> <%# Eval("Distance") %></span>
-                                <span class="travel-time"><i class="fas fa-clock"></i> <%# Eval("Travel_Time") %></span>
-                            </div>
-                            <div class="place-actions">
-                                <%# !string.IsNullOrEmpty(NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")))
-                                    ? "<a href='" + NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")) + "' target='_blank' rel='noopener' class='btn-map'><i class='fas fa-diamond-turn-right'></i> นำทาง</a>"
-                                    : "" %>
-                                <%# !string.IsNullOrEmpty(Eval("Phone")?.ToString()) ? "<a href='tel:" + Eval("Phone") + "' class='btn-call'><i class='fas fa-phone'></i> โทร</a>" : "" %>
-                            </div>
-                        </div>
+        <!-- รายการสถานที่ — จัดกลุ่มตามประเภท -->
+        <asp:Repeater ID="rptGroups" runat="server">
+            <ItemTemplate>
+                <div class="cat-group" data-category='<%# Eval("Code") %>'>
+                    <h3 class="cat-title">
+                        <span class="cat-ico"><%# Eval("Icon") %></span>
+                        <%# Eval("Name") %>
+                        <small>(<%# Eval("Count") %>)</small>
+                    </h3>
+                    <div class="places-grid">
+                        <asp:Repeater ID="rptGroupPlaces" runat="server" DataSource='<%# PlacesIn(Eval("Code")) %>'>
+                            <ItemTemplate>
+                                <div class="place-card<%# IsFeatured(Eval("Is_Featured")) ? " featured" : "" %>"
+                                     data-category='<%# Eval("Category") %>' data-id='<%# Eval("ID") %>'>
+                                    <div class="place-thumb-wrap">
+                                        <%# !string.IsNullOrEmpty(PlaceImage(Eval("Image_Path")))
+                                            ? "<img src='" + PlaceImage(Eval("Image_Path")) + "' class='place-thumb' alt='' loading='lazy' />"
+                                            : "<div class='place-thumb place-thumb-icon'>" + Eval("Icon") + "</div>" %>
+                                        <%# BadgeHtml(Eval("Badge_Text"), Eval("Badge_Color"), Eval("Is_Featured")) %>
+                                    </div>
+                                    <div class="place-info">
+                                        <h3><%# Eval("Name") %></h3>
+                                        <%# HighlightHtml(Eval("Highlight")) %>
+                                        <p><%# Eval("Description") %></p>
+                                        <div class="place-meta">
+                                            <%# MetaHtml(Eval("Distance"), Eval("Travel_Time"), Eval("Open_Hours"), Eval("Price_Range")) %>
+                                        </div>
+                                        <div class="place-actions">
+                                            <%# !string.IsNullOrEmpty(NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")))
+                                                ? "<a href='" + NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")) + "' target='_blank' rel='noopener' class='btn-map'><i class='fas fa-diamond-turn-right'></i> นำทาง</a>"
+                                                : "" %>
+                                            <%# !string.IsNullOrEmpty(Eval("Phone") == null ? "" : Eval("Phone").ToString())
+                                                ? "<a href='tel:" + Eval("Phone") + "' class='btn-call'><i class='fas fa-phone'></i> โทร</a>"
+                                                : "" %>
+                                        </div>
+                                    </div>
+                                </div>
+                            </ItemTemplate>
+                        </asp:Repeater>
                     </div>
-                </ItemTemplate>
-            </asp:Repeater>
-        </div>
+                </div>
+            </ItemTemplate>
+        </asp:Repeater>
 
         <!-- No Data Panel -->
         <asp:Panel ID="pnlNoData" runat="server" Visible="false" CssClass="no-data-panel">
@@ -562,11 +611,18 @@
             if (p.img) h += '<img src="' + nbEsc(p.img) + '" alt="" />';
             h += '<h4>' + nbEsc(p.name) + '</h4>';
             if (p.catName) h += '<div class="cat">' + nbEsc(p.icon) + ' ' + nbEsc(p.catName) + '</div>';
+            if (p.badge) h += '<div style="display:inline-block;background:' + nbEsc(p.badgeColor)
+                            + ';color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;margin-bottom:6px">'
+                            + nbEsc(p.badge) + '</div>';
+            if (p.highlight) h += '<div style="background:#fff8e1;border-left:3px solid #ffb300;padding:6px 9px;'
+                            + 'border-radius:0 6px 6px 0;font-size:12px;color:#6d4c41;font-weight:600;margin-bottom:6px">💡 '
+                            + nbEsc(p.highlight) + '</div>';
             if (p.desc) h += '<p>' + nbEsc(p.desc) + '</p>';
             var meta = [];
             if (p.dist) meta.push('📍 ' + nbEsc(p.dist));
             if (p.time) meta.push('⏱ ' + nbEsc(p.time));
             if (p.hours) meta.push('🕒 ' + nbEsc(p.hours));
+                if (p.priceRange) meta.push('💰 ' + nbEsc(p.priceRange));
             if (meta.length) h += '<p>' + meta.join(' · ') + '</p>';
             if (p.phone) h += '<p>📞 <a href="tel:' + nbEsc(p.phone) + '">' + nbEsc(p.phone) + '</a></p>';
             if (p.nav) h += '<a class="nb-nav" target="_blank" rel="noopener" href="' + nbEsc(p.nav) + '">นำทางด้วย Google Maps</a>';
@@ -624,6 +680,10 @@
 
             document.querySelectorAll('.place-card').forEach(function (card) {
                 card.style.display = (category === 'all' || card.dataset.category === category) ? 'block' : 'none';
+            });
+            // ซ่อนหัวข้อกลุ่มที่ไม่เหลือรายการ ไม่งั้นจะเห็นหัวข้อลอยไม่มีอะไรข้างใต้
+            document.querySelectorAll('.cat-group').forEach(function (g) {
+                g.style.display = (category === 'all' || g.dataset.category === category) ? '' : 'none';
             });
 
             if (!nbMap) return;
