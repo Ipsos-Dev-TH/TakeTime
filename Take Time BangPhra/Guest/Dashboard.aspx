@@ -604,6 +604,14 @@
                 <p>ตรวจสอบยอดและชำระเงิน</p>
             </a>
 
+            <a href="Amenities.aspx" class="service-card">
+                <div class="service-icon success">
+                    <i class="fas fa-concierge-bell"></i>
+                </div>
+                <h3>เบิกของใช้</h3>
+                <p>ผ้าเช็ดตัว น้ำดื่ม ของใช้เพิ่ม</p>
+            </a>
+
             <asp:PlaceHolder ID="phSvcActivities" runat="server"><a href="Activities.aspx" class="service-card">
                 <div class="service-icon info">
                     <i class="fas fa-hiking"></i>

@@ -495,6 +495,8 @@
     <Content Include="Guest\Emergency.aspx" />
     <Content Include="Guest\AboutUs.aspx" />
     <Content Include="Guest\NearbyPlaces.aspx" />
+    <Content Include="Guest\Amenities.aspx" />
+    <Content Include="Admin\ManageAmenities.aspx" />
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
@@ -1269,6 +1271,13 @@
     <Compile Include="Guest\NearbyPlaces.aspx.designer.cs">
       <DependentUpon>NearbyPlaces.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Guest\Amenities.aspx.cs">
+      <DependentUpon>Amenities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Amenities.aspx.designer.cs">
+      <DependentUpon>Amenities.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Guest\Facilities.aspx.cs">
       <DependentUpon>Facilities.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1429,6 +1438,7 @@
     </Compile>
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Class\Services\NearbyPlaceService.cs" />
+    <Compile Include="Class\Services\AmenityService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

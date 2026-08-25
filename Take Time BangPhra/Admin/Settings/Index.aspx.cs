@@ -180,6 +180,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "แนะนำร้าน/สถานที่รอบที่พัก",
                 "~/Admin/ManageNearbyPlaces",
                 "สถานที่ ใกล้เคียง nearby แผนที่ ร้านอาหาร"));
+            web.Items.Add(new Item("เบิกของใช้ในห้อง",
+                "ตั้งของที่แขกเบิกได้เอง (ฟรี/คิดเงิน) + ดูคำขอที่เข้ามา",
+                "~/Admin/ManageAmenities",
+                "amenities ของใช้ เบิก ผ้าเช็ดตัว แปรงสีฟัน น้ำดื่ม คำขอ"));
             web.Items.Add(new Item("ข้อมูลฉุกเฉิน",
                 "เบอร์โทรฉุกเฉินที่แสดงให้ลูกค้า",
                 "~/Admin/ManageEmergency",
