@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -21,7 +21,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            if (!Perm.Guard(this, Perm.SysSettings)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Perm.Guard(this, Perm.SysAccounting)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (Session["permission"]?.ToString() != "True")
             {
                 Response.Redirect("~/Admin/Login");

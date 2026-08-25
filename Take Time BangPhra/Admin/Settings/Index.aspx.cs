@@ -27,25 +27,40 @@ namespace Take_Time_BangPhra.Admin.Settings
             /// <summary>ชื่อฟีเจอร์ใน Feature flags — ปิดอยู่จะขึ้นป้ายเตือน (null = ไม่ผูก)</summary>
             public string Feature;
 
+            /// <summary>โมดูลสิทธิ์เฉพาะรายการ — ทับของหมวด (null = ใช้ของหมวด)
+            /// ใช้เมื่อหน้าปลายทาง guard ด้วยโมดูลอื่นอยู่แล้ว จะได้ไม่โชว์การ์ดที่กดแล้วเด้งออก</summary>
+            public string Module;
+
             public Item(string title, string desc, string url, string keywords,
-                bool ownerOnly = false, string feature = null)
+                bool ownerOnly = false, string feature = null, string module = null)
             {
                 Title = title; Desc = desc; Url = url; Keywords = keywords;
-                OwnerOnly = ownerOnly; Feature = feature;
+                OwnerOnly = ownerOnly; Feature = feature; Module = module;
             }
         }
 
         private class Group
         {
             public string Title, Note, Icon, Color;
+            /// <summary>โมดูลสิทธิ์ประจำหมวด — รายการในหมวดใช้ตัวนี้ (null = SYS_SETTINGS)</summary>
+            public string Module;
             public List<Item> Items = new List<Item>();
-            public Group(string title, string note, string icon, string color)
-            { Title = title; Note = note; Icon = icon; Color = color; }
+            public Group(string title, string note, string icon, string color, string module = null)
+            { Title = title; Note = note; Icon = icon; Color = color; Module = module; }
         }
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            if (!Perm.Guard(this, Perm.SysSettings)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            // ศูนย์ตั้งค่ารวมหลายโมดูล — มีสิทธิ์ส่วนไหนก็เข้ามาเห็นเฉพาะส่วนนั้นได้
+            // (เดิม guard ด้วย SYS_SETTINGS อย่างเดียว ⇒ คนที่มีแค่สิทธิ์เนื้อหาเว็บจะเข้าไม่ได้เลย)
+            if (!Perm.CanAccess(Perm.SysSettings) && !Perm.CanAccess(Perm.WebContent)
+                && !Perm.CanAccess(Perm.SvcGuest) && !Perm.CanAccess(Perm.SysChannel)
+                && !Perm.CanAccess(Perm.SysAccounting))
+            {
+                Response.Redirect("~/Default", false);
+                System.Web.HttpContext.Current?.ApplicationInstance?.CompleteRequest();
+                return;
+            }
             if (Session["permission"]?.ToString() != "True")
             {
                 Response.Redirect("~/Admin/Login");
@@ -87,7 +102,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             // ── 2. บัญชี ภาษี และการลงรายได้ ──────────────────────────────────────
             var acc = new Group("บัญชี ภาษี & การลงรายได้",
                 "เชื่อม NextAcc, อ่านอีเมลจอง OTA, และเลือกว่าจะลงบันทึกรายได้ทางไหนบ้าง",
-                "fa-calculator", "#00897b");
+                "fa-calculator", "#00897b", Perm.SysAccounting);
             acc.Items.Add(new Item("Accounting Integration (NextAcc)",
                 "เชื่อมระบบบัญชี, ผังบัญชี, โหมด sync, อ่านอีเมลจอง OTA, สวิตช์ลงบันทึกรายได้ (ขายหน้าร้าน / รูมเซอร์วิส / ค่าห้อง OTA)",
                 "~/Admin/Settings/AccountingIntegration",
@@ -105,7 +120,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             // ── 3. ช่องทางลูกค้า & AI ─────────────────────────────────────────────
             var chan = new Group("ช่องทางติดต่อลูกค้า & AI",
                 "แชททุกช่องทาง (LINE / Facebook / อีเมล OTA) และผู้ช่วย AI",
-                "fa-comments", "#7b1fa2");
+                "fa-comments", "#7b1fa2", Perm.SysChannel);
             chan.Items.Add(new Item("ตั้งค่าช่องทางแชท",
                 "เปิด/ปิดช่องทาง + ใส่ Token ของ LINE, Facebook, WhatsApp, Telegram และ **อีเมลลูกค้า OTA** (Agoda/Booking)",
                 "~/Admin/Chat/ChannelSettings",
@@ -123,7 +138,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             // ── 4. บริการในที่พัก ─────────────────────────────────────────────────
             var svc = new Group("บริการในที่พัก",
                 "สิ่งที่ลูกค้าใช้ระหว่างเข้าพัก — สั่งอาหาร กิจกรรม สิ่งอำนวยความสะดวก",
-                "fa-concierge-bell", "#ef6c00");
+                "fa-concierge-bell", "#ef6c00", Perm.SvcGuest);
             svc.Items.Add(new Item("รูมเซอร์วิส — เวลาเปิดปิด & ค่าบริการ",
                 "เปิด/ปิดรับออเดอร์, เวลาให้บริการ, และค่าบริการ (% / ต่อชิ้น / ต่อครั้ง)",
                 "~/Admin/RoomService/OrderSettings",
@@ -131,7 +146,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             svc.Items.Add(new Item("จัดการกิจกรรม",
                 "เพิ่ม/แก้กิจกรรมในที่พัก ราคา รอบเวลาให้จอง และรูปภาพ",
                 "~/Admin/Settings/ActivityManagement",
-                "กิจกรรม activity ปิงปอง จองรอบ เวลา ราคา", false, "Activities"));
+                "กิจกรรม activity ปิงปอง จองรอบ เวลา ราคา", false, "Activities", Perm.OpsActivity));
             svc.Items.Add(new Item("Guest Experience",
                 "ภาพรวมประสบการณ์ลูกค้าและการตั้งค่า Guest Portal",
                 "~/Admin/GuestExperience/Dashboard",
@@ -139,7 +154,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             svc.Items.Add(new Item("QR Code ประจำห้อง",
                 "สร้าง/พิมพ์ QR ให้ลูกค้าสแกนเข้า Guest Portal ของห้องนั้น",
                 "~/Admin/RoomQRGenerator",
-                "qr code ห้อง portal สแกน พิมพ์", false, "GuestPortal"));
+                "qr code ห้อง portal สแกน พิมพ์", false, "GuestPortal", Perm.OpsBooking));
             groups.Add(svc);
 
             // ── 5. ราคา & ช่องทางขาย ──────────────────────────────────────────────
@@ -163,7 +178,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             // ── 6. เนื้อหาเว็บไซต์ ────────────────────────────────────────────────
             var web = new Group("เนื้อหาเว็บไซต์ & รูปภาพ",
                 "สิ่งที่ลูกค้าเห็นบนหน้าเว็บสาธารณะ",
-                "fa-globe", "#1565c0");
+                "fa-globe", "#1565c0", Perm.WebContent);
             web.Items.Add(new Item("จัดการหน้าแรก",
                 "แก้ข้อความ/รูป/แบนเนอร์บนหน้าแรกของเว็บไซต์",
                 "~/Admin/Edit_Home",
@@ -228,9 +243,17 @@ namespace Take_Time_BangPhra.Admin.Settings
             var sb = new StringBuilder();
             foreach (var g in BuildCatalog())
             {
+                // ไม่มีสิทธิ์โมดูลของหมวดนี้ → ไม่ต้องแสดงทั้งหมวด
+                if (!Perm.CanAccess(string.IsNullOrEmpty(g.Module) ? Perm.SysSettings : g.Module)) continue;
+
                 var visible = new List<Item>();
                 foreach (var it in g.Items)
-                    if (!it.OwnerOnly || IsOwner) visible.Add(it);
+                {
+                    if (it.OwnerOnly && !IsOwner) continue;
+                    // รายการที่ระบุโมดูลเอง ต้องมีสิทธิ์โมดูลนั้นด้วย
+                    if (!string.IsNullOrEmpty(it.Module) && !Perm.CanAccess(it.Module)) continue;
+                    visible.Add(it);
+                }
                 if (visible.Count == 0) continue;
 
                 sb.Append("<div class='sh-group'>");

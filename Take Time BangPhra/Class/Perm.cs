@@ -44,6 +44,13 @@ public static class Perm
     public const string HrAsset = "HR_ASSET";
     public const string SysSettings = "SYS_SETTINGS";
     public const string SysDatabase = "SYS_DATABASE";
+    // ── แยกย่อยจาก SYS_SETTINGS (PHASE19_04) ────────────────────────────────
+    // เดิมศูนย์ตั้งค่าทั้งหมดอยู่ใต้ SYS_SETTINGS โมดูลเดียว ⇒ ให้สิทธิ์คนแก้เนื้อหาเว็บ
+    // เท่ากับให้กุญแจตั้งค่าบัญชี/Token ไปด้วย. แยกออกมาเพื่อมอบสิทธิ์เฉพาะส่วนได้จริง
+    public const string WebContent = "WEB_CONTENT";
+    public const string SysAccounting = "SYS_ACCOUNTING";
+    public const string SysChannel = "SYS_CHANNEL";
+    public const string SvcGuest = "SVC_GUEST";
 
     /// <summary>รายการโมดูลพร้อมชื่อไทย + หมวด — ใช้วาดตารางสิทธิ์ในหน้าจัดการ</summary>
     public class ModuleInfo
@@ -78,7 +85,16 @@ public static class Perm
         new ModuleInfo(HrLeave,         "การลา",                    "บุคคล (HR)"),
         new ModuleInfo(HrPayroll,       "เงินเดือน / OT",           "บุคคล (HR)"),
         new ModuleInfo(HrAsset,         "ทรัพย์สิน",                "บุคคล (HR)"),
-        new ModuleInfo(SysSettings,     "ตั้งค่าระบบ",              "ระบบ", "ศูนย์ตั้งค่า Token/API บัญชี NextAcc ช่องทางแชท"),
+        new ModuleInfo(WebContent,      "เนื้อหาเว็บไซต์ & รูปภาพ", "ตั้งค่า",
+            "หน้าแรก โปรโมชั่น สิ่งอำนวยความสะดวก สถานที่ใกล้เคียง เบิกของใช้ ข้อมูลฉุกเฉิน เกี่ยวกับเรา รูปสินค้า"),
+        new ModuleInfo(SvcGuest,        "ตั้งค่าบริการในที่พัก",    "ตั้งค่า",
+            "รูมเซอร์วิส (เวลา/ค่าบริการ) กิจกรรม Guest Portal QR ประจำห้อง"),
+        new ModuleInfo(SysChannel,      "ช่องทางติดต่อ & AI",       "ตั้งค่า",
+            "Token LINE/Facebook อีเมล OTA ตั้งค่า AI คลังความรู้"),
+        new ModuleInfo(SysAccounting,   "ตั้งค่าบัญชี & ภาษี",      "ตั้งค่า",
+            "NextAcc ผังบัญชี โหมด sync ลงบัญชีรายสินค้า สิทธิ์ระดับสมาชิก"),
+        new ModuleInfo(SysSettings,     "ตั้งค่าระบบ (ส่วนที่เหลือ)", "ระบบ",
+            "การเชื่อมต่อ/ระบบ ราคา&ช่องทางขาย ข้อมูลหลัก&ขั้นสูง — Token/API และกลุ่มสิทธิ์ยังเป็นของ Owner เท่านั้น"),
         new ModuleInfo(SysDatabase,     "ฐานข้อมูล / ข้อมูลหลัก",   "ระบบ")
     };
 
@@ -91,7 +107,8 @@ public static class Perm
         CrmCustomer, CrmLoyalty, CrmReview, CrmAffiliate,
         // เดิม Admin เข้าศูนย์ตั้งค่าได้ (หน้าจะกรองรายการที่เป็นของ Owner ออกเอง)
         // — คงไว้เพื่อไม่ให้พฤติกรรมเปลี่ยนก่อนผู้ดูแลจะเริ่มจัดกลุ่ม
-        SysSettings
+        // โมดูลที่แยกใหม่ต้องให้ครบด้วย ไม่งั้น Admin จะเสียสิทธิ์ที่เคยมีทันทีที่อัปเดต
+        SysSettings, WebContent, SvcGuest, SysChannel, SysAccounting
     };
 
     private static readonly HashSet<string> StaffModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

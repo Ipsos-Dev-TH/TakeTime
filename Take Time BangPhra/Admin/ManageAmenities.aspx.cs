@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -23,7 +23,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            if (!Perm.Guard(this, Perm.SysSettings)) return;
+            if (!Perm.Guard(this, Perm.WebContent)) return;
             _svc = new AmenityService(conn);
             try
             {
