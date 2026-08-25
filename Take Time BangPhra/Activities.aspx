@@ -1,4 +1,4 @@
-<%@ Page Title="กิจกรรม" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Activities.aspx.cs" Inherits="Take_Time_BangPhra.ActivitiesPublic" %>
+﻿<%@ Page Title="กิจกรรม" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Activities.aspx.cs" Inherits="Take_Time_BangPhra.ActivitiesPublic" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -47,6 +47,45 @@
             padding-top: 12px; border-top: 1px dashed #e2e8e4;
         }
         .act-price.free { color: #27ae60; }
+        .badge-nearby { background: #16a085; }
+
+        /* แผนที่สถานที่ใกล้เคียง */
+        .nb-map-wrap {
+            width: 100%; height: 440px; border-radius: 14px; overflow: hidden;
+            box-shadow: 0 3px 14px rgba(0,0,0,.09); margin-bottom: 10px;
+        }
+        .nb-map-wrap #publicNearbyMap { width: 100%; height: 100%; }
+        .nb-map-hint { text-align: center; font-size: 13px; color: #90a096; margin-bottom: 22px; }
+
+        .nb-actions { display: flex; gap: 8px; padding-top: 12px; border-top: 1px dashed #e2e8e4; }
+        .nb-btn {
+            flex: 1; text-align: center; padding: 9px 10px; border-radius: 9px;
+            font-size: 13.5px; font-weight: 700; text-decoration: none; transition: .2s;
+        }
+        .nb-btn-nav { background: #1a73e8; color: #fff; }
+        .nb-btn-nav:hover { background: #1558b0; color: #fff; text-decoration: none; }
+        .nb-btn-call { background: #eaf3ec; color: #2e5d3a; }
+        .nb-btn-call:hover { background: #d8e9dd; color: #2e5d3a; text-decoration: none; }
+
+        /* หมุดบนแผนที่ */
+        .nb-pin {
+            width: 34px; height: 34px; line-height: 32px; border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg); border: 2px solid #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,.35); text-align: center; font-size: 16px;
+        }
+        .nb-pin > span { display: inline-block; transform: rotate(45deg); }
+        .nb-pin.img { background-size: cover; background-position: center; border-radius: 50%; transform: none; }
+        .nb-popup { min-width: 190px; max-width: 240px; }
+        .nb-popup img { width: 100%; height: 110px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; }
+        .nb-popup h4 { margin: 0 0 4px; font-size: 15px; font-weight: 700; color: #2e5d3a; }
+        .nb-popup .cat { font-size: 11px; color: #666; margin-bottom: 6px; }
+        .nb-popup p { margin: 0 0 8px; font-size: 12px; color: #444; }
+        .nb-popup .nb-nav {
+            display: block; text-align: center; background: #1a73e8; color: #fff;
+            padding: 8px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;
+        }
+        .nb-popup .nb-nav:hover { background: #1558b0; color: #fff; text-decoration: none; }
+
         .act-empty { text-align: center; padding: 60px 20px; color: #90a096; }
         .act-empty i { font-size: 3.4em; margin-bottom: 14px; display: block; opacity: .5; }
         .act-cta {
@@ -63,8 +102,8 @@
 
     <div class="container" style="max-width: 1200px; padding-top: 20px; padding-bottom: 50px;">
         <div class="act-hero">
-            <h1><i class="fas fa-person-hiking"></i> กิจกรรมและสิ่งอำนวยความสะดวก</h1>
-            <p>สนุกกับกิจกรรมภายในที่พัก และสถานที่ท่องเที่ยวใกล้เคียง</p>
+            <h1><i class="fas fa-person-hiking"></i> กิจกรรมและสถานที่ใกล้เคียง</h1>
+            <p>สนุกกับกิจกรรมภายในที่พัก และสถานที่แนะนำรอบ ๆ พร้อมแผนที่นำทาง</p>
         </div>
 
         <div class="act-tabs">
@@ -73,7 +112,10 @@
                 <i class="fas fa-tree"></i> ในที่พัก
             </button>
             <button type="button" class="act-tab" data-cat="OFF_PROPERTY">
-                <i class="fas fa-map-location-dot"></i> ใกล้เคียง
+                <i class="fas fa-mountain-sun"></i> กิจกรรมนอกที่พัก
+            </button>
+            <button type="button" class="act-tab" data-cat="NEARBY">
+                <i class="fas fa-map-location-dot"></i> สถานที่ใกล้เคียง
             </button>
         </div>
 
@@ -88,6 +130,8 @@
         </div>
     </div>
 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
         (function () {
             var tabs = document.querySelectorAll('.act-tab');
@@ -103,8 +147,89 @@
                         var visible = s.querySelectorAll('.act-card:not([style*="display: none"])').length;
                         s.style.display = visible > 0 ? '' : 'none';
                     });
+                    // แผนที่โผล่เฉพาะตอนดู "ทั้งหมด" หรือ "สถานที่ใกล้เคียง"
+                    var showMap = (cat === 'ALL' || cat === 'NEARBY');
+                    document.querySelectorAll('[data-mapsection]').forEach(function (el) {
+                        el.style.display = showMap ? '' : 'none';
+                    });
+                    // Leaflet ต้องคำนวณขนาดใหม่หลังถูกซ่อนแล้วโชว์ ไม่งั้นแผนที่จะเป็นพื้นเทา
+                    if (showMap && window.nbPublicMap) setTimeout(function () { window.nbPublicMap.invalidateSize(); }, 60);
                 });
             });
+        })();
+
+        // ── แผนที่สถานที่ใกล้เคียง ────────────────────────────────────────────
+        (function () {
+            var NB = <%= MapJson %>;
+            var el = document.getElementById('publicNearbyMap');
+            if (!el || typeof L === 'undefined' || !NB || !NB.places || !NB.places.length) return;
+
+            function esc(t) {
+                return (t == null ? '' : String(t))
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            function icon(p) {
+                if (p.markerImg) {
+                    return L.divIcon({
+                        className: '',
+                        html: '<div class="nb-pin img" style="background-image:url(' + esc(p.markerImg) + ')"></div>',
+                        iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -16]
+                    });
+                }
+                return L.divIcon({
+                    className: '',
+                    html: '<div class="nb-pin" style="background:' + esc(p.color || '#16a085') + '"><span>'
+                        + esc(p.icon || '📍') + '</span></div>',
+                    iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -32]
+                });
+            }
+
+            function popup(p) {
+                var h = '<div class="nb-popup">';
+                if (p.img) h += '<img src="' + esc(p.img) + '" alt="" />';
+                h += '<h4>' + esc(p.name) + '</h4>';
+                if (p.catName) h += '<div class="cat">' + esc(p.icon) + ' ' + esc(p.catName) + '</div>';
+                if (p.desc) h += '<p>' + esc(p.desc) + '</p>';
+                var meta = [];
+                if (p.dist) meta.push('📍 ' + esc(p.dist));
+                if (p.time) meta.push('⏱ ' + esc(p.time));
+                if (p.hours) meta.push('🕒 ' + esc(p.hours));
+                if (meta.length) h += '<p>' + meta.join(' · ') + '</p>';
+                if (p.nav) h += '<a class="nb-nav" target="_blank" rel="noopener" href="' + esc(p.nav) + '">นำทางด้วย Google Maps</a>';
+                return h + '</div>';
+            }
+
+            var zone = NB.zone || {};
+            var map = L.map(el, { scrollWheelZoom: false })
+                       .setView([zone.lat || 13.1748, zone.lng || 100.9306], zone.zoom || 12);
+            window.nbPublicMap = map;
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+            map.on('click', function () { map.scrollWheelZoom.enable(); });
+
+            // ขอบเขตพื้นที่ (เช่น รูปทรงอำเภอศรีราชา) — ไม่ได้ตั้งไว้ก็ย่อ/ขยายตามหมุดแทน
+            var boundary = null;
+            if (zone.geojson) {
+                try {
+                    boundary = L.geoJSON(JSON.parse(zone.geojson), {
+                        style: { color: zone.line || '#00796B', weight: 2,
+                                 fillColor: zone.fill || '#16a085', fillOpacity: 0.12 }
+                    }).addTo(map);
+                    map.fitBounds(boundary.getBounds(), { padding: [16, 16] });
+                } catch (e) { boundary = null; }
+            }
+
+            var pts = [];
+            NB.places.forEach(function (p) {
+                L.marker([p.lat, p.lng], { icon: icon(p) }).addTo(map).bindPopup(popup(p));
+                pts.push([p.lat, p.lng]);
+            });
+            if (!boundary && pts.length) {
+                if (pts.length === 1) map.setView(pts[0], 15);
+                else map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+            }
         })();
     </script>
 </asp:Content>

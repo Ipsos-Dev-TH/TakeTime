@@ -15,6 +15,12 @@ namespace Take_Time_BangPhra
         private readonly string _conn =
             System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        /// <summary>ข้อมูลแผนที่ (หมุด + ขอบเขตโซน) ที่หน้า .aspx เอาไปวาดด้วย Leaflet</summary>
+        protected string MapJson = "{\"places\":[],\"categories\":[]}";
+
+        /// <summary>มีหมุดให้วาดจริงไหม — ไม่มีก็ไม่ต้องโหลดแผนที่เปล่า</summary>
+        protected bool HasMap;
+
         protected void Page_Load(object sender, EventArgs e)
         {
             if (!Feature.Guard(this, "Activities", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
@@ -31,14 +37,19 @@ namespace Take_Time_BangPhra
 
                 if (dt == null || dt.Rows.Count == 0)
                 {
-                    litActivities.Text =
-                        "<div class='act-empty'><i class='fas fa-calendar-xmark'></i>" +
-                        "<h4>ยังไม่มีข้อมูลกิจกรรม</h4><p>กรุณาติดต่อเจ้าหน้าที่เพื่อสอบถามรายละเอียด</p></div>";
+                    // ไม่มีกิจกรรม ไม่ได้แปลว่าไม่มีสถานที่แนะนำ — แสดงส่วนสถานที่ต่อไป
+                    var only = new StringBuilder();
+                    RenderNearbySection(only);
+                    litActivities.Text = only.Length > 0
+                        ? only.ToString()
+                        : "<div class='act-empty'><i class='fas fa-calendar-xmark'></i>" +
+                          "<h4>ยังไม่มีข้อมูลกิจกรรม</h4><p>กรุณาติดต่อเจ้าหน้าที่เพื่อสอบถามรายละเอียด</p></div>";
                     return;
                 }
 
                 RenderSection(sb, dt, "ON_PROPERTY", "กิจกรรมในที่พัก", "fa-tree");
-                RenderSection(sb, dt, "OFF_PROPERTY", "สถานที่ท่องเที่ยวใกล้เคียง", "fa-map-location-dot");
+                RenderSection(sb, dt, "OFF_PROPERTY", "กิจกรรมนอกที่พัก", "fa-mountain-sun");
+                RenderNearbySection(sb);
                 litActivities.Text = sb.ToString();
             }
             catch (Exception ex)
@@ -118,6 +129,117 @@ namespace Take_Time_BangPhra
             }
 
             sb.Append("</div></div>");
+        }
+
+        /// <summary>
+        /// ส่วน "สถานที่แนะนำใกล้เคียง" — แผนที่ขอบเขตพื้นที่ + หมุด + การ์ดพร้อมปุ่มนำทาง
+        /// ใช้ข้อมูลชุดเดียวกับ Guest Portal (จัดการที่ Admin → จัดการสถานที่ใกล้เคียง ที่เดียว)
+        /// การ์ดใช้คลาส act-card + data-cat='NEARBY' เพื่อให้ตัวกรองแท็บเดิมทำงานต่อได้ทันที
+        /// </summary>
+        private void RenderNearbySection(StringBuilder sb)
+        {
+            try
+            {
+                var svc = new NearbyPlaceService(_conn);
+                DataTable places = svc.GetPlaces();
+                if (places == null || places.Rows.Count == 0) return;
+
+                MapJson = svc.BuildMapJson();
+                HasMap = MapJson.IndexOf("\"lat\"", StringComparison.Ordinal) >= 0;
+
+                sb.Append("<div class='act-section' data-nearby='1' style='margin-bottom:38px;'>");
+                sb.Append("<h2 style='color:#2e5d3a;font-weight:700;margin-bottom:20px;font-size:1.5em;'>"
+                        + "<i class='fas fa-map-location-dot'></i> สถานที่แนะนำใกล้เคียง "
+                        + "<small style='color:#90a096;font-weight:400;font-size:.62em;'>("
+                        + places.Rows.Count + " แห่ง)</small></h2>");
+
+                if (HasMap)
+                {
+                    sb.Append("<div class='nb-map-wrap' data-mapsection='1'>");
+                    sb.Append("<div id='publicNearbyMap'></div>");
+                    sb.Append("</div>");
+                    sb.Append("<p class='nb-map-hint' data-mapsection='1'>"
+                            + "<i class='fas fa-hand-pointer'></i> แตะที่หมุดเพื่อดูรายละเอียดและกดนำทาง</p>");
+                }
+
+                sb.Append("<div class='act-grid'>");
+                foreach (DataRow r in places.Rows)
+                {
+                    string name = Val(r, "Name");
+                    string desc = Val(r, "Description");
+                    if (desc.Length > 165) desc = desc.Substring(0, 165) + "...";
+                    string img = Val(r, "Image_Path");
+                    string icon = Val(r, "Icon");
+                    if (string.IsNullOrWhiteSpace(icon)) icon = Val(r, "CategoryIcon");
+                    string catName = Val(r, "CategoryName");
+                    string dist = Val(r, "Distance");
+                    string time = Val(r, "Travel_Time");
+                    string hours = Val(r, "Open_Hours");
+                    string phone = Val(r, "Phone");
+                    string nav = NavLink(r);
+
+                    sb.Append("<div class='act-card' data-cat='NEARBY'>");
+
+                    if (!string.IsNullOrWhiteSpace(img))
+                        sb.Append("<div class='act-thumb' style=\"background-image:url('"
+                                + Server.HtmlEncode(img) + "')\">");
+                    else
+                        sb.Append("<div class='act-thumb'><span style='font-size:3em;'>"
+                                + Server.HtmlEncode(string.IsNullOrWhiteSpace(icon) ? "📍" : icon) + "</span>");
+
+                    if (!string.IsNullOrWhiteSpace(catName))
+                        sb.Append("<div class='act-badges'><span class='act-badge badge-nearby'>"
+                                + Server.HtmlEncode(catName) + "</span></div>");
+                    sb.Append("</div>");
+
+                    sb.Append("<div class='act-body'>");
+                    sb.Append("<h3>" + Server.HtmlEncode(name) + "</h3>");
+                    if (!string.IsNullOrWhiteSpace(desc))
+                        sb.Append("<div class='act-desc'>" + Server.HtmlEncode(desc) + "</div>");
+
+                    if (!string.IsNullOrWhiteSpace(dist) || !string.IsNullOrWhiteSpace(time)
+                        || !string.IsNullOrWhiteSpace(hours))
+                    {
+                        sb.Append("<div class='act-meta'>");
+                        if (!string.IsNullOrWhiteSpace(dist))
+                            sb.Append("<span><i class='fas fa-location-dot'></i>" + Server.HtmlEncode(dist) + "</span>");
+                        if (!string.IsNullOrWhiteSpace(time))
+                            sb.Append("<span><i class='fas fa-clock'></i>" + Server.HtmlEncode(time) + "</span>");
+                        if (!string.IsNullOrWhiteSpace(hours))
+                            sb.Append("<span><i class='fas fa-door-open'></i>" + Server.HtmlEncode(hours) + "</span>");
+                        sb.Append("</div>");
+                    }
+
+                    sb.Append("<div class='nb-actions'>");
+                    if (!string.IsNullOrWhiteSpace(nav))
+                        sb.Append("<a class='nb-btn nb-btn-nav' target='_blank' rel='noopener' href='"
+                                + Server.HtmlEncode(nav) + "'><i class='fas fa-diamond-turn-right'></i> นำทาง</a>");
+                    if (!string.IsNullOrWhiteSpace(phone))
+                        sb.Append("<a class='nb-btn nb-btn-call' href='tel:" + Server.HtmlEncode(phone)
+                                + "'><i class='fas fa-phone'></i> โทร</a>");
+                    sb.Append("</div>");
+
+                    sb.Append("</div></div>");
+                }
+                sb.Append("</div></div>");
+            }
+            catch (Exception ex)
+            {
+                // ส่วนสถานที่ล้มไม่ควรทำให้หน้ากิจกรรมทั้งหน้าพัง (เช่น ยังไม่ได้รันไมเกรชัน)
+                System.Diagnostics.Trace.TraceError("Nearby section error: " + ex.Message);
+            }
+        }
+
+        /// <summary>ลิงก์นำทาง — ใช้ลิงก์ที่ผู้ดูแลใส่เองก่อน ไม่มีก็สร้างจากพิกัด</summary>
+        private static string NavLink(DataRow r)
+        {
+            string url = Val(r, "Map_Url");
+            if (!string.IsNullOrWhiteSpace(url)) return url;
+            double la, ln;
+            if (!double.TryParse(Val(r, "Latitude"), out la)) return "";
+            if (!double.TryParse(Val(r, "Longitude"), out ln)) return "";
+            if (la == 0 && ln == 0) return "";
+            return NearbyPlaceService.BuildNavUrl(la, ln, "", null);
         }
 
         private static string PriceSuffix(string mode)
