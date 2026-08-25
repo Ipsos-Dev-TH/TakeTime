@@ -1428,6 +1428,7 @@
       <DependentUpon>AddFriend.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\Services\ActivityService.cs" />
+    <Compile Include="Class\Services\NearbyPlaceService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

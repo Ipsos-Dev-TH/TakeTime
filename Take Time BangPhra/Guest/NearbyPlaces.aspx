@@ -1,4 +1,4 @@
-<%@ Page Title="Nearby Places & Attractions" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="NearbyPlaces.aspx.cs" Inherits="Take_Time_BangPhra.Guest.NearbyPlaces" %>
+﻿<%@ Page Title="Nearby Places & Attractions" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="NearbyPlaces.aspx.cs" Inherits="Take_Time_BangPhra.Guest.NearbyPlaces" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -44,17 +44,52 @@
 
         .map-container {
             width: 100%;
-            height: 400px;
+            height: 460px;
             border-radius: 15px;
             overflow: hidden;
-            margin-bottom: 30px;
+            margin-bottom: 12px;
             box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            position: relative;
         }
 
-        .map-container iframe {
+        .map-container iframe,
+        .map-container #nearbyMap {
             width: 100%;
             height: 100%;
             border: none;
+        }
+
+        /* หมุดวาดเองด้วย divIcon — วงกลมสีประจำประเภท + อิโมจิตรงกลาง + หางชี้ลงพิกัด */
+        .nb-pin {
+            width: 34px; height: 34px; line-height: 32px;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            border: 2px solid #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,.35);
+            text-align: center;
+            font-size: 16px;
+        }
+        .nb-pin > span { display: inline-block; transform: rotate(45deg); }
+        .nb-pin.img { background-size: cover; background-position: center; border-radius: 50%; transform: none; }
+
+        .nb-popup { min-width: 190px; max-width: 240px; }
+        .nb-popup img { width: 100%; height: 110px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; }
+        .nb-popup h4 { margin: 0 0 4px; font-size: 15px; font-weight: 700; }
+        .nb-popup .cat { font-size: 11px; color: #666; margin-bottom: 6px; }
+        .nb-popup p { margin: 0 0 8px; font-size: 12px; color: #444; }
+        .nb-popup .nb-nav {
+            display: block; text-align: center; background: #1a73e8; color: #fff;
+            padding: 8px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;
+        }
+        .nb-popup .nb-nav:hover { background: #1558b0; color: #fff; }
+
+        .map-hint {
+            font-size: 12px; color: #777; margin: 0 0 22px; text-align: center;
+        }
+
+        .place-thumb {
+            width: 100%; height: 150px; object-fit: cover;
+            border-radius: 12px 12px 0 0; display: block;
         }
 
         .category-tabs {
@@ -423,44 +458,33 @@
             </a>
         </div>
 
-        <!-- Map -->
-        <div class="map-container">
-            <!-- BangPhra area map centered on resort location -->
-            <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d15500.0!2d100.92!3d13.23!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTPCsDEzJzQ4LjAiTiAxMDDCsDU1JzEyLjAiRQ!5e0!3m2!1sen!2sth!4v1703500000000"
-                allowfullscreen=""
-                loading="lazy"
-                referrerpolicy="no-referrer-when-downgrade">
-            </iframe>
-        </div>
+        <!-- แผนที่จริง: ขอบเขตพื้นที่ + หมุดของแต่ละสถานที่ (Leaflet + OpenStreetMap) -->
+        <% if (HasMapPoints) { %>
+        <div class="map-container"><div id="nearbyMap"></div></div>
+        <p class="map-hint"><i class="fas fa-hand-pointer"></i> แตะที่หมุดเพื่อดูรายละเอียดและกดนำทาง</p>
+        <% } %>
 
-        <!-- Category Tabs -->
+        <!-- ประเภทสถานที่ — ดึงจากฐานข้อมูล (เดิม hard-code ไว้ 5 ชนิด เพิ่มเองไม่ได้) -->
         <div class="category-tabs">
-            <button type="button" class="category-tab active" onclick="filterPlaces('all')">
-                <i class="fas fa-globe"></i> All
+            <button type="button" class="category-tab active" data-cat="all" onclick="filterPlaces('all', this)">
+                <i class="fas fa-globe"></i> ทั้งหมด
             </button>
-            <button type="button" class="category-tab" onclick="filterPlaces('beach')">
-                <i class="fas fa-umbrella-beach"></i> Beaches
-            </button>
-            <button type="button" class="category-tab" onclick="filterPlaces('restaurant')">
-                <i class="fas fa-utensils"></i> Restaurants
-            </button>
-            <button type="button" class="category-tab" onclick="filterPlaces('cafe')">
-                <i class="fas fa-coffee"></i> Cafes
-            </button>
-            <button type="button" class="category-tab" onclick="filterPlaces('attraction')">
-                <i class="fas fa-camera"></i> Attractions
-            </button>
-            <button type="button" class="category-tab" onclick="filterPlaces('shopping')">
-                <i class="fas fa-shopping-bag"></i> Shopping
-            </button>
+            <% if (DtCategories != null) { foreach (System.Data.DataRow c in DtCategories.Rows) { %>
+                <button type="button" class="category-tab" data-cat="<%= Esc(c["Code"]) %>"
+                        onclick="filterPlaces('<%= Esc(c["Code"]) %>', this)">
+                    <span><%= Esc(c["Icon"]) %></span> <%= Esc(c["Name"]) %>
+                </button>
+            <% } } %>
         </div>
 
         <!-- Places from Database -->
         <div class="places-grid">
             <asp:Repeater ID="rptPlaces" runat="server">
                 <ItemTemplate>
-                    <div class="place-card" data-category='<%# Eval("Category") %>'>
+                    <div class="place-card" data-category='<%# Eval("Category") %>' data-id='<%# Eval("ID") %>'>
+                        <%# !string.IsNullOrEmpty(PlaceImage(Eval("Image_Path")))
+                            ? "<img src='" + PlaceImage(Eval("Image_Path")) + "' class='place-thumb' alt='' loading='lazy' />"
+                            : "" %>
                         <div class="place-icon"><%# Eval("Icon") %></div>
                         <div class="place-info">
                             <h3><%# Eval("Name") %></h3>
@@ -470,7 +494,9 @@
                                 <span class="travel-time"><i class="fas fa-clock"></i> <%# Eval("Travel_Time") %></span>
                             </div>
                             <div class="place-actions">
-                                <%# !string.IsNullOrEmpty(Eval("Map_Url")?.ToString()) ? "<a href='" + Eval("Map_Url") + "' target='_blank' class='btn-map'><i class='fas fa-map'></i> แผนที่</a>" : "" %>
+                                <%# !string.IsNullOrEmpty(NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")))
+                                    ? "<a href='" + NavUrl(Eval("Map_Url"), Eval("Latitude"), Eval("Longitude")) + "' target='_blank' rel='noopener' class='btn-map'><i class='fas fa-diamond-turn-right'></i> นำทาง</a>"
+                                    : "" %>
                                 <%# !string.IsNullOrEmpty(Eval("Phone")?.ToString()) ? "<a href='tel:" + Eval("Phone") + "' class='btn-call'><i class='fas fa-phone'></i> โทร</a>" : "" %>
                             </div>
                         </div>
@@ -501,22 +527,131 @@
         </div>
     </div>
 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
-        function filterPlaces(category) {
-            // Update active tab
-            document.querySelectorAll('.category-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            event.target.classList.add('active');
+        // ข้อมูลแผนที่มาจากฐานข้อมูลทั้งก้อน (หมุด + ขอบเขตโซน + ประเภท)
+        var NB = <%= MapJson %>;
+        var nbMap = null, nbMarkers = [], nbBoundaryLayer = null;
 
-            // Filter places
-            document.querySelectorAll('.place-card').forEach(card => {
-                if (category === 'all' || card.dataset.category === category) {
-                    card.style.display = 'block';
-                } else {
-                    card.style.display = 'none';
-                }
+        function nbEsc(t) {
+            return (t == null ? '' : String(t))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // หมุด: ใช้รูปที่กำหนดเองถ้ามี ไม่งั้นเป็นวงกลมสีประจำประเภท + อิโมจิ
+        function nbIcon(p) {
+            if (p.markerImg) {
+                return L.divIcon({
+                    className: '',
+                    html: '<div class="nb-pin img" style="background-image:url(' + nbEsc(p.markerImg) + ')"></div>',
+                    iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -16]
+                });
+            }
+            return L.divIcon({
+                className: '',
+                html: '<div class="nb-pin" style="background:' + nbEsc(p.color || '#1976D2') + '"><span>'
+                    + nbEsc(p.icon || '📍') + '</span></div>',
+                iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -32]
             });
         }
+
+        function nbPopup(p) {
+            var h = '<div class="nb-popup">';
+            if (p.img) h += '<img src="' + nbEsc(p.img) + '" alt="" />';
+            h += '<h4>' + nbEsc(p.name) + '</h4>';
+            if (p.catName) h += '<div class="cat">' + nbEsc(p.icon) + ' ' + nbEsc(p.catName) + '</div>';
+            if (p.desc) h += '<p>' + nbEsc(p.desc) + '</p>';
+            var meta = [];
+            if (p.dist) meta.push('📍 ' + nbEsc(p.dist));
+            if (p.time) meta.push('⏱ ' + nbEsc(p.time));
+            if (p.hours) meta.push('🕒 ' + nbEsc(p.hours));
+            if (meta.length) h += '<p>' + meta.join(' · ') + '</p>';
+            if (p.phone) h += '<p>📞 <a href="tel:' + nbEsc(p.phone) + '">' + nbEsc(p.phone) + '</a></p>';
+            if (p.nav) h += '<a class="nb-nav" target="_blank" rel="noopener" href="' + nbEsc(p.nav) + '">นำทางด้วย Google Maps</a>';
+            h += '</div>';
+            return h;
+        }
+
+        function nbInitMap() {
+            var el = document.getElementById('nearbyMap');
+            if (!el || typeof L === 'undefined') return;   // แผนที่โหลดไม่ได้ → รายการด้านล่างยังใช้งานได้ปกติ
+
+            var zone = NB.zone || {};
+            nbMap = L.map(el, { scrollWheelZoom: false })
+                     .setView([zone.lat || 13.1748, zone.lng || 100.9306], zone.zoom || 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(nbMap);
+            nbMap.on('click', function () { nbMap.scrollWheelZoom.enable(); });
+
+            // ขอบเขตพื้นที่ (เช่น รูปทรงอำเภอศรีราชา) — ไม่ได้ใส่ไว้ก็ข้ามไป แล้วไป fit ตามหมุดแทน
+            if (zone.geojson) {
+                try {
+                    nbBoundaryLayer = L.geoJSON(JSON.parse(zone.geojson), {
+                        style: {
+                            color: zone.line || '#00796B', weight: 2,
+                            fillColor: zone.fill || '#00b09b', fillOpacity: 0.12
+                        }
+                    }).addTo(nbMap);
+                    nbMap.fitBounds(nbBoundaryLayer.getBounds(), { padding: [16, 16] });
+                } catch (e) { nbBoundaryLayer = null; }
+            }
+
+            var pts = [];
+            (NB.places || []).forEach(function (p) {
+                var m = L.marker([p.lat, p.lng], { icon: nbIcon(p) }).addTo(nbMap);
+                m.bindPopup(nbPopup(p));
+                m._nbCat = p.cat;
+                m._nbId = p.id;
+                nbMarkers.push(m);
+                pts.push([p.lat, p.lng]);
+            });
+
+            // ไม่มีขอบเขต → ซูมให้พอดีกับหมุดทั้งหมด (ยังเห็นภาพรวมพื้นที่เหมือนกัน)
+            if (!nbBoundaryLayer && pts.length > 0) {
+                if (pts.length === 1) nbMap.setView(pts[0], 15);
+                else nbMap.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+            }
+        }
+
+        // กรองประเภท: ซ่อนทั้งการ์ดและหมุดให้ตรงกัน
+        function filterPlaces(category, btn) {
+            document.querySelectorAll('.category-tab').forEach(function (tab) { tab.classList.remove('active'); });
+            if (btn) btn.classList.add('active');
+
+            document.querySelectorAll('.place-card').forEach(function (card) {
+                card.style.display = (category === 'all' || card.dataset.category === category) ? 'block' : 'none';
+            });
+
+            if (!nbMap) return;
+            var shown = [];
+            nbMarkers.forEach(function (m) {
+                var show = (category === 'all' || m._nbCat === category);
+                if (show) { m.addTo(nbMap); shown.push(m.getLatLng()); }
+                else { nbMap.removeLayer(m); }
+            });
+            if (shown.length > 1) nbMap.fitBounds(L.latLngBounds(shown), { padding: [30, 30] });
+            else if (shown.length === 1) nbMap.setView(shown[0], 15);
+            else if (nbBoundaryLayer) nbMap.fitBounds(nbBoundaryLayer.getBounds(), { padding: [16, 16] });
+        }
+
+        // แตะการ์ด → เลื่อนไปที่หมุดบนแผนที่แล้วเปิด popup
+        document.addEventListener('DOMContentLoaded', function () {
+            nbInitMap();
+            document.querySelectorAll('.place-card').forEach(function (card) {
+                card.addEventListener('click', function (ev) {
+                    if (ev.target.closest('a')) return;      // กดปุ่มนำทาง/โทร ไม่ต้องเด้งแผนที่
+                    var id = parseInt(card.dataset.id, 10);
+                    var m = nbMarkers.filter(function (x) { return x._nbId === id; })[0];
+                    if (!m || !nbMap) return;
+                    nbMap.setView(m.getLatLng(), 16);
+                    m.openPopup();
+                    document.querySelector('.map-container').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
+            });
+        });
     </script>
 </asp:Content>

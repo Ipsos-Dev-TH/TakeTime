@@ -1,26 +1,41 @@
 using System;
-using System.Collections.Generic;
 using System.Data;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra.Guest
 {
+    /// <summary>
+    /// สถานที่แนะนำใกล้เคียง (ฝั่งแขก) — แผนที่ตามขอบเขตพื้นที่ + หมุดของแต่ละสถานที่ + รายการด้านล่าง
+    ///
+    /// เดิมหน้านี้ฝัง iframe Google Maps ที่ hard-code พิกัดไว้ในหน้า จึงเป็นแค่ "ภาพแผนที่"
+    /// ไม่มีหมุด ไม่รู้จักสถานที่ในฐานข้อมูล และแก้พื้นที่ไม่ได้เลยถ้าย้ายสาขา
+    /// ตอนนี้วาดด้วย Leaflet จากข้อมูลจริง: ขอบเขตโซน (GeoJSON) + หมุดตามพิกัดที่บันทึกไว้
+    /// ปุ่มนำทางใช้ลิงก์ Google Maps แบบ api=1 (ไม่ต้องใช้ API key)
+    /// </summary>
     public partial class NearbyPlaces : Page
     {
-        private readonly string _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+        private readonly string _connectionString =
+            System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private GuestPortalService _guestPortalService;
+        private NearbyPlaceService _svc;
         private code _code;
 
         protected DataTable DtPlaces;
-        protected string[] Categories = { "beach", "restaurant", "cafe", "attraction", "shopping" };
+        protected DataTable DtCategories;
+
+        /// <summary>JSON สำหรับวาดแผนที่ (หมุด + ขอบเขต + ประเภท) — ฝังลงหน้าเว็บตรง ๆ</summary>
+        protected string MapJson = "{\"places\":[],\"categories\":[]}";
+
+        /// <summary>มีสถานที่ที่ใส่พิกัดแล้วอย่างน้อยหนึ่งแห่งไหม — ไม่มีก็ไม่ต้องโชว์แผนที่เปล่า</summary>
+        protected bool HasMapPoints;
 
         protected void Page_Load(object sender, EventArgs e)
         {
             _guestPortalService = new GuestPortalService(_connectionString);
+            _svc = new NearbyPlaceService(_connectionString);
             _code = new code();
 
-            // Check session
             if (!ValidateGuestSession())
             {
                 Response.Redirect("~/Guest/Portal");
@@ -35,20 +50,25 @@ namespace Take_Time_BangPhra.Guest
 
         private void LoadPlaces()
         {
+            try { DtCategories = _svc.GetCategories(); }
+            catch { DtCategories = new DataTable(); }
+
+            try { DtPlaces = _svc.GetPlaces(); }
+            catch { DtPlaces = new DataTable(); }
+
             try
             {
-                DtPlaces = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT * FROM Guest_NearbyPlaces
-                      WHERE Status = 'True'
-                      ORDER BY Category, Sort_Order, Name",
-                    null);
+                MapJson = _svc.BuildMapJson();
+                // นับหมุดที่วาดได้จริง (มีพิกัด) — ต่างจากจำนวนสถานที่ทั้งหมด
+                HasMapPoints = MapJson.IndexOf("\"lat\"", StringComparison.Ordinal) >= 0;
             }
             catch
             {
-                DtPlaces = new DataTable();
+                MapJson = "{\"places\":[],\"categories\":[]}";
+                HasMapPoints = false;
             }
 
-            if (DtPlaces.Rows.Count > 0)
+            if (DtPlaces != null && DtPlaces.Rows.Count > 0)
             {
                 rptPlaces.DataSource = DtPlaces;
                 rptPlaces.DataBind();
@@ -60,63 +80,42 @@ namespace Take_Time_BangPhra.Guest
             }
         }
 
-        protected DataRow[] GetPlacesByCategory(string category)
+        // ── helper สำหรับ markup ──────────────────────────────────────────────────
+
+        /// <summary>รูปของสถานที่ — ไม่มีรูปให้คืนค่าว่าง (การ์ดจะแสดงไอคอนแทน)</summary>
+        protected string PlaceImage(object imagePath)
         {
-            if (DtPlaces == null || DtPlaces.Rows.Count == 0) return new DataRow[0];
-            return DtPlaces.Select("Category = '" + category.Replace("'", "''") + "'");
+            string p = imagePath == null || imagePath == DBNull.Value ? "" : imagePath.ToString().Trim();
+            return p;
         }
 
-        protected bool HasPlacesInCategory(string category)
+        /// <summary>ลิงก์นำทาง: ใช้ลิงก์ที่ผู้ดูแลใส่เองก่อน ไม่มีก็สร้างจากพิกัด</summary>
+        protected string NavUrl(object mapUrl, object lat, object lng)
         {
-            return GetPlacesByCategory(category).Length > 0;
+            string existing = mapUrl == null || mapUrl == DBNull.Value ? "" : mapUrl.ToString().Trim();
+            if (existing.Length > 0) return existing;
+            double la, ln;
+            if (lat == null || lat == DBNull.Value || lng == null || lng == DBNull.Value) return "";
+            if (!double.TryParse(lat.ToString(), out la) || !double.TryParse(lng.ToString(), out ln)) return "";
+            if (la == 0 && ln == 0) return "";
+            return NearbyPlaceService.BuildNavUrl(la, ln, "", null);
         }
 
-        protected string GetCategoryLabel(string category)
+        protected string Esc(object v)
         {
-            switch (category)
-            {
-                case "beach": return "ชายหาด";
-                case "restaurant": return "ร้านอาหาร";
-                case "cafe": return "คาเฟ่";
-                case "attraction": return "สถานที่ท่องเที่ยว";
-                case "shopping": return "ช้อปปิ้ง";
-                default: return category;
-            }
+            return v == null || v == DBNull.Value ? "" : Server.HtmlEncode(v.ToString());
         }
 
-        protected string GetCategoryIcon(string category)
-        {
-            switch (category)
-            {
-                case "beach": return "🏖️";
-                case "restaurant": return "🍽️";
-                case "cafe": return "☕";
-                case "attraction": return "🎯";
-                case "shopping": return "🛒";
-                default: return "📍";
-            }
-        }
-
-        /// <summary>
-        /// Validate guest session
-        /// </summary>
         private bool ValidateGuestSession()
         {
             string sessionToken = Request.Cookies["GuestSession"]?.Value ?? Session["GuestSessionToken"]?.ToString();
-
-            if (string.IsNullOrEmpty(sessionToken))
+            if (string.IsNullOrEmpty(sessionToken)) return false;
+            try
             {
-                return false;
+                DataTable dtSession = _guestPortalService.ValidateGuestSession(sessionToken);
+                return dtSession != null && dtSession.Rows.Count > 0;
             }
-
-            DataTable dtSession = _guestPortalService.ValidateGuestSession(sessionToken);
-
-            if (dtSession.Rows.Count == 0)
-            {
-                return false;
-            }
-
-            return true;
+            catch { return false; }
         }
     }
 }
