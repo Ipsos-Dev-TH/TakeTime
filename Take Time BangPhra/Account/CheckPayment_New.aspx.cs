@@ -1712,6 +1712,21 @@ namespace Take_Time_BangPhra.Account
 
                 if (fresh != null && fresh.Found)
                 {
+                    // NextAcc แจ้งเลขที่ของเอกสาร GUID นี้ว่าอะไร — ถ้าไม่ตรงกับที่เราขอ ให้บอกตรง ๆ
+                    // ไม่งั้นผู้ใช้เห็นแค่ "สำเร็จ" แล้วเปิดมาได้เอกสารอื่น โดยไม่รู้ว่าเพราะอะไร
+                    string naNum = fresh.DocumentNumber ?? "";
+                    if (!string.IsNullOrEmpty(naNum)
+                        && !string.Equals(naNum, docNum, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ShowError($"⚠ ดึงไฟล์แล้ว แต่ NextAcc แจ้งว่าเอกสารที่ผูกไว้กับรายการนี้คือ \"{naNum}\" "
+                                + $"ไม่ใช่ \"{docNum}\"\n\n"
+                                + (naNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase)
+                                    ? "เอกสารที่ผูกไว้ยังเป็นฉบับร่างบน NextAcc — ใบที่อนุมัติแล้วเป็นคนละใบ "
+                                      + "กรุณาลบใบร่างที่ค้างบน NextAcc หรือแจ้งให้ผูกรายการนี้กับใบที่อนุมัติแล้ว"
+                                    : "รายการนี้ผูกกับเอกสารผิดใบ — ตรวจสอบบน NextAcc"));
+                        btnSearch_Click(null, EventArgs.Empty);
+                        return;
+                    }
                     ShowError($"✅ ดึงไฟล์ล่าสุดของ {docNum} จาก NextAcc แล้ว — กด \"📄 ดู PDF\" เพื่อเปิดไฟล์ใหม่");
                     btnSearch_Click(null, EventArgs.Empty);   // รีเฟรชตารางให้เห็นสถานะไฟล์ล่าสุด
                 }

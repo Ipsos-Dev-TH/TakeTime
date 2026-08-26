@@ -13713,7 +13713,13 @@ namespace Take_Time_BangPhra.Integration
             string relPrefix = "/Documents/Payment/NextAcc/" + safeDoc;
 
             // fast path: มี cache อยู่แล้ว (โฟลเดอร์ผูก GUID → ไม่มีทางเสิร์ฟใบอื่น)
-            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+            //
+            // ⚠ เดิมไม่มีตัวเช็ค "ความสด" เลย — มีไฟล์ = เสิร์ฟ ⇒ ถ้า cache ไว้ตอนเอกสารยังเป็นร่าง
+            //   กดดู PDF กี่ครั้งก็ได้ตัวร่างตลอดไป (ต้องกดปุ่มดึงล่าสุดเท่านั้นถึงจะเปลี่ยน)
+            //   ตอนนี้ใช้ได้ต่อเมื่อ marker ยืนยันว่าเอกสารพ้นสถานะร่างแล้ว
+            string statePath = Path.Combine(folder, Path.GetFileNameWithoutExtension(pdfFileName) + ".docstate");
+            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+                && PdfCacheIsFinal(statePath))
             {
                 result.Found = true;
                 result.PdfLocalPath = pdfPath;
@@ -13737,12 +13743,33 @@ namespace Take_Time_BangPhra.Integration
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 // 1) PDF อย่างเป็นทางการจาก NextAcc (ตาม document id) — ประทับ "ยกเลิก" ถ้าเอกสารถูก void
-                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0
+                    || !PdfCacheIsFinal(statePath))
                 {
                     byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(nextAccId,
                         watermark: isCancelled ? "ยกเลิก" : null);
                     if (pdf != null && pdf.Length > 0)
+                    {
                         File.WriteAllBytes(pdfPath, pdf);
+
+                        // บันทึกว่า NextAcc "บอกว่า" เอกสาร GUID นี้เลขอะไร/สถานะอะไร ณ ตอนดึง
+                        // ใช้ทั้งกัน cache ตัวร่าง และเป็นหลักฐานเทียบกับเลขที่ปรากฏใน PDF จริง
+                        try
+                        {
+                            var info = await _apiClient.GetDocumentAsync(nextAccId);
+                            string curNum = info?.data?.DocumentNumber ?? "";
+                            int curSt = info?.data?.Status ?? -1;
+                            WritePdfStateMarker(statePath, curNum, curSt.ToString());
+                            result.DocumentNumber = curNum;   // ใช้ฟิลด์เดิมของโมเดล
+
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"DownloadNextAccDocumentById: GUID={nextAccId} → NextAcc แจ้งเลขที่='{curNum}' "
+                                + $"สถานะ={DescribeDocumentStatus(curSt)} (ไฟล์ {pdfFileName}) — "
+                                + "ถ้า PDF ที่เปิดขึ้นมาแสดงเลขอื่น แปลว่า NextAcc เรนเดอร์ PDF ไม่ตรงกับข้อมูลของตัวเอง",
+                                "SYSTEM");
+                        }
+                        catch { WritePdfStateMarker(statePath, "", ""); }
+                    }
                 }
                 if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
                 {
