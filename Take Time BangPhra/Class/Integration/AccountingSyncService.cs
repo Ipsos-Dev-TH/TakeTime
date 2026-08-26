@@ -13354,6 +13354,45 @@ namespace Take_Time_BangPhra.Integration
             return false;   // หาไม่ได้ → ถือว่าไม่ stale (ใช้ cache, ไม่ download มั่ว)
         }
 
+        /// <summary>
+        /// PDF ที่ cache ไว้ "เป็นฉบับสมบูรณ์แล้วหรือยัง"
+        ///
+        /// เคสจริง: เอกสารถูกสร้างเป็น Draft (เลข DRAFT-xxxx) → TakeTime ดึง PDF มา cache
+        /// → ผู้ใช้ไป **กดอนุมัติบน NextAcc เอง** → เลขเปลี่ยนเป็น PV-xxxx
+        /// แต่ IsVoucherPdfCacheStale วัดจาก "เวลาที่ระบบเรา sync" เท่านั้น ⇒ ไม่มีอะไรเปลี่ยนฝั่งเรา
+        /// ⇒ cache ไม่ถูกมองว่าเก่า ⇒ กดดู PDF ได้ตัวร่างตลอดไป
+        ///
+        /// จึงบันทึก "เลข/สถานะ ณ ตอนที่ดึง" ไว้ข้าง ๆ ไฟล์ แล้วถือว่า cache ใช้ไม่ได้เมื่อ
+        /// ตอนนั้นยังเป็นร่าง — ไม่ว่าฝั่งเราจะ sync อะไรหรือไม่
+        /// ไม่มี marker (ไฟล์เก่าก่อนมีฟีเจอร์นี้) = ถือว่าใช้ไม่ได้ → ดึงใหม่ครั้งเดียวแล้ว self-heal
+        /// </summary>
+        private static bool PdfCacheIsFinal(string statePath)
+        {
+            try
+            {
+                if (!File.Exists(statePath)) return false;
+                string s = (File.ReadAllText(statePath) ?? "").Trim();
+                if (s.Length == 0) return false;
+                // รูปแบบ "{documentNumber}|{statusCode}" — เก็บ "รหัส" สถานะเป็นตัวเลข
+                // ไม่ใช่ข้อความไทย เพราะข้อความเปลี่ยนได้และเทียบพลาดง่าย
+                string[] parts = s.Split('|');
+                string num = parts.Length > 0 ? parts[0].Trim() : "";
+                if (num.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase)) return false;
+
+                int st;
+                if (parts.Length < 2 || !int.TryParse(parts[1].Trim(), out st)) return false;
+                if (st == NexaaccDocumentStatus.Draft || st == NexaaccDocumentStatus.WaitingApproval) return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private static void WritePdfStateMarker(string statePath, string documentNumber, string status)
+        {
+            try { File.WriteAllText(statePath, (documentNumber ?? "") + "|" + (status ?? "")); }
+            catch { }
+        }
+
         private static void WritePdfAmtMarker(string amtMarker, decimal total)
         {
             try { File.WriteAllText(amtMarker, total.ToString("0.0000")); } catch { }
@@ -13399,7 +13438,9 @@ namespace Take_Time_BangPhra.Integration
                 string relEarly = "/Documents/Payment/NextAcc/" + safeEarly;
                 // ใช้ cache ก็ต่อเมื่อ "ยังใหม่" (ไม่มีการ re-sync เอกสารหลังเวลาที่ cache ไฟล์)
                 // → ปกติเร็ว (ไม่ยิง API); ดึงใหม่เฉพาะตอนเอกสารถูกแก้/re-sync เท่านั้น (กันค้างยอดเก่า)
+                string stateEarly = Path.Combine(folderEarly, safeEarly + suffixEarly + ".docstate");
                 if (!forceRefresh && File.Exists(pdfEarly) && new FileInfo(pdfEarly).Length > 0
+                    && PdfCacheIsFinal(stateEarly)
                     && !IsVoucherPdfCacheStale(voucherDocNumber, pdfEarly))
                 {
                     result.Found = true;
@@ -13469,11 +13510,30 @@ namespace Take_Time_BangPhra.Integration
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 // 1) PDF อย่างเป็นทางการจาก NextAcc
-                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                string statePath = Path.Combine(folder, safeDoc + fileSuffix + ".docstate");
+                bool needPdf = forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0
+                               || !PdfCacheIsFinal(statePath);
+                if (needPdf)
                 {
                     byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(docId, watermark: watermark);
                     if (pdf != null && pdf.Length > 0)
+                    {
                         File.WriteAllBytes(pdfPath, pdf);
+
+                        // จดเลข/สถานะ ณ ตอนดึง — ถ้ายังเป็นร่าง รอบหน้าจะดึงใหม่เองจนกว่าจะอนุมัติ
+                        try
+                        {
+                            var info = await _apiClient.GetDocumentAsync(docId);
+                            string curNum = info?.data?.DocumentNumber ?? "";
+                            int curSt = info?.data?.Status ?? -1;
+                            WritePdfStateMarker(statePath, curNum, curSt.ToString());
+                            if (curNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"DownloadVoucherDocument: doc={voucherDocNumber} ยังเป็นร่างบน NextAcc ({curNum}) — "
+                                    + "PDF ที่ได้จะเป็นตัวร่าง จะดึงใหม่อัตโนมัติเมื่ออนุมัติแล้ว", "SYSTEM");
+                        }
+                        catch { WritePdfStateMarker(statePath, "", ""); }
+                    }
                 }
                 if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
                 {
