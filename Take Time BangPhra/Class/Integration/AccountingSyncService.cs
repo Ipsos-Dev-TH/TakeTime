@@ -13833,7 +13833,13 @@ namespace Take_Time_BangPhra.Integration
 
             // fast path: cache ของ GUID นี้ยังใหม่ (ไฟล์ใหม่กว่ารายการ sync ล่าสุดของใบนี้)
             // forceRefresh (ปุ่ม "ดึงล่าสุด") → ข้าม cache ทุกชั้น ดึงสดจาก NextAcc เท่านั้น
+            //
+            // ⚠ PdfCacheIsFinal เพิ่มมาเพราะ IsReceiptPdfCacheStale วัดจาก "การ sync ฝั่งเรา" เท่านั้น
+            //   ถ้าไปอนุมัติ/แก้เอกสารบน NextAcc เอง ฝั่งเราไม่มีอะไรเปลี่ยน → cache ไม่ถูกมองว่าเก่า
+            //   → เสิร์ฟไฟล์ฉบับร่างค้างตลอดไป (เคสเดียวกับฝั่งใบสำคัญจ่าย)
+            string statePath = Path.Combine(folder, safeDoc + "_" + guid8 + suffix + ".docstate");
             if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+                && PdfCacheIsFinal(statePath)
                 && !IsReceiptPdfCacheStale(receiptNumber, pdfPath))
             {
                 result.Found = true;
@@ -13850,7 +13856,9 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 string legacyPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
+                string legacyState = Path.Combine(folder, safeDoc + suffix + ".docstate");
                 if (!File.Exists(pdfPath) && File.Exists(legacyPath) && new FileInfo(legacyPath).Length > 0
+                    && PdfCacheIsFinal(legacyState)
                     && !IsReceiptPdfCacheStale(receiptNumber, legacyPath))
                 {
                     try { File.Copy(legacyPath, pdfPath, false); } catch { }
@@ -13871,6 +13879,21 @@ namespace Take_Time_BangPhra.Integration
                 if (pdf != null && pdf.Length > 0)
                 {
                     File.WriteAllBytes(pdfPath, pdf);
+
+                    // จดเลข/สถานะ ณ ตอนดึง — ยังเป็นร่างก็จะดึงใหม่เองจนกว่าจะอนุมัติ
+                    try
+                    {
+                        var info = await _apiClient.GetDocumentAsync(docId);
+                        string curNum = info?.data?.DocumentNumber ?? "";
+                        int curSt = info?.data?.Status ?? -1;
+                        WritePdfStateMarker(statePath, curNum, curSt.ToString());
+                        if (curNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"DownloadReceiptPdf: receipt={receiptNumber} ยังเป็นร่างบน NextAcc ({curNum}) — "
+                                + "PDF ที่ได้จะเป็นตัวร่าง จะดึงใหม่อัตโนมัติเมื่ออนุมัติแล้ว", "SYSTEM");
+                    }
+                    catch { WritePdfStateMarker(statePath, "", ""); }
+
                     result.Found = true;
                     result.PdfLocalPath = pdfPath;
                     result.PdfRelativeUrl = relPrefix + "/" + fileName;
