@@ -191,10 +191,10 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>การ์ดสถานที่หนึ่งกลุ่มประเภท พร้อมหัวข้อกลุ่ม</summary>
-        private void RenderNearbyGroup(StringBuilder sb, string icon, string title, DataRow[] rows)
+        private void RenderNearbyGroup(StringBuilder sb, string groupIcon, string title, DataRow[] rows)
         {
             sb.Append("<div class='nb-group'>");
-            sb.Append("<h3 class='nb-group-title'><span>" + Server.HtmlEncode(string.IsNullOrWhiteSpace(icon) ? "📍" : icon)
+            sb.Append("<h3 class='nb-group-title'><span>" + Server.HtmlEncode(string.IsNullOrWhiteSpace(groupIcon) ? "📍" : groupIcon)
                     + "</span> " + Server.HtmlEncode(title)
                     + " <small>(" + rows.Length + ")</small></h3>");
             sb.Append("<div class='act-grid'>");
