@@ -591,12 +591,13 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}, NextAccUrl: {viewUrl}");
 
-                // ── เอกสารที่ cache เป็นไฟล์ local แล้ว → เปิดไฟล์ทันที (เร็ว ไม่ยิง API) ──
-                if (!string.IsNullOrEmpty(viewUrl) && viewUrl.StartsWith("/"))
-                {
-                    Response.Redirect(viewUrl);
-                    return;
-                }
+                // ⚠ เดิมตรงนี้มี "ทางลัด": ถ้าแถวมี ViewUrl เป็นไฟล์ local → redirect ทันที
+                //   ผลคือข้ามตัวตรวจความสด/สถานะร่าง/ตัวเทียบเลขเอกสาร **ทุกชั้น** —
+                //   ไฟล์ตัวร่างที่ cache ค้างไว้จึงถูกเสิร์ฟตลอดไป และปุ่มดึงล่าสุดช่วยไม่ได้
+                //   (มันเขียนไฟล์ลงโฟลเดอร์ใหม่ แต่ทางลัดนี้ยังชี้โฟลเดอร์เก่า)
+                //   ตัดทางลัดออก: ทั้งสอง branch ข้างล่างมี smart-cache ในตัวอยู่แล้ว
+                //   (cache ยังสด = คืนไฟล์ทันทีเหมือนเดิม ไม่ช้าขึ้น) — ViewUrl เหลือไว้เป็น
+                //   fallback ท้ายสุดตอนดาวน์โหลดไม่ได้เท่านั้น
 
                 // ── เอกสารที่สร้างบน NextAcc โดยตรง (NextAcc-only) → ดึง PDF จริงมาเปิด local ──
                 // กดดู PDF ต้องได้ "ไฟล์" ไม่เด้งไปหน้า NextAcc. เอกสารพวกนี้ไม่มี entry ใน sync queue

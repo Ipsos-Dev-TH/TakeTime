@@ -13320,10 +13320,23 @@ namespace Take_Time_BangPhra.Integration
         /// เลขที่เอกสารหลายใบ → ทุกใบแชร์โฟลเดอร์ NextAcc/82_6 → PDF ทับกัน/fast-path เสิร์ฟใบอื่น
         /// (กด PV-20260715 ได้ PDF ของ PV-20260709). GUID ใน key ทำให้ (ก) ไม่ชนข้ามใบ
         /// (ข) void→สร้างใหม่ = GUID ใหม่ = URL ใหม่ → browser ไม่เสิร์ฟไฟล์รุ่นเก่า.</summary>
+        /// <summary>
+        /// โฟลเดอร์ cache ของเอกสาร NextAcc — ใช้ GUID ล้วน
+        ///
+        /// เดิมผูกกับ "Reference/เลขที่เอกสาร + guid8" ซึ่งพังสองทาง (เกิดจริง PV-20260807-0003):
+        ///   1. ชื่อพวกนี้ "เปลี่ยนได้" — เอกสารเกิดเป็น DRAFT-xxx แล้วอนุมัติเป็น PV-xxx
+        ///      ⇒ key เปลี่ยนกลางทาง เกิดสองโฟลเดอร์สำหรับเอกสารเดียว
+        ///   2. แต่ละ call site ส่งชื่อไม่เหมือนกัน (ตัวสร้างรายการใช้ Reference ก่อน /
+        ///      ปุ่มดึงล่าสุดใช้เลขที่แสดงบนแถว) ⇒ ดึงล่าสุดเขียนโฟลเดอร์หนึ่ง
+        ///      แต่ปุ่มดูเสิร์ฟอีกโฟลเดอร์ที่ค้างไฟล์ตัวร่าง — "ดึงสำเร็จแต่ได้ใบเดิม"
+        ///
+        /// GUID ไม่เปลี่ยนไม่ว่าเลข/อ้างอิงจะเปลี่ยนกี่รอบ ⇒ หนึ่งเอกสาร = หนึ่งโฟลเดอร์เสมอ
+        /// โฟลเดอร์รูปแบบเก่ากลายเป็นขยะที่ไม่ถูกอ่าน (ตั้งใจ — ไฟล์ในนั้นคือตัวร่างที่เป็นพิษ)
+        /// เอกสารเดิมจะถูกดึงใหม่หนึ่งครั้งแล้วเข้าที่เอง
+        /// </summary>
         private static string NextAccDocCacheKey(string refOrNum, Guid docId)
         {
-            string baseName = MakeSafeFileName(string.IsNullOrEmpty(refOrNum) ? docId.ToString() : refOrNum);
-            return baseName + "_" + docId.ToString("N").Substring(0, 8);
+            return "doc_" + docId.ToString("N");
         }
 
         /// <summary>true ถ้า PDF cache บนดิสก์ "เก่ากว่า" การ sync ล่าสุดของเอกสาร (ถูกแก้/re-sync หลัง cache)
