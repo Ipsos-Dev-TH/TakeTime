@@ -13414,6 +13414,50 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// หา GUID ของเอกสารฝั่งจ่ายบน NextAcc จาก "เลขที่เอกสาร" ที่ต้องการ
+        ///
+        /// ใช้ตอนพบว่า GUID ที่เก็บไว้ชี้ผิดใบ — เคสจริง: สร้างเอกสารจาก OCR ได้ใบร่าง (DRAFT-xxxx)
+        /// แล้วใบที่ถูกอนุมัติจริงกลายเป็นอีกใบ (PV-xxxx คนละ GUID) ⇒ เราถือ GUID ของใบร่างไว้
+        /// ดึง PDF กี่รอบก็ได้ใบร่างเดิม ทั้งที่ระบบแจ้งว่า "ดึงล่าสุดสำเร็จ"
+        ///
+        /// ค้นรอบ ๆ วันที่เอกสาร (±น วัน) ทุกชนิดเอกสารฝั่งจ่าย แล้วเทียบเลขที่แบบตรงตัว
+        /// </summary>
+        private async System.Threading.Tasks.Task<Guid> FindPaymentDocIdByNumberAsync(
+            string documentNumber, DateTime? around, int dayWindow = 45)
+        {
+            if (string.IsNullOrWhiteSpace(documentNumber)) return Guid.Empty;
+            DateTime centre = around ?? DateTime.Today;
+            DateTime from = centre.AddDays(-dayWindow);
+            DateTime to = centre.AddDays(dayWindow);
+
+            foreach (var typeName in PaymentDocTypeLabels.Keys)
+            {
+                int page = 1;
+                while (page <= 20)   // กันวนไม่รู้จบถ้า NextAcc ไม่ส่ง TotalPages
+                {
+                    PagedResponse<OutboundDocumentResponse> resp;
+                    try
+                    {
+                        resp = await _apiClient.GetIntegrationDocumentsAsync(new OutboundQueryParams
+                        {
+                            FromDate = from, ToDate = to, Type = typeName, Page = page, PageSize = 100
+                        });
+                    }
+                    catch { break; }
+
+                    if (resp?.Items == null || resp.Items.Count == 0) break;
+                    foreach (var d in resp.Items)
+                        if (string.Equals(d.DocumentNumber, documentNumber, StringComparison.OrdinalIgnoreCase))
+                            return d.Id;
+
+                    if (resp.Items.Count < 100 || (resp.TotalPages > 0 && page >= resp.TotalPages)) break;
+                    page++;
+                }
+            }
+            return Guid.Empty;
+        }
+
+        /// <summary>
         /// ดาวน์โหลดเอกสารใบสำคัญจ่ายอย่างเป็นทางการจาก NextAcc (PDF + ไฟล์แนบ) มาเก็บที่ฝั่ง TakeTime
         /// คืน NextAccCachedDocument พร้อม relative URL ของ PDF (ถ้าสำเร็จ)
         /// ถ้าเอกสารยังไม่ sync / NextAcc ไม่มี template → Found=false (caller fallback ไป PDF ระบบเดิม)
@@ -13526,6 +13570,43 @@ namespace Take_Time_BangPhra.Integration
                             var info = await _apiClient.GetDocumentAsync(docId);
                             string curNum = info?.data?.DocumentNumber ?? "";
                             int curSt = info?.data?.Status ?? -1;
+
+                            // ── GUID ที่เก็บไว้ชี้ผิดใบหรือเปล่า ────────────────────────
+                            // NextAcc คืนเลขที่ของ "ใบที่ GUID นี้ชี้" — ถ้าไม่ตรงกับเลขที่เราขอ
+                            // แปลว่าเราถือ GUID ของอีกใบอยู่ (มักเป็นใบร่างค้างจากตอนสร้างด้วย OCR)
+                            // ดึงกี่รอบก็ได้ใบเดิม ⇒ ต้องไปหา GUID ของใบที่เลขตรงจริง ๆ
+                            if (!string.IsNullOrEmpty(curNum)
+                                && !string.Equals(curNum, voucherDocNumber, StringComparison.OrdinalIgnoreCase))
+                            {
+                                DateTime? around = info?.data?.DocumentDate;
+                                Guid realId = await FindPaymentDocIdByNumberAsync(voucherDocNumber, around);
+                                if (realId != Guid.Empty && realId != docId)
+                                {
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"DownloadVoucherDocument: doc={voucherDocNumber} — GUID ที่เก็บไว้ ({docId}) "
+                                        + $"เป็นของเอกสาร '{curNum}' ไม่ใช่ใบนี้ → ใช้ GUID ที่ถูกต้อง ({realId}) แทน", "SYSTEM");
+
+                                    byte[] pdf2 = await _apiClient.GenerateDocumentPdfAsync(realId, watermark: watermark);
+                                    if (pdf2 != null && pdf2.Length > 0)
+                                    {
+                                        File.WriteAllBytes(pdfPath, pdf2);
+                                        docId = realId;
+                                        attachmentDocId = realId;
+                                        SetVoucherDocMarker(voucherDocNumber, realId.ToString());   // แก้ที่ต้นทางด้วย
+
+                                        var info2 = await _apiClient.GetDocumentAsync(realId);
+                                        curNum = info2?.data?.DocumentNumber ?? voucherDocNumber;
+                                        curSt = info2?.data?.Status ?? -1;
+                                    }
+                                }
+                                else
+                                {
+                                    _code.Logs(_connectionString, "AccountingSync",
+                                        $"⚠ DownloadVoucherDocument: doc={voucherDocNumber} — GUID ที่เก็บไว้เป็นของ '{curNum}' "
+                                        + "และหาเอกสารเลขนี้บน NextAcc ไม่เจอ → PDF ที่ได้อาจไม่ใช่ใบนี้", "SYSTEM");
+                                }
+                            }
+
                             WritePdfStateMarker(statePath, curNum, curSt.ToString());
                             if (curNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
                                 _code.Logs(_connectionString, "AccountingSync",
