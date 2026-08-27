@@ -166,8 +166,16 @@ namespace Take_Time_BangPhra.Admin.Chat
                 string channel = data.ContainsKey("channel") ? data["channel"]?.ToString() : "ALL";
                 string status = data.ContainsKey("status") ? data["status"]?.ToString() : "ALL";
                 string search = data.ContainsKey("search") ? data["search"]?.ToString() : null;
+                string reply = data.ContainsKey("reply") ? data["reply"]?.ToString() : null;
+                string sort = data.ContainsKey("sort") ? data["sort"]?.ToString() : null;
+                bool unreadOnly = data.ContainsKey("unreadOnly") && data["unreadOnly"] != null
+                                  && data["unreadOnly"].ToString().ToLowerInvariant() == "true";
+                int limit = 50, offset = 0;
+                if (data.ContainsKey("limit")) int.TryParse(data["limit"]?.ToString(), out limit);
+                if (data.ContainsKey("offset")) int.TryParse(data["offset"]?.ToString(), out offset);
 
-                DataTable dt = svc.GetConversations(channel, status, search);
+                DataTable dt = svc.GetConversations(channel, status, search, limit, reply, sort, offset, unreadOnly);
+                int total = svc.CountConversations(channel, status, search, reply, unreadOnly);
                 var convList = new List<object>();
 
                 foreach (DataRow row in dt.Rows)
@@ -195,16 +203,38 @@ namespace Take_Time_BangPhra.Admin.Chat
                         unread = Convert.ToInt32(row["UnreadCount"]),
                         status = row["Status"]?.ToString(),
                         assigned = row["AssignedTo"]?.ToString(),
-                        phone = row["MobilePhone"]?.ToString()
+                        phone = row["MobilePhone"]?.ToString(),
+                        // ยังไม่ตอบ = ข้อความล่าสุดมาจากลูกค้า — ใช้ติดป้ายในรายการ
+                        needsReply = row.Table.Columns.Contains("NeedsReply")
+                                     && Convert.ToInt32(row["NeedsReply"]) == 1,
+                        waitingLabel = WaitLabel(row)
                     });
                 }
 
-                return new Dictionary<string, object> { { "conversations", convList } };
+                return new Dictionary<string, object>
+                {
+                    { "conversations", convList },
+                    { "total", total },
+                    { "offset", offset },
+                    { "hasMore", offset + convList.Count < total }
+                };
             }
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "conversations", new List<object>() }, { "error", ex.Message } };
             }
+        }
+
+        /// <summary>"รอตอบมานานเท่าไร" — แสดงเฉพาะรายการที่ยังไม่ได้ตอบ</summary>
+        private static string WaitLabel(DataRow row)
+        {
+            if (!row.Table.Columns.Contains("NeedsReply") || Convert.ToInt32(row["NeedsReply"]) != 1) return "";
+            if (!row.Table.Columns.Contains("WaitingMinutes") || row["WaitingMinutes"] == DBNull.Value) return "";
+            int m = Convert.ToInt32(row["WaitingMinutes"]);
+            if (m < 0) return "";
+            if (m < 60) return "รอ " + m + " นาที";
+            if (m < 1440) return "รอ " + (m / 60) + " ชม.";
+            return "รอ " + (m / 1440) + " วัน";
         }
 
         private Dictionary<string, object> GetConversationDetail(Dictionary<string, object> data)

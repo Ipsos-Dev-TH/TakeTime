@@ -79,19 +79,41 @@ namespace Take_Time_BangPhra.Services
 
         #region Conversations
 
-        public DataTable GetConversations(string channelFilter = null, string statusFilter = null, string search = null, int limit = 50)
+        /// <summary>
+        /// รายการสนทนา พร้อมตัวกรอง/เรียง/แบ่งหน้า
+        ///
+        /// ⚠ เดิมเป็น TOP 50 เรียง UnreadCount DESC, LastMessageDate DESC เท่านั้น ⇒ พังสองทาง:
+        ///   1. มีสนทนามากกว่า 50 → ที่เหลือหายไปเฉย ๆ ไม่มีทางเข้าถึง (ไม่มีหน้าถัดไป)
+        ///   2. พอเปิดอ่าน UnreadCount กลายเป็น 0 → ร่วงไปท้ายลำดับ → ถ้ามียังไม่อ่านเกิน 50
+        ///      รายการที่เพิ่งอ่านจะหลุดออกนอก TOP 50 ทันที = "กดเปิดแล้วหายไปเลย"
+        ///
+        /// replyFilter: NEEDS_REPLY = ข้อความล่าสุดมาจากลูกค้า (เรายังไม่ตอบ) — ตัวที่ต้องใช้บ่อยสุด
+        ///              REPLIED     = เราตอบไปแล้วเป็นคนสุดท้าย
+        /// </summary>
+        public DataTable GetConversations(string channelFilter = null, string statusFilter = null,
+            string search = null, int limit = 50, string replyFilter = null, string sort = null,
+            int offset = 0, bool unreadOnly = false)
         {
-            string sql = @"SELECT TOP (@Limit)
+            if (limit <= 0 || limit > 200) limit = 50;
+            if (offset < 0) offset = 0;
+
+            // lastDir = ทิศทางของข้อความล่าสุด — ใช้ทั้งกรอง "ยังไม่ตอบ" และแสดงป้ายในรายการ
+            string sql = @"SELECT
                     c.ID, c.ChannelCode, c.Status, c.Priority, c.AssignedTo, c.Tags,
                     c.LastMessageDate, c.LastMessagePreview, c.UnreadCount,
                     ct.DisplayName, ct.AvatarUrl, ct.MobilePhone, ct.Customer_MobilePhone,
-                    ch.ChannelName, ch.IconClass, ch.BrandColor
+                    ch.ChannelName, ch.IconClass, ch.BrandColor,
+                    ISNULL(lm.Direction, '') AS LastDirection,
+                    CASE WHEN ISNULL(lm.Direction, 'IN') = 'IN' THEN 1 ELSE 0 END AS NeedsReply,
+                    DATEDIFF(MINUTE, c.LastMessageDate, GETDATE()) AS WaitingMinutes
                 FROM OmniChannel_Conversations c
                 JOIN OmniChannel_Contacts ct ON c.ContactID = ct.ID
                 JOIN OmniChannel_Channels ch ON c.ChannelCode = ch.ChannelCode
+                OUTER APPLY (SELECT TOP 1 m.Direction FROM OmniChannel_Messages m
+                             WHERE m.ConversationID = c.ID ORDER BY m.ID DESC) lm
                 WHERE 1=1";
 
-            var parms = new Dictionary<string, object> { { "@Limit", limit } };
+            var parms = new Dictionary<string, object>();
 
             if (!string.IsNullOrEmpty(channelFilter) && channelFilter != "ALL")
             {
@@ -104,10 +126,14 @@ namespace Take_Time_BangPhra.Services
                 sql += " AND c.Status = @Status";
                 parms["@Status"] = statusFilter;
             }
-            else
-            {
-                sql += " AND c.Status IN ('OPEN','PENDING')";
-            }
+            // statusFilter = ALL → ไม่กรองสถานะเลย (เดิมบังคับ OPEN/PENDING ทำให้ RESOLVED หาไม่เจอ)
+
+            if (unreadOnly) sql += " AND c.UnreadCount > 0";
+
+            if (replyFilter == "NEEDS_REPLY")
+                sql += " AND ISNULL(lm.Direction, 'IN') = 'IN'";
+            else if (replyFilter == "REPLIED")
+                sql += " AND lm.Direction = 'OUT'";
 
             if (!string.IsNullOrEmpty(search))
             {
@@ -116,9 +142,56 @@ namespace Take_Time_BangPhra.Services
                 parms["@Search"] = "%" + search + "%";
             }
 
-            sql += " ORDER BY c.UnreadCount DESC, c.LastMessageDate DESC";
+            // เรียงลำดับ — ค่าเริ่มต้นเปลี่ยนเป็น "ใหม่สุดก่อน" ล้วน ๆ
+            // ไม่เอา UnreadCount มานำหน้า เพราะทำให้รายการ "กระโดด" ทันทีที่กดอ่าน
+            switch ((sort ?? "").ToUpperInvariant())
+            {
+                case "OLDEST":       sql += " ORDER BY c.LastMessageDate ASC"; break;
+                case "UNREAD":       sql += " ORDER BY c.UnreadCount DESC, c.LastMessageDate DESC"; break;
+                case "WAITING":      sql += " ORDER BY CASE WHEN ISNULL(lm.Direction,'IN')='IN' THEN 0 ELSE 1 END, c.LastMessageDate ASC"; break;
+                case "NAME":         sql += " ORDER BY ct.DisplayName ASC, c.LastMessageDate DESC"; break;
+                default:             sql += " ORDER BY c.LastMessageDate DESC"; break;
+            }
+
+            // แบ่งหน้าแทน TOP — ดูรายการที่เกินหน้าแรกได้จริง
+            sql += " OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+            parms["@Offset"] = offset;
+            parms["@Limit"] = limit;
 
             return _code.DatabaseQuerySafe(_connStr, sql, parms);
+        }
+
+        /// <summary>จำนวนสนทนาตามตัวกรองปัจจุบัน — ให้ UI รู้ว่ายังมีอีกกี่รายการ</summary>
+        public int CountConversations(string channelFilter = null, string statusFilter = null,
+            string search = null, string replyFilter = null, bool unreadOnly = false)
+        {
+            string sql = @"SELECT COUNT(*) AS N
+                FROM OmniChannel_Conversations c
+                JOIN OmniChannel_Contacts ct ON c.ContactID = ct.ID
+                OUTER APPLY (SELECT TOP 1 m.Direction FROM OmniChannel_Messages m
+                             WHERE m.ConversationID = c.ID ORDER BY m.ID DESC) lm
+                WHERE 1=1";
+            var parms = new Dictionary<string, object>();
+
+            if (!string.IsNullOrEmpty(channelFilter) && channelFilter != "ALL")
+            { sql += " AND c.ChannelCode = @Channel"; parms["@Channel"] = channelFilter; }
+            if (!string.IsNullOrEmpty(statusFilter) && statusFilter != "ALL")
+            { sql += " AND c.Status = @Status"; parms["@Status"] = statusFilter; }
+            if (unreadOnly) sql += " AND c.UnreadCount > 0";
+            if (replyFilter == "NEEDS_REPLY") sql += " AND ISNULL(lm.Direction, 'IN') = 'IN'";
+            else if (replyFilter == "REPLIED") sql += " AND lm.Direction = 'OUT'";
+            if (!string.IsNullOrEmpty(search))
+            {
+                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search"
+                 + "      OR ct.Email LIKE @Search OR c.Subject LIKE @Search OR c.Tags LIKE @Search)";
+                parms["@Search"] = "%" + search + "%";
+            }
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connStr, sql, parms.Count > 0 ? parms : null);
+                return dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["N"]) : 0;
+            }
+            catch { return 0; }
         }
 
         public DataTable GetConversationDetail(long conversationId)
