@@ -332,6 +332,40 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        // ── คอลัมน์ AI ของ OmniChannel_Messages มีอยู่จริงไหม ─────────────────────
+        // IsAIGenerated / AIConfidence / AISource มาจาก PHASE14_Migration_02 ซึ่งบางเครื่อง
+        // ยังไม่ได้รัน ⇒ INSERT ที่อ้างคอลัมน์พวกนี้จะล้มทั้งก้อน ("Invalid column name")
+        // ทำให้ตอบข้อความไม่ได้เลย ทั้งที่การตอบปกติไม่ได้ต้องใช้ค่าเหล่านี้
+        //
+        // ตรวจครั้งเดียวแล้วจำไว้: ถ้ามีคอลัมน์ = จำถาวร / ถ้ายังไม่มี = ตรวจซ้ำทุก 5 นาที
+        // เพื่อให้พอรันไมเกรชันเสร็จ ระบบกลับมาบันทึกข้อมูล AI เองโดยไม่ต้องรีสตาร์ท
+        private static bool _aiColsKnownPresent;
+        private static DateTime _aiColsCheckedAt = DateTime.MinValue;
+        private static readonly object _aiColsLock = new object();
+
+        private bool HasAiColumns()
+        {
+            lock (_aiColsLock)
+            {
+                if (_aiColsKnownPresent) return true;
+                if ((DateTime.UtcNow - _aiColsCheckedAt) < TimeSpan.FromMinutes(5)) return false;
+                _aiColsCheckedAt = DateTime.UtcNow;
+
+                try
+                {
+                    DataTable dt = _code.DatabaseQuerySafe(_connStr,
+                        @"SELECT COUNT(*) AS Cnt FROM INFORMATION_SCHEMA.COLUMNS
+                           WHERE TABLE_NAME = 'OmniChannel_Messages'
+                             AND COLUMN_NAME IN ('IsAIGenerated','AIConfidence','AISource')", null);
+                    _aiColsKnownPresent = dt != null && dt.Rows.Count > 0
+                                          && Convert.ToInt32(dt.Rows[0]["Cnt"]) >= 3;
+                }
+                catch { _aiColsKnownPresent = false; }
+
+                return _aiColsKnownPresent;
+            }
+        }
+
         public SendMessageResult SendMessage(long conversationId, string content, string senderName,
             string messageType = "TEXT", string mediaUrl = null,
             bool isAI = false, double aiConfidence = 0, string aiSource = null)
@@ -344,20 +378,31 @@ namespace Take_Time_BangPhra.Services
 
                 string channelCode = dtConv.Rows[0]["ChannelCode"].ToString();
 
+                // คอลัมน์ AI (IsAIGenerated/AIConfidence/AISource) มาจาก PHASE14_Migration_02
+                // ระบบที่ยังไม่ได้รันไมเกรชันนั้นจะไม่มีคอลัมน์ ⇒ เดิม INSERT พังทั้งก้อน
+                // = "กดตอบกลับแล้ว error" ทั้งที่ข้อความปกติไม่ได้ต้องใช้ค่าพวกนี้เลย
+                bool ai = HasAiColumns();
+                var pSend = new Dictionary<string, object>
+                {
+                    { "@ConvId", conversationId },
+                    { "@Sender", senderName },
+                    { "@MType", messageType },
+                    { "@Content", content },
+                    { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value }
+                };
+                if (ai)
+                {
+                    pSend["@IsAI"] = isAI;
+                    pSend["@AICnf"] = isAI ? (object)aiConfidence : DBNull.Value;
+                    pSend["@AISrc"] = aiSource != null ? (object)aiSource : DBNull.Value;
+                }
+
                 _code.DatabaseInsertSafe(_connStr,
-                    @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus, IsAIGenerated, AIConfidence, AISource, Created_Date)
-                      VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT', @IsAI, @AICnf, @AISrc, GETDATE())",
-                    new Dictionary<string, object>
-                    {
-                        { "@ConvId", conversationId },
-                        { "@Sender", senderName },
-                        { "@MType", messageType },
-                        { "@Content", content },
-                        { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value },
-                        { "@IsAI", isAI },
-                        { "@AICnf", isAI ? (object)aiConfidence : DBNull.Value },
-                        { "@AISrc", aiSource != null ? (object)aiSource : DBNull.Value }
-                    });
+                    "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus"
+                    + (ai ? ", IsAIGenerated, AIConfidence, AISource" : "") + ", Created_Date) "
+                    + "VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT'"
+                    + (ai ? ", @IsAI, @AICnf, @AISrc" : "") + ", GETDATE())",
+                    pSend);
 
                 _code.DatabaseInsertSafe(_connStr,
                     "UPDATE OmniChannel_Conversations SET LastMessageDate = GETDATE(), LastMessagePreview = @Preview, Updated_Date = GETDATE() WHERE ID = @Id",
@@ -631,8 +676,10 @@ namespace Take_Time_BangPhra.Services
 
                         string textConfirm = aiSvc.GenerateBookingConfirmationText(reservationId);
                         _code.DatabaseInsertSafe(_connStr,
-                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
-                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_CONFIRM', GETDATE())",
+                            "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus"
+                            + (HasAiColumns() ? ", IsAIGenerated, AISource" : "") + ", Created_Date) "
+                            + "VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT'"
+                            + (HasAiColumns() ? ", 1, 'BOOKING_CONFIRM'" : "") + ", GETDATE())",
                             new Dictionary<string, object>
                             {
                                 { "@ConvId", conversationId },
@@ -678,8 +725,10 @@ namespace Take_Time_BangPhra.Services
                         DeliverLineFlexMessage(conversationId, flexJson, "Booking #" + reservationId + " - " + newStatus);
 
                         _code.DatabaseInsertSafe(_connStr,
-                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
-                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_STATUS', GETDATE())",
+                            "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus"
+                            + (HasAiColumns() ? ", IsAIGenerated, AISource" : "") + ", Created_Date) "
+                            + "VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT'"
+                            + (HasAiColumns() ? ", 1, 'BOOKING_STATUS'" : "") + ", GETDATE())",
                             new Dictionary<string, object>
                             {
                                 { "@ConvId", conversationId },
