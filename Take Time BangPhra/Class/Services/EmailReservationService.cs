@@ -1041,13 +1041,18 @@ namespace Take_Time_BangPhra.Services
             string phone = ResolvePhone(SanitizePhone(mobileNode?.InnerText?.Trim() ?? ""), bookingId);
 
             // คำขอพิเศษที่ลูกค้าฝากมากับ OTA — ป้ายชื่อไม่เหมือนกันทุกช่องทาง ลองไล่ทีละแบบ
-            // เดิมถูกทิ้งไปทั้งหมด ⇒ พนักงานไม่เห็นว่าลูกค้าขออะไรไว้ ต้องไปเปิดเว็บ OTA เอง
+            //
+            // ⚠️ InnerText ของอีเมล STAAH แทบไม่มีขึ้นบรรทัดใหม่ ⇒ ถ้าใช้ (.+?)…(?:\n|$)
+            // จะกวาดยาวไปจนจบก้อน เอาสิทธิประโยชน์ + นโยบายยกเลิก + refsell_amt ติดมาด้วย
+            // จึงจำกัดความยาวและหยุดเมื่อเจอหัวข้อถัดไปที่รู้จัก
+            const string Stop = @"(?:\n|$|Cancellation|Additional\s*Information|refsell_amt|Benifits|Benefits|"
+                              + @"Booking\s*Id|Payment\s*Type|Channel\s*Name|Total\s*\(|Room\s*Type)";
             string special = FirstNonEmpty(
-                Rx(text, @"Special\s*Request(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
-                Rx(text, @"Guest\s*(?:Special\s*)?Request(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
-                Rx(text, @"Special\s*Instruction(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
-                Rx(text, @"Guest\s*(?:Comment|Note)(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
-                Rx(text, @"Booking\s*Remark(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"));
+                Rx(text, @"Special\s*Request(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
+                Rx(text, @"Guest\s*(?:Special\s*)?Request(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
+                Rx(text, @"Special\s*Instruction(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
+                Rx(text, @"Guest\s*(?:Comment|Note)(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
+                Rx(text, @"Booking\s*Remark(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop));
             special = CleanNote(special);
 
             var roomRows = doc.DocumentNode.SelectNodes(
@@ -2301,11 +2306,58 @@ namespace Take_Time_BangPhra.Services
         /// <summary>เส้นคั่น: ข้อความใต้เส้นนี้เป็นของเจ้าหน้าที่ ระบบจะไม่เขียนทับ</summary>
         private const string RemarkStaffMarker = "--- บันทึกของเจ้าหน้าที่ (ระบบไม่แก้ส่วนนี้) ---";
 
+        /// <summary>
+        /// ความยาวสูงสุดของคอลัมน์ Reservation.Remark ที่ใช้ได้จริง
+        ///
+        /// ⚠️ เคสจริง: หมายเหตุที่ยาวขึ้น (แผนราคา + คำขอพิเศษจาก OTA) ทำให้ INSERT ล้ม
+        /// ด้วย "String or binary data would be truncated" ⇒ ใบจองหายทั้งใบ
+        /// การแจ้งเตือนคือของประกอบ ห้ามทำให้การลงจองพัง — จึงต้องรู้ขนาดจริงแล้วตัดให้พอดี
+        /// </summary>
+        private static int _remarkMax = -2;   // -2 = ยังไม่ได้ตรวจ
+        private static DateTime _remarkMaxAt = DateTime.MinValue;
+        private int RemarkMaxLength()
+        {
+            // ตรวจซ้ำทุก 30 นาที — ขยายคอลัมน์แล้วระบบรู้เองโดยไม่ต้องรีสตาร์ท App Pool
+            if (_remarkMax != -2 && (DateTime.UtcNow - _remarkMaxAt) < TimeSpan.FromMinutes(30))
+                return _remarkMax;
+
+            _remarkMaxAt = DateTime.UtcNow;
+            _remarkMax = 400;                 // ค่าปลอดภัยเมื่ออ่าน schema ไม่ได้
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT CHARACTER_MAXIMUM_LENGTH, DATA_TYPE
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE TABLE_NAME = 'Reservation' AND COLUMN_NAME = 'Remark'", null);
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    string type = Convert.ToString(dt.Rows[0][1]).ToLowerInvariant();
+                    if (type == "ntext" || type == "text" || type == "xml") _remarkMax = int.MaxValue;
+                    else if (dt.Rows[0][0] != DBNull.Value)
+                    {
+                        int len = Convert.ToInt32(dt.Rows[0][0]);
+                        _remarkMax = len < 0 ? int.MaxValue : len;   // -1 = nvarchar(max)
+                    }
+                }
+                _code.Logs(_conn, "EmailReservation",
+                    "Reservation.Remark รองรับ " + (_remarkMax == int.MaxValue ? "ไม่จำกัด" : _remarkMax + " ตัวอักษร"), "SYSTEM");
+            }
+            catch { }
+            return _remarkMax;
+        }
+
         private string BuildOtaRemark(RoomBooking head, List<RoomBooking> rooms, string staffNote, bool modified)
         {
+            // บรรทัดที่ "ต้องมีเสมอ" — Booking ID ใช้กันจองซ้ำ ตัดทิ้งไม่ได้เด็ดขาด
+            var required = new List<string>
+            {
+                "จองผ่าน " + head.ChannelName,
+                "Booking ID:" + head.BookingId
+            };
+
+            // บรรทัดเสริม เรียงจากสำคัญมากไปน้อย — ตัวท้าย ๆ จะถูกตัดก่อนถ้าที่ไม่พอ
+            var optional = new List<string>();
             var sb = new StringBuilder();
-            sb.AppendLine($"จองผ่าน {head.ChannelName}");
-            sb.AppendLine($"Booking ID:{head.BookingId}");
 
             if (rooms != null && rooms.Count > 0)
             {
@@ -2316,7 +2368,7 @@ namespace Take_Time_BangPhra.Services
                 // บางเจ้า map "RNB" ไว้กับแผนที่ "มี" อาหารเช้า ⇒ เดาแล้วจะบอกลูกค้าผิด
                 // ชื่อแผนราคาดิบยังแสดงในบรรทัด "แผนราคา:" ให้ตรวจเทียบได้อยู่แล้ว
                 string mapNote = MergeMapNotes(rooms, head.ChannelName);
-                if (!string.IsNullOrEmpty(mapNote)) sb.AppendLine("หมายเหตุแผนราคา: " + mapNote);
+                if (!string.IsNullOrEmpty(mapNote)) optional.Add("หมายเหตุแผนราคา: " + mapNote);
 
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var r in rooms)
@@ -2324,33 +2376,57 @@ namespace Take_Time_BangPhra.Services
                     var split = SplitRoomType(r.RoomType);
                     if (string.IsNullOrWhiteSpace(split.RatePlan)) continue;
                     string line = "แผนราคา: " + split.Name + " — " + split.RatePlan;
-                    if (seen.Add(line)) sb.AppendLine(line);
+                    if (seen.Add(line)) optional.Add(line);
                 }
-
 
                 int adults = rooms.Sum(r => r.Adults * Math.Max(1, r.NoOfRooms));
                 int kids = rooms.Sum(r => r.Children * Math.Max(1, r.NoOfRooms));
                 if (adults > 0 || kids > 0)
-                    sb.AppendLine("ผู้เข้าพัก: ผู้ใหญ่ " + adults + " คน" + (kids > 0 ? ", เด็ก " + kids + " คน" : ""));
+                    optional.Add("ผู้เข้าพัก: ผู้ใหญ่ " + adults + " คน" + (kids > 0 ? ", เด็ก " + kids + " คน" : ""));
             }
-
-            if (!string.IsNullOrWhiteSpace(head.SpecialRequest))
-                sb.AppendLine("คำขอพิเศษจาก OTA: " + head.SpecialRequest);
 
             bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                   || string.IsNullOrEmpty(head.PaymentType);
-            sb.AppendLine("การชำระ: " + (channelCollect
+            optional.Add("การชำระ: " + (channelCollect
                 ? "OTA เก็บเงินแล้ว (Channel Collect)"
                 : "เก็บเงินหน้างาน (Hotel Collect)"));
 
-            if (modified) sb.AppendLine($"(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
+            if (modified) optional.Add($"(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
 
-            if (!string.IsNullOrWhiteSpace(staffNote))
+            // คำขอพิเศษไว้ท้ายสุด — ยาวและไม่แน่นอนที่สุด จึงเป็นตัวแรกที่ถูกตัดเมื่อที่ไม่พอ
+            if (!string.IsNullOrWhiteSpace(head.SpecialRequest))
+                optional.Add("คำขอพิเศษจาก OTA: " + head.SpecialRequest);
+
+            // ── ประกอบให้พอดีความยาวคอลัมน์ ──────────────────────────────────
+            const string NL = "\r\n";
+            string tail = string.IsNullOrWhiteSpace(staffNote)
+                ? "" : NL + RemarkStaffMarker + NL + staffNote.Trim();
+
+            int budget = RemarkMaxLength();
+            foreach (string l in required)
             {
-                sb.AppendLine(RemarkStaffMarker);
-                sb.Append(staffNote.Trim());
+                if (sb.Length > 0) sb.Append(NL);
+                sb.Append(l);
             }
-            return sb.ToString();
+
+            // ข้อความของเจ้าหน้าที่สำคัญกว่าข้อมูลที่ระบบเติมเอง — กันที่ไว้ให้ก่อน
+            if (tail.Length > 0 && sb.Length + tail.Length > budget)
+                tail = tail.Substring(0, Math.Max(0, budget - sb.Length));
+
+            int room = budget - sb.Length - tail.Length;
+            foreach (string l in optional)
+            {
+                int need = NL.Length + l.Length;
+                if (need > room) continue;      // ข้ามบรรทัดนี้ แต่บรรทัดสั้นกว่าถัดไปยังมีสิทธิ์
+                sb.Append(NL).Append(l);
+                room -= need;
+            }
+
+            sb.Append(tail);
+
+            // กันเหนียวชั้นสุดท้าย — ถึงตรงนี้ไม่ควรเกินแล้ว แต่ใบจองต้องไม่พังเพราะหมายเหตุ
+            string result = sb.ToString();
+            return result.Length <= budget ? result : result.Substring(0, budget);
         }
 
         /// <summary>
@@ -2434,7 +2510,13 @@ namespace Take_Time_BangPhra.Services
             string low = v.ToLowerInvariant();
             if (low == "n/a" || low == "na" || low == "none" || low == "nil" || low == "no"
                 || low == "not applicable" || low == "-" || low == "ไม่มี") return null;
-            return v.Length > 400 ? v.Substring(0, 400) + "…" : v;
+
+            // ก้อนสิทธิประโยชน์/นโยบายของ OTA ไม่ใช่คำขอของลูกค้า — หลุดมาก็ทิ้ง
+            if (low.Contains("refsell_amt") || low.Contains("cancellation policy")
+                || low.Contains("benifits") || low.Contains("benefits")
+                || low.Contains("additional information")) return null;
+
+            return v.Length > 150 ? v.Substring(0, 150) + "…" : v;
         }
 
         /// <summary>แยก "Nordic Tent - RNB - ... - Room no breakfast" → ("Nordic Tent", "RNB - ... - Room no breakfast")</summary>
