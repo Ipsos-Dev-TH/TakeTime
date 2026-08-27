@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -296,7 +296,21 @@ namespace Take_Time_BangPhra.Services
 
                 DeliverOutbound(channelCode, conversationId, content);
 
-                return new SendMessageResult { Success = true };
+                // ── รายงานผลส่งออกจริง ────────────────────────────────────────────
+                // DeliverOutbound เป็น fire-and-forget + กลืน exception ⇒ เดิมคืน Success=true
+                // เสมอ ต่อให้ SMTP ไม่ได้ตั้งค่า/ส่งไม่ออก ⇒ พนักงานเห็น "ส่งสำเร็จ" แล้วเข้าใจว่า
+                // ลูกค้าได้รับแล้ว ทั้งที่ข้อความค้างอยู่ในระบบเฉย ๆ (อาการ "ตอบไม่ได้" แบบเงียบ)
+                // อ่านสถานะที่ตัวส่งเขียนไว้กลับมาบอกผู้ใช้ตรง ๆ
+                string delivery = ReadLastOutboundStatus(conversationId);
+                return new SendMessageResult
+                {
+                    Success = true,
+                    DeliveryStatus = delivery,
+                    Warning = delivery == "FAILED"
+                        ? "บันทึกข้อความแล้ว แต่ส่งออกช่องทาง " + channelCode + " ไม่สำเร็จ — "
+                          + "ลูกค้ายังไม่ได้รับ (ดูสาเหตุที่ log แล้วตรวจการตั้งค่าช่องทาง)"
+                        : null
+                };
             }
             catch (Exception ex)
             {
@@ -339,7 +353,38 @@ namespace Take_Time_BangPhra.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceError("OmniChannel.DeliverOutbound [{0}]: {1}", channelCode, ex.Message);
+                // มาร์คให้ตรงกับความจริง — ไม่งั้นข้อความค้างสถานะ SENT ทั้งที่ไม่เคยออกจากระบบ
+                MarkLastOutboundStatus(conversationId, "FAILED");
+                _code.Logs(_connStr, "OmniChannel",
+                    $"ส่งออกช่องทาง {channelCode} ไม่สำเร็จ (conv {conversationId}): {ex.Message}", "SYSTEM");
             }
+        }
+
+        /// <summary>สถานะส่งออกของข้อความขาออกล่าสุด — ใช้บอกผู้ใช้ว่าถึงลูกค้าจริงไหม</summary>
+        private string ReadLastOutboundStatus(long conversationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connStr,
+                    @"SELECT TOP 1 DeliveryStatus FROM OmniChannel_Messages
+                      WHERE ConversationID = @Id AND Direction = 'OUT' ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@Id", conversationId } });
+                return dt?.Rows.Count > 0 ? dt.Rows[0][0]?.ToString() : null;
+            }
+            catch { return null; }
+        }
+
+        private void MarkLastOutboundStatus(long conversationId, string status)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connStr,
+                    @"UPDATE OmniChannel_Messages SET DeliveryStatus = @S
+                      WHERE ID = (SELECT MAX(ID) FROM OmniChannel_Messages
+                                  WHERE ConversationID = @Id AND Direction = 'OUT')",
+                    new Dictionary<string, object> { { "@S", status }, { "@Id", conversationId } });
+            }
+            catch { }
         }
 
         private void DeliverToLine(long conversationId, string content)
@@ -628,5 +673,11 @@ namespace Take_Time_BangPhra.Services
     {
         public bool Success { get; set; }
         public string Error { get; set; }
+
+        /// <summary>สถานะส่งออกจริง (SENT / FAILED) — บันทึกได้เสมอ ไม่ได้แปลว่าส่งถึงลูกค้า</summary>
+        public string DeliveryStatus { get; set; }
+
+        /// <summary>ข้อความเตือนเมื่อบันทึกได้แต่ส่งออกไม่สำเร็จ (null = ปกติ)</summary>
+        public string Warning { get; set; }
     }
 }

@@ -301,7 +301,10 @@ namespace Take_Time_BangPhra.Admin.Chat
                 return new Dictionary<string, object>
                 {
                     { "success", result.Success },
-                    { "message", result.Error ?? "ส่งสำเร็จ" }
+                    { "message", result.Error ?? "ส่งสำเร็จ" },
+                    // บันทึกได้ ≠ ลูกค้าได้รับ — ส่งสถานะจริงไปให้หน้าเว็บเตือน
+                    { "delivery", result.DeliveryStatus ?? "" },
+                    { "warning", result.Warning ?? "" }
                 };
             }
             catch (Exception ex)

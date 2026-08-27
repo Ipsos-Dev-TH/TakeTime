@@ -1,4 +1,4 @@
-<%@ Page Title="Omni-Channel Inbox" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="OmniChannelInbox.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Chat.OmniChannelInbox" %>
+﻿<%@ Page Title="Omni-Channel Inbox" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="OmniChannelInbox.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Chat.OmniChannelInbox" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -18,7 +18,11 @@
         .omni-layout { display: grid; grid-template-columns: 360px 1fr; gap: 0; height: calc(100vh - 180px); min-height: 500px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 
         /* Sidebar */
-        .conv-sidebar { border-right: 1px solid #e8e8e8; display: flex; flex-direction: column; }
+        /* min-height:0 + overflow:hidden — จำเป็น ห้ามตัดออก
+           flex/grid item มีค่าเริ่มต้น min-height:auto = "ห้ามเล็กกว่าเนื้อหา"
+           ⇒ .conv-list ที่มี flex:1 จะถูกดันสูงเท่ารายการทั้งหมด แทนที่จะหดแล้วมี scrollbar
+           ⇒ เนื้อหาล้นออกนอก .omni-layout ซึ่ง overflow:hidden → ถูกตัดทิ้ง เลื่อนลงไปดูไม่ได้ */
+        .conv-sidebar { border-right: 1px solid #e8e8e8; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
         .conv-filters { padding: 12px; border-bottom: 1px solid #e8e8e8; background: #fafafa; }
         .filter-row { display: flex; gap: 6px; margin-bottom: 8px; }
         .filter-row:last-child { margin-bottom: 0; }
@@ -34,7 +38,7 @@
         .ch-pill.active .pill-count { background: rgba(255,255,255,0.3); }
 
         /* Conversation List */
-        .conv-list { flex: 1; overflow-y: auto; }
+        .conv-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .conv-item { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; display: flex; gap: 12px; align-items: flex-start; position: relative; }
         .conv-item:hover { background: #f9f9f9; }
         .conv-item.active { background: #EFEBE9; }
@@ -57,8 +61,11 @@
         .conv-assigned { font-size: 10px; color: #7C4DFF; }
 
         /* Chat Detail */
-        .chat-panel { display: flex; flex-direction: column; }
-        .chat-header { padding: 14px 20px; border-bottom: 1px solid #e8e8e8; background: #fafafa; display: flex; justify-content: space-between; align-items: center; }
+        /* เหตุผลเดียวกับ .conv-sidebar — ถ้าไม่ใส่ .messages-area จะสูงเท่าข้อความทั้งหมด
+           แล้วดัน .reply-area (กล่องพิมพ์ตอบ) ตกไปนอกพื้นที่ที่มองเห็น = "ตอบไม่ได้" */
+        .chat-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .chat-content { height: 100%; min-height: 0; flex-direction: column; }
+        .chat-header { flex-shrink: 0; padding: 14px 20px; border-bottom: 1px solid #e8e8e8; background: #fafafa; display: flex; justify-content: space-between; align-items: center; }
         .chat-header-left { display: flex; align-items: center; gap: 12px; }
         .chat-header-left .ch-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
         .chat-header-info h4 { margin: 0; font-size: 15px; color: #333; }
@@ -72,7 +79,7 @@
         .btn-act.danger { background: #F44336; color: white; border-color: #F44336; }
 
         /* Messages Area */
-        .messages-area { flex: 1; overflow-y: auto; padding: 20px; background: #f5f5f5; }
+        .messages-area { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px; background: #f5f5f5; }
         .msg-date-sep { text-align: center; margin: 15px 0; font-size: 11px; color: #999; }
         .msg-date-sep span { background: #e8e8e8; padding: 3px 12px; border-radius: 10px; }
         .msg { display: flex; margin-bottom: 10px; }
@@ -85,7 +92,7 @@
         .msg.incoming .msg-sender { font-size: 11px; color: #7C4DFF; font-weight: 600; margin-bottom: 3px; }
 
         /* Reply Area */
-        .reply-area { padding: 12px 16px; border-top: 1px solid #e8e8e8; background: white; }
+        .reply-area { padding: 12px 16px; border-top: 1px solid #e8e8e8; background: white; flex-shrink: 0; }
         .canned-bar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; max-height: 60px; overflow-y: auto; }
         .canned-btn { padding: 4px 10px; border: 1px solid #e0e0e0; background: white; border-radius: 12px; font-size: 11px; cursor: pointer; font-family: 'Prompt',sans-serif; color: #555; transition: all 0.2s; }
         .canned-btn:hover { background: #5D4037; color: white; border-color: #5D4037; }
@@ -160,7 +167,7 @@
                     <p>เลือกการสนทนาจากรายการด้านซ้าย</p>
                 </div>
 
-                <div id="chatContent" style="display:none; height:100%; display:none; flex-direction:column;">
+                <div id="chatContent" class="chat-content" style="display:none;">
                     <div class="chat-header" id="chatHeader"></div>
                     <div class="messages-area" id="messagesArea"></div>
                     <div class="reply-area">
@@ -412,9 +419,16 @@
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ conversationId: selectedConvId, content: text }),
                 success: function (r) {
-                    if (!r || !r.success) alert(r ? r.message : 'ส่งไม่สำเร็จ');
+                    if (!r || !r.success) { alert(r ? r.message : 'ส่งไม่สำเร็จ'); return; }
+                    // บันทึกสำเร็จแต่ส่งออกช่องทางไม่ได้ — ต้องบอก ไม่งั้นเข้าใจว่าลูกค้าได้รับแล้ว
+                    if (r.warning) {
+                        alert('⚠ ' + r.warning);
+                        $('#messagesArea .msg.outgoing').last()
+                            .find('.msg-meta').append(' · <span style="color:#c62828">ส่งไม่ออก</span>');
+                    }
                     loadConversations(true);
-                }
+                },
+                error: function () { alert('ส่งไม่สำเร็จ — เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
             });
         }
 
