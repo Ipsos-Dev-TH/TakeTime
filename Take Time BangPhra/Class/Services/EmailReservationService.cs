@@ -134,6 +134,29 @@ namespace Take_Time_BangPhra.Services
             catch { }
         }
 
+        /// <summary>
+        /// ยอดที่บันทึกเป็น "ราคาการจอง" ในระบบ = ผลรวม AMOUNT รายห้อง × จำนวนห้อง × จำนวนคืน
+        ///
+        /// ⚠ ไม่ใช่ refsell_amt: refsell คือยอดที่ลูกค้าจ่าย OTA ซึ่งรวมค่าคอมและส่วนที่ OTA
+        /// บวกเอง — ไม่ใช่เงินที่รีสอร์ทได้รับ ถ้าเอามาลงเป็นราคาห้องจะทำให้รายได้และยอดมัดจำ
+        /// สูงเกินจริงทุกใบ (เคสจริง: refsell 1,325 แต่ AMOUNT ที่ได้จริง 886)
+        /// refsell ยังถูกเก็บไว้ในคอลัมน์ OTA_Gross_Amount เพื่อใช้กระทบยอดกับ OTA
+        ///
+        /// สลับกลับไปใช้ refsell ได้ที่ค่า Email_Rsv_TotalSource = REFSELL (ถ้าผู้ทำบัญชีต้องการ)
+        /// </summary>
+        private double BookedTotal(RoomBooking head, List<RoomBooking> rooms, int stayDays)
+        {
+            double sumRows = rooms == null ? 0
+                : rooms.Sum(r => r.NetAmount * Math.Max(1, r.NoOfRooms) * Math.Max(1, stayDays));
+
+            bool useRefSell = string.Equals(Cfg("Email_Rsv_TotalSource", "AMOUNT"), "REFSELL",
+                                            StringComparison.OrdinalIgnoreCase);
+            if (useRefSell && head.GrossTotal > 0) return head.GrossTotal;
+
+            // อีเมลบางแบบไม่มี AMOUNT รายห้องเลย → ยอมใช้ refsell ดีกว่าลงยอด 0
+            return sumRows > 0 ? sumRows : head.GrossTotal;
+        }
+
         private string Cfg(string key, string def)
         {
             try
@@ -1211,10 +1234,11 @@ namespace Take_Time_BangPhra.Services
                             foreach (var x in avail) { chosen.Add(x.Id); assignedNames.Add(x.Name); plan.Add((x.Id, r.Adults, r.NetAmount)); }
                         }
 
-                        // gross รวม (ราคาขายจริง) → TotalPrice/Deposit; net รวม → OTA_Net_Amount
-                        double grossTotal = head.GrossTotal > 0 ? head.GrossTotal
-                            : rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);   // fallback net ถ้าไม่มี gross
+                        // ยอดที่ลงระบบ = AMOUNT รายห้องรวม (เงินที่รีสอร์ทได้จริง)
+                        // refsell_amt เก็บแยกไว้ที่ OTA_Gross_Amount สำหรับกระทบยอดกับ OTA เท่านั้น
+                        double bookedTotal = BookedTotal(head, rooms, stayDays);
                         double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
+                        double refSell = head.GrossTotal;
                         bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                               || string.IsNullOrEmpty(head.PaymentType); // STAAH default = channel collect
 
@@ -1230,12 +1254,12 @@ namespace Take_Time_BangPhra.Services
                             cmd.Parameters.AddWithValue("@Out", head.CheckOut);
                             cmd.Parameters.AddWithValue("@Days", stayDays);
                             // Deposit = gross ก็ต่อเมื่อ Channel Collect (OTA เก็บเงินแล้ว); Hotel Collect = 0 (เก็บหน้างาน)
-                            cmd.Parameters.AddWithValue("@Total", (decimal)grossTotal);
-                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)grossTotal : 0m);
+                            cmd.Parameters.AddWithValue("@Total", (decimal)bookedTotal);
+                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)bookedTotal : 0m);
                             cmd.Parameters.AddWithValue("@Remark", BuildOtaRemark(head, rooms, null, false));
                             cmd.Parameters.AddWithValue("@Ch", (object)head.ChannelName ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Bk", (object)head.BookingId ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@Gross", (decimal)grossTotal);
+                            cmd.Parameters.AddWithValue("@Gross", (decimal)(refSell > 0 ? refSell : bookedTotal));
                             cmd.Parameters.AddWithValue("@Net", (decimal)netTotal);
                             cmd.Parameters.AddWithValue("@Pay", (object)(head.PaymentType ?? "") ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Guest", (object)head.GuestName ?? DBNull.Value);
@@ -1807,7 +1831,11 @@ namespace Take_Time_BangPhra.Services
                 DateTime curIn = Convert.ToDateTime(dt.Rows[0]["CheckinDate"]);
                 DateTime curOut = Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]);
                 decimal curTotal = dt.Rows[0]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["TotalPrice"]) : 0m;
-                decimal mailTotal = (decimal)(head.GrossTotal > 0 ? head.GrossTotal : 0);
+                // เทียบกับ "ยอดที่ระบบจะบันทึก" (AMOUNT รายห้อง) ไม่ใช่ refsell
+                // ไม่งั้นทุกใบจะดูเหมือนยอดไม่ตรงตลอด ทั้งที่ถูกต้องแล้ว
+                // (stayDays ของรอบนี้ประกาศทีหลัง — คำนวณจำนวนคืนตรงนี้เอง)
+                int mailNights = Math.Max(1, (int)(head.CheckOut - head.CheckIn).TotalDays);
+                decimal mailTotal = (decimal)BookedTotal(head, rooms, mailNights);
                 bool differs = curIn.Date != head.CheckIn.Date || curOut.Date != head.CheckOut.Date
                                || (mailTotal > 0 && Math.Abs(mailTotal - curTotal) > 0.01m);
                 if (differs)
@@ -1860,7 +1888,8 @@ namespace Take_Time_BangPhra.Services
                 return new Outcome(false, false, false, msg).Detail(head, rooms, resId)
                     .Because(msg.Contains("ห้องไม่ว่าง") ? "ห้องไม่ว่างตามวันที่ใหม่" : "แก้ไขไม่สำเร็จ");
 
-            string changes = BuildChangeSummary(oldIn, oldOut, oldTotal, head, stayDays);
+            string changes = BuildChangeSummary(oldIn, oldOut, oldTotal, head, stayDays,
+                (decimal)BookedTotal(head, rooms, stayDays));
             string done = $"แก้ไขการจอง #{resId} ({head.BookingId}) เรียบร้อย — {changes}";
             _code.Logs(_conn, "EmailReservation", done, "SYSTEM");
             var okOut = new Outcome(true, false, false, done).Detail(head, rooms, resId);
@@ -1870,12 +1899,11 @@ namespace Take_Time_BangPhra.Services
         }
 
         private static string BuildChangeSummary(DateTime oldIn, DateTime oldOut, decimal oldTotal,
-            RoomBooking head, int stayDays)
+            RoomBooking head, int stayDays, decimal newTotal)
         {
             var parts = new List<string>();
             if (oldIn.Date != head.CheckIn.Date || oldOut.Date != head.CheckOut.Date)
                 parts.Add($"วันที่ {oldIn:dd/MM}-{oldOut:dd/MM} → {head.CheckIn:dd/MM}-{head.CheckOut:dd/MM} ({stayDays} คืน)");
-            decimal newTotal = (decimal)(head.GrossTotal > 0 ? head.GrossTotal : 0);
             if (newTotal > 0 && Math.Abs(newTotal - oldTotal) > 0.01m)
                 parts.Add($"ยอด {oldTotal:N2} → {newTotal:N2}");
             return parts.Count > 0 ? string.Join(", ", parts) : "ข้อมูลเหมือนเดิม";
@@ -1942,9 +1970,9 @@ namespace Take_Time_BangPhra.Services
                             if (_notifyTelegram) Notify(moved);
                         }
 
-                        double grossTotal = head.GrossTotal > 0 ? head.GrossTotal
-                            : rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
+                        double bookedTotal = BookedTotal(head, rooms, stayDays);
                         double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
+                        double refSell = head.GrossTotal;
                         bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                               || string.IsNullOrEmpty(head.PaymentType);
 
@@ -1982,9 +2010,9 @@ namespace Take_Time_BangPhra.Services
                             cmd.Parameters.AddWithValue("@In", head.CheckIn);
                             cmd.Parameters.AddWithValue("@Out", head.CheckOut);
                             cmd.Parameters.AddWithValue("@Days", stayDays);
-                            cmd.Parameters.AddWithValue("@Total", (decimal)grossTotal);
-                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)grossTotal : 0m);
-                            cmd.Parameters.AddWithValue("@Gross", (decimal)grossTotal);
+                            cmd.Parameters.AddWithValue("@Total", (decimal)bookedTotal);
+                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)bookedTotal : 0m);
+                            cmd.Parameters.AddWithValue("@Gross", (decimal)(refSell > 0 ? refSell : bookedTotal));
                             cmd.Parameters.AddWithValue("@Net", (decimal)netTotal);
                             cmd.Parameters.AddWithValue("@Pay", (object)(head.PaymentType ?? "") ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Guest", (object)head.GuestName ?? DBNull.Value);
@@ -2229,19 +2257,18 @@ namespace Take_Time_BangPhra.Services
                 if (!string.IsNullOrWhiteSpace(h.SpecialRequest))
                     sb.AppendLine($"📝 <b>คำขอพิเศษ:</b> {E(Trunc(h.SpecialRequest, 300))}");
 
-                // ⚠️ ห้ามเรียกตัวไหนว่า "ยอดที่ OTA จะโอน" — อีเมลไม่ได้บอกค่าคอมมิชชั่นมาด้วย
-                // มีแค่ refsell_amt (ระดับ booking) กับ AMOUNT (เรตต่อคืนต่อห้อง) ถ้าสองตัวไม่เท่ากัน
-                // แปลว่าอาจมีภาษี/ส่วนลด/ค่าคอมรวมอยู่ — แจ้งให้คนดู ไม่สรุปแทน
+                // ยอดที่บันทึกจริง = AMOUNT รายห้องรวม (เงินที่รีสอร์ทได้)
+                // refsell_amt = ยอดที่ลูกค้าจ่าย OTA — แสดงไว้อ้างอิงเฉย ๆ ไม่ใช่ยอดที่ลง
+                // ⚠️ ห้ามเรียกส่วนต่างว่า "ค่าคอม" — อีเมลไม่ได้บอกค่าคอมมาด้วย
+                //    ส่วนต่างอาจเป็นภาษี/ส่วนลด/ค่าคอมรวมกัน ให้คนตรวจกับ OTA เอง
                 double refSell = h.GrossTotal;
                 double sumRows = o.Rooms.Sum(r => r.NetAmount * r.NoOfRooms * nights);
-                double booked = refSell > 0 ? refSell : sumRows;
+                double booked = sumRows > 0 ? sumRows : refSell;
                 sb.AppendLine();
-                sb.AppendLine($"💰 <b>ยอดรวมที่บันทึก:</b> {booked:N0} THB");
+                sb.AppendLine($"💰 <b>ยอดที่ลงระบบ:</b> {booked:N0} THB  <i>(AMOUNT รายห้อง — เงินที่เราได้)</i>");
                 if (refSell > 0 && sumRows > 0 && Math.Abs(refSell - sumRows) > 1)
-                {
-                    sb.AppendLine($"   ├ refsell_amt (ในอีเมล): {refSell:N0}");
-                    sb.AppendLine($"   └ AMOUNT รวมรายห้อง: {sumRows:N0}  <i>ต่าง {Math.Abs(refSell - sumRows):N0} — อาจเป็นภาษี/ส่วนลด/ค่าคอม ตรวจกับ OTA</i>");
-                }
+                    sb.AppendLine($"   └ <i>ลูกค้าจ่าย OTA (refsell_amt): {refSell:N0} · ต่าง {Math.Abs(refSell - sumRows):N0} "
+                                + $"— ภาษี/ส่วนลด/ค่าคอมของ OTA ไม่ลงเป็นรายได้เรา</i>");
                 bool channelCollect = (h.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
                                       || string.IsNullOrEmpty(h.PaymentType);
                 sb.AppendLine($"💳 <b>การชำระ:</b> {(channelCollect ? "OTA เก็บเงินแล้ว (Channel Collect)" : "เก็บเงินหน้างาน (Hotel Collect)")}");
