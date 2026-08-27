@@ -2213,12 +2213,6 @@ namespace Take_Time_BangPhra.Services
                 string mapNote = MergeMapNotes(o.Rooms, h.ChannelName);
                 if (!string.IsNullOrEmpty(mapNote))
                     sb.AppendLine($"🏷 <b>หมายเหตุแผนราคา:</b> {E(Trunc(mapNote, 200))}");
-                else
-                {
-                    string mealPlan = DescribeMealPlan(o.Rooms);
-                    if (!string.IsNullOrEmpty(mealPlan))
-                        sb.AppendLine($"🍽 <b>อาหารเช้า:</b> {E(mealPlan)}");
-                }
 
                 if (h.AssignedRooms != null && h.AssignedRooms.Count > 0)
                     sb.AppendLine($"🛏 <b>จัดให้ห้อง:</b> {E(string.Join(", ", h.AssignedRooms))}");
@@ -2313,9 +2307,12 @@ namespace Take_Time_BangPhra.Services
 
             if (rooms != null && rooms.Count > 0)
             {
-                // ⭐ ตั้งต้นจากหมายเหตุที่ผูกไว้กับแผนราคาในตาราง MapDataWithSTAAH
-                // (เจ้าหน้าที่เป็นคนกรอกเอง เช่น "Agoda ไม่รวมอาหารเช้า") — ของที่ระบบสรุปเอง
-                // เป็นส่วน "บวกเพิ่ม" ไม่ใช่มาแทนที่ข้อความนี้
+                // ⭐ แหล่งเดียวของเรื่อง "รวม/ไม่รวมอาหารเช้า" คือหมายเหตุที่ผูกไว้กับแผนราคา
+                // ในตาราง MapDataWithSTAAH (เจ้าหน้าที่กรอกเอง เช่น "Agoda ไม่รวมอาหารเช้า")
+                //
+                // ⚠️ ห้ามสรุปเองจากชื่อแผนราคา: รหัสเดียวกันความหมายต่างกันได้ตามช่องทาง —
+                // บางเจ้า map "RNB" ไว้กับแผนที่ "มี" อาหารเช้า ⇒ เดาแล้วจะบอกลูกค้าผิด
+                // ชื่อแผนราคาดิบยังแสดงในบรรทัด "แผนราคา:" ให้ตรวจเทียบได้อยู่แล้ว
                 string mapNote = MergeMapNotes(rooms, head.ChannelName);
                 if (!string.IsNullOrEmpty(mapNote)) sb.AppendLine("หมายเหตุแผนราคา: " + mapNote);
 
@@ -2328,13 +2325,6 @@ namespace Take_Time_BangPhra.Services
                     if (seen.Add(line)) sb.AppendLine(line);
                 }
 
-                // สรุปเรื่องอาหารเช้าจากชื่อแผนราคา — ข้ามถ้าหมายเหตุจากตารางพูดถึงอยู่แล้ว
-                // (กันเขียนซ้ำ และกันกรณีข้อความสองแหล่งขัดกันเอง — ให้ของที่คนกรอกชนะ)
-                if (!MentionsMeal(mapNote))
-                {
-                    string meal = DescribeMealPlan(rooms);
-                    if (!string.IsNullOrEmpty(meal)) sb.AppendLine("อาหารเช้า: " + meal);
-                }
 
                 int adults = rooms.Sum(r => r.Adults * Math.Max(1, r.NoOfRooms));
                 int kids = rooms.Sum(r => r.Children * Math.Max(1, r.NoOfRooms));
@@ -2424,39 +2414,6 @@ namespace Take_Time_BangPhra.Services
                 if (!parts.Contains(note)) parts.Add(note);
             }
             return parts.Count == 0 ? null : string.Join(" · ", parts.ToArray());
-        }
-
-        /// <summary>ข้อความนี้พูดถึงเรื่องอาหาร/มื้อเช้าอยู่แล้วหรือยัง</summary>
-        private static bool MentionsMeal(string s)
-        {
-            if (string.IsNullOrWhiteSpace(s)) return false;
-            string low = s.ToLowerInvariant();
-            return low.Contains("อาหาร") || low.Contains("เช้า")
-                || low.Contains("breakfast") || low.Contains("abf") || low.Contains("board");
-        }
-
-        /// <summary>อ่านแผนราคาแล้วสรุปว่า "รวม/ไม่รวมอาหารเช้า" — ไม่ชัดเจนก็ไม่เดา</summary>
-        private static string DescribeMealPlan(List<RoomBooking> rooms)
-        {
-            bool sawNo = false, sawYes = false;
-            foreach (var r in rooms)
-            {
-                string p = (SplitRoomType(r.RoomType).RatePlan ?? "").ToLowerInvariant();
-                if (p.Length == 0) continue;
-
-                if (p.Contains("no breakfast") || p.Contains("without breakfast") || p.Contains("room only")
-                    || p.Contains("no meal") || Regex.IsMatch(p, @"\brnb\b") || Regex.IsMatch(p, @"\bro\b"))
-                { sawNo = true; continue; }
-
-                if (p.Contains("breakfast") || p.Contains("abf") || Regex.IsMatch(p, @"\bbb\b")
-                    || p.Contains("half board") || p.Contains("full board") || p.Contains("all inclusive"))
-                { sawYes = true; }
-            }
-
-            if (sawNo && sawYes) return "มีทั้งรวมและไม่รวม — ตรวจรายห้อง";
-            if (sawNo) return "ไม่รวมอาหารเช้า";
-            if (sawYes) return "รวมอาหารเช้า";
-            return null;   // แผนราคาไม่ได้บอก → ไม่เดาแทน
         }
 
         private static string FirstNonEmpty(params string[] values)
