@@ -2949,11 +2949,8 @@ namespace Take_Time_BangPhra.Integration
 
                 _lastQueueAlert = DateTime.Now;   // ตั้งก่อนส่ง — ส่งไม่ได้ก็ไม่ต้องพยายามซ้ำทุกรอบ
 
-                string token = AppCfg.Get("TelegramTokenTakeTime");
-                if (string.IsNullOrEmpty(token)) return;
-                new TelegramBot2(token)
-                    .SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), sb.ToString())
-                    .GetAwaiter().GetResult();
+                // ผ่านประตูกลาง — เปิด/ปิดและเลือกปลายทางได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                Notify.Send(Notify.Ev.AccQueueAlert, sb.ToString());
             }
             catch { /* การแจ้งเตือนพังต้องไม่ทำให้คิวพัง */ }
         }

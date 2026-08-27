@@ -1050,8 +1050,8 @@ namespace Take_Time_BangPhra
 
 ⚠️ *หมายเหตุ:* ยกเลิกไม่คืนเงิน";
 
-                    var bot = new TelegramBot2(AppCfg.Get("TelegramTokenTakeTime"));
-                    await bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
+                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                    Notify.Send(Notify.Ev.BookingCancel, message);
                 }
             }
             catch (Exception ex)

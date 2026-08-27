@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Text;
@@ -394,15 +394,11 @@ namespace Take_Time_BangPhra.Services
 
             string text = sb.ToString();
 
-            try
-            {
-                var bot = new TelegramService();
-                bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), text)
-                   .GetAwaiter().GetResult();
-            }
+            // ประตูกลาง — เปิด/ปิดและเลือกช่องทางได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+            try { Notify.Send(Notify.Ev.OrderAmenity, text); }
             catch (Exception ex)
             {
-                _code.Logs(_conn, "Amenity", "แจ้งเตือน Telegram ไม่สำเร็จ: " + ex.Message, "SYSTEM");
+                _code.Logs(_conn, "Amenity", "แจ้งเตือนไม่สำเร็จ: " + ex.Message, "SYSTEM");
             }
 
             try

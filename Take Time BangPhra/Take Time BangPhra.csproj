@@ -1455,6 +1455,7 @@
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Class\Services\NearbyPlaceService.cs" />
     <Compile Include="Class\Services\AmenityService.cs" />
+    <Compile Include="Class\Notify.cs" />
     <Compile Include="Class\Payments\PaymentModels.cs" />
     <Compile Include="Class\Payments\PaymentGatewayConfig.cs" />
     <Compile Include="Class\Payments\IPaymentGateway.cs" />

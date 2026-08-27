@@ -213,15 +213,16 @@ namespace Take_Time_BangPhra.Guest
                 string roomName = dtRoom.Rows.Count > 0 ? dtRoom.Rows[0]["RoomName"].ToString() : "Unknown";
                 string guestName = dtRoom.Rows.Count > 0 ? dtRoom.Rows[0]["GuestName"].ToString() : "Guest";
 
-                // Send Telegram notification with alert emoji
-                var telegramBot = new TelegramBot();
-                string alertMessage = $"🔔💬 ข้อความใหม่จากแขก!\n\n" +
-                                     $"🚪 ห้อง: {roomName}\n" +
-                                     $"👤 ชื่อ: {guestName}\n" +
-                                     $"📱 เบอร์: {_guestMobilePhone}\n\n" +
-                                     $"💬 ข้อความ:\n{message}\n\n" +
-                                     $"⚡ กรุณาตอบกลับที่: Admin > Chat Management";
-                telegramBot.SendMessage(alertMessage);
+                // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                // (ของเดิมใช้ TelegramBot ที่อ่าน token จาก Web.config เท่านั้น ซึ่งมักไม่ได้ตั้งไว้
+                //  ⇒ แจ้งเตือนข้อความจากแขกเงียบมาตลอด ตอนนี้ใช้ token เดียวกับที่อื่น)
+                string alertMessage = $"🔔💬 <b>ข้อความใหม่จากแขก</b>\n\n" +
+                                     $"🚪 ห้อง: {Notify.E(roomName)}\n" +
+                                     $"👤 ชื่อ: {Notify.E(guestName)}\n" +
+                                     $"📱 เบอร์: {Notify.E(_guestMobilePhone)}\n\n" +
+                                     $"💬 ข้อความ:\n{Notify.E(message)}\n\n" +
+                                     $"⚡ ตอบกลับที่: กล่องแชทรวม (Admin → แชทลูกค้า)";
+                Notify.Send(Notify.Ev.ChatGuest, alertMessage);
             }
             catch { }
         }

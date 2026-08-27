@@ -68,7 +68,7 @@ namespace Take_Time_BangPhra.Services
             }
             catch { }
             _code.Logs(_conn, "EmailReservation", message + " | " + key, "SYSTEM");
-            if (_notifyTelegram) Notify(message + $"\n🖥 <i>{E(InstanceStamp())}</i>", true);
+            if (_notifyTelegram) Notify(message + $"\n🖥 <i>{E(InstanceStamp())}</i>", true, global::Notify.Ev.OtaIntakeStale);
         }
         private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
@@ -550,7 +550,8 @@ namespace Take_Time_BangPhra.Services
             {
                 res.Error = ex.Message;
                 _code.Logs(_conn, "EmailReservation", $"IMAP error: {ex.Message}", "SYSTEM");
-                if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message + $"\n🖥 <i>{E(InstanceStamp())}</i>");
+                if (_notifyTelegram) Notify("❌ STAAH intake error: " + ex.Message + $"\n🖥 <i>{E(InstanceStamp())}</i>",
+                    false, global::Notify.Ev.SystemError);
                 AlertIfIntakeStale("อ่านอีเมลไม่สำเร็จ: " + ex.Message);
             }
             }   // lease — ปล่อยล็อกเมื่อออกจากบล็อก (และหมดอายุเองถ้า process ตายคางาน)
@@ -650,7 +651,8 @@ namespace Take_Time_BangPhra.Services
                 // รอบลองใหม่: แจ้งเฉพาะตอนสำเร็จ (ไม่งั้นจะเตือนซ้ำทุก 5 นาทีจนกว่าจะแก้)
                 // เคส Park แจ้งจากข้างใน Process* ไปแล้ว (ข้อความละเอียดกว่า) — ไม่แจ้งซ้ำ
                 if (_notifyTelegram && !o.Park && !o.Ignored && (o.Ok || (!o.Dup && !isRetry)))
-                    Notify(BuildNotification(kind, o, subject, isRetry), true);
+                    Notify(BuildNotification(kind, o, subject, isRetry), true,
+                        o.Ok ? global::Notify.Ev.OtaBookingOk : global::Notify.Ev.OtaBookingFail);
             }
             catch (Exception ex)
             {
@@ -918,7 +920,7 @@ namespace Take_Time_BangPhra.Services
                     if (_notifyTelegram && (res.Created > 0 || res.Cancelled > 0))
                         Notify($"♻️ <b>กู้อีเมลจองย้อนหลัง {days} วัน</b>\n"
                                + $"สร้างเพิ่ม {res.Created} · ยกเลิก {res.Cancelled} · มีอยู่แล้ว {res.Duplicate}\n"
-                               + $"🖥 <i>{E(InstanceStamp())}</i>", true);
+                               + $"🖥 <i>{E(InstanceStamp())}</i>", true, global::Notify.Ev.OtaBookingOk);
                     SetCfg("Email_Rsv_LastRecover", DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
                            "เวลาที่กวาดกู้อีเมลจองย้อนหลังล่าสุด (ระบบเขียนเอง)");
                 }
@@ -2286,7 +2288,7 @@ namespace Take_Time_BangPhra.Services
             if (res.Ignored > 0) sb.AppendLine($"📭 <b>ไม่ใช่อีเมลการจอง (ข้าม):</b> {res.Ignored}");
             if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
             sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm} · 🖥 {E(InstanceStamp())}</i>");
-            Notify(sb.ToString(), true);
+            Notify(sb.ToString(), true, global::Notify.Ev.OtaSummary);
         }
 
         // ── หมายเหตุการจอง ───────────────────────────────────────────────────────
@@ -2457,17 +2459,16 @@ namespace Take_Time_BangPhra.Services
         }
 
         private bool _inRetry;   // อยู่ในรอบ "ลองใหม่" — งดแจ้งเตือนซ้ำ (แจ้งเฉพาะตอนสำเร็จ)
-        private void Notify(string text, bool always = false)
+
+        /// <summary>
+        /// ส่งแจ้งเตือนผ่านประตูกลาง (global::Notify) — ผู้ดูแลเปิด/ปิดรายเหตุการณ์
+        /// และเลือกช่องทาง Telegram/LINE ได้เองที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+        /// (ต้องเรียกด้วย global:: เพราะคลาสนี้มีเมธอดชื่อ Notify ของตัวเอง)
+        /// </summary>
+        private void Notify(string text, bool always = false, string eventCode = null)
         {
             if (_inRetry && !always) return;
-            try
-            {
-                string token = AppCfg.Get("TelegramTokenTakeTime");
-                if (string.IsNullOrEmpty(token)) return;
-                var bot = new TelegramBot2(token);
-                bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), text).GetAwaiter().GetResult();
-            }
-            catch { }
+            global::Notify.Send(eventCode ?? global::Notify.Ev.OtaBookingFail, text);
         }
 
         private static string Rx(string s, string pattern)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
@@ -473,7 +473,19 @@ namespace Take_Time_BangPhra.Payments
                     + (string.IsNullOrEmpty(txn.CustomerName) ? "" : " · " + txn.CustomerName),
                     "PAYMENT", "NORMAL");
             }
-            catch (Exception ex) { Log("แจ้งเตือนไม่สำเร็จ: " + ex.Message); }
+            catch (Exception ex) { Log("แจ้งเตือนในระบบไม่สำเร็จ: " + ex.Message); }
+
+            // ช่องทางภายนอก (Telegram/LINE) — ปิดไว้เป็นค่าเริ่มต้น เปิดได้ที่หน้าการแจ้งเตือน
+            try
+            {
+                global::Notify.Send(global::Notify.Ev.PaymentOnline,
+                    "💳 <b>รับชำระเงินออนไลน์</b> " + txn.TotalPayable.ToString("N2") + " บาท\n"
+                    + global::Notify.E(PaymentSource.Thai(txn.SourceType) + " " + (txn.SourceId ?? ""))
+                    + "\n" + global::Notify.E(PaymentGatewayConfig.MethodName(txn.Method))
+                    + "\nอ้างอิง " + global::Notify.E(txn.TxnRef)
+                    + (string.IsNullOrEmpty(txn.CustomerName) ? "" : "\n👤 " + global::Notify.E(txn.CustomerName)));
+            }
+            catch { }
         }
 
         // ── helpers ──────────────────────────────────────────────────────────

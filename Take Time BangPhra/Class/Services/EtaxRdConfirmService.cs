@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -287,17 +287,10 @@ namespace Take_Time_BangPhra.Services
             try { _code.Logs(_conn, "EtaxRdConfirm", m, "SYSTEM"); } catch { }
         }
 
+        /// <summary>แจ้งพนักงานผ่านประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน</summary>
         private void NotifyStaff(string text)
         {
-            try
-            {
-                string token = AppCfg.Get("TelegramTokenTakeTime");
-                if (string.IsNullOrEmpty(token)) return;
-                new TelegramBot2(token)
-                    .SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), text)
-                    .GetAwaiter().GetResult();
-            }
-            catch { }
+            Notify.Send(Notify.Ev.EtaxRd, text);
         }
     }
 }

@@ -89,10 +89,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "ผูกบัญชี LINE เพื่อรับแจ้งเตือนส่วนตัว, ตั้งค่า LINE Login, Callback URL, บังคับ add friend",
                 "~/Admin/Settings/LineAccount",
                 "line login ไลน์ ผูกบัญชี callback add friend แจ้งเตือน uid"));
-            conn.Items.Add(new Item("การแจ้งเตือน",
-                "เลือกว่าเหตุการณ์ไหนแจ้งใคร ทางช่องทางใด",
+            conn.Items.Add(new Item("การแจ้งเตือน (Telegram / LINE)",
+                "เลือกทีละเรื่องว่าจะให้ส่งอะไรบ้าง — การจอง, ข้อความลูกค้า, ออเดอร์, คิวบัญชี + ตั้งช่วงเวลาเงียบ และปลายทางแยกรายเรื่อง",
                 "~/Admin/Notifications/Settings",
-                "notification แจ้งเตือน alert เตือน line telegram"));
+                "notification แจ้งเตือน alert เตือน line telegram ปิดแจ้งเตือน เปิดแจ้งเตือน กลุ่ม chat id ช่วงเวลาเงียบ รบกวน"));
             conn.Items.Add(new Item("Connection Settings",
                 "การเชื่อมต่อฐานข้อมูลและบริการอื่น ๆ",
                 "~/Admin/Settings/ConnectionSettings",

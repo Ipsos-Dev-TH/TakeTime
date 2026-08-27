@@ -2736,8 +2736,8 @@ namespace Take_Time_BangPhra
 👨‍💼 แก้ไขโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                                    var bot = new TelegramBot2(AppCfg.Get("TelegramTokenTakeTime").ToString());
-                                                    await bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
+                                                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                                                    Notify.Send(Notify.Ev.BookingEdit, message);
                                                 }
                                             }
                                             catch { }
@@ -3732,8 +3732,8 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 ลงจองโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                            var bot = new TelegramBot2(AppCfg.Get("TelegramTokenTakeTime").ToString());
-                                            await bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
+                                            // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                                            Notify.Send(Notify.Ev.BookingNew, message);
 
                                             // ✅ Reload page to show uploaded slip image (don't redirect to Confirmed yet)
                                             // This allows user to see the uploaded slip before confirming
@@ -5781,8 +5781,8 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 เลื่อนโดย: {Session["UserName"]?.ToString() ?? adminName ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                    var bot = new TelegramBot2(AppCfg.Get("TelegramTokenTakeTime").ToString());
-                    await bot.SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
+                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                    Notify.Send(Notify.Ev.BookingPostpone, message);
                 }
                 catch (Exception telegramEx)
                 {
