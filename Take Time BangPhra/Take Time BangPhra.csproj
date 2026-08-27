@@ -431,6 +431,7 @@
     <Content Include="API\PublicChat.ashx" />
     <Content Include="API\OmniChannelWebhook.ashx" />
     <Content Include="API\PaymentWebhook.ashx" />
+    <Content Include="API\PaymentStatus.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
@@ -595,6 +596,8 @@
     <Content Include="Checkout.aspx" />
     <Content Include="Payment\MakePayment.aspx" />
     <Content Include="Payment\Pay.aspx" />
+    <Content Include="Payment\Card.aspx" />
+    <Content Include="Payment\Charge.aspx" />
     <Content Include="Payment\PayResult.aspx" />
     <Content Include="Payment\PaymentHistory.aspx" />
     <Content Include="PostponeList.aspx" />
@@ -705,6 +708,9 @@
     </Compile>
     <Compile Include="API\PaymentWebhook.ashx.cs">
       <DependentUpon>PaymentWebhook.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\PaymentStatus.ashx.cs">
+      <DependentUpon>PaymentStatus.ashx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
@@ -1462,6 +1468,8 @@
     <Compile Include="Class\Payments\PaysoGateway.cs" />
     <Compile Include="Class\Payments\PaymentTransactionStore.cs" />
     <Compile Include="Class\Payments\OnlinePaymentService.cs" />
+    <Compile Include="Class\Payments\OmiseGateway.cs" />
+    <Compile Include="Class\Payments\SecurityHoldService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1606,6 +1614,20 @@
     </Compile>
     <Compile Include="Payment\Pay.aspx.designer.cs">
       <DependentUpon>Pay.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\Card.aspx.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Card.aspx.designer.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\Charge.aspx.cs">
+      <DependentUpon>Charge.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Charge.aspx.designer.cs">
+      <DependentUpon>Charge.aspx</DependentUpon>
     </Compile>
     <Compile Include="Payment\PayResult.aspx.cs">
       <DependentUpon>PayResult.aspx</DependentUpon>

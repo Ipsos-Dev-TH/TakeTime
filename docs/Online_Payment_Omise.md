@@ -1,0 +1,105 @@
+# รับชำระเงินออนไลน์ผ่าน Omise + วงเงินประกันความเสียหาย
+
+## ภาพรวม
+
+ระบบชำระเงินออนไลน์รองรับ 2 เกตเวย์ สลับได้จากหน้าตั้งค่า (`Payment_Provider` = **OMISE** /
+PAYSO) โดยหน้าจอทุกหน้าเรียกผ่าน `IPaymentGateway` ตัวเดียว — **เปลี่ยนเจ้าในอนาคต =
+เขียนคลาสเดียว + เพิ่มตัวเลือกเดียว** ไม่แตะหน้าจอหรือ flow เงินเลย
+
+> **ทุกสวิตช์ปิดเป็นค่าเริ่มต้น — ปิดอยู่ระบบทำงานเหมือนเดิมทุกอย่าง**
+> ชั้นสวิตช์: `Feature_OnlinePayment` (ใหญ่สุด) → `Payment_Enabled` → `Omise_Enabled` /
+> `Payment_SecurityHold_Enabled` → เปิด/ปิด **รายช่องทาง** (`Payment_Channel_*`)
+
+## สัญญา API ของ Omise ที่ใช้ (ยืนยันจากเอกสารสาธารณะ docs.omise.co)
+
+| เรื่อง | รายละเอียด |
+|---|---|
+| Auth | HTTP Basic — Secret Key เป็น username, password ว่าง |
+| จำนวนเงิน | สตางค์เสมอ (12300 = ฿123.00) — `OmiseGateway.Satang()/Baht()` |
+| QR พร้อมเพย์ | `POST /charges` + `source[type]=promptpay` (ฝั่งเซิร์ฟเวอร์) → `source.scannable_code.image.download_uri` |
+| บัตร | Omise.js ฝั่งเบราว์เซอร์ → token (`tokn_`) → `POST /charges` + `card` — **ข้อมูลบัตรไม่ผ่านเราเลย** |
+| 3-D Secure | charge ตอบ `authorize_uri` → พาลูกค้าไปยืนยัน → กลับมาที่ PayResult |
+| **กันวงเงิน** | `capture=false` → `authorized=true` เงินยังไม่ออกจากบัตร — **หมดอายุเอง 7 วัน** |
+| ตัดบางส่วน | `POST /charges/{id}/capture` + `capture_amount` — ส่วนเหลือคืนวงเงินอัตโนมัติ |
+| คืนวงเงิน | `POST /charges/{id}/reverse` |
+| คืนเงิน (ตัดแล้ว) | `POST /charges/{id}/refunds` + `amount` |
+| ค่าธรรมเนียม | คำตอบ charge มี `fee`, `fee_vat`, `net` → เก็บลง `Payment_Transaction.Fee_Amount` |
+| โหมด test/live | ดูจาก prefix คีย์เอง (`skey_test_`) ไม่ต้องตั้งแยก |
+| **Webhook** | ไม่เชื่อเนื้อ webhook เลย — อ่านแค่ id แล้ว `GET /charges/{id}` ด้วย Secret Key มายืนยันก่อนเสมอ (แนวทางที่ Omise แนะนำ) ⇒ ของปลอมยิงมาไม่มีผล |
+
+Webhook URL ที่ต้องตั้งใน Omise Dashboard → Webhooks: `https://<โดเมน>/API/PaymentWebhook.ashx`
+
+## วงเงินประกันความเสียหาย (แทนโอนเข้าบัญชีส่วนตัว)
+
+**ปัญหาเดิม:** เงินประกันให้ลูกค้าโอนเข้าบัญชีส่วนตัว → มองเป็นเงินสด → ต้องเบิกเงินสดมารอคืน
+เงินจริงวิ่งนอกระบบทั้งขาเข้า-ขาออก ไม่มีร่องรอยใน TakeTime หรือ NextAcc เลย (ทีมวิเคราะห์ยืนยัน:
+ไม่มีตาราง/หน้า/บัญชีไหนรองรับเงินประกันอยู่ก่อน)
+
+**วิธีใหม่ (Omise + บัตร):** *กันวงเงิน* บนบัตร — **ไม่มีเงินเข้า-ออกเลย** จนกว่าจะเกิดความเสียหายจริง
+
+```
+เช็คอิน   Payment/Charge → "วางวงเงินประกัน" → ลิงก์/QR ให้ลูกค้ากรอกบัตรเอง (Payment/Card)
+          → Omise กันวงเงิน (capture=false) → สถานะ HELD · แจ้ง Telegram
+พัก       ไม่มีอะไรเกิดขึ้น เงินอยู่ในบัตรลูกค้า (ระบบเตือนก่อนวงเงินหมดอายุ 7 วัน)
+เช็คเอาท์ หน้า Checkout ขึ้นแผง "วงเงินประกัน" อัตโนมัติ:
+          ├ ไม่มีความเสียหาย → [คืนวงเงินทั้งหมด] → reverse → จบ ไม่ต้องเบิกเงินสดคืน
+          └ มีความเสียหาย   → กรอกยอด+เหตุผล → [ตัดค่าเสียหาย] → capture บางส่วน
+                              ส่วนเหลือคืนอัตโนมัติ → เงินเข้าบัญชี Omise
+```
+
+**หลักบัญชีที่ยึด (ตามผลวิเคราะห์ระบบ):**
+- กันวงเงิน = **ไม่ใช่เงิน** — ห้ามแตะ `Reservation.Deposit` / `Payment_History` /
+  `Account_Receipt` (คอลัมน์พวกนั้นคือเงินค่าห้อง แตะแล้ว logic ทั้งระบบเพี้ยน)
+- เงินเกิดครั้งเดียวตอน **ตัดค่าเสียหาย** → บันทึก `Payment_Transaction` (source `DAMAGE`)
+  → พนักงาน**ออกใบเสร็จค่าเสียหายตามปกติ** เลือกแหล่งเงิน "Omise (จ่ายออนไลน์)"
+  ⇒ NextAcc ได้ Dr บัญชีพักเงิน Omise / Cr รายได้ค่าเสียหาย ผ่านเส้นทางใบเสร็จเดิมที่นิ่งแล้ว
+- ข้อจำกัดจริงของ Omise: กันวงเงินได้**เฉพาะบัตร** (PromptPay ทำไม่ได้) และ**อยู่ได้ 7 วัน**
+  — พักยาวกว่านั้นระบบจะเตือนล่วงหน้า (ค่าเริ่มต้น 24 ชม.) ให้ตัด/คืน/ส่งลิงก์กันใหม่
+
+## จุดรับเงินและสวิตช์รายช่องทาง
+
+| ช่องทาง | สวิตช์ | จุดใช้งาน |
+|---|---|---|
+| การจอง / ยอดค้าง | `Payment_Channel_RESERVATION` | Pay.aspx, MakePayment (ลิงก์), Guest/Balance (ปุ่มใหม่) |
+| กิจกรรม | `Payment_Channel_ACTIVITY` | หน้าจองกิจกรรมของแขก |
+| **ขายหน้าร้าน** | `Payment_Channel_POS` | **Payment/Charge** — พนักงานใส่ยอด → QR/ลิงก์ → จอขึ้น ✅ เอง (poll `API/PaymentStatus.ashx`) → บันทึกขายตามปกติเลือกแหล่งเงิน Omise. *ตั้งใจไม่เสียบเข้า flow บันทึกขาย — POS ออกเลขเอกสาร+ตัดสต๊อกทันที ไม่มีสถานะรอจ่าย* |
+| รูมเซอร์วิส | `Payment_Channel_ROOMSERVICE` | Pay?src=ROOMSERVICE — จ่ายแล้วตั้ง `Payment_Status='PAID', Method='ONLINE'` (กันทับออเดอร์ CHARGED) ใบสรุปรายวันจัดกลุ่มเข้าแหล่งเงิน Omise เอง |
+| เบิกของใช้ | `Payment_Channel_AMENITY` | สำรองไว้ — หน้าเบิกของยังไม่มีท่อเก็บเงิน (ช่องว่างเดิมของระบบ) |
+| ค่าเสียหาย | `Payment_Channel_DAMAGE` | ตัดจากวงเงินประกัน |
+
+ลิงก์/QR ทุกใบคือ "ลูกค้ากรอกเอง": Pay (เลือกวิธี) / Card (กรอกบัตร, Omise.js) — ส่งทางแชท
+หรือให้สแกน QR ของลิงก์ก็ได้ (หน้า Charge/MakePayment วาด QR ให้)
+
+## ค่าธรรมเนียมและเอกสารบัญชี (NextAcc)
+
+**ผังที่แนะนำ:** สร้างบัญชี **11xx "เงินรอรับจาก Omise"** (บัญชีพักเงิน) ใน NextAcc แล้วผูกกับ
+แหล่งเงิน "Omise (จ่ายออนไลน์)" ที่ Admin → NextAcc → แหล่งเงิน
+
+| เหตุการณ์ | เอกสาร | GL |
+|---|---|---|
+| ลูกค้าจ่าย (ค่าห้อง/กิจกรรม/ขายของ) | ใบเสร็จปกติ แหล่งเงิน = Omise | Dr เงินรอรับจาก Omise / Cr รายได้ (+VAT) — อัตโนมัติผ่านเส้นทางใบเสร็จเดิม |
+| ตัดค่าเสียหาย | ใบเสร็จค่าเสียหาย แหล่งเงิน = Omise | Dr เงินรอรับจาก Omise / Cr รายได้ค่าเสียหาย |
+| Omise โอนเงินเข้าธนาคาร (T+n) | บันทึกรายวัน (ทำมือ/รายรอบ) | Dr ธนาคาร + **Dr ค่าธรรมเนียม (fee+VAT)** / Cr เงินรอรับจาก Omise |
+
+- ระบบเก็บค่าธรรมเนียมจริงจาก Omise ลง `Payment_Transaction.Fee_Amount` ทุกรายการ →
+  ยอดรวมต่อวันดูได้จากตารางรายการในหน้าตั้งค่า ใช้ทำ JE โอนเงินเข้าธนาคารได้ตรง ๆ
+- `Payment_Card_Surcharge_Pct` ยังใช้ได้ถ้าต้องการบวกค่าธรรมเนียมให้ลูกค้า (ค่าเริ่มต้น 0 = ร้านรับภาระ)
+- การ auto-post JE ค่าธรรมเนียมตอน Omise settle เป็นงานถัดไป (ต้องรอ statement/transfer webhook)
+
+## ตาราง/ไฟล์ใหม่
+
+- `Database/PHASE19_Migration_09_Omise_Security_Hold.sql` — ตาราง `Payment_Security_Holds`,
+  คีย์ Omise, สวิตช์รายช่องทาง, แหล่งเงิน Omise, กฎแจ้งเตือน `PAYMENT_HOLD`
+- `Class/Payments/OmiseGateway.cs` (IPaymentGateway + IDepositGateway),
+  `SecurityHoldService.cs`, ส่วนขยายใน `OnlinePaymentService` / `PaymentGatewayConfig`
+- หน้า: `Payment/Card.aspx` (ลูกค้ากรอกบัตร), `Payment/Charge.aspx` (จุดรับเงิน+วงเงินประกัน),
+  `API/PaymentStatus.ashx` (poll สถานะ), แผงวงเงินประกันใน `Checkout.aspx`
+
+## ลำดับเปิดใช้งาน
+
+1. รัน `PHASE19_Migration_09` (ต้องมี PHASE19_05 ก่อน) → build บน Windows → deploy
+2. ใส่คีย์ **test** ของ Omise → ปุ่มทดสอบการเชื่อมต่อ → ตั้ง Webhook ใน Omise Dashboard
+3. ผูกบัญชีพักเงินให้แหล่งเงิน "Omise (จ่ายออนไลน์)" ในหน้า NextAcc
+4. เปิด `Feature_OnlinePayment` → `Payment_Enabled` → `Omise_Enabled` → ทดสอบครบวง
+   (QR / บัตร test 4242 4242 4242 4242 / กันวงเงิน-ตัด-คืน) → สลับคีย์ live
+5. เปิด `Payment_SecurityHold_Enabled` เมื่อพร้อมเลิกวิธีโอนเข้าบัญชีส่วนตัว

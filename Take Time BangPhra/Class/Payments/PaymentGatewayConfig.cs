@@ -97,6 +97,41 @@ namespace Take_Time_BangPhra.Payments
             }
         }
 
+        // ── ผู้ให้บริการที่ใช้อยู่ (สลับได้จากหน้าตั้งค่า ไม่ต้อง build ใหม่) ────
+
+        public const string ProviderOmise = "OMISE";
+        public const string ProviderPayso = "PAYSO";
+
+        /// <summary>เกตเวย์ที่เลือกใช้อยู่ — OMISE (ค่าเริ่มต้น) หรือ PAYSO</summary>
+        public static string ActiveProvider
+        {
+            get
+            {
+                string p = (Get("Payment_Provider", ProviderOmise) ?? ProviderOmise).Trim().ToUpperInvariant();
+                return p == ProviderPayso ? ProviderPayso : ProviderOmise;
+            }
+        }
+
+        /// <summary>เกตเวย์ที่เลือกอยู่พร้อมใช้งานจริงไหม</summary>
+        public static bool IsGatewayReady
+        {
+            get
+            {
+                if (!IsEnabled) return false;
+                if (ActiveProvider == ProviderPayso) return IsPaysoReady;
+                return GetBool("Omise_Enabled", false) && !string.IsNullOrEmpty(Get("Omise_SecretKey", ""));
+            }
+        }
+
+        // ── เปิด/ปิดรายช่องทางรับเงิน ────────────────────────────────────────
+        // แต่ละจุดที่รับเงินในระบบ (จอง/กิจกรรม/POS/รูมเซอร์วิส/เบิกของ/เช็คเอาท์)
+        // ปิดช่องไหน ช่องนั้นก็ไม่เสนอทางจ่ายออนไลน์ — ที่เหลือทำงานตามเดิม
+        public static bool ChannelEnabled(string sourceType)
+        {
+            if (string.IsNullOrEmpty(sourceType)) return true;
+            return GetBool("Payment_Channel_" + sourceType.Trim().ToUpperInvariant(), true);
+        }
+
         public static bool IsSandbox =>
             !string.Equals(Get("Payso_Mode", "SANDBOX"), "PRODUCTION", StringComparison.OrdinalIgnoreCase);
 

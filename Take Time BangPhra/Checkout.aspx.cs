@@ -20,7 +20,75 @@ namespace Take_Time_BangPhra
             if (!IsPostBack)
             {
                 LoadReservationData();
+                LoadSecurityHold();
             }
+        }
+
+        // ── วงเงินประกันความเสียหาย ──────────────────────────────────────────
+        // แสดงเฉพาะเมื่อการจองนี้มีวงเงินกันไว้จริง — ฟีเจอร์ปิด/ไม่มีวงเงิน = มองไม่เห็นเลย
+
+        private void LoadSecurityHold()
+        {
+            try
+            {
+                var svc = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString);
+                if (!svc.TableReady()) return;
+
+                var hold = svc.GetOpenHold(GetReservationId());
+                if (hold == null) return;
+
+                pnlSecurityHold.Visible = true;
+                ViewState["holdId"] = hold.ID;
+
+                if (hold.Status == Take_Time_BangPhra.Payments.HoldStatus.PendingCard)
+                {
+                    litHoldInfo.Text = "ส่งลิงก์กันวงเงิน " + hold.Amount.ToString("N2")
+                        + " บาทให้ลูกค้าแล้ว แต่<b>ยังไม่ได้กรอกบัตร</b> — ตัดค่าเสียหายจากวงเงินไม่ได้";
+                    pnlHoldActions.Visible = false;
+                    return;
+                }
+
+                litHoldInfo.Text = "กันวงเงินไว้ <b>" + hold.Amount.ToString("N2") + " บาท</b>"
+                    + (string.IsNullOrEmpty(hold.CardLast4) ? "" : " (บัตร ****" + Server.HtmlEncode(hold.CardLast4) + ")")
+                    + (hold.ExpiresAt.HasValue
+                        ? " · วงเงินหมดอายุ " + hold.ExpiresAt.Value.ToString("dd/MM/yyyy HH:mm") : "")
+                    + "<br/>ไม่มีความเสียหาย → กด \"คืนวงเงิน\" · มีความเสียหาย → กรอกยอดแล้วกด \"ตัดค่าเสียหาย\" "
+                    + "(ส่วนที่เหลือคืนลูกค้าอัตโนมัติ)";
+            }
+            catch { /* ส่วนเสริม — พังต้องไม่กระทบเช็คเอาท์ */ }
+        }
+
+        protected void btnCaptureHold_Click(object sender, EventArgs e)
+        {
+            long holdId = ViewState["holdId"] == null ? 0 : Convert.ToInt64(ViewState["holdId"]);
+            decimal amount;
+            if (!decimal.TryParse(txtCaptureAmount.Text, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out amount) || amount <= 0)
+            {
+                litHoldMsg.Text = "<div class='alert alert-danger'>กรุณากรอกยอดค่าเสียหายให้ถูกต้อง</div>";
+                LoadSecurityHold();
+                return;
+            }
+
+            int? adminId = null;
+            try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
+                .CaptureDamage(holdId, amount, txtCaptureReason.Text.Trim(), adminId);
+            litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
+            LoadSecurityHold();
+        }
+
+        protected void btnReleaseHold_Click(object sender, EventArgs e)
+        {
+            long holdId = ViewState["holdId"] == null ? 0 : Convert.ToInt64(ViewState["holdId"]);
+            int? adminId = null;
+            try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
+                .Release(holdId, adminId);
+            litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
+            LoadSecurityHold();
         }
 
         private void LoadReservationData()

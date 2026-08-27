@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -110,6 +110,7 @@ namespace Take_Time_BangPhra.Payment
             {
                 case PaymentSource.Reservation: return LoadReservation(id);
                 case PaymentSource.Activity: return LoadActivity(id);
+                case PaymentSource.RoomService: return LoadRoomServiceOrder(id);
                 default:
                     Fail("ยังไม่รองรับการชำระเงินของรายการชนิดนี้");
                     return false;
@@ -200,6 +201,38 @@ namespace Take_Time_BangPhra.Payment
             return true;
         }
 
+        private bool LoadRoomServiceOrder(string idText)
+        {
+            long oid;
+            if (!long.TryParse(idText, out oid)) { Fail("รหัสออเดอร์ไม่ถูกต้อง"); return false; }
+
+            var dt = _code.DatabaseQuerySafe(_conn, @"
+                SELECT TOP 1 o.ID, o.Total_Amount, ISNULL(o.Payment_Status,'') AS PS,
+                       ISNULL(o.Order_Status,'') AS OS,
+                       ISNULL(o.Customer_MobilePhone,'') AS GuestPhone,
+                       ISNULL(c.Name,'') AS GuestName
+                  FROM Guest_Room_Service_Orders o
+                  LEFT JOIN Customer c ON c.MobilePhone = o.Customer_MobilePhone
+                 WHERE o.ID = @id",
+                new Dictionary<string, object> { { "@id", oid } });
+
+            if (dt == null || dt.Rows.Count == 0) { Fail("ไม่พบออเดอร์นี้"); return false; }
+            DataRow r = dt.Rows[0];
+
+            string ps = Convert.ToString(r["PS"]);
+            if (ps == "PAID") { Fail("ออเดอร์นี้ชำระเงินแล้ว"); return false; }
+            if (ps == "CHARGED") { Fail("ออเดอร์นี้ถูกคิดรวมกับค่าห้องแล้ว — จ่ายรวมตอนเช็คเอาท์"); return false; }
+            if (Convert.ToString(r["OS"]) == "CANCELLED") { Fail("ออเดอร์นี้ถูกยกเลิกแล้ว"); return false; }
+
+            Amount = Convert.ToDecimal(r["Total_Amount"]);
+            if (Amount <= 0) { Fail("ออเดอร์นี้ไม่มียอดต้องชำระ"); return false; }
+
+            ItemText = "รูมเซอร์วิส ออเดอร์ #" + oid;
+            CustomerName = Convert.ToString(r["GuestName"]);
+            CustomerPhone = Convert.ToString(r["GuestPhone"]);
+            return true;
+        }
+
         // ── วาดหน้าจอ ─────────────────────────────────────────────────────────
 
         private void RenderSummary()
@@ -216,7 +249,7 @@ namespace Take_Time_BangPhra.Payment
         private void BuildMethods()
         {
             rblMethod.Items.Clear();
-            List<string> methods = _svc.AvailableMethods(Amount);
+            List<string> methods = _svc.AvailableMethods(Amount, SourceType);
 
             if (methods.Count == 0)
             {

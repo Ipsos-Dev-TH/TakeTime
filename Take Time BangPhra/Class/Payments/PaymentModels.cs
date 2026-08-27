@@ -42,6 +42,8 @@ namespace Take_Time_BangPhra.Payments
         public const string RoomService = "ROOMSERVICE";
         public const string Amenity = "AMENITY";
         public const string Receipt = "RECEIPT";
+        public const string Pos = "POS";
+        public const string Damage = "DAMAGE";
         public const string Other = "OTHER";
 
         public static string Thai(string s)
@@ -53,6 +55,8 @@ namespace Take_Time_BangPhra.Payments
                 case RoomService: return "รูมเซอร์วิส";
                 case Amenity: return "เบิกของใช้";
                 case Receipt: return "ใบเสร็จ";
+                case Pos: return "ขายหน้าร้าน";
+                case Damage: return "ค่าเสียหาย";
                 default: return "อื่น ๆ";
             }
         }

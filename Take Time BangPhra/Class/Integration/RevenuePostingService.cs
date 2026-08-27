@@ -234,6 +234,11 @@ namespace Take_Time_BangPhra.Integration
             {
                 case "CASH": return "เงินสด";
                 case "TRANSFER": return "เงินโอน";
+                // จ่ายออนไลน์ผ่านเกตเวย์ → แหล่งเงินของเกตเวย์ (ผูกบัญชีพักเงินใน NextAcc)
+                // ต้องตรงกับชื่อแถวใน Account_Paid_How เป๊ะ ๆ — ตั้งทับได้ที่ Payment_PaidHow_Name
+                case "ONLINE":
+                    return Take_Time_BangPhra.Payments.PaymentGatewayConfig
+                        .Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
                 default: return "เงินสด";
             }
         }

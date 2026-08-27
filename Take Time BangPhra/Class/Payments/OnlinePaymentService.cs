@@ -35,11 +35,17 @@ namespace Take_Time_BangPhra.Payments
 
         public PaymentTransactionStore Store { get { return _store; } }
 
-        /// <summary>เกตเวย์ที่ใช้อยู่ — ตอนนี้มี Payso เจ้าเดียว แต่เพิ่มได้โดยไม่แตะหน้าจอ</summary>
+        /// <summary>
+        /// เกตเวย์ที่ใช้อยู่ — สลับได้จากหน้าตั้งค่า (Payment_Provider = OMISE/PAYSO)
+        /// ไม่ต้อง build ใหม่ และหน้าจอทุกหน้าไม่ต้องรู้ว่าข้างหลังเป็นเจ้าไหน
+        /// ส่ง provider มาเมื่อรายการเก่าถูกสร้างด้วยเจ้าอื่น (เช่นถามสถานะย้อนหลังหลังสลับเจ้า)
+        /// </summary>
         public IPaymentGateway Gateway(string provider = null)
         {
-            // เผื่ออนาคตมีหลายเจ้า: เลือกตาม provider ที่ส่งมา
-            return new PaysoGateway();
+            string p = string.IsNullOrEmpty(provider) ? PaymentGatewayConfig.ActiveProvider
+                                                      : provider.Trim().ToUpperInvariant();
+            if (p == PaymentGatewayConfig.ProviderPayso) return new PaysoGateway();
+            return new OmiseGateway();
         }
 
         /// <summary>
@@ -60,6 +66,16 @@ namespace Take_Time_BangPhra.Payments
         {
             if (!IsAvailable) return new List<string>();
             return PaymentGatewayConfig.AvailableMethods(amount);
+        }
+
+        /// <summary>
+        /// เหมือนข้างบนแต่เคารพสวิตช์รายช่องทางด้วย — ช่องทางไหนปิดไว้
+        /// (จอง/กิจกรรม/POS/รูมเซอร์วิส/...) ช่องนั้นได้รายการว่าง = หน้าจอไม่เสนอเลย
+        /// </summary>
+        public List<string> AvailableMethods(decimal amount, string sourceType)
+        {
+            if (!PaymentGatewayConfig.ChannelEnabled(sourceType)) return new List<string>();
+            return AvailableMethods(amount);
         }
 
         // ── เริ่มการชำระเงิน ──────────────────────────────────────────────────
@@ -92,8 +108,18 @@ namespace Take_Time_BangPhra.Payments
             }
             req.Method = method;
 
+            // ช่องทางถูกปิดไว้จากหน้าตั้งค่า = ไม่รับ ไม่ว่าลิงก์จะมาจากไหน
+            if (!PaymentGatewayConfig.ChannelEnabled(req.SourceType))
+            {
+                fail.Message = "ช่องทางนี้ยังไม่เปิดรับชำระเงินออนไลน์";
+                return fail;
+            }
+
             // กันเก็บเงินซ้ำ: ถ้ารายการต้นทางนี้จ่ายสำเร็จไปแล้ว ไม่สร้างใหม่
-            var paid = _store.GetPaidForSource(req.SourceType, req.SourceId);
+            // ⚠ ยกเว้น "การจอง" — จ่ายได้หลายงวด (มัดจำก่อน แล้วจ่ายส่วนที่เหลือทีหลัง)
+            //   ความถูกต้องของยอดคุมโดยหน้า Pay ที่คำนวณยอดค้างจากฐานข้อมูลทุกครั้งอยู่แล้ว
+            var paid = req.SourceType == PaymentSource.Reservation
+                ? null : _store.GetPaidForSource(req.SourceType, req.SourceId);
             if (paid != null)
             {
                 fail.Message = "รายการนี้ชำระเงินเรียบร้อยแล้ว (อ้างอิง " + paid.TxnRef + ")";
@@ -295,6 +321,55 @@ namespace Take_Time_BangPhra.Payments
         // ── ตามสถานะเอง (เผื่อ webhook หาย) ─────────────────────────────────
 
         /// <summary>ถามสถานะรายการเดียวจากเกตเวย์แล้วอัปเดตให้ตรง</summary>
+        /// <summary>
+        /// ตัดเงินด้วย token บัตรจากหน้า Payment/Card (Omise.js สร้างให้ฝั่งเบราว์เซอร์ —
+        /// ข้อมูลบัตรจริงไม่เคยผ่านเซิร์ฟเวอร์เรา)
+        /// คืนข้อความผลลัพธ์ไทย; ถ้า authorizeUri ไม่ว่าง = ต้องพาลูกค้าไปยืนยัน 3-D Secure ต่อ
+        /// </summary>
+        public string ProcessCardToken(string txnRef, string cardToken, out bool ok, out string authorizeUri)
+        {
+            ok = false; authorizeUri = null;
+
+            PaymentTransaction txn = _store.GetByRef(txnRef);
+            if (txn == null) return "ไม่พบรายการชำระเงินนี้";
+            if (txn.Status == PaymentStatus.Paid) { ok = true; return "รายการนี้ชำระเงินแล้ว"; }
+            if (PaymentStatus.IsFinal(txn.Status)) return "รายการนี้ปิดไปแล้ว (" + PaymentStatus.Thai(txn.Status) + ")";
+            if (txn.IsExpired) return "รายการหมดอายุแล้ว กรุณาเริ่มใหม่";
+
+            var omise = Gateway(txn.Provider) as OmiseGateway;
+            if (omise == null) return "เกตเวย์ที่ใช้อยู่ไม่รองรับการกรอกบัตรบนหน้านี้";
+
+            PaymentChargeResult r = omise.ChargeWithToken(cardToken, txn.TotalPayable, txn.TxnRef,
+                txn.Description, holdOnly: false,
+                returnUri: PaymentUrls.ReturnUrl(txn.TxnRef));
+
+            _store.SaveChargeResult(txn.ID, r);
+
+            if (!r.Success) return "ชำระเงินไม่สำเร็จ: " + (r.Message ?? "-");
+
+            if (r.Status == PaymentStatus.Paid)
+            {
+                if (_store.MarkPaid(txn.ID, r.ProviderTxnId, null, null, null))
+                {
+                    PaymentTransaction fresh = _store.GetById(txn.ID);
+                    ApplyPaid(fresh);
+                    NotifyPaid(fresh);
+                }
+                ok = true;
+                return "ชำระเงินเรียบร้อยแล้ว";
+            }
+
+            // 3-D Secure: ธนาคารขอยืนยันตัวตนก่อน — สถานะจริงจะตามมาทาง webhook/การถามซ้ำ
+            if (!string.IsNullOrEmpty(r.PaymentUrl))
+            {
+                ok = true;
+                authorizeUri = r.PaymentUrl;
+                return "กรุณายืนยันตัวตนกับธนาคาร";
+            }
+
+            return "อยู่ระหว่างดำเนินการ — ระบบจะตรวจสถานะให้อัตโนมัติ";
+        }
+
         public string RefreshStatus(PaymentTransaction txn)
         {
             if (txn == null) return "ไม่พบรายการ";
@@ -347,6 +422,10 @@ namespace Take_Time_BangPhra.Payments
                 _lastPoll = DateTime.Now;
             }
 
+            // วงเงินประกัน: ปิดรายการหมดอายุ + เตือนก่อนหมด (เงียบถ้าฟีเจอร์ปิด)
+            try { new SecurityHoldService(_conn).SweepIfDue(); }
+            catch (Exception hex) { Log("sweep วงเงินประกันล้มเหลว: " + hex.Message); }
+
             try
             {
                 int expired = _store.ExpireStale();
@@ -389,6 +468,9 @@ namespace Take_Time_BangPhra.Payments
                     case PaymentSource.Reservation:
                         note = ApplyToReservation(txn, out receiptId);
                         break;
+                    case PaymentSource.RoomService:
+                        note = ApplyToRoomServiceOrder(txn);
+                        break;
                     case PaymentSource.Activity:
                         note = ApplyToActivityBooking(txn);
                         break;
@@ -421,7 +503,10 @@ namespace Take_Time_BangPhra.Payments
             if (!int.TryParse(txn.SourceId, out reservationId))
                 return "รหัสการจองไม่ถูกต้อง (" + (txn.SourceId ?? "-") + ")";
 
-            string methodText = PaymentGatewayConfig.MethodName(txn.Method);
+            // ⚠ ต้องเป็นชื่อที่ตรงกับแถวใน Account_Paid_How เป๊ะ ๆ — AccountingSync ค้นด้วย
+            // ข้อความนี้ (LookupPaidHowAccountId) เพื่อบังคับ Dr เข้าบัญชีพักเงินเกตเวย์ใน NextAcc
+            // ถ้าส่งชื่อสวย ๆ ("บัตรเครดิต / เดบิต") จะหาไม่เจอ แล้วบัญชีจะเดาเป็นเงินสด
+            string methodText = PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
             string notes = "ชำระออนไลน์ผ่าน " + (txn.Provider ?? "-")
                          + " · อ้างอิง " + txn.TxnRef
                          + (string.IsNullOrEmpty(txn.ProviderTxnId) ? "" : " · เลขที่เกตเวย์ " + txn.ProviderTxnId)
@@ -446,6 +531,43 @@ namespace Take_Time_BangPhra.Payments
         }
 
         /// <summary>กิจกรรม — ใช้เมธอดเดิมของ ActivityService</summary>
+        /// <summary>
+        /// รูมเซอร์วิส — บันทึกว่าออเดอร์จ่ายออนไลน์แล้ว
+        /// ⚠ ห้ามทับออเดอร์ที่ CHARGED (คิดเข้าห้องไปแล้ว) ไม่งั้นรายได้ซ้ำตอนเช็คเอาท์
+        /// ใบสรุปรายได้รายวัน (RevenuePostingService) จะจัดกลุ่มวิธี ONLINE เข้าแหล่งเงินเกตเวย์เอง
+        /// </summary>
+        private string ApplyToRoomServiceOrder(PaymentTransaction txn)
+        {
+            long orderId;
+            if (!long.TryParse(txn.SourceId, out orderId))
+                return "รหัสออเดอร์รูมเซอร์วิสไม่ถูกต้อง (" + (txn.SourceId ?? "-") + ")";
+
+            using (var con = new System.Data.SqlClient.SqlConnection(_conn))
+            {
+                con.Open();
+                using (var cmd = new System.Data.SqlClient.SqlCommand(@"
+                    UPDATE Guest_Room_Service_Orders
+                       SET Payment_Status = 'PAID', Payment_Method = 'ONLINE'
+                     WHERE ID = @id AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED')", con))
+                {
+                    cmd.Parameters.AddWithValue("@id", orderId);
+                    int n = cmd.ExecuteNonQuery();
+                    if (n > 0) return "บันทึกว่าออเดอร์รูมเซอร์วิส #" + orderId + " ชำระเงินแล้ว";
+                }
+                using (var chk = new System.Data.SqlClient.SqlCommand(
+                    "SELECT ISNULL(Payment_Status,'') FROM Guest_Room_Service_Orders WHERE ID = @id", con))
+                {
+                    chk.Parameters.AddWithValue("@id", orderId);
+                    string st = Convert.ToString(chk.ExecuteScalar());
+                    if (st == "PAID") return "ออเดอร์ #" + orderId + " ถูกบันทึกว่าจ่ายแล้วก่อนหน้านี้";
+                    if (st == "CHARGED")
+                        throw new Exception("ออเดอร์ #" + orderId + " ถูกคิดเข้าห้องพักไปแล้ว — "
+                            + "รับเงินซ้ำไม่ได้ ต้องคืนเงินลูกค้าหรือปรับบิลห้องก่อน");
+                    return "ไม่พบออเดอร์ #" + orderId;
+                }
+            }
+        }
+
         private string ApplyToActivityBooking(PaymentTransaction txn)
         {
             long bookingId;

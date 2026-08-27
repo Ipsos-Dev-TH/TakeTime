@@ -341,6 +341,40 @@
             </div>
         </asp:Panel>
 
+        <!-- วงเงินประกันความเสียหาย (แสดงเฉพาะเมื่อการจองนี้มีวงเงินกันไว้) -->
+        <asp:Panel ID="pnlSecurityHold" runat="server" CssClass="checkout-card" Visible="false"
+            style="border-left:4px solid #1d6fb8;">
+            <h3 style="margin:0 0 6px;">🛡 วงเงินประกันความเสียหาย</h3>
+            <div style="color:#5a6b62;font-size:13.5px;margin-bottom:10px;">
+                <asp:Literal ID="litHoldInfo" runat="server" />
+            </div>
+            <asp:Literal ID="litHoldMsg" runat="server" />
+            <asp:Panel ID="pnlHoldActions" runat="server">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+                    <div>
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            ค่าเสียหายที่จะตัด (บาท)</label>
+                        <asp:TextBox ID="txtCaptureAmount" runat="server" TextMode="Number" step="0.01"
+                            style="padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;width:150px;font-size:16px;" />
+                    </div>
+                    <div style="flex:1;min-width:180px;">
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            เหตุผล/รายละเอียดความเสียหาย</label>
+                        <asp:TextBox ID="txtCaptureReason" runat="server" placeholder="เช่น ผ้าเช็ดตัวหาย 2 ผืน"
+                            style="width:100%;padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;font-size:14px;" />
+                    </div>
+                    <asp:Button ID="btnCaptureHold" runat="server" Text="💥 ตัดค่าเสียหาย"
+                        OnClick="btnCaptureHold_Click" UseSubmitBehavior="false"
+                        OnClientClick="if(!confirm('ตัดค่าเสียหายจากวงเงินประกันตามยอดที่กรอก? ส่วนที่เหลือจะคืนลูกค้าทันที'))return false;this.disabled=true;"
+                        style="padding:11px 16px;border:0;border-radius:9px;background:#c0392b;color:#fff;font-weight:600;cursor:pointer;min-height:44px;" />
+                    <asp:Button ID="btnReleaseHold" runat="server" Text="✅ คืนวงเงินทั้งหมด (ไม่มีความเสียหาย)"
+                        OnClick="btnReleaseHold_Click" UseSubmitBehavior="false"
+                        OnClientClick="if(!confirm('คืนวงเงินประกันทั้งหมดให้ลูกค้า?'))return false;this.disabled=true;"
+                        style="padding:11px 16px;border:0;border-radius:9px;background:#1b7a4b;color:#fff;font-weight:600;cursor:pointer;min-height:44px;" />
+                </div>
+            </asp:Panel>
+        </asp:Panel>
+
         <!-- Checkout Checklist -->
         <div class="checkout-card">
             <div class="card-header">

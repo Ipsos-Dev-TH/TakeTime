@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -167,6 +167,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return "สวิตช์หลักและวิธีชำระที่ลูกค้าเห็น — ปิด \"เปิดรับชำระเงินออนไลน์\" แล้วระบบกลับไปเหมือนเดิมทุกอย่าง";
                 case "สแกน QR แบบเดิม":
                     return "ข้อมูลที่แสดงให้ลูกค้าสแกน/โอน แล้วแนบสลิป — ไม่เกี่ยวกับเกตเวย์";
+                case "Omise":
+                    return "คีย์จาก Omise Dashboard → Keys — ขึ้นต้น _test_ = โหมดทดสอบ ไม่ตัดเงินจริง · อย่าลืมตั้ง Webhook ตาม URL ด้านบน";
+                case "วงเงินประกันความเสียหาย":
+                    return "กันวงเงินบนบัตรแทนการรับโอนเงินประกัน — เงินไม่เข้าไม่ออกจนกว่าจะตัดค่าเสียหายจริง (Omise + บัตรเท่านั้น, วงเงินอยู่ได้ 7 วัน)";
+                case "ช่องทางที่เปิดรับเงินออนไลน์":
+                    return "ปิดช่องไหน ช่องนั้นไม่เสนอจ่ายออนไลน์ — ที่เหลือทำงานตามเดิม (มีผลเมื่อสวิตช์ใหญ่เปิดอยู่)";
                 case "Payso — การเชื่อมต่อ":
                     return "กุญแจและที่อยู่ของผู้ให้บริการ (จากหน้า Merchant ของ Payso)";
                 case "Payso — รูปแบบคำขอ":
@@ -265,7 +271,8 @@ namespace Take_Time_BangPhra.Admin.Settings
             PaymentGatewayConfig.Invalidate();
             try
             {
-                var gw = new PaysoGateway();
+                // ทดสอบเจ้าที่ "เลือกอยู่จริง" (Payment_Provider) ไม่ใช่ Payso ตายตัว
+                var gw = new OnlinePaymentService(_conn).Gateway();
                 pnlTest.Visible = true;
                 litTest.Text = Server.HtmlEncode(gw.TestConnection());
             }

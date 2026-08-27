@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -95,6 +95,23 @@ namespace Take_Time_BangPhra.Guest
                 lblTotalCharges.Text = totalCharges.ToString("N0");
                 lblDepositPaid.Text = depositPaid.ToString("N0");
                 lblBalanceDue.Text = balanceDue.ToString("N0");
+
+                // จ่ายออนไลน์ผ่านเกตเวย์ — โผล่เฉพาะเมื่อเปิดฟีเจอร์และช่องทางการจองเปิดอยู่
+                try
+                {
+                    var paySvc = new Take_Time_BangPhra.Payments.OnlinePaymentService(_connectionString);
+                    decimal due = balanceDue;
+                    if (due > 0 && paySvc.AvailableMethods(due,
+                            Take_Time_BangPhra.Payments.PaymentSource.Reservation).Count > 0)
+                    {
+                        lnkPayOnline.NavigateUrl = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                            + "/Payment/Pay?src=RESERVATION&id=" + _reservationId
+                            + "&ph=" + Uri.EscapeDataString(_guestMobilePhone ?? "");
+                        lnkPayOnline.Visible = true;
+                    }
+                    else lnkPayOnline.Visible = false;
+                }
+                catch { lnkPayOnline.Visible = false; }
 
                 // Display dates
                 DateTime checkIn = Convert.ToDateTime(balance["CheckIn"]);

@@ -47,6 +47,7 @@ public static class Notify
         public const string OrderActivity = "ORDER_ACTIVITY";
 
         public const string PaymentOnline = "PAYMENT_ONLINE";
+        public const string PaymentHold = "PAYMENT_HOLD";
         public const string EtaxRd = "ETAX_RD";
 
         public const string AccQueueAlert = "ACC_QUEUE_ALERT";
@@ -104,6 +105,8 @@ public static class Notify
 
         new EventInfo(Ev.PaymentOnline,   "เงินและเอกสาร", "รับชำระเงินออนไลน์สำเร็จ",
             "ลูกค้าจ่ายผ่านบัตร/QR ตัดยอดอัตโนมัติสำเร็จ", "ระบบชำระเงิน"),
+        new EventInfo(Ev.PaymentHold,     "เงินและเอกสาร", "วงเงินประกันความเสียหาย",
+            "กันวงเงิน / ตัดค่าเสียหาย / คืนวงเงิน / ใกล้หมดอายุ (7 วัน) — ควรเปิดไว้เสมอ", "ระบบชำระเงิน", true),
         new EventInfo(Ev.EtaxRd,          "เงินและเอกสาร", "ผลตอบกลับ e-Tax จากสรรพากร",
             "กรมสรรพากรตอบรับ/ปฏิเสธใบกำกับอิเล็กทรอนิกส์", "e-Tax"),
 
