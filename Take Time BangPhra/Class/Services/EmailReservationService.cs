@@ -1005,6 +1005,8 @@ namespace Take_Time_BangPhra.Services
             public int NoOfRooms = 1, Adults = 1, Children = 0;
             /// <summary>คำขอพิเศษ/หมายเหตุที่ลูกค้าฝากมากับ OTA (ถ้าอีเมลมีมาให้)</summary>
             public string SpecialRequest;
+            /// <summary>หมายเหตุที่ผูกไว้กับแผนราคานี้ในตาราง MapDataWithSTAAH (เจ้าหน้าที่เป็นคนกรอก)</summary>
+            public string MapNote;
             // ⚠️ อีเมล STAAH ให้ตัวเลขมาแค่ 2 ตัว และ **ไม่มีค่าคอมมิชชั่น/ยอดที่ OTA จะโอนจริง**
             //    - AMOUNT      = เรตต่อคืนของ room row นั้น (ตัวที่โปรแกรมเดิมใช้คิดยอดรวมทั้งใบ)
             //    - refsell_amt = ราคาขายอ้างอิงระดับ booking (บางอีเมลไม่มี → fallback Total (All Inclusive))
@@ -1181,6 +1183,7 @@ namespace Take_Time_BangPhra.Services
                         foreach (var r in rooms)
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
+                            if (map.Notes.Count > 0) r.MapNote = string.Join(" · ", map.Notes.ToArray());
                             if (map.Rooms.Count == 0)
                             {
                                 tx.Rollback();
@@ -1279,6 +1282,8 @@ namespace Take_Time_BangPhra.Services
             public int DisabledCount;                                      // mapping ชี้ห้องที่ปิดใช้งาน
             public List<string> KnownRoomTypes = new List<string>();
             public List<string> KnownChannels = new List<string>();
+            /// <summary>หมายเหตุที่เจ้าหน้าที่ผูกไว้กับแถว mapping นี้ (คอลัมน์หมายเหตุใน MapDataWithSTAAH)</summary>
+            public List<string> Notes = new List<string>();
 
             public List<int> Ids => Rooms.Select(r => r.Id).ToList();
             public RoomInfo Find(int id) => Rooms.FirstOrDefault(r => r.Id == id);
@@ -1326,6 +1331,44 @@ namespace Take_Time_BangPhra.Services
                 if (inner.Success) add(inner.Groups[1].Value);
             }
             return list;
+        }
+
+        /// <summary>
+        /// ชื่อคอลัมน์ "หมายเหตุ" ของตาราง MapDataWithSTAAH — เจ้าหน้าที่ผูกข้อความไว้กับแผนราคา
+        /// ที่นี่อยู่แล้ว (เช่นแถวแผน RNB ใส่ไว้ว่า "Agoda ไม่รวมอาหารเช้า")
+        ///
+        /// ปกติคือคอลัมน์ Remark — แต่หา schema ให้เองเผื่อ deployment ที่ตั้งชื่อต่างกัน
+        /// และตั้งทับได้ที่ค่า Email_Rsv_MapNoteColumn. คืน "" = ตารางไม่มีคอลัมน์หมายเหตุ
+        /// </summary>
+        private static string _mapNoteCol;
+        private string MapNoteColumn()
+        {
+            if (_mapNoteCol != null) return _mapNoteCol;
+
+            var cols = TableColumns("MapDataWithSTAAH");
+            string configured = (Cfg("Email_Rsv_MapNoteColumn", "") ?? "").Trim();
+
+            if (configured.Length > 0)
+            {
+                // ชื่อคอลัมน์ถูกต่อเข้า SQL ตรง ๆ — รับเฉพาะชื่อที่ปลอดภัยและมีอยู่จริง
+                _mapNoteCol = Regex.IsMatch(configured, @"^[A-Za-z0-9_฀-๿]+$") && cols.Contains(configured)
+                    ? configured : "";
+                if (_mapNoteCol.Length == 0)
+                    _code.Logs(_conn, "EmailReservation",
+                        $"Email_Rsv_MapNoteColumn='{configured}' ใช้ไม่ได้ (ไม่มีคอลัมน์นี้หรือชื่อไม่ปลอดภัย) — ข้ามหมายเหตุ mapping", "SYSTEM");
+                return _mapNoteCol;
+            }
+
+            foreach (string c in new[] { "Remark", "Remarks", "Note", "Notes", "Comment",
+                                         "Description", "Detail", "หมายเหตุ" })
+                if (cols.Contains(c)) { _mapNoteCol = c; break; }
+
+            if (_mapNoteCol == null) _mapNoteCol = "";
+            _code.Logs(_conn, "EmailReservation",
+                _mapNoteCol.Length > 0
+                    ? "หมายเหตุ mapping: ใช้คอลัมน์ MapDataWithSTAAH." + _mapNoteCol
+                    : "MapDataWithSTAAH ไม่มีคอลัมน์หมายเหตุ — ข้ามส่วนนี้", "SYSTEM");
+            return _mapNoteCol;
         }
 
         private MapResult MappedAccommodations(SqlConnection con, SqlTransaction tx, string channel, string roomType)
@@ -1385,12 +1428,19 @@ namespace Take_Time_BangPhra.Services
         private void LoadMapping(SqlConnection con, SqlTransaction tx, MapResult res, string where,
             string channel, string roomType)
         {
-            res.Rooms.Clear(); res.DisabledCount = 0;
+            res.Rooms.Clear(); res.DisabledCount = 0; res.Notes.Clear();
+            // หมายเหตุที่ผูกกับแผนราคา (เช่น "ไม่รวมอาหารเช้า") อยู่ในตาราง mapping อยู่แล้ว
+            // ชื่อคอลัมน์ต่างกันได้ในแต่ละ deployment → หาให้เอง / ตั้งทับได้ที่ Email_Rsv_MapNoteColumn
+            string noteCol = MapNoteColumn();
+            string noteSel = noteCol.Length > 0
+                ? ", ISNULL(CONVERT(nvarchar(400), m.[" + noteCol + "]), N'')"
+                : ", N''";
+
             string sql = @"SELECT DISTINCT m.Accommodation_ID, ISNULL(a.AccomName, N''),
                                   ISNULL(CONVERT(nvarchar(10), a.Status), '0'),
                                   ISNULL(CONVERT(nvarchar(10), a.LimitWithPeople), 'False'),
                                   ISNULL(TRY_CONVERT(int, a.People), 0),
-                                  ISNULL(TRY_CONVERT(int, a.OrderID), 0)
+                                  ISNULL(TRY_CONVERT(int, a.OrderID), 0)" + noteSel + @"
                              FROM MapDataWithSTAAH m
                              LEFT JOIN Accommodation a ON a.ID = m.Accommodation_ID
                             WHERE " + where;
@@ -1406,6 +1456,10 @@ namespace Take_Time_BangPhra.Services
                     while (rd.Read())
                     {
                         if (rd[0] == DBNull.Value) continue;
+
+                        string note = rd.FieldCount > 6 && rd[6] != DBNull.Value ? rd[6].ToString().Trim() : "";
+                        if (note.Length > 0 && !res.Notes.Contains(note)) res.Notes.Add(note);
+
                         int id = Convert.ToInt32(rd[0]);
                         string st = rd[2]?.ToString() ?? "0";
                         bool active = st == "1" || st.Equals("True", StringComparison.OrdinalIgnoreCase);
@@ -1852,6 +1906,7 @@ namespace Take_Time_BangPhra.Services
                         foreach (var r in rooms)
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
+                            if (map.Notes.Count > 0) r.MapNote = string.Join(" · ", map.Notes.ToArray());
                             if (map.Rooms.Count == 0)
                             {
                                 tx.Rollback();
@@ -2155,9 +2210,15 @@ namespace Take_Time_BangPhra.Services
                         sb.AppendLine($"     ↳ <i>แผนราคา: {E(Trunc(ratePlan, 80))}</i>");
                     totalRooms += r.NoOfRooms;
                 }
-                string mealPlan = DescribeMealPlan(o.Rooms);
-                if (!string.IsNullOrEmpty(mealPlan))
-                    sb.AppendLine($"🍽 <b>อาหารเช้า:</b> {E(mealPlan)}");
+                string mapNote = MergeMapNotes(o.Rooms, h.ChannelName);
+                if (!string.IsNullOrEmpty(mapNote))
+                    sb.AppendLine($"🏷 <b>หมายเหตุแผนราคา:</b> {E(Trunc(mapNote, 200))}");
+                else
+                {
+                    string mealPlan = DescribeMealPlan(o.Rooms);
+                    if (!string.IsNullOrEmpty(mealPlan))
+                        sb.AppendLine($"🍽 <b>อาหารเช้า:</b> {E(mealPlan)}");
+                }
 
                 if (h.AssignedRooms != null && h.AssignedRooms.Count > 0)
                     sb.AppendLine($"🛏 <b>จัดให้ห้อง:</b> {E(string.Join(", ", h.AssignedRooms))}");
@@ -2252,6 +2313,12 @@ namespace Take_Time_BangPhra.Services
 
             if (rooms != null && rooms.Count > 0)
             {
+                // ⭐ ตั้งต้นจากหมายเหตุที่ผูกไว้กับแผนราคาในตาราง MapDataWithSTAAH
+                // (เจ้าหน้าที่เป็นคนกรอกเอง เช่น "Agoda ไม่รวมอาหารเช้า") — ของที่ระบบสรุปเอง
+                // เป็นส่วน "บวกเพิ่ม" ไม่ใช่มาแทนที่ข้อความนี้
+                string mapNote = MergeMapNotes(rooms, head.ChannelName);
+                if (!string.IsNullOrEmpty(mapNote)) sb.AppendLine("หมายเหตุแผนราคา: " + mapNote);
+
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var r in rooms)
                 {
@@ -2261,8 +2328,13 @@ namespace Take_Time_BangPhra.Services
                     if (seen.Add(line)) sb.AppendLine(line);
                 }
 
-                string meal = DescribeMealPlan(rooms);
-                if (!string.IsNullOrEmpty(meal)) sb.AppendLine("อาหารเช้า: " + meal);
+                // สรุปเรื่องอาหารเช้าจากชื่อแผนราคา — ข้ามถ้าหมายเหตุจากตารางพูดถึงอยู่แล้ว
+                // (กันเขียนซ้ำ และกันกรณีข้อความสองแหล่งขัดกันเอง — ให้ของที่คนกรอกชนะ)
+                if (!MentionsMeal(mapNote))
+                {
+                    string meal = DescribeMealPlan(rooms);
+                    if (!string.IsNullOrEmpty(meal)) sb.AppendLine("อาหารเช้า: " + meal);
+                }
 
                 int adults = rooms.Sum(r => r.Adults * Math.Max(1, r.NoOfRooms));
                 int kids = rooms.Sum(r => r.Children * Math.Max(1, r.NoOfRooms));
@@ -2314,6 +2386,7 @@ namespace Take_Time_BangPhra.Services
                 if (line.Length == 0) continue;
                 if (line.StartsWith("จองผ่าน ", StringComparison.Ordinal)) continue;
                 if (line.StartsWith("Booking ID:", StringComparison.OrdinalIgnoreCase)) continue;
+                if (line.StartsWith("หมายเหตุแผนราคา:", StringComparison.Ordinal)) continue;
                 if (line.StartsWith("แผนราคา:", StringComparison.Ordinal)) continue;
                 if (line.StartsWith("อาหารเช้า:", StringComparison.Ordinal)) continue;
                 if (line.StartsWith("ผู้เข้าพัก:", StringComparison.Ordinal)) continue;
@@ -2328,6 +2401,38 @@ namespace Take_Time_BangPhra.Services
             // ถูกกรองทิ้งไปแล้วจากเงื่อนไขด้านบน — กู้กลับมาเฉพาะส่วนหลังเครื่องหมาย " / "
             string joined = string.Join("\r\n", keep.ToArray());
             return joined.Length == 0 ? null : joined;
+        }
+
+        /// <summary>
+        /// รวมหมายเหตุจากตาราง mapping ของทุกห้องในใบจอง
+        /// ตัดชื่อช่องทางที่ซ้ำกับบรรทัด "จองผ่าน ..." ออก (ตารางเก็บไว้เป็น "Agoda ไม่รวมอาหารเช้า"
+        /// ⇒ เหลือ "ไม่รวมอาหารเช้า"); ถ้าเหลือแค่ชื่อช่องทางล้วน ๆ ก็ไม่ต้องมีบรรทัดนี้
+        /// </summary>
+        private static string MergeMapNotes(List<RoomBooking> rooms, string channel)
+        {
+            var parts = new List<string>();
+            foreach (var r in rooms)
+            {
+                string note = (r.MapNote ?? "").Trim();
+                if (note.Length == 0) continue;
+
+                if (!string.IsNullOrWhiteSpace(channel)
+                    && note.StartsWith(channel, StringComparison.OrdinalIgnoreCase))
+                    note = note.Substring(channel.Length).Trim();
+
+                if (note.Length == 0) continue;
+                if (!parts.Contains(note)) parts.Add(note);
+            }
+            return parts.Count == 0 ? null : string.Join(" · ", parts.ToArray());
+        }
+
+        /// <summary>ข้อความนี้พูดถึงเรื่องอาหาร/มื้อเช้าอยู่แล้วหรือยัง</summary>
+        private static bool MentionsMeal(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            string low = s.ToLowerInvariant();
+            return low.Contains("อาหาร") || low.Contains("เช้า")
+                || low.Contains("breakfast") || low.Contains("abf") || low.Contains("board");
         }
 
         /// <summary>อ่านแผนราคาแล้วสรุปว่า "รวม/ไม่รวมอาหารเช้า" — ไม่ชัดเจนก็ไม่เดา</summary>
