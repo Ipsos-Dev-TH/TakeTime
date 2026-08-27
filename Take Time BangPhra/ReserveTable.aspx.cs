@@ -159,6 +159,65 @@ namespace Take_Time_BangPhra
             catch { return null; }   // ยังไม่รัน PHASE18_28 → ไม่แสดงป้าย
         }
 
+        /// <summary>
+        /// จัดรูปแบบช่อง "หมายเหตุ" ของการจอง
+        ///
+        /// หมายเหตุของใบที่มาจากอีเมล OTA เป็นหลายบรรทัด (จองผ่าน / Booking ID / หมายเหตุแผนราคา /
+        /// แผนราคา / ผู้เข้าพัก / คำขอพิเศษ / การชำระ / บันทึกของเจ้าหน้าที่) — ถ้าปล่อยเป็นข้อความดิบ
+        /// เบราว์เซอร์จะยุบขึ้นบรรทัดใหม่ทิ้งหมด กลายเป็นก้อนเดียวยาวเหยียดในคอลัมน์แคบ ๆ อ่านไม่ออก
+        ///
+        /// จึงแยกบรรทัดจริง + เน้นสองอย่างที่หน้างานต้องเห็นก่อน:
+        ///   • หมายเหตุแผนราคา (มาจากตาราง MapDataWithSTAAH เช่น "ไม่รวมอาหารเช้า") = ป้ายส้ม
+        ///   • คำขอพิเศษจาก OTA = กล่องฟ้า
+        /// บรรทัดที่เจ้าหน้าที่พิมพ์เอง (ใต้เส้นคั่น) แสดงเป็นตัวเข้ม แยกจากข้อมูลที่ระบบเขียน
+        ///
+        /// ทุกส่วนถูก HTML-encode ก่อนเสมอ — ข้อความในหมายเหตุมาจากอีเมลภายนอกและจากผู้ใช้
+        /// </summary>
+        protected string RemarkHtml(object value)
+        {
+            string raw = Convert.ToString(value) ?? "";
+            if (raw.Trim().Length == 0) return "";
+
+            const string staffMark = "--- บันทึกของเจ้าหน้าที่";
+            const string planKey = "หมายเหตุแผนราคา:";
+            const string reqKey = "คำขอพิเศษจาก OTA:";
+
+            var sb = new StringBuilder();
+            bool inStaffPart = false;
+
+            foreach (string rawLine in raw.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0) continue;
+
+                if (!inStaffPart && line.StartsWith(staffMark, StringComparison.Ordinal))
+                {
+                    inStaffPart = true;
+                    sb.Append("<div class=\"rm-staff-head\">บันทึกของเจ้าหน้าที่</div>");
+                    continue;
+                }
+
+                if (inStaffPart)
+                {
+                    sb.Append("<div class=\"rm-staff\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+                else if (line.StartsWith(planKey, StringComparison.Ordinal))
+                {
+                    string v = line.Substring(planKey.Length).Trim();
+                    sb.Append("<div><span class=\"rm-plan\">").Append(Server.HtmlEncode(v)).Append("</span></div>");
+                }
+                else if (line.StartsWith(reqKey, StringComparison.Ordinal))
+                {
+                    sb.Append("<div class=\"rm-req\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+                else
+                {
+                    sb.Append("<div class=\"rm-line\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+            }
+            return sb.ToString();
+        }
+
         /// <summary>ป้ายสถานะ e-Tax บนแถวการจอง (ว่าง = ใบนี้ไม่มี e-Tax)</summary>
         protected string EtaxBadge(object resIdObj)
         {

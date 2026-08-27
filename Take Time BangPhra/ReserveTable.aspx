@@ -37,17 +37,52 @@
         .no-print { display: block; }
         .hidden { display: none; }
 
-        /* 📝 ล็อคความกว้างช่องหมายเหตุและตัดข้อความมาบรรทัดใหม่ */
+        /* 📝 ช่องหมายเหตุ — ตอนนี้เก็บหลายบรรทัด (แผนราคา/คำขอพิเศษ/บันทึกเจ้าหน้าที่)
+           จึงต้องแสดงแยกบรรทัดจริง ไม่ใช่ไหลติดกันเป็นก้อนเดียวในคอลัมน์ 150px */
         .remark-column {
-            max-width: 150px;
+            max-width: 250px;
+            min-width: 190px;
             word-wrap: break-word;
-            word-break: break-word;
-            white-space: normal;
             overflow-wrap: break-word;
+            white-space: normal;
             vertical-align: top;
-            font-size: 0.9em;
-            line-height: 1.4;
+            font-size: 0.85em;
+            line-height: 1.45;
+            text-align: left;
         }
+
+        .rm-line { color: #6b625c; }
+
+        /* หมายเหตุที่ผูกกับแผนราคาในตาราง mapping — ตัวสำคัญที่หน้างานต้องเห็นก่อน */
+        .rm-plan {
+            display: inline-block;
+            background: #fff3e0;
+            border: 1px solid #ffcc80;
+            color: #a35400;
+            font-weight: 700;
+            border-radius: 6px;
+            padding: 2px 7px;
+            margin: 3px 0;
+        }
+
+        .rm-req {
+            background: #e8f1fb;
+            border-left: 3px solid #4a90d9;
+            color: #1d4e79;
+            padding: 3px 6px;
+            margin: 3px 0;
+            border-radius: 4px;
+        }
+
+        .rm-staff-head {
+            margin-top: 5px;
+            padding-top: 4px;
+            border-top: 1px dashed #d6cec8;
+            color: #9a8f88;
+            font-size: 0.92em;
+        }
+
+        .rm-staff { color: #2f3b35; font-weight: 600; }
 
         /* แสดงห้องพักคนละบรรทัด */
         .room-list {
@@ -490,9 +525,11 @@
                                     ItemStyle-CssClass="header-center"
                                     DataFormatString="{0:N0}" HtmlEncode="false" />
 
-                                <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ"
-                                    HeaderStyle-Width="10%" HeaderStyle-CssClass="header-center"
-                                    ItemStyle-CssClass="remark-column" />
+                                <asp:TemplateField HeaderText="หมายเหตุ">
+                                    <ItemTemplate><%# RemarkHtml(Eval("Remark")) %></ItemTemplate>
+                                    <HeaderStyle Width="12%" CssClass="header-center" />
+                                    <ItemStyle CssClass="remark-column" />
+                                </asp:TemplateField>
 
                                 <asp:BoundField DataField="Reserve_By" HeaderText="จองโดย" 
                                     HeaderStyle-Width="6%" HeaderStyle-CssClass="header-center" 
@@ -589,6 +626,10 @@
     </div>
 
     <script type="text/javascript">
+        function escapeForPrint(t) {
+            return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         function printTable() {
             // ✅ All platforms (including Android) now use the same HTML generation method
             // This ensures consistent print output across all devices
@@ -685,7 +726,7 @@
                         else if (headerText === 'ราคาทั้งหมด') data.totalPrice = cellContent;
                         else if (headerText === 'ยอดเงินรับมา') data.deposit = cellContent;
                         else if (headerText === 'ส่วนที่เหลือ') data.remain = cellContent;
-                        else if (headerText === 'หมายเหตุ') data.remark = cellContent;
+                        else if (headerText === 'หมายเหตุ') data.remark = (cells[j].innerText || cellContent);
                     }
                 }
 
@@ -698,7 +739,7 @@
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3; height: 90px; vertical-align: top;">' + (data.totalPrice || '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3%; height: 90px; vertical-align: top;">' + (data.deposit || '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3%; height: 90px; vertical-align: top;">' + (data.remain || '&nbsp;') + '</td>';
-                tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: left; width: 10%; height: 90px; vertical-align: top;">' + (data.remark || '&nbsp;') + '</td>';
+                tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: left; width: 10%; height: 90px; vertical-align: top;">' + (data.remark ? escapeForPrint(data.remark).replace(/\n+/g, '<br>') : '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 15%; height: 90px; background-color: #f9f9f9; vertical-align: top;">&nbsp;</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 15%; height: 90px; background-color: #f9f9f9; vertical-align: top;">&nbsp;</td>';
 
