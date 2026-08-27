@@ -3,6 +3,8 @@
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView2.css">
+    <link rel="stylesheet" type="text/css" href="/Content/responsive-table.css">
+    <script src="/Scripts/responsive-table.js" defer></script>
     
     <style type="text/css">
         /* Page Background */
@@ -380,50 +382,19 @@
                 text-align: center;
             }
 
-            /* ให้ table scroll ได้แนวนอน แต่แสดงข้อมูลสำคัญ */
+            /* ตารางข้อมูล: จัดการโดย /Content/responsive-table.css
+               (มุมมองการ์ดเป็นค่าเริ่มต้น, สลับเป็นตารางเต็มแบบเลื่อนแนวนอนได้ด้วยปุ่ม)
+               เดิมตรงนี้บีบทุกคอลัมน์ให้อยู่ในความกว้างจอ ⇒ เหลือคำละบรรทัด อ่านไม่ออก */
             .table-container {
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                border: 1px solid #ddd;
-                border-radius: 5px;
+                padding: 10px;
+                border-radius: 8px;
             }
 
-            /* ปรับ font ให้เล็กลงแต่ยังอ่านได้ */
-            .mydatagrid {
-                font-size: 10px;
-                white-space: nowrap;
-            }
-
-            .mydatagrid th, .mydatagrid td {
-                padding: 4px 2px !important;
-                font-size: 10px;
-            }
-
-            /* 📱 ปรับช่องสำคัญให้มีขนาดเท่ากัน - ลดความกว้างลง 25% (450px → 340px) */
-            .name-column,
-            .room-list,
-            .items-column,
-            .remark-column {
-                max-width: 340px !important;
-                min-width: 150px;
-                word-wrap: break-word !important;
-                word-break: break-word !important;
-                white-space: pre-line !important;
-                font-size: 10px;
-                line-height: 1.4;
-            }
-
-            /* แสดงห้องพักคนละบรรทัดบนมือถือ */
-            .room-list {
-                white-space: pre-line !important;
-                font-size: 10px;
-            }
-
-            /* ปรับปุ่มให้เล็กแต่กดได้ */
+            /* ปุ่มในการ์ด — เดิม 9px เล็กจนกดพลาด/อ่านไม่ออก */
             .btn-sm {
-                font-size: 9px;
-                padding: 2px 4px;
-                margin-bottom: 1px;
+                font-size: 12px;
+                padding: 5px 10px;
+                margin-bottom: 2px;
             }
 
             /* ปรับ calendar */
@@ -436,25 +407,6 @@
                 font-size: 1.3rem;
             }
 
-            /* ซ่อนเฉพาะคอลัมน์ที่ไม่จำเป็นบนมือถือ */
-            .mydatagrid th:nth-child(4),  /* จำนวนคืน */
-            .mydatagrid td:nth-child(4) {
-                display: none;
-            }
-
-            /* 📱 แสดงคอลัมน์สำคัญ: ชื่อผู้จอง, รายชื่อห้องพัก, รายการของเช่า/สินค้า, หมายเหตุ */
-            .mydatagrid th:nth-child(2),  /* ชื่อผู้จอง */
-            .mydatagrid td:nth-child(2),
-            .mydatagrid th:nth-child(3),  /* รายชื่อห้องพัก */
-            .mydatagrid td:nth-child(3),
-            .mydatagrid th:nth-child(5),  /* รายการของเช่า/สินค้า */
-            .mydatagrid td:nth-child(5),
-            .mydatagrid th:nth-child(9),  /* หมายเหตุ */
-            .mydatagrid td:nth-child(9) {
-                display: table-cell !important;
-                max-width: 340px !important;
-                min-width: 150px;
-            }
         }
     </style>
 
@@ -493,7 +445,7 @@
                         <asp:Label ID="Label1" runat="server" Text="" CssClass="h4 text-primary mb-3"></asp:Label>
                         
                         <asp:GridView ID="GridView1" DataKeyNames="ID" runat="server" 
-                            AutoGenerateColumns="False" CssClass="mydatagrid table-responsive"
+                            AutoGenerateColumns="False" CssClass="mydatagrid rt-table"
                             HeaderStyle-CssClass="header" RowStyle-CssClass="rows" PagerStyle-CssClass="pager"
                             BorderStyle="Solid" OnRowCommand="GridView1_RowCommand">
                             <Columns>

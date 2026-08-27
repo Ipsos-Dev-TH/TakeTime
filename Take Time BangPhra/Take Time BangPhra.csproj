@@ -603,6 +603,8 @@
     <Content Include="Reservation_Confirmed.aspx" />
     <Content Include="ReserveTable.aspx" />
     <Content Include="Scripts\AutoComplete.js" />
+    <Content Include="Scripts\responsive-table.js" />
+    <Content Include="Content\responsive-table.css" />
     <Content Include="Scripts\bootstrap.bundle.js" />
     <Content Include="Scripts\bootstrap.bundle.min.js" />
     <Content Include="Scripts\bootstrap.esm.js" />

@@ -1002,7 +1002,9 @@ namespace Take_Time_BangPhra.Services
         private class RoomBooking
         {
             public string ChannelName, BookingsStatus, BookingId, GuestName, MobilePhone, RoomType, PaymentType;
-            public int NoOfRooms = 1, Adults = 1;
+            public int NoOfRooms = 1, Adults = 1, Children = 0;
+            /// <summary>คำขอพิเศษ/หมายเหตุที่ลูกค้าฝากมากับ OTA (ถ้าอีเมลมีมาให้)</summary>
+            public string SpecialRequest;
             // ⚠️ อีเมล STAAH ให้ตัวเลขมาแค่ 2 ตัว และ **ไม่มีค่าคอมมิชชั่น/ยอดที่ OTA จะโอนจริง**
             //    - AMOUNT      = เรตต่อคืนของ room row นั้น (ตัวที่โปรแกรมเดิมใช้คิดยอดรวมทั้งใบ)
             //    - refsell_amt = ราคาขายอ้างอิงระดับ booking (บางอีเมลไม่มี → fallback Total (All Inclusive))
@@ -1034,6 +1036,16 @@ namespace Take_Time_BangPhra.Services
             var mobileNode = doc.DocumentNode.SelectSingleNode("//span[contains(., 'CONTACT NUMBER')]/following-sibling::span[1]");
             string phone = ResolvePhone(SanitizePhone(mobileNode?.InnerText?.Trim() ?? ""), bookingId);
 
+            // คำขอพิเศษที่ลูกค้าฝากมากับ OTA — ป้ายชื่อไม่เหมือนกันทุกช่องทาง ลองไล่ทีละแบบ
+            // เดิมถูกทิ้งไปทั้งหมด ⇒ พนักงานไม่เห็นว่าลูกค้าขออะไรไว้ ต้องไปเปิดเว็บ OTA เอง
+            string special = FirstNonEmpty(
+                Rx(text, @"Special\s*Request(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
+                Rx(text, @"Guest\s*(?:Special\s*)?Request(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
+                Rx(text, @"Special\s*Instruction(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
+                Rx(text, @"Guest\s*(?:Comment|Note)(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"),
+                Rx(text, @"Booking\s*Remark(?:s)?\s*:?\s*(.+?)\s*(?:\n|$)"));
+            special = CleanNote(special);
+
             var roomRows = doc.DocumentNode.SelectNodes(
                 "//table[@border='0' and @cellpadding='5' and @width='100%' and @style='border-collapse:collapse;']//tr[.//span[contains(text(), 'ROOM TYPE')]]");
             var dateRows = doc.DocumentNode.SelectNodes(
@@ -1049,7 +1061,8 @@ namespace Take_Time_BangPhra.Services
                     list.Add(new RoomBooking
                     {
                         ChannelName = channel, BookingsStatus = status, BookingId = bookingId,
-                        GuestName = guest, MobilePhone = phone, PaymentType = paymentType, GrossTotal = gross
+                        GuestName = guest, MobilePhone = phone, PaymentType = paymentType, GrossTotal = gross,
+                        SpecialRequest = special
                     });
                 return list;
             }
@@ -1061,7 +1074,8 @@ namespace Take_Time_BangPhra.Services
                     var b = new RoomBooking
                     {
                         ChannelName = channel, BookingsStatus = status, BookingId = bookingId,
-                        GuestName = guest, MobilePhone = phone, PaymentType = paymentType, GrossTotal = gross
+                        GuestName = guest, MobilePhone = phone, PaymentType = paymentType, GrossTotal = gross,
+                        SpecialRequest = special
                     };
                     var rt = roomRows[a].SelectSingleNode(".//span[contains(., 'ROOM TYPE')]/following-sibling::span[1]");
                     b.RoomType = rt?.InnerText?.Trim() ?? "";
@@ -1081,6 +1095,8 @@ namespace Take_Time_BangPhra.Services
                     {
                         var ad = adultRows[a].SelectSingleNode(".//span[contains(., 'ADULTS')]/following-sibling::span[1]");
                         if (ad != null && int.TryParse(ad.InnerText?.Trim(), out int adults)) b.Adults = adults;
+                        var ch = adultRows[a].SelectSingleNode(".//span[contains(., 'CHILDREN')]/following-sibling::span[1]");
+                        if (ch != null && int.TryParse(ch.InnerText?.Trim(), out int kids)) b.Children = kids;
                         var am = adultRows[a].SelectSingleNode(".//span[contains(., 'AMOUNT')]/following-sibling::span[1]");
                         if (am != null) b.NetAmount = ParseMoney((am.InnerText ?? "").Replace("THB", ""));
                     }
@@ -1206,7 +1222,7 @@ namespace Take_Time_BangPhra.Services
                             // Deposit = gross ก็ต่อเมื่อ Channel Collect (OTA เก็บเงินแล้ว); Hotel Collect = 0 (เก็บหน้างาน)
                             cmd.Parameters.AddWithValue("@Total", (decimal)grossTotal);
                             cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)grossTotal : 0m);
-                            cmd.Parameters.AddWithValue("@Remark", $"จองผ่าน {head.ChannelName}\r\nBooking ID:{head.BookingId}");
+                            cmd.Parameters.AddWithValue("@Remark", BuildOtaRemark(head, rooms, null, false));
                             cmd.Parameters.AddWithValue("@Ch", (object)head.ChannelName ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Bk", (object)head.BookingId ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Gross", (decimal)grossTotal);
@@ -1910,8 +1926,20 @@ namespace Take_Time_BangPhra.Services
                             cmd.Parameters.AddWithValue("@Net", (decimal)netTotal);
                             cmd.Parameters.AddWithValue("@Pay", (object)(head.PaymentType ?? "") ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Guest", (object)head.GuestName ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@Remark",
-                                $"จองผ่าน {head.ChannelName}\r\nBooking ID:{head.BookingId}\r\n(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
+                            // เก็บข้อความที่เจ้าหน้าที่พิมพ์ไว้เอง ไม่ให้อีเมลแก้ไขมาลบทิ้ง
+                            string staffNote = null;
+                            try
+                            {
+                                using (var rd = new SqlCommand(
+                                    "SELECT CAST(ISNULL(Remark, N'') AS NVARCHAR(MAX)) FROM Reservation WHERE ID = @id", con, tx))
+                                {
+                                    rd.Parameters.AddWithValue("@id", resId);
+                                    staffNote = ExtractStaffNote(Convert.ToString(rd.ExecuteScalar()));
+                                }
+                            }
+                            catch { }
+
+                            cmd.Parameters.AddWithValue("@Remark", BuildOtaRemark(head, rooms, staffNote, true));
                             cmd.ExecuteNonQuery();
                         }
 
@@ -2127,10 +2155,17 @@ namespace Take_Time_BangPhra.Services
                         sb.AppendLine($"     ↳ <i>แผนราคา: {E(Trunc(ratePlan, 80))}</i>");
                     totalRooms += r.NoOfRooms;
                 }
+                string mealPlan = DescribeMealPlan(o.Rooms);
+                if (!string.IsNullOrEmpty(mealPlan))
+                    sb.AppendLine($"🍽 <b>อาหารเช้า:</b> {E(mealPlan)}");
+
                 if (h.AssignedRooms != null && h.AssignedRooms.Count > 0)
                     sb.AppendLine($"🛏 <b>จัดให้ห้อง:</b> {E(string.Join(", ", h.AssignedRooms))}");
                 else if (totalRooms > 0)
                     sb.AppendLine($"🛏 <b>จำนวนห้อง:</b> {totalRooms}");
+
+                if (!string.IsNullOrWhiteSpace(h.SpecialRequest))
+                    sb.AppendLine($"📝 <b>คำขอพิเศษ:</b> {E(Trunc(h.SpecialRequest, 300))}");
 
                 // ⚠️ ห้ามเรียกตัวไหนว่า "ยอดที่ OTA จะโอน" — อีเมลไม่ได้บอกค่าคอมมิชชั่นมาด้วย
                 // มีแค่ refsell_amt (ระดับ booking) กับ AMOUNT (เรตต่อคืนต่อห้อง) ถ้าสองตัวไม่เท่ากัน
@@ -2197,6 +2232,145 @@ namespace Take_Time_BangPhra.Services
             if (res.Retried > 0) sb.AppendLine($"♻️ <b>ลองใหม่:</b> {res.Retried} ฉบับ (สำเร็จ {res.RetrySucceeded})");
             sb.Append($"\n🕐 <i>{DateTime.Now:dd/MM/yyyy HH:mm} · 🖥 {E(InstanceStamp())}</i>");
             Notify(sb.ToString(), true);
+        }
+
+        // ── หมายเหตุการจอง ───────────────────────────────────────────────────────
+        // เดิมเขียนแค่ "จองผ่าน X / Booking ID:..." ⇒ แผนราคาที่ OTA ส่งมา (เช่น
+        // "RNB - Nordic Tent - Double - Room no breakfast") หายไปทั้งหมด พนักงานหน้างาน
+        // จึงไม่รู้ว่าใบนี้ "ไม่รวมอาหารเช้า" ต้องเปิดเว็บ OTA เทียบเอง
+        //
+        // ⚠️ บรรทัด "Booking ID:{เลข}" ต้องคงรูปแบบเดิมเป๊ะ — dedup ค้นด้วย Remark LIKE '%เลข%'
+
+        /// <summary>เส้นคั่น: ข้อความใต้เส้นนี้เป็นของเจ้าหน้าที่ ระบบจะไม่เขียนทับ</summary>
+        private const string RemarkStaffMarker = "--- บันทึกของเจ้าหน้าที่ (ระบบไม่แก้ส่วนนี้) ---";
+
+        private string BuildOtaRemark(RoomBooking head, List<RoomBooking> rooms, string staffNote, bool modified)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"จองผ่าน {head.ChannelName}");
+            sb.AppendLine($"Booking ID:{head.BookingId}");
+
+            if (rooms != null && rooms.Count > 0)
+            {
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in rooms)
+                {
+                    var split = SplitRoomType(r.RoomType);
+                    if (string.IsNullOrWhiteSpace(split.RatePlan)) continue;
+                    string line = "แผนราคา: " + split.Name + " — " + split.RatePlan;
+                    if (seen.Add(line)) sb.AppendLine(line);
+                }
+
+                string meal = DescribeMealPlan(rooms);
+                if (!string.IsNullOrEmpty(meal)) sb.AppendLine("อาหารเช้า: " + meal);
+
+                int adults = rooms.Sum(r => r.Adults * Math.Max(1, r.NoOfRooms));
+                int kids = rooms.Sum(r => r.Children * Math.Max(1, r.NoOfRooms));
+                if (adults > 0 || kids > 0)
+                    sb.AppendLine("ผู้เข้าพัก: ผู้ใหญ่ " + adults + " คน" + (kids > 0 ? ", เด็ก " + kids + " คน" : ""));
+            }
+
+            if (!string.IsNullOrWhiteSpace(head.SpecialRequest))
+                sb.AppendLine("คำขอพิเศษจาก OTA: " + head.SpecialRequest);
+
+            bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
+                                  || string.IsNullOrEmpty(head.PaymentType);
+            sb.AppendLine("การชำระ: " + (channelCollect
+                ? "OTA เก็บเงินแล้ว (Channel Collect)"
+                : "เก็บเงินหน้างาน (Hotel Collect)"));
+
+            if (modified) sb.AppendLine($"(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
+
+            if (!string.IsNullOrWhiteSpace(staffNote))
+            {
+                sb.AppendLine(RemarkStaffMarker);
+                sb.Append(staffNote.Trim());
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// ดึงเฉพาะ "ส่วนที่คนพิมพ์เอง" ออกจากหมายเหตุเดิม เพื่อไม่ให้อีเมลแก้ไขมาลบทิ้ง
+        /// (เคสจริง: พนักงานพิมพ์ "เข้าพัก 5 คนนอนเสริมในกระโจม" ไว้ แล้ว OTA ส่งอีเมลแก้ไขมา
+        ///  ของเดิมเขียนทับ Remark ทั้งก้อน ⇒ ข้อความนั้นหายไปเงียบ ๆ)
+        /// </summary>
+        private static string ExtractStaffNote(string existingRemark)
+        {
+            if (string.IsNullOrWhiteSpace(existingRemark)) return null;
+
+            int i = existingRemark.IndexOf(RemarkStaffMarker, StringComparison.Ordinal);
+            if (i >= 0)
+            {
+                string after = existingRemark.Substring(i + RemarkStaffMarker.Length).Trim();
+                return after.Length == 0 ? null : after;
+            }
+
+            // ไม่มีเส้นคั่น (หมายเหตุที่สร้างก่อนรุ่นนี้) → ตัดบรรทัดที่ระบบเป็นคนเขียนออก
+            // ที่เหลือถือว่าเป็นของคน
+            var keep = new List<string>();
+            foreach (string raw in existingRemark.Replace("\r\n", "\n").Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0) continue;
+                if (line.StartsWith("จองผ่าน ", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("Booking ID:", StringComparison.OrdinalIgnoreCase)) continue;
+                if (line.StartsWith("แผนราคา:", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("อาหารเช้า:", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("ผู้เข้าพัก:", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("คำขอพิเศษจาก OTA:", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("การชำระ:", StringComparison.Ordinal)) continue;
+                if (line.StartsWith("(แก้ไขจากอีเมล", StringComparison.Ordinal)) continue;
+                keep.Add(line);
+            }
+            if (keep.Count == 0) return null;
+
+            // เคสเก่าที่คนพิมพ์ต่อท้ายบรรทัดเดียวกัน เช่น "Booking ID:xxx / เข้าพัก 5 คน…"
+            // ถูกกรองทิ้งไปแล้วจากเงื่อนไขด้านบน — กู้กลับมาเฉพาะส่วนหลังเครื่องหมาย " / "
+            string joined = string.Join("\r\n", keep.ToArray());
+            return joined.Length == 0 ? null : joined;
+        }
+
+        /// <summary>อ่านแผนราคาแล้วสรุปว่า "รวม/ไม่รวมอาหารเช้า" — ไม่ชัดเจนก็ไม่เดา</summary>
+        private static string DescribeMealPlan(List<RoomBooking> rooms)
+        {
+            bool sawNo = false, sawYes = false;
+            foreach (var r in rooms)
+            {
+                string p = (SplitRoomType(r.RoomType).RatePlan ?? "").ToLowerInvariant();
+                if (p.Length == 0) continue;
+
+                if (p.Contains("no breakfast") || p.Contains("without breakfast") || p.Contains("room only")
+                    || p.Contains("no meal") || Regex.IsMatch(p, @"\brnb\b") || Regex.IsMatch(p, @"\bro\b"))
+                { sawNo = true; continue; }
+
+                if (p.Contains("breakfast") || p.Contains("abf") || Regex.IsMatch(p, @"\bbb\b")
+                    || p.Contains("half board") || p.Contains("full board") || p.Contains("all inclusive"))
+                { sawYes = true; }
+            }
+
+            if (sawNo && sawYes) return "มีทั้งรวมและไม่รวม — ตรวจรายห้อง";
+            if (sawNo) return "ไม่รวมอาหารเช้า";
+            if (sawYes) return "รวมอาหารเช้า";
+            return null;   // แผนราคาไม่ได้บอก → ไม่เดาแทน
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+        {
+            foreach (string v in values)
+                if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+            return null;
+        }
+
+        /// <summary>ตัดค่าที่ OTA ใส่มาแบบ "ไม่มี" ออก เพื่อไม่ให้หมายเหตุรกโดยเปล่าประโยชน์</summary>
+        private static string CleanNote(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            string v = CleanEntities(s).Trim().Trim('-', '–', '—').Trim();
+            if (v.Length == 0) return null;
+            string low = v.ToLowerInvariant();
+            if (low == "n/a" || low == "na" || low == "none" || low == "nil" || low == "no"
+                || low == "not applicable" || low == "-" || low == "ไม่มี") return null;
+            return v.Length > 400 ? v.Substring(0, 400) + "…" : v;
         }
 
         /// <summary>แยก "Nordic Tent - RNB - ... - Room no breakfast" → ("Nordic Tent", "RNB - ... - Room no breakfast")</summary>
