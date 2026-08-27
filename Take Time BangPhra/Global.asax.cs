@@ -174,6 +174,15 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception cex) { System.Diagnostics.Trace.TraceError($"EmailChat timer error: {(cex.InnerException ?? cex).Message}"); }
 
+                // ชำระเงินออนไลน์: ปิดรายการที่หมดอายุ + ตามสถานะรายการที่ค้าง (เผื่อ webhook หาย)
+                // — no-op ทันทีถ้าฟีเจอร์ปิด/ยังไม่ได้รัน migration
+                try
+                {
+                    string payConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    new Take_Time_BangPhra.Payments.OnlinePaymentService(payConn).PollPendingIfDue();
+                }
+                catch (Exception pex) { System.Diagnostics.Trace.TraceError($"OnlinePayment timer error: {(pex.InnerException ?? pex).Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)

@@ -226,7 +226,26 @@ namespace Take_Time_BangPhra.Guest
             rblPayment.Items.Add(new ListItem("💳 ชาร์จเข้าห้องพัก — จ่ายรวมตอนเช็คเอาท์", "ROOM_CHARGE"));
             rblPayment.Items.Add(new ListItem("📤 โอนเงินแล้วแนบสลิป", "TRANSFER"));
             rblPayment.Items.Add(new ListItem("💵 จ่ายที่เคาน์เตอร์", "CASH"));
+
+            // จ่ายออนไลน์ (บัตรเครดิต/QR ตัดยอดอัตโนมัติ) — โผล่เฉพาะเมื่อเปิดฟีเจอร์และเกตเวย์พร้อม
+            // ปิดอยู่ = รายการนี้ไม่มี ตัวเลือกเดิมครบเหมือนเดิมทุกประการ
+            if (OnlinePaymentOffered(amount))
+                rblPayment.Items.Add(new ListItem("💳 จ่ายออนไลน์ด้วยบัตรเครดิต — ยืนยันทันที", "ONLINE"));
+
             rblPayment.SelectedIndex = 0;
+        }
+
+        /// <summary>เปิดให้จ่ายออนไลน์กับยอดนี้ไหม (เงียบสนิทถ้าฟีเจอร์ปิด)</summary>
+        private bool OnlinePaymentOffered(decimal amount)
+        {
+            try
+            {
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService();
+                foreach (string m in svc.AvailableMethods(amount))
+                    if (m != Take_Time_BangPhra.Payments.PaymentGatewayConfig.MethodManualQr) return true;
+                return false;
+            }
+            catch { return false; }
         }
 
         protected void rblPayment_Changed(object sender, EventArgs e)
@@ -284,6 +303,14 @@ namespace Take_Time_BangPhra.Guest
 
                 if (result.Success)
                 {
+                    // เลือกจ่ายออนไลน์ → พาไปหน้าชำระเงินทันที (การจองถูกบันทึกไว้แล้วเป็น "ยังไม่ชำระ")
+                    if (payMethod == "ONLINE" && result.BookingId > 0)
+                    {
+                        Response.Redirect("~/Payment/Pay?src=ACTIVITY&id=" + result.BookingId, false);
+                        Context.ApplicationInstance.CompleteRequest();
+                        return;
+                    }
+
                     // กลับไปหน้าแรกของ flow + refresh รายการจองของฉัน
                     pnlPay.Visible = false;
                     pnlPickSlot.Visible = false;
@@ -445,11 +472,19 @@ namespace Take_Time_BangPhra.Guest
             string s = r["PaymentStatus"]?.ToString();
             string method = m == "ROOM_CHARGE" ? "ชาร์จเข้าห้อง (จ่ายตอนเช็คเอาท์)"
                           : m == "TRANSFER" ? "โอนเงิน"
-                          : m == "CASH" ? "จ่ายที่เคาน์เตอร์" : "";
+                          : m == "CASH" ? "จ่ายที่เคาน์เตอร์"
+                          : m == "ONLINE" ? "จ่ายออนไลน์" : "";
             string status = s == "PAID" ? "ชำระแล้ว"
                           : s == "PENDING_VERIFY" ? "รอตรวจสอบสลิป"
                           : s == "UNPAID" ? "ยังไม่ชำระ" : "";
-            return Server.HtmlEncode($"{method} · {status}");
+            string text = Server.HtmlEncode($"{method} · {status}");
+
+            // เลือกจ่ายออนไลน์ไว้แต่ยังไม่จ่าย (ปิดหน้าไปกลางคัน) → ให้กดกลับไปจ่ายต่อได้
+            if (m == "ONLINE" && s == "UNPAID")
+                text += " · <a href=\"" + ResolveUrl("~/Payment/Pay?src=ACTIVITY&id=" + r["ID"])
+                     + "\" style=\"color:#1b7a4b;font-weight:600\">จ่ายเลย →</a>";
+
+            return text;
         }
 
         protected string StatusText(object item)

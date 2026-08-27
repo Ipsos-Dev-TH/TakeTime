@@ -51,6 +51,9 @@ public static class Perm
     public const string SysAccounting = "SYS_ACCOUNTING";
     public const string SysChannel = "SYS_CHANNEL";
     public const string SvcGuest = "SVC_GUEST";
+    // ── รับชำระเงินออนไลน์ (PHASE19_05) ─────────────────────────────────────
+    // แยกจาก SYS_ACCOUNTING เพราะเป็นกุญแจรับเงินจริง ควรจำกัดคนได้แคบกว่าตั้งค่าบัญชี
+    public const string SysPayment = "SYS_PAYMENT";
 
     /// <summary>รายการโมดูลพร้อมชื่อไทย + หมวด — ใช้วาดตารางสิทธิ์ในหน้าจัดการ</summary>
     public class ModuleInfo
@@ -93,6 +96,8 @@ public static class Perm
             "Token LINE/Facebook อีเมล OTA ตั้งค่า AI คลังความรู้"),
         new ModuleInfo(SysAccounting,   "ตั้งค่าบัญชี & ภาษี",      "ตั้งค่า",
             "NextAcc ผังบัญชี โหมด sync ลงบัญชีรายสินค้า สิทธิ์ระดับสมาชิก"),
+        new ModuleInfo(SysPayment,      "รับชำระเงินออนไลน์",       "ตั้งค่า",
+            "เกตเวย์บัตรเครดิต (Payso) QR ของร้าน กุญแจ API รายการชำระเงิน"),
         new ModuleInfo(SysSettings,     "ตั้งค่าระบบ (ส่วนที่เหลือ)", "ระบบ",
             "การเชื่อมต่อ/ระบบ ราคา&ช่องทางขาย ข้อมูลหลัก&ขั้นสูง — Token/API และกลุ่มสิทธิ์ยังเป็นของ Owner เท่านั้น"),
         new ModuleInfo(SysDatabase,     "ฐานข้อมูล / ข้อมูลหลัก",   "ระบบ")
@@ -108,7 +113,7 @@ public static class Perm
         // เดิม Admin เข้าศูนย์ตั้งค่าได้ (หน้าจะกรองรายการที่เป็นของ Owner ออกเอง)
         // — คงไว้เพื่อไม่ให้พฤติกรรมเปลี่ยนก่อนผู้ดูแลจะเริ่มจัดกลุ่ม
         // โมดูลที่แยกใหม่ต้องให้ครบด้วย ไม่งั้น Admin จะเสียสิทธิ์ที่เคยมีทันทีที่อัปเดต
-        SysSettings, WebContent, SvcGuest, SysChannel, SysAccounting
+        SysSettings, WebContent, SvcGuest, SysChannel, SysAccounting, SysPayment
     };
 
     private static readonly HashSet<string> StaffModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

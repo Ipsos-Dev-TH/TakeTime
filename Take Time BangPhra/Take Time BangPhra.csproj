@@ -430,6 +430,7 @@
     <Content Include="API\VendorAPI.ashx" />
     <Content Include="API\PublicChat.ashx" />
     <Content Include="API\OmniChannelWebhook.ashx" />
+    <Content Include="API\PaymentWebhook.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
@@ -497,6 +498,7 @@
     <Content Include="Guest\NearbyPlaces.aspx" />
     <Content Include="Guest\Amenities.aspx" />
     <Content Include="Admin\ManageAmenities.aspx" />
+    <Content Include="Admin\Settings\PaymentGateway.aspx" />
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
@@ -592,6 +594,8 @@
     <Content Include="Resource\sRGB Color Space Profile.icm" />
     <Content Include="Checkout.aspx" />
     <Content Include="Payment\MakePayment.aspx" />
+    <Content Include="Payment\Pay.aspx" />
+    <Content Include="Payment\PayResult.aspx" />
     <Content Include="Payment\PaymentHistory.aspx" />
     <Content Include="PostponeList.aspx" />
     <Content Include="ReservationList.aspx" />
@@ -696,6 +700,9 @@
     </Compile>
     <Compile Include="API\OmniChannelWebhook.ashx.cs">
       <DependentUpon>OmniChannelWebhook.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\PaymentWebhook.ashx.cs">
+      <DependentUpon>PaymentWebhook.ashx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
@@ -1187,6 +1194,13 @@
     <Compile Include="Admin\Settings\AccountingIntegration.aspx.designer.cs">
       <DependentUpon>AccountingIntegration.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\PaymentGateway.aspx.cs">
+      <DependentUpon>PaymentGateway.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\PaymentGateway.aspx.designer.cs">
+      <DependentUpon>PaymentGateway.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\AISettings.aspx.cs">
       <DependentUpon>AISettings.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1439,6 +1453,12 @@
     <Compile Include="Class\Services\ActivityService.cs" />
     <Compile Include="Class\Services\NearbyPlaceService.cs" />
     <Compile Include="Class\Services\AmenityService.cs" />
+    <Compile Include="Class\Payments\PaymentModels.cs" />
+    <Compile Include="Class\Payments\PaymentGatewayConfig.cs" />
+    <Compile Include="Class\Payments\IPaymentGateway.cs" />
+    <Compile Include="Class\Payments\PaysoGateway.cs" />
+    <Compile Include="Class\Payments\PaymentTransactionStore.cs" />
+    <Compile Include="Class\Payments\OnlinePaymentService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1576,6 +1596,20 @@
     </Compile>
     <Compile Include="Payment\MakePayment.aspx.designer.cs">
       <DependentUpon>MakePayment.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\Pay.aspx.cs">
+      <DependentUpon>Pay.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Pay.aspx.designer.cs">
+      <DependentUpon>Pay.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\PayResult.aspx.cs">
+      <DependentUpon>PayResult.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\PayResult.aspx.designer.cs">
+      <DependentUpon>PayResult.aspx</DependentUpon>
     </Compile>
     <Compile Include="Payment\PaymentHistory.aspx.cs">
       <DependentUpon>PaymentHistory.aspx</DependentUpon>

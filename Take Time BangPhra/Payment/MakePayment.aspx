@@ -292,6 +292,26 @@
             </div>
         </div>
 
+        <!-- ให้ลูกค้าจ่ายเอง (แสดงเฉพาะเมื่อเปิดฟีเจอร์รับชำระเงินออนไลน์) -->
+        <asp:Panel ID="pnlOnlineLink" runat="server" CssClass="payment-card" Visible="false">
+            <div class="card-header">
+                <h3>ให้ลูกค้าชำระเงินเอง</h3>
+            </div>
+            <div style="padding:15px;">
+                <p style="color:#7f8c8d;margin:0 0 10px;">
+                    ส่งลิงก์นี้ให้ลูกค้าทาง LINE / SMS — ลูกค้าเลือกได้ว่าจะสแกน QR แนบสลิป หรือจ่ายด้วยบัตรเครดิต
+                    เมื่อจ่ายสำเร็จระบบจะบันทึกเข้าการจองนี้ให้อัตโนมัติ
+                </p>
+                <asp:TextBox ID="txtPayLink" runat="server" ReadOnly="true"
+                    style="width:100%;padding:9px 11px;border:1px solid #dbe3de;border-radius:8px;font-family:monospace;font-size:12.5px;" />
+                <div style="margin-top:10px;">
+                    <asp:HyperLink ID="lnkOpenPay" runat="server" Target="_blank" CssClass="btn-secondary">
+                        เปิดหน้าชำระเงิน ↗
+                    </asp:HyperLink>
+                </div>
+            </div>
+        </asp:Panel>
+
         <!-- Payment History -->
         <div class="payment-card">
             <div class="card-header">

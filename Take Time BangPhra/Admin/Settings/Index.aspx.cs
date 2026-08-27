@@ -55,7 +55,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             // (เดิม guard ด้วย SYS_SETTINGS อย่างเดียว ⇒ คนที่มีแค่สิทธิ์เนื้อหาเว็บจะเข้าไม่ได้เลย)
             if (!Perm.CanAccess(Perm.SysSettings) && !Perm.CanAccess(Perm.WebContent)
                 && !Perm.CanAccess(Perm.SvcGuest) && !Perm.CanAccess(Perm.SysChannel)
-                && !Perm.CanAccess(Perm.SysAccounting))
+                && !Perm.CanAccess(Perm.SysAccounting) && !Perm.CanAccess(Perm.SysPayment))
             {
                 Response.Redirect("~/Default", false);
                 System.Web.HttpContext.Current?.ApplicationInstance?.CompleteRequest();
@@ -111,6 +111,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "เลือกรายสินค้า ว่าการขายจะรวมเข้า **ใบสรุปรายได้รายวัน** หรือไม่ (เช่น หมูกระทะที่ให้รายได้ไปรวมกับค่าห้อง)",
                 "~/Admin/Settings/ProductAccounting",
                 "สินค้า รายสินค้า ใบสรุป รายวัน รวบยอด rollup หมูกระทะ รายได้ ลงบัญชี ขายหน้าร้าน", true));
+            acc.Items.Add(new Item("รับชำระเงินออนไลน์ (Payso)",
+                "ให้ลูกค้าเลือกจ่ายด้วย **บัตรเครดิต/QR ตัดยอดอัตโนมัติ** หรือสแกน QR แนบสลิปแบบเดิม + ดูรายการชำระเงิน",
+                "~/Admin/Settings/PaymentGateway",
+                "จ่ายเงิน ชำระเงิน บัตรเครดิต payso เกตเวย์ gateway qr พร้อมเพย์ webhook รับเงิน ออนไลน์",
+                false, null, Perm.SysPayment));
             acc.Items.Add(new Item("สิทธิประโยชน์ระดับสมาชิก (Tier)",
                 "กำหนดส่วนลด/สิทธิพิเศษของแต่ละระดับสมาชิก",
                 "~/Account/TierBenefitsManagement",
