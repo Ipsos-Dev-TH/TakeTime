@@ -500,6 +500,7 @@
     <Content Include="Guest\Amenities.aspx" />
     <Content Include="Admin\ManageAmenities.aspx" />
     <Content Include="Admin\Settings\PaymentGateway.aspx" />
+    <Content Include="Admin\Settings\SecurityDeposit.aspx" />
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
@@ -1209,6 +1210,13 @@
     </Compile>
     <Compile Include="Admin\Settings\PaymentGateway.aspx.designer.cs">
       <DependentUpon>PaymentGateway.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\SecurityDeposit.aspx.cs">
+      <DependentUpon>SecurityDeposit.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SecurityDeposit.aspx.designer.cs">
+      <DependentUpon>SecurityDeposit.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\AISettings.aspx.cs">
       <DependentUpon>AISettings.aspx</DependentUpon>
