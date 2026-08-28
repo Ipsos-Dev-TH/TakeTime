@@ -500,7 +500,9 @@ namespace Take_Time_BangPhra.Payments
                 SELECT TOP (@top) ID, Txn_Ref, Provider, Method, Source_Type, Source_ID,
                        Amount, Surcharge_Amount, Fee_Amount, [Status], Provider_Txn_ID,
                        Card_Brand, Card_Last4, Customer_Name, Customer_Phone,
-                       Paid_At, Applied_At, Receipt_ID, Fail_Reason, Created_Date
+                       Paid_At, Applied_At, Receipt_ID, Fail_Reason, Created_Date,
+                       -- ต้องดึงมาด้วย ไม่งั้นลิงก์ที่เคยสร้างหาไม่เจออีกเลยหลังปิดหน้าจอ
+                       Payment_Url
                   FROM Payment_Transaction
                  WHERE Created_Date >= @from AND Created_Date < DATEADD(DAY, 1, @to)
                    AND (@status = '' OR [Status] = @status)

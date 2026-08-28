@@ -37,6 +37,9 @@
 
             <asp:Button ID="btnRecheck" runat="server" CssClass="btn ghost" Visible="false"
                 Text="🔄 ตรวจสอบอีกครั้ง" OnClick="btnRecheck_Click" />
+            <%-- หมดอายุ/ไม่สำเร็จ/ยกเลิก = ต้องมีทางไปต่อ ไม่ใช่ทางตัน
+                 ลิงก์นี้ผูกกับรายการต้นทาง (ใบจอง/กิจกรรม) ระบบสร้างรายการจ่ายใหม่ให้เอง --%>
+            <asp:HyperLink ID="lnkRetry" runat="server" CssClass="btn" Visible="false">↻ เริ่มรายการชำระเงินใหม่</asp:HyperLink>
             <asp:HyperLink ID="lnkHome" runat="server" CssClass="btn" NavigateUrl="~/">กลับหน้าแรก</asp:HyperLink>
         </asp:Panel>
     </div>

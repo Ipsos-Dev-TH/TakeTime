@@ -79,28 +79,58 @@ namespace Take_Time_BangPhra.Payment
                         string.IsNullOrEmpty(txn.FailReason)
                             ? "กรุณาลองใหม่อีกครั้ง หรือเลือกวิธีชำระเงินอื่น"
                             : Server.HtmlEncode(txn.FailReason));
+                    ShowRetry(txn);
                     break;
 
                 case PaymentStatus.Expired:
                     Render("bad", "⌛", "รายการหมดอายุแล้ว",
                         "กรุณาเริ่มรายการชำระเงินใหม่อีกครั้ง");
+                    ShowRetry(txn);
                     break;
 
                 case PaymentStatus.Cancelled:
                     Render("bad", "✖", "ยกเลิกการชำระเงิน",
                         "ท่านสามารถเริ่มรายการใหม่ได้ตลอดเวลา");
+                    ShowRetry(txn);
                     break;
 
                 default:
                     if (cancelled)
+                    {
                         Render("wait", "✖", "ท่านยกเลิกการชำระเงิน",
                             "ยังไม่มีการตัดเงิน ท่านสามารถเริ่มรายการใหม่ได้");
+                        ShowRetry(txn);
+                    }
                     else
                         Render("wait", "⏳", "กำลังรอผลการชำระเงิน",
                             "ธนาคารอาจใช้เวลาสักครู่ กรุณากด \"ตรวจสอบอีกครั้ง\" ในอีก 1-2 นาที");
                     btnRecheck.Visible = true;
                     break;
             }
+        }
+
+        /// <summary>
+        /// เปิดปุ่ม "เริ่มรายการใหม่" — เดิมหน้าจบแบบทางตัน ลูกค้าต้องโทรขอลิงก์ใหม่
+        /// จากเจ้าหน้าที่ ทั้งที่ลิงก์หน้าเลือกวิธีจ่ายผูกกับ "รายการต้นทาง" อยู่แล้ว
+        /// เปิดใหม่ได้ตลอด (ยอดคำนวณสดจากยอดค้างจริง)
+        /// </summary>
+        private void ShowRetry(PaymentTransaction txn)
+        {
+            try
+            {
+                if (txn == null || string.IsNullOrEmpty(txn.SourceType)
+                    || string.IsNullOrEmpty(txn.SourceId)) return;
+
+                // POS เป็นยอดลอย ๆ ที่พนักงานตั้งเอง เปิดซ้ำไม่ได้ (ไม่มีต้นทางให้อ้าง)
+                if (txn.SourceType == PaymentSource.Pos || txn.SourceType == PaymentSource.Other) return;
+
+                lnkRetry.NavigateUrl = PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Uri.EscapeDataString(txn.SourceType)
+                    + "&id=" + Uri.EscapeDataString(txn.SourceId)
+                    + "&ph=" + Uri.EscapeDataString(txn.CustomerPhone ?? "");
+                lnkRetry.Visible = true;
+            }
+            catch { }
         }
 
         private void Render(string cls, string icon, string title, string detail)

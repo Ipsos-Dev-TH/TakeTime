@@ -74,7 +74,11 @@
                     </div>
                     <div class="qc-link">
                         <label style="font-weight:600;font-size:13px;">ลิงก์ให้ลูกค้ากรอกบัตรเอง (ส่งทางแชทได้)</label>
-                        <asp:TextBox ID="txtPayLink" runat="server" ReadOnly="true" />
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <asp:TextBox ID="txtPayLink" runat="server" ReadOnly="true" />
+                            <button type="button" onclick="qcCopy('<%= txtPayLink.ClientID %>',this)"
+                                style="flex:none;padding:8px 14px;border:0;border-radius:8px;background:#1b7a4b;color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;">คัดลอก</button>
+                        </div>
                         <div id="qcLinkQr" style="margin-top:10px;"></div>
                         <div class="cap" style="font-size:12.5px;color:#7b8a83;">หรือให้ลูกค้าสแกน QR นี้เพื่อเปิดลิงก์</div>
                     </div>
@@ -123,7 +127,11 @@
                 <div class="qc-result">
                     <div class="qc-link">
                         <label style="font-weight:600;font-size:13px;">ลิงก์ให้ลูกค้ากรอกบัตร (กันวงเงิน)</label>
-                        <asp:TextBox ID="txtHoldLink" runat="server" ReadOnly="true" />
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <asp:TextBox ID="txtHoldLink" runat="server" ReadOnly="true" />
+                            <button type="button" onclick="qcCopy('<%= txtHoldLink.ClientID %>',this)"
+                                style="flex:none;padding:8px 14px;border:0;border-radius:8px;background:#1b7a4b;color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;">คัดลอก</button>
+                        </div>
                         <div id="qcHoldQr" style="margin-top:10px;"></div>
                     </div>
                 </div>
@@ -196,5 +204,16 @@
             poll('qcRef', 'qcStatus', false);
             poll('qcHoldRef', 'qcHoldStatus', true);
         })();
+
+        // คัดลอกลิงก์ — เดิมต้องลากเมาส์เลือกเองทั้งเส้น
+        function qcCopy(id, btn) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.select(); el.setSelectionRange(0, 99999);
+            try { document.execCommand('copy'); } catch (e) { }
+            if (navigator.clipboard) { try { navigator.clipboard.writeText(el.value); } catch (e) { } }
+            var old = btn.textContent; btn.textContent = '✓ แล้ว';
+            setTimeout(function () { btn.textContent = old; }, 1600);
+        }
     </script>
 </asp:Content>

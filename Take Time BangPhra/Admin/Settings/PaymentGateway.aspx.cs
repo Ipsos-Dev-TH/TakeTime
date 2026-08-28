@@ -593,6 +593,44 @@ namespace Take_Time_BangPhra.Admin.Settings
             ViewState["refundId"] = null;
         }
 
+        /// <summary>
+        /// ช่อง "ลิงก์" ในตารางรายการ — คัดลอกลิงก์เดิมกลับมาส่งซ้ำได้
+        ///
+        /// รายการที่ยังรอจ่าย: ให้ลิงก์เดิมที่เกตเวย์ออกให้ (ลูกค้าจ่ายต่อได้เลย)
+        /// รายการที่ปิดไปแล้วแต่ยังมีต้นทาง: ให้ลิงก์หน้าเลือกวิธีจ่าย = สร้างรายการใหม่ได้
+        /// (เดิมพอปิดหน้าจอไปแล้ว ลิงก์ที่ส่งให้ลูกค้าหาไม่เจออีกเลย ทั้งที่เก็บไว้ใน DB)
+        /// </summary>
+        protected string LinkCell(object paymentUrl, object sourceType, object sourceId,
+            object phone, object status)
+        {
+            try
+            {
+                string st = Convert.ToString(status) ?? "";
+                string src = Convert.ToString(sourceType) ?? "";
+                string sid = Convert.ToString(sourceId) ?? "";
+                string url = Convert.ToString(paymentUrl) ?? "";
+                string label = "ลิงก์เดิม";
+
+                bool open = st == PaymentStatus.Pending || st == PaymentStatus.Initiated;
+                if (!open || url.Length == 0)
+                {
+                    // POS เป็นยอดลอย ๆ ไม่มีต้นทางให้เปิดใหม่
+                    if (src.Length == 0 || sid.Length == 0
+                        || src == PaymentSource.Pos || src == PaymentSource.Other) return "";
+                    url = PaymentUrls.SiteBase() + "/Payment/Pay?src=" + Uri.EscapeDataString(src)
+                        + "&id=" + Uri.EscapeDataString(sid)
+                        + "&ph=" + Uri.EscapeDataString(Convert.ToString(phone) ?? "");
+                    label = open ? "ลิงก์" : "ลิงก์ใหม่";
+                }
+
+                string js = url.Replace("\\", "\\\\").Replace("'", "\\'");
+                return "<a href=\"#\" title=\"" + Server.HtmlEncode(url) + "\" "
+                     + "onclick=\"pgCopy('" + Server.HtmlEncode(js) + "',this);return false;\" "
+                     + "style=\"color:#1b7a4b;\">🔗 " + label + "</a>";
+            }
+            catch { return ""; }
+        }
+
         protected bool ShowRefund(object status, object provider)
         {
             string s = Convert.ToString(status) ?? "";

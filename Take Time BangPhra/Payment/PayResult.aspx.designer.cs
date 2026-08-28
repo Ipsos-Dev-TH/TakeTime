@@ -50,6 +50,11 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.Button btnRecheck;
 
         /// <summary>
+        /// lnkRetry control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HyperLink lnkRetry;
+
+        /// <summary>
         /// lnkHome control.
         /// </summary>
         protected global::System.Web.UI.WebControls.HyperLink lnkHome;

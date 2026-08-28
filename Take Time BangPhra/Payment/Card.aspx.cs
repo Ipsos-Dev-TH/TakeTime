@@ -119,7 +119,19 @@ namespace Take_Time_BangPhra.Payment
                 return;
             }
             if (PaymentStatus.IsFinal(txn.Status) || txn.IsExpired)
-            { Fail("รายการนี้ปิดไปแล้ว (" + PaymentStatus.Thai(txn.Status) + ") กรุณาเริ่มใหม่"); return; }
+            {
+                // ทางตันเดิม: บอกว่าปิดแล้วจบเลย ลูกค้าต้องโทรขอลิงก์ใหม่
+                // ⇒ ชี้กลับไปหน้าเลือกวิธีจ่ายของรายการต้นทาง ซึ่งเปิดใหม่ได้ตลอด
+                string again = RetryUrl(txn);
+                Fail("รายการนี้ปิดไปแล้ว (" + PaymentStatus.Thai(txn.Status) + ")"
+                    + (string.IsNullOrEmpty(again)
+                        ? " กรุณาเริ่มใหม่"
+                        : "<br/><a href=\"" + Server.HtmlEncode(again)
+                          + "\" style=\"display:inline-block;margin-top:10px;padding:11px 18px;border-radius:10px;"
+                          + "background:#1b7a4b;color:#fff;text-decoration:none;font-weight:600;\">"
+                          + "↻ เริ่มรายการชำระเงินใหม่</a>"), true);
+                return;
+            }
 
             litTitle.Text = "ชำระเงินด้วยบัตร";
             litDesc.Text = Server.HtmlEncode(txn.Description ?? "");
@@ -178,11 +190,30 @@ namespace Take_Time_BangPhra.Payment
             pnlDone.Visible = true;
         }
 
-        private void Fail(string message)
+        /// <param name="rawHtml">true = ข้อความมี HTML ที่ผู้เรียกประกอบมาเองแล้ว</param>
+        private void Fail(string message, bool rawHtml = false)
         {
             litTitle.Text = "ไม่สามารถดำเนินการได้";
-            litMsg.Text = "<div class=\"alert err\">" + Server.HtmlEncode(message) + "</div>";
+            litMsg.Text = "<div class=\"alert err\">"
+                + (rawHtml ? message : Server.HtmlEncode(message)) + "</div>";
             pnlForm.Visible = false;
+        }
+
+        /// <summary>ลิงก์กลับไปหน้าเลือกวิธีจ่ายของรายการต้นทาง — null ถ้าอ้างต้นทางไม่ได้</summary>
+        private string RetryUrl(PaymentTransaction txn)
+        {
+            try
+            {
+                if (txn == null || string.IsNullOrEmpty(txn.SourceType)
+                    || string.IsNullOrEmpty(txn.SourceId)) return null;
+                if (txn.SourceType == PaymentSource.Pos || txn.SourceType == PaymentSource.Other) return null;
+
+                return PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Uri.EscapeDataString(txn.SourceType)
+                    + "&id=" + Uri.EscapeDataString(txn.SourceId)
+                    + "&ph=" + Uri.EscapeDataString(txn.CustomerPhone ?? "");
+            }
+            catch { return null; }
         }
     }
 }

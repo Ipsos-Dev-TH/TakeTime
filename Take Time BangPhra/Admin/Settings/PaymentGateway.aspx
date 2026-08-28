@@ -213,6 +213,9 @@
                                 CommandArgument='<%# Eval("ID") %>' Text="↩ คืนเงิน"
                                 Visible='<%# ShowRefund(Eval("Status"), Eval("Provider")) %>'
                                 CausesValidation="false" style="color:#a12626;" />
+                            <%-- ลิงก์ที่เคยส่งให้ลูกค้า — เดิมหาไม่เจออีกเลยหลังปิดหน้าจอ --%>
+                            <asp:Literal ID="litLink" runat="server"
+                                Text='<%# LinkCell(Eval("Payment_Url"), Eval("Source_Type"), Eval("Source_ID"), Eval("Customer_Phone"), Eval("Status")) %>' />
                         </ItemTemplate>
                     </asp:TemplateField>
                 </Columns>
@@ -221,6 +224,19 @@
     </div>
 
     <script>
+        // คัดลอกลิงก์จากตารางรายการ
+        function pgCopy(url, el) {
+            if (navigator.clipboard) { try { navigator.clipboard.writeText(url); } catch (e) { } }
+            else {
+                var t = document.createElement('textarea');
+                t.value = url; document.body.appendChild(t); t.select();
+                try { document.execCommand('copy'); } catch (e) { }
+                document.body.removeChild(t);
+            }
+            var old = el.textContent; el.textContent = '✓ คัดลอกแล้ว';
+            setTimeout(function () { el.textContent = old; }, 1600);
+        }
+
         // ── แสดงเฉพาะสิ่งที่เกี่ยวข้อง — เลือกเกตเวย์ไหนเห็นแค่ของเจ้านั้น ──
         // ทุกอย่างยังอยู่ในฟอร์มครบ (แค่ซ่อนด้วย CSS) การบันทึกจึงทำงานเหมือนเดิมทุกประการ
         (function () {
