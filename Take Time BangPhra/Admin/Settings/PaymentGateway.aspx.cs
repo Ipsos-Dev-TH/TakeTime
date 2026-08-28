@@ -430,20 +430,43 @@ namespace Take_Time_BangPhra.Admin.Settings
                     Msg("warn", "ยังไม่ได้เปิด <b>เปิดรับชำระเงินออนไลน์</b> ในหน้านี้ — ลูกค้ายังไม่เห็นตัวเลือกใหม่", true);
                     return;
                 }
-                if (PaymentGatewayConfig.GetBool("Payso_Enabled", false) && !PaymentGatewayConfig.IsPaysoReady)
+                // ⚠ คำเตือนต้องดูที่ "เกตเวย์ที่เลือกใช้อยู่" ไม่ใช่ Payso ตายตัว
+                //   (เดิมเช็ค IsPaysoReady ล้วน ⇒ ตั้ง Omise ไว้จะไม่เตือนอะไรเลย)
+                bool omise = PaymentGatewayConfig.ActiveProvider == PaymentGatewayConfig.ProviderOmise;
+
+                if (!PaymentGatewayConfig.IsGatewayReady)
                 {
-                    Msg("warn", "เปิดใช้ Payso ไว้แต่ยังตั้งค่าไม่ครบ (Base URL / กุญแจ) — "
-                        + "ตอนนี้ลูกค้าจะเห็นเฉพาะวิธีเดิม", true);
+                    Msg("warn", omise
+                        ? "เลือกใช้ <b>Omise</b> แต่ยังตั้งค่าไม่ครบ — ต้องเปิด \"เปิดใช้เกตเวย์ Omise\" "
+                          + "และใส่ Secret Key (skey_…) ตอนนี้ลูกค้าจะเห็นเฉพาะวิธีเดิม"
+                        : "เลือกใช้ <b>Payso</b> แต่ยังตั้งค่าไม่ครบ (Base URL / กุญแจ) — "
+                          + "ตอนนี้ลูกค้าจะเห็นเฉพาะวิธีเดิม", true);
                     return;
                 }
-                if (PaymentGatewayConfig.IsPaysoReady && !PaymentGatewayConfig.IsSandbox
-                    && !PaymentGatewayConfig.WebhookVerify)
+
+                if (omise)
+                {
+                    // บัตรเครดิตต้องมี Public Key ด้วย — Omise.js บนหน้าเว็บใช้ตัวนี้แลก token
+                    if (PaymentGatewayConfig.AvailableMethods(0m).Contains(PaymentGatewayConfig.MethodCard)
+                        && string.IsNullOrEmpty(PaymentGatewayConfig.Get("Omise_PublicKey", "")))
+                    {
+                        Msg("err", "เปิดรับ <b>บัตรเครดิต</b> ไว้แต่ยังไม่ได้ใส่ <b>Public Key</b> (pkey_…) — "
+                            + "หน้ากรอกบัตรจะขึ้นไม่ได้ เพราะไม่มีกุญแจส่งข้อมูลบัตรเข้า vault ของ Omise", true);
+                        return;
+                    }
+                    if (OmiseGateway.IsTestKey)
+                        Msg("warn", "กำลังใช้กุญแจ <b>ทดสอบ (skey_test_…)</b> — จะยังไม่มีการตัดเงินจริง "
+                            + "เปลี่ยนเป็นกุญแจ skey_live_… เมื่อพร้อมใช้งานจริง", true);
+                    return;
+                }
+
+                if (!PaymentGatewayConfig.IsSandbox && !PaymentGatewayConfig.WebhookVerify)
                 {
                     Msg("err", "⚠ อยู่ในโหมดใช้งานจริงแต่ <b>ปิดการตรวจลายเซ็นการแจ้งกลับ</b> อยู่ — "
                         + "ใครก็ยิงเข้ามาบอกว่า \"จ่ายแล้ว\" ได้ กรุณาเปิดกลับทันที", true);
                     return;
                 }
-                if (PaymentGatewayConfig.IsPaysoReady && PaymentGatewayConfig.IsSandbox)
+                if (PaymentGatewayConfig.IsSandbox)
                     Msg("warn", "กำลังใช้โหมด <b>ทดสอบ (Sandbox)</b> — จะยังไม่มีการตัดเงินจริง", true);
             }
             catch { }

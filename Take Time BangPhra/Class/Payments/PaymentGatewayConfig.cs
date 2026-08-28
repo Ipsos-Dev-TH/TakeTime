@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -188,7 +188,9 @@ namespace Take_Time_BangPhra.Payments
                 if (m == MethodManualQr) { result.Add(m); continue; }
 
                 // วิธีที่ต้องผ่านเกตเวย์
-                if (!IsPaysoReady) continue;
+                // ⚠ เดิมเช็ค IsPaysoReady ตายตัว — พอสลับมาใช้ Omise ทุกวิธีที่ผ่านเกตเวย์
+                // ถูกกรองทิ้งหมด เหลือแต่ MANUAL_QR (อาการ: "วิธีชำระเงินนี้ใช้ไม่ได้กับยอด …")
+                if (!IsGatewayReady) continue;
                 if (amount > 0)
                 {
                     if (MinAmount > 0 && amount < MinAmount) continue;
@@ -197,6 +199,38 @@ namespace Take_Time_BangPhra.Payments
                 result.Add(m);
             }
             return result;
+        }
+
+        /// <summary>
+        /// เหตุผลจริงที่วิธีชำระนี้ใช้ไม่ได้ — คืน null ถ้าใช้ได้
+        /// (เดิมตอบว่า "ใช้ไม่ได้กับยอด X" ทุกกรณี ทั้งที่ยอดมักไม่ใช่ปัญหา)
+        /// </summary>
+        public static string DescribeMethodUnavailable(string method, decimal amount)
+        {
+            string m = (method ?? "").Trim().ToUpperInvariant();
+            if (m.Length == 0) return "ไม่ได้ระบุวิธีชำระเงิน";
+
+            if (AvailableMethods(amount).Contains(m)) return null;
+
+            if (m != MethodManualQr && !IsGatewayReady)
+                return ActiveProvider == ProviderOmise
+                    ? "เกตเวย์ Omise ยังไม่พร้อม — ต้องเปิด \"เปิดใช้เกตเวย์ Omise\" และใส่ Secret Key"
+                    : "เกตเวย์ Payso ยังไม่พร้อม — ต้องเปิดใช้งานและใส่ Base URL + กุญแจ";
+
+            string raw = (Get("Payment_Methods_Enabled", MethodManualQr) ?? "").ToUpperInvariant();
+            bool listed = false;
+            foreach (string part in raw.Split(','))
+                if (part.Trim() == m) { listed = true; break; }
+            if (!listed)
+                return "ยังไม่ได้เปิดวิธี \"" + MethodName(m) + "\" — เพิ่ม " + m
+                     + " ในช่อง \"วิธีชำระที่เปิดให้ลูกค้าเลือก\" (Payment_Methods_Enabled)";
+
+            if (amount > 0 && MinAmount > 0 && amount < MinAmount)
+                return "ยอด " + amount.ToString("N2") + " บาท ต่ำกว่าขั้นต่ำที่ตั้งไว้ (" + MinAmount.ToString("N2") + ")";
+            if (amount > 0 && MaxAmount > 0 && amount > MaxAmount)
+                return "ยอด " + amount.ToString("N2") + " บาท เกินเพดานที่ตั้งไว้ (" + MaxAmount.ToString("N2") + ")";
+
+            return "วิธีชำระเงินนี้ใช้ไม่ได้ในขณะนี้";
         }
 
         public static string DefaultMethod(decimal amount)

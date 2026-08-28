@@ -100,11 +100,22 @@ namespace Take_Time_BangPhra.Payments
             }
 
             string method = (req.Method ?? "").ToUpperInvariant();
-            var allowed = PaymentGatewayConfig.AvailableMethods(req.Amount);
-            if (!allowed.Contains(method))
+
+            // หน้าทดสอบ sandbox ต้องลองวิธีที่ "ยังไม่เปิดให้ลูกค้า" ได้ — นั่นคือเหตุผลที่มีหน้านั้น
+            // (ยังบังคับว่าเกตเวย์ต้องพร้อมจริงเสมอ ไม่ข้ามให้)
+            if (req.IsTest)
             {
-                fail.Message = "วิธีชำระเงินนี้ใช้ไม่ได้กับยอด " + req.Amount.ToString("N2") + " บาท";
-                return fail;
+                if (method != PaymentGatewayConfig.MethodManualQr && !PaymentGatewayConfig.IsGatewayReady)
+                {
+                    fail.Message = PaymentGatewayConfig.DescribeMethodUnavailable(method, req.Amount)
+                                   ?? "เกตเวย์ยังไม่พร้อมใช้งาน";
+                    return fail;
+                }
+            }
+            else
+            {
+                string why = PaymentGatewayConfig.DescribeMethodUnavailable(method, req.Amount);
+                if (why != null) { fail.Message = why; return fail; }
             }
             req.Method = method;
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -100,7 +100,8 @@ namespace Take_Time_BangPhra.Payment
                 SourceId = TestSourceId + "-" + DateTime.Now.ToString("HHmmss"),
                 Amount = ReadAmount(),
                 Description = "[ทดสอบ] รายการทดสอบเกตเวย์",
-                CreatedByAdminId = AdminId()
+                CreatedByAdminId = AdminId(),
+                IsTest = true
             };
 
             PaymentChargeResult r = svc.Start(req);

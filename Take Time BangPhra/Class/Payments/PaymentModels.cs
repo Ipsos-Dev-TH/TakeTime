@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace Take_Time_BangPhra.Payments
 {
@@ -79,6 +79,12 @@ namespace Take_Time_BangPhra.Payments
         public string CancelUrl { get; set; }
         public string WebhookUrl { get; set; }
         public int? CreatedByAdminId { get; set; }
+
+        /// <summary>
+        /// รายการจากหน้าทดสอบ sandbox — ข้ามการตรวจ "วิธีนี้เปิดให้ลูกค้าแล้วหรือยัง"
+        /// เพื่อให้ทดลองก่อนเปิดใช้จริงได้ (ยังต้องมีเกตเวย์ที่ตั้งค่าครบเสมอ)
+        /// </summary>
+        public bool IsTest { get; set; }
 
         public PaymentChargeRequest()
         {
