@@ -828,6 +828,87 @@
                 </div>
             </div>
             
+            <%-- ══ เก็บเงินออนไลน์ + เงินประกัน (โผล่เฉพาะโหมดเช็คอิน และเมื่อเปิดฟีเจอร์) ══
+                 ส่วนนี้เป็นส่วนเสริมล้วน ๆ ไม่แตะตรรกะบันทึกจอง/เช็คอินเดิมเลย
+                 ปิดฟีเจอร์เมื่อไหร่ pnlOnlinePay จะ Visible=false ทั้งบล็อก --%>
+            <asp:Panel ID="pnlOnlinePay" runat="server" Visible="false" CssClass="form-row"
+                style="display:block; background:#F1F8E9; border-radius:10px; padding:16px; margin-top:14px;">
+                <h4 style="color:#33691E; margin:0 0 4px;">💳 เก็บเงินออนไลน์ (ลูกค้าสแกน/กรอกบัตรเอง)</h4>
+                <div style="font-size:0.9em; color:#7CB342; margin-bottom:12px;">
+                    ไม่ต้องรอสลิป — ระบบรู้ผลเอง แล้วลงบัญชีให้อัตโนมัติ
+                </div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <span style="font-weight:600;">ยอดที่จะเก็บ</span>
+                    <asp:TextBox ID="txtPayAmount" runat="server" TextMode="Number" Width="150px"
+                        CssClass="rounded-textbox" />
+                    <span>บาท</span>
+                    <asp:Button ID="btnMakePayLink" runat="server" Text="สร้าง QR / ลิงก์ให้ลูกค้าจ่าย"
+                        OnClick="btnMakePayLink_Click" CausesValidation="false" CssClass="reservation-button" />
+                </div>
+
+                <asp:Panel ID="pnlPayLink" runat="server" Visible="false" style="margin-top:14px;">
+                    <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+                        <div id="rvPayQr" style="background:#fff; padding:10px; border-radius:8px;"></div>
+                        <div style="flex:1; min-width:260px;">
+                            <label style="font-weight:600; font-size:0.9em;">ลิงก์สำหรับลูกค้า (ส่งทางแชทได้)</label>
+                            <div style="display:flex; gap:6px;">
+                                <asp:TextBox ID="txtPayLinkUrl" runat="server" ReadOnly="true" Width="100%"
+                                    CssClass="rounded-textbox" />
+                                <button type="button" onclick="rvCopy('<%= txtPayLinkUrl.ClientID %>',this)"
+                                    style="padding:8px 14px;border:0;border-radius:8px;background:#558B2F;color:#fff;cursor:pointer;">คัดลอก</button>
+                            </div>
+                            <div style="font-size:0.85em; color:#7CB342; margin-top:6px;">
+                                ลิงก์นี้<b>ไม่หมดอายุ</b> — เปิดวันไหนระบบคิดยอดคงเหลือ ณ ตอนนั้นให้เอง
+                            </div>
+                            <div id="rvPayStatus" style="margin-top:10px; font-weight:600; color:#F57F17;">⏳ รอลูกค้าชำระเงิน…</div>
+                        </div>
+                    </div>
+                </asp:Panel>
+
+                <%-- ── เงินประกันความเสียหาย ── --%>
+                <asp:Panel ID="pnlDeposit" runat="server" Visible="false"
+                    style="margin-top:18px; border-top:1px dashed #C5E1A5; padding-top:14px;">
+                    <h4 style="color:#33691E; margin:0 0 4px;">🛡 เงินประกันความเสียหาย</h4>
+                    <div style="font-size:0.9em; color:#7CB342; margin-bottom:12px;">
+                        บัตร = กันวงเงินไว้เฉย ๆ เงินไม่ออกจากบัตร เช็คเอาท์ค่อยคืนหรือหักเฉพาะที่เสียหายจริง ·
+                        เงินสด = บันทึกรับไว้ในระบบ ไม่ต้องเบิกเงินมารอคืน
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <asp:DropDownList ID="ddlDepositMethod" runat="server" CssClass="rounded-textbox" Width="200px">
+                            <asp:ListItem Value="CARD" Text="กันวงเงินบนบัตร" />
+                            <asp:ListItem Value="CASH" Text="รับเป็นเงินสด" />
+                        </asp:DropDownList>
+                        <asp:TextBox ID="txtDepositAmount" runat="server" TextMode="Number" Width="150px"
+                            CssClass="rounded-textbox" />
+                        <span>บาท</span>
+                        <asp:Button ID="btnMakeDeposit" runat="server" Text="รับเงินประกัน"
+                            OnClick="btnMakeDeposit_Click" CausesValidation="false" CssClass="reservation-button" />
+                    </div>
+                    <asp:Literal ID="litDepositMsg" runat="server" />
+                    <asp:Panel ID="pnlDepositLink" runat="server" Visible="false" style="margin-top:14px;">
+                        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+                            <div id="rvHoldQr" style="background:#fff; padding:10px; border-radius:8px;"></div>
+                            <div style="flex:1; min-width:260px;">
+                                <label style="font-weight:600; font-size:0.9em;">ลิงก์ให้ลูกค้ากรอกบัตร (กันวงเงิน)</label>
+                                <div style="display:flex; gap:6px;">
+                                    <asp:TextBox ID="txtDepositLink" runat="server" ReadOnly="true" Width="100%"
+                                        CssClass="rounded-textbox" />
+                                    <button type="button" onclick="rvCopy('<%= txtDepositLink.ClientID %>',this)"
+                                        style="padding:8px 14px;border:0;border-radius:8px;background:#558B2F;color:#fff;cursor:pointer;">คัดลอก</button>
+                                </div>
+                                <div id="rvHoldStatus" style="margin-top:10px; font-weight:600; color:#F57F17;">⏳ รอลูกค้ากรอกบัตร…</div>
+                            </div>
+                        </div>
+                    </asp:Panel>
+                </asp:Panel>
+
+                <input type="hidden" id="rvPayRef" value="<%= PayRefJs %>" />
+                <input type="hidden" id="rvHoldRef" value="<%= HoldRefJs %>" />
+                <input type="hidden" id="rvPayUrl" value="<%= PayUrlJs %>" />
+                <input type="hidden" id="rvHoldUrl" value="<%= HoldUrlJs %>" />
+            </asp:Panel>
+
             <div class="form-row">
                 <div class="form-label">หมายเหตุ:<br />Remark:</div>
                 <div class="form-controls">
@@ -856,4 +937,58 @@
         <LocalReport ReportPath="Account\Report\Receipt.rdlc" EnableExternalImages="True">
         </LocalReport>
     </rsweb:reportviewer>
+
+    <%-- ── QR + ตามสถานะการจ่ายแบบสด (เฉพาะตอนมีลิงก์จริง) ── --%>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        function rvCopy(id, btn) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.select(); el.setSelectionRange(0, 99999);
+            try { document.execCommand('copy'); } catch (e) { }
+            if (navigator.clipboard) { try { navigator.clipboard.writeText(el.value); } catch (e) { } }
+            var old = btn.textContent; btn.textContent = '✓ คัดลอกแล้ว';
+            setTimeout(function () { btn.textContent = old; }, 1600);
+        }
+
+        (function () {
+            function val(id) { var e = document.getElementById(id); return e ? e.value : ''; }
+            function drawQr(boxId, text) {
+                var box = document.getElementById(boxId);
+                if (!box || !text || typeof QRCode === 'undefined') return;
+                box.innerHTML = '';
+                new QRCode(box, { text: text, width: 168, height: 168, correctLevel: QRCode.CorrectLevel.M });
+            }
+
+            drawQr('rvPayQr', val('rvPayUrl'));
+            drawQr('rvHoldQr', val('rvHoldUrl'));
+
+            // ถามสถานะเป็นระยะ — พนักงานเห็นทันทีว่าลูกค้าจ่ายแล้ว ไม่ต้องกดรีเฟรชเอง
+            function watch(ref, statusId, okText, okStates) {
+                if (!ref) return;
+                var box = document.getElementById(statusId);
+                if (!box) return;
+                var timer = setInterval(function () {
+                    fetch('<%= ResolveUrl("~/API/PaymentStatus.ashx") %>?ref=' + encodeURIComponent(ref) + '&_=' + Date.now())
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            var s = (d && d.status || '').toUpperCase();
+                            if (okStates.indexOf(s) >= 0) {
+                                box.textContent = okText;
+                                box.style.color = '#2E7D32';
+                                clearInterval(timer);
+                            } else if (['FAILED', 'EXPIRED', 'CANCELLED'].indexOf(s) >= 0) {
+                                box.textContent = '❌ ' + (d.thai || s);
+                                box.style.color = '#C62828';
+                                clearInterval(timer);
+                            }
+                        })
+                        .catch(function () { });
+                }, 4000);
+            }
+
+            watch(val('rvPayRef'), 'rvPayStatus', '✅ ลูกค้าชำระเงินแล้ว — กดรีเฟรชหน้าเพื่อดูยอดล่าสุด', ['PAID']);
+            watch(val('rvHoldRef'), 'rvHoldStatus', '✅ กันวงเงินเรียบร้อยแล้ว', ['HELD', 'PAID']);
+        })();
+    </script>
 </asp:Content>

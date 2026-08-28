@@ -525,6 +525,69 @@ namespace Take_Time_BangPhra
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
+        /// <summary>
+        /// pnlOnlinePay control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlOnlinePay;
+
+        /// <summary>
+        /// txtPayAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPayAmount;
+
+        /// <summary>
+        /// btnMakePayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnMakePayLink;
+
+        /// <summary>
+        /// pnlPayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlPayLink;
+
+        /// <summary>
+        /// txtPayLinkUrl control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPayLinkUrl;
+
+        /// <summary>
+        /// pnlDeposit control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDeposit;
+
+        /// <summary>
+        /// ddlDepositMethod control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlDepositMethod;
+
+        /// <summary>
+        /// txtDepositAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositAmount;
+
+        /// <summary>
+        /// btnMakeDeposit control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnMakeDeposit;
+
+        /// <summary>
+        /// litDepositMsg control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litDepositMsg;
+
+        /// <summary>
+        /// pnlDepositLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDepositLink;
+
+        /// <summary>
+        /// txtDepositLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositLink;
+
+        /// <summary>
+        /// TextBox6 control.
+        /// </summary>
         protected global::System.Web.UI.WebControls.TextBox TextBox6;
 
         /// <summary>

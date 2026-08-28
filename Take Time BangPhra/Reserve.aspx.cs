@@ -827,6 +827,14 @@ namespace Take_Time_BangPhra
                     string paidType = dtCustomer.Rows[0]["Paid_Type"]?.ToString() ?? "เงินสด";
                     if (string.IsNullOrWhiteSpace(paidType) || paidType.Length <= 5) paidType = "เงินสด";
                     Label7.Text += " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
+
+                    // เก็บยอดคงเหลือด้วย QR/ลิงก์ + รับเงินประกัน ตรงนี้เลย ไม่ต้องเปิดหน้าอื่น
+                    int ridForPay;
+                    if (int.TryParse(Convert.ToString(id), out ridForPay))
+                    {
+                        ViewState["rvResId"] = ridForPay;
+                        SetupOnlinePayPanel(ridForPay, remainingAmount);
+                    }
                 }
 
                 if (!IsPostBack)
@@ -5436,6 +5444,197 @@ namespace Take_Time_BangPhra
         {
             var totalCost = Convert.ToDouble(String.Format("{0:0.00}", num));
             return totalCost;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  เก็บเงินออนไลน์ + เงินประกัน บนหน้าเช็คอิน
+        //
+        //  ส่วนเสริมล้วน ๆ — ไม่แตะตรรกะบันทึกจอง/เช็คอินเดิมสักบรรทัด
+        //  ปิดฟีเจอร์ "รับชำระเงินออนไลน์" เมื่อไหร่ ทั้งบล็อกก็ไม่แสดงผล
+        //  หน้าเดิมกลับไปทำงานเหมือนเดิมทุกประการ (แนบสลิปเหมือนเคย)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>เลขอ้างอิงรายการจ่าย/วงเงิน ที่ฝั่งหน้าเว็บใช้ตามสถานะแบบสด</summary>
+        public string PayRefJs { get { return JsSafe(ViewState["rvPayRef"]); } }
+        public string HoldRefJs { get { return JsSafe(ViewState["rvHoldRef"]); } }
+        public string PayUrlJs { get { return JsSafe(ViewState["rvPayUrl"]); } }
+        public string HoldUrlJs { get { return JsSafe(ViewState["rvHoldUrl"]); } }
+
+        private static string JsSafe(object o)
+        {
+            string s = o == null ? "" : o.ToString();
+            return s.Replace("\\", "").Replace("\"", "").Replace("<", "").Replace(">", "");
+        }
+
+        /// <summary>
+        /// เปิด/ซ่อนบล็อกเก็บเงินออนไลน์ — เรียกจากตอนโหลดหน้าโหมดเช็คอิน
+        /// ทุกอย่างห่อ try/catch: ถ้ายังไม่ได้ติดตั้งตาราง/ปิดฟีเจอร์ ก็แค่ไม่โผล่
+        /// </summary>
+        private void SetupOnlinePayPanel(int reservationId, decimal remaining)
+        {
+            try
+            {
+                if (pnlOnlinePay == null) return;
+                pnlOnlinePay.Visible = false;
+                if (reservationId <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService(conn);
+                bool payOk = false;
+                try
+                {
+                    payOk = svc.AvailableMethods(remaining > 0 ? remaining : 1m,
+                        Take_Time_BangPhra.Payments.PaymentSource.Reservation).Count > 0;
+                }
+                catch { }
+
+                var holds = new Take_Time_BangPhra.Payments.SecurityHoldService(conn);
+                bool holdOk = false;
+                try { holdOk = holds.IsAvailable && holds.TableReady(); } catch { }
+
+                if (!payOk && !holdOk) return;      // ไม่มีอะไรให้ทำ = ไม่ต้องรกหน้าจอ
+                pnlOnlinePay.Visible = true;
+
+                // ── ฝั่งเก็บเงิน ──
+                btnMakePayLink.Visible = payOk;
+                txtPayAmount.Visible = payOk;
+                if (payOk && !IsPostBack)
+                    txtPayAmount.Text = remaining > 0 ? remaining.ToString("0.##") : "";
+
+                // ── ฝั่งเงินประกัน ──
+                pnlDeposit.Visible = holdOk;
+                if (holdOk && !IsPostBack)
+                {
+                    try { txtDepositAmount.Text = holds.SuggestedAmount(reservationId).ToString("0.##"); }
+                    catch { }
+
+                    // มีวงเงินค้างอยู่แล้ว — บอกไปเลย จะได้ไม่กันซ้ำสองก้อน
+                    var open = holds.GetOpenHold(reservationId);
+                    if (open != null)
+                    {
+                        bool held = open.Status == Take_Time_BangPhra.Payments.HoldStatus.Held;
+                        litDepositMsg.Text =
+                            "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;background:"
+                            + (held ? "#E8F5E9;color:#2E7D32" : "#FFF8E1;color:#8D6E00") + ";\">"
+                            + (held ? "✅ การจองนี้มีเงินประกันอยู่แล้ว " : "⏳ รอลูกค้ากรอกบัตร ")
+                            + open.Amount.ToString("N2") + " บาท ("
+                            + Server.HtmlEncode(open.HoldRef) + ")"
+                            + (held ? " — จัดการตอนเช็คเอาท์" : "") + "</div>";
+                        if (!held)
+                        {
+                            ViewState["rvHoldRef"] = open.HoldRef;
+                            ViewState["rvHoldUrl"] = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                                + "/Payment/Card?mode=HOLD&hold=" + Uri.EscapeDataString(open.HoldRef);
+                            txtDepositLink.Text = ViewState["rvHoldUrl"].ToString();
+                            pnlDepositLink.Visible = true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                try { pnlOnlinePay.Visible = false; } catch { }
+            }
+        }
+
+        /// <summary>สร้างลิงก์/QR ให้ลูกค้าจ่ายยอดคงเหลือเอง</summary>
+        protected void btnMakePayLink_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int rid = ReservationIdFromRequest();
+                if (rid <= 0) { ShowPayError("ไม่พบเลขที่การจอง"); return; }
+
+                // ลิงก์ผูกกับ "ใบจอง" ไม่ใช่กับรายการจ่าย ⇒ เปิดวันไหนก็คิดยอดคงเหลือ
+                // ณ ตอนนั้นให้เอง ไม่หมดอายุ ไม่ต้องสร้างใหม่
+                string phone = "";
+                try
+                {
+                    DataTable dt = new code().DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 Customer_MobilePhone FROM Reservation WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rid } });
+                    if (dt != null && dt.Rows.Count > 0)
+                        phone = Convert.ToString(dt.Rows[0]["Customer_MobilePhone"]);
+                }
+                catch { }
+
+                string url = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.Reservation
+                    + "&id=" + rid
+                    + "&ph=" + Uri.EscapeDataString(phone ?? "");
+
+                decimal amt;
+                if (decimal.TryParse((txtPayAmount.Text ?? "").Trim(), out amt) && amt > 0)
+                    url += "&amt=" + amt.ToString("0.00", CultureInfo.InvariantCulture);
+
+                ViewState["rvPayUrl"] = url;
+                ViewState["rvPayRef"] = "";   // ยังไม่มีรายการจ่ายจนกว่าลูกค้าจะเลือกวิธี
+                txtPayLinkUrl.Text = url;
+                pnlPayLink.Visible = true;
+            }
+            catch (Exception ex) { ShowPayError(ex.Message); }
+        }
+
+        /// <summary>รับเงินประกัน — เงินสดบันทึกทันที / บัตรได้ลิงก์ให้ลูกค้ากรอก</summary>
+        protected void btnMakeDeposit_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int rid = ReservationIdFromRequest();
+                if (rid <= 0) { ShowPayError("ไม่พบเลขที่การจอง"); return; }
+
+                decimal amt;
+                if (!decimal.TryParse((txtDepositAmount.Text ?? "").Trim(), out amt) || amt <= 0)
+                { ShowPayError("กรุณากรอกวงเงินประกันให้ถูกต้อง"); return; }
+
+                int? adminId = null;
+                try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); }
+                catch { }
+
+                var holds = new Take_Time_BangPhra.Payments.SecurityHoldService(conn);
+                string err;
+
+                if (ddlDepositMethod.SelectedValue == "CASH")
+                {
+                    string holdRef = holds.CreateCashHold(rid, amt, adminId, out err);
+                    if (string.IsNullOrEmpty(holdRef)) { ShowPayError(err ?? "บันทึกไม่สำเร็จ"); return; }
+                    litDepositMsg.Text =
+                        "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                        + "background:#E8F5E9;color:#2E7D32;\">✅ รับเงินประกันเป็นเงินสด "
+                        + amt.ToString("N2") + " บาท บันทึกแล้ว (" + Server.HtmlEncode(holdRef) + ")"
+                        + " — เช็คเอาท์ค่อยคืนหรือหักค่าเสียหาย</div>";
+                    pnlDepositLink.Visible = false;
+                    return;
+                }
+
+                string url = holds.CreateHoldRequest(rid, amt, adminId, out err);
+                if (string.IsNullOrEmpty(url)) { ShowPayError(err ?? "สร้างลิงก์ไม่สำเร็จ"); return; }
+
+                ViewState["rvHoldUrl"] = url;
+                var open = holds.GetOpenHold(rid);
+                ViewState["rvHoldRef"] = open == null ? "" : open.HoldRef;
+                txtDepositLink.Text = url;
+                pnlDepositLink.Visible = true;
+                litDepositMsg.Text =
+                    "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                    + "background:#E3F2FD;color:#1565C0;\">ส่งลิงก์นี้ให้ลูกค้ากรอกบัตร — "
+                    + "เป็นการ<b>กันวงเงิน</b> เงินยังไม่ออกจากบัตร</div>";
+            }
+            catch (Exception ex) { ShowPayError(ex.Message); }
+        }
+
+        private void ShowPayError(string msg)
+        {
+            litDepositMsg.Text = "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                + "background:#FFEBEE;color:#C62828;\">⚠ " + Server.HtmlEncode(msg ?? "") + "</div>";
+        }
+
+        /// <summary>เลขที่การจองของหน้านี้ — โหมดเช็คอิน/แก้ไขส่งมาทาง query string</summary>
+        private int ReservationIdFromRequest()
+        {
+            int rid;
+            if (int.TryParse((Request.QueryString["id"] ?? "").Trim(), out rid) && rid > 0) return rid;
+            if (ViewState["rvResId"] != null && int.TryParse(ViewState["rvResId"].ToString(), out rid)) return rid;
+            return 0;
         }
 
         protected void TextBox5_TextChanged(object sender, EventArgs e)
