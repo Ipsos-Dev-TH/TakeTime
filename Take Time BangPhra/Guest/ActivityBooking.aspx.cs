@@ -241,7 +241,10 @@ namespace Take_Time_BangPhra.Guest
             try
             {
                 var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService();
-                foreach (string m in svc.AvailableMethods(amount))
+                // ⚠ ต้องส่งชนิดต้นทางด้วย ไม่งั้นข้ามสวิตช์ "ช่องทางกิจกรรม" ที่ปิดไว้
+                // (เดิมปุ่มโผล่ให้กด แล้วค่อยไปโดนปฏิเสธตอนสร้างรายการ)
+                foreach (string m in svc.AvailableMethods(amount,
+                             Take_Time_BangPhra.Payments.PaymentSource.Activity))
                     if (m != Take_Time_BangPhra.Payments.PaymentGatewayConfig.MethodManualQr) return true;
                 return false;
             }

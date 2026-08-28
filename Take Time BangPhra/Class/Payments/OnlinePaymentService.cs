@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
+using System.Data;
 using System.Text;
 using Take_Time_BangPhra.Services;
 
@@ -573,6 +574,23 @@ namespace Take_Time_BangPhra.Payments
             if (!int.TryParse(txn.SourceId, out reservationId))
                 return "รหัสการจองไม่ถูกต้อง (" + (txn.SourceId ?? "-") + ")";
 
+            // ⚠ ProcessAdditionalPayment ค้นใบจองด้วย ID + เบอร์โทรแบบตรงตัวเป๊ะ ๆ
+            // ถ้าเบอร์ในรายการจ่ายว่างหรือคนละรูปแบบ (รายการที่พนักงานสร้างจากหน้าจุดรับเงิน
+            // ไม่มีเบอร์เลย) จะหาไม่เจอ → โยน exception → ปล่อยสิทธิ์ให้ลองใหม่วนไปเรื่อย ๆ
+            // ⇒ เงินถูกตัดที่เกตเวย์แล้วแต่ไม่เคยเข้า Payment_History
+            // ใช้เบอร์ที่อยู่บนใบจองจริงเสมอ (ตัวรายการจ่ายเชื่อถือไม่ได้)
+            string phone = txn.CustomerPhone;
+            try
+            {
+                DataTable rdt = new code().DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Customer_MobilePhone FROM Reservation WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (rdt == null || rdt.Rows.Count == 0)
+                    return "ไม่พบการจอง #" + reservationId;
+                phone = Convert.ToString(rdt.Rows[0]["Customer_MobilePhone"]);
+            }
+            catch { /* อ่านไม่ได้ก็ใช้เบอร์เดิมของรายการจ่ายไปก่อน */ }
+
             // ⚠ ต้องเป็นชื่อที่ตรงกับแถวใน Account_Paid_How เป๊ะ ๆ — AccountingSync ค้นด้วย
             // ข้อความนี้ (LookupPaidHowAccountId) เพื่อบังคับ Dr เข้าบัญชีพักเงินเกตเวย์ใน NextAcc
             // ถ้าส่งชื่อสวย ๆ ("บัตรเครดิต / เดบิต") จะหาไม่เจอ แล้วบัญชีจะเดาเป็นเงินสด
@@ -589,7 +607,7 @@ namespace Take_Time_BangPhra.Payments
                 methodText,
                 null,                             // ไม่มีสลิป — เกตเวย์ยืนยันให้แล้ว
                 txn.CreatedBy,
-                txn.CustomerPhone,
+                phone,
                 notes);
 
             if (r == null) return "เรียกระบบรับชำระเงินเดิมไม่สำเร็จ";
