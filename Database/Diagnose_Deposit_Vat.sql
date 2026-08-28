@@ -50,6 +50,30 @@ DECLARE @hasVat  BIT = CASE WHEN @useVatRaw IN ('1','True','true','TRUE') THEN 1
 DECLARE @atRcpt  BIT = CASE WHEN UPPER(ISNULL(@vatMode,'CHECKOUT')) = 'RECEIPT' THEN 1 ELSE 0 END;
 DECLARE @defer   BIT = CASE WHEN ISNULL(@deferRaw,'0') IN ('1','true','True','TRUE') THEN 1 ELSE 0 END;
 
+-- ── 0) ใครแก้ค่าเมื่อไหร่ (หลักฐานย้อนหลัง) ─────────────────────────────────
+PRINT N'--- 0) ค่าถูกแก้ล่าสุดเมื่อไหร่ ---';
+IF OBJECT_ID('dbo.Accounting_Integration_Config','U') IS NOT NULL
+    SELECT ConfigKey AS [คีย์], ConfigValue AS [ค่า], Updated_Date AS [แก้ล่าสุด]
+      FROM dbo.Accounting_Integration_Config
+     WHERE ConfigKey IN ('Deposit_Vat_Recognition','Deposit_Defer_Output_Vat')
+     ORDER BY ConfigKey;
+-- ⚠ ก่อน build 28/08/2026: การกด "บันทึก" การ์ด Sync Settings เขียนสองคีย์นี้ทับทุกครั้ง
+--   ตามค่าบนหน้าจอ (แม้ไม่ได้ตั้งใจแก้) — Updated_Date จึงอาจเป็นแค่วันที่มีคนกดเซฟเรื่องอื่น
+--   หลัง build ใหม่: เขียนเฉพาะเมื่อเปลี่ยนจริง + log ใคร/เก่า→ใหม่ ใน Logs
+
+PRINT '';
+PRINT N'--- 0b) ประวัติการเปลี่ยนนโยบาย/กดปุ่มตั้งค่าแนะนำ (90 วัน) ---';
+IF OBJECT_ID('dbo.Logs','U') IS NOT NULL
+    SELECT TOP 30 LogDateTime AS [เวลา], LogBy AS [โดย],
+           LEFT(CAST(LogDetail AS NVARCHAR(MAX)), 300) AS [รายละเอียด]
+      FROM dbo.Logs
+     WHERE LogDateTime >= DATEADD(DAY, -90, GETDATE())
+       AND (CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%Deposit_Vat_Recognition%'
+            OR CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%Deposit_Defer_Output_Vat%'
+            OR CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%ApplyRecommendedPreset%'
+            OR CAST(LogDetail AS NVARCHAR(MAX)) LIKE N'%นโยบาย VAT มัดจำ%')
+     ORDER BY LogDateTime DESC;
+
 -- ── 1) เงื่อนไขทีละข้อ — ข้อไหนเป็น ❌ คือสาเหตุ ───────────────────────────
 PRINT N'--- 1) เงื่อนไขที่ต้องครบทั้งหมด ---';
 SELECT
@@ -112,6 +136,37 @@ PRINT '';
 PRINT N'หลังแก้: ใบมัดจำที่ออก "หลังจากนี้" จะถูกต้องเอง';
 PRINT N'ใบที่ออกไปแล้ว → กด Retry ในคิว (void แล้วสร้างใหม่เลขเดิม) หรือให้ผู้ทำบัญชีออกใบปรับปรุง';
 PRINT N'ตรวจซ้ำได้ที่ปุ่ม 🩺 ตรวจสุขภาพการเชื่อมต่อ — ตอนนี้จะบอกผลลัพธ์ที่จะเกิดขึ้นทุกครั้ง';
+
+-- ── 5) หลักฐานใบจริง: คำขอที่ส่งไป NextAcc ของการจองที่ระบุ ─────────────────
+-- ใส่เลขการจองที่สงสัย (เช่นใบในภาพ = 149333) แล้วดูว่า vatRate อะไรถูกส่งไปจริง
+DECLARE @ResId INT = 149333;   -- <<< แก้เป็นเลขการจองที่ต้องการตรวจ
+
+PRINT '';
+PRINT N'--- 5) คำขอใบมัดจำของการจอง #' + CAST(@ResId AS NVARCHAR(10)) + N' ที่ส่งไป NextAcc จริง ---';
+PRINT N'    ดูในคอลัมน์คำขอ: "vatRate":7 = แยก VAT / "vatRate":0 = ไม่แยก (อาการที่เจอ)';
+PRINT N'    "depositOutputVatDeferred":true = สั่งพักที่ 21913';
+IF OBJECT_ID('dbo.Accounting_Sync_Log','U') IS NOT NULL
+    SELECT TOP 5 Created_Date AS [เวลา], Action AS [ปลายทาง], HTTP_Status,
+           LEFT(CAST(Request_Payload AS NVARCHAR(MAX)), 1500) AS [คำขอที่ส่งไป]
+      FROM dbo.Accounting_Sync_Log
+     WHERE Created_Date >= DATEADD(DAY, -180, GETDATE())
+       AND CAST(Request_Payload AS NVARCHAR(MAX)) LIKE '%"isDeposit":true%'
+       AND CAST(Request_Payload AS NVARCHAR(MAX)) LIKE '%RES-' + CAST(@ResId AS NVARCHAR(10)) + '%'
+     ORDER BY ID DESC;
+
+-- ── 6) มัดจำค้าง (ยังไม่เช็คเอาท์) ที่จะโดนตอน clearing ─────────────────────
+-- โค้ดรุ่นใหม่ตัดสิน clearing จากหลักฐานใบจริงแล้ว (ไม่ใช่คอนฟิกวันนี้)
+-- รายการนี้ไว้ให้ผู้ทำบัญชีรู้ว่ามีใบไหนที่ลงไว้คนละนโยบายกับปัจจุบัน
+PRINT '';
+PRINT N'--- 6) ใบมัดจำของการจองที่ยังไม่จบ (ตรวจนโยบายที่ใช้ตอนลงจากข้อ 5 รายใบ) ---';
+IF OBJECT_ID('dbo.Account_Receipt','U') IS NOT NULL
+    SELECT TOP 30 r.Account_Receipt_ID AS [เลขใบเสร็จ], r.Reservation_ID AS [การจอง],
+           r.Total_Price AS [ยอด], r.Created_Date AS [วันที่รับมัดจำ], rv.Status AS [สถานะการจอง]
+      FROM dbo.Account_Receipt r
+      JOIN dbo.Reservation rv ON rv.ID = TRY_CONVERT(INT, r.Reservation_ID)
+     WHERE ISNULL(r.IsDeposit, 0) = 1
+       AND rv.Status NOT IN (N'เสร็จสิ้น', N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+     ORDER BY r.Created_Date DESC;
 
 -- ── 4) ใบมัดจำล่าสุดที่ออกไปแล้ว (ไว้เทียบว่าใบไหนได้รับผลกระทบ) ───────────
 PRINT '';

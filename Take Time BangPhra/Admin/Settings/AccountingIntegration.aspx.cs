@@ -393,13 +393,39 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("stockQtySync")) config.SetConfig("Nexaacc_StockQtySync", BoolToFlag(data["stockQtySync"]));
                 if (data.ContainsKey("stockQtyPull")) config.SetConfig("Nexaacc_StockQtyPull", BoolToFlag(data["stockQtyPull"]));
                 if (data.ContainsKey("attachFiles")) config.SetConfig("Nexaacc_AttachFiles", data["attachFiles"]?.ToString() ?? "true");
+                // ── นโยบาย VAT มัดจำ = ค่าที่ "หายเงียบ" มาแล้วสองรอบ ─────────────────────
+                // หน้าเว็บส่งสองคีย์นี้มา "ทุกครั้งที่กดบันทึก" ตามสถานะ dropdown/checkbox บนจอ
+                // ถ้าตอนโหลดหน้า AJAX พลาด ค่าบนจอจะเป็น default (CHECKOUT/ไม่ติ๊ก) แล้วการบันทึก
+                // เพื่อแก้เรื่องอื่นจะรีเซ็ตนโยบายทิ้งโดยไม่มีใครรู้
+                // ⇒ เขียนเฉพาะเมื่อ "เปลี่ยนจริง" + log เก่า→ใหม่+ใคร ทุกครั้ง (Updated_Date ของแถว
+                //   จะกลายเป็นหลักฐานว่าโดนแก้เมื่อไหร่จริง ๆ ไม่ใช่แค่โดนเซฟทับด้วยค่าเดิม)
                 if (data.ContainsKey("depositVatRecognition"))
                 {
                     string dvr = (data["depositVatRecognition"]?.ToString() ?? "CHECKOUT").ToUpper();
                     if (dvr != "RECEIPT" && dvr != "CHECKOUT") dvr = "CHECKOUT";
-                    config.SetConfig("Deposit_Vat_Recognition", dvr);
+                    string curDvr = config.DepositVatRecognition;
+                    if (!string.Equals(curDvr, dvr, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _code.Logs(ConnStr, "AccountingConfig",
+                            $"⚠ นโยบาย VAT มัดจำถูกเปลี่ยน: Deposit_Vat_Recognition {curDvr} → {dvr} " +
+                            $"โดย {Session["UserName"] ?? "?"} — กระทบใบมัดจำทุกใบหลังจากนี้",
+                            Session["UserName"]?.ToString() ?? "SYSTEM");
+                        config.SetConfig("Deposit_Vat_Recognition", dvr);
+                    }
                 }
-                if (data.ContainsKey("depositDeferOutputVat")) config.SetConfig("Deposit_Defer_Output_Vat", BoolToFlag(data["depositDeferOutputVat"]));
+                if (data.ContainsKey("depositDeferOutputVat"))
+                {
+                    string newDefer = BoolToFlag(data["depositDeferOutputVat"]);
+                    string curDefer = config.IsDepositOutputVatDeferred ? "1" : "0";
+                    if (curDefer != newDefer)
+                    {
+                        _code.Logs(ConnStr, "AccountingConfig",
+                            $"⚠ นโยบาย VAT มัดจำถูกเปลี่ยน: Deposit_Defer_Output_Vat {curDefer} → {newDefer} " +
+                            $"โดย {Session["UserName"] ?? "?"} — {(newDefer == "1" ? "พัก VAT ที่ 21913" : "เลิกพัก VAT (เข้า 21911/ไม่แยก)")}",
+                            Session["UserName"]?.ToString() ?? "SYSTEM");
+                        config.SetConfig("Deposit_Defer_Output_Vat", newDefer);
+                    }
+                }
                 // ⚠ เปิดได้เมื่อ NextAcc deploy รองรับ depositAppliedDrivesJournal แล้วเท่านั้น (spec §9.1) —
                 //   เปิด flag = ส่ง drives=true + เลิกส่ง JV แยกพร้อมกัน; เปิดก่อน NextAcc พร้อม = GL พัง
                 if (data.ContainsKey("depositDrivesJournal")) config.SetConfig("Nexaacc_Deposit_Drives_Journal", BoolToFlag(data["depositDrivesJournal"]));

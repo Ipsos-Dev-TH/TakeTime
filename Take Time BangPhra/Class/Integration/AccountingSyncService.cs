@@ -8294,10 +8294,53 @@ namespace Take_Time_BangPhra.Integration
 
             bool hasVat = LookupBusinessHasVat();
 
-            _code.Logs(_connectionString, "AccountingSync",
-                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat}", "SYSTEM");
+            // ── นโยบาย VAT ต้องตรงกับ "ตอนลงใบมัดจำจริง" ไม่ใช่ค่าคอนฟิกวันนี้ ──────────
+            // เคสจริง: มัดจำถูกลงช่วงที่คอนฟิกเพี้ยน (ไม่แยก VAT) → ผู้ดูแลแก้กลับเป็น RECEIPT
+            // → ตอนเช็คเอาท์ถ้าเชื่อคอนฟิกวันนี้ mapper จะคิดว่า VAT แยกไปแล้ว
+            // ⇒ รายได้ถูก Cr เต็มก้อนโดย "ไม่มี VAT เลยทั้งวงจร" (ภ.พ.30 ขาด) — และสลับกัน
+            // (แยกแล้ว→คอนฟิกกลับเป็น CHECKOUT) จะได้ VAT ซ้อนสองรอบ
+            // จึงดูหลักฐานจริงจาก Accounting_Sync_Log: คำขอใบมัดจำของการจองนี้ส่ง vatRate อะไรไป
+            bool vatAtReceiptEff = _config.IsDepositVatAtReceipt;
+            bool deferVatEff = _config.IsDepositOutputVatDeferred;
+            try
+            {
+                var ev = _code.DatabaseQuerySafe(_connectionString, @"
+                    SELECT TOP 1 CAST(Request_Payload AS NVARCHAR(MAX)) AS P
+                      FROM Accounting_Sync_Log
+                     WHERE Created_Date >= DATEADD(DAY, -180, GETDATE())
+                       AND CAST(Request_Payload AS NVARCHAR(MAX)) LIKE @isDep
+                       AND CAST(Request_Payload AS NVARCHAR(MAX)) LIKE @refLike
+                     ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@isDep", "%\"isDeposit\":true%" },
+                        { "@refLike", "%RES-" + reservationId + "%" }
+                    });
+                if (ev != null && ev.Rows.Count > 0)
+                {
+                    string sent = ev.Rows[0]["P"]?.ToString() ?? "";
+                    bool evSplit = sent.Contains("\"vatRate\":7");
+                    bool evDefer = sent.Contains("\"depositOutputVatDeferred\":true");
+                    if (evSplit != vatAtReceiptEff || (evDefer && evSplit) != (deferVatEff && vatAtReceiptEff))
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessDepositClearing: Booking #{reservationId} นโยบาย VAT ตอนลงมัดจำ (แยก={evSplit}, พัก={evDefer}) " +
+                            $"ต่างจากคอนฟิกปัจจุบัน (แยก={vatAtReceiptEff}, พัก={deferVatEff}) — ใช้ตามหลักฐานใบจริงเพื่อให้ GL ตรง", "SYSTEM");
+                    vatAtReceiptEff = evSplit;
+                    deferVatEff = evDefer && evSplit;
+                }
+                else if (vatAtReceiptEff)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessDepositClearing: Booking #{reservationId} ไม่พบหลักฐานคำขอใบมัดจำใน log (>180 วัน?) " +
+                        "— ใช้นโยบายปัจจุบัน โปรดตรวจ JE เช็คเอาท์ใบนี้กับผู้ทำบัญชี", "SYSTEM");
+                }
+            }
+            catch { /* หาหลักฐานไม่ได้ → ใช้คอนฟิกปัจจุบันตามเดิม */ }
 
-            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, _config.IsDepositVatAtReceipt, _config.IsDepositOutputVatDeferred);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessDepositClearing: ref={reservationRef} resId={reservationId} deposit={depositAmount} damage={damageAmount} vat={hasVat} vatAtReceipt={vatAtReceiptEff} defer={deferVatEff}", "SYSTEM");
+
+            var journal = _mapper.MapCheckoutToJournal(reservationId, depositAmount, customerName, checkoutDate, damageAmount, reservationRef, hasVat, vatAtReceiptEff, deferVatEff);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid clearId = RequireValidDocId(result?.data?.Id, $"DepositClearing resId={reservationId}");
             await SafePostJournalAsync(clearId);
