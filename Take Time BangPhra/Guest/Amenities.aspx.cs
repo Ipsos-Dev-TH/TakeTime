@@ -101,6 +101,9 @@ namespace Take_Time_BangPhra.Guest
                       + "ยอดรวม " + result.TotalAmount.ToString("N0") + " บาท จะถูกคิดรวมกับค่าห้อง"
                     : "ส่งคำขอเรียบร้อย (เลขที่ " + result.RequestNumber + ")\\nไม่มีค่าใช้จ่าย";
                 Alert(msg + "\\nพนักงานได้รับแจ้งแล้ว");
+
+                // มียอดต้องจ่าย + เปิดช่องทางไว้ → เสนอจ่ายทันทีแทนการรอเช็คเอาท์
+                OfferOnlinePay(result);
             }
             catch (Exception ex)
             {
@@ -183,6 +186,35 @@ namespace Take_Time_BangPhra.Guest
             if (v is bool b) return b;
             string s = v.ToString();
             return s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// เสนอให้จ่ายค่าของใช้ทันที (สแกน QR / บัตร) แทนการรอไปจ่ายรวมตอนเช็คเอาท์
+        ///
+        /// เดิมค่าของใช้ถูกคิดเข้าห้องอย่างเดียว — ช่องทาง AMENITY ประกาศไว้แต่ไม่เคยมีใครใช้
+        /// เงียบสนิทถ้าปิดฟีเจอร์/ปิดช่องทาง ⇒ หน้าเดิมทำงานเหมือนเดิมทุกประการ
+        /// </summary>
+        private void OfferOnlinePay(Take_Time_BangPhra.Services.AmenityRequestResult result)
+        {
+            try
+            {
+                if (result == null || result.TotalAmount <= 0 || result.RequestId <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService();
+                if (svc.AvailableMethods(result.TotalAmount,
+                        Take_Time_BangPhra.Payments.PaymentSource.Amenity).Count == 0) return;
+
+                string url = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.Amenity
+                    + "&id=" + result.RequestId
+                    + "&ph=" + Uri.EscapeDataString(_mobilePhone ?? "");
+
+                ScriptManager.RegisterStartupScript(this, GetType(), "amPayNow",
+                    "if(confirm('ต้องการชำระเงิน " + result.TotalAmount.ToString("N0")
+                    + " บาท ตอนนี้เลยไหม?\\n(กดยกเลิก = คิดรวมกับค่าห้องตอนเช็คเอาท์เหมือนเดิม)'))"
+                    + "{window.location='" + url.Replace("'", "\\'") + "';}", true);
+            }
+            catch { /* ไม่พร้อม = ไม่เสนอ ปล่อยให้คิดเข้าห้องตามเดิม */ }
         }
 
         private void Alert(string message)

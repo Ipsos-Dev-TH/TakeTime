@@ -549,6 +549,9 @@ namespace Take_Time_BangPhra.Payments
                     case PaymentSource.Activity:
                         note = ApplyToActivityBooking(txn);
                         break;
+                    case PaymentSource.Amenity:
+                        note = ApplyToAmenityRequest(txn);
+                        break;
                     default:
                         note = "รับเงินแล้ว — ต้นทางชนิด " + PaymentSource.Thai(txn.SourceType)
                              + " ยังไม่มีการลงบันทึกอัตโนมัติ";
@@ -633,6 +636,42 @@ namespace Take_Time_BangPhra.Payments
         /// ⚠ ห้ามทับออเดอร์ที่ CHARGED (คิดเข้าห้องไปแล้ว) ไม่งั้นรายได้ซ้ำตอนเช็คเอาท์
         /// ใบสรุปรายได้รายวัน (RevenuePostingService) จะจัดกลุ่มวิธี ONLINE เข้าแหล่งเงินเกตเวย์เอง
         /// </summary>
+        /// <summary>
+        /// ใบเบิกของใช้ — บันทึกว่าจ่ายออนไลน์แล้ว
+        /// ⚠ ห้ามทับใบที่ CHARGE_TO_ROOM (คิดเข้าห้องไปแล้ว) ไม่งั้นเก็บซ้ำตอนเช็คเอาท์
+        /// </summary>
+        private string ApplyToAmenityRequest(PaymentTransaction txn)
+        {
+            long reqId;
+            if (!long.TryParse(txn.SourceId, out reqId))
+                return "รหัสใบเบิกไม่ถูกต้อง (" + (txn.SourceId ?? "-") + ")";
+
+            using (var con = new System.Data.SqlClient.SqlConnection(_conn))
+            {
+                con.Open();
+                using (var cmd = new System.Data.SqlClient.SqlCommand(@"
+                    UPDATE Guest_Amenity_Request
+                       SET Payment_Method = 'PAID'
+                     WHERE ID = @id AND ISNULL(Payment_Method,'') NOT IN ('PAID','CHARGE_TO_ROOM')", con))
+                {
+                    cmd.Parameters.AddWithValue("@id", reqId);
+                    if (cmd.ExecuteNonQuery() > 0)
+                        return "บันทึกว่าใบเบิกของใช้ #" + reqId + " ชำระเงินแล้ว";
+                }
+                using (var chk = new System.Data.SqlClient.SqlCommand(
+                    "SELECT ISNULL(Payment_Method,'') FROM Guest_Amenity_Request WHERE ID = @id", con))
+                {
+                    chk.Parameters.AddWithValue("@id", reqId);
+                    string pm = Convert.ToString(chk.ExecuteScalar());
+                    if (pm == "PAID") return "ใบเบิก #" + reqId + " ถูกบันทึกว่าจ่ายแล้วก่อนหน้านี้";
+                    if (pm == "CHARGE_TO_ROOM")
+                        throw new Exception("ใบเบิก #" + reqId + " ถูกคิดเข้าห้องพักไปแล้ว — "
+                            + "รับเงินซ้ำไม่ได้ ต้องคืนเงินลูกค้าหรือปรับบิลห้องก่อน");
+                    return "ไม่พบใบเบิก #" + reqId;
+                }
+            }
+        }
+
         private string ApplyToRoomServiceOrder(PaymentTransaction txn)
         {
             long orderId;

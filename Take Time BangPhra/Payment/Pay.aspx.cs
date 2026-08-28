@@ -111,6 +111,7 @@ namespace Take_Time_BangPhra.Payment
                 case PaymentSource.Reservation: return LoadReservation(id);
                 case PaymentSource.Activity: return LoadActivity(id);
                 case PaymentSource.RoomService: return LoadRoomServiceOrder(id);
+                case PaymentSource.Amenity: return LoadAmenityRequest(id);
                 default:
                     Fail("ยังไม่รองรับการชำระเงินของรายการชนิดนี้");
                     return false;
@@ -228,6 +229,42 @@ namespace Take_Time_BangPhra.Payment
             if (Amount <= 0) { Fail("ออเดอร์นี้ไม่มียอดต้องชำระ"); return false; }
 
             ItemText = "รูมเซอร์วิส ออเดอร์ #" + oid;
+            CustomerName = Convert.ToString(r["GuestName"]);
+            CustomerPhone = Convert.ToString(r["GuestPhone"]);
+            return true;
+        }
+
+        /// <summary>
+        /// ใบเบิกของใช้ — เดิมคิดรวมกับค่าห้องอย่างเดียว (CHARGE_TO_ROOM)
+        /// เปิดให้จ่ายแยกได้ด้วย สำหรับลูกค้าที่อยากเคลียร์เป็นรายการ ๆ ไป
+        /// </summary>
+        private bool LoadAmenityRequest(string idText)
+        {
+            long aid;
+            if (!long.TryParse(idText, out aid)) { Fail("รหัสใบเบิกไม่ถูกต้อง"); return false; }
+
+            var dt = _code.DatabaseQuerySafe(_conn, @"
+                SELECT TOP 1 a.ID, a.Request_Number, a.Total_Amount,
+                       ISNULL(a.Payment_Method,'') AS PM, ISNULL(a.[Status],'') AS ST,
+                       ISNULL(a.Customer_MobilePhone,'') AS GuestPhone,
+                       ISNULL(c.Name,'') AS GuestName
+                  FROM Guest_Amenity_Request a
+                  LEFT JOIN Customer c ON c.MobilePhone = a.Customer_MobilePhone
+                 WHERE a.ID = @id",
+                new Dictionary<string, object> { { "@id", aid } });
+
+            if (dt == null || dt.Rows.Count == 0) { Fail("ไม่พบใบเบิกนี้"); return false; }
+            DataRow r = dt.Rows[0];
+
+            string pm = Convert.ToString(r["PM"]);
+            if (pm == "PAID") { Fail("ใบเบิกนี้ชำระเงินแล้ว"); return false; }
+            if (pm == "FREE") { Fail("ใบเบิกนี้อยู่ในสิทธิ์ฟรี ไม่มียอดต้องชำระ"); return false; }
+            if (Convert.ToString(r["ST"]) == "CANCELLED") { Fail("ใบเบิกนี้ถูกยกเลิกแล้ว"); return false; }
+
+            Amount = Convert.ToDecimal(r["Total_Amount"]);
+            if (Amount <= 0) { Fail("ใบเบิกนี้ไม่มียอดต้องชำระ"); return false; }
+
+            ItemText = "เบิกของใช้ " + Convert.ToString(r["Request_Number"]);
             CustomerName = Convert.ToString(r["GuestName"]);
             CustomerPhone = Convert.ToString(r["GuestPhone"]);
             return true;

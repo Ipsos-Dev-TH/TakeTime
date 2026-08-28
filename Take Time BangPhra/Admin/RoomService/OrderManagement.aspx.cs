@@ -143,6 +143,44 @@ namespace Take_Time_BangPhra.Admin.RoomService
         /// <summary>
         /// Load order detail
         /// </summary>
+        /// <summary>
+        /// ลิงก์ให้ลูกค้าจ่ายออเดอร์นี้เอง — โผล่เฉพาะออเดอร์ที่ยังค้างจ่ายจริง ๆ
+        ///
+        /// ฝั่งรับเงิน (Pay.aspx รองรับ src=ROOMSERVICE + ApplyToRoomServiceOrder)
+        /// มีมาตั้งแต่ต้นแล้ว แต่ไม่เคยมีหน้าไหนสร้างลิงก์ให้ ⇒ ช่องทางนี้ตายมาตลอด
+        ///
+        /// เงียบสนิทถ้าปิดฟีเจอร์/ปิดช่องทางรูมเซอร์วิส — หน้าเดิมทำงานเหมือนเดิม
+        /// </summary>
+        private void ShowOnlinePayLink(long orderId, decimal amount,
+            string paymentStatus, string orderStatus, string phone)
+        {
+            try
+            {
+                if (pnlRsPay == null) return;
+                pnlRsPay.Visible = false;
+
+                string ps = (paymentStatus ?? "").ToUpperInvariant();
+                if (ps == "PAID" || ps == "CHARGED") return;      // จ่ายแล้ว/คิดเข้าห้องแล้ว
+                if ((orderStatus ?? "").ToUpperInvariant() == "CANCELLED") return;
+                if (amount <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService(_connectionString);
+                if (svc.AvailableMethods(amount,
+                        Take_Time_BangPhra.Payments.PaymentSource.RoomService).Count == 0) return;
+
+                txtRsPayLink.Text = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.RoomService
+                    + "&id=" + orderId
+                    + "&ph=" + Uri.EscapeDataString(phone ?? "");
+                pnlRsPay.Visible = true;
+            }
+            catch
+            {
+                // ยังไม่ได้ติดตั้ง/ตั้งค่า → ไม่แสดงอะไร หน้าเดิมทำงานปกติ
+                try { pnlRsPay.Visible = false; } catch { }
+            }
+        }
+
         private void LoadOrderDetail(long orderId)
         {
             try
@@ -186,6 +224,10 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     btnClaim.Visible = status == "PENDING";
                     btnDelivered.Visible = status == "CONFIRMED";
                     btnCancel.Visible = status != "DELIVERED" && status != "CANCELLED";
+
+                    ShowOnlinePayLink(orderId, totalAmt,
+                        Convert.ToString(order["Payment_Status"]), status,
+                        Convert.ToString(order["Phone"]));
                 }
 
                 // Get order items
