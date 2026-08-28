@@ -105,7 +105,7 @@
             <div class="sub">กดปุ่มในแถวเพื่อไล่ครบวงจร: ตรวจสถานะ → คืนเงิน / (วงเงิน: ตัดครึ่ง → ดูส่วนที่เหลือคืน / คืนทั้งหมด)</div>
             <div style="overflow-x:auto;">
                 <asp:GridView ID="gvTest" runat="server" AutoGenerateColumns="false" GridLines="None"
-                    CssClass="gt-grid" EmptyDataText="ยังไม่มีรายการทดสอบวันนี้" DataKeyNames="ID"
+                    CssClass="gt-grid" EmptyDataText="ยังไม่มีรายการทดสอบวันนี้"
                     OnRowCommand="gvTest_RowCommand">
                     <Columns>
                         <asp:TemplateField HeaderText="เวลา">
