@@ -211,6 +211,26 @@ namespace Take_Time_BangPhra.Payments
             IDepositGateway gw = Gateway();
             if (gw == null) return "เกตเวย์ที่ใช้อยู่ไม่รองรับการกันวงเงิน";
 
+            // ⚠ กันการกันวงเงิน "ซ้ำสองใบ" บนบัตรลูกค้า
+            // ถ้ารายการนี้เคยยิงไปแล้วและมี charge id ค้างอยู่ ให้ถามเกตเวย์ก่อนว่าตัวจริง
+            // สถานะอะไร — เคยมีเคสที่ฝั่งเกตเวย์ authorize สำเร็จแต่ฝั่งเราบันทึกพลาด
+            // ยิงใหม่ตรง ๆ = ลูกค้าโดนกันวงเงินสองก้อน
+            if (!string.IsNullOrEmpty(hold.ProviderChargeId))
+            {
+                HoldResult prev = gw.GetHold(hold.ProviderChargeId);
+                if (prev != null && prev.Status == HoldStatus.Held)
+                {
+                    SaveGatewayResult(hold.ID, prev);
+                    ok = true;
+                    return "รายการนี้กันวงเงินไว้เรียบร้อยแล้ว (ตรวจสอบกับผู้ให้บริการแล้ว) — ไม่มีการตัดเงิน";
+                }
+                if (prev != null && (prev.Status == HoldStatus.Captured || prev.Status == HoldStatus.Released))
+                {
+                    SaveGatewayResult(hold.ID, prev);
+                    return "รายการนี้ดำเนินการไปแล้ว (" + HoldStatus.Thai(prev.Status) + ")";
+                }
+            }
+
             HoldResult r = gw.CreateHold(cardToken, hold.Amount, holdRef,
                 "วงเงินประกันความเสียหาย การจอง #" + hold.ReservationId);
 
@@ -622,6 +642,35 @@ namespace Take_Time_BangPhra.Payments
                         });
             }
             catch { }
+        }
+
+        /// <summary>
+        /// ถามเกตเวย์ว่ารายการนี้สถานะอะไรกันแน่ แล้วปรับฐานข้อมูลให้ตรง
+        ///
+        /// ใช้กับรายการที่ "มี charge id แล้วแต่สถานะฝั่งเราดูไม่เข้าท่า" — เช่นเคสที่
+        /// Omise authorize สำเร็จแต่เราบันทึกเป็น FAILED (บั๊กเก่าของ ToHoldResult)
+        /// เงินถูกกันบนบัตรลูกค้าอยู่จริง ระบบต้องรู้ให้ตรงกัน ไม่งั้นวงเงินลอยค้าง
+        ///
+        /// คืนสถานะจริงที่ได้มา (null = ถามไม่ได้/ไม่มี charge id)
+        /// </summary>
+        public string SyncFromGateway(string holdRef)
+        {
+            var hold = GetByRef(holdRef);
+            if (hold == null || string.IsNullOrEmpty(hold.ProviderChargeId)) return null;
+
+            try
+            {
+                IDepositGateway gw = Gateway();
+                if (gw == null) return null;
+
+                HoldResult r = gw.GetHold(hold.ProviderChargeId);
+                if (r == null || !r.Success || string.IsNullOrEmpty(r.Status)) return null;
+                if (r.Status == hold.Status) return r.Status;    // ตรงกันอยู่แล้ว ไม่ต้องแตะ
+
+                SaveGatewayResult(hold.ID, r);
+                return r.Status;
+            }
+            catch { return null; }
         }
 
         /// <summary>เหตุผลครั้งล่าสุดที่บัตรไม่ผ่าน — null ถ้าไม่มี/ยังไม่ได้รันไฟล์ migration</summary>

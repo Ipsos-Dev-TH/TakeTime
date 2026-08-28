@@ -363,23 +363,45 @@ namespace Take_Time_BangPhra.Payments
                 return new HoldResult { Success = false, Status = HoldStatus.Failed,
                                         Message = probe.Message ?? ("HTTP " + http), RawResponse = response };
 
+            // สถานะแปลใน ToHoldResult ที่เดียว — เดิมเขียนซ้ำที่นี่ด้วย พอที่หนึ่งลืมอัปเดต
+            // ก็เพี้ยนคนละทางกัน (ต้นเหตุของเคส "authorize สำเร็จแต่ระบบว่าไม่สำเร็จ")
             var h = ToHoldResult(c);
             h.RawResponse = response;
-            h.Success = true;
-
-            if (B(c, "paid") == true) h.Status = HoldStatus.Captured;
-            else if (B(c, "reversed") == true || S(c, "status") == "reversed") h.Status = HoldStatus.Released;
-            else if (S(c, "status") == "expired") h.Status = HoldStatus.Expired;
-            else if (B(c, "authorized") == true) h.Status = HoldStatus.Held;
-            else if (S(c, "status") == "failed") { h.Status = HoldStatus.Failed; h.Message = FailureText(c); }
-            else h.Status = HoldStatus.PendingCard;
+            h.Success = true;   // = ถามสถานะได้สำเร็จ (ไม่ได้แปลว่าวงเงินยังอยู่)
             return h;
         }
 
+        /// <summary>
+        /// แปลง charge ของ Omise เป็นผลการกันวงเงิน — <b>รวมสถานะด้วย</b>
+        ///
+        /// ⚠ เดิมเมธอดนี้เติมแค่ id/ยอด/บัตร/วันหมดอายุ ไม่เคยตั้ง Status เลย ⇒ CreateHold
+        /// คืน Status = null ทั้งที่ Omise ตอบ authorized:true (กันวงเงินสำเร็จจริง) แล้ว
+        /// SaveGatewayResult แปลง null เป็น FAILED ⇒ เงินถูกกันบนบัตรลูกค้าจริง
+        /// แต่ระบบบันทึกว่า "ไม่สำเร็จ" — วงเงินลอยค้างโดยไม่มีใครรู้
+        ///
+        /// สถานะของ charge ที่กันวงเงิน (capture=false) คือ status:"pending" + authorized:true
+        /// ⇒ ต้องดู authorized ไม่ใช่ status เพียงอย่างเดียว
+        /// </summary>
         private static HoldResult ToHoldResult(JObject c)
         {
             var h = new HoldResult();
             if (c == null) return h;
+
+            string st = (S(c, "status") ?? "").ToLowerInvariant();
+            bool paid = B(c, "paid") == true;
+            bool reversed = B(c, "reversed") == true || st == "reversed";
+            bool authorized = B(c, "authorized") == true;
+
+            if (st == "failed") h.Status = HoldStatus.Failed;
+            else if (reversed) h.Status = HoldStatus.Released;
+            else if (st == "expired") h.Status = HoldStatus.Expired;
+            else if (paid) h.Status = HoldStatus.Captured;       // ตัดเงินแล้ว
+            else if (authorized) h.Status = HoldStatus.Held;     // กันวงเงินอยู่ เงินยังไม่ออก
+            else h.Status = HoldStatus.PendingCard;              // ยังไม่ผ่าน authorize (เช่น รอ 3DS)
+
+            h.Success = h.Status != HoldStatus.Failed;
+            if (h.Status == HoldStatus.Failed) h.Message = FailureText(c);
+
             h.ProviderChargeId = S(c, "id");
             h.Amount = Baht(L(c, "amount"));
             long cap = L(c, "captured_amount");

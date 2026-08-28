@@ -61,6 +61,16 @@ namespace Take_Time_BangPhra.Payment
 
                 var h = holds.GetByRef(RefParam);
                 if (h == null) { Fail("ไม่พบรายการวงเงินประกันนี้"); return; }
+
+                // มี charge ที่เกตเวย์แล้วแต่สถานะฝั่งเราไม่ใช่ "กันวงเงินอยู่" — ถามตัวจริงก่อน
+                // (เคยมีบั๊กที่ Omise authorize สำเร็จแต่เราบันทึกเป็นไม่สำเร็จ ⇒ วงเงินลอยค้าง)
+                if (h.Status != HoldStatus.Held && !string.IsNullOrEmpty(h.ProviderChargeId))
+                {
+                    string real = holds.SyncFromGateway(RefParam);
+                    if (!string.IsNullOrEmpty(real) && real != h.Status)
+                        h = holds.GetByRef(RefParam) ?? h;
+                }
+
                 if (h.Status == HoldStatus.Held)
                 {
                     litTitle.Text = "วางวงเงินประกันความเสียหาย";
