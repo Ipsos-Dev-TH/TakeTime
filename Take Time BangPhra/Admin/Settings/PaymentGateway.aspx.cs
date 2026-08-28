@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
+using System.Text.RegularExpressions;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Payments;
@@ -244,11 +245,30 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             string v = (value ?? "").Trim();
 
-            if (key.EndsWith("_Template") || key.EndsWith("_Map"))
+            // แม่แบบคำขอ: เป็น JSON ที่ "มีตัวแปร {{...}} คั่นอยู่" — ตัวแปรที่เป็นตัวเลข
+            // (เช่น "amount": {{amount}}) ทำให้ JSON ดิบ parse ไม่ผ่านตามธรรมชาติ
+            // ⚠ เดิมตรวจแบบ parse ตรง ๆ ⇒ บันทึกแม่แบบที่ถูกต้องไม่ได้เลยสักครั้ง
+            // ⇒ แทนค่าจำลองก่อนแล้วค่อยตรวจ: ตัวแปรในเครื่องหมายคำพูด → "x", ตัวแปรเปล่า → 0
+            if (key.EndsWith("_Template"))
+            {
+                if (v.Length == 0) return null;
+                string probe = Regex.Replace(v, "\"\\{\\{[^}]*\\}\\}\"", "\"x\"");
+                probe = Regex.Replace(probe, "\\{\\{[^}]*\\}\\}", "0");
+                try { Newtonsoft.Json.Linq.JToken.Parse(probe); }
+                catch (Exception ex)
+                {
+                    return key + " ยังไม่ใช่ JSON ที่ถูกต้อง — ตรวจวงเล็บ/จุลภาค/เครื่องหมายคำพูด "
+                         + "(ตัวแปร {{...}} ใส่ได้ตามปกติ ระบบเข้าใจอยู่แล้ว) · รายละเอียด: " + ex.Message;
+                }
+            }
+            else if (key.EndsWith("_Map"))
             {
                 if (v.Length == 0) return null;
                 try { Newtonsoft.Json.Linq.JToken.Parse(v); }
-                catch { return key + " ต้องเป็น JSON ที่ถูกต้อง"; }
+                catch (Exception ex)
+                {
+                    return key + " ต้องเป็น JSON ที่ถูกต้อง · รายละเอียด: " + ex.Message;
+                }
             }
 
             if (key == "Payso_BaseUrl_Sandbox" || key == "Payso_BaseUrl_Production" || key == "Payment_Site_BaseUrl")
@@ -429,10 +449,16 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch { }
         }
 
+        /// <summary>
+        /// แสดงข้อความบนหัวหน้า — ข้อความแรกของ "รอบคำขอนี้" ล้างของเดิมเสมอ
+        /// (ViewState เก็บข้อความรอบก่อนไว้ ⇒ เคยเห็นคำเตือนเดียวกันซ้อนกันสองอัน)
+        /// </summary>
+        private bool _msgWritten;
         private void Msg(string cls, string html, bool append = false)
         {
             string block = "<div class=\"pg-alert " + cls + "\">" + html + "</div>";
-            litMsg.Text = append ? litMsg.Text + block : block;
+            litMsg.Text = (_msgWritten && append) ? litMsg.Text + block : block;
+            _msgWritten = true;
         }
 
         private static string Str(object o)
