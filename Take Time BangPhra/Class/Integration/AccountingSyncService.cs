@@ -8949,17 +8949,18 @@ namespace Take_Time_BangPhra.Integration
             return 0m;
         }
 
+        /// <summary>
+        /// กิจการจด VAT ไหม — ใช้ตัดสิน VatRate ของ "เอกสารรับ" ทุกใบที่ส่ง NextAcc
+        /// (ใบเสร็จ/มัดจำ/ใบกำกับ/เช็คเอาท์/void — 17 จุดเรียก)
+        ///
+        /// ⚠ เดิมเทียบแบบเข้มงวด <c>== "True"</c> ขณะที่ <see cref="BusinessUsesVat"/>
+        /// ในไฟล์เดียวกัน (ใช้กับ POS/รูมเซอร์วิส) ยอมรับ "1"/"true" ด้วย
+        /// ⇒ ถ้าคอลัมน์เก็บเป็น 1 หรือ true ตัวเล็ก: ขายหน้าร้านมี VAT แต่ใบเสร็จ/ใบมัดจำ
+        /// ออกไปแบบ VatRate=0 เงียบ ๆ ทั้งระบบ — ใช้ตัวอ่านตัวเดียวกันเพื่อไม่ให้ขัดกันอีก
+        /// </summary>
         private bool LookupBusinessHasVat()
         {
-            try
-            {
-                var dt = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT TOP 1 Use_Vat FROM Business_Info", null);
-                if (dt?.Rows.Count > 0)
-                    return dt.Rows[0]["Use_Vat"]?.ToString() == "True";
-            }
-            catch { }
-            return false;
+            return BusinessUsesVat();
         }
 
         // ──────────────────────────────────────────────

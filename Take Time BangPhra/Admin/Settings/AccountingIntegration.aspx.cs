@@ -1651,6 +1651,63 @@ namespace Take_Time_BangPhra.Admin.Settings
                         deferMapped = !haveCoa || Convert.ToInt32(dv.Rows[0]["CodeExists"]) == 1;
                     }
 
+                    // ── ต้องบอก "ผลลัพธ์จริง" เสมอ ไม่ใช่เตือนเฉพาะตอนตั้งขัดกัน ───────────
+                    // ค่าเริ่มต้น (CHECKOUT + ไม่พัก) ไม่เข้าเงื่อนไขเตือนข้อไหนเลย
+                    // ⇒ ใบมัดจำออกมาไม่มี VAT โดยไม่มีอะไรบอกสักบรรทัด (เคสจริงที่เจอซ้ำ)
+                    bool bizVat = false;
+                    string rawUseVat = null;
+                    try
+                    {
+                        var bv = _code.DatabaseQuerySafe(ConnStr, "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                        if (bv != null && bv.Rows.Count > 0 && bv.Rows[0]["Use_Vat"] != DBNull.Value)
+                        {
+                            rawUseVat = bv.Rows[0]["Use_Vat"].ToString();
+                            bizVat = rawUseVat == "1" || rawUseVat.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        }
+                    }
+                    catch { }
+
+                    bool receiptMode = vatMode.Equals("RECEIPT", StringComparison.OrdinalIgnoreCase);
+                    bool willSplit = bizVat && receiptMode;
+                    bool willDefer = willSplit && wantDefer && deferMapped;
+
+                    string effect = willDefer
+                        ? "แยก VAT ออกจากมัดจำ แล้วพักที่ \"ภาษีขายรอเรียกเก็บ\" (" + (deferCode ?? "21913") + ")\n"
+                          + "  Dr แหล่งเงิน / Cr เงินรับล่วงหน้า (ยอดสุทธิ) + Cr " + (deferCode ?? "21913") + " (VAT)\n"
+                          + "  → VAT ยังไม่เข้า ภ.พ.30 จนกว่าจะเช็คเอาท์"
+                        : willSplit
+                        ? "แยก VAT ออกจากมัดจำ เข้า \"ภาษีขาย\" (21911) ทันที\n"
+                          + "  Dr แหล่งเงิน / Cr เงินรับล่วงหน้า (ยอดสุทธิ) + Cr 21911 (VAT)\n"
+                          + "  → VAT เข้า ภ.พ.30 เดือนที่รับมัดจำ"
+                        : "ไม่แยก VAT เลย — Cr เงินรับล่วงหน้าเต็มก้อน\n"
+                          + "  Dr แหล่งเงิน 1,000 / Cr เงินรับล่วงหน้า 1,000 (ไม่มีบรรทัดภาษีขาย)\n"
+                          + "  → VAT รับรู้ทั้งก้อนตอนเช็คเอาท์";
+
+                    string why = !bizVat
+                        ? "เพราะ Business_Info.Use_Vat = " + (rawUseVat == null ? "(ไม่มีค่า)" : "\"" + rawUseVat + "\"")
+                          + " ⇒ ระบบถือว่ากิจการไม่จด VAT (ต้องเป็น True / true / 1)"
+                        : !receiptMode
+                        ? "เพราะ Deposit_Vat_Recognition = " + vatMode + " (ต้องเป็น RECEIPT ถึงจะแยก VAT ตอนรับมัดจำ)"
+                        : (wantDefer && !deferMapped)
+                        ? "ตั้งให้พักที่ 21913 แต่บัญชียังใช้ไม่ได้ → ระบบ fallback ลง 21911"
+                        : "";
+
+                    add(willSplit ? "info" : "warn",
+                        "ใบมัดจำใบต่อไปจะลงบัญชีแบบนี้: " + (willDefer ? "พัก VAT ที่ 21913"
+                            : willSplit ? "VAT เข้า 21911 ทันที" : "ไม่มี VAT"),
+                        effect + (why.Length > 0 ? "\n\n" + why : "")
+                        + "\n\nค่าที่ใช้อยู่: Use_Vat=" + (rawUseVat ?? "-")
+                        + " · Deposit_Vat_Recognition=" + vatMode
+                        + " · Deposit_Defer_Output_Vat=" + (wantDefer ? "1" : "0")
+                        + " · OUTPUT_VAT_DEFERRED=" + (deferCode ?? "ยังไม่ผูก"));
+
+                    if (!bizVat)
+                        add("error", "กิจการถูกตั้งว่า \"ไม่จด VAT\" — เอกสารรับทุกใบออกโดยไม่มีภาษีขาย",
+                            "Business_Info.Use_Vat = " + (rawUseVat == null ? "(ไม่มีค่า)" : "\"" + rawUseVat + "\"")
+                            + "\nมีผลกับใบเสร็จ/ใบมัดจำ/ใบกำกับที่ส่ง NextAcc ทั้งหมด ไม่ใช่แค่มัดจำ\n"
+                            + "ถ้ากิจการจด VAT จริง ให้แก้ค่านี้เป็น True ที่ ข้อมูลกิจการ (Business_Info) "
+                            + "แล้วออกเอกสารใหม่ — ใบที่ออกไปแล้วต้องแก้ด้วยใบปรับปรุง");
+
                     if (wantDefer && !deferMapped)
                         add("error", "ตั้งให้พัก VAT มัดจำที่ 21913 แต่บัญชียังใช้ไม่ได้",
                             (deferCode == null

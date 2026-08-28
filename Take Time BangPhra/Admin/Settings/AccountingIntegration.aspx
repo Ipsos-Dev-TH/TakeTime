@@ -2513,11 +2513,16 @@
                              + ' เรื่องที่ควรดู <span style="color:#999;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
                     list.forEach(function (it) {
                         var err = it.level === 'error';
-                        html += '<div style="border-left:4px solid ' + (err ? '#C62828' : '#F9A825')
-                              + '; background:' + (err ? '#FFF5F5' : '#FFFDF3')
+                        var info = it.level === 'info';   // สถานะปกติ/บอกผลลัพธ์ ไม่ใช่ปัญหา
+                        var bar = err ? '#C62828' : (info ? '#1565C0' : '#F9A825');
+                        var bg = err ? '#FFF5F5' : (info ? '#F4F8FD' : '#FFFDF3');
+                        var fg = err ? '#C62828' : (info ? '#1565C0' : '#8a6d3b');
+                        var icon = err ? '❌ ' : (info ? 'ℹ️ ' : '⚠️ ');
+                        html += '<div style="border-left:4px solid ' + bar
+                              + '; background:' + bg
                               + '; border-radius:5px; padding:9px 12px; margin-bottom:7px;">'
-                              + '<div style="font-weight:600; color:' + (err ? '#C62828' : '#8a6d3b') + '; font-size:13px;">'
-                              + (err ? '❌ ' : '⚠️ ') + escapeHtml(it.title) + '</div>'
+                              + '<div style="font-weight:600; color:' + fg + '; font-size:13px;">'
+                              + icon + escapeHtml(it.title) + '</div>'
                               + '<div style="font-size:12px; color:#555; white-space:pre-wrap; margin-top:3px;">'
                               + escapeHtml(it.detail) + '</div></div>';
                     });
