@@ -29,6 +29,16 @@
         .test-bar { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #e0e6ea; }
         .res { margin-top: 10px; font-size: 13.5px; }
         .res.ok { color: #1e7e42; } .res.err { color: #c0392b; }
+
+        .ss-search { position: relative; margin-bottom: 16px; }
+        .ss-search input { width: 100%; padding: 12px 16px 12px 44px; font-size: 15px;
+                           border: 1.5px solid #dbe2e7; border-radius: 10px; background: #fff; }
+        .ss-search input:focus { outline: none; border-color: #546e7a; box-shadow: 0 0 0 3px rgba(84,110,122,.12); }
+        .ss-search i { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: #90a4ae; }
+        .ss-card > h3 { cursor: pointer; }
+        .ss-card.ss-folded > *:not(h3) { display: none; }
+        .ss-card > h3 .fold-caret { float: right; font-size: 12px; color: #b0b6bd; transition: transform .15s; }
+        .ss-card.ss-folded > h3 .fold-caret { transform: rotate(-90deg); }
     </style>
 
     <div class="ss-wrap">
@@ -47,6 +57,12 @@
         <asp:Panel ID="pnlMsg" runat="server" Visible="false" CssClass="ss-card" style="padding:14px 18px;">
             <asp:Literal ID="litMsg" runat="server" />
         </asp:Panel>
+
+        <div class="ss-search">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="ssSearch" placeholder="ค้นหาการตั้งค่า… เช่น Telegram, อีเมล, Token, โฟลเดอร์"
+                autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();return false;}" />
+        </div>
 
         <asp:Literal ID="litGroups" runat="server" />
 
@@ -72,4 +88,44 @@
                 CssClass="btn btn-success btn-lg" OnClick="btnSave_Click" />
         </div>
     </div>
+
+    <script>
+        // ค้นหา + หัวข้อกดพับได้ — ส่วนเสริมล้วน ๆ ไม่แตะคอนโทรลฝั่งเซิร์ฟเวอร์
+        (function () {
+            var box = document.getElementById('ssSearch');
+            var cards = document.querySelectorAll('.ss-card');
+
+            for (var i = 0; i < cards.length; i++) {
+                var h = cards[i].querySelector('h3');
+                if (!h || !cards[i].querySelector('.row')) continue;   // การ์ดข้อความ/ปุ่ม ไม่ต้องพับ
+                (function (card, h3) {
+                    var caret = document.createElement('span');
+                    caret.className = 'fold-caret';
+                    caret.textContent = '▾';
+                    h3.appendChild(caret);
+                    h3.addEventListener('click', function () { card.classList.toggle('ss-folded'); });
+                })(cards[i], h);
+            }
+
+            if (!box) return;
+            box.addEventListener('input', function () {
+                var q = this.value.trim().toLowerCase();
+                for (var c = 0; c < cards.length; c++) {
+                    var rows = cards[c].querySelectorAll('.row');
+                    if (!rows.length) continue;
+                    var hitCount = 0;
+                    for (var r = 0; r < rows.length; r++) {
+                        var text = (rows[r].textContent || '').toLowerCase();
+                        var input = rows[r].querySelector('input, select');
+                        if (input && input.name) text += ' ' + input.name.toLowerCase();
+                        var hit = !q || text.indexOf(q) >= 0;
+                        rows[r].style.display = hit ? '' : 'none';
+                        if (hit) hitCount++;
+                    }
+                    cards[c].style.display = hitCount ? '' : 'none';
+                    if (q && hitCount) cards[c].classList.remove('ss-folded');
+                }
+            });
+        })();
+    </script>
 </asp:Content>

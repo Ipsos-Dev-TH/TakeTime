@@ -58,9 +58,32 @@
         .pill.INITIATED { background:#eef2f5; color:#4a5b66; }
         .pill.REFUNDED { background:#eef4fb; color:#1d4e79; }
 
+        /* ── แถบขั้นตอนตั้งค่า ── */
+        .pg-steps { display:flex; gap:8px; flex-wrap:wrap; }
+        .pg-step { display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:24px;
+                   font-size:13.5px; background:#f2f6f4; color:#5a6b62; }
+        .pg-step.done { background:#e8f6ee; color:#16653e; font-weight:600; }
+        .pg-step .n { width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center;
+                      justify-content:center; background:#fff; font-weight:700; font-size:12px;
+                      border:1.5px solid currentColor; flex:none; }
+        .pg-steps-sum { margin-top:10px; font-size:13px; color:#7b8a83; }
+        .pg-steps-sum.ok { color:#16653e; font-weight:600; }
+
+        /* ── การ์ดที่ซ่อน/พับได้ ── */
+        .pg-2col { display:grid; grid-template-columns:1fr 1fr; gap:0 26px; }
+        .pg-methods .pg-chk { margin-top:2px; }
+        .pg-mnote { display:block; color:#8b978f; font-size:12.3px; margin:1px 0 10px 27px; }
+        .pg-toggle { cursor:pointer; -webkit-user-select:none; user-select:none; }
+        .pg-caret { font-size:12px; color:#8b978f; display:inline-block; transition:transform .15s; }
+        .pg-collapsed .pg-body, .pg-collapsed .sub { display:none; }
+        .pg-collapsed .pg-caret { transform:rotate(-90deg); }
+        .pg-collapsed h3 { margin-bottom:0; }
+        .pg-dim { opacity:.45; }
+
         @media (max-width: 760px) {
             .pg-row { flex-direction:column; gap:7px; }
             .pg-label { flex:none; }
+            .pg-2col { grid-template-columns:1fr; }
         }
     </style>
 
@@ -76,10 +99,28 @@
 
         <asp:Literal ID="litMsg" runat="server" />
 
+        <!-- ── ค่าตั้งค่าทั้งหมด (วาดจากฐานข้อมูล จัดกลุ่มเป็นขั้นตอน) ── -->
+        <asp:PlaceHolder ID="phSettings" runat="server" />
+
+        <div class="pg-card">
+            <div class="pg-actions">
+                <asp:Button ID="btnSave" runat="server" CssClass="pg-btn" Text="💾 บันทึกการตั้งค่า" OnClick="btnSave_Click" />
+                <asp:Button ID="btnTest" runat="server" CssClass="pg-btn ghost" Text="🔌 ทดสอบการเชื่อมต่อ"
+                    OnClick="btnTest_Click" CausesValidation="false" />
+                <asp:Button ID="btnReload" runat="server" CssClass="pg-btn ghost" Text="↻ โหลดค่าใหม่"
+                    OnClick="btnReload_Click" CausesValidation="false" />
+            </div>
+        </div>
+
         <!-- ── ที่อยู่ที่ต้องนำไปตั้งค่าฝั่งเกตเวย์ ── -->
         <div class="pg-card">
             <h3>ที่อยู่ที่ต้องนำไปใส่ในระบบของผู้ให้บริการ</h3>
-            <div class="sub">คัดลอกไปวางในหน้าตั้งค่าของ Payso — ถ้าใส่ผิด เงินจะเข้าแต่ระบบเราจะไม่รู้</div>
+            <div class="sub">
+                คัดลอกไปวางในระบบของเกตเวย์ที่เลือกใช้ —
+                <span data-pg-provider="OMISE">Omise: Dashboard → Webhooks (ใส่ Webhook URL ช่อง Endpoint)</span><span
+                    data-pg-provider="PAYSO">Payso: หน้า Merchant → ตั้งค่า Callback</span> ·
+                ถ้าใส่ผิด เงินจะเข้าแต่ระบบเราจะไม่รู้
+            </div>
             <div class="pg-row">
                 <div class="pg-label"><b>Webhook / Callback URL</b>
                     <small>ที่อยู่ที่เกตเวย์ใช้แจ้งผลการจ่ายกลับมา</small></div>
@@ -94,19 +135,6 @@
                 <div class="pg-label"><b>หน้าชำระเงินของลูกค้า</b>
                     <small>ใช้สร้างลิงก์ส่งให้ลูกค้าจ่ายเอง</small></div>
                 <div class="pg-input"><div class="pg-url"><asp:Literal ID="litPayUrl" runat="server" /></div></div>
-            </div>
-        </div>
-
-        <!-- ── ค่าตั้งค่าทั้งหมด (วาดจากฐานข้อมูล) ── -->
-        <asp:PlaceHolder ID="phSettings" runat="server" />
-
-        <div class="pg-card">
-            <div class="pg-actions">
-                <asp:Button ID="btnSave" runat="server" CssClass="pg-btn" Text="💾 บันทึกการตั้งค่า" OnClick="btnSave_Click" />
-                <asp:Button ID="btnTest" runat="server" CssClass="pg-btn ghost" Text="🔌 ทดสอบการเชื่อมต่อ"
-                    OnClick="btnTest_Click" CausesValidation="false" />
-                <asp:Button ID="btnReload" runat="server" CssClass="pg-btn ghost" Text="↻ โหลดค่าใหม่"
-                    OnClick="btnReload_Click" CausesValidation="false" />
             </div>
         </div>
 
@@ -191,4 +219,64 @@
             </asp:GridView>
         </div>
     </div>
+
+    <script>
+        // ── แสดงเฉพาะสิ่งที่เกี่ยวข้อง — เลือกเกตเวย์ไหนเห็นแค่ของเจ้านั้น ──
+        // ทุกอย่างยังอยู่ในฟอร์มครบ (แค่ซ่อนด้วย CSS) การบันทึกจึงทำงานเหมือนเดิมทุกประการ
+        (function () {
+            function $one(sel) { return document.querySelector(sel); }
+            function $all(sel) { return document.querySelectorAll(sel); }
+
+            var provider = $one("select[id$='cfg_Payment_Provider']");
+            var master = $one("input[id$='cfg_Payment_Enabled']");
+
+            function apply() {
+                var prov = provider ? (provider.value || 'OMISE').toUpperCase() : 'OMISE';
+
+                // การ์ด/ข้อความของเกตเวย์: โชว์เฉพาะเจ้าที่เลือก
+                var tagged = $all('[data-pg-provider]');
+                for (var i = 0; i < tagged.length; i++) {
+                    var el = tagged[i];
+                    el.style.display = el.getAttribute('data-pg-provider') === prov ? '' : 'none';
+                }
+
+                // สวิตช์ใหญ่ปิด: หรี่การ์ดถัด ๆ ไปให้เห็นว่า "ยังไม่มีผล" (แก้ค่าได้ตามปกติ)
+                var off = master && !master.checked;
+                var cards = $all(".pg-card[id^='pgcat']");
+                for (var c = 0; c < cards.length; c++) {
+                    if (cards[c].id === 'pgcat1') continue;
+                    if (off) cards[c].classList.add('pg-dim');
+                    else cards[c].classList.remove('pg-dim');
+                }
+
+                // การ์ดที่มีติ๊กหลัก (เช่น วงเงินประกัน): ปิดอยู่ให้เหลือแค่แถวสวิตช์
+                var mastered = $all('.pg-card[data-pg-master]');
+                for (var m = 0; m < mastered.length; m++) {
+                    var card = mastered[m];
+                    var key = card.getAttribute('data-pg-master');
+                    var box = card.querySelector("input[id$='" + key + "']");
+                    var rows = card.querySelectorAll('.pg-row');
+                    for (var r = 0; r < rows.length; r++) {
+                        var isMasterRow = !!rows[r].querySelector("input[id$='" + key + "']");
+                        rows[r].style.display = (isMasterRow || !box || box.checked) ? '' : 'none';
+                    }
+                }
+            }
+
+            if (provider) provider.addEventListener('change', apply);
+            if (master) master.addEventListener('change', apply);
+            var masterBoxes = $all('.pg-card[data-pg-master] input[type=checkbox]');
+            for (var b = 0; b < masterBoxes.length; b++) masterBoxes[b].addEventListener('change', apply);
+
+            // การ์ดขั้นสูง: หัวข้อกดพับ/กางได้
+            var toggles = $all('.pg-card[data-pg-adv] h3.pg-toggle');
+            for (var t = 0; t < toggles.length; t++) {
+                toggles[t].addEventListener('click', function () {
+                    this.parentNode.classList.toggle('pg-collapsed');
+                });
+            }
+
+            apply();
+        })();
+    </script>
 </asp:Content>

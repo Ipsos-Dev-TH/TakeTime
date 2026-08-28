@@ -2942,4 +2942,91 @@
                 });
         }
     </script>
+
+    <style>
+        /* ── แถบนำทางหัวข้อ (หน้านี้ยาว ~15 หัวข้อ เดิมต้องเลื่อนหาเอง) ── */
+        .acc-toc { position: sticky; top: 0; z-index: 40; background: rgba(245,246,248,.97);
+                   padding: 8px 0 10px; margin: 0 0 6px; display: flex; gap: 7px; overflow-x: auto;
+                   -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+        .acc-toc a { flex: none; font-size: 12.5px; padding: 6px 12px; border-radius: 18px;
+                     background: #fff; border: 1px solid #e3e6ea; color: #555; text-decoration: none;
+                     white-space: nowrap; }
+        .acc-toc a:hover { border-color: #FF9800; color: #e65100; text-decoration: none; }
+        .acc-toc a.hot { background: #fff3e0; border-color: #FF9800; color: #e65100; font-weight: 600; }
+        .acc-card > h3 { cursor: pointer; }
+        .acc-card.acc-folded > *:not(h3) { display: none; }
+        .acc-card > h3 .fold-caret { margin-left: auto; font-size: 12px; color: #b0b6bd;
+                                     transition: transform .15s; }
+        .acc-card.acc-folded > h3 .fold-caret { transform: rotate(-90deg); }
+    </style>
+    <script>
+        // สร้างแถบนำทางจากหัวข้อการ์ดจริงบนหน้า + หัวข้อกดพับได้ (จำสถานะไว้ในเครื่อง)
+        // เป็นส่วนเสริมล้วน ๆ — ไม่แตะคอนโทรลฝั่งเซิร์ฟเวอร์ ฟอร์มทำงานเหมือนเดิมทุกอย่าง
+        (function () {
+            var cards = document.querySelectorAll('.acc-card');
+            var heads = [];
+            for (var i = 0; i < cards.length; i++) {
+                var h = cards[i].querySelector('h3');
+                if (!h) continue;
+                if (!cards[i].id) cards[i].id = 'accsec' + i;
+                heads.push({ card: cards[i], h3: h });
+            }
+            if (heads.length < 4) return;   // หน้าเล็ก ๆ ไม่ต้องมีแถบนำทาง
+
+            var toc = document.createElement('div');
+            toc.className = 'acc-toc';
+            for (var t = 0; t < heads.length; t++) {
+                var a = document.createElement('a');
+                a.href = '#' + heads[t].card.id;
+                a.textContent = (heads[t].h3.textContent || '').replace(/\s+/g, ' ').trim();
+                (function (card) {
+                    a.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        card.classList.remove('acc-folded');
+                        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                })(heads[t].card);
+                toc.appendChild(a);
+            }
+            var header = document.querySelector('.acc-page .page-header');
+            if (header && header.parentNode)
+                header.parentNode.insertBefore(toc, header.nextSibling);
+
+            // พับ/กาง — เก็บสถานะราย section (อิงข้อความหัวข้อ ให้ทนต่อการสลับลำดับ)
+            function skey(h3) { return 'accfold:' + (h3.textContent || '').trim().substring(0, 40); }
+            for (var f = 0; f < heads.length; f++) {
+                (function (card, h3) {
+                    var caret = document.createElement('span');
+                    caret.className = 'fold-caret';
+                    caret.textContent = '▾';
+                    h3.appendChild(caret);
+                    try { if (localStorage.getItem(skey(h3)) === '1') card.classList.add('acc-folded'); }
+                    catch (e) { }
+                    h3.addEventListener('click', function (ev) {
+                        if (ev.target && (ev.target.tagName === 'A' || ev.target.tagName === 'BUTTON'
+                            || ev.target.tagName === 'INPUT')) return;
+                        card.classList.toggle('acc-folded');
+                        try {
+                            localStorage.setItem(skey(h3), card.classList.contains('acc-folded') ? '1' : '0');
+                        } catch (e) { }
+                    });
+                })(heads[f].card, heads[f].h3);
+            }
+
+            // ไฮไลต์หัวข้อที่กำลังดูอยู่
+            if ('IntersectionObserver' in window) {
+                var links = toc.querySelectorAll('a');
+                var io = new IntersectionObserver(function (entries) {
+                    for (var e = 0; e < entries.length; e++) {
+                        if (!entries[e].isIntersecting) continue;
+                        for (var L = 0; L < links.length; L++)
+                            links[L].classList.toggle('hot',
+                                links[L].getAttribute('href') === '#' + entries[e].target.id);
+                        break;
+                    }
+                }, { rootMargin: '-10% 0px -70% 0px' });
+                for (var c = 0; c < heads.length; c++) io.observe(heads[c].card);
+            }
+        })();
+    </script>
 </asp:Content>

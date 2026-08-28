@@ -58,6 +58,90 @@ namespace Take_Time_BangPhra.Admin.Settings
         }
 
         // ── วาดฟอร์มตั้งค่า ───────────────────────────────────────────────────
+        //
+        // หน้า "จัดกลุ่มเอง" แทนที่จะไล่ตามหมวดในฐานข้อมูลตรง ๆ เพื่อให้อ่านเป็นขั้นตอน:
+        // เปิดระบบ → ตั้งเกตเวย์ (เห็นเฉพาะเจ้าที่เลือก) → วิธีชำระ → ช่องทาง → เสริม
+        // ค่าตั้งของเกตเวย์ที่ไม่ได้เลือกถูกซ่อนด้วย JS (ยัง postback ครบ บันทึกได้ตามปกติ)
+
+        private class UiGroup
+        {
+            public string Name;          // หัวการ์ด
+            public string Note;          // คำอธิบายใต้หัว
+            public string Provider;      // "OMISE"/"PAYSO" = แสดงเฉพาะตอนเลือกเจ้านั้น
+            public bool Collapsed;       // ขั้นสูง — เริ่มแบบพับไว้
+            public bool TwoCol;          // แถวสั้น ๆ เรียงสองคอลัมน์
+            public string MasterKey;     // ติ๊กหลักของการ์ด — ปิดอยู่ให้ซ่อนแถวที่เหลือ
+        }
+
+        private static readonly UiGroup[] Groups = new UiGroup[]
+        {
+            new UiGroup { Name = "๑) เปิดระบบและเลือกผู้ให้บริการ",
+                Note = "สองค่านี้กำหนดทุกอย่าง — เลือกเกตเวย์เจ้าไหน ด้านล่างจะแสดงเฉพาะการตั้งค่าของเจ้านั้น "
+                     + "ปิดสวิตช์เมื่อไหร่ ระบบกลับไปทำงานเหมือนเดิมทุกอย่างทันที" },
+            new UiGroup { Name = "๒) ตั้งค่า Omise", Provider = "OMISE",
+                Note = "คีย์จาก Omise Dashboard → Keys — ขึ้นต้น _test_ = โหมดทดสอบ ไม่ตัดเงินจริง · "
+                     + "อย่าลืมตั้ง Webhook ตาม URL ในการ์ดล่างสุด แล้วกด \"ทดสอบการเชื่อมต่อ\"" },
+            new UiGroup { Name = "๒) Payso — การเชื่อมต่อ", Provider = "PAYSO",
+                Note = "กุญแจและที่อยู่ของผู้ให้บริการ (จากหน้า Merchant ของ Payso)" },
+            new UiGroup { Name = "Payso — รูปแบบคำขอ", Provider = "PAYSO", Collapsed = true,
+                Note = "ขั้นสูง — ต้องตรงกับเอกสาร https://api-docs.payso.co แก้ที่นี่ได้เลย ไม่ต้อง build ใหม่" },
+            new UiGroup { Name = "Payso — เส้นทาง API", Provider = "PAYSO", Collapsed = true,
+                Note = "ขั้นสูง — เส้นทางที่ต่อท้าย Base URL ตรวจกับเอกสารจริงก่อนเปิดใช้งานจริง" },
+            new UiGroup { Name = "Payso — อ่านคำตอบ", Provider = "PAYSO", Collapsed = true,
+                Note = "ขั้นสูง — บอกระบบว่าคำตอบของเกตเวย์เก็บค่าไว้ที่ฟิลด์ไหน (ใช้ผลจากปุ่มทดสอบมาปรับได้)" },
+            new UiGroup { Name = "Payso — การแจ้งกลับ", Provider = "PAYSO", Collapsed = true,
+                Note = "ความปลอดภัยของข้อความที่เกตเวย์แจ้งผลกลับมา — ห้ามปิดการตรวจลายเซ็นในระบบจริง" },
+            new UiGroup { Name = "๓) วิธีชำระที่ลูกค้าเห็น",
+                Note = "ติ๊กเปิดวิธีที่ให้ลูกค้าเลือกได้ พร้อมกติกายอดเงินและค่าธรรมเนียม — "
+                     + "วิธีที่ต้องผ่านเกตเวย์จะโผล่ให้ลูกค้าเห็นก็ต่อเมื่อเกตเวย์ในข้อ ๒ พร้อมแล้วเท่านั้น" },
+            new UiGroup { Name = "สแกน QR แบบเดิม (โอนแล้วแนบสลิป)",
+                Note = "ข้อมูลที่แสดงให้ลูกค้าสแกน/โอนเอง แล้วพนักงานตรวจสลิป — ไม่เกี่ยวกับเกตเวย์ ใช้ได้แม้ปิดเกตเวย์" },
+            new UiGroup { Name = "๔) จุดที่เปิดรับจ่ายออนไลน์", TwoCol = true,
+                Note = "ปิดจุดไหน จุดนั้นไม่เสนอทางจ่ายออนไลน์ — ที่เหลือทำงานตามเดิม (มีผลเมื่อสวิตช์ใหญ่เปิดอยู่)" },
+            new UiGroup { Name = "วงเงินประกันความเสียหาย", MasterKey = "Payment_SecurityHold_Enabled",
+                Note = "กันวงเงินบนบัตรแทนการรับโอนเงินประกัน — เงินไม่เข้าไม่ออกจนกว่าจะตัดค่าเสียหายจริง "
+                     + "(Omise + บัตรเท่านั้น, วงเงินอยู่ได้ 7 วัน)" },
+            new UiGroup { Name = "การบันทึกบัญชีและแจ้งเตือน",
+                Note = "พฤติกรรมหลังลูกค้าจ่ายสำเร็จ — การลงระบบอัตโนมัติ แหล่งเงินที่ผูกกับ NextAcc และการแจ้งพนักงาน" },
+            new UiGroup { Name = "อื่น ๆ", Note = "" },
+        };
+
+        /// <summary>คีย์ไหนอยู่การ์ดไหน — คีย์ที่ไม่เข้าเงื่อนไขใช้หมวดจากฐานข้อมูล</summary>
+        private static string GroupOf(string key, string dbCategory)
+        {
+            switch (key)
+            {
+                case "Payment_Enabled":
+                case "Payment_Provider":
+                    return "๑) เปิดระบบและเลือกผู้ให้บริการ";
+                case "Payment_Methods_Enabled":
+                case "Payment_Default_Method":
+                case "Payment_Card_Surcharge_Pct":
+                case "Payment_Min_Amount":
+                case "Payment_Max_Amount":
+                case "Payment_Expiry_Minutes":
+                    return "๓) วิธีชำระที่ลูกค้าเห็น";
+                case "Payment_Auto_Apply":
+                case "Payment_PaidHow_Name":
+                case "Payment_Notify_Staff":
+                case "Payment_Site_BaseUrl":
+                    return "การบันทึกบัญชีและแจ้งเตือน";
+            }
+            switch (dbCategory)
+            {
+                case "Omise": return "๒) ตั้งค่า Omise";
+                case "Payso — การเชื่อมต่อ": return "๒) Payso — การเชื่อมต่อ";
+                case "สแกน QR แบบเดิม": return "สแกน QR แบบเดิม (โอนแล้วแนบสลิป)";
+                case "ช่องทางที่เปิดรับเงินออนไลน์": return "๔) จุดที่เปิดรับจ่ายออนไลน์";
+                case "Payso — รูปแบบคำขอ":
+                case "Payso — เส้นทาง API":
+                case "Payso — อ่านคำตอบ":
+                case "Payso — การแจ้งกลับ":
+                case "วงเงินประกันความเสียหาย":
+                    return dbCategory;
+            }
+            return string.IsNullOrEmpty(dbCategory) ? "อื่น ๆ" : dbCategory;
+        }
 
         private void BuildSettingsUi()
         {
@@ -74,50 +158,167 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
 
             _cfg = dt;
-            string currentCategory = null;
-            PlaceHolder body = null;
 
+            // จัดแถวเข้าการ์ดตามผังของหน้า (ในการ์ดคงลำดับ Display_Order เดิม)
+            var byGroup = new Dictionary<string, List<DataRow>>();
             foreach (DataRow r in dt.Rows)
             {
-                string key = r["Config_Key"].ToString();
-                string cat = Str(r["Category"]);
-                if (string.IsNullOrEmpty(cat)) cat = "อื่น ๆ";
+                string g = GroupOf(r["Config_Key"].ToString(), Str(r["Category"]));
+                List<DataRow> list;
+                if (!byGroup.TryGetValue(g, out list)) byGroup[g] = list = new List<DataRow>();
+                list.Add(r);
+            }
 
-                if (cat != currentCategory)
+            phSettings.Controls.Add(new LiteralControl(BuildStepsHtml(dt)));
+
+            var known = new List<UiGroup>(Groups);
+            foreach (string g in byGroup.Keys)          // หมวดแปลกใหม่จาก DB ที่ผังนี้ยังไม่รู้จัก
+            {
+                bool found = false;
+                foreach (UiGroup u in known) if (u.Name == g) { found = true; break; }
+                if (!found) known.Add(new UiGroup { Name = g, Note = "" });
+            }
+
+            int anchor = 0;
+            foreach (UiGroup grp in known)
+            {
+                List<DataRow> rows;
+                if (!byGroup.TryGetValue(grp.Name, out rows) || rows.Count == 0) continue;
+
+                anchor++;
+                string attrs = " id=\"pgcat" + anchor + "\""
+                    + (grp.Provider != null ? " data-pg-provider=\"" + grp.Provider + "\"" : "")
+                    + (grp.MasterKey != null ? " data-pg-master=\"cfg_" + grp.MasterKey + "\"" : "")
+                    + (grp.Collapsed ? " data-pg-adv=\"1\"" : "");
+
+                phSettings.Controls.Add(new LiteralControl(
+                    "<div class=\"pg-card" + (grp.Collapsed ? " pg-collapsed" : "") + "\"" + attrs + ">"
+                    + "<h3 class=\"" + (grp.Collapsed ? "pg-toggle" : "") + "\">" + Server.HtmlEncode(grp.Name)
+                    + (grp.Collapsed ? " <span class=\"pg-caret\">▾</span>" : "") + "</h3>"
+                    + "<div class=\"sub\">" + Server.HtmlEncode(grp.Note) + "</div>"
+                    + "<div class=\"pg-body" + (grp.TwoCol ? " pg-2col" : "") + "\">"));
+
+                foreach (DataRow r in rows)
                 {
-                    currentCategory = cat;
+                    string key = r["Config_Key"].ToString();
+                    string name = Str(r["Display_Name"]);
+                    if (string.IsNullOrEmpty(name)) name = key;
+                    string desc = Str(r["Description"]);
+                    string type = Str(r["Input_Type"]);
+                    if (string.IsNullOrEmpty(type)) type = "text";
+                    string value = Str(r["Config_Value"]);
+                    bool secret = r["Is_Secret"] != DBNull.Value && Convert.ToBoolean(r["Is_Secret"]);
+
                     phSettings.Controls.Add(new LiteralControl(
-                        "<div class=\"pg-card\"><h3>" + Server.HtmlEncode(cat) + "</h3>"
-                        + "<div class=\"sub\">" + Server.HtmlEncode(CategoryNote(cat)) + "</div>"));
-                    body = new PlaceHolder();
-                    phSettings.Controls.Add(body);
-                    phSettings.Controls.Add(new LiteralControl("</div>"));
+                        "<div class=\"pg-row\" data-pg-key=\"" + Server.HtmlEncode(key) + "\">"
+                        + "<div class=\"pg-label\"><b>" + Server.HtmlEncode(name) + "</b>"
+                        + (string.IsNullOrEmpty(desc) ? "" : "<small>" + Server.HtmlEncode(desc) + "</small>")
+                        + "<small style=\"color:#b6c0ba\">" + Server.HtmlEncode(key) + "</small>"
+                        + "</div><div class=\"pg-input\">"));
+
+                    Control input = key == "Payment_Methods_Enabled"
+                        ? MakeMethodChecks(value)
+                        : MakeInput(key, type, value, Str(r["Options"]), secret);
+                    phSettings.Controls.Add(input);
+                    _inputs[key] = input;
+
+                    if (secret)
+                        phSettings.Controls.Add(new LiteralControl(
+                            "<small style=\"color:#8b978f;font-size:12.3px\">เว้นว่างไว้ = ใช้ค่าเดิม</small>"));
+
+                    phSettings.Controls.Add(new LiteralControl("</div></div>"));
                 }
 
-                string name = Str(r["Display_Name"]);
-                if (string.IsNullOrEmpty(name)) name = key;
-                string desc = Str(r["Description"]);
-                string type = Str(r["Input_Type"]);
-                if (string.IsNullOrEmpty(type)) type = "text";
-                string value = Str(r["Config_Value"]);
-                bool secret = r["Is_Secret"] != DBNull.Value && Convert.ToBoolean(r["Is_Secret"]);
-
-                body.Controls.Add(new LiteralControl(
-                    "<div class=\"pg-row\"><div class=\"pg-label\"><b>" + Server.HtmlEncode(name) + "</b>"
-                    + (string.IsNullOrEmpty(desc) ? "" : "<small>" + Server.HtmlEncode(desc) + "</small>")
-                    + "<small style=\"color:#b6c0ba\">" + Server.HtmlEncode(key) + "</small>"
-                    + "</div><div class=\"pg-input\">"));
-
-                Control input = MakeInput(key, type, value, Str(r["Options"]), secret);
-                body.Controls.Add(input);
-                _inputs[key] = input;
-
-                if (secret)
-                    body.Controls.Add(new LiteralControl(
-                        "<small style=\"color:#8b978f;font-size:12.3px\">เว้นว่างไว้ = ใช้ค่าเดิม</small>"));
-
-                body.Controls.Add(new LiteralControl("</div></div>"));
+                phSettings.Controls.Add(new LiteralControl("</div></div>"));
             }
+        }
+
+        /// <summary>
+        /// แถบขั้นตอน ๔ ขั้นบนหัวหน้า — คำนวณจากค่าที่บันทึกอยู่จริง ให้เห็นทันทีว่าค้างขั้นไหน
+        /// </summary>
+        private string BuildStepsHtml(DataTable dt)
+        {
+            var val = new Dictionary<string, string>();
+            foreach (DataRow r in dt.Rows) val[r["Config_Key"].ToString()] = Str(r["Config_Value"]);
+            Func<string, string> v = k => { string s; return val.TryGetValue(k, out s) ? s : ""; };
+            Func<string, bool> on = k => v(k) == "1" || v(k).Equals("true", StringComparison.OrdinalIgnoreCase);
+
+            bool featureOn = false;
+            try { featureOn = Feature.On("OnlinePayment"); } catch { }
+            bool s1 = featureOn && on("Payment_Enabled");
+
+            bool omise = !string.Equals(v("Payment_Provider"), "PAYSO", StringComparison.OrdinalIgnoreCase);
+            bool s2;
+            if (omise)
+                s2 = on("Omise_Enabled") && v("Omise_SecretKey").Length > 0;
+            else
+                s2 = on("Payso_Enabled")
+                     && (v("Payso_BaseUrl_Sandbox").Length > 0 || v("Payso_BaseUrl_Production").Length > 0)
+                     && (v("Payso_ApiKey").Length > 0 || v("Payso_SecretKey").Length > 0);
+
+            string methods = (v("Payment_Methods_Enabled") ?? "").ToUpperInvariant();
+            bool s3 = methods.Contains("CARD") || methods.Contains("QR");
+
+            bool s4 = false;
+            foreach (string k in val.Keys)
+                if (k.StartsWith("Payment_Channel_") && on(k)) { s4 = true; break; }
+
+            string[] labels =
+            {
+                s1 ? "เปิดระบบแล้ว" : "เปิดสวิตช์ (ฟีเจอร์ + หน้านี้)",
+                s2 ? "เกตเวย์ " + (omise ? "Omise" : "Payso") + " พร้อม" : "ใส่กุญแจ" + (omise ? " Omise" : " Payso"),
+                s3 ? "เปิดวิธีชำระแล้ว" : "เลือกวิธีชำระให้ลูกค้า",
+                s4 ? "เปิดจุดรับเงินแล้ว" : "เปิดจุดรับเงิน",
+            };
+            bool[] done = { s1, s2, s3, s4 };
+            bool all = s1 && s2 && s3 && s4;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<div class=\"pg-card pg-steps-card\"><div class=\"pg-steps\">");
+            for (int i = 0; i < 4; i++)
+                sb.Append("<div class=\"pg-step " + (done[i] ? "done" : "todo") + "\">"
+                        + "<span class=\"n\">" + (done[i] ? "✓" : (i + 1).ToString()) + "</span>"
+                        + "<span>" + Server.HtmlEncode(labels[i]) + "</span></div>");
+            sb.Append("</div><div class=\"pg-steps-sum " + (all ? "ok" : "") + "\">"
+                    + (all ? "✅ ครบทุกขั้น — ลองของจริงที่หน้า \"ทดสอบเกตเวย์\" ก่อนเปิดให้ลูกค้า"
+                           : "ไล่ตั้งค่าตามหมายเลขการ์ดด้านล่างจนแถบนี้ครบทุกขั้น แล้วกด \"ทดสอบการเชื่อมต่อ\"")
+                    + "</div></div>");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// วิธีชำระ = ติ๊กเลือกเป็นรายวิธี (เดิมเป็นช่องพิมพ์ "CARD,QR,..." — พังง่ายพิมพ์ผิดไม่รู้ตัว)
+        /// ค่าเก็บลงคีย์เดิมรูปแบบเดิมทุกประการ ระบบส่วนอื่นไม่ต้องเปลี่ยน
+        /// </summary>
+        private Panel MakeMethodChecks(string value)
+        {
+            string cur = "," + (value ?? "").ToUpperInvariant().Replace(" ", "") + ",";
+            var pnl = new Panel { ID = "cfg_Payment_Methods_Enabled", CssClass = "pg-methods" };
+
+            string[,] defs =
+            {
+                { PaymentGatewayConfig.MethodManualQr, "สแกน QR โอนแล้วแนบสลิป (แบบเดิม)", "ไม่ต้องใช้เกตเวย์ พนักงานตรวจสลิปเอง" },
+                { PaymentGatewayConfig.MethodCard,     "บัตรเครดิต / เดบิต",               "ผ่านเกตเวย์ ตัดยอดอัตโนมัติ — ต้องมี Public Key (Omise)" },
+                { PaymentGatewayConfig.MethodQr,       "PromptPay ผ่านเกตเวย์",            "ลูกค้าสแกนจ่าย ระบบรู้ผลเอง ไม่ต้องตรวจสลิป" },
+                { PaymentGatewayConfig.MethodInstallment, "ผ่อนชำระ",                      "ยังไม่เปิดใช้ในระบบ — เว้นไว้ก่อน" },
+            };
+
+            for (int i = 0; i < defs.GetLength(0); i++)
+            {
+                string m = defs[i, 0];
+                var cb = new CheckBox
+                {
+                    ID = "cfg_Method_" + m,
+                    CssClass = "pg-chk",
+                    Text = " " + defs[i, 1],
+                    Checked = cur.Contains("," + m + ","),
+                };
+                if (m == PaymentGatewayConfig.MethodInstallment && !cb.Checked) cb.Enabled = false;
+                pnl.Controls.Add(cb);
+                pnl.Controls.Add(new LiteralControl(
+                    "<small class=\"pg-mnote\">" + Server.HtmlEncode(defs[i, 2]) + "</small>"));
+            }
+            return pnl;
         }
 
         private Control MakeInput(string key, string type, string value, string options, bool secret)
@@ -160,34 +361,6 @@ namespace Take_Time_BangPhra.Admin.Settings
             return tb;
         }
 
-        private static string CategoryNote(string category)
-        {
-            switch (category)
-            {
-                case "ทั่วไป":
-                    return "สวิตช์หลักและวิธีชำระที่ลูกค้าเห็น — ปิด \"เปิดรับชำระเงินออนไลน์\" แล้วระบบกลับไปเหมือนเดิมทุกอย่าง";
-                case "สแกน QR แบบเดิม":
-                    return "ข้อมูลที่แสดงให้ลูกค้าสแกน/โอน แล้วแนบสลิป — ไม่เกี่ยวกับเกตเวย์";
-                case "Omise":
-                    return "คีย์จาก Omise Dashboard → Keys — ขึ้นต้น _test_ = โหมดทดสอบ ไม่ตัดเงินจริง · อย่าลืมตั้ง Webhook ตาม URL ด้านบน";
-                case "วงเงินประกันความเสียหาย":
-                    return "กันวงเงินบนบัตรแทนการรับโอนเงินประกัน — เงินไม่เข้าไม่ออกจนกว่าจะตัดค่าเสียหายจริง (Omise + บัตรเท่านั้น, วงเงินอยู่ได้ 7 วัน)";
-                case "ช่องทางที่เปิดรับเงินออนไลน์":
-                    return "ปิดช่องไหน ช่องนั้นไม่เสนอจ่ายออนไลน์ — ที่เหลือทำงานตามเดิม (มีผลเมื่อสวิตช์ใหญ่เปิดอยู่)";
-                case "Payso — การเชื่อมต่อ":
-                    return "กุญแจและที่อยู่ของผู้ให้บริการ (จากหน้า Merchant ของ Payso)";
-                case "Payso — รูปแบบคำขอ":
-                    return "ต้องตรงกับเอกสาร https://api-docs.payso.co — แก้ที่นี่ได้เลย ไม่ต้อง build ใหม่";
-                case "Payso — เส้นทาง API":
-                    return "เส้นทางที่ต่อท้าย Base URL — ตรวจกับเอกสารจริงก่อนเปิดใช้งานจริง";
-                case "Payso — อ่านคำตอบ":
-                    return "บอกระบบว่าคำตอบของเกตเวย์เก็บค่าไว้ที่ฟิลด์ไหน (ใช้ผลจากปุ่มทดสอบด้านล่างมาปรับได้)";
-                case "Payso — การแจ้งกลับ":
-                    return "ความปลอดภัยของข้อความที่เกตเวย์แจ้งผลกลับมา — ห้ามปิดการตรวจลายเซ็นในระบบจริง";
-                default: return "";
-            }
-        }
-
         // ── บันทึก ────────────────────────────────────────────────────────────
 
         protected void btnSave_Click(object sender, EventArgs e)
@@ -212,10 +385,23 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var cb = c as CheckBox;
                 var ddl = c as DropDownList;
                 var tb = c as TextBox;
+                var pnl = c as Panel;
 
                 if (cb != null) value = cb.Checked ? "1" : "0";
                 else if (ddl != null) value = ddl.SelectedValue;
                 else if (tb != null) value = tb.Text;
+                else if (pnl != null && key == "Payment_Methods_Enabled")
+                {
+                    // รวมวิธีที่ติ๊กกลับเป็น "CARD,QR,..." รูปแบบเดิมของคีย์นี้
+                    var picked = new List<string>();
+                    foreach (Control ch in pnl.Controls)
+                    {
+                        var mc = ch as CheckBox;
+                        if (mc != null && mc.Checked && mc.ID != null && mc.ID.StartsWith("cfg_Method_"))
+                            picked.Add(mc.ID.Substring("cfg_Method_".Length));
+                    }
+                    value = string.Join(",", picked.ToArray());
+                }
 
                 if (value == null) continue;
 
