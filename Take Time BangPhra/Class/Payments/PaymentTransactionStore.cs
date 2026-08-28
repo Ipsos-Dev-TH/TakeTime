@@ -238,6 +238,28 @@ namespace Take_Time_BangPhra.Payments
         }
 
         /// <summary>
+        /// บัตรใบนี้ไม่ผ่าน แต่ "รายการ" ยังเปิดอยู่ — เก็บเหตุผลไว้โดยไม่ปิดสถานะ
+        ///
+        /// ⚠ เดิมใช้ SaveChargeResult ที่เขียน Status = FAILED ทันที ⇒ ลิงก์ที่ส่งให้ลูกค้า
+        /// ใช้ไม่ได้อีกเลยหลังรูดพลาดครั้งเดียว (บัตรหมดวงเงิน/พิมพ์เลขผิด ก็ต้องเริ่มใหม่หมด)
+        /// การถูกปฏิเสธหนึ่งใบไม่ใช่จุดจบของรายการ — ต้องลองใบอื่นบนลิงก์เดิมได้
+        /// </summary>
+        public void SaveFailedAttempt(int id, PaymentChargeResult r)
+        {
+            Exec(@"UPDATE Payment_Transaction
+                      SET Fail_Reason = @msg, Raw_Request = @req, Raw_Response = @res,
+                          Updated_Date = GETDATE()
+                    WHERE ID = @id AND [Status] NOT IN ('PAID','REFUNDED')",
+                new Dictionary<string, object>
+                {
+                    { "@id", id },
+                    { "@msg", (object)Trim(r.Message, 500) ?? DBNull.Value },
+                    { "@req", (object)r.RawRequest ?? DBNull.Value },
+                    { "@res", (object)r.RawResponse ?? DBNull.Value }
+                });
+        }
+
+        /// <summary>
         /// ทำเครื่องหมายว่าจ่ายแล้ว — ทำได้ครั้งเดียวเท่านั้น
         /// คืน true เฉพาะครั้งที่เปลี่ยนสถานะสำเร็จจริง ⇒ ผู้เรียกจึงลงบันทึกปลายทางได้ปลอดภัย
         /// (เกตเวย์ส่ง webhook ซ้ำเป็นเรื่องปกติ + ผู้ใช้กดรีเฟรชหน้าผลลัพธ์ซ้ำได้)

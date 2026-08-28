@@ -214,6 +214,16 @@ namespace Take_Time_BangPhra.Payments
             HoldResult r = gw.CreateHold(cardToken, hold.Amount, holdRef,
                 "วงเงินประกันความเสียหาย การจอง #" + hold.ReservationId);
 
+            // ⚠ บัตรไม่ผ่าน ≠ รายการนี้จบแล้ว — เดิมบันทึกเป็น FAILED ทันที ลิงก์ที่ส่งให้
+            // ลูกค้าจึงใช้ไม่ได้อีกเลย ทั้งที่ควรลองบัตรใบอื่นบนลิงก์เดิมได้
+            // ⇒ คงสถานะ PENDING_CARD ไว้ เก็บเหตุผลไว้แสดงแทน
+            if (r.Status == HoldStatus.Failed)
+            {
+                SaveFailedAttempt(hold.ID, r);
+                return "กันวงเงินไม่สำเร็จ: " + (r.Message ?? "ไม่ทราบสาเหตุ")
+                     + " — ลองใหม่ด้วยบัตรใบอื่นได้ทันที";
+            }
+
             SaveGatewayResult(hold.ID, r);
 
             if (r.Status == HoldStatus.Held)
@@ -560,6 +570,74 @@ namespace Take_Time_BangPhra.Payments
                 }
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// มีคอลัมน์ Fail_Reason/Fail_Count แล้วหรือยัง (PHASE19_Migration_12)
+        /// ยังไม่รันไฟล์ก็ทำงานได้ แค่ไม่เก็บเหตุผล — ไม่ทำให้การกันวงเงินพัง
+        /// </summary>
+        private static bool? _hasFailCols;
+        private bool HasFailColumns()
+        {
+            if (_hasFailCols.HasValue) return _hasFailCols.Value;
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_conn, @"
+                    SELECT COUNT(*) AS N FROM sys.columns
+                     WHERE object_id = OBJECT_ID('dbo.Payment_Security_Holds')
+                       AND name IN ('Fail_Reason','Fail_Count')", null);
+                _hasFailCols = dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["N"]) >= 2;
+            }
+            catch { _hasFailCols = false; }
+            return _hasFailCols.Value;
+        }
+
+        /// <summary>
+        /// บัตรไม่ผ่าน — คงสถานะเดิมไว้ให้ลองใหม่ได้ เก็บเหตุผลและจำนวนครั้งไว้ให้คนดูออก
+        /// </summary>
+        private void SaveFailedAttempt(long id, HoldResult r)
+        {
+            string reason = Trunc(r.Message ?? "ไม่ทราบสาเหตุ", 400);
+            try
+            {
+                if (HasFailColumns())
+                    _code.DatabaseInsertSafe(_conn, @"
+                        UPDATE Payment_Security_Holds
+                           SET Fail_Reason = @why, Fail_Count = ISNULL(Fail_Count,0) + 1,
+                               Raw_Response = @raw, Updated_Date = GETDATE()
+                         WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", id }, { "@why", (object)reason ?? DBNull.Value },
+                            { "@raw", (object)r.RawResponse ?? DBNull.Value }
+                        });
+                else
+                    _code.DatabaseInsertSafe(_conn, @"
+                        UPDATE Payment_Security_Holds
+                           SET Raw_Response = @raw, Updated_Date = GETDATE()
+                         WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", id }, { "@raw", (object)r.RawResponse ?? DBNull.Value }
+                        });
+            }
+            catch { }
+        }
+
+        /// <summary>เหตุผลครั้งล่าสุดที่บัตรไม่ผ่าน — null ถ้าไม่มี/ยังไม่ได้รันไฟล์ migration</summary>
+        public string LastFailReason(string holdRef)
+        {
+            if (!HasFailColumns() || string.IsNullOrEmpty(holdRef)) return null;
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT Fail_Reason FROM Payment_Security_Holds WHERE Hold_Ref = @r",
+                    new Dictionary<string, object> { { "@r", holdRef } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                string s = Convert.ToString(dt.Rows[0]["Fail_Reason"]);
+                return string.IsNullOrWhiteSpace(s) ? null : s;
+            }
+            catch { return null; }
         }
 
         private void SaveGatewayResult(long id, HoldResult r)

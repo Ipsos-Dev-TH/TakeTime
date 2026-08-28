@@ -69,7 +69,13 @@ namespace Take_Time_BangPhra.Payment
                     return;
                 }
                 if (h.Status != HoldStatus.PendingCard)
-                { Fail("รายการนี้ปิดไปแล้ว (" + HoldStatus.Thai(h.Status) + ")"); return; }
+                {
+                    // สถานะปิดจริง ๆ (ยกเลิก/หมดอายุ) — บอกเหตุผลล่าสุดถ้ามี จะได้ไม่ต้องเดา
+                    string why = holds.LastFailReason(RefParam);
+                    Fail("รายการนี้ปิดไปแล้ว (" + HoldStatus.Thai(h.Status) + ")"
+                        + (string.IsNullOrEmpty(why) ? "" : " — ครั้งล่าสุด: " + why));
+                    return;
+                }
 
                 litTitle.Text = "วางวงเงินประกันความเสียหาย";
                 litDesc.Text = "การจอง #" + h.ReservationId
@@ -81,6 +87,12 @@ namespace Take_Time_BangPhra.Payment
                     + "• เช็คเอาท์แล้วไม่มีความเสียหาย → วงเงินคืนอัตโนมัติ ไม่มีการตัดเงิน<br/>"
                     + "• หากมีความเสียหาย ที่พักจะตัดเฉพาะค่าเสียหายจริง ส่วนที่เหลือคืนทันที<br/>"
                     + "• วงเงินที่กันไว้จะหมดอายุเองภายใน 7 วันหากไม่มีการดำเนินการ</div>";
+
+                // เคยลองแล้วไม่ผ่าน — บอกไปตรง ๆ ว่าติดอะไร จะได้เลือกบัตรให้ถูกใบ
+                string prevFail = holds.LastFailReason(RefParam);
+                if (!string.IsNullOrEmpty(prevFail))
+                    litMsg.Text = "<div class=\"alert err\">ครั้งก่อนไม่สำเร็จ: "
+                        + Server.HtmlEncode(prevFail) + "<br/>ลองใหม่ด้วยบัตรใบอื่นได้เลย</div>";
                 return;
             }
 
@@ -140,8 +152,12 @@ namespace Take_Time_BangPhra.Payment
             }
             else
             {
-                litMsg.Text = "<div class=\"alert err\">" + Server.HtmlEncode(msg) + "</div>";
-                RenderPage();   // วาดฟอร์มใหม่ให้ลองอีกครั้ง (สถานะยังไม่เปลี่ยน)
+                // ⚠ RenderPage() เขียนทับ litMsg เสมอ — เดิมเรียกหลังตั้งข้อความ ทำให้เหตุผลจริง
+                // จากเกตเวย์ ("บัตรถูกปฏิเสธ…") หายไป เหลือข้อความรวม ๆ ที่บอกอะไรไม่ได้
+                // ⇒ วาดหน้าก่อน แล้วค่อยวางข้อความจริงทับ
+                RenderPage();   // วาดฟอร์มใหม่ให้ลองอีกครั้งด้วยบัตรใบอื่น
+                if (!pnlDone.Visible)   // เว้นกรณีระหว่างนั้นสถานะกลายเป็นสำเร็จไปแล้ว
+                    litMsg.Text = "<div class=\"alert err\">" + Server.HtmlEncode(msg) + "</div>";
             }
         }
 

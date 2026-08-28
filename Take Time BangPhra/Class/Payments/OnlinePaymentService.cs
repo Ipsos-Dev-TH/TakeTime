@@ -354,9 +354,14 @@ namespace Take_Time_BangPhra.Payments
                 txn.Description, holdOnly: false,
                 returnUri: PaymentUrls.ReturnUrl(txn.TxnRef));
 
-            _store.SaveChargeResult(txn.ID, r);
+            if (!r.Success)
+            {
+                // บัตรไม่ผ่าน = ลองใบอื่นบนลิงก์เดิมได้ ไม่ปิดรายการทิ้ง
+                _store.SaveFailedAttempt(txn.ID, r);
+                return "ชำระเงินไม่สำเร็จ: " + (r.Message ?? "-") + " — ลองใหม่ด้วยบัตรใบอื่นได้ทันที";
+            }
 
-            if (!r.Success) return "ชำระเงินไม่สำเร็จ: " + (r.Message ?? "-");
+            _store.SaveChargeResult(txn.ID, r);
 
             if (r.Status == PaymentStatus.Paid)
             {
