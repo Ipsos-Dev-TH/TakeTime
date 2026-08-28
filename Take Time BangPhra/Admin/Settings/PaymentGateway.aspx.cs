@@ -312,9 +312,34 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void gvTxn_RowCommand(object sender, GridViewCommandEventArgs e)
         {
-            if (e.CommandName != "CheckStatus") return;
             int id;
             if (!int.TryParse(Convert.ToString(e.CommandArgument), out id)) return;
+
+            if (e.CommandName == "StartRefund")
+            {
+                var store = new PaymentTransactionStore(_conn);
+                PaymentTransaction t = store.GetById(id);
+                if (t == null) { Msg("err", "ไม่พบรายการ"); return; }
+
+                decimal already = store.GetRefundedAmount(t.ID);
+                decimal refundable = t.TotalPayable - already;
+
+                ViewState["refundId"] = t.ID;
+                pnlRefund.Visible = true;
+                litRefundInfo.Text = Server.HtmlEncode(t.TxnRef) + " · "
+                    + Server.HtmlEncode(PaymentSource.Thai(t.SourceType) + " " + (t.SourceId ?? "")) + " · ยอด "
+                    + t.TotalPayable.ToString("N2") + " บาท"
+                    + (already > 0 ? " (คืนไปแล้ว " + already.ToString("N2") + ")" : "")
+                    + (t.AppliedAt.HasValue
+                        ? "<br/><span style=\"color:#a12626\">⚠ รายการนี้ถูกบันทึกเข้าระบบแล้ว — คืนเงินแล้วต้องปรับใบเสร็จ/ยอดการจองด้วย</span>"
+                        : "");
+                txtRefundAmount.Text = refundable.ToString("0.##");
+                txtRefundReason.Text = "";
+                BindTxn();
+                return;
+            }
+
+            if (e.CommandName != "CheckStatus") return;
 
             try
             {
@@ -328,6 +353,44 @@ namespace Take_Time_BangPhra.Admin.Settings
                 Msg("err", "ตรวจสถานะไม่สำเร็จ: " + Server.HtmlEncode(ex.Message));
             }
             BindTxn();
+        }
+
+        protected void btnDoRefund_Click(object sender, EventArgs e)
+        {
+            long id = ViewState["refundId"] == null ? 0 : Convert.ToInt64(ViewState["refundId"]);
+            decimal amount;
+            if (id <= 0) { Msg("err", "ไม่พบรายการที่จะคืน"); pnlRefund.Visible = false; return; }
+            if (!decimal.TryParse(txtRefundAmount.Text, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out amount) || amount <= 0)
+            {
+                Msg("err", "กรุณากรอกยอดคืนให้ถูกต้อง");
+                pnlRefund.Visible = true;
+                return;
+            }
+
+            int? adminId = null;
+            try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            string result = new OnlinePaymentService(_conn)
+                .RefundTransaction(id, amount, txtRefundReason.Text.Trim(), adminId);
+
+            bool ok = result.StartsWith("คืนเงิน") && result.Contains("สำเร็จ");
+            Msg(ok ? "ok" : "err", Server.HtmlEncode(result));
+            pnlRefund.Visible = !ok;
+            BindTxn();
+        }
+
+        protected void btnCancelRefund_Click(object sender, EventArgs e)
+        {
+            pnlRefund.Visible = false;
+            ViewState["refundId"] = null;
+        }
+
+        protected bool ShowRefund(object status, object provider)
+        {
+            string s = Convert.ToString(status) ?? "";
+            string p = Convert.ToString(provider) ?? "";
+            return s == PaymentStatus.Paid && p != "MANUAL_QR" && p != "CASH";
         }
 
         // ── ข้อความสถานะ ──────────────────────────────────────────────────────

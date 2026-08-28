@@ -116,6 +116,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "~/Admin/Settings/PaymentGateway",
                 "จ่ายเงิน ชำระเงิน บัตรเครดิต omise payso เกตเวย์ gateway qr พร้อมเพย์ webhook รับเงิน ออนไลน์ วงเงินประกัน กันวงเงิน hold ช่องทาง",
                 false, null, Perm.SysPayment));
+            acc.Items.Add(new Item("ทดสอบเกตเวย์ (Sandbox)",
+                "คอนโซลทดสอบก่อนใช้จริง: QR/บัตรทดสอบ, กันวงเงิน-ตัด-คืน, คืนเงิน, ดูคำตอบดิบจากเกตเวย์",
+                "~/Payment/GatewayTest",
+                "sandbox ทดสอบ test เกตเวย์ omise บัตรทดสอบ 4242 กันวงเงิน คืนเงิน",
+                false, null, Perm.SysPayment));
             acc.Items.Add(new Item("จุดรับเงินออนไลน์ (หน้าร้าน)",
                 "สร้าง QR/ลิงก์เก็บเงินลูกค้าตรงหน้าเคาน์เตอร์ + สร้างลิงก์วางวงเงินประกันความเสียหาย",
                 "~/Payment/Charge",

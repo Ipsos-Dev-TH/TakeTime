@@ -598,6 +598,7 @@
     <Content Include="Payment\Pay.aspx" />
     <Content Include="Payment\Card.aspx" />
     <Content Include="Payment\Charge.aspx" />
+    <Content Include="Payment\GatewayTest.aspx" />
     <Content Include="Payment\PayResult.aspx" />
     <Content Include="Payment\PaymentHistory.aspx" />
     <Content Include="PostponeList.aspx" />
@@ -1628,6 +1629,13 @@
     </Compile>
     <Compile Include="Payment\Charge.aspx.designer.cs">
       <DependentUpon>Charge.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\GatewayTest.aspx.cs">
+      <DependentUpon>GatewayTest.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\GatewayTest.aspx.designer.cs">
+      <DependentUpon>GatewayTest.aspx</DependentUpon>
     </Compile>
     <Compile Include="Payment\PayResult.aspx.cs">
       <DependentUpon>PayResult.aspx</DependentUpon>

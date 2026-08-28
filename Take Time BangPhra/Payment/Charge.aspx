@@ -1,4 +1,4 @@
-<%@ Page Title="จุดรับเงินออนไลน์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Charge.aspx.cs" Inherits="Take_Time_BangPhra.Payment.Charge" %>
+﻿<%@ Page Title="จุดรับเงินออนไลน์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Charge.aspx.cs" Inherits="Take_Time_BangPhra.Payment.Charge" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -86,24 +86,38 @@
 
         <!-- ── วางวงเงินประกันความเสียหาย ── -->
         <asp:Panel ID="pnlHoldSection" runat="server" CssClass="qc-card">
-            <h3>🛡 วางวงเงินประกันความเสียหาย (กันวงเงินบนบัตร)</h3>
+            <h3>🛡 รับเงินประกันความเสียหาย (ตอนเช็คอิน)</h3>
             <div class="sub">
-                แทนการให้โอนเข้าบัญชี: ระบบ<b>กันวงเงิน</b>บนบัตรลูกค้าไว้เฉย ๆ ไม่มีเงินเข้า-ออก
-                เช็คเอาท์ไม่มีความเสียหาย → กด "คืนวงเงิน" ที่หน้าเช็คเอาท์ จบ ไม่ต้องเบิกเงินสดมาคืน
-                · <b>วงเงินอยู่ได้ 7 วัน</b> ระบบจะเตือนก่อนหมดอายุ
+                เลือกได้สองแบบ — <b>กันวงเงินบัตร</b>: ส่งลิงก์ให้ลูกค้ากรอกเอง เงินไม่เข้าไม่ออก
+                (วงเงินอยู่ได้ 7 วัน หมดอายุระบบสร้างลิงก์ใหม่ให้เอง) /
+                <b>เงินสด</b>: บันทึกรับเข้าระบบทันที ·
+                ทั้งสองแบบไปจบที่หน้าเช็คเอาท์: คืนทั้งหมด หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ
             </div>
             <div class="qc-row">
-                <div class="qc-f" style="max-width:160px">
+                <div class="qc-f" style="max-width:150px">
                     <label>เลขที่การจอง</label>
                     <asp:TextBox ID="txtHoldRes" runat="server" TextMode="Number" />
                 </div>
-                <div class="qc-f" style="max-width:180px">
+                <div class="qc-f" style="max-width:170px">
                     <label>วงเงินประกัน (บาท)</label>
-                    <asp:TextBox ID="txtHoldAmount" runat="server" TextMode="Number" step="0.01" />
+                    <asp:TextBox ID="txtHoldAmount" runat="server" TextMode="Number" step="0.01"
+                        placeholder="ว่าง = ตามห้องพัก" />
                 </div>
-                <asp:Button ID="btnHold" runat="server" CssClass="qc-btn" Text="สร้างลิงก์กันวงเงิน"
+                <div class="qc-f" style="max-width:210px">
+                    <label>วิธีรับประกัน</label>
+                    <asp:DropDownList ID="ddlHoldMethod" runat="server"
+                        style="width:100%;padding:10px 12px;border:1.5px solid #dbe3de;border-radius:9px;font-size:15px;">
+                        <asp:ListItem Value="CARD">💳 กันวงเงินบัตร (ส่งลิงก์)</asp:ListItem>
+                        <asp:ListItem Value="CASH">💵 รับเงินสด (บันทึกทันที)</asp:ListItem>
+                    </asp:DropDownList>
+                </div>
+                <asp:Button ID="btnHold" runat="server" CssClass="qc-btn" Text="รับประกัน / สร้างลิงก์"
                     OnClick="btnHold_Click" UseSubmitBehavior="false"
-                    OnClientClick="this.disabled=true;this.value='กำลังสร้าง…';" />
+                    OnClientClick="this.disabled=true;this.value='กำลังดำเนินการ…';" />
+            </div>
+            <div class="sub" style="margin-top:6px;">
+                ไม่กรอกยอด = ใช้วงเงินที่ตั้งไว้รายห้องพัก (Accommodation → Security_Deposit_Amount)
+                · เงินสด: บันทึกรับเข้าระบบทันที เช็คเอาท์ค่อยคืน/หัก — ไม่ต้องเบิกเงินมารอคืนอีก
             </div>
             <asp:Panel ID="pnlHoldResult" runat="server" Visible="false" style="margin-top:14px;">
                 <div class="qc-result">

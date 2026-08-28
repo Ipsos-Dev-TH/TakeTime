@@ -1,4 +1,4 @@
-<%@ Page Title="รับชำระเงินออนไลน์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PaymentGateway.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.PaymentGatewaySettings" %>
+﻿<%@ Page Title="รับชำระเงินออนไลน์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PaymentGateway.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.PaymentGatewaySettings" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -116,6 +116,41 @@
             <div class="pg-pre"><asp:Literal ID="litTest" runat="server" /></div>
         </asp:Panel>
 
+        <!-- ── คืนเงิน (เปิดจากปุ่มในตาราง) ── -->
+        <asp:Panel ID="pnlRefund" runat="server" CssClass="pg-card" Visible="false"
+            style="border-left:4px solid #a12626;">
+            <h3>↩ คืนเงินลูกค้า</h3>
+            <div class="sub">
+                ใช้เมื่อ: จ่ายซ้ำ/ซ้อน · ยกเลิกการจอง-ออเดอร์ที่จ่ายผ่านเกตเวย์ · เก็บผิดยอด (คืนบางส่วน)<br />
+                ⚠ การคืนเงิน<b>ไม่</b>ย้อนใบเสร็จ/ยอดการจองให้ — ต้องไปปรับเอกสารที่เกี่ยวข้องเองด้วย
+            </div>
+            <div class="pg-row">
+                <div class="pg-label"><b>รายการ</b></div>
+                <div class="pg-input"><asp:Literal ID="litRefundInfo" runat="server" /></div>
+            </div>
+            <div class="pg-row">
+                <div class="pg-label"><b>ยอดที่จะคืน (บาท)</b>
+                    <small>น้อยกว่ายอดเต็ม = คืนบางส่วน</small></div>
+                <div class="pg-input">
+                    <asp:TextBox ID="txtRefundAmount" runat="server" TextMode="Number" step="0.01"
+                        style="max-width:180px;" />
+                </div>
+            </div>
+            <div class="pg-row">
+                <div class="pg-label"><b>เหตุผล</b></div>
+                <div class="pg-input"><asp:TextBox ID="txtRefundReason" runat="server"
+                    placeholder="เช่น ลูกค้าจ่ายซ้ำ / ยกเลิกการจอง #123" /></div>
+            </div>
+            <div class="pg-actions">
+                <asp:Button ID="btnDoRefund" runat="server" Text="↩ ยืนยันคืนเงิน"
+                    OnClick="btnDoRefund_Click" UseSubmitBehavior="false"
+                    OnClientClick="if(!confirm('ยืนยันคืนเงินตามยอดที่กรอก? เงินจะถูกส่งกลับช่องทางเดิมของลูกค้า'))return false;this.disabled=true;"
+                    style="padding:11px 20px;border:0;border-radius:10px;background:#a12626;color:#fff;font-weight:600;cursor:pointer;" />
+                <asp:Button ID="btnCancelRefund" runat="server" CssClass="pg-btn ghost" Text="ยกเลิก"
+                    OnClick="btnCancelRefund_Click" CausesValidation="false" />
+            </div>
+        </asp:Panel>
+
         <!-- ── รายการชำระเงินล่าสุด ── -->
         <div class="pg-card">
             <h3>รายการชำระเงินล่าสุด</h3>
@@ -146,6 +181,10 @@
                             <asp:LinkButton ID="lbCheck" runat="server" CommandName="CheckStatus"
                                 CommandArgument='<%# Eval("ID") %>' Text="ตรวจสถานะ"
                                 Visible='<%# ShowCheck(Eval("Status")) %>' CausesValidation="false" />
+                            <asp:LinkButton ID="lbRefund" runat="server" CommandName="StartRefund"
+                                CommandArgument='<%# Eval("ID") %>' Text="↩ คืนเงิน"
+                                Visible='<%# ShowRefund(Eval("Status"), Eval("Provider")) %>'
+                                CausesValidation="false" style="color:#a12626;" />
                         </ItemTemplate>
                     </asp:TemplateField>
                 </Columns>

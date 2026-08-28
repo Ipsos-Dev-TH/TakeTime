@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -30,20 +30,61 @@ namespace Take_Time_BangPhra.Payments
 
         public SecurityHoldService(string connectionString) { _conn = connectionString; }
 
-        /// <summary>ฟีเจอร์เปิดและเกตเวย์รองรับการกันวงเงินไหม</summary>
+        /// <summary>
+        /// ระบบเงินประกันเปิดใช้ไหม — ครอบทั้งเงินสดและบัตร
+        /// (เงินสดไม่ต้องพึ่งเกตเวย์ ขอแค่ตารางพร้อม + สวิตช์เปิด)
+        /// </summary>
         public bool IsAvailable
         {
             get
             {
                 try
                 {
-                    if (!PaymentGatewayConfig.IsEnabled) return false;
                     if (!PaymentGatewayConfig.GetBool("Payment_SecurityHold_Enabled", false)) return false;
-                    if (!TableReady()) return false;
+                    return TableReady();
+                }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>กันวงเงินบนบัตรได้ไหม (ต้องมีเกตเวย์ที่รองรับ + ระบบชำระเงินเปิด)</summary>
+        public bool IsCardHoldAvailable
+        {
+            get
+            {
+                try
+                {
+                    if (!IsAvailable) return false;
+                    if (!PaymentGatewayConfig.IsEnabled) return false;
                     return new OnlinePaymentService(_conn).Gateway() is IDepositGateway;
                 }
                 catch { return false; }
             }
+        }
+
+        /// <summary>
+        /// วงเงินประกันแนะนำของการจองนี้ — สูงสุดของค่าที่ตั้งรายห้อง (Accommodation.
+        /// Security_Deposit_Amount) ของห้องในใบจอง; ไม่ได้ตั้งเลยใช้ค่ากลาง
+        /// </summary>
+        public decimal SuggestedAmount(int reservationId)
+        {
+            decimal fallback = PaymentGatewayConfig.GetDecimal("Payment_SecurityHold_Default", 1000m);
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn, @"
+                    SELECT MAX(a.Security_Deposit_Amount) AS Amt
+                      FROM Reservation_Accommodation ra
+                      JOIN Accommodation a ON a.ID = ra.Accommodation_ID
+                     WHERE ra.Reservation_ID = @r AND a.Security_Deposit_Amount IS NOT NULL",
+                    new Dictionary<string, object> { { "@r", reservationId } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0]["Amt"] != DBNull.Value)
+                {
+                    decimal v = Convert.ToDecimal(dt.Rows[0]["Amt"]);
+                    if (v > 0) return v;
+                }
+            }
+            catch { }
+            return fallback;
         }
 
         public bool TableReady()
@@ -77,6 +118,7 @@ namespace Take_Time_BangPhra.Payments
         {
             error = null;
             if (!IsAvailable) { error = "ระบบวงเงินประกันยังไม่เปิดใช้งาน"; return null; }
+            if (!IsCardHoldAvailable) { error = "เกตเวย์ยังไม่พร้อมกันวงเงินบัตร — รับเป็นเงินสดแทนได้"; return null; }
             if (amount <= 0) { error = "จำนวนเงินต้องมากกว่า 0"; return null; }
 
             var open = GetOpenHold(reservationId);
@@ -105,6 +147,50 @@ namespace Take_Time_BangPhra.Payments
                 });
 
             return CardUrl(holdRef);
+        }
+
+        /// <summary>
+        /// รับเงินประกันเป็น "เงินสด" — บันทึกเข้าระบบทันที (สถานะ HELD, ไม่มีวันหมดอายุ)
+        /// เดิมเงินก้อนนี้อยู่นอกระบบทั้งขาเข้า-ขาออก ตอนนี้มีร่องรอยครบ:
+        /// รับเมื่อไหร่ เท่าไหร่ คืน/หักเมื่อไหร่ โดยใคร
+        /// </summary>
+        public string CreateCashHold(int reservationId, decimal amount, int? adminId, out string error)
+        {
+            error = null;
+            if (!IsAvailable) { error = "ระบบวงเงินประกันยังไม่เปิดใช้งาน"; return null; }
+            if (amount <= 0) { error = "จำนวนเงินต้องมากกว่า 0"; return null; }
+
+            var open = GetOpenHold(reservationId);
+            if (open != null)
+            {
+                error = "การจองนี้มีเงินประกันเปิดอยู่แล้ว (" + open.HoldRef + " · "
+                      + HoldStatus.Thai(open.Status) + ")";
+                return null;
+            }
+
+            string holdRef = "HOLD-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-"
+                           + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
+
+            _code.DatabaseInsertSafe(_conn, @"
+                INSERT INTO Payment_Security_Holds
+                    (Hold_Ref, Reservation_ID, Provider, Amount, [Status], Held_At, Created_Date, Created_By)
+                VALUES (@r, @res, 'CASH', @amt, @st, GETDATE(), GETDATE(), @by)",
+                new Dictionary<string, object>
+                {
+                    { "@r", holdRef },
+                    { "@res", reservationId },
+                    { "@amt", amount },
+                    { "@st", HoldStatus.Held },
+                    { "@by", (object)adminId ?? DBNull.Value }
+                });
+
+            Notify.Send(Notify.Ev.PaymentHold,
+                "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท
+"
+                + "การจอง #" + reservationId + " · " + holdRef
+                + "
+เช็คเอาท์: คืนเงินสดก้อนนี้ หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ");
+            return holdRef;
         }
 
         public static string CardUrl(string holdRef)
@@ -171,10 +257,20 @@ namespace Take_Time_BangPhra.Payments
             if (!TryTransition(hold.ID, HoldStatus.Held, "CAPTURING"))
                 return "รายการนี้กำลังถูกดำเนินการอยู่ กรุณารอสักครู่แล้วรีเฟรช";
 
-            IDepositGateway gw = Gateway();
-            HoldResult r = gw == null
-                ? new HoldResult { Success = false, Message = "เกตเวย์ไม่รองรับ" }
-                : gw.CaptureHold(hold.ProviderChargeId, amount);
+            bool isCash = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+            HoldResult r;
+            if (isCash)
+            {
+                // เงินสดอยู่ในมือเราแล้ว — ไม่มีอะไรต้องยิง แค่บันทึกการตัดสินใจ
+                r = new HoldResult { Success = true, Status = HoldStatus.Captured };
+            }
+            else
+            {
+                IDepositGateway gw = Gateway();
+                r = gw == null
+                    ? new HoldResult { Success = false, Message = "เกตเวย์ไม่รองรับ" }
+                    : gw.CaptureHold(hold.ProviderChargeId, amount);
+            }
 
             if (!r.Success)
             {
@@ -203,7 +299,7 @@ namespace Take_Time_BangPhra.Payments
                 var req = new PaymentChargeRequest
                 {
                     TxnRef = hold.HoldRef + "-CAP",
-                    Method = PaymentGatewayConfig.MethodCard,
+                    Method = isCash ? PaymentGatewayConfig.MethodManualQr : PaymentGatewayConfig.MethodCard,
                     SourceType = "DAMAGE",
                     SourceId = hold.ReservationId.ToString(),
                     Amount = amount,
@@ -214,7 +310,9 @@ namespace Take_Time_BangPhra.Payments
                 var txn = store.Create(req, hold.Provider, 0m);
                 store.MarkPaid(txn.ID, hold.ProviderChargeId, null, hold.CardBrand, hold.CardLast4);
                 store.SetApplied(txn.ID,
-                    "ตัดจากวงเงินประกัน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหายโดยเลือกแหล่งเงินของเกตเวย์",
+                    isCash
+                        ? "หักจากเงินประกันเงินสด " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)"
+                        : "ตัดจากวงเงินประกัน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหายโดยเลือกแหล่งเงินของเกตเวย์",
                     null);
             }
             catch (Exception ex)
@@ -222,15 +320,24 @@ namespace Take_Time_BangPhra.Payments
                 _code.Logs(_conn, "SecurityHold", "บันทึก txn หลัง capture ไม่สำเร็จ: " + ex.Message, "System");
             }
 
+            decimal remainder = hold.Amount - amount;
             Notify.Send(Notify.Ev.PaymentHold,
-                "💥 <b>ตัดค่าเสียหายจากวงเงินประกัน</b> " + amount.ToString("N2")
-                + " / " + hold.Amount.ToString("N2") + " บาท\nการจอง #" + hold.ReservationId
+                "💥 <b>หักค่าเสียหายจากเงินประกัน" + (isCash ? " (เงินสด)" : "") + "</b> "
+                + amount.ToString("N2") + " / " + hold.Amount.ToString("N2") + " บาท\nการจอง #" + hold.ReservationId
                 + (string.IsNullOrEmpty(reason) ? "" : "\n📝 " + Notify.E(reason))
-                + "\nส่วนที่เหลือคืนวงเงินให้ลูกค้าอัตโนมัติ · อย่าลืมออกใบเสร็จค่าเสียหาย");
+                + (isCash
+                    ? (remainder > 0 ? "\n💵 ต้องคืนเงินสดลูกค้า " + remainder.ToString("N2") + " บาท" : "")
+                    : "\nส่วนที่เหลือคืนวงเงินให้ลูกค้าอัตโนมัติ")
+                + " · อย่าลืมออกใบเสร็จค่าเสียหาย");
+
+            if (isCash)
+                return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
+                     + (remainder > 0 ? " — คืนเงินสดลูกค้า " + remainder.ToString("N2") + " บาท" : "")
+                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)";
 
             return "ตัดค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
-                 + (amount < hold.Amount
-                    ? " ส่วนที่เหลือ " + (hold.Amount - amount).ToString("N2") + " บาท คืนวงเงินอัตโนมัติ"
+                 + (remainder > 0
+                    ? " ส่วนที่เหลือ " + remainder.ToString("N2") + " บาท คืนวงเงินอัตโนมัติ"
                     : "")
                  + " — ไปออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เกตเวย์) ให้เรียบร้อย";
         }
@@ -253,10 +360,19 @@ namespace Take_Time_BangPhra.Payments
             if (!TryTransition(hold.ID, HoldStatus.Held, "RELEASING"))
                 return "รายการนี้กำลังถูกดำเนินการอยู่";
 
-            IDepositGateway gw = Gateway();
-            HoldResult r = gw == null
-                ? new HoldResult { Success = false, Message = "เกตเวย์ไม่รองรับ" }
-                : gw.ReleaseHold(hold.ProviderChargeId);
+            bool isCash = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+            HoldResult r;
+            if (isCash)
+            {
+                r = new HoldResult { Success = true, Status = HoldStatus.Released };
+            }
+            else
+            {
+                IDepositGateway gw = Gateway();
+                r = gw == null
+                    ? new HoldResult { Success = false, Message = "เกตเวย์ไม่รองรับ" }
+                    : gw.ReleaseHold(hold.ProviderChargeId);
+            }
 
             if (!r.Success)
             {
@@ -277,9 +393,13 @@ namespace Take_Time_BangPhra.Payments
                 });
 
             Notify.Send(Notify.Ev.PaymentHold,
-                "✅ <b>คืนวงเงินประกันแล้ว</b> " + hold.Amount.ToString("N2") + " บาท\n"
-                + "การจอง #" + hold.ReservationId + " · ไม่มีการตัดเงินใด ๆ");
-            return "คืนวงเงิน " + hold.Amount.ToString("N2") + " บาท เรียบร้อย — เงินไม่เคยออกจากบัตรลูกค้า";
+                (isCash ? "✅ <b>คืนเงินประกันเงินสดแล้ว</b> " : "✅ <b>คืนวงเงินประกันแล้ว</b> ")
+                + hold.Amount.ToString("N2") + " บาท\n"
+                + "การจอง #" + hold.ReservationId
+                + (isCash ? " · คืนเงินสดให้ลูกค้าที่เคาน์เตอร์" : " · ไม่มีการตัดเงินใด ๆ"));
+            return isCash
+                ? "บันทึกคืนเงินประกันแล้ว — คืนเงินสด " + hold.Amount.ToString("N2") + " บาท ให้ลูกค้า"
+                : "คืนวงเงิน " + hold.Amount.ToString("N2") + " บาท เรียบร้อย — เงินไม่เคยออกจากบัตรลูกค้า";
         }
 
         // ── งานเบื้องหลัง: เตือนก่อนหมดอายุ + ปิดรายการที่หมดอายุ ─────────────
@@ -312,14 +432,29 @@ namespace Take_Time_BangPhra.Payments
                 if (expired != null)
                     foreach (DataRow r in expired.Rows)
                     {
+                        int resId = Convert.ToInt32(r["Reservation_ID"]);
+                        decimal amt = Convert.ToDecimal(r["Amount"]);
                         _code.DatabaseInsertSafe(_conn,
                             "UPDATE Payment_Security_Holds SET [Status]=@st, Updated_Date=GETDATE() WHERE ID=@id AND [Status]=@held",
                             new Dictionary<string, object>
                             { { "@st", HoldStatus.Expired }, { "@id", r["ID"] }, { "@held", HoldStatus.Held } });
+
+                        // ตามที่ตกลง: เกิน 7 วัน → สร้างลิงก์ใหม่ให้เอง (เฉพาะการจองที่ยังพักอยู่)
+                        // ลิงก์ใหม่แนบไปกับแจ้งเตือนเลย พนักงานแค่ส่งต่อให้ลูกค้า
+                        string newLink = null;
+                        if (IsCardHoldAvailable && ReservationStillActive(resId))
+                        {
+                            string linkErr;
+                            newLink = CreateHoldRequest(resId, amt, null, out linkErr);
+                        }
+
                         Notify.Send(Notify.Ev.PaymentHold,
-                            "⌛ <b>วงเงินประกันหมดอายุแล้ว</b> " + Convert.ToDecimal(r["Amount"]).ToString("N2")
-                            + " บาท\nการจอง #" + r["Reservation_ID"]
-                            + "\nวงเงินคืนลูกค้าอัตโนมัติโดยเกตเวย์ — ถ้ายังต้องการประกัน ให้ส่งลิงก์กันวงเงินใหม่");
+                            "⌛ <b>วงเงินประกันหมดอายุแล้ว</b> " + amt.ToString("N2")
+                            + " บาท\nการจอง #" + resId
+                            + "\nวงเงินคืนลูกค้าอัตโนมัติโดยเกตเวย์"
+                            + (newLink != null
+                                ? "\n🔗 <b>ลิงก์กันวงเงินรอบใหม่ (ส่งให้ลูกค้าได้เลย):</b>\n" + newLink
+                                : "\nการจองปิดแล้วหรือเกตเวย์ไม่พร้อม — ไม่สร้างลิงก์ใหม่"));
                     }
 
                 // 2) เตือนก่อนหมดอายุ (ครั้งเดียวต่อรายการ)
@@ -348,6 +483,24 @@ namespace Take_Time_BangPhra.Payments
             {
                 _code.Logs(_conn, "SecurityHold", "sweep ล้มเหลว: " + ex.Message, "System");
             }
+        }
+
+        /// <summary>การจองยังไม่จบ (ยังไม่เช็คเอาท์/ยกเลิก) — ค่อยต่ออายุวงเงินให้</summary>
+        private bool ReservationStillActive(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Status, CheckoutDate FROM Reservation WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                string st = Convert.ToString(dt.Rows[0]["Status"]) ?? "";
+                if (st.Contains("ยกเลิก") || st.Contains("เสร็จสิ้น")) return false;
+                if (dt.Rows[0]["CheckoutDate"] != DBNull.Value
+                    && Convert.ToDateTime(dt.Rows[0]["CheckoutDate"]).Date < DateTime.Today) return false;
+                return true;
+            }
+            catch { return false; }
         }
 
         // ── อ่านข้อมูล ──────────────────────────────────────────────────────

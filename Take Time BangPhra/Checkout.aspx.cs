@@ -48,12 +48,25 @@ namespace Take_Time_BangPhra
                     return;
                 }
 
-                litHoldInfo.Text = "กันวงเงินไว้ <b>" + hold.Amount.ToString("N2") + " บาท</b>"
-                    + (string.IsNullOrEmpty(hold.CardLast4) ? "" : " (บัตร ****" + Server.HtmlEncode(hold.CardLast4) + ")")
-                    + (hold.ExpiresAt.HasValue
-                        ? " · วงเงินหมดอายุ " + hold.ExpiresAt.Value.ToString("dd/MM/yyyy HH:mm") : "")
-                    + "<br/>ไม่มีความเสียหาย → กด \"คืนวงเงิน\" · มีความเสียหาย → กรอกยอดแล้วกด \"ตัดค่าเสียหาย\" "
-                    + "(ส่วนที่เหลือคืนลูกค้าอัตโนมัติ)";
+                bool cashHold = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+                if (cashHold)
+                {
+                    litHoldInfo.Text = "รับเงินประกันเป็น<b>เงินสด " + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (hold.HeldAt.HasValue ? " (รับเมื่อ " + hold.HeldAt.Value.ToString("dd/MM/yyyy HH:mm") + ")" : "")
+                        + "<br/>ไม่มีความเสียหาย → กด \"คืนทั้งหมด\" แล้ว<b>คืนเงินสดให้ลูกค้า</b> · "
+                        + "มีความเสียหาย → กรอกยอดแล้วกด \"หักค่าเสียหาย\" (ระบบบอกยอดเงินสดที่ต้องคืน)";
+                    btnReleaseHold.Text = "✅ คืนทั้งหมด (คืนเงินสด " + hold.Amount.ToString("N2") + " บาท)";
+                    btnCaptureHold.Text = "💥 หักค่าเสียหาย";
+                }
+                else
+                {
+                    litHoldInfo.Text = "กันวงเงินไว้ <b>" + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (string.IsNullOrEmpty(hold.CardLast4) ? "" : " (บัตร ****" + Server.HtmlEncode(hold.CardLast4) + ")")
+                        + (hold.ExpiresAt.HasValue
+                            ? " · วงเงินหมดอายุ " + hold.ExpiresAt.Value.ToString("dd/MM/yyyy HH:mm") : "")
+                        + "<br/>ไม่มีความเสียหาย → กด \"คืนวงเงิน\" · มีความเสียหาย → กรอกยอดแล้วกด \"ตัดค่าเสียหาย\" "
+                        + "(ส่วนที่เหลือคืนลูกค้าอัตโนมัติ)";
+                }
             }
             catch { /* ส่วนเสริม — พังต้องไม่กระทบเช็คเอาท์ */ }
         }

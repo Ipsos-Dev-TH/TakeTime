@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Configuration;
 using Take_Time_BangPhra.Payments;
 
@@ -136,18 +136,47 @@ namespace Take_Time_BangPhra.Payment
 
         protected void btnHold_Click(object sender, EventArgs e)
         {
-            int resId; decimal amount;
+            int resId;
             if (!int.TryParse(txtHoldRes.Text, out resId) || resId <= 0)
             { Msg("err", "กรุณาใส่เลขที่การจอง"); BindToday(); return; }
-            if (!decimal.TryParse(txtHoldAmount.Text, System.Globalization.NumberStyles.Any,
+
+            var holds = new SecurityHoldService(_conn);
+
+            // ยอดว่าง = ใช้วงเงินที่ตั้งรายห้องพักของการจองนี้ (ไม่ตั้ง → ค่ากลาง)
+            decimal amount;
+            if (string.IsNullOrWhiteSpace(txtHoldAmount.Text))
+            {
+                amount = holds.SuggestedAmount(resId);
+                txtHoldAmount.Text = amount.ToString("0.##");
+            }
+            else if (!decimal.TryParse(txtHoldAmount.Text, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out amount) || amount <= 0)
             { Msg("err", "กรุณาใส่วงเงินประกันให้ถูกต้อง"); BindToday(); return; }
 
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
 
+            // ── เงินสด: บันทึกรับทันที จบในคลิกเดียว ──
+            if (ddlHoldMethod.SelectedValue == "CASH")
+            {
+                string cashErr;
+                string holdRef = holds.CreateCashHold(resId, amount, adminId, out cashErr);
+                if (holdRef == null)
+                {
+                    Msg("err", Server.HtmlEncode(cashErr ?? "บันทึกไม่สำเร็จ"));
+                    BindToday();
+                    return;
+                }
+                Msg("ok", "รับเงินประกันเงินสด " + amount.ToString("N2") + " บาท ของการจอง #" + resId
+                    + " แล้ว (" + Server.HtmlEncode(holdRef) + ")<br/>"
+                    + "ตอนเช็คเอาท์: หน้าเช็คเอาท์จะแสดงเงินก้อนนี้ให้เลือก \"คืนเงินสด\" หรือ \"หักค่าเสียหาย\"");
+                BindToday();
+                return;
+            }
+
+            // ── บัตร: สร้างลิงก์ให้ลูกค้ากรอกเอง ──
             string error;
-            string link = new SecurityHoldService(_conn).CreateHoldRequest(resId, amount, adminId, out error);
+            string link = holds.CreateHoldRequest(resId, amount, adminId, out error);
             if (link == null)
             {
                 Msg("err", Server.HtmlEncode(error ?? "สร้างไม่สำเร็จ"));

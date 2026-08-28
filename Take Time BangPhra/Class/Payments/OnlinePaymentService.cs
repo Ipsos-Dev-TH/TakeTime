@@ -370,6 +370,60 @@ namespace Take_Time_BangPhra.Payments
             return "อยู่ระหว่างดำเนินการ — ระบบจะตรวจสถานะให้อัตโนมัติ";
         }
 
+        /// <summary>
+        /// คืนเงินรายการที่จ่ายผ่านเกตเวย์ (เต็มหรือบางส่วน)
+        ///
+        /// เงื่อนไขการใช้ (วิเคราะห์ไว้ใน docs/Online_Payment_Omise.md):
+        ///   1. ลูกค้าจ่ายซ้ำ/ซ้อน (รายการ PAID ที่ยังไม่ถูกบันทึกเข้าใบจอง)
+        ///   2. ยกเลิกการจองแบบคืนเงิน ที่รับเงินผ่านเกตเวย์
+        ///   3. ยกเลิกออเดอร์/กิจกรรมหลังจ่ายแล้ว
+        ///   4. เก็บผิดยอดที่จุดรับเงินหน้าร้าน (คืนบางส่วน)
+        ///
+        /// ⚠ การคืนเงิน "ไม่" ย้อนบันทึกฝั่ง TakeTime/NextAcc ให้ — ใบเสร็จ/Payment_History
+        ///   ที่ออกไปแล้วต้องให้พนักงานยกเลิก/ปรับตามขั้นตอนเดิม (ระบบเตือนในข้อความผลลัพธ์)
+        /// กันคืนเกินด้วยยอดคืนสะสม (Refunded_Amount) — Omise เองรับคืนได้ไม่เกิน 365 วัน
+        /// </summary>
+        public string RefundTransaction(long txnId, decimal amount, string reason, int? adminId)
+        {
+            PaymentTransaction txn = _store.GetById((int)txnId);
+            if (txn == null) return "ไม่พบรายการ";
+            if (txn.Provider == "MANUAL_QR")
+                return "รายการโอน/แนบสลิปไม่ได้ผ่านเกตเวย์ — คืนเงินด้วยการโอนกลับตามปกติ";
+            if (txn.Status != PaymentStatus.Paid && txn.Status != PaymentStatus.Refunded)
+                return "คืนได้เฉพาะรายการที่จ่ายสำเร็จแล้ว (สถานะปัจจุบัน: " + PaymentStatus.Thai(txn.Status) + ")";
+            if (amount <= 0) return "ยอดคืนต้องมากกว่า 0";
+
+            decimal already = _store.GetRefundedAmount(txn.ID);
+            decimal refundable = txn.TotalPayable - already;
+            if (amount > refundable + 0.005m)
+                return "คืนได้อีกไม่เกิน " + refundable.ToString("N2") + " บาท (คืนไปแล้ว "
+                     + already.ToString("N2") + " จากยอด " + txn.TotalPayable.ToString("N2") + ")";
+
+            IPaymentGateway gw = Gateway(txn.Provider);
+            PaymentStatusResult r = gw.Refund(txn.ProviderTxnId, txn.TxnRef, amount, reason);
+            if (r == null) return "เกตเวย์นี้ยังไม่ได้ตั้งค่าเส้นทางคืนเงิน";
+            if (!r.Success) return "คืนเงินไม่สำเร็จ: " + (r.Message ?? "-");
+
+            bool fullyRefunded = already + amount >= txn.TotalPayable - 0.005m;
+            _store.RecordRefund(txn.ID, amount, fullyRefunded, reason, adminId);
+
+            Log("Refund " + txn.TxnRef + " ยอด " + amount.ToString("N2")
+                + (fullyRefunded ? " (คืนครบ)" : " (บางส่วน)") + " เหตุผล: " + (reason ?? "-"));
+            Notify.Send(Notify.Ev.PaymentOnline,
+                "↩️ <b>คืนเงินลูกค้า</b> " + amount.ToString("N2") + " บาท"
+                + (fullyRefunded ? " (ครบทั้งยอด)" : " (บางส่วน)") + "\n"
+                + Notify.E(PaymentSource.Thai(txn.SourceType) + " " + (txn.SourceId ?? ""))
+                + " · อ้างอิง " + Notify.E(txn.TxnRef)
+                + (string.IsNullOrEmpty(reason) ? "" : "\n📝 " + Notify.E(reason)));
+
+            string warn = txn.AppliedAt.HasValue
+                ? " ⚠ รายการนี้ถูกบันทึกเข้าระบบไปแล้ว — อย่าลืมยกเลิก/ปรับใบเสร็จหรือยอดการจองให้ตรงด้วย"
+                : "";
+            return "คืนเงิน " + amount.ToString("N2") + " บาท สำเร็จ"
+                 + (fullyRefunded ? " (คืนครบทั้งยอด)" : " (คืนสะสม " + (already + amount).ToString("N2") + ")")
+                 + warn;
+        }
+
         public string RefreshStatus(PaymentTransaction txn)
         {
             if (txn == null) return "ไม่พบรายการ";

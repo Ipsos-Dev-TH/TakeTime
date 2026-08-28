@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -323,6 +323,59 @@ namespace Take_Time_BangPhra.Payments
                     { "@n", (object)Trim(note, 500) ?? DBNull.Value },
                     { "@r", (object)Trim(receiptId, 50) ?? DBNull.Value }
                 });
+        }
+
+        /// <summary>ยอดที่คืนลูกค้าไปแล้วสะสม (คอลัมน์มาจาก PHASE19_11 — ยังไม่มี = 0)</summary>
+        public decimal GetRefundedAmount(int id)
+        {
+            try
+            {
+                using (var con = new SqlConnection(_conn))
+                {
+                    con.Open();
+                    using (var cmd = new SqlCommand(
+                        "SELECT ISNULL(Refunded_Amount, 0) FROM Payment_Transaction WHERE ID = @id", con))
+                    {
+                        cmd.Parameters.AddWithValue("@id", id);
+                        object o = cmd.ExecuteScalar();
+                        return o == null || o == DBNull.Value ? 0m : Convert.ToDecimal(o);
+                    }
+                }
+            }
+            catch { return 0m; }   // คอลัมน์ยังไม่มี → ถือว่ายังไม่เคยคืน
+        }
+
+        /// <summary>บันทึกการคืนเงิน — คืนครบ = สถานะ REFUNDED, บางส่วน = คง PAID + สะสมยอด</summary>
+        public void RecordRefund(int id, decimal amount, bool fullyRefunded, string reason, int? adminId)
+        {
+            string note = "คืนเงิน " + amount.ToString("N2") + " บาท "
+                        + DateTime.Now.ToString("dd/MM/yyyy HH:mm")
+                        + (string.IsNullOrEmpty(reason) ? "" : " (" + Trim(reason, 120) + ")");
+            try
+            {
+                Exec(@"UPDATE Payment_Transaction
+                          SET Refunded_Amount = ISNULL(Refunded_Amount, 0) + @amt,
+                              [Status] = CASE WHEN @full = 1 THEN 'REFUNDED' ELSE [Status] END,
+                              Applied_Note = LEFT(ISNULL(Applied_Note,'') + @sep + @note, 500),
+                              Updated_Date = GETDATE()
+                        WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", id }, { "@amt", amount }, { "@full", fullyRefunded ? 1 : 0 },
+                        { "@sep", " | " }, { "@note", note }
+                    });
+            }
+            catch
+            {
+                // ฐานยังไม่มีคอลัมน์ Refunded_Amount → บันทึกเท่าที่ทำได้ (สถานะ + หมายเหตุ)
+                Exec(@"UPDATE Payment_Transaction
+                          SET [Status] = CASE WHEN @full = 1 THEN 'REFUNDED' ELSE [Status] END,
+                              Applied_Note = LEFT(ISNULL(Applied_Note,'') + @sep + @note, 500),
+                              Updated_Date = GETDATE()
+                        WHERE ID = @id",
+                    new Dictionary<string, object>
+                    { { "@id", id }, { "@full", fullyRefunded ? 1 : 0 }, { "@sep", " | " }, { "@note", note } });
+            }
         }
 
         /// <summary>ปิดรายการที่เลยเวลาไปแล้ว — เรียกจากงานเบื้องหลัง</summary>
