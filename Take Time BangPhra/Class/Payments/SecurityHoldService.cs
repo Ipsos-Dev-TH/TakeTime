@@ -185,11 +185,9 @@ namespace Take_Time_BangPhra.Payments
                 });
 
             Notify.Send(Notify.Ev.PaymentHold,
-                "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท
-"
+                "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท\n"
                 + "การจอง #" + reservationId + " · " + holdRef
-                + "
-เช็คเอาท์: คืนเงินสดก้อนนี้ หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ");
+                + "\nเช็คเอาท์: คืนเงินสดก้อนนี้ หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ");
             return holdRef;
         }
 
