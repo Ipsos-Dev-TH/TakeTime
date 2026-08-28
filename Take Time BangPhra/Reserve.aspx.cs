@@ -275,6 +275,9 @@ namespace Take_Time_BangPhra
             {
                 // Reserve mode: Don't show payment history (new reservation)
                 divPaymentHistory.Visible = false;
+
+                // เสนอทางจ่ายด้วยบัตร/QR ทันที แทนการโอน+แนบสลิป (เงียบถ้าสวิตช์ปิด)
+                SetupPayNowOption();
             }
 
             // 🔧 IMPORTANT: Rebind product charges on page load, BUT NOT during postback from delete button
@@ -1521,7 +1524,10 @@ namespace Take_Time_BangPhra
                             bool hasValidPaymentProof = FileUpload1.HasFile ||
                                                        Image1.ImageUrl != "./Images/บัญชี.png" ||
                                                        TextBox1.Text == "02" ||
-                                                       DropDownList2.SelectedItem.Text == "เงินสด";
+                                                       DropDownList2.SelectedItem.Text == "เงินสด" ||
+                                                       // เลือกจ่ายด้วยบัตร/QR ทันที = ยังไม่มีสลิปเป็นเรื่องปกติ
+                                                       // ใบจองจะถูกบันทึกเป็น "รอชำระเงิน" แล้วพาไปจ่ายต่อ
+                                                       PayNowChosen;
 
                             // ✅ Skip slip validation for edit without additional deposit
                             if ((!needSlipValidation || hasValidPaymentProof) && checkpaymentselect == 0)
@@ -3347,9 +3353,13 @@ namespace Take_Time_BangPhra
                                                     checkinDate.Value,
                                                     checkinDate.Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
-                                                    "มัดจำแล้ว",
+                                                    // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
+                                                    // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
+                                                    PayNowChosen
+                                                        ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
+                                                        : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3365,9 +3375,13 @@ namespace Take_Time_BangPhra
                                                     DateTime.Parse("1990-01-01"),
                                                     DateTime.Parse("1990-01-01"),
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
-                                                    "มัดจำแล้ว",
+                                                    // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
+                                                    // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
+                                                    PayNowChosen
+                                                        ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
+                                                        : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3765,6 +3779,26 @@ namespace Take_Time_BangPhra
                                             {
                                                 Response.Redirect($"./Reserve?command=reserve&date={TextBox12.Text}", false);
                                                 HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                            }
+                                            else if (PayNowChosen)
+                                            {
+                                                // เลือกจ่ายทันที → พาไปหน้าชำระเงินต่อเลย
+                                                // ใบจองอยู่สถานะ "รอชำระเงิน" กันห้องไว้ให้แล้ว
+                                                int ridPay;
+                                                decimal payAmt = 0m;
+                                                decimal.TryParse(TextBox5.Text ?? "0", out payAmt);
+                                                if (int.TryParse(ID, out ridPay) && ridPay > 0)
+                                                {
+                                                    Response.Redirect(
+                                                        Take_Time_BangPhra.Payments.BookingPayment.PayUrl(
+                                                            ridPay, TextBox1.Text, payAmt), false);
+                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                                }
+                                                else
+                                                {
+                                                    Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text, false);
+                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                                }
                                             }
                                             else
                                             {
@@ -5626,6 +5660,63 @@ namespace Take_Time_BangPhra
         {
             litDepositMsg.Text = "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
                 + "background:#FFEBEE;color:#C62828;\">⚠ " + Server.HtmlEncode(msg ?? "") + "</div>";
+        }
+
+        // ── ลูกค้าจองเอง แล้วจ่ายด้วยบัตร/QR ทันที ────────────────────────────
+
+        /// <summary>ผู้ใช้เลือก "จ่ายทันที" อยู่ไหม (ต้องเปิดสวิตช์ด้วย ห้ามเชื่อ checkbox เดี่ยว ๆ)</summary>
+        private bool PayNowChosen
+        {
+            get
+            {
+                try
+                {
+                    return pnlPayNow != null && pnlPayNow.Visible
+                        && chkPayNow != null && chkPayNow.Checked
+                        && Take_Time_BangPhra.Payments.BookingPayment.IsEnabled;
+                }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>เปิดตัวเลือก "จ่ายทันที" ในโหมดจองใหม่ (เงียบสนิทถ้าสวิตช์ปิด)</summary>
+        private void SetupPayNowOption()
+        {
+            try
+            {
+                if (pnlPayNow == null) return;
+                pnlPayNow.Visible = Take_Time_BangPhra.Payments.BookingPayment.IsEnabled;
+                if (!pnlPayNow.Visible && chkPayNow != null) chkPayNow.Checked = false;
+                ApplyPayNowUi();
+            }
+            catch { try { pnlPayNow.Visible = false; } catch { } }
+        }
+
+        /// <summary>เลือกจ่ายทันที = ไม่ต้องโอน จึงซ่อนช่องแนบสลิปไม่ให้สับสน</summary>
+        private void ApplyPayNowUi()
+        {
+            try
+            {
+                if (rowSlip == null) return;
+                bool payNow = PayNowChosen;
+                rowSlip.Visible = !payNow;
+                if (payNow)
+                {
+                    // ยอดที่จะเก็บ = ยอดมัดจำขั้นต่ำที่ระบบคำนวณไว้ (ลูกค้าจ่ายเต็มก็ได้ที่หน้าถัดไป)
+                    if (string.IsNullOrWhiteSpace(TextBox5.Text) || TextBox5.Text.Trim() == "0")
+                    {
+                        decimal minDep;
+                        if (decimal.TryParse((Label2.Text ?? "").Replace(",", "").Trim(), out minDep) && minDep > 0)
+                            TextBox5.Text = minDep.ToString("0");
+                    }
+                }
+            }
+            catch { }
+        }
+
+        protected void chkPayNow_CheckedChanged(object sender, EventArgs e)
+        {
+            ApplyPayNowUi();
         }
 
         /// <summary>เลขที่การจองของหน้านี้ — โหมดเช็คอิน/แก้ไขส่งมาทาง query string</summary>

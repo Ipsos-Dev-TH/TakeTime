@@ -497,6 +497,10 @@ namespace Take_Time_BangPhra.Payments
             try { new SecurityHoldService(_conn).SweepIfDue(); }
             catch (Exception hex) { Log("sweep วงเงินประกันล้มเหลว: " + hex.Message); }
 
+            // ใบจองที่ลูกค้ากดจองแล้วไม่จ่ายสักที → ยกเลิกคืนห้อง (เงียบถ้าสวิตช์ปิด)
+            try { BookingPayment.CancelStaleUnpaidIfDue(_conn); }
+            catch (Exception bex) { Log("กวาดใบจองที่ไม่ชำระล้มเหลว: " + bex.Message); }
+
             try
             {
                 int expired = _store.ExpireStale();
@@ -613,8 +617,13 @@ namespace Take_Time_BangPhra.Payments
             if (r == null) return "เรียกระบบรับชำระเงินเดิมไม่สำเร็จ";
             if (!r.Success) throw new Exception(r.Message ?? "บันทึกการชำระเงินไม่สำเร็จ");
 
+            // ใบจองที่ลูกค้าจองเองแล้วรอจ่าย → ได้เงินแล้วเลื่อนเป็น "มัดจำแล้ว"
+            // (ไม่งั้นตัวกวาดจะยกเลิกใบที่จ่ายเงินมาแล้วทิ้ง)
+            bool promoted = BookingPayment.PromoteIfPending(_conn, reservationId);
+
             receiptId = r.ReceiptId == null ? null : r.ReceiptId.ToString();
             return "บันทึกเข้าการจอง #" + reservationId + " แล้ว"
+                 + (promoted ? " · ยืนยันการจองเรียบร้อย (รอชำระเงิน → มัดจำแล้ว)" : "")
                  + (string.IsNullOrEmpty(receiptId) ? "" : " (ใบเสร็จ " + receiptId + ")");
         }
 

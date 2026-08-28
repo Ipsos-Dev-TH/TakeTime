@@ -526,6 +526,21 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         /// <summary>
+        /// pnlPayNow control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlPayNow;
+
+        /// <summary>
+        /// chkPayNow control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkPayNow;
+
+        /// <summary>
+        /// rowSlip control.
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl rowSlip;
+
+        /// <summary>
         /// pnlOnlinePay control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Panel pnlOnlinePay;

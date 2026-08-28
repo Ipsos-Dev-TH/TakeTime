@@ -1478,6 +1478,7 @@
     <Compile Include="Class\Payments\PaymentTransactionStore.cs" />
     <Compile Include="Class\Payments\OnlinePaymentService.cs" />
     <Compile Include="Class\Payments\OmiseGateway.cs" />
+    <Compile Include="Class\Payments\BookingPayment.cs" />
     <Compile Include="Class\Payments\SecurityHoldService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>

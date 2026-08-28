@@ -750,7 +750,26 @@
                 </div>
             </div>
             
-            <div class="form-row" style="background-color: #EFEBE9; padding: 8px 0;">
+            <%-- ══ ลูกค้าเลือกจ่ายด้วยบัตร/QR ทันที (โผล่เฉพาะเมื่อเปิดสวิตช์) ══
+                 ติ๊กแล้วไม่ต้องโอน+แนบสลิป — กดยืนยันจองแล้วระบบพาไปหน้าจ่ายเงินต่อ
+                 ปิดสวิตช์ = ทั้งบล็อกไม่แสดง หน้าจองทำงานเหมือนเดิมทุกประการ --%>
+            <asp:Panel ID="pnlPayNow" runat="server" Visible="false" CssClass="form-row"
+                style="display:block; background:#E8F5E9; border-radius:10px; padding:14px; margin:10px 0;">
+                <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
+                    <asp:CheckBox ID="chkPayNow" runat="server" CssClass="mycheckbox"
+                        AutoPostBack="true" OnCheckedChanged="chkPayNow_CheckedChanged" />
+                    <span>
+                        <b style="color:#2E7D32; font-size:1.05em;">💳 จ่ายด้วยบัตรเครดิต / QR ทันที (ไม่ต้องโอนและแนบสลิป)</b><br />
+                        <span style="font-size:0.9em; color:#558B2F;">
+                            กดยืนยันการจองแล้วระบบจะพาไปหน้าชำระเงินต่อ — จ่ายสำเร็จเมื่อไหร่ การจองยืนยันทันที
+                            ไม่ต้องรอเจ้าหน้าที่ตรวจสลิป<br />
+                            <b>ห้องจะถูกกันไว้ให้</b> ระหว่างรอชำระ หากไม่ชำระภายในเวลาที่กำหนด การจองจะถูกยกเลิกอัตโนมัติ
+                        </span>
+                    </span>
+                </label>
+            </asp:Panel>
+
+            <div class="form-row" id="rowSlip" runat="server" style="background-color: #EFEBE9; padding: 8px 0;">
                 <div class="form-label">อัพโหลดสลิป:<br />Transfer Slip Upload:</div>
                 <div class="form-controls">
                     <div>
