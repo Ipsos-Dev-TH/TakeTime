@@ -525,7 +525,107 @@
         }
     </style>
 
-  
+    <%-- ═══════════════════════════════════════════════════════════════════════
+         ตารางข้อมูลบนมือถือ — แก้ที่เดียว มีผลทั้งระบบ
+
+         ปัญหาเดิม: หน้าที่มีตารางเขียน CSS กันเอง หลายหน้าใส่ overflow:hidden
+         (ตัดทิ้งเลย เลื่อนดูก็ไม่ได้) บางหน้ามี overflow-x:auto แต่ไม่มี min-width
+         คอลัมน์เลยถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัว อ่านไม่ออกทั้งคู่
+
+         วิธีแก้: บนจอแคบเปลี่ยนแต่ละแถวเป็น "การ์ด" — ป้ายชื่อคอลัมน์อยู่ซ้าย
+         ค่าอยู่ขวา ใช้ความกว้างเต็มจอ ไม่ต้องเลื่อนแนวนอนเลย
+         ป้ายชื่อมาจากหัวตารางจริงผ่าน data-th ที่ JS ด้านล่างเติมให้อัตโนมัติ
+
+         หน้าไหนไม่อยากให้แปลง ใส่ class="tt-keep-table" ที่ <table> หรือกล่องหุ้ม
+         ═══════════════════════════════════════════════════════════════════════ --%>
+    <style>
+        /* กันตารางดันหน้าให้กว้างเกินจอ (อาการ: หน้าเลื่อนซ้ายขวาได้ทั้งหน้า) */
+        @media (max-width: 820px) {
+            html, body { overflow-x: hidden; }
+        }
+
+        /* กล่องหุ้มที่ JS สร้างให้ตารางที่ยังไม่มีที่เลื่อน */
+        .tt-scroll-x {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        @media (max-width: 820px) {
+            /* ── โหมดการ์ด: ใช้กับตารางที่ JS ติดป้าย tt-cards ให้แล้วเท่านั้น ── */
+            table.tt-cards,
+            table.tt-cards tbody,
+            table.tt-cards tr,
+            table.tt-cards td {
+                display: block;
+                width: auto !important;
+                max-width: 100% !important;
+                min-width: 0 !important;
+            }
+
+            table.tt-cards { border-collapse: separate; border-spacing: 0; min-width: 0 !important; }
+
+            /* หัวตารางไม่ต้องแสดง — ชื่อคอลัมน์ไปอยู่หน้าค่าของแต่ละช่องแทน
+               ⚠ GridView วาดแถวหัวเป็น <tr><th> ธรรมดา ไม่มี <thead> ห่อ
+                  ⇒ ซ่อนแค่ thead ไม่พอ ต้องใช้คลาสที่ JS ติดให้ด้วย */
+            table.tt-cards thead,
+            table.tt-cards > tbody > tr.tt-hdr { display: none; }
+
+            table.tt-cards > tbody > tr {
+                background: #fff;
+                border: 1px solid #e6eaed;
+                border-radius: 10px;
+                margin: 0 0 10px;
+                padding: 6px 12px;
+                box-shadow: 0 1px 4px rgba(0,0,0,.05);
+                overflow: hidden;
+            }
+
+            table.tt-cards > tbody > tr > td {
+                border: 0 !important;
+                border-bottom: 1px solid #f2f5f7 !important;
+                padding: 9px 0 !important;
+                text-align: left !important;
+                white-space: normal !important;
+                word-break: break-word;
+                font-size: 14px;
+                line-height: 1.55;
+            }
+
+            table.tt-cards > tbody > tr > td:last-child { border-bottom: 0 !important; }
+
+            /* ป้ายชื่อคอลัมน์ (มาจาก data-th) */
+            table.tt-cards > tbody > tr > td[data-th]:before {
+                content: attr(data-th);
+                display: block;
+                font-size: 11.5px;
+                font-weight: 600;
+                color: #8a97a3;
+                margin-bottom: 3px;
+                letter-spacing: .01em;
+            }
+
+            /* ช่องว่างไม่ต้องกินที่ทั้งแถว */
+            table.tt-cards > tbody > tr > td.tt-empty { display: none; }
+
+            /* แถว "ไม่มีข้อมูล" ของ GridView */
+            table.tt-cards > tbody > tr > td[colspan] { padding: 14px 0 !important; }
+            table.tt-cards > tbody > tr > td[colspan]:before { content: none; }
+
+            /* ปุ่ม/ลิงก์ในตารางบนมือถือ — แตะง่ายขึ้น ไม่เบียดกัน */
+            table.tt-cards > tbody > tr > td a,
+            table.tt-cards > tbody > tr > td .btn,
+            table.tt-cards > tbody > tr > td input[type=submit],
+            table.tt-cards > tbody > tr > td input[type=button] {
+                display: inline-block;
+                margin: 2px 8px 2px 0;
+                padding: 6px 2px;
+            }
+
+            /* รูปในตารางไม่ล้นการ์ด */
+            table.tt-cards > tbody > tr > td img { max-width: 100%; height: auto; }
+        }
+    </style>
 </head>
 
 <body>
@@ -1808,6 +1908,119 @@
         })();
         </script>
         </asp:PlaceHolder>
+
+    <%-- ═══ ตารางข้อมูลบนมือถือ: ติดป้ายชื่อคอลัมน์ให้ทุกช่อง แล้วเปลี่ยนเป็นการ์ด ═══
+         ทำงานร่วมกับ CSS ใน <head> — ที่นี่แค่ "เตรียมข้อมูล" ไม่ได้ตัดสินใจเรื่องหน้าตา
+         (การตัดสินใจว่าจะแสดงเป็นการ์ดหรือไม่ อยู่ที่ @media ใน CSS ล้วน ๆ
+          ⇒ หมุนจอ/ย่อขยายหน้าต่างแล้วสลับได้ทันทีโดยไม่ต้องรัน JS ซ้ำ) --%>
+    <script>
+        (function () {
+            var MIN_COLS = 3;          // ตารางน้อยกว่านี้อ่านรู้เรื่องอยู่แล้ว ไม่ต้องแปลง
+            var SKIP = 'tt-keep-table'; // ใส่ class นี้ = ไม่แตะ
+
+            function headerTexts(table) {
+                // หาแถวหัวตาราง: thead ก่อน ถ้าไม่มีใช้แถวแรกที่เป็น th ล้วน (GridView ปกติ)
+                var hr = table.tHead && table.tHead.rows.length
+                    ? table.tHead.rows[table.tHead.rows.length - 1]
+                    : null;
+                if (!hr) {
+                    var first = table.rows[0];
+                    if (first && first.cells.length && first.cells[0].tagName === 'TH') hr = first;
+                }
+                if (!hr) return null;
+
+                var out = [];
+                for (var i = 0; i < hr.cells.length; i++) {
+                    var c = hr.cells[i];
+                    var span = parseInt(c.getAttribute('colspan') || '1', 10) || 1;
+                    var txt = (c.textContent || '').replace(/\s+/g, ' ').trim();
+                    for (var s = 0; s < span; s++) out.push(txt);
+                }
+                return out;
+            }
+
+            function isLayoutTable(table) {
+                // ตารางที่ WebForms ใช้จัดหน้า (เช่นกรอบของ control) ไม่ใช่ตารางข้อมูล
+                if (table.getAttribute('role') === 'presentation') return true;
+                if (table.closest && table.closest('.' + SKIP)) return true;
+                if (table.classList.contains(SKIP)) return true;
+                // ตารางซ้อนในตาราง — แปลงตัวนอกพอ
+                if (table.parentElement && table.parentElement.closest &&
+                    table.parentElement.closest('table')) return true;
+                return false;
+            }
+
+            function prepare(table) {
+                if (!table || table.__ttDone) return;
+                if (isLayoutTable(table)) { table.__ttDone = 1; return; }
+
+                var heads = headerTexts(table);
+                if (!heads || heads.length < MIN_COLS) { table.__ttDone = 1; return; }
+
+                var bodies = table.tBodies.length ? table.tBodies : [table];
+                for (var b = 0; b < bodies.length; b++) {
+                    var rows = bodies[b].rows;
+                    for (var r = 0; r < rows.length; r++) {
+                        var row = rows[r];
+                        // แถวหัวตาราง — GridView ไม่ห่อด้วย thead ต้องติดคลาสให้ CSS ซ่อนเอง
+                        if (row.cells.length && row.cells[0].tagName === 'TH') {
+                            row.classList.add('tt-hdr');
+                            continue;
+                        }
+                        var col = 0;
+                        for (var c = 0; c < row.cells.length; c++) {
+                            var cell = row.cells[c];
+                            var label = heads[col] || '';
+                            if (label) cell.setAttribute('data-th', label);
+                            // ช่องว่างเปล่า ๆ ไม่ต้องกินที่บนการ์ด
+                            var val = (cell.textContent || '').replace(/\s+/g, '').trim();
+                            if (!val && !cell.querySelector('img,input,select,a,button'))
+                                cell.classList.add('tt-empty');
+                            col += parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
+                        }
+                    }
+                }
+
+                table.classList.add('tt-cards');
+
+                // ยังต้องเลื่อนแนวนอนได้บนจอกลาง ๆ (แท็บเล็ต) ที่ยังแสดงเป็นตารางอยู่
+                var p = table.parentElement;
+                var wrapped = false;
+                while (p && p !== document.body) {
+                    var ov = window.getComputedStyle(p).overflowX;
+                    if (ov === 'auto' || ov === 'scroll') { wrapped = true; break; }
+                    p = p.parentElement;
+                }
+                if (!wrapped && table.parentElement) {
+                    var box = document.createElement('div');
+                    box.className = 'tt-scroll-x';
+                    table.parentElement.insertBefore(box, table);
+                    box.appendChild(table);
+                }
+
+                table.__ttDone = 1;
+            }
+
+            function run() {
+                try {
+                    var t = document.querySelectorAll('table');
+                    for (var i = 0; i < t.length; i++) prepare(t[i]);
+                } catch (e) { }
+            }
+
+            if (document.readyState === 'loading')
+                document.addEventListener('DOMContentLoaded', run);
+            else run();
+
+            // GridView ที่วาดใหม่หลัง postback แบบ AJAX ต้องติดป้ายซ้ำ
+            try {
+                if (window.Sys && Sys.WebForms && Sys.WebForms.PageRequestManager) {
+                    Sys.WebForms.PageRequestManager.getInstance()
+                        .add_endRequest(function () { run(); });
+                }
+            } catch (e) { }
+        })();
+    </script>
     </form>
 </body>
 </html>

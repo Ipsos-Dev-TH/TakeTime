@@ -167,12 +167,17 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            /* ⚠ เดิมเป็น overflow:hidden — ตารางถูกตัดทิ้งที่ขอบจอ เลื่อนดูก็ไม่ได้
+               (ใส่ไว้เพื่อให้มุมโค้งไม่โดนตารางทับ แต่แลกมาด้วยข้อมูลที่อ่านไม่ได้) */
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            /* ไม่มี min-width มาก่อน ⇒ คอลัมน์ถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัว */
+            min-width: 720px;
         }
 
         .data-table th {
@@ -190,6 +195,24 @@
 
         .data-table tr:hover {
             background-color: #f8f9fa;
+        }
+
+        /* บนมือถือใช้พื้นที่ให้เต็ม — กินขอบซ้ายขวาของ padding หน้าออกไป
+           (ตัวตารางเปลี่ยนเป็นการ์ดโดยระบบกลางใน Site.Master) */
+        @media (max-width: 820px) {
+            .data-table {
+                background: transparent;
+                box-shadow: none;
+                border-radius: 0;
+                margin-left: -12px;
+                margin-right: -12px;
+                overflow-x: visible;
+            }
+            .data-table table { min-width: 0; }
+            .filter-row { flex-direction: column; align-items: stretch; }
+            .filter-group { width: 100%; }
+            .btn-group { flex-wrap: wrap; }
+            .btn-group .btn, .btn-group input[type=submit] { flex: 1 1 auto; }
         }
 
         .badge {
