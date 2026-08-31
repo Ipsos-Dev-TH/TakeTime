@@ -574,6 +574,79 @@ public class PayrollService
     /// <summary>
     /// Update payroll record
     /// </summary>
+    /// <summary>
+    /// แก้ยอดของแถวที่ "ทำจ่ายแล้ว" → ส่งยอดใหม่ขึ้น NextAcc ให้ตรงกัน
+    ///
+    /// ปัญหาเดิม: การแก้ยอดหลังทำจ่ายไม่เคยถูกส่งขึ้น NextAcc เลย — ตัวรับเงินเดือนขึ้น
+    /// ตอน "ทำจ่าย" ครั้งเดียว แก้ทีหลังเท่ากับ TakeTime กับ NextAcc ถือยอดคนละชุด
+    /// (และต่อให้เรียกซ้ำ ตัวกันซ้ำ 24 ชม. ก็จะกลืนไปเงียบ ๆ ⇒ ต้องส่ง force)
+    ///
+    /// คืนข้อความสรุปให้เอาไปแสดงต่อผู้ใช้ (null = ไม่ต้องทำอะไร/ปิดการเชื่อมต่อไว้)
+    /// </summary>
+    public string ResyncPayrollRecordToAccounting(long payrollRecordId)
+    {
+        try
+        {
+            var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+            if (!cfg.IsConfigured || !cfg.Enabled) return null;
+
+            DataTable dt;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT TOP 1 PayrollPeriod_ID, VoucherGenerated, VoucherNumber " +
+                "FROM Payroll_Records WHERE ID = @id", conn))
+            {
+                cmd.Parameters.AddWithValue("@id", payrollRecordId);
+                conn.Open();
+                using (var da = new SqlDataAdapter(cmd)) { dt = new DataTable(); da.Fill(dt); }
+            }
+            if (dt.Rows.Count == 0) return null;
+            DataRow r = dt.Rows[0];
+
+            bool paid = r["VoucherGenerated"] != DBNull.Value && Convert.ToBoolean(r["VoucherGenerated"]);
+            // ยังไม่ทำจ่าย = ยังไม่เคยส่งขึ้น NextAcc ⇒ ไม่มีอะไรให้แก้ที่ปลายทาง
+            if (!paid) return null;
+            if (r["PayrollPeriod_ID"] == DBNull.Value) return null;
+
+            int periodId = Convert.ToInt32(r["PayrollPeriod_ID"]);
+            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+
+            if (cfg.IsPayrollImportMode)
+            {
+                long qid = sync.EnqueuePayrollRunImport(periodId, true);
+                return qid > 0
+                    ? "ส่งยอดใหม่ทั้งงวดขึ้น NextAcc แล้ว (คิว #" + qid + ")"
+                    : "ส่งยอดขึ้น NextAcc ไม่สำเร็จ — ตรวจที่หน้าคิวการเชื่อมต่อบัญชี";
+            }
+
+            if (cfg.IsPayrollDocumentMode)
+            {
+                long qid = sync.EnqueuePayrollRunSync(periodId, true);
+                return qid > 0
+                    ? "ส่งงวดเงินเดือนขึ้น NextAcc ใหม่แล้ว (คิว #" + qid + ")"
+                    : "ส่งยอดขึ้น NextAcc ไม่สำเร็จ — ตรวจที่หน้าคิวการเชื่อมต่อบัญชี";
+            }
+
+            // JOURNAL_ONLY: GL ถูกโพสต์ไปแล้วตอนทำจ่าย ต่อพนักงานหนึ่งใบ
+            // ส่งซ้ำ = ลงบัญชีซ้ำซ้อน (ไม่ใช่การแก้) ⇒ บอกให้คนไปจัดการเองดีกว่าเดาแทน
+            string voucher = r["VoucherNumber"] == DBNull.Value ? "" : Convert.ToString(r["VoucherNumber"]);
+            return "⚠ โหมด JOURNAL_ONLY: GL ถูกโพสต์ขึ้น NextAcc ไปแล้ว"
+                 + (string.IsNullOrEmpty(voucher) ? "" : " (ใบสำคัญจ่าย " + voucher + ")")
+                 + " — ระบบไม่ส่งซ้ำให้อัตโนมัติเพราะจะกลายเป็นลงบัญชีซ้ำ "
+                 + "กรุณาแก้ JE ที่ NextAcc ให้ตรงกับยอดใหม่";
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync",
+                    "Payroll edit resync error: record=" + payrollRecordId + " " + ex.Message, "SYSTEM");
+            }
+            catch { }
+            return "ส่งยอดขึ้น NextAcc ไม่สำเร็จ: " + ex.Message;
+        }
+    }
+
     public bool UpdatePayrollRecord(long payrollRecordId, Dictionary<string, object> updateFields)
     {
         // These columns are computed in the database and cannot be updated directly

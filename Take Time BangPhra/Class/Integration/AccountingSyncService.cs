@@ -328,15 +328,19 @@ namespace Take_Time_BangPhra.Integration
         /// NextAcc จัดการ GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip ทั้งหมด
         /// ใช้เมื่อ PayrollSyncMode = DOCUMENT
         /// </summary>
-        public long EnqueuePayrollRunSync(int payrollPeriodId)
+        /// <param name="force">ข้ามการกันซ้ำ 24 ชม. — ใช้ตอนแก้ยอดของงวดที่ทำจ่ายไปแล้ว</param>
+        public long EnqueuePayrollRunSync(int payrollPeriodId, bool force = false)
         {
             if (!_config.IsConfigured) return -1;
 
             string refKey = $"PAYROLL-PERIOD-{payrollPeriodId}";
             long existing = FindPendingEntry("PAYROLL", "SYNC_PAYROLL_RUN", "refKey", refKey);
             if (existing > 0) return existing;
-            long recent = FindRecentCompletedEntry("PAYROLL", "SYNC_PAYROLL_RUN", "refKey", refKey, 86400);
-            if (recent > 0) return recent;
+            if (!force)
+            {
+                long recent = FindRecentCompletedEntry("PAYROLL", "SYNC_PAYROLL_RUN", "refKey", refKey, 86400);
+                if (recent > 0) return recent;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -353,15 +357,24 @@ namespace Take_Time_BangPhra.Integration
         /// approve → pay → ออก GL + ภงด.1 + สปส.1-10 + 50ทวิ + payslip จากยอดของเรา (ไม่คำนวณใหม่).
         /// ใช้เมื่อ PayrollSyncMode = DOCUMENT_IMPORT (รองรับยอดผันแปรต่องวด)
         /// </summary>
-        public long EnqueuePayrollRunImport(int payrollPeriodId)
+        /// <param name="force">
+        /// ข้ามการกันซ้ำ 24 ชม. — ใช้ตอน "แก้ยอดของงวดที่ทำจ่ายไปแล้ว"
+        /// ⚠ ถ้าไม่มีตัวนี้ การแก้ยอดหลังจ่ายจะถูกกลืนหายเงียบ ๆ (เจอ entry เดิมที่สำเร็จแล้ว
+        /// ก็คืนค่าเดิมโดยไม่ส่งอะไรใหม่) ⇒ NextAcc ยังถือยอดเก่าอยู่ ไม่ตรงกับที่แก้
+        /// NextAcc import เป็น idempotent ตาม ExternalRunRef อยู่แล้ว ส่งซ้ำ = อัปเดตยอดให้
+        /// </param>
+        public long EnqueuePayrollRunImport(int payrollPeriodId, bool force = false)
         {
             if (!_config.IsConfigured) return -1;
 
             string refKey = $"PAYROLL-IMPORT-{payrollPeriodId}";
             long existing = FindPendingEntry("PAYROLL", "IMPORT_PAYROLL_RUN", "refKey", refKey);
-            if (existing > 0) return existing;
-            long recent = FindRecentCompletedEntry("PAYROLL", "IMPORT_PAYROLL_RUN", "refKey", refKey, 86400);
-            if (recent > 0) return recent;
+            if (existing > 0) return existing;   // รออยู่แล้ว = ยอดล่าสุดจะถูกอ่านตอนประมวลผล
+            if (!force)
+            {
+                long recent = FindRecentCompletedEntry("PAYROLL", "IMPORT_PAYROLL_RUN", "refKey", refKey, 86400);
+                if (recent > 0) return recent;
+            }
 
             var payload = new Dictionary<string, object>
             {

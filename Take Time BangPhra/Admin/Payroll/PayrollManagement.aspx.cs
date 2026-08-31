@@ -362,10 +362,24 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 int updatedCount = 0;
                 int salaryUpdatedCount = 0;
 
+                int skippedPaid = 0;
+
                 foreach (DataRow row in dt.Rows)
                 {
                     long recordId = Convert.ToInt64(row["ID"]);
                     short adminId = Convert.ToInt16(row["Admin_ID"]);
+
+                    // ⚠ ห้ามคำนวณทับแถวที่ "ทำจ่ายแล้ว"
+                    //
+                    // เดิมวนทับทุกแถวไม่สนสถานะ ⇒ กดคำนวณใหม่ทีเดียว ยอดที่แก้มือไว้
+                    // (โบนัส/หักอื่น ๆ/OT ที่ปรับเอง) ถูกเขียนทับด้วยค่าที่คำนวณสด
+                    // และยอดที่ "จ่ายเงินออกไปแล้วจริง" ก็เปลี่ยนไม่ตรงกับใบสำคัญจ่าย
+                    // + ไม่ตรงกับที่ส่งขึ้น NextAcc แล้ว
+                    // ⇒ จ่ายแล้ว = ล็อก ต้องแก้ผ่านปุ่มแก้ไขรายคนเท่านั้น (มี audit + sync)
+                    bool alreadyPaid = row.Table.Columns.Contains("VoucherGenerated")
+                        && row["VoucherGenerated"] != DBNull.Value
+                        && Convert.ToBoolean(row["VoucherGenerated"]);
+                    if (alreadyPaid) { skippedPaid++; continue; }
 
                     // Always get latest salary from Employee_Salary
                     decimal baseSalary = GetEmployeeCurrentSalary(adminId);
@@ -446,7 +460,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 {
                     msg += $" - ดึงเงินเดือนจากการตั้งค่า {salaryUpdatedCount} คน";
                 }
-                ShowMessage(msg, "success");
+                if (skippedPaid > 0)
+                {
+                    // บอกให้ชัดว่าข้ามใครไป ไม่ใช่คำนวณไม่สำเร็จ
+                    msg += $"<br/><b>ข้ามคนที่ทำจ่ายแล้ว {skippedPaid} คน</b> — "
+                         + "ยอดที่จ่ายออกไปแล้วจะไม่ถูกเขียนทับ "
+                         + "ถ้าต้องแก้จริง ๆ ใช้ปุ่มแก้ไข ✏ รายคน (ระบบจะส่งยอดใหม่ไป NextAcc ให้)";
+                }
+                ShowMessage(msg, skippedPaid > 0 ? "warning" : "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -900,7 +921,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         payrollService.UpdatePeriodTotals(currentPayrollPeriodId);
                     }
 
-                    ShowMessage("บันทึกข้อมูลสำเร็จ", "success");
+                    // แถวที่ทำจ่ายแล้ว = เคยส่งขึ้น NextAcc ไปแล้ว ⇒ แก้ยอดต้องส่งตามไปด้วย
+                    // ไม่งั้น TakeTime กับ NextAcc ถือยอดคนละชุด (เงียบ ๆ ไม่มีใครรู้)
+                    string syncNote = payrollService.ResyncPayrollRecordToAccounting(payrollRecordId);
+
+                    ShowMessage(string.IsNullOrEmpty(syncNote)
+                            ? "บันทึกข้อมูลสำเร็จ"
+                            : "บันทึกข้อมูลสำเร็จ<br/>" + syncNote,
+                        syncNote != null && syncNote.StartsWith("⚠") ? "warning" : "success");
                     LoadPayrollData();
                 }
                 else
@@ -984,6 +1012,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
             if (type == "success")
             {
                 pnlMessage.CssClass = "alert alert-success";
+            }
+            else if (type == "warning")
+            {
+                // สำเร็จแต่มีเรื่องต้องรู้ — ไม่ใช่ error จึงไม่ควรขึ้นแดง
+                pnlMessage.CssClass = "alert alert-warning";
             }
             else
             {
