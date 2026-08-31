@@ -551,6 +551,19 @@
             -webkit-overflow-scrolling: touch;
         }
 
+        /* ⚠ ชื่อคลาสสองตัวนี้ถูกใช้อยู่ ~18 หน้าทั่วระบบ โดยเข้าใจว่ามันทำให้เลื่อนได้
+           แต่ความจริง "ไม่มี CSS รองรับเลย":
+           · .mobile-table-wrapper นิยามอยู่ใน Content/Site.css ซึ่งไม่เคยถูก <link> เข้ามา
+           · .table-responsive เป็นของ Bootstrap แต่โหลดเฉพาะ JS ไม่ได้โหลด CSS
+           ⇒ เป็น div เปล่า ๆ มาตลอด ให้ความหมายกลับคืนตรงนี้ (ไม่ดึงทั้งไฟล์เข้ามา
+              เพราะ Site.css มีกฎอื่นที่ไม่เคยทำงาน อาจเปลี่ยนหน้าตาทั้งระบบ) */
+        .mobile-table-wrapper,
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
         @media (max-width: 820px) {
             /* ── โหมดการ์ด: ใช้กับตารางที่ JS ติดป้าย tt-cards ให้แล้วเท่านั้น ── */
             table.tt-cards,
@@ -1996,6 +2009,16 @@
                     box.className = 'tt-scroll-x';
                     table.parentElement.insertBefore(box, table);
                     box.appendChild(table);
+                }
+
+                // ⚠ overflow-x:auto เฉย ๆ "ไม่ทำให้เลื่อนได้" ถ้าตารางเป็น width:100%
+                //   เพราะตารางจะหดตามกล่องแทนที่จะล้นออกไป ⇒ ไม่มีอะไรให้เลื่อน
+                //   คอลัมน์ถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัวแทน (อาการที่เจอจริง)
+                //   ต้องคู่กับ min-width เสมอ — หน้าไหนตั้งมาเองแล้วไม่แตะ
+                if (heads.length >= 6 && !table.style.minWidth) {
+                    var declared = window.getComputedStyle(table).minWidth;
+                    if (!declared || declared === '0px' || declared === 'auto')
+                        table.style.minWidth = Math.min(heads.length * 110, 1400) + 'px';
                 }
 
                 table.__ttDone = 1;
