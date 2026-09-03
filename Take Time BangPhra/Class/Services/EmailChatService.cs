@@ -351,19 +351,27 @@ namespace Take_Time_BangPhra.Services
             }
 
             string subject = (msg.Subject ?? "").Trim();
-            string text = ExtractText(msg);
+            string rawText = ExtractText(msg);
             var files = CollectAttachments(msg);
-            if (string.IsNullOrWhiteSpace(text) && files.Count == 0) return IngestOutcome.Duplicate; // เมลเปล่า — ข้าม
+            if (string.IsNullOrWhiteSpace(rawText) && files.Count == 0) return IngestOutcome.Duplicate; // เมลเปล่า — ข้าม
 
-            long reservationId = FindReservationId(subject + "\n" + text);
+            // ตัดของแถมจาก OTA ออก ให้พนักงานเห็นเฉพาะที่ลูกค้าพิมพ์
+            // (ต้นฉบับเก็บใน Metadata → กู้กลับได้เสมอ ไม่ได้ลบทิ้ง)
+            string text = StripOtaBoilerplate(rawText, guestName);
+            bool trimmed = !string.Equals(text, rawText, StringComparison.Ordinal);
 
-            var meta = new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+            // จับคู่การจองใช้ "ต้นฉบับ" — เลขที่จองมักอยู่ในส่วนหัวที่เพิ่งตัดออกไป
+            long reservationId = FindReservationId(subject + "\n" + rawText);
+
+            var metaFields = new Dictionary<string, object>
             {
                 { "subject", subject },
                 { "messageId", messageId },
                 { "from", alias },
                 { "reservationId", reservationId }
-            });
+            };
+            if (trimmed) metaFields["rawBody"] = rawText;   // ต้นฉบับก่อนตัด
+            var meta = new JavaScriptSerializer().Serialize(metaFields);
 
             var result = _omni.ReceiveMessage(Channel, alias, guestName,
                 string.IsNullOrWhiteSpace(text) ? "(ไฟล์แนบ)" : text,
@@ -564,6 +572,141 @@ namespace Take_Time_BangPhra.Services
             result = Regex.Replace(result, @"\n{3,}", "\n\n").Trim();
             if (result.Length > MaxBodyChars) result = result.Substring(0, MaxBodyChars) + " …";
             return result;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  ตัดของแถมจาก OTA ออก ให้เหลือเฉพาะที่ลูกค้าพิมพ์จริง
+        //
+        //  อีเมลจาก Agoda/Booking.com/Expedia ห่อข้อความลูกค้าไว้กลางกองโฆษณา:
+        //  หัวเรื่องทักทาย + ชื่อผู้ส่ง + เวลา + หมายเลขการจอง → [ข้อความจริง] →
+        //  ประกาศว่าแปลด้วย Google → [ข้อความจริงซ้ำอีกรอบ ภาษาต้นฉบับ] →
+        //  "Did you know?" + โฆษณาแอป + ลิงก์ยกเลิกรับข่าวสาร
+        //  เคสในภาพ: ลูกค้าพิมพ์แค่ "รับทราบค่ะ" แต่ในกล่องข้อความมี ~15 บรรทัด
+        //
+        //  ⚠ กติกาสำคัญ: ตัดแล้วต้องไม่ทำให้ข้อความหาย — ถ้าตัดจนเหลือว่าง คืนต้นฉบับ
+        //    และเก็บต้นฉบับไว้ใน Metadata เสมอ (กู้กลับได้ ไม่ได้ลบทิ้ง)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>บรรทัดที่ "เจอแล้วตัดตั้งแต่ตรงนี้ลงไปทั้งหมด" — ท้ายอีเมลเป็นโฆษณาล้วน</summary>
+        private static readonly string[] TailMarkers =
+        {
+            // ประกาศแปลอัตโนมัติ — ใต้บรรทัดนี้คือข้อความเดิมซ้ำอีกรอบ
+            "ได้รับการแปลอัตโนมัติ", "แปลโดยอัตโนมัติ", "อ่านข้อความต้นฉบับ",
+            "translated automatically", "automatic translation", "google translate",
+            "original message below", "ข้อความต้นฉบับ",
+            // โฆษณา/คำแนะนำของ OTA
+            "did you know", "รู้หรือไม่",
+            "prompt replies to guests", "replying to this email",
+            "ตอบในแอป", "ดาวน์โหลดแอป", "มีให้บริการที่", "get the ycs app",
+            "download the app", "available on the app store", "available on google play",
+            // ท้ายอีเมลมาตรฐาน
+            "อีเมลนี้ส่งถึง", "อีเมลฉบับนี้ส่งจาก", "ยกเลิกการสมัคร", "ยกเลิกรับข่าวสาร",
+            "นโยบายความเป็นส่วนตัว", "สงวนลิขสิทธิ์",
+            "this email was sent", "this message was sent", "unsubscribe",
+            "privacy policy", "terms and conditions", "all rights reserved",
+            "booking.com b.v", "agoda company", "expedia group", "airbnb, inc",
+            "sent from my iphone", "sent from my android", "ส่งจาก iphone ของฉัน"
+        };
+
+        /// <summary>
+        /// บรรทัดหัวเรื่อง/ข้อมูลระบบ — ข้อความจริงของลูกค้าเริ่ม "หลัง" บรรทัดพวกนี้
+        /// (ใช้ตัวสุดท้ายที่เจอในช่วงต้นอีเมลเป็นจุดเริ่ม)
+        /// </summary>
+        private static readonly string[] HeadMarkers =
+        {
+            "หมายเลขการจอง", "เลขที่การจอง", "รหัสการจอง",
+            "booking number", "booking id", "booking reference",
+            "reservation number", "reservation id", "confirmation number"
+        };
+
+        /// <summary>บรรทัดทักทาย/ประกาศของ OTA ที่ทิ้งได้ทั้งบรรทัด</summary>
+        private static readonly string[] NoiseLinePatterns =
+        {
+            @"^\s*สวัสดี(ค่ะ|ครับ)?\s*,?\s*คุณ",
+            @"^\s*(เรียน|ถึง)\s+คุณ",
+            @"^\s*(dear|hello|hi)\b.{0,60}$",
+            @"^\s*นักเดินทางท่านนี้",
+            @"^\s*ใหม่!\s*(คำถาม|ข้อความ)\s*จาก",
+            @"^\s*new!?\s*(question|message)\s+from",
+            @"^\s*(you have a )?new message\b",
+            @"^\s*ขอบคุณที่ใช้บริการ\s*$",
+            // บรรทัดที่มีแต่วันเวลา เช่น "ส.ค. 30, 12:28 หลังเที่ยง ICT" / "Aug 30, 12:28 PM ICT"
+            @"^\s*[ก-๙A-Za-z\.]{2,10}\s*\d{1,2},\s*\d{1,2}:\d{2}\s*(หลังเที่ยง|ก่อนเที่ยง|AM|PM)?\s*[A-Z]{2,4}?\s*$",
+            @"^\s*[-–—_=*·•]{2,}\s*$"
+        };
+
+        /// <summary>
+        /// เหลือเฉพาะที่ลูกค้าพิมพ์ — คืนต้นฉบับถ้าตัดแล้วไม่เหลืออะไร (ห้ามทำข้อความหาย)
+        /// </summary>
+        internal static string StripOtaBoilerplate(string text, string senderName = null)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return text;
+
+            var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
+
+            // ── 1) ตัดท้าย: เจอ marker ตัวแรกแล้วตัดตั้งแต่บรรทัดนั้นลงไป ──
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string low = lines[i].Trim().ToLowerInvariant();
+                if (low.Length == 0) continue;
+                if (TailMarkers.Any(m => low.IndexOf(m, StringComparison.Ordinal) >= 0))
+                {
+                    lines = lines.Take(i).ToList();
+                    break;
+                }
+            }
+
+            // ── 2) ตัดหัว: ข้อความจริงเริ่มหลังบรรทัด "หมายเลขการจอง: ..." ──
+            //    ดูเฉพาะช่วงต้น ๆ กันเผลอตัดทิ้งตอนลูกค้าพิมพ์เลขจองมาเองกลางข้อความ
+            //
+            //    ⚠ เลือกจุดตัดจาก "ตัวท้ายสุดที่ตัดแล้วยังเหลือข้อความ" — ไม่ใช่ตัวท้ายสุดเฉย ๆ
+            //    เพราะถ้าลูกค้าพิมพ์เลขจองไว้ท้ายข้อความเอง การตัดถึงตรงนั้นจะกินข้อความหมด
+            //    (ยังมีตาข่ายกันพลาดข้อ 5 อยู่ แต่ตรงนี้ทำให้ได้ผลลัพธ์ที่ถูกกว่าเดิม)
+            int scanTo = Math.Min(lines.Count, 15);
+            var headHits = new List<int>();
+            for (int i = 0; i < scanTo; i++)
+            {
+                string low = lines[i].Trim().ToLowerInvariant();
+                if (low.Length == 0) continue;
+                if (HeadMarkers.Any(m => low.IndexOf(m, StringComparison.Ordinal) >= 0)) headHits.Add(i);
+            }
+            for (int h = headHits.Count - 1; h >= 0; h--)
+            {
+                int cut = headHits[h];
+                bool hasContentAfter = lines.Skip(cut + 1).Any(l => l.Trim().Length > 0);
+                if (!hasContentAfter) continue;
+                lines = lines.Skip(cut + 1).ToList();
+                break;
+            }
+
+            // ── 3) ทิ้งบรรทัดทักทาย/ชื่อผู้ส่ง/เวลา ──
+            string sender = (senderName ?? "").Trim();
+            var kept = new List<string>();
+            foreach (string raw in lines)
+            {
+                string t = raw.Trim();
+                if (t.Length == 0) { kept.Add(""); continue; }
+                if (NoiseLinePatterns.Any(p => Regex.IsMatch(t, p, RegexOptions.IgnoreCase))) continue;
+                // บรรทัดที่มีแค่ชื่อผู้ส่ง (OTA ใส่ซ้ำใต้หัวเรื่อง)
+                if (sender.Length > 2 && string.Equals(t, sender, StringComparison.OrdinalIgnoreCase)) continue;
+                kept.Add(raw.TrimEnd());
+            }
+
+            // ── 4) ตัดบรรทัดซ้ำติดกัน (ข้อความเดิม/ฉบับแปล มักซ้ำกัน) ──
+            var dedup = new List<string>();
+            foreach (string l in kept)
+            {
+                string t = l.Trim();
+                string prev = dedup.LastOrDefault(x => x.Trim().Length > 0);
+                if (t.Length > 0 && prev != null && string.Equals(prev.Trim(), t, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                dedup.Add(l);
+            }
+
+            string result = Regex.Replace(string.Join("\n", dedup), @"\n{3,}", "\n\n").Trim();
+
+            // ── 5) ตัดจนไม่เหลือ = ตัดพลาด → คืนต้นฉบับ ดีกว่าทำข้อความลูกค้าหาย ──
+            return result.Length == 0 ? text.Trim() : result;
         }
 
         /// <summary>(ชื่อไฟล์, bytes, เป็นรูปไหม) — เฉพาะรูป/PDF ขนาดไม่เกินลิมิต</summary>
