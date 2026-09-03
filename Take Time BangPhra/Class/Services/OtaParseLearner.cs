@@ -185,7 +185,7 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 if (!AiAssistEnabled) { error = "ปิดการใช้ AI ช่วยอ่านไว้"; return result; }
-                var ai = new DeepSeekService();
+                var ai = new DeepSeekService(_conn);
                 if (!ai.IsEnabled) { error = "ยังไม่ได้เปิดใช้ AI ในระบบ"; return result; }
 
                 string body = plainText ?? "";
