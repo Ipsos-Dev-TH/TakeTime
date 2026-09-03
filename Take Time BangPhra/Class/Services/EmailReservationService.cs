@@ -144,6 +144,127 @@ namespace Take_Time_BangPhra.Services
         ///
         /// สลับกลับไปใช้ refsell ได้ที่ค่า Email_Rsv_TotalSource = REFSELL (ถ้าผู้ทำบัญชีต้องการ)
         /// </summary>
+        // ══════════════════════════════════════════════════════════════════════
+        //  ตรวจสุขภาพการอ่านอีเมล — จุดเดียวที่ตัดสินว่า "ข้อมูลที่แกะมาเชื่อถือได้ไหม"
+        //
+        //  บทเรียนจากบั๊กทุกตัวที่เจอในระบบนี้: มันพังเหมือนกันหมดคือ **พังเงียบ**
+        //    · regex กวาดข้ามฟิลด์ → ได้ค่าผิดแต่ดูเหมือนมีค่า
+        //    · regex ไม่ match     → ได้ค่าว่างแต่ระบบเดาต่อให้
+        //    · ค่าเงินเป็น 0       → ลงจองสำเร็จด้วยยอด 0 ไม่มีใครรู้
+        //  ⇒ "อ่านไม่ได้" ต้องแยกออกจาก "อ่านได้แล้วค่าว่างจริง ๆ" ให้ชัด
+        //
+        //  หลักการ: เรื่องที่กระทบเงิน/กันจองซ้ำ = บล็อกไว้ให้คนดู (ไม่เดา)
+        //           เรื่องอื่น = ลงจองได้ แต่ติดธงไปกับการแจ้งเตือนเสมอ
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>ป้ายชื่อฟิลด์ที่ "ห้ามโผล่ในค่าที่แกะได้" — โผล่เมื่อไหร่แปลว่า regex กวาดข้ามฟิลด์</summary>
+        private static readonly string[] FieldLabelLeaks =
+        {
+            "channel name", "bookings status", "booking id", "booking reference",
+            "payment type", "refsell_amt", "room type", "check-in", "check-out",
+            "no of rooms", "no of nights", "guest name", "total (all inclusive)",
+            "cancellation", "commission"
+        };
+
+        /// <summary>
+        /// ค่านี้ดูเหมือน regex กวาดข้ามฟิลด์มาไหม
+        /// (เจอป้ายชื่อฟิลด์อื่นปนอยู่ = เชื่อไม่ได้ ต่อให้ "มีค่า" ก็ตาม)
+        /// </summary>
+        private static bool LooksSwept(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string v = value.ToLowerInvariant();
+            foreach (string lbl in FieldLabelLeaks)
+                if (v.IndexOf(lbl, StringComparison.Ordinal) >= 0) return true;
+            return false;
+        }
+
+        /// <summary>ผลตรวจสุขภาพของอีเมลหนึ่งฉบับ</summary>
+        private class ParseHealth
+        {
+            /// <summary>เหตุที่ "ห้ามลงจองอัตโนมัติ" — มีค่า = ต้องให้คนดู</summary>
+            public string Blocking;
+            /// <summary>เรื่องที่ลงจองได้แต่ต้องบอกให้รู้</summary>
+            public readonly List<string> Warnings = new List<string>();
+            public bool HasWarnings { get { return Warnings.Count > 0; } }
+        }
+
+        /// <summary>
+        /// ตรวจว่าข้อมูลที่แกะจากอีเมลใช้ลงจองได้จริงไหม
+        ///
+        /// ตั้งใจให้ "เพิ่มกฎใหม่ได้ที่เดียว" — ทุกครั้งที่เจอเทมเพลตใหม่พังแบบใหม่
+        /// ให้มาเพิ่มกฎตรงนี้ แทนที่จะไปแก้ regex ทีละตัวแล้วลืมตรวจผลลัพธ์
+        /// </summary>
+        private ParseHealth CheckParse(RoomBooking head, List<RoomBooking> rooms, int stayDays)
+        {
+            var h = new ParseHealth();
+            if (head == null) { h.Blocking = "แกะข้อมูลจากอีเมลไม่ได้เลย"; return h; }
+
+            // ── กันจองซ้ำ: Booking ID ต้องสะอาด ──
+            // ค่าที่กวาดข้ามฟิลด์มาจะทำให้ dedup (Remark LIKE '%เลข%') เพี้ยน
+            // → อีเมลใบเดิมที่ลองใหม่กลายเป็นการจองซ้ำอีกใบ
+            if (LooksSwept(head.BookingId))
+                h.Blocking = "Booking ID ที่อ่านได้ผิดรูป (มีชื่อฟิลด์อื่นปนมา): "
+                           + Trunc(head.BookingId, 60) + " — เทมเพลตอีเมลน่าจะเปลี่ยน";
+            else if (!string.IsNullOrWhiteSpace(head.BookingId) && head.BookingId.Length > 40)
+                h.Blocking = "Booking ID ยาวผิดปกติ (" + head.BookingId.Length + " ตัวอักษร) — เทมเพลตอีเมลน่าจะเปลี่ยน";
+
+            // ── เงิน: ยอด 0 = ห้ามลงจอง ──
+            // เดิมไม่มีการตรวจเลย ⇒ อ่านยอดไม่ได้ก็ลงจองสำเร็จด้วยยอด 0
+            // ทั้งใบ พนักงานเห็นยอด 0 แล้วเข้าใจว่าลูกค้าจ่ายครบ/ไม่ต้องเก็บ
+            if (h.Blocking == null)
+            {
+                double total = BookedTotal(head, rooms, stayDays);
+                if (total <= 0)
+                    h.Blocking = "อ่านยอดเงินจากอีเมลไม่ได้ (ได้ 0) — ไม่ลงจองอัตโนมัติ "
+                               + "เพราะยอด 0 จะทำให้หน้างานเข้าใจผิดว่าลูกค้าจ่ายครบแล้ว";
+                else if (total > _maxTotalSanity)
+                    h.Warnings.Add("ยอดสูงผิดปกติ " + total.ToString("N0") + " บาท (เพดานที่ตั้งไว้ "
+                                 + _maxTotalSanity.ToString("N0") + ") — ตรวจกับอีเมลต้นทาง");
+            }
+
+            // ── วิธีเก็บเงิน: เดาแล้วต้องบอก ──
+            if (LooksSwept(head.PaymentType))
+                h.Warnings.Add("Payment Type ที่อ่านได้มีชื่อฟิลด์อื่นปนมา — ตรวจว่าใครเก็บเงินให้ชัวร์");
+            else if (ClassifyCollect(head.PaymentType) == CollectUnknown)
+                h.Warnings.Add(string.IsNullOrWhiteSpace(head.PaymentType)
+                    ? "อีเมลไม่บอก Payment Type — ระบบใช้ค่าตั้งต้นแทน ตรวจว่าใครเก็บเงิน"
+                    : "ไม่รู้จัก Payment Type: \"" + Trunc(head.PaymentType, 40) + "\" — ระบบใช้ค่าตั้งต้นแทน");
+
+            // ── ข้อมูลลูกค้า ──
+            if (string.IsNullOrWhiteSpace(head.GuestName))
+                h.Warnings.Add("อ่านชื่อผู้เข้าพักไม่ได้");
+            else if (LooksSwept(head.GuestName))
+                h.Warnings.Add("ชื่อผู้เข้าพักมีชื่อฟิลด์อื่นปนมา: " + Trunc(head.GuestName, 40));
+
+            if (string.IsNullOrWhiteSpace(head.MobilePhone) || head.MobilePhone.StartsWith("OTA_"))
+                h.Warnings.Add("อีเมลไม่มีเบอร์โทรลูกค้า (ใช้รหัสอ้างอิงแทน)");
+
+            if (string.IsNullOrWhiteSpace(head.ChannelName))
+                h.Warnings.Add("อ่านชื่อช่องทาง (Channel Name) ไม่ได้");
+
+            // ── ห้อง ──
+            if (rooms != null)
+                foreach (var r in rooms)
+                    if (LooksSwept(r.RoomType))
+                    {
+                        h.Warnings.Add("ชื่อห้อง/แผนราคามีชื่อฟิลด์อื่นปนมา: " + Trunc(r.RoomType, 50));
+                        break;
+                    }
+
+            return h;
+        }
+
+        /// <summary>เพดานยอดจองที่ถือว่าสมเหตุสมผล — เกินกว่านี้ให้เตือน (ไม่บล็อก)</summary>
+        private double _maxTotalSanity
+        {
+            get
+            {
+                double v;
+                return double.TryParse(Cfg("Email_Rsv_MaxTotalSanity", "500000"), out v) && v > 0 ? v : 500000;
+            }
+        }
+
         private double BookedTotal(RoomBooking head, List<RoomBooking> rooms, int stayDays)
         {
             double sumRows = rooms == null ? 0
@@ -220,6 +341,8 @@ namespace Take_Time_BangPhra.Services
             public RoomBooking Head;
             public List<RoomBooking> Rooms;
             public string Changes;             // สรุปสิ่งที่เปลี่ยน (เส้นแก้ไข)
+            /// <summary>เรื่องที่ "อ่านอีเมลได้ไม่ชัวร์" — ลงจองไปแล้วแต่ต้องให้คนตรวจ</summary>
+            public List<string> ParseWarnings;
             public string OldDates;            // ช่วงวันเดิมก่อนแก้/ก่อนยกเลิก
 
             public Outcome Detail(RoomBooking head, List<RoomBooking> rooms = null, int resId = 0)
@@ -1201,6 +1324,14 @@ namespace Take_Time_BangPhra.Services
             if ((head.CheckIn - DateTime.Today).TotalDays > _maxDaysFuture)
                 return new Outcome(false, false, false, $"จองล่วงหน้าเกิน {_maxDaysFuture} วัน").Detail(head, rooms).Because("จองล่วงหน้าเกินกำหนด");
 
+            // ── ด่านตรวจสุขภาพการอ่านอีเมล (จุดเดียวสำหรับกฎทั้งหมด) ──
+            // ผิดเรื่องเงิน/กันจองซ้ำ = ไม่ลงจองอัตโนมัติ ให้คนดูแทน ดีกว่าลงผิดแล้วไม่มีใครรู้
+            var health = CheckParse(head, rooms, stayDays);
+            if (health.Blocking != null)
+                return new Outcome(false, false, false,
+                        "ไม่ลงจองอัตโนมัติ: " + health.Blocking, park: true)
+                    .Detail(head, rooms).Because("อ่านอีเมลได้ไม่ครบ/ไม่น่าเชื่อถือ");
+
             var (resId, reason) = SaveReservation(rooms, stayDays);
             if (resId > 0 && _sweepMode && !string.IsNullOrEmpty(head.BookingId))
                 _sweepCreated.Add(head.BookingId);   // ใบยกเลิกที่ตามมาในรอบเดียวกันมีสิทธิ์ยกเลิกใบนี้
@@ -1210,9 +1341,11 @@ namespace Take_Time_BangPhra.Services
                            : reason.StartsWith("ห้องไม่ว่าง") ? "ห้องไม่ว่าง" : "บันทึกลงฐานข้อมูลไม่สำเร็จ");
 
             if (_createDocument) TryEnqueueDocument(resId, head);
-            return new Outcome(true, false, false,
+            var okOutcome = new Outcome(true, false, false,
                 $"จอง #{resId} {head.GuestName} {head.CheckIn:dd/MM} ({head.ChannelName}) gross={head.GrossTotal:N2}")
                 .Detail(head, rooms, resId);
+            okOutcome.ParseWarnings = health.Warnings;   // ลงจองได้ แต่ยังต้องบอกให้รู้
+            return okOutcome;
         }
 
         // ── Save (SERIALIZABLE txn, ตรงตาม external app) ──────────────────────────
@@ -1996,6 +2129,13 @@ namespace Take_Time_BangPhra.Services
                         double refSell = head.GrossTotal;
                         bool collectGuessed2;
                         bool channelCollect = ResolveCollect(head.PaymentType, out collectGuessed2) == CollectChannel;
+                        // ยอด 0 บนเส้นแก้ไข = เขียนทับใบเดิมให้กลายเป็น 0 (แย่กว่าตอนสร้างใหม่)
+                        if (bookedTotal <= 0)
+                        {
+                            tx.Rollback();
+                            return (false, "อ่านยอดเงินจากอีเมลแก้ไขไม่ได้ (ได้ 0) — ไม่แก้ใบจองเดิม "
+                                        + "เพราะจะทับยอดที่ถูกต้องอยู่แล้วให้เป็น 0");
+                        }
 
                         // เบอร์ผู้จองเปลี่ยนในอีเมลแก้ไข → ย้ายการจองไปผูกลูกค้าเบอร์ใหม่
                         // (เฉพาะเบอร์จริง — ไม่ใช่ค่า fallback OTA_xxx และไม่ใช่ค่าว่าง)
@@ -2302,6 +2442,18 @@ namespace Take_Time_BangPhra.Services
             {
                 sb.AppendLine();
                 sb.AppendLine($"🔄 <b>สิ่งที่เปลี่ยน:</b> {E(o.Changes)}");
+            }
+
+            // ── ลงจองสำเร็จ แต่มีเรื่องที่อ่านจากอีเมลไม่ชัวร์ ──
+            // ต้องโผล่ทุกครั้ง ไม่งั้นก็กลับไปเป็น "พังเงียบ" เหมือนเดิม
+            if (o.ParseWarnings != null && o.ParseWarnings.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("🔎 <b>ตรวจการอ่านอีเมล:</b>");
+                foreach (string w in o.ParseWarnings.Take(6))
+                    sb.AppendLine("   • " + E(w));
+                if (o.ParseWarnings.Count > 6)
+                    sb.AppendLine($"   • (และอีก {o.ParseWarnings.Count - 6} รายการ)");
             }
 
             if (o.Ok && o.Cancelled)
