@@ -965,6 +965,8 @@
     <Compile Include="Class\UploadHelper.cs" />
     <Compile Include="Class\Services\DbRunLease.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
+    <Compile Include="Class\Services\OtaFieldReader.cs" />
+    <Compile Include="Class\Services\OtaParseLearner.cs" />
     <Compile Include="Class\Services\EmailChatService.cs" />
     <Compile Include="Class\Services\ChatBookingLinker.cs" />
     <Compile Include="Class\Services\EtaxRdConfirmService.cs" />

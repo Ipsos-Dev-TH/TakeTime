@@ -200,6 +200,9 @@ namespace Take_Time_BangPhra.Services
             var h = new ParseHealth();
             if (head == null) { h.Blocking = "แกะข้อมูลจากอีเมลไม่ได้เลย"; return h; }
 
+            // ชั้นกู้ภัยทำอะไรไปบ้าง (เทมเพลตใหม่ / AI ช่วย / ฟิลด์ที่ยังไม่ชัวร์)
+            if (_lastParseNotes != null) h.Warnings.AddRange(_lastParseNotes);
+
             // ── กันจองซ้ำ: Booking ID ต้องสะอาด ──
             // ค่าที่กวาดข้ามฟิลด์มาจะทำให้ dedup (Remark LIKE '%เลข%') เพี้ยน
             // → อีเมลใบเดิมที่ลองใหม่กลายเป็นการจองซ้ำอีกใบ
@@ -1165,6 +1168,145 @@ namespace Take_Time_BangPhra.Services
             public List<string> AssignedRooms;   // ชื่อห้องจริงที่ระบบจัดให้ (ไว้แจ้ง Telegram)
         }
 
+        // ══════════════════════════════════════════════════════════════════════
+        //  ชั้นกู้ภัยการอ่านอีเมล — ใช้เมื่อ regex เดิมอ่านไม่ได้/ได้ค่าน่าสงสัย
+        //
+        //  ลำดับ: อ่านหลายวิธีให้คะแนน (+โบนัสจากบทเรียนของเทมเพลตนี้)
+        //         → ยังไม่มั่นใจ ค่อยถาม AI → AI ตอบมาก็ยังต้องผ่านตัวตรวจเหมือนกัน
+        //         → ยังไม่ผ่านเกณฑ์ ก็ปล่อยว่างไว้ให้ CheckParse ตัดสินใจบล็อก/เตือน
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>บันทึกว่าชั้นกู้ภัยทำอะไรไปบ้าง — เอาไปแสดงในแจ้งเตือน</summary>
+        private List<string> _lastParseNotes;
+
+        private void RescueFields(string html, string text, ref string channel, ref string bookingId,
+            ref string paymentType, ref string guest, ref string phone, ref double gross)
+        {
+            var reader = new OtaFieldReader(html);
+            var learner = new OtaParseLearner(_conn);
+            string tkey = reader.TemplateKey();
+            learner.LoadFor(tkey);
+            int minConf = learner.ConfidenceThreshold;
+            var notes = new List<string>();
+
+            var specs = new List<OtaFieldReader.FieldSpec>
+            {
+                new OtaFieldReader.FieldSpec {
+                    Name = "BookingId", Kind = OtaFieldReader.FieldKind.Id, MaxLength = 40,
+                    Labels = new[] { "booking id", "booking reference", "reservation no",
+                                     "reservation number", "confirmation number", "booking no" },
+                    Patterns = new[] { @"Booking\s*Id#?:\s*([^\s]{5,30})",
+                                       @"BOOKING\s*REFERENCE\s*([0-9][0-9\-]{5,})" } },
+                new OtaFieldReader.FieldSpec {
+                    Name = "PaymentType", Kind = OtaFieldReader.FieldKind.Text, MaxLength = 60,
+                    Labels = new[] { "payment type", "payment method", "payment model", "collect" },
+                    Patterns = new[] { @"Payment\s*Type:\s*([^\n]{2,40}?)\s*(?:Commission|Room|Total|$)" } },
+                new OtaFieldReader.FieldSpec {
+                    Name = "ChannelName", Kind = OtaFieldReader.FieldKind.Text, MaxLength = 60,
+                    Labels = new[] { "channel name", "channel", "source", "ota" },
+                    Patterns = new[] { @"Channel\s*Name:\s*([^\n]{2,40})" } },
+                new OtaFieldReader.FieldSpec {
+                    Name = "GuestName", Kind = OtaFieldReader.FieldKind.Text, MaxLength = 80,
+                    Labels = new[] { "guest name", "contact name", "customer name", "lead guest" } },
+                new OtaFieldReader.FieldSpec {
+                    Name = "MobilePhone", Kind = OtaFieldReader.FieldKind.Phone, MaxLength = 30,
+                    Labels = new[] { "contact number", "mobile", "phone", "telephone" } },
+                new OtaFieldReader.FieldSpec {
+                    Name = "GrossTotal", Kind = OtaFieldReader.FieldKind.Money, MaxLength = 30,
+                    Labels = new[] { "total (all inclusive)", "grand total", "room total",
+                                     "total amount", "total" },
+                    Patterns = new[] { @"refsell_amt\s*:?\s*([\d,\.]+)",
+                                       @"Total\s*\(All Inclusive\)\s*:?\s*THB\s*([\d,\.]+)" } }
+            };
+
+            // ── รอบที่ 1: อ่านเองด้วยหลายวิธี ──
+            var results = new Dictionary<string, OtaFieldReader.ReadResult>();
+            foreach (var sp in specs)
+                results[sp.Name] = reader.Read(sp, learner.Bonus);
+
+            // ── รอบที่ 2: ฟิลด์ไหนยังไม่ถึงเกณฑ์ ถาม AI ช่วย ──
+            var stillWeak = specs.Where(sp => !results[sp.Name].IsConfident(minConf))
+                                 .Select(sp => sp.Name).ToList();
+            if (stillWeak.Count > 0 && learner.AiAssistEnabled)
+            {
+                string aiErr;
+                var aiVals = learner.AskAi(text, stillWeak, out aiErr);
+                foreach (var kv in aiVals)
+                {
+                    var sp = specs.FirstOrDefault(x => x.Name == kv.Key);
+                    if (sp == null) continue;
+                    // คำตอบ AI = ผู้สมัครอีกคน ต้องผ่านตัวตรวจชนิดข้อมูลเหมือนกัน
+                    var scored = OtaFieldReader.ScoreExternal(kv.Value, sp, "ai");
+                    if (scored.Confidence > results[sp.Name].Confidence)
+                    {
+                        results[sp.Name] = scored;
+                        notes.Add("AI ช่วยอ่าน " + sp.Name + " ได้ \"" + Trunc(kv.Value, 30) + "\"");
+                    }
+                }
+                if (!string.IsNullOrEmpty(aiErr) && aiVals.Count == 0)
+                    notes.Add("ขอ AI ช่วยไม่สำเร็จ: " + aiErr);
+            }
+
+            // ── นำค่าที่ผ่านเกณฑ์มาเติมเฉพาะช่องที่ยังว่าง/น่าสงสัย ──
+            string chForLog = channel;   // สำเนาไว้ใช้ใน lambda (อ้าง ref โดยตรงไม่ได้)
+            Action<string, Func<string, bool>, Action<string>> apply = (name, isWeakNow, setter) =>
+            {
+                var r = results[name];
+                if (!r.IsConfident(minConf)) return;
+                if (!isWeakNow(r.Value)) return;
+                setter(r.Value);
+                notes.Add("กู้ " + name + " = \"" + Trunc(r.Value, 30) + "\" ("
+                        + r.Strategy + ", คะแนน " + r.Confidence + ")");
+                learner.Record(tkey, chForLog, name, r.Strategy, true, r.Value);
+            };
+
+            // ⚠ C# ห้ามอ้างพารามิเตอร์ ref ภายใน lambda (CS1628) → ทำงานกับตัวแปรท้องถิ่น
+            //   แล้วค่อยเขียนกลับเข้า ref ทีเดียวตอนจบ
+            string bid = bookingId, pt = paymentType, ch = channel, gn = guest, phv = phone;
+            apply("BookingId", v => string.IsNullOrWhiteSpace(bid) || OtaFieldReader.LooksSwept(bid), v => bid = v);
+            apply("PaymentType", v => string.IsNullOrWhiteSpace(pt) || OtaFieldReader.LooksSwept(pt), v => pt = v);
+            apply("ChannelName", v => string.IsNullOrWhiteSpace(ch), v => ch = v);
+            apply("GuestName", v => string.IsNullOrWhiteSpace(gn), v => gn = v);
+            apply("MobilePhone", v => string.IsNullOrWhiteSpace(phv) || phv.StartsWith("OTA_"),
+                  v => phv = ResolvePhone(SanitizePhone(v), bid));
+            bookingId = bid; paymentType = pt; channel = ch; guest = gn; phone = phv;
+
+            if (gross <= 0)
+            {
+                var g = results["GrossTotal"];
+                double gv;
+                if (g.IsConfident(minConf) && OtaFieldReader.TryMoney(g.Value, out gv) && gv > 0)
+                {
+                    gross = gv;
+                    notes.Add("กู้ยอดเงิน = " + gv.ToString("N2") + " (" + g.Strategy + ", คะแนน " + g.Confidence + ")");
+                    learner.Record(tkey, channel, "GrossTotal", g.Strategy, true, g.Value);
+                }
+            }
+
+            // ── จดว่าเจอเทมเพลตนี้ + คะแนนโดยรวม ──
+            int overall = results.Count == 0 ? 0 : (int)results.Values.Average(r => r.Confidence);
+            bool needsReview = results.Values.Any(r => !r.IsConfident(minConf));
+            bool isNewTemplate = learner.NoteTemplate(tkey, channel, null, overall, needsReview);
+            if (isNewTemplate)
+                notes.Insert(0, "พบเทมเพลตอีเมลแบบใหม่ (" + tkey.Substring(0, 8) + ") — ระบบพยายามอ่านเอง");
+
+            // ฟิลด์ที่ยังไม่มั่นใจ บอกไปด้วยว่าแต่ละวิธีได้อะไรมา จะได้ตรวจง่าย
+            foreach (var sp in specs)
+            {
+                var r = results[sp.Name];
+                if (r.IsConfident(minConf)) continue;
+                bool stillEmpty =
+                    (sp.Name == "BookingId" && string.IsNullOrWhiteSpace(bookingId)) ||
+                    (sp.Name == "PaymentType" && string.IsNullOrWhiteSpace(paymentType)) ||
+                    (sp.Name == "GrossTotal" && gross <= 0);
+                if (stillEmpty)
+                    notes.Add("อ่าน " + sp.Name + " ไม่ชัวร์ (คะแนนสูงสุด " + r.Confidence
+                            + " ต่ำกว่าเกณฑ์ " + minConf + ") → " + r.Explain(3));
+            }
+
+            if (notes.Count > 0) _lastParseNotes = notes;
+        }
+
         private List<RoomBooking> ExtractRoomBookings(string html)
         {
             var list = new List<RoomBooking>();
@@ -1200,6 +1342,36 @@ namespace Take_Time_BangPhra.Services
             string guest = nameNode?.InnerText?.Trim().Replace("'", "") ?? "";
             var mobileNode = doc.DocumentNode.SelectSingleNode("//span[contains(., 'CONTACT NUMBER')]/following-sibling::span[1]");
             string phone = ResolvePhone(SanitizePhone(mobileNode?.InnerText?.Trim() ?? ""), bookingId);
+
+            // ══════════════════════════════════════════════════════════════════
+            //  ชั้นกู้ภัย: ฟิลด์ไหนที่ regex ข้างบนอ่านไม่ได้/ได้ค่าน่าสงสัย
+            //  ให้ตัวอ่านแบบให้คะแนนลองใหม่ (หาป้ายชื่อแล้วอ่านค่าถัดไป — เหมือนคนอ่าน)
+            //  แล้วถ้ายังไม่มั่นใจค่อยถาม AI
+            //
+            //  ⚠ ทำงานเฉพาะตอน "ของเดิมไม่ได้ผล" ⇒ เทมเพลตที่อ่านได้อยู่แล้วไม่กระทบเลย
+            //  ⚠ ค่าที่ได้จากชั้นนี้ยังต้องผ่าน CheckParse เหมือนกันทุกประการ
+            //     (ยอด 0 / Booking ID เพี้ยน ยังบล็อกเหมือนเดิม — AI ไม่มีสิทธิ์ข้ามกฎ)
+            // ══════════════════════════════════════════════════════════════════
+            _lastParseNotes = null;
+            try
+            {
+                bool needRescue =
+                    string.IsNullOrWhiteSpace(bookingId) || OtaFieldReader.LooksSwept(bookingId) ||
+                    string.IsNullOrWhiteSpace(paymentType) || OtaFieldReader.LooksSwept(paymentType) ||
+                    string.IsNullOrWhiteSpace(channel) ||
+                    string.IsNullOrWhiteSpace(guest) ||
+                    gross <= 0;
+
+                if (needRescue)
+                    RescueFields(html, text, ref channel, ref bookingId, ref paymentType,
+                                 ref guest, ref phone, ref gross);
+            }
+            catch (Exception rex)
+            {
+                // ชั้นกู้ภัยพังต้องไม่ทำให้การอ่านอีเมลพังตาม — ของเดิมยังเดินต่อได้
+                try { _code.Logs(_conn, "EmailReservation", "rescue parse error: " + rex.Message, "SYSTEM"); }
+                catch { }
+            }
 
             // คำขอพิเศษที่ลูกค้าฝากมากับ OTA — ป้ายชื่อไม่เหมือนกันทุกช่องทาง ลองไล่ทีละแบบ
             //
