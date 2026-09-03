@@ -9299,7 +9299,7 @@ namespace Take_Time_BangPhra.Integration
                 Address = ComposeCustomerAddress(row),
                 // โครงสร้างที่อยู่ + สาขา ให้ NextAcc render ใบกำกับ §86/4 ครบ
                 BuildingNumber = ColVal("Address"),
-                Moo = ColVal("Address1"),
+                Moo = NormalizeMoo(ColVal("Address1")),
                 SubDistrict = ColVal("SubDistrict"),
                 District = ColVal("District"),
                 Province = ColVal("Province"),
@@ -9425,6 +9425,30 @@ namespace Take_Time_BangPhra.Integration
         /// เดิม sync ส่งเฉพาะ Customer.Address (บ้านเลขที่) → เอกสารมีที่อยู่แค่ "55".
         /// รูปแบบตรงกับที่หน้า Receipt.aspx สร้างลง PDF: กรุงเทพฯ = แขวง/เขต, ต่างจังหวัด = ต./อ./จ.
         /// </summary>
+        /// <summary>
+        /// คัดเฉพาะค่าที่ "เป็นหมู่จริง ๆ" ออกจากช่องที่อยู่บรรทัด 2 (Customer.Address1)
+        ///
+        /// ⚠ เดิมยัด Address1 ลงช่อง Moo ตรง ๆ แต่ Address1 ในระบบเราเป็นช่องข้อความอิสระ
+        /// (บรรทัดที่ 2 ของที่อยู่) ผู้ใช้พิมพ์อะไรก็ได้ — เคสจริงที่เจอ:
+        ///   "ทะเบียนการค้า : 0105564045849 บริษัท…" ไปโผล่ในช่อง "หมู่ที่" บน NextAcc
+        /// ⇒ รับเฉพาะรูปแบบที่เป็นหมู่จริง: "5" / "หมู่ 5" / "หมู่ที่ 5" / "ม.5" / "5/2"
+        ///   ที่เหลือคืน null (ข้อความยังอยู่ในที่อยู่เต็มผ่าน ComposeCustomerAddress อยู่แล้ว
+        ///   จึงไม่มีข้อมูลหาย)
+        /// </summary>
+        internal static string NormalizeMoo(string raw)
+        {
+            string v = (raw ?? "").Trim();
+            if (v.Length == 0) return null;
+            if (v.Length > 20) return null;                 // ยาวขนาดนี้ไม่ใช่เลขหมู่แน่ ๆ
+
+            var m = System.Text.RegularExpressions.Regex.Match(
+                v, @"^(?:หมู่\s*ที่|หมู่|ม\s*\.)?\s*(\d{1,3}(?:/\d{1,3})?)$");
+            if (!m.Success) return null;
+
+            string moo = m.Groups[1].Value;
+            return moo == "0" ? null : moo;
+        }
+
         private static string ComposeCustomerAddress(System.Data.DataRow row)
         {
             string Val(string col) =>
@@ -9586,7 +9610,8 @@ namespace Take_Time_BangPhra.Integration
                             //   ทั้งชื่อและชนิดผู้ติดต่อค้างเป็นค่าเก่า ทั้งที่ส่งค่าใหม่ไปแล้ว)
                             //   ⇒ ใช้ company PUT เป็นตัวอัปเดตหลักเมื่อเรียกได้ (verified ว่าทับจริง)
                             //   ส่งเฉพาะค่าที่มี — null = ไม่แตะ (กันลบข้อมูลเดิมทิ้งโดยไม่ตั้งใจ)
-                            await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
+                            int wantType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual;
+                            var putResp = await _apiClient.UpdateContactAsync(info.NexaaccContactId.Value, new UpdateContactRequest
                             {
                                 Name = string.IsNullOrWhiteSpace(info.Name) ? null : info.Name.Trim(),
                                 TaxId = taxIdOk ? info.TaxId.Trim() : null,
@@ -9594,13 +9619,37 @@ namespace Take_Time_BangPhra.Integration
                                 Phone = string.IsNullOrWhiteSpace(info.Phone) ? null : info.Phone.Trim(),
                                 Email = string.IsNullOrWhiteSpace(info.Email) ? null : info.Email.Trim(),
                                 BranchCode = patchBranch,
-                                ContactType = isJuristic ? NexaaccContactType.JuristicPerson : NexaaccContactType.Individual
+                                ContactType = wantType
                             });
-                            _lastContactPatchNote = $"อัปเดตผ่าน company PUT: ชื่อ/เลขภาษี/ที่อยู่ + ชนิด "
-                                + $"{(isJuristic ? "นิติบุคคล" : "บุคคลธรรมดา")} สาขา {(patchBranch ?? "-")}";
+
+                            // ⚠ เดิมทิ้งคำตอบของ PUT ทั้งก้อน แล้วรายงานว่า "อัปเดตแล้ว" ทุกกรณี
+                            //   ⇒ NextAcc ไม่ได้เซ็ตชนิดผู้ติดต่อให้จริง (ช่องว่างบนหน้าจอ) ก็ไม่มีใครรู้
+                            //   ตอนนี้อ่านค่าที่ NextAcc คืนกลับมาแล้วเทียบกับที่ส่งไป
+                            int gotType = putResp?.data == null ? 0 : putResp.data.ContactType;
+                            string typeThai = wantType == NexaaccContactType.JuristicPerson ? "นิติบุคคล" : "บุคคลธรรมดา";
+
+                            if (putResp?.data == null)
+                            {
+                                _lastContactPatchNote = "⚠ ส่งอัปเดตผู้ติดต่อไปแล้วแต่ NextAcc ไม่คืนข้อมูลกลับมา "
+                                    + "— ยืนยันไม่ได้ว่าชนิดผู้ติดต่อถูกตั้งจริง"
+                                    + (string.IsNullOrEmpty(putResp?.message) ? "" : " (" + putResp.message + ")");
+                            }
+                            else if (gotType != wantType)
+                            {
+                                _lastContactPatchNote = $"⚠ ส่งชนิดผู้ติดต่อ = {typeThai} ({wantType}) "
+                                    + $"แต่ NextAcc คืนกลับมาเป็น {(gotType == 0 ? "ว่าง/ไม่ระบุ" : gotType.ToString())} "
+                                    + "— ชนิดผู้ติดต่อบน NextAcc จะไม่ขึ้น ต้องตรวจฝั่ง NextAcc";
+                            }
+                            else
+                            {
+                                _lastContactPatchNote = $"อัปเดตผ่าน company PUT: ชื่อ/เลขภาษี/ที่อยู่ + ชนิด "
+                                    + $"{typeThai} สาขา {(patchBranch ?? "-")} (NextAcc ยืนยันกลับแล้ว)";
+                            }
+
                             _code.Logs(_connectionString, "AccountingSync",
                                 $"{logPrefix}: patch contact {info.NexaaccContactId} branch={patchBranch ?? "-"} " +
-                                $"type={(isJuristic ? "Juristic" : "Individual")} ผ่าน company PUT (int_ upsert ไม่ทับ field เดิม)", "SYSTEM");
+                                $"type ส่ง={wantType} รับกลับ={gotType} " +
+                                (gotType == wantType ? "✓" : "✗ ไม่ตรง") + " (company PUT)", "SYSTEM");
                         }
                         catch (Exception px)
                         {
@@ -9932,7 +9981,7 @@ namespace Take_Time_BangPhra.Integration
                 TaxId = ColVal("TaxId"),
                 Address = ComposeCustomerAddress(row),
                 BuildingNumber = ColVal("Address"),
-                Moo = ColVal("Address1"),
+                Moo = NormalizeMoo(ColVal("Address1")),
                 SubDistrict = ColVal("SubDistrict"),
                 District = ColVal("District"),
                 Province = ColVal("Province"),
