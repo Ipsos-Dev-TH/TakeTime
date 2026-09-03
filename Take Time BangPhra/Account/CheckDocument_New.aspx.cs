@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -20,6 +20,7 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 // Initialize services
@@ -28,8 +29,17 @@ namespace Take_Time_BangPhra.Account
                 if (Session["permission"]?.ToString() == "True" &&
                     (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin"))
                 {
+                    // AJAX: ดึง JE + เอกสารของใบเสร็จจาก NextAcc มาแสดง (read-only) — ตอบ JSON แล้วจบ
+                    if (string.Equals(Request.QueryString["action"], "viewJE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        HandleViewJE(Request.QueryString["doc"]);
+                        return;
+                    }
+
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ClientScript.RegisterStartupScript(this.GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
                         InitializePage();
 
                         // Show success alert from Post-Redirect-Get sync
@@ -46,6 +56,7 @@ namespace Take_Time_BangPhra.Account
                     Response.Redirect("/Default");
                 }
             }
+            catch (System.Threading.ThreadAbortException) { throw; }   // Response.End/Redirect (เช่น viewJE JSON) — อย่ากลืน
             catch (Exception ex)
             {
                 loggingService?.LogException(ex, LoggingService.LogCategory.Accounting,
@@ -69,6 +80,38 @@ namespace Take_Time_BangPhra.Account
             ddlYear.Items.Clear();
             ddlYear.Items.Add(new ListItem(thisYear, thisYear));
             ddlYear.Items.Add(new ListItem(lastYear, lastYear));
+        }
+
+        /// <summary>AJAX handler: ดึง "ทั้ง JE และเอกสาร" ของใบเสร็จจาก NextAcc → ตอบ JSON ให้ modal แสดง</summary>
+        private void HandleViewJE(string doc)
+        {
+            Response.Clear();
+            Response.ContentType = "application/json; charset=utf-8";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(doc))
+                {
+                    Response.Write("{\"success\":false,\"message\":\"ไม่ระบุเลขที่เอกสาร\"}");
+                }
+                else
+                {
+                    Server.ScriptTimeout = 120;
+                    var svc = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                    Take_Time_BangPhra.Integration.AccountingSyncService.ReceiptAccountingView view = null;
+                    var task = System.Threading.Tasks.Task.Run(() => svc.GetReceiptAccountingViewAsync(doc.Trim()));
+                    if (task.Wait(60000)) view = task.Result;
+                    else view = new Take_Time_BangPhra.Integration.AccountingSyncService.ReceiptAccountingView
+                    { Success = false, Message = "NextAcc ตอบช้าเกิน 60 วินาที — ลองใหม่อีกครั้ง" };
+
+                    Response.Write(new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(view));
+                }
+            }
+            catch (Exception ex)
+            {
+                Response.Write("{\"success\":false,\"message\":" +
+                    new System.Web.Script.Serialization.JavaScriptSerializer().Serialize("ผิดพลาด: " + ex.Message) + "}");
+            }
+            Response.End();
         }
 
         protected void btnSearch_Click(object sender, EventArgs e)
@@ -629,8 +672,12 @@ namespace Take_Time_BangPhra.Account
                 SELECT ar.ID, ar.Reservation_ID, ar.Created_Date, ar.Paid_Type,
                        ar.Total_Amount, ar.Vat, ar.IsDeposit, ar.UseDeposit,
                        ar.Status,
-                       c.FullName as CustomerName,
-                       r.Customer_MobilePhone,
+                       -- ผู้ซื้อของใบเสร็จใบนี้ (Account_Receipt.Customer_ID) มาก่อนเสมอ
+                       -- เดิม join จาก r.Customer_MobilePhone = ผู้จอง จึงโชว์ชื่อผู้จองตลอด
+                       -- แม้ใบจะออกในนามบริษัทแล้ว ทำให้เข้าใจผิดว่าแก้ไขไม่ติด
+                       " + LinkedDocIdSelect() + @"
+                       ISNULL(cb.FullName, c.FullName) as CustomerName,
+                       ISNULL(cb.MobilePhone, r.Customer_MobilePhone) as Customer_MobilePhone,
                        r.Remark,
                        a.Username as Created_By,
                        -- Slip information (prevents N+1 queries by including in main query)
@@ -639,6 +686,7 @@ namespace Take_Time_BangPhra.Account
                 FROM Account_Receipt ar
                 LEFT JOIN Reservation r ON ar.Reservation_ID = r.ID
                 LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                LEFT JOIN Customer cb ON cb.ID = ar.Customer_ID
                 LEFT JOIN Admin a ON ar.Created_By_ID = a.ID
                 -- LEFT JOIN to get slip data directly from Payment_Slips by Account_Receipt_ID
                 LEFT JOIN (
@@ -745,6 +793,18 @@ namespace Take_Time_BangPhra.Account
                     throw;
                 }
 
+                // ── รวมเอกสารจาก NextAcc (รวมใบที่ยกเลิก/void) เข้าตาราง ──
+                // ใบที่ถูก void ตอนแก้ไขไม่มีแถวใน local → ดึงจาก NextAcc มาแสดงเป็นแถว "NextAcc-only"
+                // เพื่อดาวน์โหลด PDF ส่งบัญชีได้ครบ เลขที่เอกสารไม่ขาดช่วง. ล้มเหลว = คงตาราง local เดิม.
+                if (dt != null) MergeNextAccReceiptDocs(dt, startDate, endDate);
+
+                // โหลด set ใบเสร็จที่มี e-Tax แล้ว (โชว์ปุ่ม "ส่ง e-Tax" เฉพาะใบพวกนี้)
+                try
+                {
+                    _etaxReceipts = new AccountingSyncService(conn).GetReceiptsWithEtax(startDate, endDate);
+                }
+                catch { _etaxReceipts = new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+
                 // Debug: Add message to date range label (ALWAYS execute this)
                 if (dt != null && dt.Rows.Count > 0)
                 {
@@ -791,8 +851,23 @@ namespace Take_Time_BangPhra.Account
                     ShowError($"ไม่พบเอกสารในช่วง {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}{diagInfo}\n\nกรุณาตรวจสอบ:\n1. เลือกช่วงวันที่ที่มีเอกสาร\n2. วันที่ที่เลือกถูกต้องหรือไม่\n3. ตรวจสอบ Debug Output สำหรับรายละเอียดเพิ่มเติม");
                 }
 
-                // Bind to GridView
-                gvDetails.DataSource = dt;
+                // Bind to GridView — เรียงตาม "วันที่เอกสาร" (Created_Date) เป็นหลัก, tie-break ด้วยเลขที่
+                // (DisplayDoc) ให้เอกสารวันเดียวกันเรียงตามเลขต่อเนื่อง
+                if (dt != null && dt.Columns.Contains("Created_Date"))
+                {
+                    string tie = dt.Columns.Contains("DisplayDoc") ? ", DisplayDoc ASC" : "";
+                    dt.DefaultView.Sort = "Created_Date ASC" + tie;
+                    gvDetails.DataSource = dt.DefaultView;
+                }
+                else if (dt != null && dt.Columns.Contains("DisplayDoc"))
+                {
+                    dt.DefaultView.Sort = "DisplayDoc ASC";
+                    gvDetails.DataSource = dt.DefaultView;
+                }
+                else
+                {
+                    gvDetails.DataSource = dt;
+                }
                 gvDetails.DataBind();
                 System.Diagnostics.Debug.WriteLine($"   ✅ GridView.DataBind() completed");
             }
@@ -810,6 +885,263 @@ namespace Take_Time_BangPhra.Account
                     gvDetails.DataBind();
                 }
                 catch { }
+            }
+        }
+
+        /// <summary>
+        /// รวมเอกสารฝั่งรับจาก NextAcc (รวมใบที่ยกเลิก/void) เข้าตาราง local:
+        /// - เพิ่มคอลัมน์ IsNextAccOnly / NextAccId / NextAccViewUrl (ใช้เป็น DataKey ตอนกดดู PDF)
+        /// - ใบที่ยกเลิกบน NextAcc → เพิ่มเป็นแถวสถานะ "Cancel" (เอกสารที่ถูก void ตอนแก้ไข = ดาวน์โหลดส่งบัญชีได้)
+        /// - ใบที่สร้างบน NextAcc โดยตรง (ไม่มีคู่ใน local) → เพิ่มเป็นแถว "NextAcc"
+        /// การกดดู PDF ของแถวเหล่านี้เปิดจาก NextAcc ด้วย GUID (gvDetails_SelectedIndexChanging)
+        /// ล้มเหลว/timeout → คงตาราง local เดิม (คอลัมน์ที่เพิ่มยังอยู่ครบ เพื่อ DataKeyNames ไม่พัง)
+        /// </summary>
+        private void MergeNextAccReceiptDocs(DataTable dt, DateTime startDate, DateTime endDate)
+        {
+            // เพิ่มคอลัมน์ที่ DataKeyNames/grid อ้าง — ต้องมีเสมอแม้ดึง NextAcc ไม่สำเร็จ
+            // DisplayDoc = เลขที่ที่แสดงในตาราง (เลข NextAcc ถ้า sync แล้ว, เลข local ถ้ายัง) —
+            // เลขเดียวต่อเอกสาร ไม่ซ้อนกัน; ปุ่มแก้ไข/ลบ/ดู PDF ใช้เลข local จาก DataKeys["ID"] เสมอ
+            if (!dt.Columns.Contains("DisplayDoc")) dt.Columns.Add("DisplayDoc", typeof(string));
+            if (!dt.Columns.Contains("IsNextAccOnly")) dt.Columns.Add("IsNextAccOnly", typeof(string));
+            if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
+            if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
+            if (!dt.Columns.Contains("NextAccDocStatus")) dt.Columns.Add("NextAccDocStatus", typeof(string));
+            // ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ (ไม่ใช่เอกสารขายของเราเอง) — ห้ามให้กด "ดึงกลับ"
+            if (!dt.Columns.Contains("IsNaPaymentDoc")) dt.Columns.Add("IsNaPaymentDoc", typeof(string));
+            // ใบ local ของการจองเดียวกัน (ถ้ามี) — บอกผู้ใช้ว่า "แถวไหนคือใบที่กดแก้ไขได้"
+            if (!dt.Columns.Contains("LocalTwinId")) dt.Columns.Add("LocalTwinId", typeof(string));
+
+            foreach (DataRow r in dt.Rows)
+            {
+                r["DisplayDoc"] = r["ID"]?.ToString() ?? "";
+                r["IsNextAccOnly"] = "0";
+                r["NextAccId"] = "";
+                r["NextAccViewUrl"] = "";
+                r["NextAccDocStatus"] = "";
+                r["IsNaPaymentDoc"] = "0";
+                r["LocalTwinId"] = "";
+            }
+
+            System.Collections.Generic.List<Take_Time_BangPhra.Integration.NextAccPaymentDoc> naDocs = null;
+            try
+            {
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!cfg.IsConfigured || !cfg.Enabled) return;
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                var task = System.Threading.Tasks.Task.Run(() => svc.FetchNextAccReceiptDocumentsAsync(startDate, endDate));
+                if (task.Wait(20000)) naDocs = task.Result;
+                else
+                {
+                    try { codeInstance.Logs(conn, "AccountingSync", "CheckDocument: ดึงเอกสาร NextAcc ไม่ทันใน 20 วิ → แสดง local อย่างเดียว", "SYSTEM"); }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { codeInstance.Logs(conn, "AccountingSync", $"CheckDocument: ดึงเอกสาร NextAcc ล้มเหลว ({ex.Message}) → แสดง local อย่างเดียว", "SYSTEM"); }
+                catch { }
+                return;
+            }
+
+            if (naDocs == null || naDocs.Count == 0) return;
+
+            bool IsVoidStatus(string s) =>
+                string.Equals(s, "Voided", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Canceled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+            // index เอกสาร NextAcc: ตาม GUID และตามเลขเอกสาร (ใช้จับคู่ผ่าน sync queue)
+            var byId = new Dictionary<Guid, Take_Time_BangPhra.Integration.NextAccPaymentDoc>();
+            var byNum = new Dictionary<string, Take_Time_BangPhra.Integration.NextAccPaymentDoc>(StringComparer.OrdinalIgnoreCase);
+            // ⚠ เลขเอกสารบน NextAcc **ใช้ซ้ำได้** — ยกเลิกใบแล้วสร้างใหม่ เลขเดิมถูกจ่ายให้ใบใหม่
+            //   (พบจริง: REC-20260815-0006 เป็นทั้ง f74fc0db (17 ส.ค.) และ e3dccc9f (19 ส.ค.))
+            //   ⇒ index ตามเลขต้องเก็บ "ใบที่ยัง active และใหม่ที่สุด" ไม่ใช่ใบแรกที่เจอ
+            //   ไม่งั้นกดดู/จับคู่ด้วยเลข จะได้ใบเก่าที่ถูกยกเลิกไปแล้ว
+            foreach (var d in naDocs)
+            {
+                if (d.Id != Guid.Empty && !byId.ContainsKey(d.Id)) byId[d.Id] = d;
+                if (string.IsNullOrEmpty(d.DocumentNumber)) continue;
+
+                Take_Time_BangPhra.Integration.NextAccPaymentDoc prev;
+                if (!byNum.TryGetValue(d.DocumentNumber, out prev)) { byNum[d.DocumentNumber] = d; continue; }
+
+                bool prevVoid = IsVoidStatus(prev.Status), curVoid = IsVoidStatus(d.Status);
+                if (prevVoid && !curVoid) byNum[d.DocumentNumber] = d;               // active ชนะ voided
+                else if (prevVoid == curVoid && d.DocumentDate >= prev.DocumentDate)  // เท่ากัน → ใบใหม่กว่า
+                    byNum[d.DocumentNumber] = d;
+            }
+
+            if (_syncStatusCache == null) LoadSyncStatusCache();
+            var matched = new HashSet<Take_Time_BangPhra.Integration.NextAccPaymentDoc>();
+
+            // จับคู่แถว local → เอกสาร NextAcc: (1) sync queue (GUID/เลขเอกสารที่บันทึกไว้ตอน sync —
+            // แม่นสุด ครอบคลุมเคส Reference = "RES-{resId}" ที่ไม่มีเลข local), (2) Reference มีเลข local
+            // (เอกสาร active ก่อน — ใบ voided จากการแก้ไขต้องแสดงเป็นแถวยกเลิกแยกต่างหาก)
+            foreach (DataRow r in dt.Rows)
+            {
+                string lid = r["ID"]?.ToString() ?? "";
+                if (string.IsNullOrEmpty(lid)) continue;
+
+                Take_Time_BangPhra.Integration.NextAccPaymentDoc nd = null;
+
+                // (0) การจับคู่ที่เก็บบนใบเสร็จเอง (PHASE18_32) — แหล่งจริง ไม่หายเวลาคิวถูกแก้
+                if (dt.Columns.Contains("LinkedDocId"))
+                {
+                    Guid lg;
+                    if (Guid.TryParse(r["LinkedDocId"]?.ToString() ?? "", out lg) && lg != Guid.Empty)
+                        byId.TryGetValue(lg, out nd);
+                }
+
+                if (nd == null && _syncStatusCache != null && _syncStatusCache.TryGetValue(lid, out var qrow))
+                {
+                    string respId = qrow.Table.Columns.Contains("Nexaacc_Response_Id") ? qrow["Nexaacc_Response_Id"]?.ToString() : null;
+                    if (Guid.TryParse(respId, out var g)) byId.TryGetValue(g, out nd);
+                    if (nd == null)
+                    {
+                        string qnum = qrow.Table.Columns.Contains("Nexaacc_Document_Number") ? qrow["Nexaacc_Document_Number"]?.ToString() : null;
+                        if (!string.IsNullOrEmpty(qnum)) byNum.TryGetValue(qnum, out nd);
+                    }
+                }
+                if (nd == null)
+                {
+                    foreach (var d in naDocs)   // active ก่อน — ใบ voided คงไว้เป็นแถวประวัติแยก
+                    {
+                        if (IsVoidStatus(d.Status)) continue;
+                        if ((d.Reference ?? "").IndexOf(lid, StringComparison.OrdinalIgnoreCase) >= 0) { nd = d; break; }
+                    }
+                }
+
+                if (nd != null)
+                {
+                    matched.Add(nd);
+                    r["DisplayDoc"] = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : lid;
+                    r["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
+                }
+            }
+
+            // เอกสารที่ไม่มีคู่ local (สร้างบน NextAcc โดยตรง / ใบเก่าที่ถูก void ตอนแก้ไข) → เพิ่มแถวใหม่
+            int added = 0;
+            foreach (var nd in naDocs)
+            {
+                if (matched.Contains(nd)) continue;
+                bool isVoid = IsVoidStatus(nd.Status);
+                string naNum = !string.IsNullOrEmpty(nd.DocumentNumber) ? nd.DocumentNumber : nd.Id.ToString();
+
+                var nr = dt.NewRow();
+                nr["ID"] = naNum;
+                nr["DisplayDoc"] = naNum;
+                nr["Created_Date"] = nd.DocumentDate;
+                // ดึงเลขการจองจาก Reference "RES-{id}" ของเอกสาร NextAcc — ให้คอลัมน์การจองไม่ว่าง
+                // (เคสใบที่ถูกลบใน local แล้วกู้คืนบน NextAcc: ผู้ใช้เห็นทันทีว่าใบนี้เป็นของการจองไหน)
+                if (dt.Columns.Contains("Reservation_ID"))
+                {
+                    var mRes = System.Text.RegularExpressions.Regex.Match(nd.Reference ?? "", @"RES-?(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (mRes.Success && int.TryParse(mRes.Groups[1].Value, out int naResId)) nr["Reservation_ID"] = naResId;
+                }
+                if (dt.Columns.Contains("CustomerName")) nr["CustomerName"] = string.IsNullOrEmpty(nd.ContactName) ? "-" : nd.ContactName;
+                if (dt.Columns.Contains("Paid_Type")) nr["Paid_Type"] = nd.DocumentTypeLabel ?? "";
+                nr["Total_Amount"] = nd.TotalAmount;
+                nr["Vat"] = nd.VatAmount;
+                nr["Status"] = isVoid ? "Cancel" : "NextAcc";
+                if (dt.Columns.Contains("Remark")) nr["Remark"] = nd.Notes ?? "";
+                if (dt.Columns.Contains("Created_By")) nr["Created_By"] = "NextAcc";
+                if (dt.Columns.Contains("HasSlip")) nr["HasSlip"] = 0;
+                nr["IsNextAccOnly"] = "1";
+                nr["NextAccId"] = nd.Id != Guid.Empty ? nd.Id.ToString() : "";
+                nr["NextAccViewUrl"] = "";
+                nr["NextAccDocStatus"] = nd.Status ?? "";   // สถานะจริงบน NextAcc (Draft/Approved/...) — ใช้ตอน "ดึงกลับ"
+                nr["IsNaPaymentDoc"] = IsNextAccPaymentReceipt(nd) ? "1" : "0";
+                // หาใบ local ของการจองเดียวกัน — แถวนี้ไม่มีปุ่มแก้ไขเพราะไม่ใช่ใบของระบบเรา
+                // แต่ผู้ใช้มักกำลังตามหา "ใบที่แก้ไขได้" อยู่ → ชี้ให้เลยว่าอยู่แถวไหน
+                // ⚠ การจองหนึ่งมีใบเสร็จได้หลายใบ (มัดจำ + เช็คเอาท์) — ห้ามหยิบ "ใบแรกที่เจอ"
+                //   (เคยผูกใบมัดจำเข้ากับเอกสารเช็คเอาท์มาแล้ว = ขโมยสายจับคู่ของใบอื่น)
+                //   เงื่อนไข: ต้องเป็นใบที่ "ยังไม่มีคู่บน NextAcc" และต้องเหลือผู้สมัครเพียงใบเดียว
+                //   เท่านั้น ถ้ากำกวมให้ไม่เสนอปุ่มผูก ปลอดภัยกว่าเดาผิด
+                nr["LocalTwinId"] = "";
+                if (dt.Columns.Contains("Reservation_ID") && nr["Reservation_ID"] != DBNull.Value)
+                {
+                    string naRes = nr["Reservation_ID"].ToString();
+                    string onlyCandidate = null;
+                    int candidates = 0, localRows = 0;
+                    foreach (DataRow lr in dt.Rows)
+                    {
+                        if ((lr["IsNextAccOnly"]?.ToString() ?? "0") != "0") continue;
+                        if (lr["Reservation_ID"] == DBNull.Value) continue;
+                        if (lr["Reservation_ID"].ToString() != naRes) continue;
+                        localRows++;
+                        // จับคู่กับเอกสาร NextAcc ใบอื่นอยู่แล้ว → ไม่ใช่ใบที่ขาดคู่ (แต่ยังเลือกเองได้)
+                        if (!string.IsNullOrEmpty(lr["NextAccId"]?.ToString())) continue;
+                        candidates++;
+                        onlyCandidate = lr["ID"]?.ToString() ?? "";
+                    }
+                    // ค่าที่ใส่ให้เป็น "ค่าเริ่มต้นในช่องกรอก" เท่านั้น ผู้ใช้แก้ได้เสมอ
+                    // "" = การจองนี้ไม่มีใบเสร็จในระบบเลย → ปุ่มเป็น "ดึงกลับ" (สร้างใบใหม่)
+                    if (candidates == 1) nr["LocalTwinId"] = onlyCandidate;
+                    else if (localRows > 0) nr["LocalTwinId"] = "*AMBIGUOUS*";
+                }
+                dt.Rows.Add(nr);
+                added++;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"   ➕ MergeNextAccReceiptDocs: matched {matched.Count}, added {added} NextAcc-only row(s) from {naDocs.Count} doc(s)");
+            lblDateRange.Text += $" <span style='color:#8a5a00;'>(NextAcc: จับคู่ {matched.Count}, เพิ่ม {added})</span>";
+        }
+
+        /// <summary>
+        /// เอกสารนี้เป็น "ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับใบอื่น" หรือไม่
+        /// (เช่น TIV-xxxx เปิดลูกหนี้ แล้ว NextAcc ออก REC-xxxx ปิดลูกหนี้ให้ทีละงวด)
+        /// เอกสารพวกนี้ไม่ใช่ "ใบขายที่หายไปจากระบบเรา" — ถ้าปล่อยให้กด "↩️ ดึงกลับ"
+        /// จะสร้าง Account_Receipt ปลอม + บวกยอดชำระ/มัดจำเข้าการจองซ้ำ (ยอดเบิ้ล)
+        /// </summary>
+        private static bool IsNextAccPaymentReceipt(Take_Time_BangPhra.Integration.NextAccPaymentDoc nd)
+        {
+            string notes = nd?.Notes ?? "";
+            return notes.IndexOf("รับชำระเงินตามใบกำกับ", StringComparison.Ordinal) >= 0
+                || notes.IndexOf("รับชำระเงินตามใบแจ้งหนี้", StringComparison.Ordinal) >= 0
+                || System.Text.RegularExpressions.Regex.IsMatch(notes, @"ตามใบกำกับภาษีเลขที่\s*\S+");
+        }
+
+        /// <summary>ปุ่ม "🔍 ตรวจยอดชำระ NextAcc" — ตรวจทุกใบในช่วงวันที่ที่เลือก: รับเงินซ้อน (ชำระเกินยอด)
+        /// และค้างชำระ (settle ไม่ครบ) แล้วรายงานเป็นรายใบ พร้อมวิธีแก้ (ใช้เคลียร์ "เอกสารเดิม")</summary>
+        protected void btnAuditPayments_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // ช่วงวันที่: ใช้กติกาเดียวกับปุ่มค้นหา (เดือน/ปี ก่อน แล้วค่อยช่วงวันที่)
+                DateTime startDate, endDate;
+                if (ddlMonth.SelectedIndex > 0 && !string.IsNullOrEmpty(ddlYear.SelectedValue))
+                {
+                    int month = Convert.ToInt32(ddlMonth.SelectedValue);
+                    int year = Convert.ToInt32(ddlYear.SelectedValue);
+                    startDate = new DateTime(year, month, 1);
+                    endDate = startDate.AddMonths(1).AddDays(-1);
+                }
+                else
+                {
+                    startDate = Convert.ToDateTime(txtStartDate.Text);
+                    endDate = Convert.ToDateTime(txtEndDate.Text);
+                }
+
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!cfg.IsConfigured || !cfg.Enabled)
+                {
+                    ShowError("ยังไม่ได้เปิดใช้ NextAcc — ตรวจยอดชำระไม่ได้");
+                    return;
+                }
+
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                string report = null;
+                var task = System.Threading.Tasks.Task.Run(() => svc.AuditNextAccReceiptPaymentsAsync(startDate, endDate));
+                if (task.Wait(60000)) report = task.Result;
+
+                ShowError(report ?? "NextAcc ตอบช้า — ลองกดตรวจอีกครั้งในสักครู่ (ผลถูกบันทึกใน log ด้วย)");
+            }
+            catch (Exception ex)
+            {
+                ShowError("ตรวจยอดชำระไม่สำเร็จ: " + ex.Message);
             }
         }
 
@@ -939,9 +1271,36 @@ namespace Take_Time_BangPhra.Account
 
             try
             {
-                // ✅ FIX: Get document number from correct column (Cells[4], not Cells[3])
-                // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร
-                string docNum = gvDetails.Rows[e.RowIndex].Cells[4].Text;
+                // เอกสาร NextAcc-only: ใบที่ยัง active → ยกเลิกได้ (enqueue void ไป NextAcc ด้วย GUID)
+                // ใบที่ยกเลิกแล้ว → ไม่มีอะไรให้ทำ
+                var dkDel = gvDetails.DataKeys[e.RowIndex];
+                if (dkDel != null && dkDel["IsNextAccOnly"]?.ToString() == "1")
+                {
+                    string naStatus = dkDel["Status"]?.ToString() ?? "";
+                    string naId = dkDel["NextAccId"]?.ToString() ?? "";
+                    string naDocNum = dkDel["ID"]?.ToString() ?? "";
+                    if (naStatus == "Cancel")
+                    {
+                        ShowError("เอกสารนี้ถูกยกเลิกบน NextAcc แล้ว");
+                        return;
+                    }
+                    if (!Guid.TryParse(naId, out _))
+                    {
+                        ShowError("เอกสารนี้ไม่มีรหัส NextAcc สำหรับยกเลิก");
+                        return;
+                    }
+                    var syncNa = new AccountingSyncService(conn);
+                    long qid = syncNa.EnqueueVoidReceiptByNexaaccId(naId, naDocNum, "ยกเลิกจากหน้าเอกสาร TakeTime");
+                    if (qid > 0)
+                        ShowError($"✅ ส่งคำสั่งยกเลิก {naDocNum} เข้าคิวแล้ว (#{qid}) — สถานะจะเปลี่ยนเป็นยกเลิกเมื่อประมวลผลเสร็จ กดค้นหาใหม่เพื่อตรวจสอบ");
+                    else
+                        ShowError("ส่งคำสั่งยกเลิกไม่สำเร็จ — ตรวจสอบการตั้งค่า NextAcc");
+                    return;
+                }
+
+                // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                // Column index: [0]=ลบ, [1]=ดูPDF, [2]=แก้ไข, [3]=ดูสลิป, [4]=เลขที่เอกสาร(DisplayDoc)
+                string docNum = dkDel?["ID"]?.ToString() ?? gvDetails.Rows[e.RowIndex].Cells[4].Text;
 
                 System.Diagnostics.Debug.WriteLine($"🗑️ Attempting to delete document: {docNum}");
 
@@ -957,11 +1316,11 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
-                    string path = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("ReceiptFolderPath") + "\\" + docYear + "\\" + docMonth;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(path))
                     {
-                        string altPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        string altPath = AppCfg.Get("ReceiptFolderPath") + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
                         if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
                             path = altPath;
                     }
@@ -1081,11 +1440,11 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("PaymentFolderPath") + "\\" + docYear + "\\" + docMonth;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(path))
                     {
-                        string altPath = ConfigurationManager.AppSettings["PaymentFolderPath"] + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
+                        string altPath = AppCfg.Get("PaymentFolderPath") + "\\" + docYear + "\\" + docMonth.PadLeft(2, '0');
                         if (docMonth.PadLeft(2, '0') != docMonth && Directory.Exists(altPath))
                             path = altPath;
                     }
@@ -1151,9 +1510,10 @@ namespace Take_Time_BangPhra.Account
                 }
                 catch { /* Ignore logging errors */ }
 
-                // Show success message and refresh page
-                ClientScript.RegisterStartupScript(this.GetType(), "deleteSuccess",
-                    $"alert('✅ ลบเอกสาร {docNum} สำเร็จ'); window.location='/Account/CheckDocument_New';", true);
+                // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS) → row หายจริง + แจ้งสำเร็จ
+                Response.Redirect("~/Account/CheckDocument_New?deleted=1", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
             }
             catch (Exception ex)
             {
@@ -1176,8 +1536,41 @@ namespace Take_Time_BangPhra.Account
         {
             try
             {
-                string docStatus = gvDetails.Rows[e.NewSelectedIndex].Cells[14].Text; // Status column
-                string docNum = gvDetails.Rows[e.NewSelectedIndex].Cells[4].Text; // ID column
+                // เอกสาร NextAcc-only (รวมใบที่ยกเลิก/void) → เปิด PDF จาก NextAcc ด้วย GUID โดยตรง
+                // (ต้องเช็คก่อน parser เลขเอกสารด้านล่าง เพราะเลข NextAcc เช่น REC-20260716-0005 จะ parse ไม่ได้)
+                var dk = gvDetails.DataKeys[e.NewSelectedIndex];
+                if (dk != null && (dk["IsNextAccOnly"]?.ToString() == "1"))
+                {
+                    string naId = dk["NextAccId"]?.ToString() ?? "";
+                    string naDocNum = dk["ID"]?.ToString() ?? "";
+                    // ใบยกเลิก → ขอ PDF ที่ประทับ "ยกเลิก" จาก NextAcc (ไม่งั้นได้ PDF รุ่น active เดิม)
+                    bool naCancelled = (dk["Status"]?.ToString() == "Cancel");
+                    if (Guid.TryParse(naId, out var gid) && gid != Guid.Empty)
+                    {
+                        try
+                        {
+                            Server.ScriptTimeout = 300;
+                            var svc = new AccountingSyncService(conn);
+                            var na = System.Threading.Tasks.Task.Run(() =>
+                                svc.DownloadNextAccDocumentByIdAsync(gid, naDocNum, false, naCancelled)).GetAwaiter().GetResult();
+                            if (na != null && na.Found && !string.IsNullOrEmpty(na.PdfRelativeUrl))
+                            {
+                                Response.Redirect(na.PdfRelativeUrl);
+                                return;
+                            }
+                            ShowError("NextAcc ไม่มี PDF สำหรับเอกสารนี้: " + (na?.Message ?? "ไม่ทราบสาเหตุ"));
+                        }
+                        catch (System.Threading.ThreadAbortException) { throw; }
+                        catch (Exception nex) { ShowError("เปิด PDF จาก NextAcc ไม่สำเร็จ: " + nex.Message); }
+                        return;
+                    }
+                    ShowError("เอกสาร NextAcc นี้ไม่มีรหัสสำหรับเปิด PDF");
+                    return;
+                }
+
+                // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                string docStatus = dk?["Status"]?.ToString() ?? gvDetails.Rows[e.NewSelectedIndex].Cells[14].Text;
+                string docNum = dk?["ID"]?.ToString() ?? gvDetails.Rows[e.NewSelectedIndex].Cells[4].Text;
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}");
 
@@ -1193,8 +1586,79 @@ namespace Take_Time_BangPhra.Account
 
                 if (docType == "REC")
                 {
+                    // ── DOCUMENT mode: เอกสารจริงออกบน NextAcc → เปิด PDF จาก NextAcc ก่อน ──
+                    // (mirror ฝั่งจ่าย CheckPayment_New) — ใบเสร็จ/ใบกำกับที่ sync แล้วต้องแสดงเอกสาร
+                    // ตามที่ NextAcc ออก (เลขที่/ยอด/รูปแบบทางการ) ไม่ใช่ PDF ที่ระบบ render เอง.
+                    // smart-cache ในตัว: ครั้งแรกดึง ครั้งต่อไปเปิด local ทันที; ดึงใหม่หลัง edit/re-sync.
+                    // ถ้ายังไม่ sync/ดึงไม่ได้ → ตกไปใช้ไฟล์ local เดิมด้านล่าง
+                    bool naTimedOut = false;
+                    try
+                    {
+                        var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                        // ลอง NextAcc "ถ้าเปิดใช้ NextAcc" — ไม่ผูกกับ IsReceiptDocumentMode (โหมดปัจจุบัน) เพราะ
+                        // เอกสารที่ sync ไปแล้วต้องแสดง PDF ทางการเสมอ แม้ config โหมดจะถูกสลับภายหลัง.
+                        // DownloadReceiptPdfFromNextAccAsync คืน Found=false เองถ้าใบนี้ไม่มีเอกสาร NextAcc → ตก local
+                        if (naCfg.IsConfigured && naCfg.Enabled)
+                        {
+                            Server.ScriptTimeout = 300;
+                            var naSvc = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                            // bound 25 วิ — NextAcc ช้าต้องไม่ทำให้ผู้ใช้ค้าง; task ดึงต่อเบื้องหลัง
+                            // จนจบและเขียน cache เอง → กดใหม่รอบหน้าเปิดได้ทันที
+                            Take_Time_BangPhra.Integration.NextAccCachedDocument naPdf = null;
+                            var naTask = System.Threading.Tasks.Task.Run(() =>
+                                naSvc.DownloadReceiptPdfFromNextAccAsync(docNum, docStatus == "Cancel"));
+                            if (naTask.Wait(25000)) naPdf = naTask.Result;
+                            else naTimedOut = true;
+                            if (naPdf != null && naPdf.Found && !string.IsNullOrEmpty(naPdf.PdfRelativeUrl))
+                            {
+                                Response.Redirect(naPdf.PdfRelativeUrl);
+                                return;
+                            }
+                            // เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (ExternalRef ไม่ตรง) → หยุด ไม่ดึงต่อ
+                            // ด้วย GUID (เป็น GUID ที่ชนตัวเดียวกัน) กันเปิดเอกสารผิดคน — แจ้งให้กด Retry
+                            if (naPdf != null && naPdf.MismatchedIdentity)
+                            {
+                                ShowError(naPdf.Message ?? "เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น — กด Retry เพื่อออกเอกสารของใบนี้เอง");
+                                return;
+                            }
+
+                            // fallback ชั้น 2: การจับคู่ตอนโหลดตาราง (merge) เก็บ GUID เอกสาร NextAcc ไว้ใน
+                            // DataKeys["NextAccId"] แล้ว → ดึง PDF ตรงด้วย GUID (ไม่พึ่งการ lookup จากคิว
+                            // ที่อาจหาไม่เจอ เช่น payload คนละรูปแบบ/คิวถูกล้าง). ข้ามถ้าชั้นแรก timeout
+                            // (NextAcc ช้าทั้งระบบ — ยิงซ้ำมีแต่รอเพิ่ม)
+                            string rowNaId = dk?["NextAccId"]?.ToString() ?? "";
+                            if (!naTimedOut && Guid.TryParse(rowNaId, out var rowGid) && rowGid != Guid.Empty)
+                            {
+                                Take_Time_BangPhra.Integration.NextAccCachedDocument byId = null;
+                                var byIdTask = System.Threading.Tasks.Task.Run(() =>
+                                    naSvc.DownloadNextAccDocumentByIdAsync(rowGid, docNum, false, docStatus == "Cancel"));
+                                if (byIdTask.Wait(15000)) byId = byIdTask.Result;
+                                else naTimedOut = true;
+                                if (byId != null && byId.Found && !string.IsNullOrEmpty(byId.PdfRelativeUrl))
+                                {
+                                    Response.Redirect(byId.PdfRelativeUrl);
+                                    return;
+                                }
+                            }
+
+                            // ดึง NextAcc ไม่สำเร็จ → log เหตุผล (แทนกลืนเงียบ) เพื่อรู้ว่าทำไมตก local
+                            try
+                            {
+                                codeInstance.Logs(conn, "AccountingSync",
+                                    $"CheckDocument ดู PDF: receipt={docNum} → NextAcc ไม่คืน PDF ({(naTimedOut ? "timeout" : naPdf?.Message ?? "unknown")}, byId={rowNaId}) → ใช้ไฟล์ local", "SYSTEM");
+                            }
+                            catch { }
+                        }
+                    }
+                    catch (System.Threading.ThreadAbortException) { throw; }   // อย่ากลืน redirect
+                    catch (Exception naEx)
+                    {
+                        try { codeInstance.Logs(conn, "AccountingSync", $"CheckDocument ดู PDF: receipt={docNum} NextAcc error: {naEx.Message} → ใช้ไฟล์ local", "SYSTEM"); }
+                        catch { }
+                    }
+
                     // Get receipt UID from database (SECURE)
-                    string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
+                    string path = AppCfg.Get("ReceiptFolderPath");
                     var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
                     var uidResult = codeInstance.DatabaseQuerySafe(conn,
                         "SELECT [UID] FROM [dbo].[Account_Receipt] WHERE ID = @DocNum",
@@ -1261,13 +1725,15 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
-                    // If no file found, show error
+                    // If no file found, show error — แยกเคส NextAcc ช้า (ไฟล์กำลังเตรียมเบื้องหลัง กดใหม่ได้)
+                    if (naTimedOut)
+                        throw new Exception($"NextAcc ตอบช้า — ระบบกำลังเตรียมไฟล์ {docNum} อยู่เบื้องหลัง กรุณากดดูอีกครั้งใน 15-30 วินาที");
                     throw new Exception($"ไม่พบไฟล์ PDF สำหรับเอกสาร {docNum}\n\nตรวจสอบแล้ว:\n{string.Join("\n", filesToCheck)}");
                 }
                 else if (docType == "PAY")
                 {
                     // Get payment UID from database (SECURE)
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                    string path = AppCfg.Get("PaymentFolderPath");
                     var uidParams = new Dictionary<string, object> { { "@DocNum", docNum } };
                     var uidResult = codeInstance.DatabaseQuerySafe(conn,
                         "SELECT [UID] FROM [dbo].[Account_Payment] WHERE ID = @DocNum",
@@ -1358,12 +1824,177 @@ namespace Take_Time_BangPhra.Account
                 return;
             }
 
+            // ปุ่ม "📧 ส่ง e-Tax" — เปิดหน้าตรวจ/ส่งอีเมล (pre-fill ผู้รับ/CC/หัวข้อ/เนื้อหา)
+            if (e.CommandName == "sendetax")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    var dkE = gvDetails.DataKeys[rowIndex];
+                    string docNum = dkE?["ID"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสาร"); return; }
+                    Response.Redirect("/Account/SendEtax?receipt=" + Server.UrlEncode(docNum));
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception ex) { ShowError("เปิดหน้าส่ง e-Tax ไม่สำเร็จ: " + ex.Message); }
+                return;
+            }
+
+            // ปุ่ม "🧾 ออกใบกำกับเต็มรูป" — เคสลูกค้าขอใบกำกับภาษีย้อนหลัง
+            // พนักงานเติมเลขผู้เสียภาษี + ที่อยู่ในใบเสร็จก่อน แล้วกดปุ่มนี้เพื่อส่งขึ้น NextAcc ใหม่
+            // ระบบจะ route ไปทางใบกำกับเต็มรูปเอง (HasFullBuyerTaxData) แทนใบเสร็จรับเงินธรรมดา
+            // — resync in-place ก่อน (เลขเอกสารคงเดิม) ถ้า NextAcc ไม่ยอมค่อย void + ออกใหม่
+            if (e.CommandName == "fulltaxinvoice")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    string docNum = gvDetails.DataKeys[rowIndex]?["ID"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                    var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (!naCfg.IsConfigured || !naCfg.Enabled)
+                    { ShowError("ยังไม่ได้เปิดใช้ NextAcc"); return; }
+
+                    var svc = new AccountingSyncService(conn);
+
+                    // ข้อมูลผู้ซื้อครบ = จะได้ใบกำกับเต็มรูป, ไม่ครบ = ได้ใบเสร็จรับเงินเหมือนเดิม
+                    // ⚠️ ไม่บล็อก — ปุ่มนี้ใช้ส่ง "การแก้ไขทุกชนิด" (ยอด/รายการ/แหล่งเงิน/ลูกค้า)
+                    //    ถ้าบล็อกเมื่อไม่มีเลขภาษี จะใช้ push แก้ไขทั่วไปไม่ได้เลย
+                    var chk = svc.CheckBuyerTaxDataForReceipt(docNum);
+                    string docKind = chk.Ready ? "ใบกำกับภาษีเต็มรูป" : "ใบเสร็จรับเงิน (ข้อมูลผู้ซื้อไม่ครบ)";
+
+                    Server.ScriptTimeout = 300;
+                    long r = svc.RepostReceiptByNumber(docNum);
+                    string detail = svc.LastRepostMessage ?? "";
+                    // แสดงเสมอ (ไม่ใช่เฉพาะตอนไม่ครบ) — บอกว่าใช้ผู้ซื้อคนไหนและมาจากไหน
+                    // ผู้ใช้จะเห็นทันทีว่าทำไมได้ชื่อผู้จองแทนบริษัท โดยไม่ต้องเปิด log
+                    string note = string.IsNullOrEmpty(chk.Reason) ? "" : "\n\nℹ️ " + chk.Reason;
+
+                    if (r == 0)
+                        ShowInfo($"✅ อัปเดตเอกสาร {docNum} บน NextAcc แล้ว — ได้เป็น{docKind} (เลขเอกสารเดิม) {detail}{note}");
+                    else if (r > 0)
+                        ShowInfo($"✅ ส่ง {docNum} ขึ้น NextAcc ใหม่แล้ว — จะได้เป็น{docKind} (คิวที่ {r}) รอ sync สักครู่แล้วกด \"ดึงล่าสุด\" {detail}{note}");
+                    else
+                        ShowError("ส่งขึ้น NextAcc ไม่สำเร็จ: " + (string.IsNullOrEmpty(detail)
+                            ? "NextAcc ปฏิเสธ (อาจปิดงวดบัญชี/ยื่น ภ.พ.30 แล้ว หรือใบนี้ชำระ/มีใบลดหนี้แล้ว)" : detail));
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception ex) { ShowError("ส่งขึ้น NextAcc ไม่สำเร็จ: " + ex.Message); }
+                return;
+            }
+
+            // ปุ่ม "🔄 ดึงล่าสุด" — บังคับดึง PDF สดจาก NextAcc ข้าม cache ทุกชั้น (ใช้หลังแก้ไข/
+            // ยกเลิกเอกสารแล้วอยากได้ไฟล์รุ่นปัจจุบันทันที ไม่รอ cache หมดอายุ)
+            if (e.CommandName == "refreshpdf")
+            {
+                try
+                {
+                    int rowIndex = Convert.ToInt32(e.CommandArgument);
+                    var dkR = gvDetails.DataKeys[rowIndex];
+                    string docNum = dkR?["ID"]?.ToString() ?? "";
+                    bool cancelled = (dkR?["Status"]?.ToString() ?? "") == "Cancel";
+                    bool isNaOnly = dkR?["IsNextAccOnly"]?.ToString() == "1";
+                    string naId = dkR?["NextAccId"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                    var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (!naCfg.IsConfigured || !naCfg.Enabled)
+                    {
+                        ShowError("ยังไม่ได้เปิดใช้ NextAcc — ดึงไฟล์ล่าสุดไม่ได้");
+                        return;
+                    }
+
+                    Server.ScriptTimeout = 300;
+                    var svc = new AccountingSyncService(conn);
+                    Take_Time_BangPhra.Integration.NextAccCachedDocument fresh = null;
+                    bool timedOut = false;
+
+                    if (isNaOnly && Guid.TryParse(naId, out var gNa) && gNa != Guid.Empty)
+                    {
+                        // แถว NextAcc-only → ดึงตรงด้วย GUID (forceRefresh)
+                        var t = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadNextAccDocumentByIdAsync(gNa, docNum, true, cancelled));
+                        if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+                    }
+                    else
+                    {
+                        // ใบ local ที่ sync แล้ว → เส้นทางเลขใบเสร็จ (forceRefresh) → fallback GUID จากตาราง
+                        var t = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadReceiptPdfFromNextAccAsync(docNum, cancelled, forceRefresh: true));
+                        if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+
+                        if (!timedOut && (fresh == null || !fresh.Found)
+                            && Guid.TryParse(naId, out var g2) && g2 != Guid.Empty)
+                        {
+                            var t2 = System.Threading.Tasks.Task.Run(() =>
+                                svc.DownloadNextAccDocumentByIdAsync(g2, docNum, true, cancelled));
+                            if (t2.Wait(30000)) fresh = t2.Result; else timedOut = true;
+                        }
+                    }
+
+                    if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
+                    {
+                        Response.Redirect(fresh.PdfRelativeUrl);
+                        return;
+                    }
+                    ShowError(timedOut
+                        ? $"NextAcc ตอบช้า — ระบบกำลังดึงไฟล์ {docNum} ต่อเบื้องหลัง กรุณากดดู PDF อีกครั้งใน 15-30 วินาที"
+                        : $"ดึงไฟล์ล่าสุดไม่สำเร็จ: {fresh?.Message ?? "ไม่ทราบสาเหตุ"}");
+                }
+                catch (System.Threading.ThreadAbortException) { throw; }
+                catch (Exception rex)
+                {
+                    ShowError("ดึงไฟล์ล่าสุดไม่สำเร็จ: " + rex.Message);
+                }
+                return;
+            }
+
             if (e.CommandName == "edit")
             {
                 try
                 {
                     int rowIndex = Convert.ToInt32(e.CommandArgument);
-                    string docNum = gvDetails.Rows[rowIndex].Cells[4].Text; // Column index: ลบ(0), ดูPDF(1), แก้ไข(2), ดูสลิป(3), เลขที่เอกสาร(4)
+
+                    // เอกสาร NextAcc-only (ไม่มีใบ local) — ปุ่มนี้กลายเป็น "↩️ ดึงกลับ":
+                    // กู้ใบเสร็จที่ถูกลบใน TakeTime กลับจาก snapshot ในคิว sync (สร้าง Account_Receipt/
+                    // Payment_History + ผูกการจอง + คืนยอดมัดจำ) — เคสลบแล้วไปกู้คืนเอกสารบน NextAcc
+                    var dkEdit = gvDetails.DataKeys[rowIndex];
+                    if (dkEdit != null && dkEdit["IsNextAccOnly"]?.ToString() == "1")
+                    {
+                        if (dkEdit["Status"]?.ToString() == "Cancel")
+                        {
+                            ShowError("เอกสารนี้ถูกยกเลิกบน NextAcc — ไม่มีอะไรให้ดึงกลับ");
+                            return;
+                        }
+                        string restoreNaId = dkEdit["NextAccId"]?.ToString() ?? "";
+                        string restoreDocNum = dkEdit["ID"]?.ToString() ?? "";
+                        string restoreNaStatus = dkEdit["NextAccDocStatus"]?.ToString() ?? "";
+
+                        // ใบ local ของการจองนี้ยังอยู่ → ไม่ใช่เคส "ถูกลบแล้วกู้คืน" แต่เป็น
+                        // "สายจับคู่ขาด" (void→สร้างใหม่หลายรอบ / ลบเอกสารอื่นทิ้งบน NextAcc)
+                        // → ผูกกลับให้ ไม่ต้องสร้างใบซ้ำ (ซึ่งจะทำให้ยอดมัดจำ/ชำระเบิล)
+                        // เลขใบปลายทางมาจากช่อง prompt ที่ผู้ใช้ยืนยัน (ไม่ให้ระบบเดาเอง)
+                        string twinLocal = (hfRelinkTarget.Value ?? "").Trim();
+                        hfRelinkTarget.Value = "";
+                        if (!string.IsNullOrEmpty(twinLocal))
+                        {
+                            var linkSvc = new AccountingSyncService(conn);
+                            var (lOk, lMsg) = linkSvc.RelinkReceiptToNextAccDoc(twinLocal, restoreNaId, restoreDocNum);
+                            ShowError((lOk ? "🔗 " : "") + lMsg + (lOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
+                            return;
+                        }
+                        // เลขการจองของเอกสาร (จาก Reference RES-{id}) — บังคับ snapshot ต้องเป็นการจองเดียวกัน
+                        int restoreResId = 0;
+                        int.TryParse(dkEdit["Reservation_ID"]?.ToString() ?? "0", out restoreResId);
+                        var restoreSvc = new AccountingSyncService(conn);
+                        var (rOk, rMsg) = restoreSvc.RestoreDeletedReceiptFromNextAcc(restoreNaId, restoreDocNum, restoreNaStatus, restoreResId);
+                        ShowError((rOk ? "✅ " : "") + rMsg + (rOk ? " — กดค้นหาใหม่เพื่อรีเฟรชตาราง" : ""));
+                        return;
+                    }
+
+                    // ใช้เลข local จาก DataKeys — คอลัมน์เลขที่ในตารางแสดง DisplayDoc (เลข NextAcc) แล้ว
+                    string docNum = dkEdit?["ID"]?.ToString() ?? gvDetails.Rows[rowIndex].Cells[4].Text;
 
                     System.Diagnostics.Debug.WriteLine($"📝 Edit document: {docNum}, RowIndex: {rowIndex}");
 
@@ -1493,7 +2124,18 @@ namespace Take_Time_BangPhra.Account
 
         private void ShowError(string message)
         {
-            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{message}');", true);
+            // ต้อง escape ก่อนฝังใน alert('...') — ข้อความมี \n / ' / \ (เช่น รายการ path ที่ตรวจ)
+            // จะทำให้ JS พังเงียบ ๆ → ผู้ใช้เห็นแค่หน้ารีโหลดเด้งขึ้นบนโดยไม่มีข้อความอะไรเลย
+            // (หน้า CheckPayment_New ใช้วิธีเดียวกันอยู่แล้ว)
+            string safe = System.Web.HttpUtility.JavaScriptStringEncode(message ?? "");
+            ScriptManager.RegisterStartupScript(this, GetType(), "error", $"alert('{safe}');", true);
+        }
+
+        /// <summary>แจ้งผลสำเร็จ — escape เหมือน ShowError กันข้อความมี ' หรือขึ้นบรรทัดใหม่แล้ว JS พัง</summary>
+        private void ShowInfo(string message)
+        {
+            string safe = System.Web.HttpUtility.JavaScriptStringEncode(message ?? "");
+            ScriptManager.RegisterStartupScript(this, GetType(), "info", $"alert('{safe}');", true);
         }
 
         /// <summary>
@@ -1616,6 +2258,32 @@ namespace Take_Time_BangPhra.Account
         // ──────────────────────────────────────────────
 
         private Dictionary<string, DataRow> _syncStatusCache;
+        private HashSet<string> _etaxReceipts;   // เลขใบเสร็จที่มี e-Tax แล้ว (ในช่วงวันที่) → โชว์ปุ่มส่ง e-Tax
+
+        private static int _hasLinkCol = -1;   // -1 = ยังไม่ตรวจ, 1 = มี, 0 = ไม่มี
+
+        /// <summary>
+        /// คอลัมน์การจับคู่ (PHASE18_32) อาจยังไม่ถูก migrate บนบางเครื่อง —
+        /// ถ้าใส่ชื่อคอลัมน์ที่ไม่มีลงไปตรง ๆ query หลักจะพังทั้งหน้า
+        /// จึงตรวจครั้งเดียวแล้วเลือกส่ง ชื่อคอลัมน์จริง หรือค่าว่าง
+        /// </summary>
+        private string LinkedDocIdSelect()
+        {
+            if (_hasLinkCol < 0)
+            {
+                try
+                {
+                    var chk = codeInstance.DatabaseQuerySafe(conn,
+                        @"SELECT TOP 1 1 FROM INFORMATION_SCHEMA.COLUMNS
+                          WHERE TABLE_NAME = 'Account_Receipt' AND COLUMN_NAME = 'Nexaacc_Doc_Id'", null);
+                    _hasLinkCol = (chk != null && chk.Rows.Count > 0) ? 1 : 0;
+                }
+                catch { _hasLinkCol = 0; }
+            }
+            return _hasLinkCol == 1
+                ? "ISNULL(CAST(ar.Nexaacc_Doc_Id AS NVARCHAR(50)), '') AS LinkedDocId,"
+                : "CAST('' AS NVARCHAR(50)) AS LinkedDocId,";
+        }
 
         private void LoadSyncStatusCache()
         {
@@ -1669,6 +2337,86 @@ namespace Take_Time_BangPhra.Account
 
             string docId = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
             string docStatus = DataBinder.Eval(e.Row.DataItem, "Status")?.ToString() ?? "";
+
+            // แถวเอกสาร NextAcc-only — คงปุ่ม "ดู PDF"; ใบ active คงปุ่มลบไว้เป็นปุ่ม "ยกเลิก" (enqueue
+            // void ไป NextAcc); ใบที่ยกเลิกแล้วซ่อนปุ่มลบ; ซ่อนแก้ไข/sync เสมอ (ไม่มีใบ local)
+            string isNaOnly = DataBinder.Eval(e.Row.DataItem, "IsNextAccOnly")?.ToString() ?? "0";
+            if (isNaOnly == "1")
+            {
+                bool voided = docStatus == "Cancel";
+                bool isNaPayment = (DataBinder.Eval(e.Row.DataItem, "IsNaPaymentDoc")?.ToString() ?? "0") == "1";
+                lblSync.Text = voided
+                    ? "<span class='sync-badge failed' title='เอกสารถูกยกเลิกบน NextAcc'>❌ ยกเลิก (NextAcc)</span>"
+                    : isNaPayment
+                        ? "<span class='sync-badge completed' title='ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ — ไม่ใช่ใบขายของระบบเรา'>💵 ใบรับชำระ (NextAcc)</span>"
+                        : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
+
+                // ทำไมแถวนี้ไม่มีปุ่ม "แก้ไข": เอกสารนี้อยู่บน NextAcc แต่ไม่มีใบคู่ในระบบเรา
+                // ถ้าการจองเดียวกันมีใบ local อยู่ → ชี้ไปที่แถวนั้น (ผู้ใช้มักหาไม่เจอแล้วคิดว่าแก้ไม่ได้แล้ว)
+                string twin = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
+                if (!voided)
+                    lblSync.Text += twin == "*AMBIGUOUS*"
+                        ? "<div style='font-size:10px;color:#888;margin-top:2px;'>การจองนี้มีใบเสร็จหลายใบที่ยังไม่มีคู่ — ผูกอัตโนมัติไม่ได้ ใช้ปุ่ม \"ส่งแก้ไขขึ้น NextAcc\" ที่ใบที่ต้องการแทน</div>"
+                        : string.IsNullOrEmpty(twin)
+                            ? "<div style='font-size:10px;color:#888;margin-top:2px;'>ไม่มีใบนี้ในระบบ TakeTime จึงแก้ไขไม่ได้</div>"
+                            : $"<div style='font-size:10px;color:#888;margin-top:2px;'>แก้ไขได้ที่ใบ <b>{Server.HtmlEncode(twin)}</b> (การจองเดียวกัน)</div>";
+                btnSync.Visible = false;
+                try
+                {
+                    if (e.Row.Cells.Count > 0)
+                        foreach (Control c in e.Row.Cells[0].Controls)
+                            if (c is Button bDel)
+                            {
+                                if (voided) bDel.Visible = false;         // ยกเลิกแล้ว — ไม่มีอะไรให้ทำ
+                                else bDel.Text = "🚫 ยกเลิก";             // active → ยกเลิกบน NextAcc ได้
+                            }
+                    var bEdit = e.Row.FindControl("btnEdit") as Button;
+                    if (bEdit != null)
+                    {
+                        if (voided) bEdit.Visible = false;                // ใบยกเลิก — ไม่มีอะไรให้ทำ
+                        else if (isNaPayment)
+                        {
+                            // ใบรับชำระของ NextAcc (คู่กับใบกำกับใบอื่น) — ไม่ใช่ใบขายที่หายไปจากระบบเรา
+                            // "ดึงกลับ" ที่นี่ = สร้างใบเสร็จปลอม + บวกยอดชำระเข้าการจองซ้ำ → ซ่อนปุ่มทิ้ง
+                            bEdit.Visible = false;
+                        }
+                        else
+                        {
+                            // ใบ active ที่ไม่มีคู่ใน local (เช่น ลบในระบบแล้วไปกู้คืนบน NextAcc) →
+                            // ปุ่ม "ดึงกลับ": สร้าง Account_Receipt/Payment_History + คืนมัดจำเข้าการจอง
+                            // มีใบ local ของการจองนี้อยู่แล้ว → ปุ่มนี้คือ "ผูกกลับ" ไม่ใช่ "สร้างใบใหม่"
+                            // ระบบเดาใบปลายทางเองไม่ได้เสมอ (การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์)
+                            // → ให้ผู้ใช้ยืนยัน/แก้เลขใบเองในช่อง prompt แล้วส่งมากับ hidden field
+                            string twinId = DataBinder.Eval(e.Row.DataItem, "LocalTwinId")?.ToString() ?? "";
+                            if (!string.IsNullOrEmpty(twinId))
+                            {
+                                // การจองนี้มีใบเสร็จในระบบอยู่แล้ว → งานคือ "ผูกกลับ" ไม่ใช่สร้างใบใหม่
+                                // ระบบเดาใบปลายทางเองไม่ได้ (การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์
+                                // และใบที่ผูกผิดไว้ก่อนหน้าก็ต้องแก้ได้) → ให้ผู้ใช้ยืนยันเลขใบเอง
+                                string guess = twinId == "*AMBIGUOUS*" ? "" : twinId;
+                                string naNumShow = DataBinder.Eval(e.Row.DataItem, "ID")?.ToString() ?? "";
+                                string naAmt = DataBinder.Eval(e.Row.DataItem, "Total_Amount")?.ToString() ?? "";
+                                bEdit.Text = "🔗 ผูกกับใบในระบบ";
+                                bEdit.ToolTip = "ผูกเอกสารนี้เข้ากับใบเสร็จในระบบ — แก้เฉพาะการจับคู่ ไม่แตะบัญชี ไม่สร้าง/ลบเอกสาร";
+                                bEdit.OnClientClick =
+                                    "var v=prompt('ผูกเอกสาร " + naNumShow + " (ยอด " + naAmt + ") เข้ากับใบเสร็จเลขที่ใดในระบบ?\\n\\n"
+                                    + "ตรวจให้ตรงใบจริง — การจองหนึ่งมีทั้งใบมัดจำและใบเช็คเอาท์', '" + guess + "');"
+                                    + "if(v===null||v.trim()===''){return false;}"
+                                    + "document.getElementById('" + hfRelinkTarget.ClientID + "').value=v.trim();return true;";
+                            }
+                            else
+                            {
+                                bEdit.Text = "↩️ ดึงกลับ";
+                                bEdit.ToolTip = "ดึงใบเสร็จกลับเข้าระบบ (กู้ข้อมูลการจอง/มัดจำจากประวัติ sync)";
+                                bEdit.OnClientClick = "return confirm('ดึงเอกสารนี้กลับเข้าระบบ?\\n\\nระบบจะสร้างใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำเข้าการจองให้ (กู้จากประวัติ sync)');";
+                            }
+                        }
+                    }
+                }
+                catch { }
+                if (voided) e.Row.Attributes["style"] = "background-color:#fff3f3;color:#a00;";
+                return;
+            }
 
             if (docStatus == "Cancel")
             {
@@ -1725,6 +2473,11 @@ namespace Take_Time_BangPhra.Account
                 lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
                 btnSync.Visible = true;
             }
+
+            // ปุ่ม "📧 ส่ง e-Tax" — โชว์เฉพาะใบที่มี e-Tax แล้ว (local rows; NextAcc-only ไม่มีใบในระบบ return ไปก่อนแล้ว)
+            var btnEtax = e.Row.FindControl("btnSendEtax") as Button;
+            if (btnEtax != null)
+                btnEtax.Visible = _etaxReceipts != null && !string.IsNullOrEmpty(docId) && _etaxReceipts.Contains(docId);
         }
 
         private void HandleSyncDocument(string docId)

@@ -81,6 +81,7 @@ namespace Take_Time_BangPhra
 
                 // 🔄 Google Reviews - ดึงข้อมูลใหม่ทุก 7 วัน
                 string jsonResponse = "";
+                string reviewDiag = "";   // เหตุผลจริงเมื่อรีวิวไม่ขึ้น (status ของ Google) เพื่อ diagnose บนเครื่อง production
                 try
                 {
                     // ดึงข้อมูล review ล่าสุด (TOP 1)
@@ -100,10 +101,13 @@ namespace Take_Time_BangPhra
                         System.Diagnostics.Debug.WriteLine($"[Google Reviews] Cache expires: {cacheExpiryDate:yyyy-MM-dd HH:mm}");
                         System.Diagnostics.Debug.WriteLine($"[Google Reviews] Current time: {now:yyyy-MM-dd HH:mm}");
 
-                        // ✅ เช็คว่า cache ยังไม่หมดอายุ และ lastFetchDate ไม่ใช่อนาคต
-                        if (lastFetchDate <= now && now < cacheExpiryDate)
+                        // ✅ ใช้ cache เฉพาะเมื่อยังไม่หมดอายุ + เป็น JSON รีวิวที่ valid (status OK, มี result)
+                        // กันกรณีเคย cache คำตอบ error ของ Google (เช่น OVER_QUERY_LIMIT/REQUEST_DENIED)
+                        // ไว้ → หน้าแรกจะไม่มีรีวิวจนกว่าจะครบ 7 วัน
+                        string cachedJson = dtReviews.Rows[0]["json"]?.ToString() ?? "";
+                        if (lastFetchDate <= now && now < cacheExpiryDate && IsValidReviewJson(cachedJson))
                         {
-                            jsonResponse = dtReviews.Rows[0]["json"].ToString();
+                            jsonResponse = cachedJson;
                             needRefresh = false;
                             double daysUntilExpiry = (cacheExpiryDate - now).TotalDays;
                             System.Diagnostics.Debug.WriteLine($"[Google Reviews] ✅ Using cached data (expires in {daysUntilExpiry:F1} days)");
@@ -123,8 +127,9 @@ namespace Take_Time_BangPhra
                         System.Diagnostics.Debug.WriteLine("[Google Reviews] 🔄 Fetching new data from Google API...");
                         jsonResponse = await FetchGoogleReviews();
 
-                        // Check if fetch was successful (not error)
-                        if (!jsonResponse.Contains("\"error\""))
+                        // บันทึกเฉพาะเมื่อได้ JSON รีวิวที่ valid (status OK + มี result) เท่านั้น
+                        // ไม่ทับ cache ที่ดีด้วยคำตอบ error ของ Google (status != OK) หรือ exception
+                        if (IsValidReviewJson(jsonResponse))
                         {
                             // ลบข้อมูลเก่าทั้งหมด แล้ว insert ใหม่
                             DatabaseQuery(conn, code.AdaptSql("DELETE FROM Reviews"));
@@ -142,24 +147,28 @@ namespace Take_Time_BangPhra
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API Error: {jsonResponse}");
-                            // ถ้า API error แต่มี cached data เก่า → ใช้ cached แทน
-                            if (dtReviews.Rows.Count > 0)
-                            {
-                                jsonResponse = dtReviews.Rows[0]["json"].ToString();
-                                System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ Using old cached data due to API error");
-                            }
+                            reviewDiag = ExtractGoogleReviewError(jsonResponse);   // เก็บ status/error_message จริงของ Google
+                            System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ API invalid response ({reviewDiag}): {jsonResponse}");
+                            // ใช้ cache เก่าได้เฉพาะถ้ายัง valid — ไม่งั้นปล่อย reviews ว่างให้ frontend แสดง "ไม่มีรีวิว"
+                            string oldJson = dtReviews.Rows.Count > 0 ? dtReviews.Rows[0]["json"]?.ToString() ?? "" : "";
+                            jsonResponse = IsValidReviewJson(oldJson) ? oldJson : "{\"result\":{\"reviews\":[]}}";
+                            System.Diagnostics.Debug.WriteLine("[Google Reviews] ⚠️ Kept old cache / empty (did not overwrite good data)");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
+                    reviewDiag = "exception: " + ex.Message;
                     System.Diagnostics.Debug.WriteLine($"[Google Reviews] ❌ Exception: {ex.Message}");
                     jsonResponse = "{\"error\": \"Unable to load reviews\"}";
                 }
 
                 // Assign the response to a Literal as a JavaScript variable
-                Literal1.Text = $"<script>var jsoninput = {jsonResponse};</script>";
+                // + แนบ diagnostic เมื่อรีวิวโหลดไม่ได้ → เปิดหน้าแรกบน production แล้วดู Console เห็นเหตุผลจริงของ Google
+                string diagScript = string.IsNullOrEmpty(reviewDiag)
+                    ? ""
+                    : $"try{{console.warn('[Google Reviews] '+{Newtonsoft.Json.JsonConvert.SerializeObject(reviewDiag)});}}catch(e){{}}";
+                Literal1.Text = $"<script>var jsoninput = {jsonResponse};{diagScript}</script>";
 
             }
             try
@@ -178,25 +187,83 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>
+        /// ตรวจว่า JSON ที่ได้จาก Google Places เป็นคำตอบที่ใช้ได้จริง:
+        /// parse ได้ + status = OK (หรือไม่มี status) + มี result. ใช้กันการ cache คำตอบ error
+        /// (OVER_QUERY_LIMIT / REQUEST_DENIED / INVALID_REQUEST / NOT_FOUND / {"error":...})
+        /// ทับข้อมูลรีวิวที่ดีไว้.
+        /// </summary>
+        private static bool IsValidReviewJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            try
+            {
+                var o = JObject.Parse(json);
+                if (o["error"] != null) return false;
+                string status = o["status"]?.ToString();
+                if (!string.IsNullOrEmpty(status) && !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return o["result"] != null;   // reviews อาจว่างได้ถ้าสถานที่ไม่มีรีวิว
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ดึงเหตุผลจริงจากคำตอบ Google Places (status + error_message) เพื่อบอกว่าทำไมรีวิวไม่ขึ้น
+        /// เช่น REQUEST_DENIED (คีย์ผิด/ถูกจำกัด referrer/ยังไม่เปิด Places API), OVER_QUERY_LIMIT (billing),
+        /// NOT_FOUND/INVALID_REQUEST (place_id ผิด). คืน "" ถ้าแกะไม่ได้.
+        /// </summary>
+        private static string ExtractGoogleReviewError(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return "empty response";
+            try
+            {
+                var o = JObject.Parse(json);
+                if (o["error"] != null) return "error: " + o["error"].ToString();
+                string status = o["status"]?.ToString();
+                string msg = o["error_message"]?.ToString();
+                if (!string.IsNullOrEmpty(status))
+                    return string.IsNullOrEmpty(msg) ? "status=" + status : $"status={status} — {msg}";
+                return "no result/status in response";
+            }
+            catch { return "unparseable response"; }
+        }
+
         private async Task<string> FetchGoogleReviews()
         {
-            string apiUrl = "https://maps.googleapis.com/maps/api/place/details/json?placeid=ChIJvUgTD9nLAjERMgFSAIuRHJw&key=AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U&language=th";
+            // Key + place id อ่านจาก Web.config appSettings ก่อน (แก้/หมุนคีย์ได้โดยไม่ต้อง rebuild)
+            // ถ้าไม่ตั้งใน config จะ fallback เป็นค่าเดิม
+            string apiKey = AppCfg.Get("GooglePlacesApiKey");
+            if (string.IsNullOrWhiteSpace(apiKey)) apiKey = "AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U";
+            string placeId = ConfigurationManager.AppSettings["GooglePlaceId"];
+            if (string.IsNullOrWhiteSpace(placeId)) placeId = "ChIJvUgTD9nLAjERMgFSAIuRHJw";
+
+            // legacy Place Details ต้องระบุ fields (ไม่ระบุ = Google เตือน/คิดเงินเต็ม) — ขอเฉพาะที่ใช้
+            string apiUrl = "https://maps.googleapis.com/maps/api/place/details/json"
+                + "?place_id=" + Uri.EscapeDataString(placeId)
+                + "&fields=name,rating,user_ratings_total,reviews"
+                + "&language=th"
+                + "&key=" + Uri.EscapeDataString(apiKey);
 
             try
             {
                 using (HttpClient client = new HttpClient())
                 {
                     HttpResponseMessage response = await client.GetAsync(apiUrl);
-                    response.EnsureSuccessStatusCode();
-
                     string content = await response.Content.ReadAsStringAsync();
-                    return content; // Return raw JSON response
+
+                    // ไม่ throw ทิ้ง body — คืน JSON ดิบ (มี status/error_message ของ Google) เพื่อให้ diagnose ได้จริง
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[Google Reviews] HTTP {(int)response.StatusCode}: {content}");
+                    }
+                    return content; // Return raw JSON response (รวม REQUEST_DENIED/OVER_QUERY_LIMIT ถ้ามี)
                 }
             }
             catch (Exception ex)
             {
                 // Return an error message if API call fails
-                return $"{{\"error\": \"{ex.Message}\"}}";
+                return $"{{\"error\": {Newtonsoft.Json.JsonConvert.SerializeObject(ex.Message)}}}";
             }
         }
 
@@ -290,7 +357,7 @@ namespace Take_Time_BangPhra
                 Response.Redirect("./Default.aspx?selecteddate="+ Calendar1.SelectedDate.ToString("yyyy-MM-dd"));
                 
             }
-            if (DateTime.Now > Calendar1.SelectedDate.AddDays(1) && Session["permission"] == "No")
+            if (DateTime.Now > Calendar1.SelectedDate.AddDays(1) && Session["permission"]?.ToString() == "No")
             {
                 GridView1.Visible = false;
                 
@@ -305,10 +372,13 @@ namespace Take_Time_BangPhra
                 {
                     { "@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd") }
                 };
+                // ⚠️ ต้องใช้เงื่อนไขชุดเดียวกับ AccommodationAvailabilityService / ตัวอ่านอีเมล OTA
+                // (ตัดสถานะที่ห้องคืนแล้ว + เทียบเฉพาะวัน) ไม่งั้นหน้าจอกับระบบจองจะเห็นห้องว่างไม่ตรงกัน
                 DataTable dtReservation = DatabaseQuerySafe(conn,
                     code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
                     "INNER JOIN Accommodation ON Accommodation.ID = Reservation_Accommodation.Accommodation_ID " +
-                    "WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate"),
+                    "WHERE @SelectedDate >= CAST(CheckinDate AS date) AND @SelectedDate < CAST(CheckoutDate AS date) " +
+                    "AND ISNULL(Reservation.Status, N'') NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')"),
                     reservationParams);
                 DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by OrderID asc"));
                 try
@@ -566,7 +636,7 @@ namespace Take_Time_BangPhra
             }
             else
             {
-                if (DateTime.Now.AddDays(-1) > e.Day.Date && Session["permission"] == "No")
+                if (DateTime.Now.AddDays(-1) > e.Day.Date && Session["permission"]?.ToString() == "No")
                 {
                     e.Cell.ForeColor = System.Drawing.Color.Transparent;
                 }
@@ -593,7 +663,6 @@ namespace Take_Time_BangPhra
                         elseReservationParams);
                     DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by ID asc"));
                     int maxAccommodation = dtAccommodation.Rows.Count;
-                    int totalAmount = 0;
 
                     for (int j = 0; j < dtAccommodation.Rows.Count; j++)
                     {

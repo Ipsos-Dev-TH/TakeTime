@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
@@ -53,6 +53,20 @@ namespace Take_Time_BangPhra.Integration
         public Guid? BranchId { get; set; }
         public Guid? DimensionId { get; set; }
         public string Tags { get; set; }
+    }
+
+    /// <summary>
+    /// แก้ JE เดิม in-place (PUT /accounting/journals/{id}) — NextAcc UpdateJournalEntryRequest.
+    /// field = null → คงค่าเดิม; Lines != null → แทนที่บรรทัดทั้งชุด (ต้อง balance + ≥2 บรรทัด).
+    /// ใช้ได้แม้ JE เป็น Posted (operator-override) ตราบเท่าที่งวดบัญชียังเปิด และ JE ไม่ใช่
+    /// รายการ auto-generated จากเอกสาร (พวกนั้น NextAcc ปฏิเสธ — ต้อง void เอกสาร+สร้างใหม่)
+    /// </summary>
+    public class UpdateJournalEntryRequest
+    {
+        public DateTime? EntryDate { get; set; }
+        public string Description { get; set; }
+        public string Reference { get; set; }
+        public List<JournalEntryLineRequest> Lines { get; set; }
     }
 
     public class JournalEntryResponse
@@ -144,6 +158,62 @@ namespace Take_Time_BangPhra.Integration
         public string Reference { get; set; }
         public string Notes { get; set; }
         public List<DocumentLineRequest> Lines { get; set; }
+        public Guid? ProjectId { get; set; }
+        public Guid? BankAccountId { get; set; }
+        /// <summary>บัญชีเงินสด/ธนาคารฝั่งรับ-จ่าย (ChartOfAccount id) — แหล่งเงิน.
+        /// Receipt/ReceiptVoucher: Dr บัญชีนี้. null → NextAcc ใช้เงินสด 111.</summary>
+        public Guid? PaymentAccountId { get; set; }
+        public DateTime? PaymentDate { get; set; }
+        public string Currency { get; set; } = "THB";
+        /// <summary>true → UnitPrice รวม VAT แล้ว (NextAcc ถอด 7% ออกเอง)</summary>
+        public bool PricesIncludeVat { get; set; }
+        /// <summary>เงินมัดจำ/รับล่วงหน้า — Cr "ขายรอรับรู้" (217xx) แทนรายได้</summary>
+        public bool IsDeposit { get; set; }
+        /// <summary>ผังพักรายได้สำหรับมัดจำ (null → 21712). ตั้งให้ตรงกับบัญชี ADVANCE_DEPOSIT
+        /// ฝั่ง TakeTime เพื่อให้ checkout clearing (Dr ADVANCE_DEPOSIT) หักล้างได้พอดี</summary>
+        public string DepositDeferredAccountCode { get; set; }
+        /// <summary>true → Cr ภาษีขายรอเรียกเก็บ 21913 (ยังไม่เข้า ภ.พ.30); false → Cr 21911 ทันที</summary>
+        public bool DepositOutputVatDeferred { get; set; }
+        /// <summary>เลขที่ใบกำกับ/เอกสารของคู่ค้า (ฝั่งซื้อ/ใบสำคัญจ่าย) — แยกจาก DocumentNumber ของเรา</summary>
+        public string SupplierInvoiceNumber { get; set; }
+        /// <summary>ยอดมัดจำที่หักในใบรับเงินฉบับสุดท้าย (รวม VAT) — DISPLAY-ONLY, ไม่กระทบ JE.
+        /// NextAcc แสดงบนใบ (PDF+preview): "หักเงินมัดจำ (ref) (amount)" + "ยอดชำระสุทธิ" (ตัวหนา).
+        /// null/0 → แสดง "ยอดรวมสุทธิ" แบบเดิม (backward-compatible). การรับรู้/กลับ 21913 ยังทำผ่าน
+        /// adjustment แยก → GL ไม่เปลี่ยน. NextAcc field: depositAppliedAmount (spec §9).</summary>
+        public decimal? DepositAppliedAmount { get; set; }
+        /// <summary>เลขใบมัดจำที่อ้างอิง (เช่น REC260702001) — แสดงในวงเล็บข้าง "หักเงินมัดจำ".
+        /// NextAcc field: depositAppliedRef.</summary>
+        public string DepositAppliedRef { get; set; }
+        /// <summary>true → NextAcc "โหมดขับ JE" (spec §9.1): ตอน post Receipt ลง JE self-contained ในใบเดียว
+        /// (Dr เงินสดสุทธิ = Total−Applied + กลับ 217xx/21913 ของใบมัดจำที่ depositAppliedRef ชี้) แทน JV แยก.
+        /// ⚠️ เปิด flag นี้ต้อง "เลิกส่ง JV หักมัดจำแยก" พร้อมกัน มิฉะนั้น 217xx/21913 ถูกกลับ 2 รอบ (GL พัง).
+        /// default false = display-only (JV แยกฝั่ง TakeTime ยังทำ GL). NextAcc field: depositAppliedDrivesJournal.</summary>
+        public bool DepositAppliedDrivesJournal { get; set; }
+        /// <summary>เลขจอง (booking) ของการจองห้องพัก — NextAcc field "bookingNumber" (string). ผูกเอกสาร
+        /// ชุดเดียวกันของการจอง (มัดจำ→ใบกำกับ→ใบเสร็จ) + auto-suggest หักมัดจำ. TakeTime ส่ง "RES-{id}".</summary>
+        public string BookingNumber { get; set; }
+        /// <summary>ชื่อผู้ทำเอกสาร/ผู้รับเงิน (พนักงานที่สร้างใบในระบบ TakeTime เช่น "ชวนพิศ …") —
+        /// เพื่อให้ช่อง "ผู้รับเงิน/ผู้จัดทำ" บน PDF เป็นคนทำจริง ไม่ใช่ NextAcc user (เจ้าของ/กรรมการ).
+        /// NextAcc field "preparerName". ⚠ NextAcc ต้องรองรับ + ให้ priority เหนือ CreatedBy user
+        /// (ดู docs/NextAcc_Pending_Requests). ตอนนี้ส่งไปก่อนแบบ forward-compatible (record ignore ได้).</summary>
+        public string PreparerName { get; set; }
+        /// <summary>ลายเซ็นผู้ทำเอกสาร/ผู้รับเงิน (data-URI หรือ base64) — NextAcc field
+        /// "preparerSignatureBase64". คู่กับ PreparerName สำหรับช่อง "ผู้รับเงิน/ผู้จัดทำ".</summary>
+        public string PreparerSignatureBase64 { get; set; }
+
+        /// <summary>
+        /// ขายเงินสด "ใบเดียวจบ" — verified vs Wachira-d/Accounting (CreateDocumentRequest):
+        /// <c>DocumentType=TaxInvoice + IssuedAsCashReceipt=true</c> → AutoPost ลงแบบเงินสด
+        /// (<b>Dr เงินสด/ธนาคาร (PaymentAccountId) + กลับมัดจำ 217xx/21913 ถ้ามี /
+        /// Cr รายได้ + Cr 21911 — ไม่ตั้งลูกหนี้</b>) และ <b>ไม่ออกใบเสร็จหลักฐานแยก</b>
+        /// หัวเอกสาร upgrade เป็น "ใบกำกับภาษี/ใบเสร็จรับเงิน" (ComputeDocumentTitle) + e-Tax T03
+        /// ⇒ แก้ปัญหา "1 ใบกำกับ + ใบเสร็จรับชำระอีก 2 ใบ" ที่เกิดจากเส้น integration
+        /// (production ยังไม่รองรับ isCashSale จึงเปิดลูกหนี้แล้วปิดด้วย payment ทีละงวด)
+        /// </summary>
+        public bool? IssuedAsCashReceipt { get; set; }
+
+        /// <summary>ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี → ยกเว้น gate §86/4 + หัวคงเป็น "ใบเสร็จรับเงิน"</summary>
+        public bool? BuyerDeclinedTaxInvoice { get; set; }
     }
 
     public class DocumentLineRequest
@@ -156,12 +226,44 @@ namespace Take_Time_BangPhra.Integration
         public decimal VatRate { get; set; }
         public decimal WithholdingTaxRate { get; set; }
         public Guid? AccountId { get; set; }
+        /// <summary>ผังบัญชีในรูป AccountCode (string) — ทางเลือกแทน AccountId; NextAcc resolve code→Id ตอน save</summary>
+        public string AccountCode { get; set; }
+        /// <summary>true (default) = เคลมภาษีซื้อได้ (Dr ภาษีซื้อ). false = ภาษีซื้อต้องห้าม §82/5 →
+        /// NextAcc รวม VAT เข้าบัญชีค่าใช้จ่าย (Dr ค่าใช้จ่าย = net+VAT) ไม่แยกภาษีซื้อ</summary>
+        public bool IsVatClaimable { get; set; } = true;
+        public string VatNonClaimableReason { get; set; }
+    }
+
+    /// <summary>แก้ไขเอกสาร Draft (PUT /api/companies/{id}/document/{docId}). ฟิลด์ null = คงค่าเดิม;
+    /// Lines != null = แทนที่ทั้งชุด; PaymentAccountId = บังคับแหล่งเงิน (ฝั่งเครดิตเงินสด/ธนาคาร)</summary>
+    public class UpdateDocumentRequest
+    {
+        public DateTime? DocumentDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public Guid? ContactId { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
+        public List<DocumentLineRequest> Lines { get; set; }
+        public Guid? PaymentAccountId { get; set; }
+        public Guid? BankAccountId { get; set; }
+        public string SupplierInvoiceNumber { get; set; }
+        public DateTime? SupplierTaxInvoiceDate { get; set; }
+        public bool? PricesIncludeVat { get; set; }
+        /// <summary>เลขจอง (booking) — NextAcc field "bookingNumber". null = คงเดิม.</summary>
+        public string BookingNumber { get; set; }
+        /// <summary>ชื่อผู้ทำเอกสาร/ผู้จัดทำ (พนักงานที่ทำใน TakeTime) — NextAcc field "preparerName".
+        /// ใช้กับเอกสารที่ NextAcc สร้างจาก OCR แล้วเราแก้ผ่าน PUT (เราไม่คุมตอน create) → ยัดผู้จัดทำจริง
+        /// ตรงนี้แทน (X-Acting-User ช่วยได้เฉพาะเมื่อ staff เป็น NextAcc user). null = คงเดิม.</summary>
+        public string PreparerName { get; set; }
+        /// <summary>ลายเซ็นผู้ทำเอกสาร (data-URI/base64) — NextAcc field "preparerSignatureBase64". null = คงเดิม.</summary>
+        public string PreparerSignatureBase64 { get; set; }
     }
 
     public class DocumentResponse
     {
         public Guid Id { get; set; }
         public string DocumentNumber { get; set; }
+        [JsonConverter(typeof(DocumentTypeConverter))]
         public int DocumentType { get; set; }
         [JsonConverter(typeof(DocumentStatusConverter))]
         public int Status { get; set; }
@@ -176,6 +278,9 @@ namespace Take_Time_BangPhra.Integration
         public decimal BalanceDue { get; set; }
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
+        /// <summary>externalRef ของเอกสาร (NextAcc `GET /documents/{id}` คืน field `reference`) —
+        /// TakeTime ใช้ = เลขใบเสร็จ (receiptNumber) → ยืนยันตัวตนเอกสารก่อนเปิด PDF กันเปิดผิดใบ</summary>
+        public string Reference { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -217,6 +322,7 @@ namespace Take_Time_BangPhra.Integration
         public string Name { get; set; }
         public string TaxId { get; set; }
         public string BranchCode { get; set; }
+        [JsonConverter(typeof(ContactTypeConverter))]
         public int ContactType { get; set; }
         public bool IsCustomer { get; set; }
         public bool IsSupplier { get; set; }
@@ -245,6 +351,12 @@ namespace Take_Time_BangPhra.Integration
         public Guid? OverrideBankAccountId { get; set; }
         public Guid? OverridePaymentAccountId { get; set; }
         public Guid? ProjectId { get; set; }
+
+        // base64 ลายเซ็น "ผู้จ่ายเงิน" (slot 0 ของ PV PDF). NextAcc cap 512KB.
+        // ใช้กับ integration service account ที่ไม่มีลายเซ็นบนระบบ NextAcc.
+        public string PayerSignatureBase64 { get; set; }
+        // ชื่อที่พิมพ์ใต้ลายเซ็นผู้จ่าย (default = ชื่อ CreatedBy ฝั่ง NextAcc)
+        public string PayerSignatureName { get; set; }
     }
 
     public class PaymentResponse
@@ -260,6 +372,120 @@ namespace Take_Time_BangPhra.Integration
         public Guid? BankAccountId { get; set; }
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // Document approve (company endpoint, acc_) — ตรงตาม Nexaacc DocumentDtos.ApproveDocumentRequest
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Body ของ POST /api/companies/{cid}/document/{id}/approve. ครั้งแรกถ้ามี soft warning
+    /// NextAcc จะตอบ 422 + รายการเตือน → ส่งซ้ำด้วย AcknowledgeWarnings=true เพื่อยืนยัน.
+    /// </summary>
+    public class ApproveDocumentRequest
+    {
+        public string Notes { get; set; }
+        public bool AcknowledgeWarnings { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
+    // OCR (company endpoint, acc_) — ตรงตาม Nexaacc OcrDtos.OcrResultResponse (subset)
+    // Newtonsoft จะข้าม field ที่ไม่ได้ map ให้เอง จึง model เฉพาะที่ TakeTime ใช้
+    // ──────────────────────────────────────────────
+
+    public class OcrResultResponse
+    {
+        public Guid Id { get; set; }
+        public string OriginalFileName { get; set; }
+        public string ScanStatus { get; set; }            // Pending/Processing/Completed/Failed/...
+        public string DocumentType { get; set; }
+        public decimal Confidence { get; set; }
+        public string ExtractedVendorName { get; set; }
+        public string ExtractedVendorTaxId { get; set; }
+        public string ExtractedDocumentNumber { get; set; }
+        public DateTime? ExtractedDate { get; set; }
+        public decimal? ExtractedSubTotal { get; set; }
+        public decimal? ExtractedVatAmount { get; set; }
+        public decimal? ExtractedTotalAmount { get; set; }
+        public decimal? ExtractedDiscountAmount { get; set; }
+        public Guid? MatchedContactId { get; set; }
+        public Guid? CreatedDocumentId { get; set; }
+        public DateTime? ProcessedAt { get; set; }
+        public bool IsDuplicate { get; set; }
+        public string ProcessingNotes { get; set; }
+        public string ExpenseCategory { get; set; }
+        public OcrSuggestedAccountsDto SuggestedAccounts { get; set; }
+        public bool HasWht { get; set; }
+        public decimal? WhtRate { get; set; }
+        public int? PaymentTermsDays { get; set; }
+        public List<OcrLineItemDto> ExtractedItems { get; set; }
+        public string BuyerName { get; set; }
+        public string BuyerTaxId { get; set; }
+        public OcrDbdInfo DbdInfo { get; set; }
+        public string ScannedDocumentType { get; set; }
+        public string OurRole { get; set; }              // "Buyer"/"Seller"
+        public string TargetDocumentType { get; set; }   // เอกสารที่ควรสร้าง เช่น PaymentVoucher
+        public string OcrEngine { get; set; }
+        public bool HasPotentialFixedAsset { get; set; }
+        public bool HasHandwriting { get; set; }
+        public OcrQualityGradeDto Quality { get; set; }
+        public string SuggestedEntryMode { get; set; }
+        public bool GlAccountUsedAi { get; set; }         // true = AI จริงช่วยจัดผังบัญชี
+    }
+
+    public class OcrSuggestedAccountsDto
+    {
+        public string DebitAccountCode { get; set; }
+        public string DebitAccountName { get; set; }
+        public string CreditAccountCode { get; set; }
+        public string CreditAccountName { get; set; }
+        public string VatAccountCode { get; set; }
+        public string VatAccountName { get; set; }
+    }
+
+    public class OcrLineItemDto
+    {
+        public string Description { get; set; }
+        public decimal? Quantity { get; set; }
+        public decimal? UnitPrice { get; set; }
+        public decimal? Amount { get; set; }
+        public string SuggestedAccountCode { get; set; }
+        public string Unit { get; set; }
+    }
+
+    public class OcrDbdInfo
+    {
+        public bool LookupAttempted { get; set; }
+        public bool Matched { get; set; }
+        public string CanonicalName { get; set; }
+        public string Address { get; set; }
+        public string JuristicType { get; set; }
+        public string Status { get; set; }
+    }
+
+    public class OcrQualityGradeDto
+    {
+        public string Letter { get; set; }    // A/B/C/D
+        public int Score { get; set; }         // 0-100
+        public string Color { get; set; }
+    }
+
+    /// <summary>
+    /// ผลค้นข้อมูลนิติบุคคลจากกรมพัฒนาธุรกิจการค้า (DBD) ผ่าน NextAcc
+    /// ตรงกับ record <c>DbdCompanyResult</c> ใน Wachira-d/Accounting
+    /// (Services/Interfaces/IDbdLookupService.cs) — GET /api/dbd/juristic/{juristicId}
+    /// NextAcc cache ผล 24 ชม. (ข้อมูลราชการเปลี่ยนช้า)
+    /// </summary>
+    public class DbdCompanyResult
+    {
+        public string JuristicId { get; set; }          // เลขทะเบียนนิติบุคคล 13 หลัก
+        public string NameTh { get; set; }              // ชื่อนิติบุคคล (ไทย) — ชื่อที่จดทะเบียนจริง
+        public string NameEn { get; set; }              // ชื่อนิติบุคคล (อังกฤษ)
+        public string JuristicType { get; set; }        // บริษัทจำกัด / ห้างหุ้นส่วนจำกัด / ฯลฯ
+        public string Status { get; set; }              // สถานะนิติบุคคล (ยังดำเนินกิจการอยู่ / เลิก)
+        public decimal? RegisteredCapital { get; set; } // ทุนจดทะเบียน (บาท)
+        public string Address { get; set; }             // ที่ตั้งสำนักงานใหญ่ (ข้อความไทยเต็ม)
+        public string RegisterDate { get; set; }        // วันที่จดทะเบียน
     }
 
     // ──────────────────────────────────────────────
@@ -302,25 +528,9 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
-    // Stock (ตรงตาม Nexaacc ProductDtos.cs)
+    // Stock: StockAdjustmentRequest / StockMovementResponse ย้ายไปนิยามใกล้ inventory qty sync
+    // (ดู "Inventory qty (NextAcc ProductController /product/stock/*)") — ตรงตาม ProductDtos.cs จริง
     // ──────────────────────────────────────────────
-
-    public class StockAdjustmentRequest
-    {
-        public Guid ProductId { get; set; }
-        public decimal Quantity { get; set; }
-        public string Reason { get; set; }
-        public string Reference { get; set; }
-    }
-
-    public class StockMovementResponse
-    {
-        public Guid Id { get; set; }
-        public Guid ProductId { get; set; }
-        public decimal Quantity { get; set; }
-        public string Reason { get; set; }
-        public DateTime CreatedDate { get; set; }
-    }
 
     // ──────────────────────────────────────────────
     // Enums (ตรงตาม Nexaacc AllEnums.cs)
@@ -398,6 +608,43 @@ namespace Take_Time_BangPhra.Integration
     }
 
     /// <summary>
+    /// NextAcc คืน contactType ใน response เป็นชื่อ enum ("JuristicPerson") ไม่ใช่ int
+    /// → ต้องรับได้ทั้งสองแบบ ไม่งั้น deserialize พังทั้ง response ทั้งที่ฝั่ง NextAcc ทำงานสำเร็จแล้ว
+    /// (เคสจริง: PUT contacts สำเร็จ แต่ client อ่าน response ไม่ได้ → นับเป็นล้มเหลว + retry 5 รอบ
+    ///  → รายงานว่าอัปเดตชนิดผู้ติดต่อไม่สำเร็จ ทั้งที่อัปเดตไปแล้ว)
+    /// ไม่ throw ถ้าไม่รู้จัก (คืน 0) เพื่อไม่ให้ response พังทั้งก้อน
+    /// </summary>
+    public class ContactTypeConverter : JsonConverter<int>
+    {
+        private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Individual", NexaaccContactType.Individual },
+            { "JuristicPerson", NexaaccContactType.JuristicPerson },
+            { "GovernmentAgency", NexaaccContactType.GovernmentAgency }
+        };
+
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer) return Convert.ToInt32(reader.Value);
+            if (reader.TokenType == JsonToken.Null) return 0;
+            if (reader.TokenType == JsonToken.String)
+            {
+                var str = (string)reader.Value;
+                int v;
+                if (_nameToValue.TryGetValue(str ?? "", out v)) return v;
+                if (int.TryParse(str, out v)) return v;
+                return 0;
+            }
+            return 0;
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
+    }
+
+    /// <summary>
     /// Handles JournalType deserialization from both int and string values.
     /// The Nexaacc API may return either format (e.g. 3 or "CashReceipts").
     /// </summary>
@@ -442,6 +689,38 @@ namespace Take_Time_BangPhra.Integration
     /// Handles Status deserialization from both int and string values.
     /// The Nexaacc API may return either format (e.g. 0 or "Draft").
     /// </summary>
+    /// <summary>NextAcc คืน documentType ใน response เป็นชื่อ enum ("PaymentVoucher") ไม่ใช่ int
+    /// → แปลงชื่อ→ค่า int (รับ int ตรง ๆ ก็ได้). ไม่ throw ถ้าไม่รู้จัก (คืน 0) เพื่อไม่ให้ response พังทั้งก้อน.</summary>
+    public class DocumentTypeConverter : JsonConverter<int>
+    {
+        private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Quotation", 1 }, { "Invoice", 2 }, { "Receipt", 3 }, { "TaxInvoice", 4 },
+            { "DebitNote", 5 }, { "CreditNote", 6 }, { "PurchaseOrder", 7 }, { "PurchaseInvoice", 8 },
+            { "Expense", 9 }, { "DeliveryNote", 10 }, { "BillingNote", 11 }, { "PurchaseRequisition", 12 },
+            { "PaymentVoucher", 13 }, { "ReceiptVoucher", 14 }, { "CertificateInLieu", 15 }, { "GoodsReceiptNote", 16 }
+        };
+
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer)
+                return Convert.ToInt32(reader.Value);
+            if (reader.TokenType == JsonToken.String)
+            {
+                var str = (string)reader.Value;
+                if (_nameToValue.TryGetValue(str, out int value)) return value;
+                if (int.TryParse(str, out int parsed)) return parsed;
+                return 0;   // ไม่รู้จัก → 0 (informational เท่านั้น ไม่ throw)
+            }
+            return 0;
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
+    }
+
     public class DocumentStatusConverter : JsonConverter<int>
     {
         private static readonly Dictionary<string, int> _nameToValue = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -456,8 +735,24 @@ namespace Take_Time_BangPhra.Integration
             { "Overdue", NexaaccDocumentStatus.Overdue },
             { "Rejected", NexaaccDocumentStatus.Rejected },
             // Also support journal-specific status names
-            { "Posted", 1 }
+            { "Posted", 1 },
+            // Journal ที่ถูกกลับรายการ — ยังอยู่ใน GL (ไม่ใช่ voided). map เป็นค่า distinct (9) เพื่อให้
+            // logic void-exclude (IsVoidedStatus = 2/6) นับรวม → net GL 21510 ถูก (ตรงกับ NextAcc Posted||Reversed).
+            // ⚠ ก่อนหน้านี้ "Reversed" ไม่อยู่ใน dict → ReadJson throw → deserialize SearchJournals ทั้ง response พัง
+            // (กระทบ deposit-reverse detection / auto-recover / post-sync verify ที่ใช้ SearchJournals)
+            //
+            // NextAcc enum จริง (ยืนยัน): JournalEntryStatus Draft=0/Posted=1/Voided=2/Reversed=3 — **serialize เป็น
+            // string เสมอ** (JsonStringEnumConverter) → เรา key off string ("Reversed") ตรง ๆ (ทางที่เชื่อถือได้สุด).
+            // 9 เป็น "ค่า internal ของ TakeTime" เท่านั้น (ไม่มีโค้ดไหนคาด NextAcc ส่ง 9; ไม่มี hard-code == 9).
+            // ถ้าเลข NextAcc จริงมาทาง int-token (ไม่เกิดเพราะเป็น string เสมอ): 2=Voided → IsVoidedStatus จับได้,
+            // 3=Reversed → not-voided → นับใน GL (ถูก). ทั้ง 9 และ 3 ปฏิบัติเหมือนกัน (in-GL, not voided).
+            { "Reversed", 9 },
+            { "Reversal", 9 }
         };
+
+        /// <summary>ค่า sentinel สำหรับ status ที่ NextAcc ส่งมาแต่ยังไม่ map (กัน throw ทำ deserialize พังทั้ง
+        /// response เมื่อ NextAcc เพิ่ม status ใหม่). ไม่ตรงกับ Posted/Voided ใด ๆ → logic เดิมปฏิบัติแบบ conservative.</summary>
+        public const int UnknownStatus = -1;
 
         public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
         {
@@ -473,8 +768,12 @@ namespace Take_Time_BangPhra.Integration
                 if (int.TryParse(str, out int parsed))
                     return parsed;
 
-                throw new JsonSerializationException($"Unknown Status value: '{str}'");
+                // ไม่รู้จัก → คืน sentinel แทน throw (forward-compatible: NextAcc เพิ่ม status ใหม่ ไม่ทำ response พัง)
+                return UnknownStatus;
             }
+
+            if (reader.TokenType == JsonToken.Null)
+                return UnknownStatus;
 
             throw new JsonSerializationException($"Unexpected token type {reader.TokenType} for Status");
         }
@@ -504,14 +803,50 @@ namespace Take_Time_BangPhra.Integration
         public string DocumentType { get; set; }
         public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
+        /// <summary>Resync contract (INTEGRATION_RESYNC.md): true + externalRef ซ้ำ → NextAcc แก้เอกสาร
+        /// เดิมเอง (งวดเปิด+JE เดียว = in-place เลข JE คงเดิม / งวดปิด = reversal+post ใหม่) —
+        /// เลขเอกสารคงเดิมเสมอ ไม่มี void. null/false = พฤติกรรมเดิม (ซ้ำ → "Already synced" skip)</summary>
+        public bool? ResyncUpdate { get; set; }
+        /// <summary>ลูกค้าไม่ประสงค์รับใบกำกับภาษี (ขายปลีก B2C ไม่มีเลขภาษี/ที่อยู่): true → NextAcc
+        /// ผูกใบกับ contact กลาง "ลูกค้าเงินสด (ไม่ประสงค์รับใบกำกับภาษี)" (IsWalkInCustomer — ยกเว้น
+        /// gate §86/4), VAT ขายเข้า ภ.พ.30 ครบ. ต้องไม่ส่ง customerName/TaxId/ExternalId ทั้ง 3 field.
+        /// ลูกค้าขอใบเต็มรูปทีหลัง → void+ส่งใหม่พร้อมข้อมูล (หรือ resyncUpdate ถ้ายังไม่ชำระ/ยังไม่ยื่นภาษี)</summary>
+        public bool? BuyerDeclinedTaxInvoice { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
         public Guid? PaymentAccountId { get; set; }
+        /// <summary>ขายสด: true → NextAcc ออก "ใบเดียว" (ใบกำกับภาษี/ใบเสร็จรับเงิน) — โพสต์ payment
+        /// ฝังในใบ (Dr แหล่งเงิน PaymentAccountId / Cr รายได้ / Cr VAT) ไม่เปิดลูกหนี้ ไม่สร้าง
+        /// ใบเสร็จรับชำระแยก. คู่กับ PaymentAccountId + PaymentDate + PaymentMethod + DocumentType=TaxInvoice.
+        /// null/false = พฤติกรรมเดิม (เปิดลูกหนี้ + ปิดด้วย payment แยก = ใบกำกับ + ใบเสร็จหลายใบ).
+        /// NextAcc field "isCashSale" (Option B, CI 34e50ba). รุ่นเก่า ignore field นี้ = พฤติกรรมเดิม.</summary>
+        public bool? IsCashSale { get; set; }
+        /// <summary>วันที่รับชำระ (คู่กับ IsCashSale) — NextAcc field "paymentDate"</summary>
+        public DateTime? PaymentDate { get; set; }
+        /// <summary>ยอดมัดจำที่หักในใบ (รวม VAT) — คู่กับ IsCashSale: NextAcc ลง Dr แหล่งเงิน (Total−มัดจำ)
+        /// + Dr 21510 (มัดจำ) ในใบเดียว + แสดง "หักเงินมัดจำ/ยอดชำระสุทธิ" บนใบ.
+        /// NextAcc field "depositAppliedAmount" (ส่วนขยาย Option B — รุ่นเก่า ignore = ห้ามส่งเคสมัดจำ
+        /// จนกว่า NextAcc ยืนยัน มิฉะนั้นเงินสดลงเต็มยอด GL พัง → gate ด้วย Nexaacc_CashSale_Deposit)</summary>
+        public decimal? DepositAppliedAmount { get; set; }
+        /// <summary>เลขใบมัดจำที่อ้าง (เช่น REC260718003) — NextAcc กลับ 217xx/21913 ของใบนั้น.
+        /// NextAcc field "depositAppliedRef"</summary>
+        public string DepositAppliedRef { get; set; }
+        /// <summary>true = VAT มัดจำพักที่ 21913 (defer) → NextAcc ทำ Dr 21913 / Cr 21911 ส่วน VAT มัดจำด้วย.
+        /// NextAcc field "depositOutputVatDeferred"</summary>
+        public bool? DepositOutputVatDeferred { get; set; }
+        /// <summary>⚠ สำคัญต่อ GL: บน cash-sale invoice **`depositAppliedAmount` เดี่ยว ๆ = display-only**
+        /// (NextAcc จ่ายเต็ม BalanceDue → เงินสดเต็มยอด มัดจำ 21510 ไม่ถูกล้าง). ต้องตั้ง true คู่กันเสมอ
+        /// เมื่อมีหักมัดจำ → NextAcc ลง JE self-contained กลับ 217xx/21913 ในใบเดียว (Dr 21510 = มัดจำ).
+        /// NextAcc field "depositAppliedDrivesJournal" (ยืนยันสัญญา NextAcc พร้อมรับ)</summary>
+        public bool? DepositAppliedDrivesJournal { get; set; }
         public decimal? VatRate { get; set; }
         public string Currency { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        /// <summary>เลขจอง (booking) — NextAcc field "bookingNumber" (int_ InboundInvoiceRequest, commit 8ed90ba).
+        /// TakeTime ส่ง "RES-{id}" → ผูก booking เดียวกันของการจอง. NextAcc build เก่าจะ ignore field นี้.</summary>
+        public string BookingNumber { get; set; }
         public string Sensitivity { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
         public string PreparerName { get; set; }
@@ -529,6 +864,8 @@ namespace Take_Time_BangPhra.Integration
         public DateTime? DueDate { get; set; }
         public string Reference { get; set; }
         public bool ReplaceExistingForSource { get; set; }
+        /// <summary>Resync contract — เหมือน CreateIntegrationInvoiceRequest.ResyncUpdate</summary>
+        public bool? ResyncUpdate { get; set; }
         public string Description { get; set; }
         public List<IntegrationLineRequest> Lines { get; set; }
         public string PaymentMethod { get; set; }
@@ -629,6 +966,13 @@ namespace Take_Time_BangPhra.Integration
         public string ReferenceNo { get; set; }
         public string SlipUrl { get; set; }
         public string Notes { get; set; }
+        /// <summary>บัญชีฝั่งจ่าย (เครดิต) ที่ระบุชัดเจน — override บัญชี default (เงินสด) เช่น
+        /// เจ้าหนี้กรรมการเมื่อจ่ายจากเงินทดรองกรรมการ. ต้องเป็น NextAcc Account Id จริง.</summary>
+        public Guid? OverridePaymentAccountId { get; set; }
+        /// <summary>ลายเซ็นผู้จ่ายเงิน (slot 0 ใน PV PDF) — data URI หรือ bare base64, cap 512KB</summary>
+        public string PayerSignatureBase64 { get; set; }
+        /// <summary>ชื่อผู้จ่ายเงินที่แสดงใต้ลายเซ็น</summary>
+        public string PayerSignatureName { get; set; }
     }
 
     public class IntegrationPaymentResponse
@@ -733,9 +1077,17 @@ namespace Take_Time_BangPhra.Integration
         public decimal? VatRate { get; set; }
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
+        /// <summary>ช่องทางจ่ายเงิน (Cash/BankTransfer/...) — NextAcc ใช้เลือกบัญชีฝั่งเครดิตถ้าไม่ได้ส่ง PaymentAccountId</summary>
+        public string PaymentMethod { get; set; }
+        /// <summary>บัญชีฝั่งจ่าย (เครดิต) ที่ระบุชัดเจน — เช่น เจ้าหนี้กรรมการเมื่อจ่ายจากเงินทดรองกรรมการ
+        /// แทนการ default เป็นเงินสด. ต้องเป็น NextAcc Account Id.</summary>
+        public Guid? PaymentAccountId { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
         public string PreparerName { get; set; }
         public string PreparerSignatureBase64 { get; set; }
+        /// <summary>ลายเซ็นผู้จ่ายเงิน (slot 0 ใน PV PDF) — เผื่อ endpoint PV one-shot รองรับโดยตรง</summary>
+        public string PayerSignatureBase64 { get; set; }
+        public string PayerSignatureName { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -854,6 +1206,9 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+        // เลขการจอง (RES-{id}) — group ทุกเอกสารของการจอง (invoice + CN + DN) ด้วยคีย์เดียว
+        // NextAcc ยัง ignore ได้ถ้า DTO ยังไม่มีฟิลด์นี้ (forward-compatible, mirror invoice 8ed90ba)
+        public string BookingNumber { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -873,6 +1228,9 @@ namespace Take_Time_BangPhra.Integration
         public List<IntegrationLineRequest> Lines { get; set; }
         public string Notes { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+        // เลขการจอง (RES-{id}) — group ทุกเอกสารของการจอง (invoice + CN + DN) ด้วยคีย์เดียว
+        // NextAcc ยัง ignore ได้ถ้า DTO ยังไม่มีฟิลด์นี้ (forward-compatible, mirror invoice 8ed90ba)
+        public string BookingNumber { get; set; }
     }
 
     // ──────────────────────────────────────────────
@@ -920,6 +1278,23 @@ namespace Take_Time_BangPhra.Integration
         public string Notes { get; set; }
         public DateTime CreatedAt { get; set; }
         public List<OutboundDocumentLineResponse> Lines { get; set; }
+
+        /// <summary>ไฟล์แนบของเอกสาร — NextAcc เพิ่มใน GET /api/integration/documents (มิ.ย. 2026).
+        /// ถ้า null/ว่าง = NextAcc รุ่นเก่าที่ยังไม่ส่งไฟล์แนบมาใน list → fallback เรียก
+        /// GET /api/companies/{cid}/attachments/Document/{id} แยก (ซึ่งมี on-read repair ของ OcrScan ด้วย)</summary>
+        public List<OutboundDocumentAttachmentResponse> Attachments { get; set; }
+    }
+
+    /// <summary>ไฟล์แนบที่ฝังมากับ OutboundDocumentResponse (integration list).
+    /// DownloadUrl = /api/companies/{cid}/attachments/{fileId}/download (relative → ต่อกับ BaseUrl + X-Api-Key)</summary>
+    public class OutboundDocumentAttachmentResponse
+    {
+        public Guid Id { get; set; }
+        public string FileName { get; set; }
+        public string ContentType { get; set; }
+        public long FileSize { get; set; }
+        public string DownloadUrl { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     public class OutboundDocumentLineResponse
@@ -1204,6 +1579,60 @@ namespace Take_Time_BangPhra.Integration
     /// ผลการดาวน์โหลดเอกสารอย่างเป็นทางการ (PDF + ไฟล์แนบ) จาก NextAcc มาเก็บที่ฝั่ง TakeTime
     /// ใช้ในหน้า CheckPayment เพื่อเปิดดู PDF จาก NextAcc แทน PDF ที่ระบบออกเอง
     /// </summary>
+    /// <summary>ผลลัพธ์ purge ใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ orphan
+    /// (parent TaxInvoice ถูกลบ/void) — NextAcc `/cleanup/orphaned-settlement-receipts/purge`</summary>
+    public class PurgeOrphanReceiptsResult
+    {
+        public int Deleted { get; set; }
+        public List<string> DeletedIds { get; set; } = new List<string>();
+    }
+
+    /// <summary>ผลตรวจซาก GL มัดจำ (215xx/217xx/21913) ที่ churn ทิ้งไว้ — NextAcc
+    /// `GET /cleanup/deposit-gl-debris`. sourceStatus ชี้ว่าบรรทัดนั้นเป็น JV ของ TakeTime
+    /// (ต้อง reverse เอง) หรือซากจากเอกสารที่ถูกลบ</summary>
+    public class DepositGlDebrisResult
+    {
+        public List<DepositGlDebrisItem> Items { get; set; } = new List<DepositGlDebrisItem>();
+        public List<DepositGlDebrisSuspectNet> SuspectNet { get; set; } = new List<DepositGlDebrisSuspectNet>();
+    }
+
+    public class DepositGlDebrisItem
+    {
+        public string EntryNumber { get; set; }
+        public DateTime EntryDate { get; set; }
+        public string AccountCode { get; set; }
+        public decimal DebitAmount { get; set; }
+        public decimal CreditAmount { get; set; }
+        /// <summary>"ไม่ผูกเอกสาร (JV integration/manual)" = JV ของ TakeTime → reverse เอง /
+        /// "เอกสารต้นทางถูกลบ/ยกเลิก" = ซากจากลบเอกสาร (NextAcc กวาดตอนลบครั้งถัดไป)</summary>
+        public string SourceStatus { get; set; }
+    }
+
+    public class DepositGlDebrisSuspectNet
+    {
+        public string AccountCode { get; set; }
+        public decimal Net { get; set; }
+    }
+
+    /// <summary>ผลตรวจ (GET diagnostic) ใบเสร็จหลักฐานรับเงินที่ orphan</summary>
+    public class OrphanReceiptsDiagnostic
+    {
+        public int Count { get; set; }
+        public decimal TotalAmount { get; set; }
+        public List<OrphanReceiptItem> Items { get; set; } = new List<OrphanReceiptItem>();
+    }
+
+    public class OrphanReceiptItem
+    {
+        public string Id { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public string ContactName { get; set; }
+        public decimal TotalAmount { get; set; }
+        public string ParentReference { get; set; }
+        public string Reason { get; set; }
+    }
+
     public class NextAccCachedDocument
     {
         public bool Found { get; set; }
@@ -1213,6 +1642,10 @@ namespace Take_Time_BangPhra.Integration
         public int AttachmentCount { get; set; }
         public List<string> AttachmentRelativeUrls { get; set; } = new List<string>();
         public string Message { get; set; }
+
+        /// <summary>true = เอกสารบน NextAcc ที่ resolve ได้เป็นของใบอื่น (ExternalRef ไม่ตรง — เลขเอกสารชน
+        /// จากบั๊กก่อน fix) → caller ไม่ควรเปิด และควรแนะให้กด Retry ออกเอกสารของใบนี้เอง</summary>
+        public bool MismatchedIdentity { get; set; }
 
         /// <summary>URL ไฟล์ PDF ใบหัก ณ ที่จ่าย (50 ทวิ) ที่ cache ไว้ฝั่ง TakeTime — ว่างถ้าไม่มี</summary>
         public string WhtCertPdfRelativeUrl { get; set; }
@@ -1240,6 +1673,34 @@ namespace Take_Time_BangPhra.Integration
     // Payroll System (NextAcc /api/companies/{companyId}/payroll/*)
     // Sync พนักงาน → สร้าง PayrollRun → Calculate → Approve → Pay
     // ══════════════════════════════════════════════
+
+    // ──────────────────────────────────────────────
+    // Inventory qty (NextAcc ProductController /product/stock/*)
+    // POST /api/companies/{cid}/product/stock/adjust  (qty-only, ไม่โพสต์ GL)
+    // GET  /api/companies/{cid}/product/{productId}/stock/movements
+    // ──────────────────────────────────────────────
+
+    /// <summary>ปรับจำนวนสต๊อกฝั่ง NextAcc (qty-only). MovementType: "IN"/"OUT"/"ADJUST"/"TRANSFER_OUT"/"TRANSFER_IN"</summary>
+    public class StockAdjustmentRequest
+    {
+        public Guid ProductId { get; set; }       // = Nexaacc_Product_Id (GUID)
+        public decimal Quantity { get; set; }     // ปริมาณ (บวกเสมอ; ทิศทางอยู่ที่ MovementType)
+        public string MovementType { get; set; }
+        public decimal? UnitCost { get; set; }
+        public string Reference { get; set; }     // อ้างอิงจากฝั่ง TakeTime (อาจถูก NextAcc ละเว้น)
+        public string Note { get; set; }
+    }
+
+    public class StockMovementResponse
+    {
+        public Guid Id { get; set; }
+        public Guid ProductId { get; set; }
+        public string ProductName { get; set; }
+        public DateTime MovementDate { get; set; }
+        public string MovementType { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitCost { get; set; }
+    }
 
     public class PayrollEmployeeSyncRow
     {
@@ -1286,6 +1747,57 @@ namespace Take_Time_BangPhra.Integration
         public DateTime PayDate { get; set; }
         public DateTime PeriodStart { get; set; }
         public DateTime PeriodEnd { get; set; }
+    }
+
+    /// <summary>Import ยอดเงินเดือนสำเร็จรูปต่อพนักงาน (Option A) — POST /api/companies/{id}/payroll/runs/import.
+    /// Recalculate=false → NextAcc ใช้ยอดที่ส่งมาตรง ๆ ไม่คำนวณใหม่. Idempotent ด้วย ExternalRunRef.</summary>
+    public class PayrollImportRunRequest
+    {
+        public string Name { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public DateTime PayDate { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public string ExternalSystem { get; set; } = "TakeTime";
+        /// <summary>idempotency key (ยิงซ้ำ → คืน run เดิม). เช่น PAYRUN-202606</summary>
+        public string ExternalRunRef { get; set; }
+        /// <summary>false = ห้ามคำนวณใหม่ ใช้ยอดที่ส่งมาเป็น source of truth</summary>
+        public bool Recalculate { get; set; } = false;
+        public List<PayrollImportLine> Lines { get; set; } = new List<PayrollImportLine>();
+    }
+
+    public class PayrollImportLine
+    {
+        public string EmployeeExternalId { get; set; }   // map ก่อน (เช่น EMP-1024)
+        public string CitizenId { get; set; }            // fallback map
+        public string EmployeeName { get; set; }
+
+        // รายได้ (ยอดจริงจาก TakeTime)
+        public decimal BaseSalary { get; set; }
+        public decimal OvertimePay { get; set; }
+        public decimal Allowances { get; set; }
+        public decimal Commission { get; set; }
+        public decimal Bonus { get; set; }
+        public decimal OtherEarnings { get; set; }
+        public decimal GrossIncome { get; set; }         // = ผลรวมรายได้
+
+        // รายการหัก (ยอดจริง)
+        public decimal SocialSecurityEmployee { get; set; }
+        public decimal SocialSecurityEmployer { get; set; }
+        public decimal WithholdingTax { get; set; }      // ภ.ง.ด.1
+        public decimal ProvidentFundEmployee { get; set; }
+        public decimal ProvidentFundEmployer { get; set; }
+        public decimal SalaryAdvance { get; set; }
+        public decimal OtherDeductions { get; set; }
+        public decimal TotalDeductions { get; set; }     // ฝั่งลูกจ้างเท่านั้น (ไม่รวม SSO/PVD นายจ้าง)
+
+        public decimal NetPay { get; set; }              // = gross − หักฝั่งลูกจ้าง
+
+        // ผังบัญชี override (null → NextAcc ใช้ default)
+        public string SalaryExpenseAccountCode { get; set; }
+        public string PaymentAccountCode { get; set; }
+        public string IncomeTypeCode { get; set; }       // ประเภทเงินได้ ภ.ง.ด.1 (เช่น 01 = ม.40(1))
     }
 
     public class PayrollRunResponse

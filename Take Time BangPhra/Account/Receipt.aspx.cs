@@ -33,6 +33,7 @@ namespace Take_Time_BangPhra.Account.Report
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);
@@ -120,7 +121,14 @@ namespace Take_Time_BangPhra.Account.Report
                     DataTable dtcustomer = new DataTable();
                     try
                     {
-                        if( Convert.ToInt32(dtReceipt.Rows[0]["Customer_ID"].ToString()) > 0)
+                        // ⚠ Customer_ID เป็น NULL → ToString() = "" → Convert.ToInt32 โยน FormatException
+                        //   ตกไป catch แล้วโหลด "ผู้จอง" มาแทนแบบเงียบ ๆ ⇒ กดบันทึกทับเป็นผู้จอง
+                        //   ทุกครั้งที่เปิดแก้ไข (วนไม่จบ) → ต้องเช็คให้ชัดก่อนแปลง
+                        long editCustId;
+                        var custIdCell = dtReceipt.Rows[0]["Customer_ID"];
+                        bool hasCustId = custIdCell != DBNull.Value
+                            && long.TryParse(custIdCell.ToString(), out editCustId) && editCustId > 0;
+                        if (hasCustId)
                         {
                             // SECURE: Get customer by ID with parameterized query
                             var customerIdParams = new Dictionary<string, object>
@@ -335,31 +343,24 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                     catch { }
 
-                    if (CheckBox3.Checked == true)
+                    // ⚠️ เดิม: ถ้าติ๊ก "ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" จะ "ไม่โหลด" ข้อมูลลูกค้าเข้าฟอร์มเลย
+                    //    → ฟอร์มว่างทั้งชื่อ/ที่อยู่/เลขภาษี/เบอร์โทร ทั้งที่ในฐานข้อมูลมีข้อมูลอยู่
+                    //    พอผู้ใช้กรอกเพิ่มแล้วบันทึก เบอร์โทร (ซึ่งเป็น key ผูกลูกค้า) ยังว่าง
+                    //    → UpsertCustomer ไปลงลูกค้า "เบอร์ว่าง" คนละแถวกับที่เอกสารใช้ = แก้ยังไงก็ไม่ติด
+                    //    ติ๊กนี้ควรมีผลแค่ "ไม่พิมพ์ชื่อบนเอกสาร" ไม่ใช่ซ่อนข้อมูลจากคนกรอก
+                    if (hasCustomerData)
                     {
-                        //TextBox10.Text = "ประสงค์ไม่รับใบกำกับภาษี";
-                        //TextBox11.Text = "";
-                        //TextBox12.Text = "";
-                        // TextBox13.Text = "";
-
+                        TextBox10.Text = dtcustomer.Rows[0]["FullName"]?.ToString() ?? "";
+                        TextBox11.Text = dtcustomer.Rows[0]["Address"]?.ToString() ?? "";
+                        TextBox12.Text = dtcustomer.Rows[0]["IDNumber"]?.ToString() ?? "";
+                        TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"]?.ToString() ?? "";
+                        TextBox17.Text = dtcustomer.Rows[0]["Email"]?.ToString() ?? "";
+                        TextBox18.Text = dtcustomer.Rows[0]["Address1"]?.ToString() ?? "";
                     }
                     else
                     {
-                        // 🔧 FIX: Check if customer data exists before loading
-                        if (hasCustomerData)
-                        {
-                            TextBox10.Text = dtcustomer.Rows[0]["FullName"]?.ToString() ?? "";
-                            TextBox11.Text = dtcustomer.Rows[0]["Address"]?.ToString() ?? "";
-                            TextBox12.Text = dtcustomer.Rows[0]["IDNumber"]?.ToString() ?? "";
-                            TextBox13.Text = dtcustomer.Rows[0]["MobilePhone"]?.ToString() ?? "";
-                            TextBox17.Text = dtcustomer.Rows[0]["Email"]?.ToString() ?? "";
-                            TextBox18.Text = dtcustomer.Rows[0]["Address1"]?.ToString() ?? "";
-                        }
-                        else
-                        {
-                            // No customer found - use phone from reservation as default
-                            TextBox13.Text = dtReceipt.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
-                        }
+                        // ไม่มีลูกค้าในระบบ — อย่างน้อยต้องมีเบอร์จากการจองไว้เป็น key
+                        TextBox13.Text = dtReceipt.Rows[0]["Customer_MobilePhone"]?.ToString() ?? "";
                     }
                     
 
@@ -377,19 +378,14 @@ namespace Take_Time_BangPhra.Account.Report
                     Session["dtDetail"] = dtReceiptDetail;
 
                     Panel1.Visible = true;
-                    string Year = Convert.ToDateTime(TextBox8.Text).Year.ToString();
-                    string Month = Convert.ToDateTime(TextBox8.Text).Month.ToString("00");
-                    string Day = Convert.ToDateTime(TextBox8.Text).Day.ToString();
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
-                    if (File.Exists(path + "\\" + Year + "\\" + Month + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + ".pdf"))
-                    {
-                        myFrame.Attributes["src"] = "/Documents/Receipt/" + Year + "/" + Month + "/" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid+ ".pdf";
-                    }
-                    else
-                    {
-                        myFrame.Attributes["src"] = "/Documents/Receipt/" + Year + "/" + Month + "/" + dtReceipt.Rows[0]["ID"].ToString() + ".pdf";
-                    }
-                        
+                    // เอกสารที่ต้องโชว์คือ "ตัวทางการ" — ถ้า sync ขึ้น NextAcc แล้วต้องเป็นใบของ NextAcc
+                    // ไม่ใช่ PDF ที่ระบบ render เอง (เลขที่/รูปแบบ/สถานะอาจต่างกัน ลูกค้าถือคนละใบกับบัญชี)
+                    // ViewReceiptDoc.ashx จัดลำดับให้แล้ว: NextAcc (smart cache) → fallback ไฟล์ local
+                    string recId = dtReceipt.Rows[0]["ID"].ToString();
+                    myFrame.Attributes["src"] =
+                        ResolveUrl("~/API/ViewReceiptDoc.ashx") + "?doc=" + HttpUtility.UrlEncode(recId)
+                        + "&_=" + DateTime.Now.Ticks;   // กัน browser cache ใบเก่าหลังแก้ไข
+
 
                 }
 
@@ -662,6 +658,43 @@ namespace Take_Time_BangPhra.Account.Report
                 catch
                 {
                     addressId = 0; // Fallback on error
+                }
+
+                // เบอร์โทรคือ key ที่ใช้ผูกลูกค้าทุกที่ (UpsertCustomer / contact บน NextAcc)
+                // ถ้าปล่อยว่างจะไปสร้าง-แก้ลูกค้า "เบอร์ว่าง" ซึ่งไม่ใช่แถวที่เอกสารใช้
+                // → ข้อมูลภาษีที่กรอกจะไม่มีผลกับใบกำกับเลย จึง fallback ไปเบอร์ของการจองเสมอ
+                if (string.IsNullOrWhiteSpace(TextBox13.Text))
+                {
+                    // ⚠️ ตัวแปร reservation_id ยังไม่ถูกเซ็ต ณ จุดนี้ (เซ็ตทีหลังในเส้นบันทึก)
+                    //    ต้องอ่านเลขการจองจากช่องบนฟอร์มเอง
+                    int ridForPhone;
+                    if (int.TryParse((TextBox9.Text ?? "").Trim(), out ridForPhone) && ridForPhone > 0)
+                    {
+                        try
+                        {
+                            var phParams = new Dictionary<string, object> { { "@rid", ridForPhone } };
+                            var dtPh = code2.DatabaseQuerySafe(conn,
+                                "SELECT TOP 1 ISNULL(Customer_MobilePhone, N'') FROM Reservation WHERE ID = @rid", phParams);
+                            if (dtPh != null && dtPh.Rows.Count > 0)
+                                TextBox13.Text = dtPh.Rows[0][0]?.ToString() ?? "";
+                        }
+                        catch { }
+                    }
+                    if (!string.IsNullOrWhiteSpace(TextBox13.Text))
+                        code2.Logs(conn, "Receipt",
+                            $"ช่องเบอร์โทรว่าง → ใช้เบอร์ของการจอง {TextBox13.Text} เป็น key ผูกลูกค้า", "SYSTEM");
+                }
+
+                // กรอกชื่อผู้ซื้อจริงแล้ว = ต้องการใบกำกับ → ปลดติ๊ก "ประสงค์ไม่ระบุชื่อในใบกำกับภาษี" ให้เอง
+                // (เดิมต้องปลดเอง ลืมแล้วได้ผลขัดกัน: NextAcc ออกใบกำกับเต็มรูป แต่ PDF ในระบบไม่โชว์ชื่อ)
+                string buyerNameForFlag = (TextBox10.Text ?? "").Trim();
+                if (CheckBox3.Checked && buyerNameForFlag.Length > 0
+                    && buyerNameForFlag.IndexOf("ไม่รับใบกำกับ", StringComparison.Ordinal) < 0
+                    && buyerNameForFlag.IndexOf("ไม่ประสงค์", StringComparison.Ordinal) < 0)
+                {
+                    CheckBox3.Checked = false;
+                    code2.Logs(conn, "Receipt",
+                        $"ปลดติ๊ก 'ประสงค์ไม่ระบุชื่อในใบกำกับภาษี' อัตโนมัติ เพราะกรอกชื่อผู้ซื้อ '{buyerNameForFlag}'", "SYSTEM");
                 }
 
                 // Upsert customer data (insert or update) - ensures no duplicates and always latest data
@@ -1175,7 +1208,7 @@ namespace Take_Time_BangPhra.Account.Report
                     }
                 }
 
-                string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                string path = AppCfg.Get("ReceiptFolderPath").ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -1411,7 +1444,7 @@ namespace Take_Time_BangPhra.Account.Report
                         try
                         {
                             string xmlFilePath = path + "\\" + Year + "\\" + Month + "\\" + docNum + "_" + uid + ".xml";
-                            string xmlString = System.IO.File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
+                            string xmlString = System.IO.File.ReadAllText(AppCfg.Get("BaseFolderPath").ToString() + "\\Resources\\template.xml");
                             xmlString = xmlString.Replace("*invoice_id", docNum);
                             xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                             xmlString = xmlString.Replace("*invoice_typecode", "T03");
@@ -1549,7 +1582,7 @@ namespace Take_Time_BangPhra.Account.Report
                                     }
                                     //DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");
 
-                                    //string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                                    //string path = AppCfg.Get("ReceiptFolderPath").ToString();
                                     //string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
 
                                     //string pdfFilePath = pdfpath;
@@ -1594,7 +1627,7 @@ namespace Take_Time_BangPhra.Account.Report
                                     string subject = "[" + docCreateThaiDate + "][INV][" + dtReceipt.Rows[0]["ID"].ToString() + "]";
                                     string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
-                                    NumberHelper.SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox17.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                                    NumberHelper.SendEmail(AppCfg.Get("SMTP").ToString(), Convert.ToInt32(AppCfg.Get("SMTP_Port").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_EnableSsl").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_UseDefaultCredentials").ToString()), AppCfg.Get("Email_From").ToString(), AppCfg.Get("Email_Password_From").ToString(), TextBox17.Text, AppCfg.Get("Email_CC").ToString(), subject, body, dataall);
 
 
                                 }
@@ -1632,15 +1665,22 @@ namespace Take_Time_BangPhra.Account.Report
                         int.TryParse(reservation_id > 0 ? reservation_id.ToString() : TextBox9.Text, out resId);
                         decimal totalAmt = Convert.ToDecimal(TextBox6.Text);
                         decimal vatAmt = Convert.ToDecimal(TextBox4.Text);
-                        string custName = TextBox16.Text;
+                        // TextBox10 = ชื่อลูกค้า (เดิมส่ง TextBox16 ซึ่งเป็นรหัสไปรษณีย์ → CustomerName ผิด
+                        // บนเส้น int_/walk-in ที่ resolve contact ด้วยชื่อ)
+                        string custName = TextBox10.Text;
 
                         if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
                         {
                             string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
                             string payAccId = sync.LookupPaidHowAccountId(paidMethod);
+                            // ส่งเบอร์ "ผู้ซื้อบนใบเสร็จ" ไปด้วย — อาจไม่ใช่ลูกค้าของการจอง
+                            // (จองในนามบริษัท แต่ออกใบให้ผู้ติดต่อ / แก้ผู้ซื้อในหน้านี้)
+                            // ถ้าไม่ส่ง ตัว sync จะอ่านลูกค้าจากการจองอย่างเดียว การแก้ชื่อ/เลขภาษี/
+                            // ที่อยู่ตรงนี้จะไม่มีผลกับเอกสารบน NextAcc เลย
                             sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
                                 isDeposit: CheckBox1.Checked, paymentMethod: paidMethod,
-                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId);
+                                revenueType: "ROOM_REVENUE", paymentAccountId: payAccId,
+                                customerPhone: TextBox13.Text);
                         }
                     }
                 }
@@ -1649,9 +1689,50 @@ namespace Take_Time_BangPhra.Account.Report
                     code2.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
                 }
 
+                // ── ตรวจซ้ำว่า "ผู้ซื้อ" ถูกผูกกับใบนี้จริง ────────────────────────────────
+                // เส้นทางบันทึกมี try/catch ที่กลืน error หลายจุด (UPDATE Account_Receipt,
+                // UpsertCustomer) ⇒ ถ้าเขียน Customer_ID ไม่ลง ทุกอย่างจะ fallback ไป "ผู้จอง"
+                // เงียบ ๆ: หน้าแก้ไขโหลดผู้จองมาให้ → บันทึกทับเป็นผู้จอง → เอกสารออกชื่อผู้จอง
+                // วนแบบนี้ไปเรื่อย ๆ โดยผู้ใช้ไม่มีทางรู้ → ต้องฟ้องบนหน้าจอทันที
+                string saveWarn = "";
+                try
+                {
+                    var vrf = code2.DatabaseQuerySafe(conn,
+                        @"SELECT TOP 1 ISNULL(CAST(ar.Customer_ID AS NVARCHAR(30)), '') AS CustId,
+                                 ISNULL(c.FullName, '') AS BuyerName, ISNULL(c.MobilePhone, '') AS BuyerPhone,
+                                 ISNULL(NULLIF(LTRIM(RTRIM(c.IDNumber)), ''), ISNULL(c.TaxID, '')) AS BuyerTax
+                          FROM Account_Receipt ar
+                          LEFT JOIN Customer c ON c.ID = ar.Customer_ID
+                          WHERE ar.ID = @id",
+                        new Dictionary<string, object> { { "@id", docNum } });
+                    if (vrf != null && vrf.Rows.Count > 0)
+                    {
+                        string custId = vrf.Rows[0]["CustId"].ToString();
+                        string bName = vrf.Rows[0]["BuyerName"].ToString();
+                        string bPhone = vrf.Rows[0]["BuyerPhone"].ToString();
+                        string wantPhone = (TextBox13.Text ?? "").Trim();
+
+                        if (string.IsNullOrEmpty(custId) || custId == "0")
+                            saveWarn = "⚠ บันทึกแล้วแต่ยังไม่ได้ผูกผู้ซื้อกับใบนี้ (Customer_ID ว่าง) — เอกสารบน NextAcc จะออกในนามผู้จองแทน";
+                        else if (!string.IsNullOrEmpty(wantPhone) && !string.Equals(bPhone, wantPhone, StringComparison.Ordinal))
+                            saveWarn = $"⚠ ผู้ซื้อที่ผูกกับใบนี้คือ {bName} ({bPhone}) ไม่ตรงกับเบอร์ที่กรอก ({wantPhone}) — เอกสารจะออกในนามนี้";
+
+                        if (!string.IsNullOrEmpty(saveWarn))
+                            code2.Logs(conn, "Receipt",
+                                $"{saveWarn} | receipt={docNum} Customer_ID={custId} form(name={TextBox10.Text}, phone={wantPhone}, tax={TextBox12.Text})", "SYSTEM");
+                        else
+                            code2.Logs(conn, "Receipt",
+                                $"บันทึกใบ {docNum}: ผู้ซื้อ = {bName} ({bPhone}) เลขภาษี {vrf.Rows[0]["BuyerTax"]}", "SYSTEM");
+                    }
+                }
+                catch { }
+
                 // Show success message then redirect
+                string okMsg = string.IsNullOrEmpty(saveWarn)
+                    ? "✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว"
+                    : "✅ บันทึกใบเสร็จรับเงินแล้ว\n\n" + saveWarn.Replace("'", "");
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
+                    "alert('" + okMsg + "'); window.location.href='/Account/Receipt';", true);
             }
             else
             {
@@ -1849,8 +1930,8 @@ namespace Take_Time_BangPhra.Account.Report
         protected void Button4_Click1(object sender, EventArgs e)
         {
             string uid = Request.QueryString["uid"];
-            string path = ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
-            string Imagespath = ConfigurationManager.AppSettings["ImagesFolderPath"].ToString();
+            string path = AppCfg.Get("ReceiptFolderPath").ToString();
+            string Imagespath = AppCfg.Get("ImagesFolderPath").ToString();
 
             // SECURE: Use parameterized query
             var receiptParams = new Dictionary<string, object>
@@ -1950,6 +2031,115 @@ namespace Take_Time_BangPhra.Account.Report
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
                     "alert('✅ เพิ่มลายเซ็นอิเล็กทรอนิกส์เรียบร้อยแล้ว'); window.location.href='/Account/Receipt';", true);
             }
+        }
+
+        /// <summary>
+        /// 🔍 ดึงข้อมูลนิติบุคคลจากเลขผู้เสียภาษี 13 หลัก (กรมพัฒนาธุรกิจการค้า ผ่าน NextAcc)
+        /// เติมชื่อจดทะเบียน + ที่อยู่สำนักงานใหญ่ + ชนิดลูกค้า + รหัสสาขา ให้อัตโนมัติ
+        /// ผู้ใช้ตรวจ/แก้ได้ก่อนกดบันทึก — ไม่บันทึกอะไรเองทั้งสิ้น
+        /// </summary>
+        protected void btnDbdLookup_Click(object sender, EventArgs e)
+        {
+            string taxId = (TextBox12.Text ?? "").Trim();
+
+            Action<bool, string> show = (ok, html) =>
+            {
+                divDbdResult.Visible = true;
+                divDbdResult.Attributes["style"] =
+                    "margin-top:6px; font-size:12px; padding:7px 10px; border-radius:5px; "
+                    + (ok ? "background:#E8F5E9; border:1px solid #A5D6A7; color:#1B5E20;"
+                          : "background:#FFF5F5; border:1px solid #FFCDD2; color:#C62828;");
+                divDbdResult.InnerHtml = html;
+            };
+
+            AccountingSyncService.DbdLookupResult r;
+            try
+            {
+                r = new AccountingSyncService(conn).LookupDbdCompany(taxId);
+            }
+            catch (Exception ex)
+            {
+                show(false, "ค้นข้อมูลไม่สำเร็จ: " + Server.HtmlEncode(ex.Message));
+                return;
+            }
+
+            if (!r.Ok)
+            {
+                show(false, "❌ " + Server.HtmlEncode(r.Message ?? "ไม่พบข้อมูล")
+                          + " <span style=\"color:#888;\">— กรอกข้อมูลเองได้ตามปกติ</span>");
+                return;
+            }
+
+            // ── ชื่อจดทะเบียน + ชนิดลูกค้า = นิติบุคคล ──────────────────────────
+            TextBox10.Text = r.Name;
+            try
+            {
+                var dtType = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 CAST(ID AS NVARCHAR(20)) AS ID FROM Customer_Type WHERE Customer_Code = 'TXID'", null);
+                if (dtType != null && dtType.Rows.Count > 0)
+                {
+                    var item = DropDownList8.Items.FindByValue(dtType.Rows[0]["ID"].ToString());
+                    if (item != null)
+                    {
+                        DropDownList8.ClearSelection();
+                        item.Selected = true;
+                        TextBox7.Visible = true;   // นิติบุคคล → โชว์ช่องรหัสสาขา
+                    }
+                }
+            }
+            catch { }
+
+            // DBD คืนที่อยู่ "สำนักงานใหญ่" เสมอ → รหัสสาขา 00000 (แก้เองได้ถ้าออกใบให้สาขาอื่น)
+            if (string.IsNullOrWhiteSpace(TextBox7.Text)) TextBox7.Text = "00000";
+
+            // ── ที่อยู่ ────────────────────────────────────────────────────────
+            if (!string.IsNullOrWhiteSpace(r.BuildingNumber)) TextBox11.Text = r.BuildingNumber;
+            if (!string.IsNullOrWhiteSpace(r.Moo)) TextBox18.Text = "หมู่ " + r.Moo;
+
+            bool addrOk = false;
+            if (!string.IsNullOrWhiteSpace(r.PostalCode))
+            {
+                TextBox16.Text = r.PostalCode;
+                Button5_Click(null, null);   // bind จังหวัด/อำเภอ/ตำบล จากรหัสไปรษณีย์
+                SelectAddressItem(DropDownList5, r.Province);
+                SelectAddressItem(DropDownList6, r.District);
+                SelectAddressItem(DropDownList7, r.SubDistrict);
+                addrOk = DropDownList5.Items.Count > 0;
+            }
+
+            // มีชื่อผู้ซื้อจริงแล้ว = ต้องการใบกำกับ → ปลดติ๊ก "ไม่ระบุชื่อในใบกำกับภาษี"
+            if (CheckBox3.Checked) CheckBox3.Checked = false;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("✅ พบข้อมูล: <b>").Append(Server.HtmlEncode(r.Name)).Append("</b>");
+            if (!string.IsNullOrEmpty(r.JuristicType)) sb.Append(" (").Append(Server.HtmlEncode(r.JuristicType)).Append(")");
+            if (!string.IsNullOrEmpty(r.Status)) sb.Append(" · สถานะ: ").Append(Server.HtmlEncode(r.Status));
+            sb.Append("<br/>ที่อยู่จดทะเบียน: ").Append(Server.HtmlEncode(r.RawAddress ?? "-"));
+            if (!addrOk)
+                sb.Append("<br/><span style=\"color:#C62828;\">⚠ แยกจังหวัด/อำเภอ/ตำบล จากที่อยู่ไม่สำเร็จ — เลือกเองด้านบน</span>");
+            sb.Append("<br/><span style=\"color:#666;\">ตรวจความถูกต้องแล้วกด \"บันทึก\" — ข้อมูลจะถูกส่งไปอัปเดตผู้ติดต่อบน NextAcc ให้เอง</span>");
+            show(true, sb.ToString());
+        }
+
+        /// <summary>เลือกค่าใน dropdown ที่อยู่แบบยืดหยุ่น (ตรงเป๊ะ → ขึ้นต้นเหมือนกัน → มีคำนี้อยู่)</summary>
+        private static void SelectAddressItem(DropDownList ddl, string value)
+        {
+            if (ddl == null || ddl.Items.Count == 0 || string.IsNullOrWhiteSpace(value)) return;
+            string v = value.Trim();
+
+            var exact = ddl.Items.FindByText(v) ?? ddl.Items.FindByValue(v);
+            if (exact == null)
+                foreach (ListItem it in ddl.Items)
+                {
+                    string t = (it.Text ?? "").Trim();
+                    if (t.StartsWith(v, StringComparison.Ordinal) || v.StartsWith(t, StringComparison.Ordinal)
+                        || t.IndexOf(v, StringComparison.Ordinal) >= 0)
+                    { exact = it; break; }
+                }
+            if (exact == null) return;
+
+            ddl.ClearSelection();
+            exact.Selected = true;
         }
 
         protected void Button5_Click(object sender, EventArgs e)

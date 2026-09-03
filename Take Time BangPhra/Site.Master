@@ -9,6 +9,104 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%: Page.Title %></title>
 
+    <%-- ===================== SEO / AEO (chatbot) ===================== --%>
+    <%-- Per-page override: หน้าใดต้องการ description/OG เฉพาะ ใส่ใน ContentPlaceHolder "SeoHead"
+         ถ้าไม่ override จะใช้ค่า default ของรีสอร์ทด้านล่าง --%>
+    <asp:ContentPlaceHolder ID="SeoHead" runat="server">
+        <meta name="description" content="Take Time Nature Resort ที่พักบางพระ วิลล่า รีสอร์ท โรงแรม ท่ามกลางธรรมชาติ ใกล้บางแสน ศรีราชา ชลบุรี บ้านพักเงียบสงบ จองห้องพักออนไลน์ ราคาพิเศษ โทร 063-416-1496" />
+        <meta property="og:title" content="Take Time Nature Resort — ที่พัก รีสอร์ท บางพระ ชลบุรี" />
+        <meta property="og:description" content="ที่พักบางพระท่ามกลางธรรมชาติ วิลล่าและบ้านพักเงียบสงบ ใกล้บางแสน ศรีราชา ชลบุรี จองออนไลน์ได้เลย" />
+    </asp:ContentPlaceHolder>
+
+    <meta name="keywords" content="ที่พักบางพระ, รีสอร์ทบางพระ, โรงแรมบางพระ, ที่พักบางแสน, ที่พักศรีราชา, ที่พักชลบุรี, รีสอร์ทชลบุรี, วิลล่าบางพระ, บ้านพักบางพระ, Take Time Nature Resort, Take Time BangPhra" />
+    <meta name="author" content="Take Time Nature Resort" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="geo.region" content="TH-20" />
+    <meta name="geo.placename" content="บางพระ, ศรีราชา, ชลบุรี" />
+    <meta name="geo.position" content="13.246222;101.030556" />
+    <meta name="ICBM" content="13.246222, 101.030556" />
+    <link rel="canonical" href="<%: Request.Url.GetLeftPart(System.UriPartial.Path) %>" />
+
+    <%-- Open Graph / Facebook --%>
+    <meta property="og:type" content="business.business" />
+    <meta property="og:site_name" content="Take Time Nature Resort" />
+    <meta property="og:locale" content="th_TH" />
+    <meta property="og:url" content="<%: Request.Url.GetLeftPart(System.UriPartial.Path) %>" />
+    <meta property="og:image" content="https://taketimebangphra.com/Images/Accommodation/Villa.png" />
+    <meta property="business:contact_data:street_address" content="202/24 หมู่ 5 ตำบลบางพระ อำเภอศรีราชา จังหวัดชลบุรี 20110" />
+    <meta property="business:contact_data:locality" content="ศรีราชา" />
+    <meta property="business:contact_data:region" content="ชลบุรี" />
+    <meta property="business:contact_data:postal_code" content="20110" />
+    <meta property="business:contact_data:country_name" content="Thailand" />
+    <meta property="place:location:latitude" content="13.246222" />
+    <meta property="place:location:longitude" content="101.030556" />
+
+    <%-- Twitter Card --%>
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Take Time Nature Resort — ที่พัก รีสอร์ท บางพระ ชลบุรี" />
+    <meta name="twitter:description" content="ที่พักบางพระท่ามกลางธรรมชาติ ใกล้บางแสน ศรีราชา ชลบุรี จองห้องพักออนไลน์" />
+    <meta name="twitter:image" content="https://taketimebangphra.com/Images/Accommodation/Villa.png" />
+
+    <%-- Structured Data: Resort/Hotel (Google rich results + AI/chatbot citation) --%>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Resort",
+      "@id": "https://taketimebangphra.com/#resort",
+      "name": "Take Time Nature Resort บางพระ",
+      "alternateName": ["Take Time BangPhra", "ที่พักบางพระ Take Time", "รีสอร์ทบางพระ Take Time"],
+      "description": "ที่พัก รีสอร์ท โรงแรม บางพระ ท่ามกลางธรรมชาติ วิลล่าและบ้านพักเงียบสงบ ใกล้บางแสน ศรีราชา จังหวัดชลบุรี เหมาะพักผ่อน ครอบครัว คู่รัก จัดกิจกรรม",
+      "url": "https://taketimebangphra.com/",
+      "telephone": "+66634161496",
+      "priceRange": "฿฿",
+      "currenciesAccepted": "THB",
+      "image": "https://taketimebangphra.com/Images/Accommodation/Villa.png",
+      "logo": "https://taketimebangphra.com/Images/Logo.png",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "202/24 หมู่ 5 ตำบลบางพระ",
+        "addressLocality": "อำเภอศรีราชา",
+        "addressRegion": "ชลบุรี",
+        "postalCode": "20110",
+        "addressCountry": "TH"
+      },
+      "geo": { "@type": "GeoCoordinates", "latitude": 13.246222, "longitude": 101.030556 },
+      "hasMap": "https://goo.gl/maps/LxkDCfBkEyFe7dXi8",
+      "areaServed": ["บางพระ", "บางแสน", "ศรีราชา", "ชลบุรี", "พัทยา"],
+      "sameAs": [
+        "https://www.facebook.com/TakeTimeBangPhra",
+        "https://goo.gl/maps/LxkDCfBkEyFe7dXi8"
+      ],
+      "checkinTime": "14:00",
+      "checkoutTime": "12:00",
+      "amenityFeature": [
+        { "@type": "LocationFeatureSpecification", "name": "Wi-Fi ฟรี", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "ที่จอดรถฟรี", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "อาหารเช้า", "value": true }
+      ],
+      "potentialAction": {
+        "@type": "ReserveAction",
+        "target": { "@type": "EntryPoint", "urlTemplate": "https://taketimebangphra.com/Reserve", "inLanguage": "th-TH", "actionPlatform": ["http://schema.org/DesktopWebPlatform", "http://schema.org/MobileWebPlatform"] },
+        "result": { "@type": "LodgingReservation", "name": "จองห้องพัก Take Time Nature Resort" }
+      }
+    }
+    </script>
+
+    <%-- Structured Data: FAQ (ตอบตรงให้ Google + chatbot อ้างอิงได้) --%>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Take Time Nature Resort อยู่ที่ไหน", "acceptedAnswer": { "@type": "Answer", "text": "อยู่ที่ 202/24 หมู่ 5 ตำบลบางพระ อำเภอศรีราชา จังหวัดชลบุรี 20110 ใกล้อ่างเก็บน้ำบางพระ ห่างจากบางแสนและตัวเมืองศรีราชาโดยรถยนต์ไม่ไกล" } },
+        { "@type": "Question", "name": "ที่พักบางพระ Take Time มีห้องพักแบบไหนบ้าง", "acceptedAnswer": { "@type": "Answer", "text": "มีวิลล่า บ้านพัก Nordic Cabin, Cozy Cabin, Glass Room และเต็นท์ ท่ามกลางธรรมชาติ เหมาะทั้งครอบครัว คู่รัก และหมู่คณะ" } },
+        { "@type": "Question", "name": "จองห้องพักบางพระได้อย่างไร", "acceptedAnswer": { "@type": "Answer", "text": "จองออนไลน์ได้ที่เว็บไซต์ taketimebangphra.com หรือโทร 063-416-1496 เช็คอิน 14:00 น. เช็คเอาท์ 12:00 น." } },
+        { "@type": "Question", "name": "รีสอร์ทบางพระใกล้บางแสนไหม", "acceptedAnswer": { "@type": "Answer", "text": "Take Time Nature Resort ตั้งอยู่ที่ตำบลบางพระ อำเภอศรีราชา ใกล้ชายหาดบางแสนและตัวเมืองศรีราชา จังหวัดชลบุรี เดินทางสะดวก" } }
+      ]
+    }
+    </script>
+    <%-- ===================== /SEO ===================== --%>
+
     <asp:PlaceHolder runat="server">
         <%: Scripts.Render("~/bundles/modernizr") %>
     </asp:PlaceHolder>
@@ -173,13 +271,26 @@
             left: 0;
             right: 0;
             width: 100%;
-            padding: 20px 30px;
+            padding: 16px 24px;
             background: linear-gradient(135deg, #5D4037 0%, #4E342E 100%);
             border: none;
             border-radius: 0 0 12px 12px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.3);
             display: none;
+            /* เดิมไม่จำกัดความสูง → คอลัมน์แถวล่างถูกตัดที่ขอบจอและเลื่อนไม่ได้
+               จำกัดไม่ให้เกินความสูงจอ แล้วให้เลื่อนภายในกล่องเมนูเอง */
+            max-height: calc(100vh - 76px);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
+
+        /* แถบเลื่อนให้กลมกลืนกับพื้นสีน้ำตาลของเมนู */
+        .mega-menu .mega-dropdown::-webkit-scrollbar { width: 10px; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-track { background: rgba(0,0,0,0.18); border-radius: 0 0 12px 0; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-thumb { background: rgba(255,213,79,0.45); border-radius: 6px; }
+        .mega-menu .mega-dropdown::-webkit-scrollbar-thumb:hover { background: rgba(255,213,79,0.7); }
+        .mega-menu .mega-dropdown { scrollbar-width: thin; scrollbar-color: rgba(255,213,79,0.5) rgba(0,0,0,0.18); }
 
         .mega-menu:hover .mega-dropdown,
         .mega-menu.open .mega-dropdown {
@@ -188,22 +299,25 @@
 
         .mega-menu-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 20px;
-            max-width: 1400px;
+            /* 176px + gap 14 → จอ ~1520px ขึ้นไปวาง 8 คอลัมน์ได้ในแถวเดียว
+               (8×176 + 7×14 = 1506) จอแคบกว่านั้นตกแถว แล้วเลื่อนดูได้ตาม max-height ด้านบน */
+            grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+            gap: 14px;
+            max-width: 1620px;
             margin: 0 auto;
+            align-items: start;
         }
 
         .mega-menu-column {
-            min-width: 200px;
+            min-width: 0;
         }
 
         .mega-menu-column h4 {
             color: #FFD54F;
-            font-size: 13px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            padding-bottom: 8px;
+            font-size: 12.5px;
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            padding-bottom: 6px;
             border-bottom: 2px solid rgba(255,213,79,0.3);
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -220,18 +334,19 @@
         }
 
         .mega-menu-column ul li {
-            margin-bottom: 4px;
+            margin-bottom: 1px;
         }
 
         .mega-menu-column ul li a {
             display: flex;
             align-items: center;
-            padding: 8px 12px;
+            padding: 6px 10px;
             color: #F8F4E9 !important;
             text-decoration: none;
             border-radius: 6px;
             transition: all 0.2s ease;
-            font-size: 13px;
+            font-size: 12.8px;
+            line-height: 1.35;
         }
 
         .mega-menu-column ul li a:hover {
@@ -241,8 +356,9 @@
         }
 
         .mega-menu-column ul li a i {
-            width: 20px;
-            margin-right: 10px;
+            width: 18px;
+            margin-right: 8px;
+            flex: 0 0 18px;
             text-align: center;
             opacity: 0.8;
         }
@@ -250,7 +366,7 @@
         .mega-menu-column.owner-section {
             background: rgba(255, 193, 7, 0.1);
             border-radius: 8px;
-            padding: 15px;
+            padding: 11px 12px;
             border-left: 3px solid #FFC107;
         }
 
@@ -258,12 +374,18 @@
             color: #FFC107;
         }
 
+        /* จอเดสก์ท็อปแคบ — ย่อคอลัมน์ให้ยังลงได้หลายคอลัมน์ต่อแถว */
+        @media (max-width: 1500px) and (min-width: 1200px) {
+            .mega-menu-grid { grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; }
+            .mega-menu-column ul li a { font-size: 12.4px; padding: 5px 8px; }
+        }
+
         /* Mobile Mega Menu */
         @media (max-width: 1199px) {
             .mega-menu .mega-dropdown {
                 position: relative;
                 padding: 10px;
-                max-height: 60vh;
+                max-height: 72vh;
                 overflow-y: auto;
             }
 
@@ -403,7 +525,120 @@
         }
     </style>
 
-  
+    <%-- ═══════════════════════════════════════════════════════════════════════
+         ตารางข้อมูลบนมือถือ — แก้ที่เดียว มีผลทั้งระบบ
+
+         ปัญหาเดิม: หน้าที่มีตารางเขียน CSS กันเอง หลายหน้าใส่ overflow:hidden
+         (ตัดทิ้งเลย เลื่อนดูก็ไม่ได้) บางหน้ามี overflow-x:auto แต่ไม่มี min-width
+         คอลัมน์เลยถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัว อ่านไม่ออกทั้งคู่
+
+         วิธีแก้: บนจอแคบเปลี่ยนแต่ละแถวเป็น "การ์ด" — ป้ายชื่อคอลัมน์อยู่ซ้าย
+         ค่าอยู่ขวา ใช้ความกว้างเต็มจอ ไม่ต้องเลื่อนแนวนอนเลย
+         ป้ายชื่อมาจากหัวตารางจริงผ่าน data-th ที่ JS ด้านล่างเติมให้อัตโนมัติ
+
+         หน้าไหนไม่อยากให้แปลง ใส่ class="tt-keep-table" ที่ <table> หรือกล่องหุ้ม
+         ═══════════════════════════════════════════════════════════════════════ --%>
+    <style>
+        /* กันตารางดันหน้าให้กว้างเกินจอ (อาการ: หน้าเลื่อนซ้ายขวาได้ทั้งหน้า) */
+        @media (max-width: 820px) {
+            html, body { overflow-x: hidden; }
+        }
+
+        /* กล่องหุ้มที่ JS สร้างให้ตารางที่ยังไม่มีที่เลื่อน */
+        .tt-scroll-x {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* ⚠ ชื่อคลาสสองตัวนี้ถูกใช้อยู่ ~18 หน้าทั่วระบบ โดยเข้าใจว่ามันทำให้เลื่อนได้
+           แต่ความจริง "ไม่มี CSS รองรับเลย":
+           · .mobile-table-wrapper นิยามอยู่ใน Content/Site.css ซึ่งไม่เคยถูก <link> เข้ามา
+           · .table-responsive เป็นของ Bootstrap แต่โหลดเฉพาะ JS ไม่ได้โหลด CSS
+           ⇒ เป็น div เปล่า ๆ มาตลอด ให้ความหมายกลับคืนตรงนี้ (ไม่ดึงทั้งไฟล์เข้ามา
+              เพราะ Site.css มีกฎอื่นที่ไม่เคยทำงาน อาจเปลี่ยนหน้าตาทั้งระบบ) */
+        .mobile-table-wrapper,
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        @media (max-width: 820px) {
+            /* ── โหมดการ์ด: ใช้กับตารางที่ JS ติดป้าย tt-cards ให้แล้วเท่านั้น ── */
+            table.tt-cards,
+            table.tt-cards tbody,
+            table.tt-cards tr,
+            table.tt-cards td {
+                display: block;
+                width: auto !important;
+                max-width: 100% !important;
+                min-width: 0 !important;
+            }
+
+            table.tt-cards { border-collapse: separate; border-spacing: 0; min-width: 0 !important; }
+
+            /* หัวตารางไม่ต้องแสดง — ชื่อคอลัมน์ไปอยู่หน้าค่าของแต่ละช่องแทน
+               ⚠ GridView วาดแถวหัวเป็น <tr><th> ธรรมดา ไม่มี <thead> ห่อ
+                  ⇒ ซ่อนแค่ thead ไม่พอ ต้องใช้คลาสที่ JS ติดให้ด้วย */
+            table.tt-cards thead,
+            table.tt-cards > tbody > tr.tt-hdr { display: none; }
+
+            table.tt-cards > tbody > tr {
+                background: #fff;
+                border: 1px solid #e6eaed;
+                border-radius: 10px;
+                margin: 0 0 10px;
+                padding: 6px 12px;
+                box-shadow: 0 1px 4px rgba(0,0,0,.05);
+                overflow: hidden;
+            }
+
+            table.tt-cards > tbody > tr > td {
+                border: 0 !important;
+                border-bottom: 1px solid #f2f5f7 !important;
+                padding: 9px 0 !important;
+                text-align: left !important;
+                white-space: normal !important;
+                word-break: break-word;
+                font-size: 14px;
+                line-height: 1.55;
+            }
+
+            table.tt-cards > tbody > tr > td:last-child { border-bottom: 0 !important; }
+
+            /* ป้ายชื่อคอลัมน์ (มาจาก data-th) */
+            table.tt-cards > tbody > tr > td[data-th]:before {
+                content: attr(data-th);
+                display: block;
+                font-size: 11.5px;
+                font-weight: 600;
+                color: #8a97a3;
+                margin-bottom: 3px;
+                letter-spacing: .01em;
+            }
+
+            /* ช่องว่างไม่ต้องกินที่ทั้งแถว */
+            table.tt-cards > tbody > tr > td.tt-empty { display: none; }
+
+            /* แถว "ไม่มีข้อมูล" ของ GridView */
+            table.tt-cards > tbody > tr > td[colspan] { padding: 14px 0 !important; }
+            table.tt-cards > tbody > tr > td[colspan]:before { content: none; }
+
+            /* ปุ่ม/ลิงก์ในตารางบนมือถือ — แตะง่ายขึ้น ไม่เบียดกัน */
+            table.tt-cards > tbody > tr > td a,
+            table.tt-cards > tbody > tr > td .btn,
+            table.tt-cards > tbody > tr > td input[type=submit],
+            table.tt-cards > tbody > tr > td input[type=button] {
+                display: inline-block;
+                margin: 2px 8px 2px 0;
+                padding: 6px 2px;
+            }
+
+            /* รูปในตารางไม่ล้นการ์ด */
+            table.tt-cards > tbody > tr > td img { max-width: 100%; height: auto; }
+        }
+    </style>
 </head>
 
 <body>
@@ -495,17 +730,32 @@
                             </ul>
                         </li>
                         
+                        <asp:PlaceHolder ID="phNavActivitiesPub" runat="server">
+                        <li><a runat="server" href="~/Activities">
+                            <i class="fas fa-person-hiking"></i> กิจกรรม
+                        </a></li>
+                        </asp:PlaceHolder>
+
                         <li><a runat="server" href="~/Contact">
                             <i class="fas fa-phone-alt"></i> ติดต่อเรา
                         </a></li>
-                        
+
+                        <asp:PlaceHolder ID="phNavAffiliatePub" runat="server">
                         <li><a runat="server" href="~/Affiliate/Login">
                             <i class="fas fa-handshake"></i> Affiliate
                         </a></li>
+                        </asp:PlaceHolder>
 
-                        <li><a runat="server" href="~/Guest/Portal">
-                            <i class="fas fa-mobile-alt"></i> Guest Portal
+                        <asp:PlaceHolder ID="phNavMemberPub" runat="server">
+                        <li><a runat="server" href="~/Member/Login">
+                            <i class="fas fa-id-card"></i> สมาชิก
                         </a></li>
+                        </asp:PlaceHolder>
+
+                        <%-- Guest Portal ไม่อยู่ในเมนูสาธารณะ: ต้องเข้าผ่าน QR ในห้องที่มีรหัสห้องกำกับ
+                             กดจากเมนูตรง ๆ จะเจอ "Invalid QR code" เสมอ (ยังคง placeholder ไว้ให้
+                             โค้ดเดิมที่อ้างถึงทำงานได้ตามปกติ) --%>
+                        <asp:PlaceHolder ID="phNavGuestPortal" runat="server" Visible="false" />
 
                         <!-- Admin Mega Menu -->
                         <asp:PlaceHolder ID="pnlAdminNav" runat="server" Visible="false">
@@ -515,7 +765,8 @@
                                 </a>
                                 <div class="mega-dropdown dropdown-menu">
                                     <div class="mega-menu-grid">
-                                        <!-- Column 1: งานประจำวัน (Daily Operations) - All Staff -->
+
+                                        <!-- ═══ คอลัมน์ 1: งานประจำวัน — ทุกคนที่ล็อกอิน ═══ -->
                                         <div class="mega-menu-column">
                                             <h4><i class="fas fa-calendar-day"></i> งานประจำวัน</h4>
                                             <ul>
@@ -523,191 +774,219 @@
                                                     <i class="fas fa-users"></i> ผู้เข้าพักรายวัน
                                                 </a></li>
                                                 <li><a runat="server" href="~/DisplayReserve">
-                                                    <i class="fas fa-calendar-alt"></i> ผู้เข้าพักรายเดือน
-                                                </a></li>
-                                                <li><a runat="server" href="~/PostponeList">
-                                                    <i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
+                                                    <i class="fas fa-calendar-alt"></i> ปฏิทินรายเดือน
                                                 </a></li>
                                                 <li><a runat="server" href="~/ReservationList">
                                                     <i class="fas fa-list-alt"></i> รายการจองทั้งหมด
                                                 </a></li>
+                                                <li><a runat="server" href="~/PostponeList">
+                                                    <i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
+                                                </a></li>
+                                                <li><a runat="server" href="~/DailyBoard">
+                                                    <i class="fas fa-clipboard-list"></i> บอร์ดสรุปรายวัน
+                                                </a></li>
+                                                <asp:PlaceHolder ID="phNavHousekeeping" runat="server">
                                                 <li><a runat="server" href="~/Admin/Housekeeping/Dashboard">
-                                                    <i class="fas fa-broom"></i> Housekeeping
+                                                    <i class="fas fa-broom"></i> แม่บ้าน / สถานะห้อง
+                                                </a></li>
+                                                </asp:PlaceHolder>
+                                                <asp:PlaceHolder ID="phNavMaintenance" runat="server">
+                                                <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
+                                                    <i class="fas fa-tools"></i> งานซ่อมบำรุง
+                                                </a></li>
+                                                </asp:PlaceHolder>
+                                            </ul>
+                                        </div>
+
+                                        <!-- ═══ คอลัมน์ 2: บริการลูกค้า — ทุกคนที่ล็อกอิน ═══ -->
+                                        <div class="mega-menu-column">
+                                            <h4><i class="fas fa-concierge-bell"></i> บริการลูกค้า</h4>
+                                            <ul>
+                                                <asp:PlaceHolder ID="phNavChat" runat="server">
+                                                <li><a runat="server" href="~/Admin/Chat/OmniChannelInbox">
+                                                    <i class="fas fa-inbox"></i> กล่องแชทรวมทุกช่องทาง
                                                 </a></li>
                                                 <li><a runat="server" href="~/Admin/Chat/ChatManagement">
                                                     <i class="fas fa-comments"></i> จัดการแชท
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/Chat/OmniChannelInbox">
-                                                    <i class="fas fa-inbox"></i> Omni-Channel Inbox
-                                                </a></li>
+                                                </asp:PlaceHolder>
+                                                <asp:PlaceHolder ID="phNavRoomService" runat="server">
                                                 <li><a runat="server" href="~/Admin/RoomService/OrderManagement">
-                                                    <i class="fas fa-concierge-bell"></i> Room Service
+                                                    <i class="fas fa-utensils"></i> ออเดอร์รูมเซอร์วิส
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/RoomService/OrderSettings">
-                                                    <i class="fas fa-store-alt"></i> ตั้งค่าเปิด-ปิดสั่งของ
+                                                </asp:PlaceHolder>
+                                                <li><a runat="server" href="~/Admin/RoomQRGenerator">
+                                                    <i class="fas fa-qrcode"></i> QR Code ประจำห้อง
                                                 </a></li>
+                                                <asp:PlaceHolder ID="phNavActivityMgmt" runat="server">
+                                                <li><a runat="server" href="~/Admin/Settings/ActivityManagement">
+                                                    <i class="fas fa-person-hiking"></i> กิจกรรม & การจองรอบ
+                                                </a></li>
+                                                </asp:PlaceHolder>
                                             </ul>
                                         </div>
 
-                                        <!-- Column 2: ขาย & สินค้า (Sales & Products) - All Staff -->
+                                        <!-- ═══ คอลัมน์ 3: ขายหน้าร้าน & สต๊อก — ทุกคนที่ล็อกอิน ═══ -->
                                         <div class="mega-menu-column">
-                                            <h4><i class="fas fa-shopping-cart"></i> ขาย & สินค้า</h4>
+                                            <h4><i class="fas fa-cash-register"></i> ขายหน้าร้าน & สต๊อก</h4>
                                             <ul>
                                                 <li><a runat="server" href="~/Product">
-                                                    <i class="fas fa-cash-register"></i> POS ขายสินค้า
+                                                    <i class="fas fa-shopping-basket"></i> ขายสินค้า (POS)
                                                 </a></li>
                                                 <li><a runat="server" href="~/Voucher">
-                                                    <i class="fas fa-ticket-alt"></i> ขาย Voucher
+                                                    <i class="fas fa-ticket-alt"></i> ขายบัตรกำนัล
                                                 </a></li>
-                                                <li><a runat="server" href="~/Product/Stock">
-                                                    <i class="fas fa-warehouse"></i> สินค้าคงคลัง
-                                                </a></li>
-                                                <li><a runat="server" href="~/Product/In">
-                                                    <i class="fas fa-arrow-down"></i> นำสินค้าเข้าคลัง
-                                                </a></li>
-                                                <li><a runat="server" href="~/Product/SellReport">
-                                                    <i class="fas fa-chart-line"></i> รายงานการขาย
-                                                </a></li>
-                                            </ul>
-                                        </div>
-
-                                        <!-- Column 3: บัญชี & CRM (Finance & CRM) - All Staff -->
-                                        <div class="mega-menu-column">
-                                            <h4><i class="fas fa-file-invoice-dollar"></i> บัญชี & CRM</h4>
-                                            <ul>
-                                                <li><a runat="server" href="~/Account/Receipt">
-                                                    <i class="fas fa-receipt"></i> สร้างใบเสร็จ
-                                                </a></li>
-                                                <li><a runat="server" href="~/Account/CheckDocument_New">
-                                                    <i class="fas fa-file-invoice"></i> จัดการใบเสร็จ
-                                                </a></li>
-                                                <li><a runat="server" href="~/Account/PaymentVoucher">
-                                                    <i class="fas fa-file-alt"></i> สร้างใบสำคัญจ่าย
-                                                </a></li>
-                                                <li><a runat="server" href="~/Account/CheckPayment_New">
-                                                    <i class="fas fa-file-invoice-dollar"></i> จัดการใบสำคัญจ่าย
+                                                <li><a runat="server" href="~/Voucher/VoucherList">
+                                                    <i class="fas fa-list"></i> รายการบัตรกำนัล
                                                 </a></li>
                                                 <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
-                                                <li><a runat="server" href="~/Admin/CustomerManagement">
-                                                    <i class="fas fa-address-book"></i> จัดการลูกค้า
+                                                <li><a runat="server" href="~/Product/In">
+                                                    <i class="fas fa-truck-loading"></i> รับสินค้าเข้า
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/GuestProfile">
-                                                    <i class="fas fa-user-circle"></i> Guest Profile 360
+                                                <li><a runat="server" href="~/Product/Stock">
+                                                    <i class="fas fa-boxes"></i> ตรวจนับ / ปรับสต๊อก
                                                 </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
-                                                    <i class="fas fa-trophy"></i> Loyalty Dashboard
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/MembershipManagement">
-                                                    <i class="fas fa-users-cog"></i> จัดการสมาชิก
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
-                                                    <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
-                                                    <i class="fas fa-star"></i> Review Management
-                                                </a></li>
-                                                <li><a runat="server" href="~/Admin/CRM/AIReviewDashboard">
-                                                    <i class="fas fa-chart-line"></i> AI Review Analysis
+                                                <li><a runat="server" href="~/Product/SellReport">
+                                                    <i class="fas fa-chart-bar"></i> รายงานการขาย
                                                 </a></li>
                                             </ul>
                                         </div>
 
-                                        <!-- Column 4: จัดการโรงแรม (Hotel Management) - Owner Only -->
-                                        <asp:Panel ID="pnlHotelMgmt" runat="server" Visible="false">
-                                            <div class="mega-menu-column owner-section">
-                                                <h4><i class="fas fa-hotel"></i> จัดการโรงแรม</h4>
+                                        <!-- ═══ คอลัมน์ 4: การเงิน & บัญชี — Admin/Owner เท่านั้น ═══ -->
+                                        <asp:Panel ID="pnlFinanceNav" runat="server" Visible="false">
+                                            <div class="mega-menu-column">
+                                                <h4><i class="fas fa-file-invoice-dollar"></i> การเงิน & บัญชี</h4>
                                                 <ul>
-                                                    <li><a runat="server" href="~/Admin/Dashboard">
-                                                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                                                    <li><a runat="server" href="~/Account/Receipt">
+                                                        <i class="fas fa-receipt"></i> ออกใบเสร็จ / ใบกำกับ
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
-                                                        <i class="fas fa-network-wired"></i> Channel Manager
+                                                    <li><a runat="server" href="~/Account/CheckDocument_New">
+                                                        <i class="fas fa-file-circle-check"></i> ตรวจสอบเอกสารขาย
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/Pricing/DynamicPricing">
-                                                        <i class="fas fa-tags"></i> Dynamic Pricing
+                                                    <li><a runat="server" href="~/Account/SendEtax">
+                                                        <i class="fas fa-paper-plane"></i> ส่ง e-Tax
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/HolidayPrice">
-                                                        <i class="fas fa-calendar-day"></i> ราคาวันหยุด
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Maintenance/Dashboard">
-                                                        <i class="fas fa-tools"></i> Maintenance
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Notifications/Settings">
-                                                        <i class="fas fa-bell"></i> Notifications
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Settings/ConnectionSettings">
-                                                        <i class="fas fa-plug"></i> Connection Settings
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
-                                                        <i class="fas fa-calculator"></i> Accounting Integration
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Settings/AISettings">
-                                                        <i class="fas fa-robot"></i> AI Settings (DeepSeek)
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Settings/AIKnowledgeBase">
-                                                        <i class="fas fa-brain"></i> AI Knowledge Base
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/Chat/ChannelSettings">
-                                                        <i class="fas fa-plug"></i> Channel Settings
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Admin/GuestExperience/Dashboard">
-                                                        <i class="fas fa-concierge-bell"></i> Guest Experience
-                                                    </a></li>
-                                                    <li><a runat="server" href="~/Account/TierBenefitsManagement">
-                                                        <i class="fas fa-crown"></i> Tier Benefits
+                                                    <li><a runat="server" href="~/Account/SlipVerification">
+                                                        <i class="fas fa-money-check"></i> ตรวจสลิปโอน
                                                     </a></li>
                                                     <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
-                                                    <li><a runat="server" href="~/Admin/ManageFacilities">
-                                                        <i class="fas fa-swimming-pool"></i> จัดการสิ่งอำนวยความสะดวก
+                                                    <li><a runat="server" href="~/Account/PaymentVoucher">
+                                                        <i class="fas fa-file-invoice"></i> ใบสำคัญจ่าย
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ManageNearbyPlaces">
-                                                        <i class="fas fa-map-marker-alt"></i> จัดการสถานที่ใกล้เคียง
+                                                    <li><a runat="server" href="~/Account/CheckPayment_New">
+                                                        <i class="fas fa-magnifying-glass-dollar"></i> ตรวจสอบใบสำคัญจ่าย
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ManageEmergency">
-                                                        <i class="fas fa-phone-alt"></i> จัดการข้อมูลฉุกเฉิน
+                                                    <li><a runat="server" href="~/Voucher/OcrUpload">
+                                                        <i class="fas fa-file-import"></i> OCR ใบสำคัญจ่าย
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ManageAboutUs">
-                                                        <i class="fas fa-info-circle"></i> จัดการเกี่ยวกับเรา
+                                                    <li><a runat="server" href="~/Voucher/MatchTaxInvoice">
+                                                        <i class="fas fa-link"></i> จับคู่ใบกำกับซื้อ
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ManagePromotions">
-                                                        <i class="fas fa-bullhorn"></i> จัดการโปรโมชั่น
+                                                    <li><a runat="server" href="~/Account/Report/Report">
+                                                        <i class="fas fa-chart-pie"></i> รายงานบัญชี
                                                     </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
 
-                                        <!-- Column 5: ระบบ & HR (System & HR) - Owner Only -->
-                                        <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
-                                            <div class="mega-menu-column owner-section">
-                                                <h4><i class="fas fa-shield-alt"></i> ระบบ & HR</h4>
+                                        <!-- ═══ คอลัมน์ 5: ลูกค้า & การตลาด — Admin/Owner เท่านั้น ═══ -->
+                                        <asp:Panel ID="pnlCrmNav" runat="server" Visible="false">
+                                            <div class="mega-menu-column">
+                                                <h4><i class="fas fa-address-book"></i> ลูกค้า & การตลาด</h4>
                                                 <ul>
+                                                    <li><a runat="server" href="~/Admin/CustomerManagement">
+                                                        <i class="fas fa-address-book"></i> ข้อมูลลูกค้า
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/GuestProfile">
+                                                        <i class="fas fa-user-circle"></i> Guest Profile 360
+                                                    </a></li>
+                                                    <asp:PlaceHolder ID="phNavLoyalty" runat="server">
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/LoyaltyDashboard">
+                                                        <i class="fas fa-trophy"></i> แต้มสะสม (Loyalty)
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/MembershipManagement">
+                                                        <i class="fas fa-users-cog"></i> จัดการสมาชิก
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/RedemptionTerminal">
+                                                        <i class="fas fa-qrcode"></i> เคาน์เตอร์แลกรางวัล
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/MemberHub">
+                                                        <i class="fas fa-users-gear"></i> จัดการสมาชิก
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/MemberVouchers">
+                                                        <i class="fas fa-ticket-alt"></i> Voucher & สิทธิ์สมาชิก
+                                                    </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavReviews" runat="server">
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/ReviewManagement">
+                                                        <i class="fas fa-star"></i> จัดการรีวิว
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/AIReviewDashboard">
+                                                        <i class="fas fa-chart-line"></i> วิเคราะห์รีวิวด้วย AI
+                                                    </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavAffiliateAdmin" runat="server">
+                                                    <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
+                                                    <li><a runat="server" href="~/Admin/AffiliateManagement">
+                                                        <i class="fas fa-handshake"></i> จัดการ Affiliate
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/PaymentAffiliate">
+                                                        <i class="fas fa-money-bill-transfer"></i> จ่ายค่าคอม Affiliate
+                                                    </a></li>
+                                                    </asp:PlaceHolder>
+                                                </ul>
+                                            </div>
+                                        </asp:Panel>
+
+                                        <!-- ═══ คอลัมน์ 6: รายงาน & ภาพรวม — Owner เท่านั้น ═══ -->
+                                        <asp:Panel ID="pnlHotelMgmt" runat="server" Visible="false">
+                                            <div class="mega-menu-column owner-section">
+                                                <h4><i class="fas fa-chart-line"></i> รายงาน & ภาพรวม</h4>
+                                                <ul>
+                                                    <li><a runat="server" href="~/Admin/Dashboard">
+                                                        <i class="fas fa-tachometer-alt"></i> Dashboard ภาพรวม
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Report/ProfitLoss">
+                                                        <i class="fas fa-balance-scale"></i> กำไร / ขาดทุน
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Report/Report">
                                                         <i class="fas fa-chart-bar"></i> รายงานระบบ
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/Report/ProfitLoss">
-                                                        <i class="fas fa-balance-scale"></i> กำไร/ขาดทุน
-                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Report/CustomerAnalytics">
-                                                        <i class="fas fa-chart-pie"></i> Customer Analytics
+                                                        <i class="fas fa-chart-pie"></i> วิเคราะห์ลูกค้า
                                                     </a></li>
+                                                    <asp:PlaceHolder ID="phNavAIReport" runat="server">
                                                     <li><a runat="server" href="~/Admin/Report/AIReportSummary">
-                                                        <i class="fas fa-robot"></i> AI Report Summary
+                                                        <i class="fas fa-robot"></i> สรุปรายงานด้วย AI
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/DatabaseManagement">
-                                                        <i class="fas fa-database"></i> ฐานข้อมูล
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavWebAnalytics" runat="server">
+                                                    <li><a runat="server" href="~/Admin/WebAnalytics">
+                                                        <i class="fas fa-globe"></i> สถิติเว็บไซต์
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/RoomQRGenerator">
-                                                        <i class="fas fa-qrcode"></i> Room QR Codes
+                                                    </asp:PlaceHolder>
+                                                    <asp:PlaceHolder ID="phNavChannelMgr" runat="server">
+                                                    <li><a runat="server" href="~/Admin/ChannelManager/Dashboard">
+                                                        <i class="fas fa-network-wired"></i> Channel Manager
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/ProductImages">
-                                                        <i class="fas fa-images"></i> จัดการรูปสินค้า
-                                                    </a></li>
-                                                    <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
+                                                    </asp:PlaceHolder>
+                                                </ul>
+                                            </div>
+                                        </asp:Panel>
+
+                                        <!-- ═══ คอลัมน์ 7: บุคคล + ตั้งค่า — Owner เท่านั้น ═══ -->
+                                        <asp:Panel ID="pnlOwnerOnly" runat="server" Visible="false">
+                                            <div class="mega-menu-column owner-section">
+                                                <asp:PlaceHolder ID="phNavHR" runat="server">
+                                                <h4><i class="fas fa-user-tie"></i> บุคคล (HR)</h4>
+                                                <ul>
                                                     <li><a runat="server" href="~/Admin/HR/EmployeeManagement">
                                                         <i class="fas fa-user-tie"></i> จัดการพนักงาน
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/HR/SupervisorManagement">
-                                                        <i class="fas fa-users-cog"></i> จัดการหัวหน้า-ลูกน้อง
+                                                        <i class="fas fa-users-cog"></i> หัวหน้า - ลูกน้อง
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/Leave/LeaveManagement">
                                                         <i class="fas fa-calendar-minus"></i> จัดการการลา
@@ -715,28 +994,56 @@
                                                     <li><a runat="server" href="~/Admin/Leave/SupervisorLeaveApproval">
                                                         <i class="fas fa-user-check"></i> อนุมัติการลา (ทั้งหมด)
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/Leave/LeaveReplacement">
+                                                        <i class="fas fa-people-arrows"></i> คนทำงานแทน
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Admin/Payroll/PayrollManagement">
-                                                        <i class="fas fa-money-check-alt"></i> เงินเดือน/OT
+                                                        <i class="fas fa-money-check-alt"></i> เงินเดือน
                                                     </a></li>
                                                     <li><a runat="server" href="~/Admin/HR/OTManagement">
-                                                        <i class="fas fa-list-alt"></i> จัดการ OT ทั้งหมด
+                                                        <i class="fas fa-business-time"></i> จัดการ OT
                                                     </a></li>
-                                                    <li role="separator" style="border-top: 1px solid rgba(255,193,7,0.3); margin: 8px 0;"></li>
+                                                </ul>
+                                                </asp:PlaceHolder>
+
+                                                <asp:PlaceHolder ID="phNavAssets" runat="server">
+                                                <h4 style="margin-top:16px;"><i class="fas fa-boxes-stacked"></i> ทรัพย์สิน</h4>
+                                                <ul>
                                                     <li><a runat="server" href="~/Admin/Assets/AssetManagement">
-                                                        <i class="fas fa-boxes"></i> สินทรัพย์
+                                                        <i class="fas fa-boxes"></i> ทะเบียนทรัพย์สิน
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/Vendor">
-                                                        <i class="fas fa-store"></i> Vendor
+                                                </ul>
+                                                </asp:PlaceHolder>
+
+                                            </div>
+                                        </asp:Panel>
+
+                                        <!-- ═══ คอลัมน์ 8: ตั้งค่า — Admin เห็นศูนย์ตั้งค่า, Owner เห็นทางลัดเพิ่ม ═══ -->
+                                        <asp:Panel ID="pnlSettingsNav" runat="server" Visible="false">
+                                            <div class="mega-menu-column owner-section">
+                                                <h4><i class="fas fa-sliders"></i> ตั้งค่า</h4>
+                                                <ul>
+                                                    <li><a runat="server" href="~/Admin/Settings/Index" style="font-weight:700; color:#FFD54F;">
+                                                        <i class="fas fa-star"></i> ศูนย์ตั้งค่า (ทั้งหมด)
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/AffiliateManagement">
-                                                        <i class="fas fa-handshake"></i> จัดการ Affiliate
+                                                    <asp:PlaceHolder ID="phNavSettingsOwner" runat="server">
+                                                    <li><a runat="server" href="~/Admin/Settings/PermissionGroups">
+                                                        <i class="fas fa-users-gear"></i> กลุ่มสิทธิ์ผู้ใช้
                                                     </a></li>
-                                                    <li><a runat="server" href="~/Admin/WebAnalytics">
-                                                        <i class="fas fa-chart-line"></i> Web Analytics
+                                                    <li><a runat="server" href="~/Admin/Settings/SystemSettings">
+                                                        <i class="fas fa-key"></i> Token / API / อีเมล
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Admin/Settings/AccountingIntegration">
+                                                        <i class="fas fa-calculator"></i> บัญชี NextAcc & รายได้
+                                                    </a></li>
+                                                    </asp:PlaceHolder>
+                                                    <li><a runat="server" href="~/Admin/Settings/LineAccount">
+                                                        <i class="fab fa-line"></i> บัญชี LINE ของฉัน
                                                     </a></li>
                                                 </ul>
                                             </div>
                                         </asp:Panel>
+
                                     </div>
                                 </div>
                             </li>
@@ -1471,6 +1778,272 @@
                 });
             </script>
         </asp:Panel>
+
+        <%-- ═══ แชทลูกค้าลอย (สาธารณะ) — โชว์เฉพาะผู้เยี่ยมชม ไม่โชว์ตอนพนักงานล็อกอิน ═══ --%>
+        <asp:PlaceHolder ID="phPublicChat" runat="server" Visible="false">
+        <style>
+            #ttChatBtn { position: fixed; right: 20px; bottom: 20px; width: 60px; height: 60px;
+                border-radius: 50%; background: linear-gradient(135deg,#6d4c41,#4e342e); color:#fff;
+                border:none; cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.28); z-index: 99998;
+                font-size: 26px; display:flex; align-items:center; justify-content:center; transition:transform .15s; }
+            #ttChatBtn:hover { transform: scale(1.07); }
+            #ttChatBtn .badge { position:absolute; top:-3px; right:-3px; background:#e53935; color:#fff;
+                font-size:11px; min-width:18px; height:18px; border-radius:9px; display:none; align-items:center; justify-content:center; padding:0 4px; }
+            #ttChatWin { position: fixed; right: 20px; bottom: 90px; width: 360px; max-width: calc(100vw - 32px);
+                height: 520px; max-height: calc(100vh - 130px); background:#fff; border-radius:16px; z-index:99999;
+                box-shadow:0 12px 40px rgba(0,0,0,.28); display:none; flex-direction:column; overflow:hidden; }
+            #ttChatWin.open { display:flex; }
+            .ttc-head { background: linear-gradient(135deg,#6d4c41,#4e342e); color:#fff; padding:14px 16px; }
+            .ttc-head h4 { margin:0; font-size:15px; font-weight:700; }
+            .ttc-head p { margin:2px 0 0; font-size:11.5px; opacity:.85; }
+            .ttc-head .x { position:absolute; top:12px; right:14px; color:#fff; background:none; border:none; font-size:20px; cursor:pointer; opacity:.85; }
+            .ttc-body { flex:1; overflow-y:auto; padding:14px; background:#f6f3f1; }
+            .ttc-msg { margin-bottom:10px; display:flex; }
+            .ttc-msg.user { justify-content:flex-end; }
+            .ttc-bubble { max-width:78%; padding:9px 13px; border-radius:14px; font-size:13.5px; line-height:1.5; white-space:pre-wrap; word-wrap:break-word; }
+            .ttc-msg.bot .ttc-bubble { background:#fff; color:#333; border-bottom-left-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+            .ttc-msg.user .ttc-bubble { background:#6d4c41; color:#fff; border-bottom-right-radius:4px; }
+            .ttc-bubble img { max-width:100%; border-radius:8px; display:block; }
+            .ttc-book { background:#fff; border:1.5px solid #d7ccc8; border-radius:12px; padding:12px; margin-bottom:10px; font-size:13px; }
+            .ttc-book b { color:#4e342e; }
+            .ttc-book .slipbtn { display:inline-block; margin-top:8px; background:#43a047; color:#fff; border:none;
+                border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; }
+            .ttc-foot { padding:10px; border-top:1px solid #eee; display:flex; gap:8px; background:#fff; }
+            .ttc-foot input { flex:1; border:1.5px solid #ddd; border-radius:20px; padding:9px 14px; font-size:13.5px; outline:none; }
+            .ttc-foot input:focus { border-color:#6d4c41; }
+            .ttc-foot button { background:#6d4c41; color:#fff; border:none; border-radius:50%; width:40px; height:40px; cursor:pointer; font-size:16px; }
+            .ttc-typing { font-size:12px; color:#999; padding:0 14px 8px; display:none; }
+        </style>
+
+        <button id="ttChatBtn" type="button" title="แชทสอบถาม/จองห้องพัก" aria-label="แชท">
+            <i class="fas fa-comment-dots"></i><span class="badge" id="ttChatBadge">1</span>
+        </button>
+        <div id="ttChatWin" role="dialog" aria-label="แชทกับที่พัก">
+            <div class="ttc-head" style="position:relative;">
+                <h4><i class="fas fa-hotel"></i> Take Time Nature Resort</h4>
+                <p>สอบถามห้องว่าง ราคา หรือจองได้เลยค่ะ 😊</p>
+                <button class="x" type="button" id="ttChatClose" aria-label="ปิด">&times;</button>
+            </div>
+            <div class="ttc-body" id="ttChatBody"></div>
+            <div class="ttc-typing" id="ttChatTyping">กำลังพิมพ์…</div>
+            <div class="ttc-foot">
+                <input type="text" id="ttChatInput" placeholder="พิมพ์ข้อความ…" autocomplete="off" maxlength="1000" />
+                <button type="button" id="ttChatSend" aria-label="ส่ง"><i class="fas fa-paper-plane"></i></button>
+            </div>
+            <input type="file" id="ttSlipFile" accept="image/*,.pdf" style="display:none;" />
+        </div>
+
+        <script>
+        (function () {
+            var API = '<%= ResolveUrl("~/API/PublicChat.ashx") %>';
+            var sid = localStorage.getItem('ttChatSid');
+            if (!sid) { sid = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); localStorage.setItem('ttChatSid', sid); }
+            var pendingResId = null, greeted = false;
+            var $ = function (id) { return document.getElementById(id); };
+
+            function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+            function scrollDown() { var b = $('ttChatBody'); b.scrollTop = b.scrollHeight; }
+
+            function addMsg(from, text, mediaUrl) {
+                var wrap = document.createElement('div');
+                wrap.className = 'ttc-msg ' + (from === 'user' ? 'user' : 'bot');
+                var inner = mediaUrl ? '<img src="' + esc(mediaUrl) + '" alt="" />' : esc(text).replace(/\n/g, '<br>');
+                wrap.innerHTML = '<div class="ttc-bubble">' + inner + '</div>';
+                $('ttChatBody').appendChild(wrap); scrollDown();
+            }
+
+            function addBookingCard(b) {
+                if (!b) return;
+                var el = document.createElement('div');
+                el.className = 'ttc-book';
+                el.innerHTML = '<b>สรุปการจอง (รอยืนยัน)</b><br>' +
+                    'ห้อง: ' + esc(b.roomName || '-') + '<br>' +
+                    'เข้าพัก: ' + esc(b.checkIn || '') + ' → ' + esc(b.checkOut || '') + ' (' + esc('' + (b.nights || '')) + ' คืน)<br>' +
+                    'ยอดรวม: ฿' + esc(Number(b.total || 0).toLocaleString()) + '<br>' +
+                    '<button class="slipbtn" type="button" id="ttDoSlip"><i class="fas fa-receipt"></i> แนบสลิปโอนเงิน</button>';
+                $('ttChatBody').appendChild(el); scrollDown();
+                $('ttDoSlip').onclick = function () { $('ttSlipFile').click(); };
+            }
+
+            function typing(on) { $('ttChatTyping').style.display = on ? 'block' : 'none'; if (on) scrollDown(); }
+
+            function send() {
+                var inp = $('ttChatInput'); var text = inp.value.trim();
+                if (!text) return;
+                inp.value = ''; addMsg('user', text); typing(true);
+                fetch(API + '?action=send', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sid: sid, message: text })
+                }).then(function (r) { return r.json(); }).then(function (d) {
+                    typing(false);
+                    if (d && d.ok) {
+                        addMsg('bot', d.reply);
+                        if (d.needSlip && d.pendingReservationId) { pendingResId = d.pendingReservationId; addBookingCard(d.booking); }
+                    } else { addMsg('bot', (d && d.error) || 'ขออภัยค่ะ ลองใหม่อีกครั้งนะคะ'); }
+                }).catch(function () { typing(false); addMsg('bot', 'การเชื่อมต่อขัดข้อง ลองใหม่อีกครั้งค่ะ'); });
+            }
+
+            $('ttSlipFile').onchange = function () {
+                if (!this.files.length || !pendingResId) return;
+                var fd = new FormData(); fd.append('sid', sid); fd.append('resId', pendingResId); fd.append('file', this.files[0]);
+                addMsg('user', '📎 กำลังส่งสลิป…'); typing(true);
+                fetch(API + '?action=slip', { method: 'POST', body: fd })
+                    .then(function (r) { return r.json(); }).then(function (d) {
+                        typing(false);
+                        addMsg('bot', (d && d.ok) ? d.reply : ((d && d.error) || 'แนบสลิปไม่สำเร็จ ลองใหม่ค่ะ'));
+                        if (d && d.ok) pendingResId = null;
+                    }).catch(function () { typing(false); addMsg('bot', 'ส่งสลิปไม่สำเร็จ ลองใหม่ค่ะ'); });
+                this.value = '';
+            };
+
+            function loadHistory() {
+                fetch(API + '?action=history&sid=' + encodeURIComponent(sid))
+                    .then(function (r) { return r.json(); }).then(function (d) {
+                        if (d && d.messages && d.messages.length) {
+                            d.messages.forEach(function (m) { addMsg(m.from, m.text, m.mediaUrl); });
+                        } else if (!greeted) {
+                            addMsg('bot', 'สวัสดีค่ะ 😊 ยินดีต้อนรับสู่ Take Time Nature Resort\nสอบถามห้องว่าง ราคา หรือแจ้งวันที่อยากเข้าพักได้เลยค่ะ');
+                        }
+                        greeted = true;
+                    }).catch(function () {});
+            }
+
+            function toggle(open) {
+                var w = $('ttChatWin');
+                if (open) { w.classList.add('open'); $('ttChatBadge').style.display = 'none'; if (!greeted) loadHistory(); $('ttChatInput').focus(); }
+                else w.classList.remove('open');
+            }
+
+            $('ttChatBtn').onclick = function () { toggle(!$('ttChatWin').classList.contains('open')); };
+            $('ttChatClose').onclick = function () { toggle(false); };
+            $('ttChatSend').onclick = send;
+            $('ttChatInput').addEventListener('keypress', function (e) { if (e.key === 'Enter') send(); });
+        })();
+        </script>
+        </asp:PlaceHolder>
+
+    <%-- ═══ ตารางข้อมูลบนมือถือ: ติดป้ายชื่อคอลัมน์ให้ทุกช่อง แล้วเปลี่ยนเป็นการ์ด ═══
+         ทำงานร่วมกับ CSS ใน <head> — ที่นี่แค่ "เตรียมข้อมูล" ไม่ได้ตัดสินใจเรื่องหน้าตา
+         (การตัดสินใจว่าจะแสดงเป็นการ์ดหรือไม่ อยู่ที่ @media ใน CSS ล้วน ๆ
+          ⇒ หมุนจอ/ย่อขยายหน้าต่างแล้วสลับได้ทันทีโดยไม่ต้องรัน JS ซ้ำ) --%>
+    <script>
+        (function () {
+            var MIN_COLS = 3;          // ตารางน้อยกว่านี้อ่านรู้เรื่องอยู่แล้ว ไม่ต้องแปลง
+            var SKIP = 'tt-keep-table'; // ใส่ class นี้ = ไม่แตะ
+
+            function headerTexts(table) {
+                // หาแถวหัวตาราง: thead ก่อน ถ้าไม่มีใช้แถวแรกที่เป็น th ล้วน (GridView ปกติ)
+                var hr = table.tHead && table.tHead.rows.length
+                    ? table.tHead.rows[table.tHead.rows.length - 1]
+                    : null;
+                if (!hr) {
+                    var first = table.rows[0];
+                    if (first && first.cells.length && first.cells[0].tagName === 'TH') hr = first;
+                }
+                if (!hr) return null;
+
+                var out = [];
+                for (var i = 0; i < hr.cells.length; i++) {
+                    var c = hr.cells[i];
+                    var span = parseInt(c.getAttribute('colspan') || '1', 10) || 1;
+                    var txt = (c.textContent || '').replace(/\s+/g, ' ').trim();
+                    for (var s = 0; s < span; s++) out.push(txt);
+                }
+                return out;
+            }
+
+            function isLayoutTable(table) {
+                // ตารางที่ WebForms ใช้จัดหน้า (เช่นกรอบของ control) ไม่ใช่ตารางข้อมูล
+                if (table.getAttribute('role') === 'presentation') return true;
+                if (table.closest && table.closest('.' + SKIP)) return true;
+                if (table.classList.contains(SKIP)) return true;
+                // ตารางซ้อนในตาราง — แปลงตัวนอกพอ
+                if (table.parentElement && table.parentElement.closest &&
+                    table.parentElement.closest('table')) return true;
+                return false;
+            }
+
+            function prepare(table) {
+                if (!table || table.__ttDone) return;
+                if (isLayoutTable(table)) { table.__ttDone = 1; return; }
+
+                var heads = headerTexts(table);
+                if (!heads || heads.length < MIN_COLS) { table.__ttDone = 1; return; }
+
+                var bodies = table.tBodies.length ? table.tBodies : [table];
+                for (var b = 0; b < bodies.length; b++) {
+                    var rows = bodies[b].rows;
+                    for (var r = 0; r < rows.length; r++) {
+                        var row = rows[r];
+                        // แถวหัวตาราง — GridView ไม่ห่อด้วย thead ต้องติดคลาสให้ CSS ซ่อนเอง
+                        if (row.cells.length && row.cells[0].tagName === 'TH') {
+                            row.classList.add('tt-hdr');
+                            continue;
+                        }
+                        var col = 0;
+                        for (var c = 0; c < row.cells.length; c++) {
+                            var cell = row.cells[c];
+                            var label = heads[col] || '';
+                            if (label) cell.setAttribute('data-th', label);
+                            // ช่องว่างเปล่า ๆ ไม่ต้องกินที่บนการ์ด
+                            var val = (cell.textContent || '').replace(/\s+/g, '').trim();
+                            if (!val && !cell.querySelector('img,input,select,a,button'))
+                                cell.classList.add('tt-empty');
+                            col += parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
+                        }
+                    }
+                }
+
+                table.classList.add('tt-cards');
+
+                // ยังต้องเลื่อนแนวนอนได้บนจอกลาง ๆ (แท็บเล็ต) ที่ยังแสดงเป็นตารางอยู่
+                var p = table.parentElement;
+                var wrapped = false;
+                while (p && p !== document.body) {
+                    var ov = window.getComputedStyle(p).overflowX;
+                    if (ov === 'auto' || ov === 'scroll') { wrapped = true; break; }
+                    p = p.parentElement;
+                }
+                if (!wrapped && table.parentElement) {
+                    var box = document.createElement('div');
+                    box.className = 'tt-scroll-x';
+                    table.parentElement.insertBefore(box, table);
+                    box.appendChild(table);
+                }
+
+                // ⚠ overflow-x:auto เฉย ๆ "ไม่ทำให้เลื่อนได้" ถ้าตารางเป็น width:100%
+                //   เพราะตารางจะหดตามกล่องแทนที่จะล้นออกไป ⇒ ไม่มีอะไรให้เลื่อน
+                //   คอลัมน์ถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัวแทน (อาการที่เจอจริง)
+                //   ต้องคู่กับ min-width เสมอ — หน้าไหนตั้งมาเองแล้วไม่แตะ
+                if (heads.length >= 6 && !table.style.minWidth) {
+                    var declared = window.getComputedStyle(table).minWidth;
+                    if (!declared || declared === '0px' || declared === 'auto')
+                        table.style.minWidth = Math.min(heads.length * 110, 1400) + 'px';
+                }
+
+                table.__ttDone = 1;
+            }
+
+            function run() {
+                try {
+                    var t = document.querySelectorAll('table');
+                    for (var i = 0; i < t.length; i++) prepare(t[i]);
+                } catch (e) { }
+            }
+
+            if (document.readyState === 'loading')
+                document.addEventListener('DOMContentLoaded', run);
+            else run();
+
+            // GridView ที่วาดใหม่หลัง postback แบบ AJAX ต้องติดป้ายซ้ำ
+            try {
+                if (window.Sys && Sys.WebForms && Sys.WebForms.PageRequestManager) {
+                    Sys.WebForms.PageRequestManager.getInstance()
+                        .add_endRequest(function () { run(); });
+                }
+            } catch (e) { }
+        })();
+    </script>
     </form>
 </body>
 </html>

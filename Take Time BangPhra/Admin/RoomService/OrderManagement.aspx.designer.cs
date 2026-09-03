@@ -23,6 +23,19 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected global::System.Web.UI.WebControls.Label lblDeliveryNote;
         protected global::System.Web.UI.WebControls.Repeater rptOrderItems;
         protected global::System.Web.UI.WebControls.Label lblTotalAmount;
+        /// <summary>
+        /// pnlRsPay control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlRsPay;
+
+        /// <summary>
+        /// txtRsPayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtRsPayLink;
+
+        /// <summary>
+        /// btnClaim control.
+        /// </summary>
         protected global::System.Web.UI.WebControls.Button btnClaim;
         protected global::System.Web.UI.WebControls.Button btnDelivered;
         protected global::System.Web.UI.WebControls.Button btnCancel;

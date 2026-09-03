@@ -33,10 +33,10 @@ namespace Take_Time_BangPhra.Services
             _connectionString = DatabaseHelper.GetConnectionString();
             _codeHelper = new CodeHelper();
             _emailService = new EmailService();
-            _receiptFolderPath = ConfigurationManager.AppSettings["ReceiptFolderPath"] ?? "~/Documents/Receipt";
-            _imagesFolderPath = ConfigurationManager.AppSettings["ImagesFolderPath"] ?? "~/Images";
-            _staffSignatureFolderPath = ConfigurationManager.AppSettings["StaffSignatureFolderPath"] ?? "~/Signatures";
-            _baseFolderPath = ConfigurationManager.AppSettings["BaseFolderPath"] ?? "~/";
+            _receiptFolderPath = AppCfg.Get("ReceiptFolderPath") ?? "~/Documents/Receipt";
+            _imagesFolderPath = AppCfg.Get("ImagesFolderPath") ?? "~/Images";
+            _staffSignatureFolderPath = AppCfg.Get("StaffSignatureFolderPath") ?? "~/Signatures";
+            _baseFolderPath = AppCfg.Get("BaseFolderPath") ?? "~/";
         }
 
         public async Task CancelReceipt(string receiptId, string uid)
@@ -509,7 +509,7 @@ namespace Take_Time_BangPhra.Services
                 { "@receiptId", receiptId },
                 { "@uid", uid },
                 { "@reservationId", reservationId },
-                { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                { "@docDate", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
                 { "@totalAmount", totalAmount },
                 { "@vat", vat },
                 { "@priceExcludeVat", priceExcludeVat },
@@ -578,7 +578,7 @@ namespace Take_Time_BangPhra.Services
                 var paymentHistoryParams = new System.Collections.Generic.Dictionary<string, object>
                 {
                     { "@reservationId", reservationId },
-                    { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                    { "@docDate", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
                     { "@totalAmount", totalAmount },
                     { "@paidType", paidType },
                     { "@receiptId", receiptId },
@@ -617,7 +617,7 @@ namespace Take_Time_BangPhra.Services
                 { "@receiptId", receiptId },
                 { "@uid", uid },
                 { "@reservationId", reservationId },
-                { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                { "@docDate", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
                 { "@totalAmount", totalAmount },
                 { "@vat", vat },
                 { "@priceExcludeVat", priceExcludeVat },
@@ -701,7 +701,7 @@ namespace Take_Time_BangPhra.Services
                 var paymentHistoryParams = new System.Collections.Generic.Dictionary<string, object>
                 {
                     { "@reservationId", reservationId },
-                    { "@docDate", docDate.ToString("yyyy-MM-dd") },
+                    { "@docDate", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
                     { "@totalAmount", totalAmount },
                     { "@paidType", paidType },
                     { "@receiptId", receiptId },
@@ -1126,8 +1126,8 @@ namespace Take_Time_BangPhra.Services
                 xmlString = xmlString.Replace("*invoice_id", receiptId);
                 xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                 xmlString = xmlString.Replace("*invoice_typecode", "T03");
-                xmlString = xmlString.Replace("*invoice_issue_date", docDate.ToString("yyyy-MM-dd") + "T00:00:00.000");
-                xmlString = xmlString.Replace("*invoice_create_date", docDate.ToString("yyyy-MM-dd") + "T00:00:00.000");
+                xmlString = xmlString.Replace("*invoice_issue_date", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00.000");
+                xmlString = xmlString.Replace("*invoice_create_date", docDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00.000");
 
                 // Seller information (Business)
                 string sellerType = businessRow["Customer_Code"].ToString();

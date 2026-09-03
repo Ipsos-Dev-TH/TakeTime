@@ -23,6 +23,11 @@ namespace Take_Time_BangPhra
         code code2 = new code();
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
 
+        // สิทธิ์จัดการบัญชี NextAcc (ปุ่ม/AJAX ในหน้านี้) — Owner/Admin เท่านั้น
+        protected bool IsNaAdmin =>
+            Session["permission"]?.ToString() == "True"
+            && (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin");
+
         protected void Page_Load(object sender, EventArgs e)
         {
             Page.MaintainScrollPositionOnPostBack = true;
@@ -30,11 +35,21 @@ namespace Take_Time_BangPhra
             {
                 if (Session["permission"]?.ToString() == "True")
                 {
+                    // AJAX จัดการ sync NextAcc รายการจอง — ตอบ JSON แล้วจบ (ไม่ render หน้า)
+                    if (!string.IsNullOrEmpty(Request.QueryString["naAction"]))
+                    {
+                        HandleNaAction(Request.QueryString["naAction"]);
+                        return;
+                    }
+
                     if (!IsPostBack)
                     {
                         // Select today's date in the calendar
                         Calendar1.SelectedDate = DateTime.Today;
                         Calendar1.VisibleDate = DateTime.Today;
+
+                        // เติมตัวเลือกบัญชีจ่ายคืน (modal ยกเลิกคืนเงิน) — ViewState คงค่าข้าม postback
+                        LoadRefundAccountOptions();
 
                         // Trigger the selection changed event to load today's reservations
                         Calendar1_SelectionChanged(sender, e);
@@ -45,10 +60,317 @@ namespace Take_Time_BangPhra
                     Response.Redirect("./Default");
                 }
             }
+            catch (System.Threading.ThreadAbortException) { throw; }   // Response.End ของ AJAX naAction — อย่ากลืน
             catch
             {
                 Response.Redirect("./Default");
             }
+        }
+
+        // ── ปุ่มแชทลูกค้า (OmniChannel) บนตารางจองรายวัน ─────────────────────────
+        // การจองที่มีบทสนทนาผูกอยู่จะโชว์ปุ่ม 💬 พร้อมบอกว่าลูกค้าติดต่อมาทางไหน
+        // (LINE / Facebook / TikTok / อีเมล OTA / แชทหน้าเว็บ) — ผูกโดย ChatBookingLinker
+        // ซึ่งจับคู่จากการจองที่เกิดในแชท, เบอร์โทรที่ลูกค้าพิมพ์, หรือเลขการจอง/เลข OTA
+        private class ChatLink
+        {
+            public long ConvId;
+            public string ChannelCode;
+            public string ChannelName;
+            public int Unread;
+        }
+        private Dictionary<long, ChatLink> _chatByRes;
+
+        private void EnsureChatLinks()
+        {
+            if (_chatByRes != null) return;
+            _chatByRes = new Dictionary<long, ChatLink>();
+            try
+            {
+                // บทสนทนาล่าสุดต่อการจอง (ลูกค้าคนเดียวอาจทักหลายช่องทาง → เอาอันที่มีข้อความล่าสุด)
+                var dt = code2.DatabaseQuerySafe(conn,
+                    @"SELECT x.Reservation_ID, x.ConvID, x.ChannelCode, x.UnreadCount,
+                             ISNULL(ch.ChannelName, x.ChannelCode) AS ChannelName
+                        FROM (
+                            SELECT ct.Reservation_ID, c.ID AS ConvID, c.ChannelCode, c.UnreadCount,
+                                   ROW_NUMBER() OVER (PARTITION BY ct.Reservation_ID
+                                        ORDER BY ISNULL(c.LastMessageDate, c.Created_Date) DESC, c.ID DESC) AS rn
+                              FROM OmniChannel_Conversations c
+                              JOIN OmniChannel_Contacts ct ON ct.ID = c.ContactID
+                             WHERE ct.Reservation_ID IS NOT NULL
+                        ) x
+                        LEFT JOIN OmniChannel_Channels ch ON ch.ChannelCode = x.ChannelCode
+                       WHERE x.rn = 1", null);
+
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        _chatByRes[Convert.ToInt64(r["Reservation_ID"])] = new ChatLink
+                        {
+                            ConvId = Convert.ToInt64(r["ConvID"]),
+                            ChannelCode = r["ChannelCode"]?.ToString() ?? "",
+                            ChannelName = r["ChannelName"]?.ToString() ?? "",
+                            Unread = r["UnreadCount"] == DBNull.Value ? 0 : Convert.ToInt32(r["UnreadCount"])
+                        };
+            }
+            catch { /* ตาราง OmniChannel ยังไม่มี → ไม่โชว์ปุ่ม */ }
+        }
+
+        private ChatLink GetChatLink(object resIdObj)
+        {
+            try
+            {
+                EnsureChatLinks();
+                ChatLink link;
+                return _chatByRes.TryGetValue(Convert.ToInt64(resIdObj), out link) ? link : null;
+            }
+            catch { return null; }
+        }
+
+        // ── สถานะ e-Tax ต่อการจอง (รวมผลยืนยันจากกรมสรรพากร) ────────────────────
+        private class EtaxState { public bool HasEtax; public bool RdConfirmed; public DateTime? RdDate; }
+        private Dictionary<long, EtaxState> _etaxByRes;
+
+        private EtaxState GetEtaxState(object resIdObj)
+        {
+            try
+            {
+                if (_etaxByRes == null)
+                {
+                    _etaxByRes = new Dictionary<long, EtaxState>();
+                    var dt = code2.DatabaseQuerySafe(conn,
+                        @"SELECT Reservation_ID,
+                                 MAX(CASE WHEN Nexaacc_Etax_Id IS NOT NULL THEN 1 ELSE 0 END) AS HasEtax,
+                                 MAX(CASE WHEN Rd_Confirmed_Date IS NOT NULL THEN 1 ELSE 0 END) AS RdOk,
+                                 MAX(Rd_Confirmed_Date) AS RdDate
+                            FROM Accounting_ETax_Log
+                           WHERE Reservation_ID IS NOT NULL
+                           GROUP BY Reservation_ID", null);
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                            _etaxByRes[Convert.ToInt64(r["Reservation_ID"])] = new EtaxState
+                            {
+                                HasEtax = Convert.ToInt32(r["HasEtax"]) == 1,
+                                RdConfirmed = Convert.ToInt32(r["RdOk"]) == 1,
+                                RdDate = r["RdDate"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(r["RdDate"])
+                            };
+                }
+                EtaxState st;
+                return _etaxByRes.TryGetValue(Convert.ToInt64(resIdObj), out st) ? st : null;
+            }
+            catch { return null; }   // ยังไม่รัน PHASE18_28 → ไม่แสดงป้าย
+        }
+
+        /// <summary>
+        /// จัดรูปแบบช่อง "หมายเหตุ" ของการจอง
+        ///
+        /// หมายเหตุของใบที่มาจากอีเมล OTA เป็นหลายบรรทัด (จองผ่าน / Booking ID / หมายเหตุแผนราคา /
+        /// แผนราคา / ผู้เข้าพัก / คำขอพิเศษ / การชำระ / บันทึกของเจ้าหน้าที่) — ถ้าปล่อยเป็นข้อความดิบ
+        /// เบราว์เซอร์จะยุบขึ้นบรรทัดใหม่ทิ้งหมด กลายเป็นก้อนเดียวยาวเหยียดในคอลัมน์แคบ ๆ อ่านไม่ออก
+        ///
+        /// จึงแยกบรรทัดจริง + เน้นสองอย่างที่หน้างานต้องเห็นก่อน:
+        ///   • หมายเหตุแผนราคา (มาจากตาราง MapDataWithSTAAH เช่น "ไม่รวมอาหารเช้า") = ป้ายส้ม
+        ///   • คำขอพิเศษจาก OTA = กล่องฟ้า
+        /// บรรทัดที่เจ้าหน้าที่พิมพ์เอง (ใต้เส้นคั่น) แสดงเป็นตัวเข้ม แยกจากข้อมูลที่ระบบเขียน
+        ///
+        /// ทุกส่วนถูก HTML-encode ก่อนเสมอ — ข้อความในหมายเหตุมาจากอีเมลภายนอกและจากผู้ใช้
+        /// </summary>
+        protected string RemarkHtml(object value)
+        {
+            string raw = Convert.ToString(value) ?? "";
+            if (raw.Trim().Length == 0) return "";
+
+            const string staffMark = "--- บันทึกของเจ้าหน้าที่";
+            const string planKey = "หมายเหตุแผนราคา:";
+            const string reqKey = "คำขอพิเศษจาก OTA:";
+
+            var sb = new StringBuilder();
+            bool inStaffPart = false;
+
+            foreach (string rawLine in raw.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0) continue;
+
+                if (!inStaffPart && line.StartsWith(staffMark, StringComparison.Ordinal))
+                {
+                    inStaffPart = true;
+                    sb.Append("<div class=\"rm-staff-head\">บันทึกของเจ้าหน้าที่</div>");
+                    continue;
+                }
+
+                if (inStaffPart)
+                {
+                    sb.Append("<div class=\"rm-staff\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+                else if (line.StartsWith(planKey, StringComparison.Ordinal))
+                {
+                    string v = line.Substring(planKey.Length).Trim();
+                    sb.Append("<div><span class=\"rm-plan\">").Append(Server.HtmlEncode(v)).Append("</span></div>");
+                }
+                else if (line.StartsWith(reqKey, StringComparison.Ordinal))
+                {
+                    sb.Append("<div class=\"rm-req\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+                else
+                {
+                    sb.Append("<div class=\"rm-line\">").Append(Server.HtmlEncode(line)).Append("</div>");
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>ป้ายสถานะ e-Tax บนแถวการจอง (ว่าง = ใบนี้ไม่มี e-Tax)</summary>
+        protected string EtaxBadge(object resIdObj)
+        {
+            var st = GetEtaxState(resIdObj);
+            if (st == null || !st.HasEtax) return "";
+            return st.RdConfirmed
+                ? "<span title='กรมสรรพากรรับเอกสารแล้ว " + (st.RdDate.HasValue ? st.RdDate.Value.ToString("dd/MM/yyyy HH:mm") : "") +
+                  "' style='display:inline-block;background:#e8f5e9;color:#1e7e42;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;'>✅ e-Tax สรรพากรรับแล้ว</span>"
+                : "<span title='ออก e-Tax แล้ว รอผลตอบกลับจากกรมสรรพากร' style='display:inline-block;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;'>🧾 e-Tax รอสรรพากรยืนยัน</span>";
+        }
+
+        /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม)</summary>
+        protected long GuestChatConvId(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            return link != null ? link.ConvId : 0;
+        }
+
+        /// <summary>ข้อความบนปุ่ม — บอกช่องทางที่ลูกค้าติดต่อมา + จำนวนที่ยังไม่อ่าน</summary>
+        protected string GuestChatLabel(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            if (link == null) return "💬 แชทลูกค้า";
+
+            string icon;
+            switch (link.ChannelCode)
+            {
+                case "LINE": icon = "💬 LINE"; break;
+                case "FACEBOOK": icon = "💬 Facebook"; break;
+                case "INSTAGRAM": icon = "💬 Instagram"; break;
+                case "TIKTOK": icon = "💬 TikTok"; break;
+                case "WHATSAPP": icon = "💬 WhatsApp"; break;
+                case "TELEGRAM": icon = "💬 Telegram"; break;
+                case "EMAIL": icon = "💬 อีเมล OTA"; break;
+                case "WEBCHAT": icon = "💬 แชทเว็บ"; break;
+                default: icon = "💬 " + (string.IsNullOrEmpty(link.ChannelName) ? "แชท" : link.ChannelName); break;
+            }
+            return link.Unread > 0 ? icon + $" ({link.Unread})" : icon;
+        }
+
+        /// <summary>ยังมีข้อความที่ยังไม่อ่าน → เน้นปุ่มเป็นสีแดงให้พนักงานเห็น</summary>
+        protected string GuestChatCss(object resIdObj)
+        {
+            var link = GetChatLink(resIdObj);
+            return (link != null && link.Unread > 0)
+                ? "btn btn-danger btn-sm mb-1"
+                : "btn btn-success btn-sm mb-1";
+        }
+
+        /// <summary>AJAX จัดการ sync NextAcc ของ "การจองเดียว": overview (จำแนก ไม่มี/JE/เอกสาร ต่อใบ) /
+        /// resyncAll (รีเซ็ต + สร้างใหม่ทั้งชุด) / reset (ลบเอกสาร+กลับ JE อย่างเดียว) /
+        /// resyncReceipt, voidReceipt (รายใบ). Owner/Admin เท่านั้น.</summary>
+        private void HandleNaAction(string act)
+        {
+            Response.Clear();
+            Response.ContentType = "application/json; charset=utf-8";
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            object result;
+            try
+            {
+                if (!IsNaAdmin)
+                {
+                    result = new { Success = false, Message = "เฉพาะ Owner/Admin เท่านั้น" };
+                }
+                else
+                {
+                    int resId;
+                    int.TryParse(Request.QueryString["resId"] ?? "0", out resId);
+                    string doc = (Request.QueryString["doc"] ?? "").Trim();
+                    var sync = new Integration.AccountingSyncService(conn);
+
+                    switch (act)
+                    {
+                        case "overview":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var t = Task.Run(() => sync.GetReservationSyncOverviewAsync(resId));
+                                result = t.Wait(90000)
+                                    ? (object)t.Result
+                                    : new { Success = false, Message = "NextAcc ตอบช้าเกิน 90 วินาที — ลองใหม่อีกครั้ง" };
+                                break;
+                            }
+                        case "resyncAll":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var (n, msg) = sync.ResyncReservationDocuments(resId);
+                                result = new { Success = n >= 0, Message = msg };
+                                break;
+                            }
+                        case "reset":
+                            {
+                                Server.ScriptTimeout = 300;
+                                var (n, msg) = sync.ResetReservationAccounting(resId);
+                                result = new { Success = n >= 0, Message = msg };
+                                break;
+                            }
+                        case "resyncReceipt":
+                            {
+                                Server.ScriptTimeout = 300;   // repost ยิง NextAcc ตรง (in-place) — อาจใช้เวลา
+                                var (rc, msg, _) = sync.ResyncSingleReceipt(doc);
+                                result = new { Success = rc >= 0, Message = msg };
+                                break;
+                            }
+                        case "setCheckedIn":
+                            {
+                                // แก้สถานะการจองที่ค้าง (จ่ายครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะไม่อัปเดต) →
+                                // ตั้งเป็น "เช็คอินแล้ว" โดยตรง (ไม่แตะเงิน/เอกสาร). ปลอดภัยเมื่อรับเงินครบแล้ว
+                                if (resId <= 0) { result = new { Success = false, Message = "รหัสการจองไม่ถูกต้อง" }; break; }
+                                int n = code2.DatabaseInsertSafe(conn,
+                                    "UPDATE [dbo].[Reservation] SET [Status] = N'เช็คอินแล้ว', [Deposit] = [TotalPrice] WHERE ID = @rid AND [Status] <> N'เช็คอินแล้ว'",
+                                    new Dictionary<string, object> { { "@rid", resId } });
+                                code2.Logs(conn, "Reserve CheckIn", $"setCheckedIn manual: #{resId} → เช็คอินแล้ว (rows={n})", Session["User"]?.ToString());
+                                result = new { Success = true, Message = $"ตั้งสถานะการจอง #{resId} เป็น 'เช็คอินแล้ว' เรียบร้อย (เงิน/เอกสารไม่ถูกแตะ) — โหลดหน้าใหม่เพื่อเห็นสถานะ" };
+                                break;
+                            }
+                        case "restoreReceipts":
+                            {
+                                // ดึงใบเสร็จที่ถูกลบของการจองกลับจาก NextAcc (เคสลบในระบบแล้วกู้คืนเอกสารบน
+                                // NextAcc) — กู้จาก snapshot คิว sync: ผูกการจอง + คืนมัดจำ. idempotent.
+                                Server.ScriptTimeout = 300;
+                                var tr = Task.Run(() => sync.RestoreReservationReceiptsFromNextAccAsync(resId));
+                                if (tr.Wait(120000))
+                                {
+                                    var (n, msg) = tr.Result;
+                                    result = new { Success = n >= 0, Message = msg };
+                                }
+                                else result = new { Success = false, Message = "NextAcc ตอบช้าเกิน 120 วินาที — ลองใหม่อีกครั้ง" };
+                                break;
+                            }
+                        case "voidReceipt":
+                            {
+                                long q = sync.EnqueueVoidReceipt(doc);
+                                result = new
+                                {
+                                    Success = q > 0,
+                                    Message = q > 0
+                                        ? $"เข้าคิว void เอกสาร {doc} บน NextAcc แล้ว (คิว #{q}) — เอกสาร+JE ถูกยกเลิกอัตโนมัติใน ~1-2 นาที"
+                                        : $"ไม่พบเอกสารบน NextAcc ของใบ {doc} (อาจยังไม่เคย sync)"
+                                };
+                                break;
+                            }
+                        default:
+                            result = new { Success = false, Message = "ไม่รู้จักคำสั่ง: " + act };
+                            break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result = new { Success = false, Message = "ผิดพลาด: " + ex.Message };
+            }
+            Response.Write(ser.Serialize(result));
+            Response.End();
         }
 
         protected void Calendar1_SelectionChanged(object sender, EventArgs e)
@@ -523,7 +845,9 @@ namespace Take_Time_BangPhra
             Context.ApplicationInstance.CompleteRequest();
         }
 
-        private async Task CancelReservation(string reservationId, bool refund)
+        // refundPaidHowId: null/ว่าง = คืนอัตโนมัติบัญชีเดิม (void ใบเสร็จมัดจำ) / มีค่า = คืนออกบัญชีที่เลือก
+        // (คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยก) — รองรับรับธนาคารแล้วคืนเงินสด
+        private async Task CancelReservation(string reservationId, bool refund, string refundPaidHowId = null)
         {
             string status = refund ? "ยกเลิกคืนเงิน" : "ยกเลิกไม่คืนเงิน";
 
@@ -560,6 +884,34 @@ namespace Take_Time_BangPhra
             // Send Telegram notification
             await SendTelegramNotification(reservationId, refund);
 
+            // ── ยกเลิกชาร์จเข้าห้องที่ค้าง (PENDING) ก่อนลบการจอง ──
+            // charge PENDING ตัดสต๊อก + ลง COGS บน NextAcc ไปแล้วตอนชาร์จ — ถ้าปล่อยทิ้งตอนยกเลิกการจอง
+            // ต้นทุนค้างโดยไม่มีวันมีรายได้ (asymmetry). CancelRoomCharge คืนสต๊อก + reverse COGS ให้ครบ
+            try
+            {
+                DataTable pendCharges = DatabaseQuery(conn,
+                    "SELECT ID FROM Reservation_Product_Charges WHERE Reservation_ID = @rid AND Status = 'PENDING'",
+                    new SqlParameter("@rid", reservationId));
+                if (pendCharges != null && pendCharges.Rows.Count > 0)
+                {
+                    var chargeService = new Take_Time_BangPhra.RoomChargeService(conn);
+                    foreach (DataRow pc in pendCharges.Rows)
+                    {
+                        try { chargeService.CancelRoomCharge(Convert.ToInt64(pc["ID"]), null, "ยกเลิกการจอง #" + reservationId); }
+                        catch (Exception cex)
+                        {
+                            code2.Logs(conn, "Accounting Sync", $"CancelReservation: ยกเลิก charge {pc["ID"]} ไม่สำเร็จ: {cex.Message}", "SYSTEM");
+                        }
+                    }
+                    code2.Logs(conn, "Accounting Sync",
+                        $"CancelReservation: ยกเลิกชาร์จค้าง {pendCharges.Rows.Count} รายการของการจอง #{reservationId} (คืนสต๊อก + reverse COGS)", "SYSTEM");
+                }
+            }
+            catch (Exception pcx)
+            {
+                code2.Logs(conn, "Accounting Sync", $"CancelReservation: ตรวจ charge ค้าง #{reservationId} ล้มเหลว: {pcx.Message}", "SYSTEM");
+            }
+
             // Delete related records
             DatabaseInsert(conn, "DELETE FROM [dbo].[Reservation_Accommodation] WHERE Reservation_ID = @ReservationId",
                 new SqlParameter("@ReservationId", reservationId));
@@ -569,46 +921,64 @@ namespace Take_Time_BangPhra
 
             if (refund)
             {
-                ProcessRefund(reservationId);
+                if (string.IsNullOrEmpty(refundPaidHowId))
+                    ProcessRefund(reservationId);                       // อัตโนมัติ: void ใบเสร็จมัดจำ → กลับบัญชีเดิม
+                else
+                    ProcessRefundToChosenAccount(reservationId, refundPaidHowId);  // คืนออกบัญชีที่เลือก (ไม่ void)
             }
 
             // Sync cancellation to accounting system
-            try
+            //   ยกเลิกคืนเงิน  → ProcessRefund ด้านบน void ใบเสร็จมัดจำ (กลับรายการ Dr เงินสด/Cr รับล่วงหน้า) แล้ว — ไม่ทำซ้ำ
+            //   ยกเลิกไม่คืนเงิน (ริบมัดจำ/no-show) → ต้องรับรู้รายได้ริบ: Dr เงินรับล่วงหน้า / Cr รายได้ริบมัดจำ
+            //   (เดิมบล็อกนี้ถูกปิดไว้ → มัดจำที่ริบค้างเป็นหนี้สินบน NextAcc ตลอด ไม่เคยลงรายได้)
+            if (!refund)
             {
-                string connStr = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString;
-                if (!string.IsNullOrEmpty(connStr))
+                try
                 {
-                    // Get deposit amount before it was zeroed
-                    decimal depositAmount = 0;
-                    string customerName = "ลูกค้า";
-                    string paymentMethod = "CASH";
-
-                    DataTable resData = DatabaseQuery(conn,
-                        @"SELECT ISNULL(ph.TotalPaid, 0) AS DepositPaid,
-                                 ISNULL(c.Customer_Name, c.NickName) AS Name,
-                                 ISNULL(ph.PaymentMethod, 'CASH') AS PayMethod
-                          FROM Reservation r
-                          LEFT JOIN Customer c ON r.Customer_MobilePhone = c.Customer_MobilePhone
-                          LEFT JOIN (SELECT Reservation_ID, SUM(PaymentAmount) AS TotalPaid,
-                                     MAX(PaymentMethod) AS PaymentMethod
-                                     FROM Payment_History WHERE Status = 'CANCELLED'
-                                     GROUP BY Reservation_ID) ph ON ph.Reservation_ID = r.ID
-                          WHERE r.ID = @id",
-                        new SqlParameter("@id", reservationId));
-
-                    if (resData?.Rows.Count > 0)
+                    var acctCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (acctCfg.IsConfigured && acctCfg.Enabled)
                     {
-                        depositAmount = resData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(resData.Rows[0]["DepositPaid"]) : 0;
-                        customerName = resData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
-                        paymentMethod = resData.Rows[0]["PayMethod"]?.ToString() ?? "CASH";
-                    }
+                        // ยอดริบ = มัดจำคงค้างจริง: มัดจำที่จ่าย (ใบเสร็จ IsDeposit=1 Status='Normal')
+                        // − ส่วนที่ถูกหักในใบเสร็จอื่นไปแล้ว (Deposit_Applied_Amount — ส่วนนั้นรับรู้รายได้
+                        // ผ่านใบเสร็จแล้ว ห้ามริบซ้ำ ไม่งั้น Dr เงินรับล่วงหน้าเกิน + รายได้ซ้ำ)
+                        decimal forfeitAmt = 0;
+                        string custName = "ลูกค้า";
+                        DataTable fData = DatabaseQuery(conn,
+                            @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                             WHERE Reservation_ID = r.ID AND IsDeposit = 1
+                                               AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositPaid,
+                                     ISNULL((SELECT SUM(ISNULL(Deposit_Applied_Amount, 0)) FROM Account_Receipt
+                                             WHERE Reservation_ID = r.ID AND ISNULL(IsDeposit, 0) = 0
+                                               AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositApplied,
+                                     ISNULL(c.FullName, c.Name) AS Name
+                              FROM Reservation r
+                              LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                              WHERE r.ID = @id",
+                            new SqlParameter("@id", reservationId));
+                        if (fData?.Rows.Count > 0)
+                        {
+                            decimal depPaid = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                            decimal depApplied = fData.Rows[0]["DepositApplied"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositApplied"]) : 0;
+                            forfeitAmt = depPaid - depApplied;
+                            custName = fData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
+                        }
 
-                    // Accounting sync disabled — ใช้ manual sync จากหน้าจัดการเอกสารแทน
+                        if (forfeitAmt > 0)
+                        {
+                            int resIdInt;
+                            int.TryParse(reservationId, out resIdInt);
+                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                            long qid = sync.EnqueueDepositForfeit(resIdInt, forfeitAmt, custName,
+                                DateTime.Now, "ยกเลิกไม่คืนเงิน (ริบมัดจำ)");
+                            code2.Logs(conn, "Accounting Sync",
+                                $"CancelReservation: ริบมัดจำ #{reservationId} จำนวน {forfeitAmt:N2} → enqueue FORFEIT queueId={qid}", "SYSTEM");
+                        }
+                    }
                 }
-            }
-            catch (Exception accEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Accounting sync error: {accEx.Message}");
+                catch (Exception accEx)
+                {
+                    try { code2.Logs(conn, "Accounting Sync", $"CancelReservation forfeit enqueue error #{reservationId}: {accEx.Message}", "SYSTEM"); } catch { }
+                }
             }
         }
 
@@ -680,8 +1050,8 @@ namespace Take_Time_BangPhra
 
 ⚠️ *หมายเหตุ:* ยกเลิกไม่คืนเงิน";
 
-                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"]);
-                    await bot.SendMessageAsync("-4969611371", message);
+                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                    Notify.Send(Notify.Ev.BookingCancel, message);
                 }
             }
             catch (Exception ex)
@@ -692,8 +1062,8 @@ namespace Take_Time_BangPhra
 
         private void ProcessRefund(string reservationId)
         {
-            string path = ConfigurationManager.AppSettings["ReceiptFolderPath"];
-            string Imagespath = ConfigurationManager.AppSettings["ImagesFolderPath"];
+            string path = AppCfg.Get("ReceiptFolderPath");
+            string Imagespath = AppCfg.Get("ImagesFolderPath");
             DataTable dtRec = DatabaseQuery(conn,
                 "SELECT * FROM Account_Receipt WHERE Status = 'Normal' AND Reservation_ID = @ReservationId",
                 new SqlParameter("@ReservationId", reservationId));
@@ -727,6 +1097,111 @@ namespace Take_Time_BangPhra
                 DateTime createdDate = Convert.ToDateTime(dtRec.Rows[i]["Created_Date"]);
 
                 ProcessReceiptFile(path, Imagespath, receiptId, uid, createdDate);
+            }
+        }
+
+        // เติมตัวเลือกบัญชีจ่ายคืนใน modal: ตัวแรก = อัตโนมัติ (บัญชีเดิม) / ที่เหลือ = Account_Paid_How
+        private void LoadRefundAccountOptions()
+        {
+            try
+            {
+                ddlRefundAccountModal.Items.Clear();
+                ddlRefundAccountModal.Items.Add(new System.Web.UI.WebControls.ListItem("อัตโนมัติ (บัญชีเดิมที่รับมัดจำเข้ามา)", ""));
+                DataTable dt = DatabaseQuery(conn,
+                    "SELECT ID, Paid_How FROM Account_Paid_How ORDER BY ID");
+                if (dt != null)
+                {
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        string id = r["ID"]?.ToString();
+                        string name = r["Paid_How"]?.ToString();
+                        if (!string.IsNullOrEmpty(id))
+                            ddlRefundAccountModal.Items.Add(new System.Web.UI.WebControls.ListItem($"คืนออก: {name}", id));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Accounting Sync", $"LoadRefundAccountOptions error: {ex.Message}", "SYSTEM"); } catch { }
+            }
+        }
+
+        // ยืนยันจาก modal: อ่านรหัสจอง + บัญชีที่เลือก แล้วยกเลิกคืนเงิน
+        protected async void btnConfirmRefund_Click(object sender, EventArgs e)
+        {
+            string resId = hfRefundResId.Value;
+            string paidHowId = ddlRefundAccountModal.SelectedValue;   // "" = อัตโนมัติ
+            if (string.IsNullOrEmpty(resId)) return;
+            await CancelReservation(resId, true, string.IsNullOrEmpty(paidHowId) ? null : paidHowId);
+            // รีเฟรชรายการวันที่เลือกอยู่
+            Calendar1_SelectionChanged(sender, e);
+        }
+
+        // คืนเงินออกบัญชีที่เลือก (ไม่ใช่บัญชีเดิม): คงใบเสร็จมัดจำไว้บน NextAcc (mark 'Refunded' ในระบบ)
+        // + โพสต์รายการคืนเงินแยก (Dr 21510 + กลับ VAT / Cr บัญชีที่เลือก) ผ่าน EnqueueDepositRefund.
+        // ต่างจาก ProcessRefund (auto) ที่ void ใบเสร็จ → กลับบัญชีเดิม.
+        private void ProcessRefundToChosenAccount(string reservationId, string paidHowId)
+        {
+            try
+            {
+                // แหล่งเงินที่เลือก → Nexaacc_AccountId + ชนิดวิธีจ่าย (สำหรับ label/fallback)
+                string refundAccountNexaaccId = null, paidHowName = null;
+                DataTable ph = DatabaseQuery(conn,
+                    "SELECT Paid_How, Nexaacc_AccountId FROM Account_Paid_How WHERE ID = @id",
+                    new SqlParameter("@id", paidHowId));
+                if (ph?.Rows.Count > 0)
+                {
+                    paidHowName = ph.Rows[0]["Paid_How"]?.ToString();
+                    refundAccountNexaaccId = ph.Rows[0]["Nexaacc_AccountId"]?.ToString();
+                }
+
+                // ยอดคืน = มัดจำคงค้าง (จ่ายจริง − หักในใบเสร็จแล้ว)
+                decimal refundAmt = 0; string custName = "ลูกค้า";
+                DataTable fData = DatabaseQuery(conn,
+                    @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt
+                                     WHERE Reservation_ID = r.ID AND IsDeposit = 1
+                                       AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositPaid,
+                             ISNULL((SELECT SUM(ISNULL(Deposit_Applied_Amount, 0)) FROM Account_Receipt
+                                     WHERE Reservation_ID = r.ID AND ISNULL(IsDeposit, 0) = 0
+                                       AND (Status = 'Normal' OR Status IS NULL)), 0) AS DepositApplied,
+                             ISNULL(c.FullName, c.Name) AS Name
+                      FROM Reservation r
+                      LEFT JOIN Customer c ON r.Customer_MobilePhone = c.MobilePhone
+                      WHERE r.ID = @id",
+                    new SqlParameter("@id", reservationId));
+                if (fData?.Rows.Count > 0)
+                {
+                    decimal depPaid = fData.Rows[0]["DepositPaid"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositPaid"]) : 0;
+                    decimal depApplied = fData.Rows[0]["DepositApplied"] != DBNull.Value ? Convert.ToDecimal(fData.Rows[0]["DepositApplied"]) : 0;
+                    refundAmt = depPaid - depApplied;
+                    custName = fData.Rows[0]["Name"]?.ToString() ?? "ลูกค้า";
+                }
+
+                // mark ใบมัดจำเป็น 'Refunded' (ไม่ใช่ 'Cancel' → ไม่ void บน NextAcc, ใบเสร็จยังใช้ได้)
+                DatabaseInsert(conn,
+                    @"UPDATE Account_Receipt SET Status = 'Refunded'
+                      WHERE Reservation_ID = @rid AND IsDeposit = 1 AND (Status = 'Normal' OR Status IS NULL)",
+                    new SqlParameter("@rid", reservationId));
+
+                if (refundAmt > 0)
+                {
+                    int resIdInt; int.TryParse(reservationId, out resIdInt);
+                    var acctCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                    if (acctCfg.IsConfigured && acctCfg.Enabled)
+                    {
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
+                        long qid = sync.EnqueueDepositRefund(resIdInt, refundAmt,
+                            string.IsNullOrEmpty(paidHowName) ? "CASH" : paidHowName, custName, DateTime.Now,
+                            refundAccountNexaaccId);
+                        code2.Logs(conn, "Accounting Sync",
+                            $"CancelReservation(คืนบัญชีที่เลือก): #{reservationId} คืน {refundAmt:N2} ออกบัญชี '{paidHowName}' " +
+                            $"(nexaacc={refundAccountNexaaccId ?? "-"}) → enqueue REFUND queueId={qid} (คงใบเสร็จมัดจำ ไม่ void)", "SYSTEM");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Accounting Sync", $"ProcessRefundToChosenAccount error #{reservationId}: {ex.Message}", "SYSTEM"); } catch { }
             }
         }
 

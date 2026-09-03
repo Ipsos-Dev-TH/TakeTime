@@ -47,6 +47,9 @@
         .btn-save:hover { background: #4E342E; }
         .btn-test { padding: 7px 14px; background: white; color: #5D4037; border: 1px solid #5D4037; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: 'Prompt',sans-serif; }
         .btn-test:hover { background: #EFEBE9; }
+        .btn-check { background: #fff; border: 1px solid #8D9F7F; color: #4C5B3C; border-radius: 6px;
+                     padding: 6px 12px; font-size: 13px; cursor: pointer; }
+        .btn-check:hover { background: #F1F5EC; }
         .save-result { font-size: 12px; margin-top: 8px; padding: 6px 10px; border-radius: 6px; display: none; }
         .save-result.ok { display: block; background: #E8F5E9; color: #2E7D32; }
         .save-result.err { display: block; background: #FFEBEE; color: #C62828; }
@@ -77,6 +80,21 @@
 
         $(document).ready(function () {
             try { allChannels = JSON.parse($('#<%= hfChannels.ClientID %>').val() || '[]'); } catch (e) { }
+            // ไม่มีช่องทางให้แสดง → บอกสาเหตุจริงแทนหน้าจอเปล่า พร้อมปุ่มสร้างช่องทางเริ่มต้น
+            var loadErr = window.__channelLoadError || '';
+            if (!allChannels.length) {
+                $('#channelSections').html(
+                    '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:18px;">' +
+                    '<div style="font-weight:700;margin-bottom:6px;">⚠️ ยังไม่มีช่องทางให้ตั้งค่า</div>' +
+                    '<div style="font-size:13px;color:#6b5e3c;margin-bottom:12px;">' +
+                    (loadErr ? $('<div>').text(loadErr).html()
+                             : 'ระบบอ่านรายการช่องทางได้ แต่ตารางว่าง') +
+                    '<br>ถ้าเป็น "Invalid object name" ให้รัน <code>Database/PHASE15_Migration_01_OmniChannel.sql</code> ก่อน' +
+                    '</div>' +
+                    '<button type="button" class="btn-check" onclick="seedChannels()">➕ สร้างช่องทางเริ่มต้น</button>' +
+                    '<div class="save-result" id="seedResult"></div></div>');
+                return;
+            }
             baseWebhookUrl = window.location.origin + '<%= ResolveUrl("~/API/OmniChannelWebhook.ashx") %>';
             $('#webhookUrl').text(baseWebhookUrl + '?channel={CHANNEL_CODE}');
             renderChannels();
@@ -108,6 +126,12 @@
             'TELEGRAM': [
                 { key: 'botToken', label: 'Bot Token', hint: 'จาก @BotFather' }
             ],
+            'TIKTOK': [
+                { key: 'accessToken', label: 'Access Token', hint: 'จาก TikTok for Business — ต้องได้รับสิทธิ์ Messaging' },
+                { key: 'appSecret', label: 'App Secret', hint: 'ใช้ตรวจสอบลายเซ็น Webhook' },
+                { key: 'sendUrl', label: 'Send Message URL', hint: 'endpoint สำหรับส่งข้อความออก (ตามที่ TikTok อนุมัติให้) — เว้นว่างได้ถ้ายังตอบผ่านแอป TikTok' }
+            ],
+            'WEBCHAT': [],
             'AGODA': [
                 { key: 'hotelId', label: 'Hotel ID', hint: 'รหัสโรงแรมบน Agoda' },
                 { key: 'apiKey', label: 'API Key (ถ้ามี)', hint: 'สำหรับ Agoda Partner API' }
@@ -126,7 +150,12 @@
                 { key: 'apiKey', label: 'API Key', hint: 'จาก Expedia Partner Central' }
             ],
             'EMAIL': [
-                { key: 'inboundAddress', label: 'Inbound Email', hint: 'อีเมลสำหรับรับข้อความลูกค้า' }
+                { key: 'fromDomains', label: 'โดเมนอีเมลลูกค้า OTA', hint: 'คั่นด้วยจุลภาค — ค่าเริ่มต้น agoda-messaging.com, mchat.booking.com, guest.booking.com (อีเมลจากโดเมนเหล่านี้ = ข้อความลูกค้า จะเข้ากล่องแชทอัตโนมัติ)' },
+                { key: 'pollMinutes', label: 'รอบดึงอีเมล (นาที)', hint: 'ค่าเริ่มต้น 3 นาที — ใช้กล่องอีเมล IMAP เดียวกับระบบอ่านอีเมลจอง (ตั้งที่ Admin → Accounting Integration)' },
+                { key: 'processedLabel', label: 'โฟลเดอร์เก็บอีเมลที่อ่านแล้ว', hint: 'ค่าเริ่มต้น Chat-Processed' },
+                { key: 'extraFolders', label: 'โฟลเดอร์/label เพิ่มเติมที่ให้ไล่อ่าน', hint: 'คั่นจุลภาค เช่น OTA-Chat, งาน/Agoda — สำหรับกรณีตั้ง filter ใน Gmail ให้ติด label แล้วย้ายอีเมลข้าม Inbox ไป (ปกติเว้นว่าง = อ่านเฉพาะ INBOX)' },
+                { key: 'notifyTelegram', label: 'แจ้งเตือน Telegram (1/0)', hint: 'แจ้งพนักงานทันทีเมื่อลูกค้าส่งข้อความมา' },
+                { key: 'signature', label: 'ลายเซ็นท้ายอีเมลตอบกลับ', hint: 'ต่อท้ายทุกข้อความที่ส่งถึงลูกค้า เช่น ชื่อที่พัก + เบอร์โทร' }
             ],
             'SMS': [
                 { key: 'provider', label: 'SMS Provider', hint: 'ชื่อผู้ให้บริการ SMS' },
@@ -135,7 +164,7 @@
         };
 
         function renderChannels() {
-            var types = { 'SOCIAL': 'โซเชียลมีเดีย', 'OTA': 'OTA (Online Travel Agency)', 'EMAIL': 'อีเมลและ SMS', 'SMS': 'อีเมลและ SMS', 'INTERNAL': 'ภายในระบบ' };
+            var types = { 'SOCIAL': 'โซเชียลมีเดีย', 'OTA': 'OTA (Online Travel Agency)', 'EMAIL': 'อีเมลและ SMS', 'SMS': 'อีเมลและ SMS', 'WEB': 'แชทหน้าเว็บ', 'INTERNAL': 'ภายในระบบ' };
             var grouped = {};
             for (var i = 0; i < allChannels.length; i++) {
                 var ch = allChannels[i];
@@ -144,7 +173,7 @@
                 grouped[group].push(ch);
             }
 
-            var order = ['SOCIAL', 'OTA', 'EMAIL', 'INTERNAL'];
+            var order = ['WEB', 'SOCIAL', 'OTA', 'EMAIL', 'INTERNAL'];
             var html = '';
             for (var o = 0; o < order.length; o++) {
                 var key = order[o];
@@ -191,7 +220,13 @@
                     html += '<button type="button" class="btn-test" onclick="copyChannelWebhook(\'' + ch.code + '\')"><i class="fas fa-link"></i> Webhook URL</button>';
                 }
                 html += '</div>';
-                html += '<div class="save-result" id="result_' + ch.code + '"></div>';
+                if (ch.code === 'EMAIL') {
+                html += '<button type="button" class="btn-check" onclick="checkEmailChat()" ' +
+                        'style="margin-left:8px;">🩺 ตรวจสถานะแชท OTA</button>';
+                html += '<button type="button" class="btn-check" onclick="pollEmailChat()" ' +
+                        'style="margin-left:6px;">📥 ดึงแชทตอนนี้</button>';
+            }
+            html += '<div class="save-result" id="result_' + ch.code + '"></div>';
                 html += '</div>';
             }
 
@@ -228,6 +263,57 @@
                     else el.removeClass('ok').addClass('err').text('❌ ' + (r ? r.message : 'Error')).show();
                     setTimeout(function () { el.fadeOut(); }, 3000);
                 }
+            });
+        }
+
+        // ไล่ตรวจทีละเงื่อนไขว่าแชท OTA พร้อมใช้หรือยัง (เปิดช่องทาง / IMAP / โดเมน /
+        // เชื่อมต่อได้จริง / มีอีเมลเข้าเกณฑ์ / ผูกกับใบจองแล้วกี่ราย)
+        function checkEmailChat() {
+            var el = $('#result_EMAIL');
+            el.removeClass('ok err').text('กำลังตรวจสอบ...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=emailChatCheck',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err');
+                    el.html('<pre style="margin:0;white-space:pre-wrap;font-size:12px;text-align:left;">' +
+                            $('<div>').text((r && r.message) || 'ไม่มีข้อมูล').html() + '</pre>').show();
+                },
+                error: function (x) {
+                    el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show();
+                }
+            });
+        }
+
+        // สร้างแถวช่องทางมาตรฐานให้ครบ (ข้ามตัวที่มีแล้ว) — ใช้เมื่อ seed ของ migration ไม่ผ่าน
+        function seedChannels() {
+            var el = $('#seedResult');
+            el.removeClass('ok err').text('กำลังสร้าง...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=seedChannels',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err')
+                      .text((r && r.message) || '').show();
+                    if (r && r.success) setTimeout(function () { location.reload(); }, 1200);
+                },
+                error: function (x) { el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show(); }
+            });
+        }
+
+        // ดึงอีเมลแชทเดี๋ยวนี้ — ใช้ทดสอบโดยไม่ต้องรอรอบ timer
+        function pollEmailChat() {
+            var el = $('#result_EMAIL');
+            el.removeClass('ok err').text('กำลังดึงอีเมล...').show();
+            $.ajax({
+                url: window.location.pathname + '?action=emailChatPoll',
+                type: 'POST', contentType: 'application/json', data: '{}',
+                success: function (r) {
+                    el.removeClass('ok err').addClass(r && r.success ? 'ok' : 'err');
+                    el.html('<pre style="margin:0;white-space:pre-wrap;font-size:12px;text-align:left;">' +
+                            $('<div>').text((r && r.message) || '').html() + '</pre>').show();
+                },
+                error: function (x) { el.removeClass('ok').addClass('err').text('❌ ' + x.statusText).show(); }
             });
         }
 

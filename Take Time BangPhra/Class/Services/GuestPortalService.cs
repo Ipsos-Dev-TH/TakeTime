@@ -207,8 +207,14 @@ namespace Take_Time_BangPhra.Services
         /// <summary>
         /// Create room service order
         /// </summary>
+        /// <param name="totalAmount">ยอดรวมที่ลูกค้าต้องจ่าย = ค่าสินค้า + ค่าบริการ</param>
+        /// <param name="serviceCharge">
+        /// ค่าบริการที่คิดจริง (snapshot) — เก็บแยกเพื่อให้บิล/บัญชีแยกบรรทัดได้
+        /// และแก้การตั้งค่าทีหลังไม่กระทบออเดอร์เก่า
+        /// </param>
         public long CreateRoomServiceOrder(long reservationId, string customerMobilePhone, byte accommodationId,
-            string deliveryInstructions, decimal totalAmount, string paymentMethod, string paymentSlipPath = null)
+            string deliveryInstructions, decimal totalAmount, string paymentMethod, string paymentSlipPath = null,
+            decimal serviceCharge = 0m)
         {
             try
             {
@@ -228,14 +234,25 @@ namespace Take_Time_BangPhra.Services
                     { "@Payment_Slip_Path", paymentSlipPath ?? (object)DBNull.Value }
                 };
 
-                string query = @"
-                    INSERT INTO Guest_Room_Service_Orders
-                    (Order_Number, Reservation_ID, Customer_MobilePhone, Accommodation_ID,
-                     Delivery_Instructions, Total_Amount, Payment_Method, Payment_Slip_Path)
-                    VALUES
-                    (@Order_Number, @Reservation_ID, @Customer_MobilePhone, @Accommodation_ID,
-                     @Delivery_Instructions, @Total_Amount, @Payment_Method, @Payment_Slip_Path);
-                    SELECT CAST(SCOPE_IDENTITY() AS BIGINT);";
+                // คอลัมน์ Service_Charge มาจาก PHASE18_21 — ถ้าฐานยังไม่อัปเดต ให้ insert แบบเดิมได้
+                bool hasSvcColumn = ColumnExists("Guest_Room_Service_Orders", "Service_Charge");
+                if (hasSvcColumn) parameters["@Service_Charge"] = serviceCharge;
+
+                string query = hasSvcColumn
+                    ? @"INSERT INTO Guest_Room_Service_Orders
+                        (Order_Number, Reservation_ID, Customer_MobilePhone, Accommodation_ID,
+                         Delivery_Instructions, Total_Amount, Payment_Method, Payment_Slip_Path, Service_Charge)
+                        VALUES
+                        (@Order_Number, @Reservation_ID, @Customer_MobilePhone, @Accommodation_ID,
+                         @Delivery_Instructions, @Total_Amount, @Payment_Method, @Payment_Slip_Path, @Service_Charge);
+                        SELECT CAST(SCOPE_IDENTITY() AS BIGINT);"
+                    : @"INSERT INTO Guest_Room_Service_Orders
+                        (Order_Number, Reservation_ID, Customer_MobilePhone, Accommodation_ID,
+                         Delivery_Instructions, Total_Amount, Payment_Method, Payment_Slip_Path)
+                        VALUES
+                        (@Order_Number, @Reservation_ID, @Customer_MobilePhone, @Accommodation_ID,
+                         @Delivery_Instructions, @Total_Amount, @Payment_Method, @Payment_Slip_Path);
+                        SELECT CAST(SCOPE_IDENTITY() AS BIGINT);";
 
                 DataTable dt = _code.DatabaseQuerySafe(_connectionString, query, parameters);
                 return dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
@@ -814,6 +831,154 @@ namespace Take_Time_BangPhra.Services
                 parameters);
 
             return rows > 0;
+        }
+
+        #endregion
+
+        #region Room Service — ค่าบริการ (Service Charge)
+
+        // cache ผลตรวจคอลัมน์ (schema ไม่เปลี่ยนระหว่างรัน) — กัน query INFORMATION_SCHEMA ทุกออเดอร์
+        private static readonly Dictionary<string, bool> _columnCache =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>คอลัมน์มีอยู่จริงไหม — ให้โค้ดใหม่ทำงานได้แม้ยังไม่ได้รัน migration</summary>
+        private bool ColumnExists(string table, string column)
+        {
+            string key = table + "." + column;
+            lock (_columnCache)
+            {
+                bool cached;
+                if (_columnCache.TryGetValue(key, out cached)) return cached;
+            }
+            bool exists = false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 1 FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE TABLE_NAME = @t AND COLUMN_NAME = @c",
+                    new Dictionary<string, object> { { "@t", table }, { "@c", column } });
+                exists = dt != null && dt.Rows.Count > 0;
+            }
+            catch { }
+            lock (_columnCache) { _columnCache[key] = exists; }
+            return exists;
+        }
+
+        /// <summary>ผลการคิดค่าบริการ (คำนวณฝั่งเซิร์ฟเวอร์เสมอ — ห้ามเชื่อยอดจากหน้าเว็บ)</summary>
+        public class ServiceChargeResult
+        {
+            /// <summary>NONE | PERCENT | PER_ITEM | PER_ORDER</summary>
+            public string Mode = "NONE";
+            /// <summary>ค่าที่ตั้งไว้ (% หรือ บาท ตามโหมด)</summary>
+            public decimal Value;
+            /// <summary>เพดานค่าบริการ (0 = ไม่จำกัด)</summary>
+            public decimal MaxAmount;
+            /// <summary>ชื่อที่แสดงให้ลูกค้า</summary>
+            public string Label = "ค่าบริการ";
+            /// <summary>ยอดค่าบริการที่คิดจริง</summary>
+            public decimal Amount;
+            /// <summary>คำอธิบายสั้น ๆ เช่น "10%" / "฿5 × 3 ชิ้น" / "ต่อครั้ง"</summary>
+            public string Detail = "";
+            public bool HasCharge { get { return Amount > 0m; } }
+        }
+
+        /// <summary>อ่านการตั้งค่าค่าบริการ (ไม่คิดยอด) — ใช้ส่งให้หน้าเว็บแสดงผลตอนเลือกสินค้า</summary>
+        public ServiceChargeResult GetServiceChargeSetting()
+        {
+            var r = new ServiceChargeResult();
+            try
+            {
+                DataRow s = GetRoomServiceSettings();
+                if (s == null) return r;
+
+                // คอลัมน์อาจยังไม่มี (ยังไม่รัน PHASE18_21) → คงค่า NONE
+                if (!s.Table.Columns.Contains("Service_Charge_Mode")) return r;
+
+                string mode = (s["Service_Charge_Mode"]?.ToString() ?? "NONE").Trim().ToUpperInvariant();
+                if (mode != "PERCENT" && mode != "PER_ITEM" && mode != "PER_ORDER") mode = "NONE";
+                r.Mode = mode;
+
+                if (s.Table.Columns.Contains("Service_Charge_Value") && s["Service_Charge_Value"] != DBNull.Value)
+                    r.Value = Convert.ToDecimal(s["Service_Charge_Value"]);
+                if (s.Table.Columns.Contains("Service_Charge_Max") && s["Service_Charge_Max"] != DBNull.Value)
+                    r.MaxAmount = Convert.ToDecimal(s["Service_Charge_Max"]);
+                if (s.Table.Columns.Contains("Service_Charge_Label"))
+                {
+                    string lbl = s["Service_Charge_Label"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(lbl)) r.Label = lbl.Trim();
+                }
+                if (r.Value <= 0m) r.Mode = "NONE";
+            }
+            catch { /* ตาราง/คอลัมน์ยังไม่พร้อม → ไม่คิดค่าบริการ */ }
+            return r;
+        }
+
+        /// <summary>
+        /// คิดค่าบริการจากยอดสินค้า + จำนวนชิ้น ตามโหมดที่ตั้งไว้
+        /// (ปัดทศนิยม 2 ตำแหน่ง, ไม่เกินเพดานถ้าตั้งไว้)
+        /// </summary>
+        public ServiceChargeResult CalculateServiceCharge(decimal subtotal, int totalQuantity)
+        {
+            var r = GetServiceChargeSetting();
+            if (r.Mode == "NONE" || subtotal <= 0m) { r.Amount = 0m; return r; }
+
+            switch (r.Mode)
+            {
+                case "PERCENT":
+                    r.Amount = Math.Round(subtotal * r.Value / 100m, 2, MidpointRounding.AwayFromZero);
+                    r.Detail = $"{r.Value:0.##}%";
+                    break;
+                case "PER_ITEM":
+                    int qty = totalQuantity > 0 ? totalQuantity : 0;
+                    r.Amount = Math.Round(r.Value * qty, 2, MidpointRounding.AwayFromZero);
+                    r.Detail = $"฿{r.Value:0.##} × {qty} ชิ้น";
+                    break;
+                case "PER_ORDER":
+                    r.Amount = Math.Round(r.Value, 2, MidpointRounding.AwayFromZero);
+                    r.Detail = "ต่อครั้ง";
+                    break;
+            }
+
+            if (r.MaxAmount > 0m && r.Amount > r.MaxAmount)
+            {
+                r.Amount = r.MaxAmount;
+                r.Detail += $" (สูงสุด ฿{r.MaxAmount:0.##})";
+            }
+            if (r.Amount < 0m) r.Amount = 0m;
+            return r;
+        }
+
+        /// <summary>บันทึกการตั้งค่าค่าบริการ — แยกจาก SaveRoomServiceSettings เพื่อไม่แตะ signature เดิม</summary>
+        public bool SaveServiceChargeSettings(string mode, decimal value, decimal maxAmount, string label)
+        {
+            string m = (mode ?? "NONE").Trim().ToUpperInvariant();
+            if (m != "PERCENT" && m != "PER_ITEM" && m != "PER_ORDER") m = "NONE";
+            if (value < 0m) value = 0m;
+            if (maxAmount < 0m) maxAmount = 0m;
+
+            try
+            {
+                int rows = _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Guest_RoomService_Settings
+                         SET Service_Charge_Mode  = @Mode,
+                             Service_Charge_Value = @Value,
+                             Service_Charge_Max   = @Max,
+                             Service_Charge_Label = @Label,
+                             Updated_Date = GETDATE()
+                       WHERE ID = 1",
+                    new Dictionary<string, object>
+                    {
+                        { "@Mode", m },
+                        { "@Value", value },
+                        { "@Max", maxAmount > 0m ? (object)maxAmount : DBNull.Value },
+                        { "@Label", string.IsNullOrWhiteSpace(label) ? (object)DBNull.Value : label.Trim() }
+                    });
+                return rows > 0;
+            }
+            catch
+            {
+                return false;   // ยังไม่รัน PHASE18_21
+            }
         }
 
         #endregion

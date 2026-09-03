@@ -11,6 +11,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Take_Time_BangPhra.Integration;
+using Take_Time_BangPhra.Services;
 
 namespace Take_Time_BangPhra
 {
@@ -59,7 +60,16 @@ namespace Take_Time_BangPhra
             try
             {
                 var config = new AccountingConfig();
-                if (!config.IsReadyToSync) return;
+                // เปิด timer ถ้า accounting sync พร้อม หรือ เปิดอ่านอีเมลจอง OTA (email intake ก็อาศัย timer นี้)
+                bool bgFeaturesOn = false;
+                try
+                {
+                    string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn)
+                                   || EmailChatService.IsEnabled(conn);
+                }
+                catch { }
+                if (!config.IsReadyToSync && !bgFeaturesOn) return;
 
                 int intervalMs = config.SyncIntervalSeconds * 1000;
                 if (intervalMs < 10000) intervalMs = 30000; // minimum 10 seconds
@@ -74,21 +84,105 @@ namespace Take_Time_BangPhra
 
         private static int _consecutiveTimerErrors = 0;
 
+        private static DateTime _syncStartedAt = DateTime.MinValue;
+
         private static void ProcessAccountingSyncQueue(object state)
         {
+            // watchdog: ถ้า _isSyncing ค้างเกิน 30 นาที (task ที่ทิ้งไว้ไม่จบสักที) ให้ปลดล็อก
+            // ไม่งั้น timer จะเงียบถาวรจนกว่าจะ restart app pool
+            if (_isSyncing && _syncStartedAt != DateTime.MinValue
+                && (DateTime.Now - _syncStartedAt).TotalMinutes > 30)
+            {
+                lock (_syncLock) { _isSyncing = false; }
+                System.Diagnostics.Trace.TraceWarning("Accounting sync watchdog: รอบก่อนค้างเกิน 30 นาที — ปลดล็อกให้เริ่มรอบใหม่");
+            }
+
             if (_isSyncing) return;
 
             lock (_syncLock)
             {
                 if (_isSyncing) return;
                 _isSyncing = true;
+                _syncStartedAt = DateTime.Now;
             }
 
+            bool queueStillRunning = false;
             try
             {
                 var syncService = new AccountingSyncService();
                 var task = syncService.ProcessQueueAsync(20);
-                task.Wait(TimeSpan.FromMinutes(2));
+                // Wait() หมดเวลาแล้ว "งานยังวิ่งอยู่" — ของเดิมปล่อย _isSyncing = false ทันที
+                // รอบถัดไป (30 วิ) จึงเริ่มทับงานเดิมได้ → เสี่ยงยิงเอกสารซ้ำ
+                // (ตอนนี้มี app lock ระดับ DB กันอีกชั้นแล้ว แต่ไม่ควรพึ่งชั้นเดียว)
+                if (!task.Wait(TimeSpan.FromMinutes(2)))
+                {
+                    queueStillRunning = true;
+                    task.ContinueWith(t =>
+                    {
+                        lock (_syncLock) { _isSyncing = false; }
+                        if (t.IsFaulted)
+                            System.Diagnostics.Trace.TraceError(
+                                $"Accounting sync (background) error: {(t.Exception?.InnerException ?? t.Exception)?.Message}");
+                    });
+                    System.Diagnostics.Trace.TraceWarning("Accounting sync: รอบนี้ยังไม่จบใน 2 นาที — ปล่อยทำงานต่อเบื้องหลัง (งานอื่นของรอบนี้ยังทำตามปกติ)");
+                }
+
+                // รวบยอดขายหน้าร้านที่ไม่ออกใบกำกับเป็นใบรับเงินสดสรุปรายวัน (auto, ไม่ต้องกด)
+                // — no-op ถ้า config ปิด; แยก try กันพังเฉพาะส่วนนี้ ไม่กระทบ queue หลัก
+                try { syncService.RollupPosDailySalesIfDue(); }
+                catch (Exception rex) { System.Diagnostics.Trace.TraceError($"PosDailyRollup timer error: {rex.Message}"); }
+
+                // ลงบันทึกรายได้ที่ยังตกหล่น (รูมเซอร์วิส / ค่าห้องจาก OTA) — no-op ถ้าปิดสวิตช์
+                // แยก try ต่อ job กันพังลามถึงคิวหลัก
+                try
+                {
+                    string revConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    var revenue = new RevenuePostingService(revConn);
+                    try { revenue.PostRoomServiceRevenueIfDue(); }
+                    catch (Exception rsx) { System.Diagnostics.Trace.TraceError($"RoomServiceRevenue timer error: {rsx.Message}"); }
+                    try { revenue.PostOtaRoomRevenueIfDue(); }
+                    catch (Exception otx) { System.Diagnostics.Trace.TraceError($"OtaRoomRevenue timer error: {otx.Message}"); }
+                }
+                catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"RevenuePosting timer error: {rvx.Message}"); }
+
+                // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
+                try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
+                catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }
+
+                // อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ — gate ด้วย flag Email_Rsv_Enabled + poll interval; no-op ถ้าปิด
+                try { ProcessEmailReservationIntakeIfDue(); }
+                catch (Exception eex) { System.Diagnostics.Trace.TraceError($"EmailReservation timer error: {(eex.InnerException ?? eex).Message}"); }
+
+                // ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — no-op ถ้าปิด
+                try { SendDailyLineReportIfDue(); }
+                catch (Exception lex) { System.Diagnostics.Trace.TraceError($"DailyLineReport timer error: {(lex.InnerException ?? lex).Message}"); }
+
+                // อ่านอีเมลตอบกลับจากกรมสรรพากร → มาร์คใบกำกับว่านำส่ง e-Tax สำเร็จ (no-op ถ้าปิด)
+                try
+                {
+                    string rdConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    EtaxRdConfirmService.PollIfDue(rdConn);
+                }
+                catch (Exception rdx) { System.Diagnostics.Trace.TraceError($"EtaxRdConfirm timer error: {rdx.Message}"); }
+
+                // แชทลูกค้า OTA ผ่านอีเมล: ดึงอีเมลจาก relay ของ OTA เข้า OmniChannel inbox
+                // — gate ด้วยสวิตช์ channel EMAIL + รอบเวลาใน PollIfDue; no-op ถ้าปิด
+                try
+                {
+                    string chatConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    EmailChatService.PollIfDue(chatConn);
+                }
+                catch (Exception cex) { System.Diagnostics.Trace.TraceError($"EmailChat timer error: {(cex.InnerException ?? cex).Message}"); }
+
+                // ชำระเงินออนไลน์: ปิดรายการที่หมดอายุ + ตามสถานะรายการที่ค้าง (เผื่อ webhook หาย)
+                // — no-op ทันทีถ้าฟีเจอร์ปิด/ยังไม่ได้รัน migration
+                try
+                {
+                    string payConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    new Take_Time_BangPhra.Payments.OnlinePaymentService(payConn).PollPendingIfDue();
+                }
+                catch (Exception pex) { System.Diagnostics.Trace.TraceError($"OnlinePayment timer error: {(pex.InnerException ?? pex).Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)
@@ -107,8 +201,54 @@ namespace Take_Time_BangPhra
             }
             finally
             {
-                _isSyncing = false;
+                // ถ้าคิวยังวิ่งอยู่เบื้องหลัง ปล่อยให้ ContinueWith เป็นคนปลดล็อกเอง
+                if (!queueStillRunning) _isSyncing = false;
             }
+        }
+
+        private static DateTime _lastEmailPoll = DateTime.MinValue;
+
+        /// <summary>
+        /// ดึง+ลงจองอีเมล OTA (STAAH) ตามรอบ Email_Rsv_PollMinutes — เรียกจาก timer หลัก.
+        /// no-op ถ้า flag ปิด; กันยิงถี่ด้วยตัวจับเวลา in-memory (ต่อ worker process).
+        /// </summary>
+        private static void ProcessEmailReservationIntakeIfDue()
+        {
+            string conn;
+            try { conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString; }
+            catch { return; }
+            if (!EmailReservationService.IsEnabled(conn)) return;
+
+            int pollMin = 5;
+            try
+            {
+                var c = new code();
+                var dt = c.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey = 'Email_Rsv_PollMinutes'", null);
+                if (dt?.Rows.Count > 0) int.TryParse(dt.Rows[0][0]?.ToString(), out pollMin);
+            }
+            catch { }
+            if (pollMin < 1) pollMin = 5;
+            if ((DateTime.Now - _lastEmailPoll).TotalMinutes < pollMin) return;
+            _lastEmailPoll = DateTime.Now;
+
+            var svc = new EmailReservationService(conn);
+            svc.ProcessEmails();
+        }
+
+        /// <summary>
+        /// ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — เรียกจาก timer หลัก.
+        /// IsDueNow คุมเอง (เปิด + เลยเวลา + ยังไม่ส่งวันนี้) → no-op ถ้ายังไม่ถึง/ปิด.
+        /// </summary>
+        private static void SendDailyLineReportIfDue()
+        {
+            string conn;
+            try { conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString; }
+            catch { return; }
+            if (!DailyReportLineService.IsEnabled(conn)) return;
+            // SendScheduled จองสิทธิ์ "ส่งของวันนี้" แบบ atomic ก่อนส่ง → timer รอบถัดไป (ทุก ~30 วิ)
+            // จะไม่ยิงซ้ำระหว่างที่รอบนี้กำลัง render/push อยู่
+            new DailyReportLineService(conn).SendScheduled();
         }
 
         /// <summary>

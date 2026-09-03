@@ -275,6 +275,9 @@ namespace Take_Time_BangPhra
             {
                 // Reserve mode: Don't show payment history (new reservation)
                 divPaymentHistory.Visible = false;
+
+                // เสนอทางจ่ายด้วยบัตร/QR ทันที แทนการโอน+แนบสลิป (เงียบถ้าสวิตช์ปิด)
+                SetupPayNowOption();
             }
 
             // 🔧 IMPORTANT: Rebind product charges on page load, BUT NOT during postback from delete button
@@ -827,6 +830,14 @@ namespace Take_Time_BangPhra
                     string paidType = dtCustomer.Rows[0]["Paid_Type"]?.ToString() ?? "เงินสด";
                     if (string.IsNullOrWhiteSpace(paidType) || paidType.Length <= 5) paidType = "เงินสด";
                     Label7.Text += " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
+
+                    // เก็บยอดคงเหลือด้วย QR/ลิงก์ + รับเงินประกัน ตรงนี้เลย ไม่ต้องเปิดหน้าอื่น
+                    int ridForPay;
+                    if (int.TryParse(Convert.ToString(id), out ridForPay))
+                    {
+                        ViewState["rvResId"] = ridForPay;
+                        SetupOnlinePayPanel(ridForPay, remainingAmount);
+                    }
                 }
 
                 if (!IsPostBack)
@@ -1513,7 +1524,10 @@ namespace Take_Time_BangPhra
                             bool hasValidPaymentProof = FileUpload1.HasFile ||
                                                        Image1.ImageUrl != "./Images/บัญชี.png" ||
                                                        TextBox1.Text == "02" ||
-                                                       DropDownList2.SelectedItem.Text == "เงินสด";
+                                                       DropDownList2.SelectedItem.Text == "เงินสด" ||
+                                                       // เลือกจ่ายด้วยบัตร/QR ทันที = ยังไม่มีสลิปเป็นเรื่องปกติ
+                                                       // ใบจองจะถูกบันทึกเป็น "รอชำระเงิน" แล้วพาไปจ่ายต่อ
+                                                       PayNowChosen;
 
                             // ✅ Skip slip validation for edit without additional deposit
                             if ((!needSlipValidation || hasValidPaymentProof) && checkpaymentselect == 0)
@@ -2498,7 +2512,7 @@ namespace Take_Time_BangPhra
                                                 //SendLineNotify("แก้ไขการจองหมายเลข: "+ id+ "\r\nหมายเลขโทรศัพท์: " + TextBox1.Text + "\r\nเช็คอินวันที่: " + code2.ParseDate(TextBox12.Text).ToString("dd MMMM yyyy") + "\r\nเช็คเอ้าท์วันที่: " + code2.ParseDate(TextBox12.Text).AddDays(Convert.ToDouble(DropDownList1.SelectedValue)).ToString("dd MMMM yyyy") + "\r\n"+msg);
                                                 ////                                        using (var client = new HttpClient())
                                                 ////                                        {
-                                                ////                                            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ConfigurationManager.AppSettings["linechannelaccesstokentaketime"]);
+                                                ////                                            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AppCfg.Get("linechannelaccesstokentaketime"));
                                                 ////                                            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
                                                 ////                                            var jsonPayload = new
@@ -2736,8 +2750,8 @@ namespace Take_Time_BangPhra
 👨‍💼 แก้ไขโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
-                                                    await bot.SendMessageAsync("-4969611371", message);
+                                                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                                                    Notify.Send(Notify.Ev.BookingEdit, message);
                                                 }
                                             }
                                             catch { }
@@ -2768,6 +2782,9 @@ namespace Take_Time_BangPhra
                                         var reservationDA = new ReservationDataAccess(conn);
 
                                         IsDeposit = false;
+                                        // true = เช็คอินไม่สำเร็จ (ไม่ติ๊กชำระเงิน/ยอดไม่ครบ) → อย่า redirect กลับ ReserveTable
+                                        // ให้ค้างหน้าเดิมเพื่อโชว์ alert (เดิม redirect ทับ alert → เด้งกลับเงียบ ๆ ไม่รู้สาเหตุ)
+                                        bool checkinBlocked = false;
 
                                         // ✅ Validate Customer_Type_ID with fallback to default
                                         int customerTypeId = 1; // Default: บุคคลธรรมดา
@@ -2881,9 +2898,36 @@ namespace Take_Time_BangPhra
                                             decimal DepositAmount = 0;
                                             if (dtfindDeposit.Rows.Count <= 0)
                                             {
-                                                // 🆕 Use manual payment amount from TextBox10 (like rentmore)
-                                                // Deposit already declared above at line 1636
-                                                dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", Deposit * -1, Deposit * -1);
+                                                // ไม่มีใบมัดจำจริงแต่มียอดชำระเดิม (Deposit=TextBox5) = OTA-prepaid (เช่น Agoda
+                                                // เก็บค่าห้องแล้ว โรงแรมไม่ได้รับเงินก้อนนั้น) หรือจ่ายที่อื่นโดยไม่ออกใบเสร็จ.
+                                                // เดิม: add "ส่วนลด -Deposit" ทั้งก้อนทับรายการเต็ม → ใบเสร็จลูกค้าโชว์ค่าห้อง
+                                                // + ส่วนลดก้อนใหญ่แปลก ๆ ทั้งที่ลูกค้าจ่ายจริงแค่ของเช่า/ค่าบริการเพิ่ม และ JE
+                                                // ฝั่งบัญชีเพี้ยน (กลับมัดจำ 21510 ที่ไม่มีจริง).
+                                                // ใหม่: "ตัดรายการที่ถูกจ่ายล่วงหน้าแล้ว" (เริ่มจากที่พัก ProductType=1) ออกจากใบ
+                                                // → ใบเสร็จเหลือเฉพาะรายการที่ลูกค้าจ่ายจริงหน้างาน + ส่วนลดเฉพาะเศษที่เหลือ
+                                                // (เช่น Agoda 2,391 - ห้อง 2,390 = เศษ 1 บาท) → ยอดสุทธิเท่าเดิมเป๊ะ
+                                                decimal prepaidRemain = Deposit;
+                                                if (prepaidRemain > 0)
+                                                {
+                                                    // ตัดรายการที่พัก (ไม่ใช่บรรทัดส่วนลด) ที่ยอด ≤ ยอดจ่ายล่วงหน้าคงเหลือ
+                                                    for (int ri = dtReserve.Rows.Count - 1; ri >= 0; ri--)
+                                                    {
+                                                        var rr = dtReserve.Rows[ri];
+                                                        if ((rr["ProductType_ID"]?.ToString() ?? "") != "1") continue;
+                                                        if ((rr["Product_Data"]?.ToString() ?? "").StartsWith("ส่วนลด")) continue;
+                                                        decimal amtCut = 0;
+                                                        decimal.TryParse(rr["Price_Amount"]?.ToString(), out amtCut);
+                                                        if (amtCut > 0 && amtCut <= prepaidRemain + 0.005m)
+                                                        {
+                                                            prepaidRemain -= amtCut;
+                                                            dtReserve.Rows.RemoveAt(ri);
+                                                        }
+                                                    }
+                                                    for (int ri = 0; ri < dtReserve.Rows.Count; ri++)
+                                                        dtReserve.Rows[ri]["Number"] = (ri + 1).ToString();
+                                                }
+                                                if (prepaidRemain > 0.005m)
+                                                    dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", prepaidRemain * -1, prepaidRemain * -1);
                                                 id = Request.QueryString["id"];
                                                 if (CheckBox4.Checked == false)
                                                 {
@@ -3196,6 +3240,7 @@ namespace Take_Time_BangPhra
                                         else
                                         {
                                             // ❌ ไม่ได้ tick checkbox หรือไม่ได้กรอกยอดเงิน - ไม่ทำการเช็คอิน
+                                            checkinBlocked = true;   // อย่า redirect → ค้างหน้าให้ alert แสดง
                                             string alertMessage = "⚠️ ยังไม่ได้ทำการเช็คอิน!\\n\\n" +
                                                                 "กรุณาติ๊กเลือก \\'ชำระเงิน\\' และกรอกยอดเงินที่รับ\\n" +
                                                                 "จึงจะสามารถเช็คอินได้\\n\\n" +
@@ -3227,11 +3272,12 @@ namespace Take_Time_BangPhra
                                             Response.Redirect($"./Reserve?command=checkin&id={id}&check={TextBox1.Text}", false);
                                             HttpContext.Current.ApplicationInstance.CompleteRequest();
                                         }
-                                        else
+                                        else if (!checkinBlocked)
                                         {
                                             Response.Redirect("/ReserveTable",false);
                                             HttpContext.Current.ApplicationInstance.CompleteRequest();
                                         }
+                                        // checkinBlocked = true → ไม่ redirect, ค้างหน้าเดิมให้ alert "ยังไม่ได้เช็คอิน" แสดง
                                     }
                                     else if (command == "reserve")
                                     {
@@ -3307,9 +3353,13 @@ namespace Take_Time_BangPhra
                                                     checkinDate.Value,
                                                     checkinDate.Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue)),
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
-                                                    "มัดจำแล้ว",
+                                                    // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
+                                                    // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
+                                                    PayNowChosen
+                                                        ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
+                                                        : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3325,9 +3375,13 @@ namespace Take_Time_BangPhra
                                                     DateTime.Parse("1990-01-01"),
                                                     DateTime.Parse("1990-01-01"),
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
-                                                    "มัดจำแล้ว",
+                                                    // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
+                                                    // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
+                                                    PayNowChosen
+                                                        ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
+                                                        : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3659,7 +3713,7 @@ namespace Take_Time_BangPhra
 
                                             //                                    using (var client = new HttpClient())
                                             //                                    {
-                                            //                                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ConfigurationManager.AppSettings["linechannelaccesstokentaketime"]);
+                                            //                                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AppCfg.Get("linechannelaccesstokentaketime"));
                                             //                                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
                                             //                                        var jsonPayload = new
@@ -3700,8 +3754,8 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 ลงจองโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                                            var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
-                                            await bot.SendMessageAsync("-4969611371", message);
+                                            // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                                            Notify.Send(Notify.Ev.BookingNew, message);
 
                                             // ✅ Reload page to show uploaded slip image (don't redirect to Confirmed yet)
                                             // This allows user to see the uploaded slip before confirming
@@ -3725,6 +3779,26 @@ namespace Take_Time_BangPhra
                                             {
                                                 Response.Redirect($"./Reserve?command=reserve&date={TextBox12.Text}", false);
                                                 HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                            }
+                                            else if (PayNowChosen)
+                                            {
+                                                // เลือกจ่ายทันที → พาไปหน้าชำระเงินต่อเลย
+                                                // ใบจองอยู่สถานะ "รอชำระเงิน" กันห้องไว้ให้แล้ว
+                                                int ridPay;
+                                                decimal payAmt = 0m;
+                                                decimal.TryParse(TextBox5.Text ?? "0", out payAmt);
+                                                if (int.TryParse(ID, out ridPay) && ridPay > 0)
+                                                {
+                                                    Response.Redirect(
+                                                        Take_Time_BangPhra.Payments.BookingPayment.PayUrl(
+                                                            ridPay, TextBox1.Text, payAmt), false);
+                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                                }
+                                                else
+                                                {
+                                                    Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text, false);
+                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                                }
                                             }
                                             else
                                             {
@@ -3753,7 +3827,23 @@ namespace Take_Time_BangPhra
                                         }
                                     }
                                     catch { }
-                                    
+
+                                    // เดิม catch นี้กลืนข้อผิดพลาดเงียบ ๆ — บันทึกไม่สำเร็จแต่ผู้ใช้ไม่รู้ตัว
+                                    // และไม่มี log ให้ตามหลัง → บันทึก log เสมอ + แจ้งผู้ใช้
+                                    try
+                                    {
+                                        code2.Logs(conn, "Reserve Save Error",
+                                            $"Reservation_ID={ID}: {ex.Message}", Session["User"]?.ToString() ?? "SYSTEM");
+                                    }
+                                    catch { }
+
+                                    // ห้องถูกจองตัดหน้าระหว่างบันทึก (guard atomic ใน InsertReservationAccommodation)
+                                    // → บอกผู้ใช้ตรง ๆ ให้เลือกห้องใหม่ ไม่ปล่อยเงียบจนเข้าใจว่าจองสำเร็จ
+                                    string userMsg = ex is InvalidOperationException
+                                        ? ex.Message
+                                        : "บันทึกการจองไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ";
+                                    ClientScript.RegisterStartupScript(this.GetType(), "reserveSaveError",
+                                        $"alert('{userMsg.Replace("'", "\\'").Replace("\r", " ").Replace("\n", " ")}');", true);
                                 }
                                 
                             }
@@ -3881,7 +3971,12 @@ namespace Take_Time_BangPhra
                 ClientId = googleClientId,
                 ClientSecret = googleClientSecret
             };
-            return GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes,user:"user",CancellationToken.None).Result;
+            // ⚠️ ห้ามใช้ .Result ตรง ๆ บน request thread ของ ASP.NET — async ที่ไม่ได้ ConfigureAwait(false)
+            // จะรอ SynchronizationContext ที่ถูกบล็อกอยู่ → deadlock (หน้าเว็บหมุนค้าง)
+            // ห่อด้วย Task.Run ให้รันบน thread pool (ไม่มี context) แล้วค่อยรอ
+            return System.Threading.Tasks.Task.Run(() =>
+                GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes, user: "user", CancellationToken.None)
+            ).GetAwaiter().GetResult();
         }
 
         //public void SendLineNotify(string Message)
@@ -4579,7 +4674,8 @@ namespace Take_Time_BangPhra
                 {
                     string paymentType = IsDeposit ? "DEPOSIT" : "FULL";
                     string paymentMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
-                    string paymentNotes = IsDeposit ? "มัดจำ - ออกใบกำกับภาษี" : "ชำระเต็ม - ออกใบกำกับภาษี";
+                    // มัดจำ = ใบเสร็จรับเงิน (ใบกำกับภาษีออกตอนเช็คเอาท์/ชำระเต็ม) — ห้ามระบุว่าออกใบกำกับ
+                    string paymentNotes = IsDeposit ? "มัดจำ - ใบเสร็จรับเงิน" : "ชำระเต็ม - ออกใบกำกับภาษี";
 
                     int? adminId = null;
                     if (!string.IsNullOrEmpty(created_By_ID) && created_By_ID != "0")
@@ -4658,6 +4754,11 @@ namespace Take_Time_BangPhra
                     // Don't fail receipt creation if payment history fails
                 }
 
+                // สร้าง PDF + ส่งอีเมล e-Tax = ผลข้างเคียง "หลังบันทึกใบเสร็จ+enqueue sync แล้ว" ห้ามให้ล้มเหลว
+                // (ไฟล์ PDF ไม่พบ / SMTP error) ทำให้ throw ออกจาก createReceipt → ผู้เรียกไม่ได้อัปเดตสถานะ
+                // "เช็คอินแล้ว" (CheckInReservation รันหลัง createReceipt). กลืน error + log เหมือน Payment_History
+                try
+                {
                 if (CheckBox4.Checked == false)
                 {
                     createReport(ReceiptID, status, docDate);
@@ -4678,7 +4779,7 @@ namespace Take_Time_BangPhra
                         receiptParams);
 
                     string uid = dtReceipt.Rows[0]["UID"].ToString();
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     string pdfpath = "";
                     if (File.Exists(path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_" + uid + "_etax.pdf"))
                     {
@@ -4733,7 +4834,14 @@ namespace Take_Time_BangPhra
                     string subject = "[" + docCreateThaiDate + "][INV][" + dtReceipt.Rows[0]["ID"].ToString() + "]";
                     string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
-                    SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox13.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                    SendEmail(AppCfg.Get("SMTP").ToString(), Convert.ToInt32(AppCfg.Get("SMTP_Port").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_EnableSsl").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_UseDefaultCredentials").ToString()), AppCfg.Get("Email_From").ToString(), AppCfg.Get("Email_Password_From").ToString(), TextBox13.Text, AppCfg.Get("Email_CC").ToString(), subject, body, dataall);
+                }
+                }
+                catch (Exception pdfEx)
+                {
+                    code2.Logs(conn, "Receipt PDF/e-Tax Error (createReceipt)",
+                        pdfEx.Message + " - " + pdfEx.StackTrace, "SYSTEM");
+                    // ไม่ throw — ใบเสร็จ+sync บันทึกแล้ว, ต้องปล่อยให้ผู้เรียกอัปเดตสถานะเช็คอินต่อ
                 }
 
                 // 🏨 Mark product charges as paid
@@ -4974,7 +5082,7 @@ namespace Take_Time_BangPhra
         }
         public void createReport(string DocNumber,string status,DateTime docDate)
         {
-            string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+            string path = AppCfg.Get("ReceiptFolderPath").ToString();
             try
             {
                 System.IO.Directory.CreateDirectory(path+"\\"+docDate.Year.ToString());
@@ -5235,7 +5343,7 @@ namespace Take_Time_BangPhra
                 {
                     uid = dtReceipt.Rows[0]["UID"].ToString();
                     string xmlFilePath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString("00") + "\\" + DocNumber +"_"+uid+ ".xml";
-                    string xmlString = System.IO.File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
+                    string xmlString = System.IO.File.ReadAllText(AppCfg.Get("BaseFolderPath").ToString() + "\\Resources\\template.xml");
                     xmlString = xmlString.Replace("*invoice_id", DocNumber);
                     xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                     xmlString = xmlString.Replace("*invoice_typecode", "T03");
@@ -5370,6 +5478,254 @@ namespace Take_Time_BangPhra
         {
             var totalCost = Convert.ToDouble(String.Format("{0:0.00}", num));
             return totalCost;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  เก็บเงินออนไลน์ + เงินประกัน บนหน้าเช็คอิน
+        //
+        //  ส่วนเสริมล้วน ๆ — ไม่แตะตรรกะบันทึกจอง/เช็คอินเดิมสักบรรทัด
+        //  ปิดฟีเจอร์ "รับชำระเงินออนไลน์" เมื่อไหร่ ทั้งบล็อกก็ไม่แสดงผล
+        //  หน้าเดิมกลับไปทำงานเหมือนเดิมทุกประการ (แนบสลิปเหมือนเคย)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>เลขอ้างอิงรายการจ่าย/วงเงิน ที่ฝั่งหน้าเว็บใช้ตามสถานะแบบสด</summary>
+        public string PayRefJs { get { return JsSafe(ViewState["rvPayRef"]); } }
+        public string HoldRefJs { get { return JsSafe(ViewState["rvHoldRef"]); } }
+        public string PayUrlJs { get { return JsSafe(ViewState["rvPayUrl"]); } }
+        public string HoldUrlJs { get { return JsSafe(ViewState["rvHoldUrl"]); } }
+
+        private static string JsSafe(object o)
+        {
+            string s = o == null ? "" : o.ToString();
+            return s.Replace("\\", "").Replace("\"", "").Replace("<", "").Replace(">", "");
+        }
+
+        /// <summary>
+        /// เปิด/ซ่อนบล็อกเก็บเงินออนไลน์ — เรียกจากตอนโหลดหน้าโหมดเช็คอิน
+        /// ทุกอย่างห่อ try/catch: ถ้ายังไม่ได้ติดตั้งตาราง/ปิดฟีเจอร์ ก็แค่ไม่โผล่
+        /// </summary>
+        private void SetupOnlinePayPanel(int reservationId, decimal remaining)
+        {
+            try
+            {
+                if (pnlOnlinePay == null) return;
+                pnlOnlinePay.Visible = false;
+                if (reservationId <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService(conn);
+                bool payOk = false;
+                try
+                {
+                    payOk = svc.AvailableMethods(remaining > 0 ? remaining : 1m,
+                        Take_Time_BangPhra.Payments.PaymentSource.Reservation).Count > 0;
+                }
+                catch { }
+
+                var holds = new Take_Time_BangPhra.Payments.SecurityHoldService(conn);
+                bool holdOk = false;
+                try { holdOk = holds.IsAvailable && holds.TableReady(); } catch { }
+
+                if (!payOk && !holdOk) return;      // ไม่มีอะไรให้ทำ = ไม่ต้องรกหน้าจอ
+                pnlOnlinePay.Visible = true;
+
+                // ── ฝั่งเก็บเงิน ──
+                btnMakePayLink.Visible = payOk;
+                txtPayAmount.Visible = payOk;
+                if (payOk && !IsPostBack)
+                    txtPayAmount.Text = remaining > 0 ? remaining.ToString("0.##") : "";
+
+                // ── ฝั่งเงินประกัน ──
+                pnlDeposit.Visible = holdOk;
+                if (holdOk && !IsPostBack)
+                {
+                    try { txtDepositAmount.Text = holds.SuggestedAmount(reservationId).ToString("0.##"); }
+                    catch { }
+
+                    // มีวงเงินค้างอยู่แล้ว — บอกไปเลย จะได้ไม่กันซ้ำสองก้อน
+                    var open = holds.GetOpenHold(reservationId);
+                    if (open != null)
+                    {
+                        bool held = open.Status == Take_Time_BangPhra.Payments.HoldStatus.Held;
+                        litDepositMsg.Text =
+                            "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;background:"
+                            + (held ? "#E8F5E9;color:#2E7D32" : "#FFF8E1;color:#8D6E00") + ";\">"
+                            + (held ? "✅ การจองนี้มีเงินประกันอยู่แล้ว " : "⏳ รอลูกค้ากรอกบัตร ")
+                            + open.Amount.ToString("N2") + " บาท ("
+                            + Server.HtmlEncode(open.HoldRef) + ")"
+                            + (held ? " — จัดการตอนเช็คเอาท์" : "") + "</div>";
+                        if (!held)
+                        {
+                            ViewState["rvHoldRef"] = open.HoldRef;
+                            ViewState["rvHoldUrl"] = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                                + "/Payment/Card?mode=HOLD&hold=" + Uri.EscapeDataString(open.HoldRef);
+                            txtDepositLink.Text = ViewState["rvHoldUrl"].ToString();
+                            pnlDepositLink.Visible = true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                try { pnlOnlinePay.Visible = false; } catch { }
+            }
+        }
+
+        /// <summary>สร้างลิงก์/QR ให้ลูกค้าจ่ายยอดคงเหลือเอง</summary>
+        protected void btnMakePayLink_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int rid = ReservationIdFromRequest();
+                if (rid <= 0) { ShowPayError("ไม่พบเลขที่การจอง"); return; }
+
+                // ลิงก์ผูกกับ "ใบจอง" ไม่ใช่กับรายการจ่าย ⇒ เปิดวันไหนก็คิดยอดคงเหลือ
+                // ณ ตอนนั้นให้เอง ไม่หมดอายุ ไม่ต้องสร้างใหม่
+                string phone = "";
+                try
+                {
+                    DataTable dt = new code().DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 Customer_MobilePhone FROM Reservation WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rid } });
+                    if (dt != null && dt.Rows.Count > 0)
+                        phone = Convert.ToString(dt.Rows[0]["Customer_MobilePhone"]);
+                }
+                catch { }
+
+                string url = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.Reservation
+                    + "&id=" + rid
+                    + "&ph=" + Uri.EscapeDataString(phone ?? "");
+
+                decimal amt;
+                if (decimal.TryParse((txtPayAmount.Text ?? "").Trim(), out amt) && amt > 0)
+                    url += "&amt=" + amt.ToString("0.00", CultureInfo.InvariantCulture);
+
+                ViewState["rvPayUrl"] = url;
+                ViewState["rvPayRef"] = "";   // ยังไม่มีรายการจ่ายจนกว่าลูกค้าจะเลือกวิธี
+                txtPayLinkUrl.Text = url;
+                pnlPayLink.Visible = true;
+            }
+            catch (Exception ex) { ShowPayError(ex.Message); }
+        }
+
+        /// <summary>รับเงินประกัน — เงินสดบันทึกทันที / บัตรได้ลิงก์ให้ลูกค้ากรอก</summary>
+        protected void btnMakeDeposit_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int rid = ReservationIdFromRequest();
+                if (rid <= 0) { ShowPayError("ไม่พบเลขที่การจอง"); return; }
+
+                decimal amt;
+                if (!decimal.TryParse((txtDepositAmount.Text ?? "").Trim(), out amt) || amt <= 0)
+                { ShowPayError("กรุณากรอกวงเงินประกันให้ถูกต้อง"); return; }
+
+                int? adminId = null;
+                try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); }
+                catch { }
+
+                var holds = new Take_Time_BangPhra.Payments.SecurityHoldService(conn);
+                string err;
+
+                if (ddlDepositMethod.SelectedValue == "CASH")
+                {
+                    string holdRef = holds.CreateCashHold(rid, amt, adminId, out err);
+                    if (string.IsNullOrEmpty(holdRef)) { ShowPayError(err ?? "บันทึกไม่สำเร็จ"); return; }
+                    litDepositMsg.Text =
+                        "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                        + "background:#E8F5E9;color:#2E7D32;\">✅ รับเงินประกันเป็นเงินสด "
+                        + amt.ToString("N2") + " บาท บันทึกแล้ว (" + Server.HtmlEncode(holdRef) + ")"
+                        + " — เช็คเอาท์ค่อยคืนหรือหักค่าเสียหาย</div>";
+                    pnlDepositLink.Visible = false;
+                    return;
+                }
+
+                string url = holds.CreateHoldRequest(rid, amt, adminId, out err);
+                if (string.IsNullOrEmpty(url)) { ShowPayError(err ?? "สร้างลิงก์ไม่สำเร็จ"); return; }
+
+                ViewState["rvHoldUrl"] = url;
+                var open = holds.GetOpenHold(rid);
+                ViewState["rvHoldRef"] = open == null ? "" : open.HoldRef;
+                txtDepositLink.Text = url;
+                pnlDepositLink.Visible = true;
+                litDepositMsg.Text =
+                    "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                    + "background:#E3F2FD;color:#1565C0;\">ส่งลิงก์นี้ให้ลูกค้ากรอกบัตร — "
+                    + "เป็นการ<b>กันวงเงิน</b> เงินยังไม่ออกจากบัตร</div>";
+            }
+            catch (Exception ex) { ShowPayError(ex.Message); }
+        }
+
+        private void ShowPayError(string msg)
+        {
+            litDepositMsg.Text = "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                + "background:#FFEBEE;color:#C62828;\">⚠ " + Server.HtmlEncode(msg ?? "") + "</div>";
+        }
+
+        // ── ลูกค้าจองเอง แล้วจ่ายด้วยบัตร/QR ทันที ────────────────────────────
+
+        /// <summary>ผู้ใช้เลือก "จ่ายทันที" อยู่ไหม (ต้องเปิดสวิตช์ด้วย ห้ามเชื่อ checkbox เดี่ยว ๆ)</summary>
+        private bool PayNowChosen
+        {
+            get
+            {
+                try
+                {
+                    return pnlPayNow != null && pnlPayNow.Visible
+                        && chkPayNow != null && chkPayNow.Checked
+                        && Take_Time_BangPhra.Payments.BookingPayment.IsEnabled;
+                }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>เปิดตัวเลือก "จ่ายทันที" ในโหมดจองใหม่ (เงียบสนิทถ้าสวิตช์ปิด)</summary>
+        private void SetupPayNowOption()
+        {
+            try
+            {
+                if (pnlPayNow == null) return;
+                pnlPayNow.Visible = Take_Time_BangPhra.Payments.BookingPayment.IsEnabled;
+                if (!pnlPayNow.Visible && chkPayNow != null) chkPayNow.Checked = false;
+                ApplyPayNowUi();
+            }
+            catch { try { pnlPayNow.Visible = false; } catch { } }
+        }
+
+        /// <summary>เลือกจ่ายทันที = ไม่ต้องโอน จึงซ่อนช่องแนบสลิปไม่ให้สับสน</summary>
+        private void ApplyPayNowUi()
+        {
+            try
+            {
+                if (rowSlip == null) return;
+                bool payNow = PayNowChosen;
+                rowSlip.Visible = !payNow;
+                if (payNow)
+                {
+                    // ยอดที่จะเก็บ = ยอดมัดจำขั้นต่ำที่ระบบคำนวณไว้ (ลูกค้าจ่ายเต็มก็ได้ที่หน้าถัดไป)
+                    if (string.IsNullOrWhiteSpace(TextBox5.Text) || TextBox5.Text.Trim() == "0")
+                    {
+                        decimal minDep;
+                        if (decimal.TryParse((Label2.Text ?? "").Replace(",", "").Trim(), out minDep) && minDep > 0)
+                            TextBox5.Text = minDep.ToString("0");
+                    }
+                }
+            }
+            catch { }
+        }
+
+        protected void chkPayNow_CheckedChanged(object sender, EventArgs e)
+        {
+            ApplyPayNowUi();
+        }
+
+        /// <summary>เลขที่การจองของหน้านี้ — โหมดเช็คอิน/แก้ไขส่งมาทาง query string</summary>
+        private int ReservationIdFromRequest()
+        {
+            int rid;
+            if (int.TryParse((Request.QueryString["id"] ?? "").Trim(), out rid) && rid > 0) return rid;
+            if (ViewState["rvResId"] != null && int.TryParse(ViewState["rvResId"].ToString(), out rid)) return rid;
+            return 0;
         }
 
         protected void TextBox5_TextChanged(object sender, EventArgs e)
@@ -5715,8 +6071,8 @@ namespace Take_Time_BangPhra
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 เลื่อนโดย: {Session["UserName"]?.ToString() ?? adminName ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
-                    var bot = new TelegramBot2(ConfigurationManager.AppSettings["TelegramTokenTakeTime"].ToString());
-                    await bot.SendMessageAsync("-4969611371", message);
+                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                    Notify.Send(Notify.Ev.BookingPostpone, message);
                 }
                 catch (Exception telegramEx)
                 {
@@ -7649,7 +8005,18 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         ph.PaymentType,
                         ph.PaymentMethod,
                         ph.Status,
-                        ph.Receipt_ID as ReceiptNumber,
+                        -- แสดงเลขเอกสาร NextAcc (TIV-/REC-) ถ้า sync แล้ว, ไม่งั้นเลข local เดิม
+                        -- ไม่กรอง Nexaacc_Document_Type เพื่อให้จับได้ทั้ง TaxInvoice/Receipt/Invoice
+                        COALESCE(
+                            (SELECT TOP 1 q.Nexaacc_Document_Number
+                               FROM Accounting_Sync_Queue q
+                              WHERE q.Entity_Type = 'RECEIPT' AND q.Status = 'COMPLETED'
+                                AND q.Nexaacc_Document_Number IS NOT NULL
+                                AND LTRIM(RTRIM(q.Nexaacc_Document_Number)) <> ''
+                                AND q.Nexaacc_Document_Number NOT LIKE 'DRAFT%'
+                                AND q.Payload LIKE '%""receiptNumber"":""' + ph.Receipt_ID + '""%'
+                              ORDER BY q.ID DESC),
+                            ph.Receipt_ID) as ReceiptNumber,
                         ps.SlipFileURL,
                         a.Username as ProcessedBy
                     FROM Payment_History ph

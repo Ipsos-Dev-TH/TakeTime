@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -11,6 +11,8 @@ namespace Take_Time_BangPhra.Admin.HR
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrPayroll)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             otService = new OTService();
 
             if (!IsPostBack)

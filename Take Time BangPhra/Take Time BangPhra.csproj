@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.2.0.1\build\net46\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.props" Condition="Exists('..\packages\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.2.0.1\build\net46\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -95,24 +95,31 @@
     </Reference>
     <Reference Include="Microsoft.ReportViewer.Common, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.WebForms.150.1400.0\lib\net40\Microsoft.ReportViewer.Common.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.DataVisualization, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.Winforms.150.1537.0\lib\net40\Microsoft.ReportViewer.DataVisualization.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.Design, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.WebForms.150.1400.0\lib\net40\Microsoft.ReportViewer.Design.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.ProcessingObjectModel, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.Winforms.150.1537.0\lib\net40\Microsoft.ReportViewer.ProcessingObjectModel.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.WebDesign, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.WebForms.150.1400.0\lib\net40\Microsoft.ReportViewer.WebDesign.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.WebForms, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.WebForms.150.1400.0\lib\net40\Microsoft.ReportViewer.WebForms.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.ReportViewer.WinForms, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.ReportingServices.ReportViewerControl.Winforms.150.1537.0\lib\net40\Microsoft.ReportViewer.WinForms.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.SqlServer.Types, Version=14.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.SqlServer.Types.14.0.314.76\lib\net40\Microsoft.SqlServer.Types.dll</HintPath>
@@ -324,6 +331,7 @@
     </Reference>
     <Reference Include="System.Web.Optimization, Version=1.1.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35">
       <HintPath>..\packages\Microsoft.AspNet.Web.Optimization.1.1.3\lib\net40\System.Web.Optimization.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System.Xml.ReaderWriter, Version=4.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Xml.ReaderWriter.4.3.0\lib\net46\System.Xml.ReaderWriter.dll</HintPath>
@@ -351,14 +359,83 @@
       <HintPath>..\packages\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.2.0.1\lib\net45\Microsoft.CodeDom.Providers.DotNetCompilerPlatform.dll</HintPath>
     </Reference>
   </ItemGroup>
+  <!--
+    อ่านอีเมลจอง OTA / แชทอีเมล / ยืนยัน e-Tax  →  MailKit + MimeKit (ต้อง 2.15.0 เท่านั้น
+    ห้าม 4.x เพราะชน BouncyCastle 1.8.9 ที่ใช้เซ็น e-Tax) และ HtmlAgilityPack สำหรับ parse HTML
+    ส่งรูปตารางจองเข้า LINE  →  HtmlRenderer.WinForms (+ HtmlRenderer.Core)
+    ใช้ Include แบบชื่อล้วน + HintPath หลายทาง (Condition) เพื่อให้ตรงกับ lib folder ของแต่ละแพ็กเกจ
+    ถ้า restore แล้วยังไม่เจอ ให้รัน: Update-Package -reinstall <ชื่อแพ็กเกจ> ใน Package Manager Console
+  -->
+  <!--
+    เลือก lib folder ให้ตรงกับ TargetFramework (net472) เอง
+    ⚠️ ห้ามชี้ไป net48 — MSBuild จะปฏิเสธด้วย "built against .NETFramework v4.8 ...
+    higher than the currently targeted framework v4.7.2" แล้ว reference หลุดทั้งตัว
+    ไล่จากสูงสุดที่ใช้ได้ (net47) ลงไป กันกรณีแพ็กเกจรุ่นอื่นไม่มีโฟลเดอร์นั้น
+  -->
+  <PropertyGroup>
+    <_PkgRoot>$(MSBuildThisFileDirectory)..\packages\</_PkgRoot>
+    <_MimeKitLib>$(_PkgRoot)MimeKit.2.15.0\lib\net47\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\net46\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\net45\</_MimeKitLib>
+    <_MimeKitLib Condition="!Exists('$(_MimeKitLib)MimeKit.dll')">$(_PkgRoot)MimeKit.2.15.0\lib\netstandard2.0\</_MimeKitLib>
+    <_MailKitLib>$(_PkgRoot)MailKit.2.15.0\lib\net47\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\net46\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\net45\</_MailKitLib>
+    <_MailKitLib Condition="!Exists('$(_MailKitLib)MailKit.dll')">$(_PkgRoot)MailKit.2.15.0\lib\netstandard2.0\</_MailKitLib>
+    <_HapLib>$(_PkgRoot)HtmlAgilityPack.1.11.72\lib\Net45\</_HapLib>
+    <_HapLib Condition="!Exists('$(_HapLib)HtmlAgilityPack.dll')">$(_PkgRoot)HtmlAgilityPack.1.11.72\lib\net45\</_HapLib>
+    <_HrCoreLib>$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net45\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net40\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net35\</_HrCoreLib>
+    <_HrCoreLib Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And !Exists('$(_HrCoreLib)HtmlRenderer.dll')">$(_PkgRoot)HtmlRenderer.Core.1.5.0.6\lib\net20\</_HrCoreLib>
+    <_HrWinLib>$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net45\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net40\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net35\</_HrWinLib>
+    <_HrWinLib Condition="!Exists('$(_HrWinLib)HtmlRenderer.WinForms.dll')">$(_PkgRoot)HtmlRenderer.WinForms.1.5.0.6\lib\net20\</_HrWinLib>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="MimeKit">
+      <HintPath>$(_MimeKitLib)MimeKit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="MailKit">
+      <HintPath>$(_MailKitLib)MailKit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlAgilityPack">
+      <HintPath>$(_HapLib)HtmlAgilityPack.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <!-- แพ็กเกจ HtmlRenderer.Core ตั้งชื่อไฟล์ต่างกันตามรุ่น (HtmlRenderer.Core.dll หรือ
+         HtmlRenderer.dll) — ชื่อใน Include ต้องตรงกับชื่อ assembly จริง ไม่งั้น resolve ไม่ผ่าน
+         จึงประกาศสองแบบแล้วเลือกด้วย Condition ตามไฟล์ที่มีอยู่จริง -->
+    <Reference Include="HtmlRenderer.Core" Condition="Exists('$(_HrCoreLib)HtmlRenderer.Core.dll')">
+      <HintPath>$(_HrCoreLib)HtmlRenderer.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlRenderer" Condition="!Exists('$(_HrCoreLib)HtmlRenderer.Core.dll') And Exists('$(_HrCoreLib)HtmlRenderer.dll')">
+      <HintPath>$(_HrCoreLib)HtmlRenderer.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HtmlRenderer.WinForms">
+      <HintPath>$(_HrWinLib)HtmlRenderer.WinForms.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
   <ItemGroup>
     <Content Include="API\FileHandler.ashx" />
     <Content Include="API\TaxInvoiceAPI.ashx" />
+    <Content Include="API\ViewReceiptDoc.ashx" />
     <Content Include="API\VendorAPI.ashx" />
+    <Content Include="API\PublicChat.ashx" />
     <Content Include="API\OmniChannelWebhook.ashx" />
+    <Content Include="API\PaymentWebhook.ashx" />
+    <Content Include="API\PaymentStatus.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
     <Content Include="Account\CheckDocument_New.aspx" />
+    <Content Include="Account\SendEtax.aspx" />
     <Content Include="Account\CheckPayment_New.aspx" />
     <Content Include="Account\Receipt.aspx" />
     <Content Include="Account\PaymentVoucher.aspx" />
@@ -420,10 +497,32 @@
     <Content Include="Guest\Emergency.aspx" />
     <Content Include="Guest\AboutUs.aspx" />
     <Content Include="Guest\NearbyPlaces.aspx" />
+    <Content Include="Guest\Amenities.aspx" />
+    <Content Include="Admin\ManageAmenities.aspx" />
+    <Content Include="Admin\Settings\PaymentGateway.aspx" />
+    <Content Include="Admin\Settings\SecurityDeposit.aspx" />
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
     <Content Include="Guest\Activities.aspx" />
+    <Content Include="Guest\ActivityBooking.aspx" />
+    <Content Include="Activities.aspx" />
+    <Content Include="DailyBoard.aspx" />
+    <Content Include="Admin\Settings\ActivityManagement.aspx" />
+    <Content Include="Admin\Settings\LineAccount.aspx" />
+    <Content Include="Admin\Settings\Index.aspx" />
+    <Content Include="Admin\Settings\PermissionGroups.aspx" />
+    <Content Include="Admin\Settings\ProductAccounting.aspx" />
+    <Content Include="Admin\CRM\MemberVouchers.aspx" />
+    <Content Include="Admin\CRM\MemberHub.aspx" />
+    <Content Include="Member\Login.aspx" />
+    <Content Include="Member\Card.aspx" />
+    <Content Include="Admin\Settings\SystemSettings.aspx" />
+    <Content Include="Admin\LineLinkCallback.aspx" />
+    <Content Include="Mobile\Leave.aspx" />
+    <Content Include="Mobile\LeaveApprove.aspx" />
+    <Content Include="Mobile\LineLink.aspx" />
+    <Content Include="Mobile\AddFriend.aspx" />
     <Content Include="Guest\MyPoints.aspx" />
     <Content Include="Affiliate\Default.aspx" />
     <Content Include="Affiliate\Login.aspx" />
@@ -439,10 +538,12 @@
     <Content Include="Content\Site.css" />
     <Content Include="CountReserved.aspx" />
     <Content Include="Default.aspx" />
-    <Content Include="Default_Backup.aspx" />
     <Content Include="DisplayReserve.aspx" />
     <Content Include="DisplayToday.aspx" />
     <Content Include="favicon.ico" />
+    <Content Include="robots.txt" />
+    <Content Include="sitemap.xml" />
+    <Content Include="llms.txt" />
     <Content Include="fonts\glyphicons-halflings-regular.svg" />
     <Content Include="Gallery.aspx" />
     <Content Include="fonts\glyphicons-halflings-regular.woff2" />
@@ -495,6 +596,11 @@
     <Content Include="Resource\sRGB Color Space Profile.icm" />
     <Content Include="Checkout.aspx" />
     <Content Include="Payment\MakePayment.aspx" />
+    <Content Include="Payment\Pay.aspx" />
+    <Content Include="Payment\Card.aspx" />
+    <Content Include="Payment\Charge.aspx" />
+    <Content Include="Payment\GatewayTest.aspx" />
+    <Content Include="Payment\PayResult.aspx" />
     <Content Include="Payment\PaymentHistory.aspx" />
     <Content Include="PostponeList.aspx" />
     <Content Include="ReservationList.aspx" />
@@ -502,6 +608,8 @@
     <Content Include="Reservation_Confirmed.aspx" />
     <Content Include="ReserveTable.aspx" />
     <Content Include="Scripts\AutoComplete.js" />
+    <Content Include="Scripts\responsive-table.js" />
+    <Content Include="Content\responsive-table.css" />
     <Content Include="Scripts\bootstrap.bundle.js" />
     <Content Include="Scripts\bootstrap.bundle.min.js" />
     <Content Include="Scripts\bootstrap.esm.js" />
@@ -572,6 +680,7 @@
     </Content>
     <Content Include="ViewSwitcher.ascx" />
     <Content Include="Voucher\Default.aspx" />
+    <Content Include="Voucher\OcrUpload.aspx" />
     <Content Include="Voucher\MatchTaxInvoice.aspx" />
     <Content Include="Voucher\VoucherList.aspx" />
     <Content Include="Voucher\Voucher_Confirmed.aspx" />
@@ -583,14 +692,27 @@
     <Compile Include="API\FileHandler.ashx.cs">
       <DependentUpon>FileHandler.ashx</DependentUpon>
     </Compile>
+    <Compile Include="API\ViewReceiptDoc.ashx.cs">
+      <DependentUpon>ViewReceiptDoc.ashx</DependentUpon>
+    </Compile>
     <Compile Include="API\TaxInvoiceAPI.ashx.cs">
       <DependentUpon>TaxInvoiceAPI.ashx</DependentUpon>
     </Compile>
     <Compile Include="API\VendorAPI.ashx.cs">
       <DependentUpon>VendorAPI.ashx</DependentUpon>
     </Compile>
+    <Compile Include="API\PublicChat.ashx.cs">
+      <DependentUpon>PublicChat.ashx</DependentUpon>
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="API\OmniChannelWebhook.ashx.cs">
       <DependentUpon>OmniChannelWebhook.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\PaymentWebhook.ashx.cs">
+      <DependentUpon>PaymentWebhook.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\PaymentStatus.ashx.cs">
+      <DependentUpon>PaymentStatus.ashx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckDocument.aspx.cs">
       <DependentUpon>CheckDocument.aspx</DependentUpon>
@@ -605,6 +727,13 @@
     </Compile>
     <Compile Include="Account\CheckDocument_New.aspx.designer.cs">
       <DependentUpon>CheckDocument_New.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\SendEtax.aspx.cs">
+      <DependentUpon>SendEtax.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\SendEtax.aspx.designer.cs">
+      <DependentUpon>SendEtax.aspx</DependentUpon>
     </Compile>
     <Compile Include="Account\CheckPayment_New.aspx.cs">
       <DependentUpon>CheckPayment_New.aspx</DependentUpon>
@@ -795,6 +924,7 @@
     <Compile Include="Class\AccountingArithmeticValidator.cs" />
     <Compile Include="Class\AccountingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.cs" />
+    <Compile Include="Class\Integration\RevenuePostingService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />
     <Compile Include="Class\Integration\AccountingConfig.cs" />
     <Compile Include="Class\Integration\AccountingModels.cs" />
@@ -829,6 +959,19 @@
     <Compile Include="Class\RoomChargeService.cs" />
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
+    <Compile Include="Class\DefaultCompat.cs" />
+    <Compile Include="Class\Feature.cs" />
+    <Compile Include="Class\Perm.cs" />
+    <Compile Include="Class\UploadHelper.cs" />
+    <Compile Include="Class\Services\DbRunLease.cs" />
+    <Compile Include="Class\Services\EmailReservationService.cs" />
+    <Compile Include="Class\Services\OtaFieldReader.cs" />
+    <Compile Include="Class\Services\OtaParseLearner.cs" />
+    <Compile Include="Class\Services\EmailChatService.cs" />
+    <Compile Include="Class\Services\ChatBookingLinker.cs" />
+    <Compile Include="Class\Services\EtaxRdConfirmService.cs" />
+    <Compile Include="Class\Services\MemberPortalService.cs" />
+    <Compile Include="Class\Services\DailyReportLineService.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\OmniChannelService.cs" />
     <Compile Include="Class\Services\AIKnowledgeService.cs" />
@@ -1063,6 +1206,20 @@
     <Compile Include="Admin\Settings\AccountingIntegration.aspx.designer.cs">
       <DependentUpon>AccountingIntegration.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\PaymentGateway.aspx.cs">
+      <DependentUpon>PaymentGateway.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\PaymentGateway.aspx.designer.cs">
+      <DependentUpon>PaymentGateway.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\SecurityDeposit.aspx.cs">
+      <DependentUpon>SecurityDeposit.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SecurityDeposit.aspx.designer.cs">
+      <DependentUpon>SecurityDeposit.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\AISettings.aspx.cs">
       <DependentUpon>AISettings.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1147,6 +1304,13 @@
     <Compile Include="Guest\NearbyPlaces.aspx.designer.cs">
       <DependentUpon>NearbyPlaces.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Guest\Amenities.aspx.cs">
+      <DependentUpon>Amenities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\Amenities.aspx.designer.cs">
+      <DependentUpon>Amenities.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Guest\Facilities.aspx.cs">
       <DependentUpon>Facilities.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1175,6 +1339,149 @@
     <Compile Include="Guest\Activities.aspx.designer.cs">
       <DependentUpon>Activities.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Guest\ActivityBooking.aspx.cs">
+      <DependentUpon>ActivityBooking.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Guest\ActivityBooking.aspx.designer.cs">
+      <DependentUpon>ActivityBooking.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Activities.aspx.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Activities.aspx.designer.cs">
+      <DependentUpon>Activities.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="DailyBoard.aspx.cs">
+      <DependentUpon>DailyBoard.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="DailyBoard.aspx.designer.cs">
+      <DependentUpon>DailyBoard.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\ActivityManagement.aspx.cs">
+      <DependentUpon>ActivityManagement.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\ActivityManagement.aspx.designer.cs">
+      <DependentUpon>ActivityManagement.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\LineAccount.aspx.cs">
+      <DependentUpon>LineAccount.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\LineAccount.aspx.designer.cs">
+      <DependentUpon>LineAccount.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberHub.aspx.cs">
+      <DependentUpon>MemberHub.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberHub.aspx.designer.cs">
+      <DependentUpon>MemberHub.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberVouchers.aspx.cs">
+      <DependentUpon>MemberVouchers.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\MemberVouchers.aspx.designer.cs">
+      <DependentUpon>MemberVouchers.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Member\Login.aspx.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Member\Login.aspx.designer.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Member\Card.aspx.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Member\Card.aspx.designer.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\ProductAccounting.aspx.cs">
+      <DependentUpon>ProductAccounting.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\ProductAccounting.aspx.designer.cs">
+      <DependentUpon>ProductAccounting.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\PermissionGroups.aspx.cs">
+      <DependentUpon>PermissionGroups.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\PermissionGroups.aspx.designer.cs">
+      <DependentUpon>PermissionGroups.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\Index.aspx.cs">
+      <DependentUpon>Index.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\Index.aspx.designer.cs">
+      <DependentUpon>Index.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\SystemSettings.aspx.cs">
+      <DependentUpon>SystemSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SystemSettings.aspx.designer.cs">
+      <DependentUpon>SystemSettings.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\AppCfg.cs" />
+    <Compile Include="Admin\LineLinkCallback.aspx.cs">
+      <DependentUpon>LineLinkCallback.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\LineLinkCallback.aspx.designer.cs">
+      <DependentUpon>LineLinkCallback.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\Services\LineLoginService.cs" />
+    <Compile Include="Class\Services\LeaveLineNotifier.cs" />
+    <Compile Include="Class\Services\MobileAuth.cs" />
+    <Compile Include="Mobile\Leave.aspx.cs">
+      <DependentUpon>Leave.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\Leave.aspx.designer.cs">
+      <DependentUpon>Leave.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Mobile\LeaveApprove.aspx.cs">
+      <DependentUpon>LeaveApprove.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\LeaveApprove.aspx.designer.cs">
+      <DependentUpon>LeaveApprove.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Mobile\LineLink.aspx.cs">
+      <DependentUpon>LineLink.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\LineLink.aspx.designer.cs">
+      <DependentUpon>LineLink.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Mobile\AddFriend.aspx.cs">
+      <DependentUpon>AddFriend.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Mobile\AddFriend.aspx.designer.cs">
+      <DependentUpon>AddFriend.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Class\Services\ActivityService.cs" />
+    <Compile Include="Class\Services\NearbyPlaceService.cs" />
+    <Compile Include="Class\Services\AmenityService.cs" />
+    <Compile Include="Class\Notify.cs" />
+    <Compile Include="Class\Payments\PaymentModels.cs" />
+    <Compile Include="Class\Payments\PaymentGatewayConfig.cs" />
+    <Compile Include="Class\Payments\IPaymentGateway.cs" />
+    <Compile Include="Class\Payments\PaysoGateway.cs" />
+    <Compile Include="Class\Payments\PaymentTransactionStore.cs" />
+    <Compile Include="Class\Payments\OnlinePaymentService.cs" />
+    <Compile Include="Class\Payments\OmiseGateway.cs" />
+    <Compile Include="Class\Payments\BookingPayment.cs" />
+    <Compile Include="Class\Payments\SecurityHoldService.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1189,13 +1496,6 @@
     <Compile Include="Class\Services\MaintenanceRequestService.cs" />
     <Compile Include="Class\Services\NotificationService.cs" />
     <Compile Include="Class\Services\AdvancedAnalyticsService.cs" />
-    <Compile Include="Default_Backup.aspx.cs">
-      <DependentUpon>Default_Backup.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Compile>
-    <Compile Include="Default_Backup.aspx.designer.cs">
-      <DependentUpon>Default_Backup.aspx</DependentUpon>
-    </Compile>
     <Compile Include="Global.asax.cs">
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>
@@ -1320,6 +1620,41 @@
     <Compile Include="Payment\MakePayment.aspx.designer.cs">
       <DependentUpon>MakePayment.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Payment\Pay.aspx.cs">
+      <DependentUpon>Pay.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Pay.aspx.designer.cs">
+      <DependentUpon>Pay.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\Card.aspx.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Card.aspx.designer.cs">
+      <DependentUpon>Card.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\Charge.aspx.cs">
+      <DependentUpon>Charge.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\Charge.aspx.designer.cs">
+      <DependentUpon>Charge.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\GatewayTest.aspx.cs">
+      <DependentUpon>GatewayTest.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\GatewayTest.aspx.designer.cs">
+      <DependentUpon>GatewayTest.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Payment\PayResult.aspx.cs">
+      <DependentUpon>PayResult.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Payment\PayResult.aspx.designer.cs">
+      <DependentUpon>PayResult.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Payment\PaymentHistory.aspx.cs">
       <DependentUpon>PaymentHistory.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1370,6 +1705,13 @@
     </Compile>
     <Compile Include="Voucher\Default.aspx.designer.cs">
       <DependentUpon>Default.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Voucher\OcrUpload.aspx.cs">
+      <DependentUpon>OcrUpload.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Voucher\OcrUpload.aspx.designer.cs">
+      <DependentUpon>OcrUpload.aspx</DependentUpon>
     </Compile>
     <Compile Include="Voucher\MatchTaxInvoice.aspx.cs">
       <DependentUpon>MatchTaxInvoice.aspx</DependentUpon>

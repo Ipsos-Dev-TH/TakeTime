@@ -21,6 +21,7 @@ namespace Take_Time_BangPhra.Admin.Report
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.MgtReport)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!IsPostBack)
             {
                 InitializePage();

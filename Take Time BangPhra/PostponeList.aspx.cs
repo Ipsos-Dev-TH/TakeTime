@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -73,7 +73,20 @@ namespace Take_Time_BangPhra
                             (SELECT COUNT(*) FROM Reservation_Reschedule_History RH
                              WHERE RH.Reservation_ID = R.ID) AS TotalReschedules,
                             (SELECT TOP 1 RH.Reason FROM Reservation_Reschedule_History RH
-                             WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate DESC) AS LastRescheduleReason
+                             WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate DESC) AS LastRescheduleReason,
+                            -- ข้อมูลการจองเดิมก่อนขอเลื่อน (จากประวัติการเลื่อนครั้งแรกสุด)
+                            -- ถ้ายังไม่มีประวัติ (ข้อมูลเก่าก่อนมีตารางนี้) จะเป็น NULL แล้วแสดงขีดแทน
+                            (SELECT TOP 1 RH.OldCheckinDate FROM Reservation_Reschedule_History RH
+                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate ASC) AS OrigCheckin,
+                            (SELECT TOP 1 RH.OldCheckoutDate FROM Reservation_Reschedule_History RH
+                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate ASC) AS OrigCheckout,
+                            (SELECT TOP 1 RH.OldStayDays FROM Reservation_Reschedule_History RH
+                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate ASC) AS OrigStayDays,
+                            -- วันที่ทำเรื่องขอเลื่อน (ครั้งล่าสุด) + ใครเป็นคนทำ
+                            (SELECT TOP 1 RH.RescheduledDate FROM Reservation_Reschedule_History RH
+                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate DESC) AS LastRescheduledDate,
+                            (SELECT TOP 1 RH.RescheduledBy_Name FROM Reservation_Reschedule_History RH
+                              WHERE RH.Reservation_ID = R.ID ORDER BY RH.RescheduledDate DESC) AS LastRescheduledBy
                         FROM [dbo].[Reservation] R
                         INNER JOIN [dbo].[Customer] C ON C.MobilePhone = R.Customer_MobilePhone
                         WHERE R.Status = N'มัดจำแล้ว'

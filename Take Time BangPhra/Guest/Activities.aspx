@@ -1,4 +1,4 @@
-<%@ Page Title="Activities" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Activities.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Activities" %>
+﻿<%@ Page Title="Activities" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Activities.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Activities" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -44,6 +44,36 @@
         }
 
         /* Tab Navigation */
+        .nearby-entry {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
+            color: #fff;
+            padding: 16px 18px;
+            border-radius: 16px;
+            margin-bottom: 18px;
+            text-decoration: none;
+            box-shadow: 0 4px 14px rgba(0,176,155,.28);
+            transition: transform .2s ease, box-shadow .2s ease;
+        }
+        .nearby-entry:hover {
+            color: #fff;
+            text-decoration: none;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,176,155,.35);
+        }
+        .nearby-entry-icon {
+            width: 46px; height: 46px; flex: 0 0 46px;
+            border-radius: 50%;
+            background: rgba(255,255,255,.22);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+        }
+        .nearby-entry-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+        .nearby-entry-text strong { font-size: 16px; font-weight: 700; }
+        .nearby-entry-text span { font-size: 12px; opacity: .92; }
+
         .activity-tabs {
             display: flex;
             gap: 0;
@@ -348,6 +378,16 @@
                 <i class="fas fa-arrow-left"></i> กลับ
             </a>
         </div>
+
+        <!-- ทางเข้าสถานที่แนะนำใกล้เคียง (แผนที่ + หมุด + นำทาง) -->
+        <a href="NearbyPlaces.aspx" class="nearby-entry">
+            <div class="nearby-entry-icon"><i class="fas fa-map-marked-alt"></i></div>
+            <div class="nearby-entry-text">
+                <strong>สถานที่แนะนำใกล้เคียง</strong>
+                <span>ดูแผนที่รอบที่พัก · แตะหมุดเพื่อนำทางด้วย Google Maps</span>
+            </div>
+            <i class="fas fa-chevron-right"></i>
+        </a>
 
         <!-- Tab Navigation -->
         <div class="activity-tabs">
