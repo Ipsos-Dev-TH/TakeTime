@@ -643,6 +643,20 @@
                     <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่ไม่ใช่ใบจอง</label>
                     <input type="text" id="cfgEmailRsvIgnoredLabel" placeholder="STAAH-Other" style="width:100%; padding:8px;" />
                 </div>
+                <div style="min-width:280px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">
+                        ถ้าอีเมลไม่บอกว่าใครเก็บเงิน ให้ถือว่า
+                    </label>
+                    <select id="cfgEmailRsvDefaultCollect" style="width:100%; padding:8px;">
+                        <option value="CHANNEL">OTA เก็บเงินแล้ว — ลงมัดจำเต็มจำนวน</option>
+                        <option value="HOTEL">เก็บเงินหน้างาน — ลงมัดจำ 0</option>
+                    </select>
+                    <div style="font-size:12px; color:#666; margin-top:5px; line-height:1.6;">
+                        ใช้เฉพาะกรณีที่อ่านจากอีเมลไม่ได้ — คำที่ระบบรู้จักอยู่แล้ว เช่น
+                        Hotel Collect / Pay at Hotel / Expedia Collect / Prepaid / VCC
+                        จะถูกแยกให้อัตโนมัติและแจ้งเตือนว่าเดาให้เสมอ
+                    </div>
+                </div>
                 <div style="min-width:130px;">
                     <label style="display:block; font-weight:600; margin-bottom:6px;">กรองผู้ส่ง (มีคำ)</label>
                     <input type="text" id="cfgEmailRsvFromContains" placeholder="staah" style="width:100%; padding:8px;" />
@@ -1417,6 +1431,7 @@
                 setVal('cfgEmailRsvUsername', cfg.emailRsvUsername || '');
                 setVal('cfgEmailRsvProcessedLabel', cfg.emailRsvProcessedLabel || 'STAAH-Processed');
                 setVal('cfgEmailRsvFailedLabel', cfg.emailRsvFailedLabel || 'STAAH-Failed');
+                setVal('cfgEmailRsvDefaultCollect', cfg.emailRsvDefaultCollect || 'CHANNEL');
                 setVal('cfgEmailRsvIgnoredLabel', cfg.emailRsvIgnoredLabel || 'STAAH-Other');
                 setVal('cfgEmailRsvFromContains', cfg.emailRsvFromContains || 'staah');
                 setVal('cfgEmailRsvMaxStayDays', cfg.emailRsvMaxStayDays || 30);
@@ -1571,6 +1586,7 @@
                 emailRsvPassword: document.getElementById('cfgEmailRsvPassword').value,
                 emailRsvProcessedLabel: document.getElementById('cfgEmailRsvProcessedLabel').value,
                 emailRsvFailedLabel: document.getElementById('cfgEmailRsvFailedLabel').value,
+                emailRsvDefaultCollect: document.getElementById('cfgEmailRsvDefaultCollect').value,
                 emailRsvIgnoredLabel: document.getElementById('cfgEmailRsvIgnoredLabel').value,
                 emailRsvFromContains: document.getElementById('cfgEmailRsvFromContains').value,
                 emailRsvMaxStayDays: document.getElementById('cfgEmailRsvMaxStayDays').value,

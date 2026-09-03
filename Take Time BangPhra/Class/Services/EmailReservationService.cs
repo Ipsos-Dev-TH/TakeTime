@@ -1053,7 +1053,13 @@ namespace Take_Time_BangPhra.Services
             string channel = Rx(text, @"Channel Name:\s*(.+?)\s*(?:\n|Bookings Status)");
             string status = Rx(text, @"Bookings Status:\s*(.+?)\s*(?:\n|Booking Id)");
             string bookingId = Rx(text, @"Booking Id#?:\s*(.+?)\s*(?:\n|$)");
-            string paymentType = Rx(text, @"Payment Type:\s*(.+?)\s*(?:\n|$)");
+            // ⚠️ InnerText ของอีเมลพวกนี้แทบไม่มีขึ้นบรรทัดใหม่ ⇒ "(.+?)\s*(?:\n|$)" จะกวาดยาว
+            // ไปจนจบข้อความ แล้วลากคำว่า "Channel Name:" ที่อยู่ท้าย ๆ ติดมาด้วย
+            // ⇒ การจอง Hotel Collect ถูกตัดสินเป็น Channel Collect (เพราะเจอคำว่า Channel)
+            //   แล้วบันทึกมัดจำเต็มจำนวน ทั้งที่ยังไม่ได้รับเงิน — หน้างานเลยไม่เก็บเงิน
+            // ⇒ จำกัดความยาว + หยุดที่ชื่อฟิลด์ถัดไป
+            string paymentType = Rx(text,
+                @"Payment\s*Type:\s*(.{1,60}?)\s*(?:\n|$|Channel\s*Name|Bookings?\s*Status|Booking\s*Id|Guest|Contact|Total|Room|Check)");
             // gross ที่ลูกค้าจ่าย OTA (STAAH ใส่ใน refsell_amt) + Total (All Inclusive) fallback
             double gross = ParseMoney(Rx(text, @"refsell_amt\s*:?\s*([\d,\.]+)"));
             if (gross <= 0) gross = ParseMoney(Rx(text, @"Total\s*\(All Inclusive\)\s*:?\s*THB\s*([\d,\.]+)"));
@@ -1239,8 +1245,9 @@ namespace Take_Time_BangPhra.Services
                         double bookedTotal = BookedTotal(head, rooms, stayDays);
                         double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
                         double refSell = head.GrossTotal;
-                        bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
-                                              || string.IsNullOrEmpty(head.PaymentType); // STAAH default = channel collect
+                        bool collectGuessed;
+                        string collectMode = ResolveCollect(head.PaymentType, out collectGuessed);
+                        bool channelCollect = collectMode == CollectChannel;
 
                         int resId;
                         using (var cmd = new SqlCommand(ReservationInsertSql(), con, tx))
@@ -1973,8 +1980,8 @@ namespace Take_Time_BangPhra.Services
                         double bookedTotal = BookedTotal(head, rooms, stayDays);
                         double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
                         double refSell = head.GrossTotal;
-                        bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
-                                              || string.IsNullOrEmpty(head.PaymentType);
+                        bool collectGuessed2;
+                        bool channelCollect = ResolveCollect(head.PaymentType, out collectGuessed2) == CollectChannel;
 
                         // เบอร์ผู้จองเปลี่ยนในอีเมลแก้ไข → ย้ายการจองไปผูกลูกค้าเบอร์ใหม่
                         // (เฉพาะเบอร์จริง — ไม่ใช่ค่า fallback OTA_xxx และไม่ใช่ค่าว่าง)
@@ -2269,9 +2276,12 @@ namespace Take_Time_BangPhra.Services
                 if (refSell > 0 && sumRows > 0 && Math.Abs(refSell - sumRows) > 1)
                     sb.AppendLine($"   └ <i>ลูกค้าจ่าย OTA (refsell_amt): {refSell:N0} · ต่าง {Math.Abs(refSell - sumRows):N0} "
                                 + $"— ภาษี/ส่วนลด/ค่าคอมของ OTA ไม่ลงเป็นรายได้เรา</i>");
-                bool channelCollect = (h.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || string.IsNullOrEmpty(h.PaymentType);
-                sb.AppendLine($"💳 <b>การชำระ:</b> {(channelCollect ? "OTA เก็บเงินแล้ว (Channel Collect)" : "เก็บเงินหน้างาน (Hotel Collect)")}");
+                bool nGuessed;
+                string nCollect = ResolveCollect(h.PaymentType, out nGuessed);
+                double nDue = sumRows > 0 ? sumRows : refSell;
+                sb.AppendLine($"💳 <b>การชำระ:</b> {CollectText(nCollect, nGuessed, nDue)}");
+                if (nCollect == CollectHotel)
+                    sb.AppendLine("🔴 <b>ยังไม่ได้รับเงิน</b> — ลงมัดจำ 0 ไว้ ต้องเก็บเงินตอนลูกค้าเช็คอิน");
             }
 
             if (!string.IsNullOrEmpty(o.Changes))
@@ -2412,11 +2422,13 @@ namespace Take_Time_BangPhra.Services
                     optional.Add("ผู้เข้าพัก: ผู้ใหญ่ " + adults + " คน" + (kids > 0 ? ", เด็ก " + kids + " คน" : ""));
             }
 
-            bool channelCollect = (head.PaymentType ?? "").IndexOf("Channel", StringComparison.OrdinalIgnoreCase) >= 0
-                                  || string.IsNullOrEmpty(head.PaymentType);
-            optional.Add("การชำระ: " + (channelCollect
-                ? "OTA เก็บเงินแล้ว (Channel Collect)"
-                : "เก็บเงินหน้างาน (Hotel Collect)"));
+            // บรรทัดนี้สำคัญกับหน้างาน — ใส่ไว้ต้น ๆ ของรายการเสริม จะได้ไม่โดนตัดทิ้งเมื่อหมายเหตุยาว
+            bool rGuessed;
+            string rCollect = ResolveCollect(head.PaymentType, out rGuessed);
+            optional.Insert(0, "การชำระ: " + (rCollect == CollectHotel
+                ? "*** เก็บเงินหน้างาน (Hotel Collect) — ยังไม่ได้รับเงิน ***"
+                : "OTA เก็บเงินแล้ว (Channel Collect)")
+                + (rGuessed ? " [ระบบเดาให้]" : ""));
 
             if (modified) optional.Add($"(แก้ไขจากอีเมล {DateTime.Now:dd/MM/yyyy HH:mm})");
 
@@ -2578,6 +2590,86 @@ namespace Take_Time_BangPhra.Services
         {
             if (_inRetry && !always) return;
             global::Notify.Send(eventCode ?? global::Notify.Ev.OtaBookingFail, text);
+        }
+
+        // ── ใครเป็นคนเก็บเงิน: OTA หรือที่พัก ────────────────────────────────────
+        //
+        // เรื่องนี้ตัดสิน "ยอดมัดจำ" ที่ลงระบบ ⇒ ผิดแล้วเสียเงินจริง:
+        //   Channel Collect (OTA เก็บแล้ว) → มัดจำ = ยอดเต็ม  หน้างานไม่ต้องเก็บ
+        //   Hotel Collect  (เราเก็บเอง)   → มัดจำ = 0        หน้างาน "ต้องเก็บ"
+        // ถ้าลง Hotel Collect เป็นมัดจำเต็ม = เช็คเอาท์ไปโดยไม่เก็บเงิน เงินหายเงียบ ๆ
+        //
+        // ⚠️ เดิมตัดสินด้วย IndexOf("Channel") อย่างเดียว ซึ่งพลาดกับคำที่ OTA ใช้จริง:
+        //   · Expedia เรียกฝั่ง OTA เก็บว่า "Expedia Collect" — ไม่มีคำว่า Channel
+        //     ⇒ ถูกมองเป็น Hotel Collect ⇒ ไปทวงเงินลูกค้าที่จ่าย Expedia มาแล้ว
+        //   · บัตรเสมือน (VCC / Virtual Card) ก็คือ OTA จ่ายให้ ไม่ใช่ลูกค้าจ่ายหน้างาน
+        public const string CollectChannel = "CHANNEL";
+        public const string CollectHotel = "HOTEL";
+        public const string CollectUnknown = "UNKNOWN";
+
+        /// <summary>คำที่แปลว่า "OTA เก็บเงินไปแล้ว" (เจอคำใดคำหนึ่ง = Channel Collect)</summary>
+        private static readonly string[] ChannelCollectWords =
+        {
+            "channel collect", "expedia collect", "agoda collect", "booking.com collect",
+            "ota collect", "prepaid", "pre-paid", "pre paid", "paid online", "paid to ota",
+            "virtual card", "virtual credit", "vcc", "已付", "bank transfer to ota"
+        };
+
+        /// <summary>คำที่แปลว่า "ที่พักเก็บเงินเองหน้างาน"</summary>
+        private static readonly string[] HotelCollectWords =
+        {
+            "hotel collect", "property collect", "collect at property", "collect from guest",
+            "pay at hotel", "pay at property", "pay at the hotel", "payment at hotel",
+            "pay on arrival", "payment on arrival", "pay at check-in", "pay at checkin",
+            "pah", "cash at hotel", "direct payment"
+        };
+
+        /// <summary>
+        /// ตัดสินว่าใครเก็บเงิน — คืน CollectChannel / CollectHotel / CollectUnknown
+        ///
+        /// ไม่เดาเมื่อไม่มีข้อมูล: คืน UNKNOWN แล้วให้ผู้เรียกไปใช้ค่าตั้งต้นที่ผู้ดูแลตั้งไว้
+        /// พร้อม "แจ้งเตือนเสมอ" — การเดาเงียบ ๆ คือสิ่งที่ทำให้เงินหายมาก่อน
+        /// </summary>
+        public static string ClassifyCollect(string paymentTypeRaw)
+        {
+            string p = (paymentTypeRaw ?? "").Trim().ToLowerInvariant();
+            if (p.Length == 0) return CollectUnknown;
+
+            // ตรวจ Hotel ก่อน — "Hotel Collect" ไม่ควรถูกคำกว้าง ๆ ฝั่ง Channel แย่งไปก่อน
+            foreach (string w in HotelCollectWords)
+                if (p.IndexOf(w, StringComparison.Ordinal) >= 0) return CollectHotel;
+
+            foreach (string w in ChannelCollectWords)
+                if (p.IndexOf(w, StringComparison.Ordinal) >= 0) return CollectChannel;
+
+            // คำว่า "channel" ลอย ๆ (พฤติกรรมเดิม) — เก็บไว้เป็นตัวสุดท้าย
+            if (p.IndexOf("channel", StringComparison.Ordinal) >= 0) return CollectChannel;
+
+            return CollectUnknown;
+        }
+
+        /// <summary>
+        /// ผลสรุปที่ใช้จริง — UNKNOWN จะถูกแทนด้วยค่าตั้งต้นจากผู้ดูแล
+        /// (Email_Rsv_DefaultCollect = CHANNEL | HOTEL, ค่าเริ่มต้น CHANNEL = พฤติกรรมเดิม)
+        /// </summary>
+        private string ResolveCollect(string paymentTypeRaw, out bool wasGuessed)
+        {
+            string c = ClassifyCollect(paymentTypeRaw);
+            wasGuessed = c == CollectUnknown;
+            if (!wasGuessed) return c;
+
+            string def = (Cfg("Email_Rsv_DefaultCollect", CollectChannel) ?? "").Trim().ToUpperInvariant();
+            return def == CollectHotel ? CollectHotel : CollectChannel;
+        }
+
+        /// <summary>ข้อความอธิบายวิธีเก็บเงินสำหรับแจ้งเตือน/หมายเหตุ</summary>
+        private static string CollectText(string collect, bool guessed, double amount)
+        {
+            if (collect == CollectHotel)
+                return "⚠ เก็บเงินหน้างาน (Hotel Collect) — ต้องเก็บ ฿" + amount.ToString("N2") + " จากลูกค้า"
+                     + (guessed ? " [ระบบเดาให้ ตรวจกับอีเมลต้นทางด้วย]" : "");
+            return "OTA เก็บเงินแล้ว (Channel Collect)"
+                 + (guessed ? " [ระบบเดาให้ ตรวจกับอีเมลต้นทางด้วย]" : "");
         }
 
         private static string Rx(string s, string pattern)

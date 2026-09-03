@@ -378,6 +378,20 @@ namespace Take_Time_BangPhra.Integration
         public string EmailRsvFailedLabel => GetConfig("Email_Rsv_FailedLabel", "STAAH-Failed");
         /// <summary>folder เก็บอีเมล STAAH ที่ไม่เกี่ยวกับการจอง (จดหมายข่าว/รายงาน) — แยกจาก Failed</summary>
         public string EmailRsvIgnoredLabel => GetConfig("Email_Rsv_IgnoredLabel", "STAAH-Other");
+
+        /// <summary>
+        /// อีเมลไม่บอกชัดว่าใครเก็บเงิน จะให้ถือว่าอะไร — CHANNEL (OTA เก็บแล้ว) หรือ HOTEL (เก็บหน้างาน)
+        /// ค่าเริ่มต้น CHANNEL = พฤติกรรมเดิม · ตั้งเป็น HOTEL ถ้ารับจองช่องทางที่เก็บเงินหน้างานเป็นหลัก
+        /// (พลาดฝั่ง HOTEL แค่ไปถามลูกค้าแล้วรู้ว่าจ่ายมาแล้ว · พลาดฝั่ง CHANNEL = ไม่ได้เก็บเงินเลย)
+        /// </summary>
+        public string EmailRsvDefaultCollect
+        {
+            get
+            {
+                string v = (GetConfig("Email_Rsv_DefaultCollect", "CHANNEL") ?? "").Trim().ToUpperInvariant();
+                return v == "HOTEL" ? "HOTEL" : "CHANNEL";
+            }
+        }
         public int EmailRsvMaxStayDays => int.TryParse(GetConfig("Email_Rsv_MaxStayDays", "30"), out var v) ? v : 30;
         public int EmailRsvMaxDaysFuture => int.TryParse(GetConfig("Email_Rsv_MaxDaysFuture", "365"), out var v) ? v : 365;
         public bool EmailRsvNotifyTelegram => GetConfig("Email_Rsv_NotifyTelegram", "1") == "1";
