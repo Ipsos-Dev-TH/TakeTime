@@ -1052,14 +1052,23 @@ namespace Take_Time_BangPhra.Services
 
             string channel = Rx(text, @"Channel Name:\s*(.+?)\s*(?:\n|Bookings Status)");
             string status = Rx(text, @"Bookings Status:\s*(.+?)\s*(?:\n|Booking Id)");
-            string bookingId = Rx(text, @"Booking Id#?:\s*(.+?)\s*(?:\n|$)");
+            string bookingId = Rx(text, @"Booking Id#?:\s*(.{1,40}?)\s*(?:\n|$|Channel|Payment|Guest|Room|Check|Total)");
+
+            // เทมเพลตของ STAAH ไม่เหมือนกันทุกช่องทาง — ฝั่ง Expedia ใช้คำว่า
+            // "BOOKING REFERENCE 1114600000001190 (2405991278)" แทน "Booking Id:"
+            // ⚠️ Booking ID คือกุญแจกันจองซ้ำ (ค้นด้วย Remark LIKE '%เลข%') ถ้าว่าง
+            //    อีเมลฉบับเดิมที่ถูกลองใหม่จะกลายเป็นการจองซ้ำอีกใบ ⇒ ต้องมีทางสำรอง
+            if (string.IsNullOrWhiteSpace(bookingId))
+                bookingId = Rx(text, @"BOOKING\s*REFERENCE\s*([0-9][0-9\-]{5,})");
+            if (string.IsNullOrWhiteSpace(bookingId))
+                bookingId = Rx(text, @"Reservation\s*No\s*:?\s*([0-9][0-9\-]{5,})");
             // ⚠️ InnerText ของอีเมลพวกนี้แทบไม่มีขึ้นบรรทัดใหม่ ⇒ "(.+?)\s*(?:\n|$)" จะกวาดยาว
             // ไปจนจบข้อความ แล้วลากคำว่า "Channel Name:" ที่อยู่ท้าย ๆ ติดมาด้วย
             // ⇒ การจอง Hotel Collect ถูกตัดสินเป็น Channel Collect (เพราะเจอคำว่า Channel)
             //   แล้วบันทึกมัดจำเต็มจำนวน ทั้งที่ยังไม่ได้รับเงิน — หน้างานเลยไม่เก็บเงิน
             // ⇒ จำกัดความยาว + หยุดที่ชื่อฟิลด์ถัดไป
             string paymentType = Rx(text,
-                @"Payment\s*Type:\s*(.{1,60}?)\s*(?:\n|$|Channel\s*Name|Bookings?\s*Status|Booking\s*Id|Guest|Contact|Total|Room|Check)");
+                @"Payment\s*Type:\s*(.{1,60}?)\s*(?:\n|$|Commission|Channel\s*Name|Bookings?\s*Status|Booking\s*Id|Guest|Contact|Total|Room|Check)");
             // gross ที่ลูกค้าจ่าย OTA (STAAH ใส่ใน refsell_amt) + Total (All Inclusive) fallback
             double gross = ParseMoney(Rx(text, @"refsell_amt\s*:?\s*([\d,\.]+)"));
             if (gross <= 0) gross = ParseMoney(Rx(text, @"Total\s*\(All Inclusive\)\s*:?\s*THB\s*([\d,\.]+)"));
@@ -1076,12 +1085,17 @@ namespace Take_Time_BangPhra.Services
             // จึงจำกัดความยาวและหยุดเมื่อเจอหัวข้อถัดไปที่รู้จัก
             const string Stop = @"(?:\n|$|Cancellation|Additional\s*Information|refsell_amt|Benifits|Benefits|"
                               + @"Booking\s*Id|Payment\s*Type|Channel\s*Name|Total\s*\(|Room\s*Type)";
+            // ⚠️ เดิมจำกัด 160 ตัวอักษร — ของจริงยาวกว่านั้น (เคสจริงจาก Expedia ~185 ตัว:
+            //    เตียง/ห้ามสูบบุหรี่/ขอห้องเงียบ/วิวดี/ที่จอดรถ/โปรโมชัน) พอเกินลิมิตแล้ว
+            //    หา Stop ไม่เจอในระยะ = ไม่ match เลย ⇒ คำขอพิเศษหายทั้งก้อนแบบเงียบ ๆ
+            //    ตัว Stop คุมขอบเขตอยู่แล้ว จึงขยายลิมิตได้ปลอดภัย
+            const int SpecialMax = 400;
             string special = FirstNonEmpty(
-                Rx(text, @"Special\s*Request(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
-                Rx(text, @"Guest\s*(?:Special\s*)?Request(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
-                Rx(text, @"Special\s*Instruction(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
-                Rx(text, @"Guest\s*(?:Comment|Note)(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop),
-                Rx(text, @"Booking\s*Remark(?:s)?\s*:\s*(.{0,160}?)\s*" + Stop));
+                Rx(text, @"Special\s*Request(?:s)?\s*:\s*(.{0," + SpecialMax + @"}?)\s*" + Stop),
+                Rx(text, @"Guest\s*(?:Special\s*)?Request(?:s)?\s*:\s*(.{0," + SpecialMax + @"}?)\s*" + Stop),
+                Rx(text, @"Special\s*Instruction(?:s)?\s*:\s*(.{0," + SpecialMax + @"}?)\s*" + Stop),
+                Rx(text, @"Guest\s*(?:Comment|Note)(?:s)?\s*:\s*(.{0," + SpecialMax + @"}?)\s*" + Stop),
+                Rx(text, @"Booking\s*Remark(?:s)?\s*:\s*(.{0," + SpecialMax + @"}?)\s*" + Stop));
             special = CleanNote(special);
 
             var roomRows = doc.DocumentNode.SelectNodes(
