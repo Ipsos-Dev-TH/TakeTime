@@ -637,6 +637,27 @@
 
             /* รูปในตารางไม่ล้นการ์ด */
             table.tt-cards > tbody > tr > td img { max-width: 100%; height: auto; }
+
+            /* ── ตารางที่ "คงรูปแบบตาราง" บนมือถือ (ตารางกวาดสายตา เช่น รายการห้องว่าง) ──
+               ผู้ใช้บอกเองว่าอยากเห็นแนวนอนเหมือนเดิม เพราะเทียบสถานะข้ามแถวได้เร็วกว่า
+               ค่อยซูม/เลื่อนดูรายละเอียดทีหลัง — ที่นี่จึงแค่ทำให้ "เลื่อนได้จริง + อ่านออก" */
+            table.tt-wide { font-size: 13px; }
+            table.tt-wide th, table.tt-wide td { padding: 7px 8px !important; }
+            table.tt-wide th { white-space: nowrap; }
+            /* ปุ่มในตารางแบบนี้มักเป็น เลือก/จอง — บีบให้พอดีจะได้ไม่ดันตารางกว้างเกิน */
+            table.tt-wide input[type=submit],
+            table.tt-wide input[type=button],
+            table.tt-wide button { padding: 5px 10px; font-size: 12.5px; white-space: nowrap; }
+
+            /* บอกให้รู้ว่าปัดซ้าย-ขวาได้ (เห็นครั้งเดียวพอ ไม่รบกวน) */
+            .tt-scroll-x.tt-hint { position: relative; }
+            .tt-scroll-x.tt-hint:before {
+                content: '↔ ปัดซ้าย-ขวาเพื่อดูคอลัมน์อื่น';
+                display: block;
+                font-size: 11.5px;
+                color: #8a97a3;
+                padding: 2px 0 6px;
+            }
         }
     </style>
 </head>
@@ -1928,8 +1949,15 @@
           ⇒ หมุนจอ/ย่อขยายหน้าต่างแล้วสลับได้ทันทีโดยไม่ต้องรัน JS ซ้ำ) --%>
     <script>
         (function () {
-            var MIN_COLS = 3;          // ตารางน้อยกว่านี้อ่านรู้เรื่องอยู่แล้ว ไม่ต้องแปลง
-            var SKIP = 'tt-keep-table'; // ใส่ class นี้ = ไม่แตะ
+            // ⚠ เดิม 3 — ทำให้ตาราง 4 คอลัมน์อย่าง "รายการห้องว่าง" หน้าแรกกลายเป็นการ์ด
+            //   ตารางแคบ ๆ ไม่ได้พังบนมือถืออยู่แล้ว แต่พอเป็นการ์ดกลับ "ยาวขึ้นหลายเท่า"
+            //   ผู้ใช้ต้องเลื่อนยาวมากกว่าจะเห็นห้องสุดท้าย และเทียบสถานะข้ามแถวไม่ได้
+            //   ⇒ แปลงเฉพาะตารางที่กว้างจริง ๆ (ตั้งแต่ 5 คอลัมน์ขึ้นไป)
+            var MIN_COLS = 5;
+            // ไม่แปลงเป็นการ์ด แต่ยังหุ้มให้เลื่อนแนวนอนได้ (ตารางที่ต้องกวาดสายตาเทียบข้ามแถว)
+            var SKIP = 'tt-keep-table';
+            // ไม่แตะเลยสักอย่าง (ตารางจัดหน้า / ตารางที่มีระบบ responsive ของตัวเองแล้ว)
+            var NOTOUCH = 'tt-no-touch';
 
             function headerTexts(table) {
                 // หาแถวหัวตาราง: thead ก่อน ถ้าไม่มีใช้แถวแรกที่เป็น th ล้วน (GridView ปกติ)
@@ -1952,14 +1980,26 @@
                 return out;
             }
 
+            /// ไม่แตะเลย
             function isLayoutTable(table) {
                 // ตารางที่ WebForms ใช้จัดหน้า (เช่นกรอบของ control) ไม่ใช่ตารางข้อมูล
                 if (table.getAttribute('role') === 'presentation') return true;
-                if (table.closest && table.closest('.' + SKIP)) return true;
-                if (table.classList.contains(SKIP)) return true;
+                if (table.classList.contains(NOTOUCH)) return true;
+                if (table.closest && table.closest('.' + NOTOUCH)) return true;
+                // หน้าที่มีระบบ responsive ของตัวเองแล้ว (ReserveTable ใช้ responsive-table.js)
+                // — ปล่อยให้ของเดิมทำงาน ไม่งั้นแปลงซ้อนกันสองชั้น
+                if (table.classList.contains('rt-table')) return true;
+                if (table.closest && table.closest('.rt-wrap')) return true;
                 // ตารางซ้อนในตาราง — แปลงตัวนอกพอ
                 if (table.parentElement && table.parentElement.closest &&
                     table.parentElement.closest('table')) return true;
+                return false;
+            }
+
+            /// คงเป็นตาราง (แต่ยังให้เลื่อนแนวนอนได้)
+            function keepAsTable(table) {
+                if (table.classList.contains(SKIP)) return true;
+                if (table.closest && table.closest('.' + SKIP)) return true;
                 return false;
             }
 
@@ -1968,7 +2008,11 @@
                 if (isLayoutTable(table)) { table.__ttDone = 1; return; }
 
                 var heads = headerTexts(table);
-                if (!heads || heads.length < MIN_COLS) { table.__ttDone = 1; return; }
+                if (!heads) { table.__ttDone = 1; return; }
+
+                // ตารางแคบ/ตารางที่สั่งให้คงรูปแบบเดิม → ไม่ทำเป็นการ์ด
+                // แต่ยังหุ้มกล่องเลื่อน + ใส่ min-width ให้ (ด้านล่าง) จะได้ไม่ถูกบีบจนอ่านไม่ออก
+                var cardsOk = heads.length >= MIN_COLS && !keepAsTable(table);
 
                 var bodies = table.tBodies.length ? table.tBodies : [table];
                 for (var b = 0; b < bodies.length; b++) {
@@ -1994,7 +2038,8 @@
                     }
                 }
 
-                table.classList.add('tt-cards');
+                if (cardsOk) table.classList.add('tt-cards');
+                else table.classList.add('tt-wide');   // คงตาราง — เลื่อนแนวนอนแทน
 
                 // ยังต้องเลื่อนแนวนอนได้บนจอกลาง ๆ (แท็บเล็ต) ที่ยังแสดงเป็นตารางอยู่
                 var p = table.parentElement;
@@ -2009,16 +2054,31 @@
                     box.className = 'tt-scroll-x';
                     table.parentElement.insertBefore(box, table);
                     box.appendChild(table);
+                    // ตารางที่คงรูปแบบเดิม: บอกให้รู้ว่าปัดดูคอลัมน์อื่นได้
+                    // (เช็คตอนโหลดเสร็จว่ากว้างเกินจอจริงไหม ค่อยโชว์)
+                    if (!cardsOk) {
+                        setTimeout(function () {
+                            try {
+                                if (box.scrollWidth > box.clientWidth + 4) box.classList.add('tt-hint');
+                            } catch (e) { }
+                        }, 60);
+                    }
                 }
 
                 // ⚠ overflow-x:auto เฉย ๆ "ไม่ทำให้เลื่อนได้" ถ้าตารางเป็น width:100%
                 //   เพราะตารางจะหดตามกล่องแทนที่จะล้นออกไป ⇒ ไม่มีอะไรให้เลื่อน
                 //   คอลัมน์ถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัวแทน (อาการที่เจอจริง)
                 //   ต้องคู่กับ min-width เสมอ — หน้าไหนตั้งมาเองแล้วไม่แตะ
-                if (heads.length >= 6 && !table.style.minWidth) {
+                // ตารางที่ยังเป็นตารางอยู่ (ไม่ใช่การ์ด) ต้องมี min-width เสมอ ไม่งั้นบนมือถือ
+                // คอลัมน์จะถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัว — และไม่มีอะไรให้เลื่อนด้วย
+                var needMin = !cardsOk || heads.length >= 6;
+                if (needMin && !table.style.minWidth) {
                     var declared = window.getComputedStyle(table).minWidth;
-                    if (!declared || declared === '0px' || declared === 'auto')
-                        table.style.minWidth = Math.min(heads.length * 110, 1400) + 'px';
+                    if (!declared || declared === '0px' || declared === 'auto') {
+                        // ตารางแคบใช้ตัวคูณเล็กกว่า จะได้ไม่ต้องเลื่อนถ้าไม่จำเป็น
+                        var per = heads.length <= 4 ? 95 : 110;
+                        table.style.minWidth = Math.min(heads.length * per, 1400) + 'px';
+                    }
                 }
 
                 table.__ttDone = 1;

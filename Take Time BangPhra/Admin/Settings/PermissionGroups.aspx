@@ -1,4 +1,4 @@
-<%@ Page Title="กลุ่มสิทธิ์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PermissionGroups.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.PermissionGroups" %>
+﻿<%@ Page Title="กลุ่มสิทธิ์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PermissionGroups.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.PermissionGroups" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -93,7 +93,7 @@
                     <asp:TextBox ID="txtGroupDesc" runat="server" />
                 </div>
 
-                <table class="pg-matrix">
+                <table class="pg-matrix tt-keep-table">
                     <tr>
                         <th>ส่วนงาน</th>
                         <th class="chk">👁 มองเห็น</th>

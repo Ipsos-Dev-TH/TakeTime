@@ -686,7 +686,7 @@
         <asp:Label ID="Label1" runat="server" Text=""></asp:Label>
     </strong>
 </div>
-                        <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" CssClass="mydatagrid ExampleFont gridview-container" 
+                        <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" CssClass="mydatagrid ExampleFont gridview-container tt-keep-table" 
                             PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows" 
                             OnRowCommand="GridView1_RowCommand" OnSelectedIndexChanged="GridView1_SelectedIndexChanged" Width="90%">
                             <Columns>
