@@ -70,7 +70,13 @@ namespace Take_Time_BangPhra.Services
                 cfg.ContainsKey(k) && !string.IsNullOrWhiteSpace(cfg[k]?.ToString()) ? cfg[k].ToString().Trim() : def;
 
             _enabled = IsEnabled(_conn);
-            _fromDomains = Get("fromDomains", "agoda-messaging.com, mchat.booking.com, guest.booking.com")
+            // โดเมนที่ OTA ใช้ส่งข้อความลูกค้า — จับแบบ "มีคำนี้อยู่ในที่อยู่ผู้ส่ง" (FromContains)
+            // จึงครอบคลุมซับโดเมนด้วย เช่น trip.com → messaging.trip.com / mail.trip.com
+            // ⚠ ค่านี้เป็น "ค่าเริ่มต้นตอนยังไม่เคยตั้ง" — ถ้าเคยบันทึกค่าไว้แล้วต้องไปเพิ่มเองใน
+            //   Admin → กล่องแชท → ตั้งค่าช่องทาง (ตัวตรวจสุขภาพด้านล่างจะบอกว่าขาดเจ้าไหน)
+            _fromDomains = Get("fromDomains",
+                    "agoda-messaging.com, mchat.booking.com, guest.booking.com, "
+                  + "trip.com, ctrip.com, expedia.com, airbnb.com")
                 .Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(d => d.Trim().ToLowerInvariant()).Where(d => d.Length > 3).Distinct().ToArray();
             _pollMinutes = int.TryParse(Get("pollMinutes", "3"), out var pm) && pm >= 1 ? pm : 3;
@@ -229,6 +235,13 @@ namespace Take_Time_BangPhra.Services
                             _code.Logs(_conn, "EmailChat", $"folder '{folder.FullName}' error: {fex.Message}", "SYSTEM");
                         }
                     }
+
+                    // ── มองหา OTA เจ้าใหม่ที่ยังไม่ได้ตั้งโดเมนไว้ ──
+                    // ตัวค้นด้านบนกรองด้วย fromDomains ⇒ ข้อความจากเจ้าที่ยังไม่ได้ตั้งค่า
+                    // จะ "ไม่ถูกดึงเลย" และไม่มีใครรู้ว่ามีลูกค้าทักมาแล้วไม่ได้ตอบ
+                    // ⇒ กวาดหัวจดหมายที่ยังไม่อ่านเป็นระยะ แล้วรายงานโดเมนที่น่าจะเป็น OTA
+                    try { DiscoverUnknownOtaSenders(folders, res); } catch { }
+
                     client.Disconnect(true);
                 }
             }
@@ -319,6 +332,97 @@ namespace Take_Time_BangPhra.Services
                 ? $"🎉 พร้อมใช้งาน — ระบบจะดึงอีเมลทุก {_pollMinutes} นาที เก็บเข้าโฟลเดอร์ '{_processedLabel}'"
                 : "⚠️ ยังไม่พร้อม — แก้ข้อที่เป็น ❌ ด้านบนก่อน");
             return sb.ToString();
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  หา OTA เจ้าใหม่ที่ยังไม่ได้ตั้งโดเมน
+        //
+        //  ระบบดึงเมลด้วยตัวกรอง fromDomains ⇒ เจ้าที่ยังไม่ได้ตั้งค่า "เงียบสนิท"
+        //  ลูกค้าทักมาแล้วไม่มีใครเห็น ไม่มี error ไม่มี log — แย่กว่าพังเสียอีก
+        //  ⇒ กวาดหัวจดหมาย (Envelope อย่างเดียว ไม่โหลดเนื้อ) หาผู้ส่งที่ "หน้าตาเหมือน
+        //    ข้อความลูกค้าผ่าน OTA" แล้วบอกให้ไปเพิ่มโดเมน
+        // ══════════════════════════════════════════════════════════════════════
+
+        private static DateTime _lastDiscover = DateTime.MinValue;
+
+        /// <summary>คำในหัวเรื่องที่บอกว่าน่าจะเป็นข้อความจากลูกค้าผ่าน OTA</summary>
+        private static readonly string[] GuestMsgHints =
+        {
+            "message", "ข้อความ", "question", "คำถาม", "inquiry", "สอบถาม",
+            "guest", "ผู้เข้าพัก", "booking", "reservation", "การจอง", "reply"
+        };
+
+        private void DiscoverUnknownOtaSenders(List<IMailFolder> folders, ChatPollResult res)
+        {
+            lock (_pollLock)
+            {
+                if ((DateTime.Now - _lastDiscover).TotalHours < 6) return;   // วันละไม่กี่ครั้งพอ
+                _lastDiscover = DateTime.Now;
+            }
+
+            string ourDomain = "";
+            try { ourDomain = (_imapUser ?? "").Split('@').Last().ToLowerInvariant(); } catch { }
+
+            var hits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);  // domain → ตัวอย่างหัวเรื่อง
+            foreach (var folder in folders)
+            {
+                try
+                {
+                    if (!folder.IsOpen) folder.Open(FolderAccess.ReadOnly);
+                    // เฉพาะที่ยังไม่อ่านและมาถึงไม่นาน — ไม่กวาดทั้งกล่อง
+                    var uids = folder.Search(SearchQuery.And(
+                        SearchQuery.NotSeen,
+                        SearchQuery.DeliveredAfter(DateTime.Now.AddDays(-7).Date)));
+                    if (uids.Count == 0) continue;
+                    if (uids.Count > 80) uids = uids.Skip(uids.Count - 80).ToList();  // เอาใหม่สุด
+
+                    // ดึงแค่ซองจดหมาย (ผู้ส่ง/หัวเรื่อง) ไม่โหลดเนื้อ — เบามาก
+                    foreach (var sum in folder.Fetch(uids, MessageSummaryItems.Envelope))
+                    {
+                        var env = sum.Envelope;
+                        if (env == null) continue;
+
+                        var box = (env.ReplyTo != null ? env.ReplyTo.Mailboxes.FirstOrDefault() : null)
+                                  ?? (env.From != null ? env.From.Mailboxes.FirstOrDefault() : null);
+                        string addr = (box == null ? "" : box.Address ?? "").ToLowerInvariant();
+                        if (addr.Length < 5 || !addr.Contains("@")) continue;
+
+                        string dom = addr.Split('@').Last();
+                        if (dom == ourDomain) continue;                                  // เมลของเราเอง
+                        if (_fromDomains.Any(d => addr.IndexOf(d, StringComparison.Ordinal) >= 0)) continue; // ตั้งไว้แล้ว
+
+                        string subj = (env.Subject ?? "").ToLowerInvariant();
+                        if (!GuestMsgHints.Any(h => subj.IndexOf(h, StringComparison.Ordinal) >= 0)) continue;
+
+                        if (!hits.ContainsKey(dom)) hits[dom] = env.Subject ?? "";
+                        if (hits.Count >= 6) break;
+                    }
+                }
+                catch { }
+                if (hits.Count >= 6) break;
+            }
+
+            if (hits.Count == 0) return;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("📬 <b>พบอีเมลที่น่าจะเป็นข้อความลูกค้า แต่ยังไม่ได้ตั้งโดเมนไว้</b>");
+            sb.AppendLine();
+            foreach (var kv in hits)
+                sb.AppendLine("• <b>" + WebUtility.HtmlEncode(kv.Key) + "</b> — "
+                            + WebUtility.HtmlEncode(Truncate(kv.Value, 70)));
+            sb.AppendLine();
+            sb.AppendLine("ข้อความจากโดเมนพวกนี้<b>ยังไม่ถูกดึงเข้ากล่องแชท</b> ลูกค้าอาจทักมาแล้วไม่มีใครเห็น");
+            sb.AppendLine("เพิ่มได้ที่ ศูนย์ตั้งค่า → กล่องแชท → ตั้งค่าช่องทาง EMAIL → fromDomains");
+            sb.AppendLine();
+            sb.AppendLine("ตอนนี้ตั้งไว้: " + WebUtility.HtmlEncode(string.Join(", ", _fromDomains)));
+
+            string msg = sb.ToString();
+            res.Messages.Add("[info] พบโดเมนที่ยังไม่ได้ตั้งค่า: " + string.Join(", ", hits.Keys));
+            _code.Logs(_conn, "EmailChat", "unknown OTA senders: " + string.Join(", ", hits.Keys), "SYSTEM");
+            if (_notifyTelegram)
+            {
+                try { global::Notify.Send(global::Notify.Ev.ChatOtaEmail, msg); } catch { }
+            }
         }
 
         private enum IngestOutcome { Received, Duplicate, Failed }
@@ -605,7 +709,14 @@ namespace Take_Time_BangPhra.Services
             "this email was sent", "this message was sent", "unsubscribe",
             "privacy policy", "terms and conditions", "all rights reserved",
             "booking.com b.v", "agoda company", "expedia group", "airbnb, inc",
-            "sent from my iphone", "sent from my android", "ส่งจาก iphone ของฉัน"
+            "trip.com group", "ctrip", "trip.com limited",
+            "sent from my iphone", "sent from my android", "ส่งจาก iphone ของฉัน",
+            // ท้ายอีเมลที่เจอบ่อยข้าม OTA — เพิ่มไว้ให้เจ้าใหม่ตัดออกได้ตั้งแต่ใบแรก
+            "do not reply to this", "โปรดอย่าตอบกลับ", "อย่าตอบกลับอีเมลนี้",
+            "manage your preferences", "จัดการการแจ้งเตือน",
+            "view this message in", "ดูข้อความนี้ใน",
+            "customer service", "ฝ่ายบริการลูกค้า",
+            "best regards,", "kind regards,", "ด้วยความเคารพ"
         };
 
         /// <summary>
