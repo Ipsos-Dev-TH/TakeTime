@@ -11160,7 +11160,11 @@ namespace Take_Time_BangPhra.Integration
                 case NexaaccDocumentType.PurchaseInvoice: return "ใบแจ้งหนี้ซื้อ";
                 case NexaaccDocumentType.Expense: return "ค่าใช้จ่าย";
                 case NexaaccDocumentType.PaymentVoucher: return "ใบสำคัญจ่าย";
-                case NexaaccDocumentType.CertificateInLieu: return "ใบรับรองแทนใบกำกับภาษี";
+                // ชนิด 15 = แบบฟอร์ม "ใบรับรองแทนใบเสร็จรับเงิน" (ผู้รับเงินออกใบเสร็จให้ไม่ได้ เช่น
+                // ค่าแท็กซี่/แผงลอย → กิจการรับรองเอง) — ดูจากฟิลด์ของ InboundCertificateInLieuRequest
+                // ที่มี CertificateReason / CertifierName+Position / WitnessName+Position ตรงกับฟอร์มนี้
+                // (เดิมที่นี่เขียน "ใบรับรองแทนใบกำกับภาษี" ไม่ตรงกับ PaymentDocTypeLabels — คนละชื่อชนิดเดียวกัน)
+                case NexaaccDocumentType.CertificateInLieu: return "ใบรับรองแทนใบเสร็จรับเงิน";
                 default: return "ประเภท " + t;
             }
         }
@@ -13048,7 +13052,7 @@ namespace Take_Time_BangPhra.Integration
             { "Expense", "ใบบันทึกค่าใช้จ่าย" },
             { "PaymentVoucher", "ใบสำคัญจ่าย" },
             { "PurchaseInvoice", "ใบแจ้งหนี้ซื้อ" },
-            { "CertificateInLieu", "ใบรับรองแทนใบเสร็จ" }
+            { "CertificateInLieu", "ใบรับรองแทนใบเสร็จรับเงิน" }
         };
 
         /// <summary>ชนิดเอกสารฝั่งรับ (ใบเสร็จ/ใบกำกับ) สำหรับดึงมาแสดงในหน้า CheckDocument</summary>

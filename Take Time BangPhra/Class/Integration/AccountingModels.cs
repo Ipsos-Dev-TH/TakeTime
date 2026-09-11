@@ -583,7 +583,7 @@ namespace Take_Time_BangPhra.Integration
         public const int Expense = 9;
         public const int PurchaseRequisition = 12;
         public const int PaymentVoucher = 13;       // ใบสำคัญจ่าย — จ่ายเงินแล้วใบเดียวจบ
-        public const int CertificateInLieu = 15;    // ใบรับรองแทนใบกำกับภาษี
+        public const int CertificateInLieu = 15;    // ใบรับรองแทนใบเสร็จรับเงิน (ผู้รับเงินออกใบเสร็จให้ไม่ได้)
         public const int GoodsReceiptNote = 16;
     }
 
