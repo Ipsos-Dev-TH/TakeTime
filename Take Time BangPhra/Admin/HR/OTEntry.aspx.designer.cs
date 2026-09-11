@@ -52,6 +52,16 @@ namespace Take_Time_BangPhra.Admin.HR
         protected global::System.Web.UI.WebControls.Panel pnlSupervisorMode;
 
         /// <summary>
+        /// pnlSelfOnly control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlSelfOnly;
+
+        /// <summary>
+        /// litSelfName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litSelfName;
+
+        /// <summary>
         /// ddlEmployee control.
         /// </summary>
         protected global::System.Web.UI.WebControls.DropDownList ddlEmployee;

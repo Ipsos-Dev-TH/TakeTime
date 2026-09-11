@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
@@ -30,6 +30,11 @@ namespace Take_Time_BangPhra.Integration
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             DateFormatString = "yyyy-MM-ddTHH:mm:ss",
+            // สำคัญ: บังคับปฏิทิน "ค.ศ." (Gregorian) เสมอ. ถ้าไม่ตั้ง Culture, Newtonsoft จะ format
+            // DateFormatString ด้วย CurrentCulture — บน thread ที่เป็น th-TH ปฏิทินเริ่มต้นเป็น "พุทธ"
+            // → ทุกวันที่ที่ส่งไป NextAcc จะกลายเป็นปี พ.ศ. (เช่น 2569 แทน 2026) = ใบกำกับภาษี/ใบเสร็จ
+            // มัดจำ ส่งวันที่ผิด. InvariantCulture ทำให้ได้ ค.ศ. เสมอ ไม่ว่า thread จะ culture อะไร.
+            Culture = System.Globalization.CultureInfo.InvariantCulture,
             NullValueHandling = NullValueHandling.Ignore
         };
 
@@ -48,6 +53,13 @@ namespace Take_Time_BangPhra.Integration
         // Auth failure tracking — avoid hammering API with an invalid key on every queue item
         private static DateTime _authFailedUntil = DateTime.MinValue;
         private static string _lastAuthError = null;
+
+        // Server-down tracking — NextAcc ทั้งแอปล่ม (start ไม่ขึ้น / 502-503) ตอบ 5xx เป็นหน้า HTML
+        // ทุก endpoint. เดิมทุกรายการในคิวยิงซ้ำ 5 ครั้ง × N รายการ = retry storm ที่ไม่มีทางสำเร็จ
+        // และเผา Retry_Count จนรายการตกเป็น FAILED ถาวรทั้งที่ข้อมูลไม่ผิด
+        private static DateTime _serverDownUntil = DateTime.MinValue;
+        private static string _lastServerDownError = null;
+        private static readonly object _serverDownLock = new object();
 
         /// <summary>
         /// NextAcc X-Acting-User header — ระบุว่าผู้ใดทำรายการจริง
@@ -130,6 +142,15 @@ namespace Take_Time_BangPhra.Integration
         public async Task<T> GetAsync<T>(string path)
         {
             return await ExecuteWithRetryAsync<T>(HttpMethod.Get, path, null);
+        }
+
+        /// <summary>GET แล้วคืน JSON ดิบเป็นข้อความ — ไม่ deserialize
+        /// ใช้ตรวจว่า NextAcc เก็บค่าอะไรไว้จริง โดยไม่ให้ model/converter ฝั่งเราบัง</summary>
+        public async Task<string> GetRawAsync(string path)
+        {
+            // JsonRaw ให้ ExecuteWithRetryAsync คืน responseBody ตรง ๆ (ดู deserialize step)
+            return await ExecuteWithRetryAsync<JsonRaw>(HttpMethod.Get, path, null)
+                is JsonRaw r ? r.Body : null;
         }
 
         public async Task<TResponse> PostAsync<TRequest, TResponse>(string path, TRequest body)
@@ -241,6 +262,55 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
+        /// <summary>NextAcc ล่มทั้งแอป → พักการยิงชั่วคราว (คิวจะข้ามทั้ง batch แทนที่จะยิงรัว)</summary>
+        private void SetServerDown(string errorMessage)
+        {
+            lock (_serverDownLock)
+            {
+                _serverDownUntil = DateTime.Now.AddMinutes(_config.ServerDownCooldownMinutes);
+                _lastServerDownError = errorMessage;
+            }
+        }
+
+        /// <summary>เคลียร์สถานะ "NextAcc ล่ม" — เรียกเมื่อมี call สำเร็จ หรือผู้ใช้กด Test Connection</summary>
+        public static void ClearServerDown()
+        {
+            lock (_serverDownLock)
+            {
+                _serverDownUntil = DateTime.MinValue;
+                _lastServerDownError = null;
+            }
+        }
+
+        /// <summary>true ถ้าตอนนี้อยู่ในช่วงพักเพราะ NextAcc ล่ม</summary>
+        public static bool IsServerDown(out DateTime until, out string lastError)
+        {
+            lock (_serverDownLock)
+            {
+                until = _serverDownUntil;
+                lastError = _lastServerDownError;
+                return DateTime.Now < _serverDownUntil;
+            }
+        }
+
+        /// <summary>
+        /// body ที่ตอบกลับเป็นหน้า HTML error page / startup failure = แอปฝั่ง NextAcc ล่มทั้งแอป
+        /// ไม่ใช่ปัญหาข้อมูลของ request นี้ → ยิงซ้ำกี่ครั้งก็ไม่สำเร็จ ต้อง fail fast + พัก
+        /// </summary>
+        internal static bool LooksLikeServerDown(string body)
+        {
+            string b = body ?? "";
+            if (b.Length == 0) return false;
+            if (b.IndexOf("An error occurred while starting the application", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("A circular dependency was detected", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("Some services are not able to be constructed", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 502", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (b.IndexOf("HTTP Error 503", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            bool isHtml = b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0
+                       || b.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0;
+            return isHtml && b.IndexOf("Exception", StringComparison.Ordinal) >= 0;
+        }
+
         /// <summary>
         /// Check if auth is in cooldown due to recent 401 failure.
         /// </summary>
@@ -282,6 +352,16 @@ namespace Take_Time_BangPhra.Integration
             {
                 errorDetail = ex.Message;
                 return false;
+            }
+
+            // NextAcc ล่มทั้งแอปเมื่อกี้ → ข้าม batch นี้ทั้งก้อน (ไม่เผา retry ของรายการในคิว)
+            lock (_serverDownLock)
+            {
+                if (DateTime.Now < _serverDownUntil)
+                {
+                    errorDetail = $"NextAcc ไม่พร้อมใช้งาน (พักถึง {_serverDownUntil:HH:mm:ss}) — {_lastServerDownError}";
+                    return false;
+                }
             }
 
             // Check auth cooldown
@@ -338,7 +418,13 @@ namespace Take_Time_BangPhra.Integration
                             request.Headers.Add("X-Acting-User", ActingUser);
                     }
                     else
-                        request.Headers.Add("X-Api-Key", _config.ApiKey);
+                    {
+                        request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
+                        // X-Acting-User → NextAcc ตั้ง CreatedBy เป็น user จริง (audit + ลายเซ็นผู้จัดทำ
+                        // บนเอกสาร company /document ที่ไม่มีฟิลด์ลายเซ็น). ไม่ใส่ = fallback Owner
+                        if (!string.IsNullOrEmpty(ActingUser))
+                            request.Headers.Add("X-Acting-User", ActingUser);
+                    }
                     request.Headers.Add("Accept", "application/json");
 
                     if (jsonBody != null)
@@ -383,14 +469,54 @@ namespace Take_Time_BangPhra.Integration
                                 status, responseBody);
                         }
 
+                        // 5xx ที่ตอบเป็นหน้า HTML error page = แอป NextAcc ล่มทั้งแอป (start ไม่ขึ้น /
+                        // 502-503 จาก reverse proxy) → ยิงซ้ำอีก 4 ครั้งก็ได้ผลเดิม เสียเวลาและเผา
+                        // Retry_Count ของรายการในคิวทิ้งเปล่า ๆ. fail fast + พักทั้ง client
+                        if (status >= 500 && LooksLikeServerDown(responseBody))
+                        {
+                            string downMsg = $"NextAcc ไม่พร้อมใช้งาน: HTTP {status} ตอบกลับเป็นหน้า error page "
+                                           + "(แอปฝั่ง NextAcc start ไม่ขึ้น) — ไม่ใช่ปัญหาข้อมูลของรายการนี้";
+                            SetServerDown(downMsg);
+                            throw new ServerUnavailableException(downMsg, status, responseBody);
+                        }
+
                         // 408/429/5xx errors: retry
                         throw new HttpRequestException($"Server error {response.StatusCode}: {responseBody}");
                     }
 
+                    // call สำเร็จ → NextAcc กลับมาแล้ว เคลียร์สถานะพัก
+                    ClearServerDown();
+
                     if (typeof(T) == typeof(object) && string.IsNullOrWhiteSpace(responseBody))
                         return default(T);
 
-                    return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
+                    // ขอ JSON ดิบ (ตรวจสอบ/ดีบัก) — ไม่ต้องแปลงเป็น model
+                    if (typeof(T) == typeof(JsonRaw))
+                        return (T)(object)new JsonRaw { Body = responseBody };
+
+                    // ⚠ ถึงตรงนี้ = NextAcc ทำงานสำเร็จแล้ว (2xx) เหลือแค่แปลง response
+                    //   ถ้าแปลงไม่ได้ **ห้าม retry เด็ดขาด** — ยิงซ้ำ = ทำงานซ้ำฝั่งเซิร์ฟเวอร์
+                    //   (POST สร้างเอกสารจะได้เอกสารซ้ำ 5 ใบ). โยนชนิดแยกให้ผู้เรียกรู้ว่า
+                    //   "งานสำเร็จแล้ว แต่เราอ่านคำตอบไม่ออก"
+                    try
+                    {
+                        return JsonConvert.DeserializeObject<T>(responseBody, _jsonSettings);
+                    }
+                    catch (Exception dex)
+                    {
+                        string preview = (responseBody ?? "").Length > 500 ? responseBody.Substring(0, 500) + "…" : responseBody;
+                        throw new ResponseParseException(
+                            $"NextAcc ทำรายการสำเร็จแล้ว (HTTP {(int)response.StatusCode} {method.Method} {path}) " +
+                            $"แต่ระบบอ่านคำตอบไม่ได้: {dex.Message}\nResponse: {preview}", responseBody, dex);
+                    }
+                }
+                catch (ResponseParseException)
+                {
+                    throw; // เซิร์ฟเวอร์ทำงานไปแล้ว — ยิงซ้ำมีแต่จะทำซ้ำ
+                }
+                catch (ServerUnavailableException)
+                {
+                    throw; // แอปปลายทางล่ม — ยิงซ้ำไม่ช่วย
                 }
                 catch (AccountingApiException)
                 {
@@ -439,6 +565,19 @@ namespace Take_Time_BangPhra.Integration
             string diagnostic = lastException?.Message ?? "unknown error";
             if (lastException?.InnerException != null)
                 diagnostic += $" | Inner: {lastException.InnerException.Message}";
+
+            // 5xx ที่ยิงครบทุกครั้งแล้วยังพัง = ปลายทางล่ม ไม่ใช่ข้อมูลผิด → ให้คิวรู้ชนิดที่ถูกต้อง
+            // (เดิมโยน Exception ธรรมดา คิวจึงนับเป็นความผิดของรายการ แล้วเผา Retry_Count จนตาย)
+            if (LooksLikeServerDown(diagnostic)
+                || diagnostic.IndexOf("Server error InternalServerError", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error BadGateway", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error ServiceUnavailable", StringComparison.OrdinalIgnoreCase) >= 0
+                || diagnostic.IndexOf("Server error GatewayTimeout", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string downMsg = $"NextAcc ไม่พร้อมใช้งาน: ยิง {method.Method} {path} ครบ {MaxRetries + 1} ครั้งแล้วยังตอบ error ฝั่งเซิร์ฟเวอร์ — {diagnostic}";
+                SetServerDown(downMsg);
+                throw new ServerUnavailableException(downMsg, 0, diagnostic);
+            }
 
             throw new Exception(
                 $"Accounting API call failed after {MaxRetries + 1} attempts to {method.Method} {path}: {diagnostic}",
@@ -529,6 +668,33 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// แก้ JE เดิม in-place (PUT /accounting/journals/{id}) — verified จาก NextAcc
+        /// AccountingService.UpdateJournalEntryAsync: นโยบาย operator-override แก้ได้ทุกสถานะ
+        /// "รวม Posted" เพื่อตามแก้ตัวเลข/ผังบัญชีที่บันทึกผิด. เงื่อนไขฝั่ง NextAcc:
+        ///   1) งวดบัญชี (FiscalPeriod) ต้องยังเปิดอยู่ — งวดปิดแล้ว → 400
+        ///   2) ห้ามแก้ JE ที่สร้างอัตโนมัติจากเอกสารต้นทาง (IsAutoGenerated เช่น JE ของ
+        ///      Receipt/Invoice/PV ที่ approve แล้ว) → พวกนั้นต้อง void เอกสาร + สร้างใหม่เท่านั้น
+        /// ส่ง Lines มา = แทนที่บรรทัดทั้งชุด; field อื่น null = คงเดิม
+        /// </summary>
+        public async Task<ApiResponse<JournalEntryResponse>> UpdateJournalEntryAsync(Guid entryId, UpdateJournalEntryRequest request)
+        {
+            return await PutAsync<UpdateJournalEntryRequest, ApiResponse<JournalEntryResponse>>(
+                $"{CompanyPath}/accounting/journals/{entryId}", request ?? new UpdateJournalEntryRequest());
+        }
+
+        /// <summary>
+        /// ค้นหา JE (GET /accounting/journals?search=) — ใช้หา JE ของใบเสร็จจากเลขที่อ้างอิง
+        /// (Reference = เลขใบเสร็จ TakeTime) เพื่อแก้ in-place โดยไม่ต้องรู้ entryId ล่วงหน้า
+        /// </summary>
+        public async Task<ApiResponse<PagedResponse<JournalEntryResponse>>> SearchJournalsAsync(string search, int pageSize = 10)
+        {
+            string qs = $"?page=1&pageSize={pageSize}" +
+                (string.IsNullOrEmpty(search) ? "" : "&search=" + Uri.EscapeDataString(search));
+            return await GetAsync<ApiResponse<PagedResponse<JournalEntryResponse>>>(
+                $"{CompanyPath}/accounting/journals{qs}");
+        }
+
+        /// <summary>
         /// กลับรายการ Journal — ใช้ /api/integration/journals/reverse
         /// </summary>
         public async Task<ApiResponse<JournalEntryResponse>> ReverseJournalAsync(Guid entryId, ReverseJournalEntryRequest request = null)
@@ -581,11 +747,159 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/document", document);
         }
 
+        /// <summary>แก้ไขเอกสาร Draft (PUT). ใช้บังคับ PaymentAccountId (แหล่งเงิน) + ค่าที่ผู้ใช้ยืนยัน
+        /// หลังสร้างจาก OCR ก่อน approve. company endpoint → X-Api-Key (acc_/int_ fallback).</summary>
+        public async Task<ApiResponse<DocumentResponse>> UpdateDocumentAsync(Guid documentId, UpdateDocumentRequest request)
+        {
+            return await PutAsync<UpdateDocumentRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}", request);
+        }
+
+        /// <summary>ดึงเอกสารเดี่ยวจาก NextAcc — ใช้ตรวจว่าเอกสารยังอยู่หรือไม่ (reconciliation).
+        /// ถ้าไม่มี → throw AccountingApiException StatusCode=404 (ไม่ retry). transient (5xx/timeout)
+        /// → HttpRequestException/อื่น ๆ. company endpoint → X-Api-Key.</summary>
+        public async Task<ApiResponse<DocumentResponse>> GetDocumentAsync(Guid documentId)
+        {
+            return await GetAsync<ApiResponse<DocumentResponse>>($"{CompanyPath}/document/{documentId}");
+        }
+
+        /// <summary>ลบใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ "orphan" — parent TaxInvoice ถูกลบ/void.
+        /// ส่ง reference = เลขใบกำกับต้นทางที่ลบ → ลบเฉพาะ REC ของใบนั้น (soft-delete, ไม่กระทบ GL).
+        /// NextAcc intersect กับ orphan set เสมอ → REC ที่ parent ยัง active จะไม่ถูกลบ (กันลบผิด).
+        /// company endpoint (acc_ ผ่าน X-Api-Key). คืน deleted count + ids.</summary>
+        public async Task<ApiResponse<PurgeOrphanReceiptsResult>> PurgeOrphanedSettlementReceiptsAsync(string reference)
+        {
+            var body = new { reference = reference };
+            return await PostAsync<object, ApiResponse<PurgeOrphanReceiptsResult>>(
+                $"{CompanyPath}/cleanup/orphaned-settlement-receipts/purge", body);
+        }
+
+        /// <summary>ตรวจรายการใบเสร็จหลักฐานรับเงินที่ orphan (GET diagnostic, acc_ key) — ไม่ลบ.
+        /// ใช้ parentReference ไป purge เจาะจงต่อได้</summary>
+        public async Task<ApiResponse<OrphanReceiptsDiagnostic>> GetOrphanedSettlementReceiptsAsync()
+        {
+            return await GetAsync<ApiResponse<OrphanReceiptsDiagnostic>>(
+                $"{CompanyPath}/cleanup/orphaned-settlement-receipts");
+        }
+
+        /// <summary>ตรวจซาก GL มัดจำ (215xx/217xx/21913) ที่ค้างจาก churn — read-only, acc_ key.
+        /// คืน entryNumber + sourceStatus ให้แยกว่าบรรทัดไหนเป็น JV ของ TakeTime (reverse เอง)</summary>
+        public async Task<ApiResponse<DepositGlDebrisResult>> GetDepositGlDebrisAsync()
+        {
+            return await GetAsync<ApiResponse<DepositGlDebrisResult>>(
+                $"{CompanyPath}/cleanup/deposit-gl-debris");
+        }
+
         [Obsolete("Integration endpoints auto-approve documents. JWT-only — will 401 with Integration Key.")]
         public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId)
         {
             return await PostAsync<object, ApiResponse<DocumentResponse>>(
                 $"{CompanyPath}/document/{documentId}/approve", null);
+        }
+
+        /// <summary>
+        /// อนุมัติเอกสาร (company endpoint, acc_) พร้อม body. ครั้งแรกถ้ามี soft warning จะได้ 422
+        /// → เรียกซ้ำด้วย AcknowledgeWarnings=true. Auto-post GL (ไม่ auto-pay).
+        /// </summary>
+        public async Task<ApiResponse<DocumentResponse>> ApproveDocumentAsync(Guid documentId, ApproveDocumentRequest request)
+        {
+            return await PostAsync<ApproveDocumentRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/approve", request ?? new ApproveDocumentRequest());
+        }
+
+        // ──────────────────────────────────────────────
+        // OCR (company endpoint, acc_) — OcrController
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// อัปโหลดไฟล์เข้า OCR inbox. autoCreate=false (ค่าเริ่มต้นฝั่ง web) = สแกนอย่างเดียว
+        /// ไม่สร้างเอกสาร — ให้ผู้ใช้ตรวจ/แก้ก่อนแล้วค่อยเรียก CreateDocumentFromOcrAsync.
+        /// รับทั้ง int_/acc_ แต่ flow ต่อ (create-document/approve) ต้องใช้ acc_.
+        /// </summary>
+        public async Task<ApiResponse<OcrResultResponse>> UploadOcrAsync(
+            string filePath, string preferredEngine = null, bool autoCreate = false)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl))
+                throw new Exception("Accounting Base URL is not configured.");
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                throw new FileNotFoundException("OCR upload: file not found", filePath);
+
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+
+            var qs = new List<string> { "autoCreate=" + (autoCreate ? "true" : "false") };
+            if (!string.IsNullOrEmpty(preferredEngine))
+                qs.Add("preferredEngine=" + Uri.EscapeDataString(preferredEngine));
+            string path = $"{CompanyPath}/ocr/upload?" + string.Join("&", qs);
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+
+            using (var form = new MultipartFormDataContent())
+            {
+                var fileBytes = File.ReadAllBytes(filePath);
+                var fileContent = new ByteArrayContent(fileBytes);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetContentType(filePath));
+                form.Add(fileContent, "file", Path.GetFileName(filePath));
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                // OCR upload อยู่ใต้ /api/companies/* → ใช้ X-Api-Key (acc_)
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
+                if (!string.IsNullOrEmpty(ActingUser))
+                    request.Headers.Add("X-Acting-User", ActingUser);   // creator จริง → ลายเซ็น/audit
+                request.Headers.Add("Accept", "application/json");
+                request.Content = form;
+
+                // OCR ประมวลผลรูป/PDF นานกว่า call ปกติมาก → ใช้ client แยกที่ timeout ยาว
+                // (_httpClient.Timeout เป็น global ใช้กับ sync อื่น ไม่ควรยืดทั้งระบบ)
+                int ocrTimeout = _config.OcrTimeoutSeconds;
+                using (var ocrHandler = new HttpClientHandler
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+                })
+                using (var ocrClient = new HttpClient(ocrHandler) { Timeout = TimeSpan.FromSeconds(ocrTimeout) })
+                {
+                    HttpResponseMessage response;
+                    try
+                    {
+                        response = await ocrClient.SendAsync(request).ConfigureAwait(false);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        throw new AccountingApiException(
+                            $"OCR ใช้เวลานานเกิน {ocrTimeout} วินาที (timeout) — ลองไฟล์ที่เล็ก/ชัดขึ้น หรือเพิ่มค่า Nexaacc_OcrTimeoutSec",
+                            408, null);
+                    }
+                    var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("POST", path, "[multipart file]", responseBody,
+                        (int)response.StatusCode, response.IsSuccessStatusCode, 0);
+
+                    if (!response.IsSuccessStatusCode)
+                        throw new AccountingApiException(
+                            $"OCR upload failed: {response.StatusCode} {responseBody}",
+                            (int)response.StatusCode, responseBody);
+
+                    return JsonConvert.DeserializeObject<ApiResponse<OcrResultResponse>>(responseBody, _jsonSettings);
+                }
+            }
+        }
+
+        /// <summary>ดึงผล OCR (poll จนกว่า ScanStatus จะเป็น Completed/Failed).</summary>
+        public async Task<ApiResponse<OcrResultResponse>> GetOcrResultAsync(Guid scanId)
+        {
+            return await GetAsync<ApiResponse<OcrResultResponse>>($"{CompanyPath}/ocr/{scanId}");
+        }
+
+        /// <summary>
+        /// สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId แล้ว Name).
+        /// targetType เช่น PaymentVoucher/Expense. คืน OcrResultResponse ที่มี CreatedDocumentId.
+        /// จากนั้นเรียก ApproveDocumentAsync(CreatedDocumentId, ...).
+        /// </summary>
+        public async Task<ApiResponse<OcrResultResponse>> CreateDocumentFromOcrAsync(Guid scanId, string targetType)
+        {
+            string path = $"{CompanyPath}/ocr/{scanId}/create-document";
+            if (!string.IsNullOrEmpty(targetType))
+                path += "?targetType=" + Uri.EscapeDataString(targetType);
+            return await PostAsync<object, ApiResponse<OcrResultResponse>>(path, null);
         }
 
         /// <summary>
@@ -984,7 +1298,7 @@ namespace Take_Time_BangPhra.Integration
 
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 var startTime = DateTime.Now;
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
                 int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
@@ -1074,7 +1388,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 if (!string.IsNullOrEmpty(_config.ApiKey))
                 {
-                    client.DefaultRequestHeaders.Add("X-Api-Key", _config.ApiKey);
+                    client.DefaultRequestHeaders.Add("X-Api-Key", _config.CompanyApiKey);
                 }
                 try
                 {
@@ -1114,7 +1428,7 @@ namespace Take_Time_BangPhra.Integration
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, url))
             {
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
                 var startTime = DateTime.Now;
@@ -1150,6 +1464,14 @@ namespace Take_Time_BangPhra.Integration
             await PostActionAsync($"{CompanyPath}/document/payments/{paymentId}/void");
         }
 
+        /// <summary>อ่าน contact กลับมาจาก NextAcc แบบดิบ (JSON ทั้งก้อน) — ใช้พิสูจน์ว่า
+        /// ฟิลด์ที่เราส่งไป (โดยเฉพาะ contactType/branchCode) ถูกบันทึกจริงหรือไม่
+        /// อ่านเป็น string ไม่ deserialize เพื่อไม่ให้ converter ฝั่งเราบังความจริง</summary>
+        public async Task<string> GetContactRawAsync(Guid contactId)
+        {
+            return await GetRawAsync($"{CompanyPath}/document/contacts/{contactId}");
+        }
+
         // Contact: Smart Defaults & Parse Address
         public async Task<ApiResponse<ContactResponse>> GetContactSmartDefaultsAsync(string name)
         {
@@ -1165,9 +1487,51 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // DBD lookup (กรมพัฒนาธุรกิจการค้า) — /api/dbd/*
+        // verified vs Wachira-d/Accounting: DbdLookupController [Route("api/dbd")] [Authorize]
+        //   GET  /api/dbd/juristic/{juristicId}  → ApiResponse<DbdCompanyResult>
+        //   GET  /api/dbd/search?q=&limit=       → ApiResponse<List<DbdCompanyResult>>
+        // เส้นทางนี้ไม่ได้ขึ้นต้นด้วย /api/integration/ → client ส่ง X-Api-Key ให้เอง
+        // (ApiKeyMiddleware ของ NextAcc ทำงานทุก path ก่อน JWT และ fallback ไป ExternalIntegration
+        //  ⇒ ใช้ได้ทั้งคีย์ acc_ และ int_)
+        // ──────────────────────────────────────────────
+
+        /// <summary>ดึงข้อมูลนิติบุคคลจากเลขทะเบียน/เลขผู้เสียภาษี 13 หลัก (NextAcc cache 24 ชม.)</summary>
+        public async Task<ApiResponse<DbdCompanyResult>> GetDbdCompanyAsync(string juristicId)
+        {
+            string id = (juristicId ?? "").Trim();
+            return await GetAsync<ApiResponse<DbdCompanyResult>>($"/api/dbd/juristic/{Uri.EscapeDataString(id)}");
+        }
+
+        /// <summary>ค้นหานิติบุคคลจากชื่อ (autocomplete)</summary>
+        public async Task<ApiResponse<List<DbdCompanyResult>>> SearchDbdByNameAsync(string query, int limit = 10)
+        {
+            string q = Uri.EscapeDataString((query ?? "").Trim());
+            return await GetAsync<ApiResponse<List<DbdCompanyResult>>>($"/api/dbd/search?q={q}&limit={limit}");
+        }
+
+        // ──────────────────────────────────────────────
         // Payroll System (/api/companies/{companyId}/payroll/*)
         // ใช้ X-Api-Key (acc_) — Integration Key (int_) ใช้ไม่ได้
         // ──────────────────────────────────────────────
+
+        // ──────────────────────────────────────────────
+        // Inventory qty (company endpoint /product/stock/*) — int_ ผ่าน X-Api-Key fallback ได้
+        // ──────────────────────────────────────────────
+
+        /// <summary>ปรับจำนวนสต๊อกฝั่ง NextAcc (qty-only, ไม่โพสต์ GL): POST /product/stock/adjust → StockMovement ที่สร้าง</summary>
+        public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest request)
+        {
+            return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
+                $"{CompanyPath}/product/stock/adjust", request);
+        }
+
+        /// <summary>ดึง stock movements ของสินค้า 1 ตัวจาก NextAcc: GET /product/{productId}/stock/movements</summary>
+        public async Task<ApiResponse<List<StockMovementResponse>>> GetProductStockMovementsAsync(Guid productId)
+        {
+            return await GetAsync<ApiResponse<List<StockMovementResponse>>>(
+                $"{CompanyPath}/product/{productId}/stock/movements");
+        }
 
         public async Task<ApiResponse<PayrollSyncEmployeesResponse>> SyncPayrollEmployeesAsync(PayrollSyncEmployeesRequest request)
         {
@@ -1179,6 +1543,15 @@ namespace Take_Time_BangPhra.Integration
         {
             return await PostAsync<PayrollCreateRunRequest, ApiResponse<PayrollRunResponse>>(
                 $"{CompanyPath}/payroll/runs", request);
+        }
+
+        /// <summary>Import ยอดเงินเดือนสำเร็จรูป (Option A): POST /payroll/runs/import.
+        /// NextAcc สร้าง run สถานะ Calculated จากยอดที่ส่ง (Recalculate=false), idempotent ด้วย ExternalRunRef
+        /// (ยิงซ้ำคืน run เดิม). จากนั้นเรียก ApprovePayrollAsync → PayPayrollAsync ตามปกติ</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> ImportPayrollRunAsync(PayrollImportRunRequest request)
+        {
+            return await PostAsync<PayrollImportRunRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/import", request);
         }
 
         public async Task<ApiResponse<PayrollRunResponse>> CalculatePayrollAsync(Guid runId)
@@ -1234,7 +1607,7 @@ namespace Take_Time_BangPhra.Integration
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 // {company}/attachments/* เป็น JWT endpoint → X-Api-Key
-                request.Headers.Add("X-Api-Key", _config.ApiKey);
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
@@ -1370,12 +1743,6 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/product/{productId}", product);
         }
 
-        [Obsolete("JWT-only — will 401 with Integration Key. NextAcc Integration ไม่มี stock-adjust endpoint โดยตรง; ใช้ ProcessStockAdjustment ส่ง journal แทน")]
-        public async Task<ApiResponse<StockMovementResponse>> AdjustStockAsync(StockAdjustmentRequest adjustment)
-        {
-            return await PostAsync<StockAdjustmentRequest, ApiResponse<StockMovementResponse>>(
-                $"{CompanyPath}/product/stock/adjust", adjustment);
-        }
 
         // ──────────────────────────────────────────────
         // Connection Test
@@ -1508,6 +1875,14 @@ namespace Take_Time_BangPhra.Integration
                     $"ซึ่งเป็นปัญหาฝั่งเซิร์ฟเวอร์ NextAcc ไม่เกี่ยวกับ Integration Key\n" +
                     $"รายละเอียด: {ex.ResponseBody}");
             }
+            catch (ServerUnavailableException ex)
+            {
+                return new ConnectionTestResult(false,
+                    "🔴 เซิร์ฟเวอร์ NextAcc ไม่พร้อมใช้งาน (ไม่ใช่ปัญหา API Key หรือการตั้งค่าฝั่งเรา)\n\n" +
+                    $"URL: {targetUrl}\n{ex.Message}\n\n" +
+                    "แอปฝั่ง NextAcc ตอบกลับเป็นหน้า error page = start ไม่ขึ้น/ล่ม → ทุก endpoint จะใช้ไม่ได้\n" +
+                    "แจ้งผู้ดูแล NextAcc ให้แก้ก่อน แล้วค่อยกด Retry ในหน้าคิว", ex.StatusCode, ex.ResponseBody);
+            }
             catch (Exception ex)
             {
                 return new ConnectionTestResult(false, $"เชื่อมต่อไม่ได้: {ex.Message}\nURL: {targetUrl}");
@@ -1597,6 +1972,39 @@ namespace Take_Time_BangPhra.Integration
     public class AuthenticationFailedException : Exception
     {
         public AuthenticationFailedException(string message) : base(message) { }
+    }
+
+    /// <summary>ตัวห่อ JSON ดิบ — ใช้กับ GetRawAsync เพื่อข้ามการ deserialize</summary>
+    public class JsonRaw { public string Body { get; set; } }
+
+    /// <summary>
+    /// NextAcc ตอบ 2xx (ทำงานสำเร็จแล้ว) แต่ client แปลง response ไม่ได้
+    /// **ห้าม retry** — งานฝั่งเซิร์ฟเวอร์เกิดขึ้นแล้ว ยิงซ้ำจะได้ผลลัพธ์ซ้ำ
+    /// ผู้เรียกควรถือว่า "อาจสำเร็จ" แล้วไปตรวจสถานะจริง ไม่ใช่ทำใหม่
+    /// </summary>
+    public class ResponseParseException : Exception
+    {
+        public string ResponseBody { get; }
+        public ResponseParseException(string message, string responseBody, Exception inner)
+            : base(message, inner) { ResponseBody = responseBody; }
+    }
+
+    /// <summary>
+    /// ปลายทาง (NextAcc) ล่มทั้งแอป — 5xx / หน้า HTML error page / start ไม่ขึ้น.
+    /// **ไม่ใช่ความผิดของข้อมูลในรายการคิว** → คิวต้องคง PENDING ไม่นับ retry
+    /// แล้วหยุดรอบ รอ NextAcc กลับมาแล้วยิงต่อเอง (เหมือน DNS/Auth failure).
+    /// </summary>
+    public class ServerUnavailableException : Exception
+    {
+        public int StatusCode { get; }
+        public string ResponseBody { get; }
+
+        public ServerUnavailableException(string message, int statusCode, string responseBody)
+            : base(message)
+        {
+            StatusCode = statusCode;
+            ResponseBody = responseBody;
+        }
     }
 
     /// <summary>

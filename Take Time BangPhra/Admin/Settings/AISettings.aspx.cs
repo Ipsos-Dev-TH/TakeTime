@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
@@ -14,6 +14,8 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysChannel)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "AI", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             if (Session["permission"]?.ToString() != "True" ||
                 (Session["User"]?.ToString() != "Owner" && Session["User"]?.ToString() != "Admin"))
             {

@@ -664,7 +664,7 @@
 
                         <asp:TemplateField HeaderText="ใบรับรองแพทย์">
                             <ItemTemplate>
-                                <%# Convert.ToBoolean(Eval("RequiresMedicalCert")) ? "ต้องการ" : "-" %>
+                                <%# MedCertText(Eval("RequiresMedicalCert"), Eval("MedicalCertAfterDays"), Eval("NoCertAction")) %>
                             </ItemTemplate>
                         </asp:TemplateField>
 
@@ -839,7 +839,8 @@
                             <label for="<%=chkDeductSalary.ClientID %>">หักเงินเดือน</label>
                         </div>
                         <div class="checkbox-item">
-                            <asp:CheckBox ID="chkRequiresMedicalCert" runat="server" />
+                            <asp:CheckBox ID="chkRequiresMedicalCert" runat="server" AutoPostBack="true"
+                                OnCheckedChanged="chkRequiresMedicalCert_CheckedChanged" />
                             <label for="<%=chkRequiresMedicalCert.ClientID %>">ต้องมีใบรับรองแพทย์</label>
                         </div>
                         <div class="checkbox-item">
@@ -852,6 +853,38 @@
                         </div>
                     </div>
                 </div>
+
+                <%-- ── กฎใบรับรองแพทย์ (โผล่เมื่อติ๊ก "ต้องมีใบรับรองแพทย์") ──
+                     ตอบโจทย์: ลาป่วย 1 วันไม่ต้องใช้ · 2 วันขึ้นไปต้องใช้ถึงจะไม่หักเงิน
+                     · ไม่แนบเลย = หักหมด --%>
+                <asp:Panel ID="pnlCertRule" runat="server" Visible="false"
+                    CssClass="form-group"
+                    style="background:#F1F8E9; border-left:4px solid #7CB342; border-radius:8px; padding:14px;">
+                    <label style="font-weight:600; color:#33691E;">กฎใบรับรองแพทย์</label>
+
+                    <div style="margin-top:10px;">
+                        <label style="font-weight:500;">ต้องใช้ใบรับรองเมื่อลา<b>เกิน</b>กี่วัน</label>
+                        <asp:TextBox ID="txtCertAfterDays" runat="server" CssClass="form-control"
+                            TextMode="Number" step="0.5" placeholder="เว้นว่าง = ต้องใช้ทุกกรณี"
+                            style="max-width:200px;" />
+                        <div style="font-size:12.5px; color:#558B2F; margin-top:5px; line-height:1.6;">
+                            ใส่ <b>1</b> = ลา 1 วันไม่ต้องแนบ · ลา 2 วันขึ้นไปต้องแนบ<br />
+                            เว้นว่าง = ต้องแนบทุกครั้งไม่ว่าลากี่วัน
+                        </div>
+                    </div>
+
+                    <div style="margin-top:14px;">
+                        <label style="font-weight:500;">ถ้าต้องแนบแต่ไม่ได้แนบ</label>
+                        <asp:DropDownList ID="ddlNoCertAction" runat="server" CssClass="form-control"
+                            style="max-width:320px;">
+                            <asp:ListItem Value="DEDUCT" Text="หักเงินทั้งจำนวนวันที่ลา (รับคำขอไว้)" />
+                            <asp:ListItem Value="BLOCK" Text="ปฏิเสธคำขอ ไม่ให้ยื่น" />
+                        </asp:DropDownList>
+                        <div style="font-size:12.5px; color:#558B2F; margin-top:5px; line-height:1.6;">
+                            เลือก <b>หักเงิน</b> ถ้าอยากให้ลาได้แต่ไม่ได้เงิน (พนักงานเลือกเองว่าจะหาใบรับรองมาหรือยอมโดนหัก)
+                        </div>
+                    </div>
+                </asp:Panel>
             </div>
             <div class="modal-footer">
                 <asp:Button ID="btnCancelLeaveType" runat="server" Text="ยกเลิก" CssClass="btn-secondary"

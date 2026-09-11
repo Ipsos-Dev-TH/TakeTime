@@ -10,7 +10,10 @@ using Take_Time_BangPhra.Helpers;
 
 namespace Take_Time_BangPhra.API
 {
-    public class VendorAPI : IHttpHandler, IRequiresSessionState
+    // IReadOnlySessionState (not IRequiresSessionState): this handler only reads
+    // Session["permission"], it never writes session. A read-only lock avoids serializing
+    // concurrent requests that share the same SessionID (prevents "Session ค้าง").
+    public class VendorAPI : IHttpHandler, IReadOnlySessionState
     {
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
         private readonly code _code = new code();

@@ -23,6 +23,7 @@ namespace Take_Time_BangPhra.Affiliate
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Affiliate", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);

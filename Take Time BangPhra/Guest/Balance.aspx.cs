@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -96,6 +96,23 @@ namespace Take_Time_BangPhra.Guest
                 lblDepositPaid.Text = depositPaid.ToString("N0");
                 lblBalanceDue.Text = balanceDue.ToString("N0");
 
+                // จ่ายออนไลน์ผ่านเกตเวย์ — โผล่เฉพาะเมื่อเปิดฟีเจอร์และช่องทางการจองเปิดอยู่
+                try
+                {
+                    var paySvc = new Take_Time_BangPhra.Payments.OnlinePaymentService(_connectionString);
+                    decimal due = balanceDue;
+                    if (due > 0 && paySvc.AvailableMethods(due,
+                            Take_Time_BangPhra.Payments.PaymentSource.Reservation).Count > 0)
+                    {
+                        lnkPayOnline.NavigateUrl = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                            + "/Payment/Pay?src=RESERVATION&id=" + _reservationId
+                            + "&ph=" + Uri.EscapeDataString(_guestMobilePhone ?? "");
+                        lnkPayOnline.Visible = true;
+                    }
+                    else lnkPayOnline.Visible = false;
+                }
+                catch { lnkPayOnline.Visible = false; }
+
                 // Display dates
                 DateTime checkIn = Convert.ToDateTime(balance["CheckIn"]);
                 DateTime checkOut = Convert.ToDateTime(balance["CheckOut"]);
@@ -143,28 +160,16 @@ namespace Take_Time_BangPhra.Guest
                     return;
                 }
 
-                // Upload payment slip
-                string paymentSlipPath = null;
-                try
-                {
-                    string fileName = $"Payment_{DateTime.Now:yyyyMMddHHmmss}_{_reservationId}_{filePaymentSlip.FileName}";
-                    string uploadFolder = Server.MapPath("~/Uploads/PaymentSlips/");
-
-                    if (!Directory.Exists(uploadFolder))
-                    {
-                        Directory.CreateDirectory(uploadFolder);
-                    }
-
-                    string filePath = Path.Combine(uploadFolder, fileName);
-                    filePaymentSlip.SaveAs(filePath);
-                    paymentSlipPath = $"/Uploads/PaymentSlips/{fileName}";
-                }
-                catch (Exception ex)
+                // Upload payment slip — ตรวจนามสกุล + สร้างชื่อไฟล์เอง (กัน .aspx web shell / path traversal)
+                var slip = UploadHelper.Save(filePaymentSlip, "~/Uploads/PaymentSlips",
+                    $"Payment_{_reservationId}", UploadHelper.ImageDoc);
+                if (!slip.Success)
                 {
                     ScriptManager.RegisterStartupScript(this, GetType(), "alert",
-                        $"alert('Error uploading payment slip: {ex.Message}');", true);
+                        $"alert('{slip.Error.Replace("'", "\\'")}');", true);
                     return;
                 }
+                string paymentSlipPath = slip.WebPath;
 
                 // Record payment (create a payment record - you may need to create a table for this)
                 var parameters = new Dictionary<string, object>

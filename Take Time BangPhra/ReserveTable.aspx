@@ -3,6 +3,8 @@
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView2.css">
+    <link rel="stylesheet" type="text/css" href="/Content/responsive-table.css">
+    <script src="/Scripts/responsive-table.js" defer></script>
     
     <style type="text/css">
         /* Page Background */
@@ -35,17 +37,52 @@
         .no-print { display: block; }
         .hidden { display: none; }
 
-        /* 📝 ล็อคความกว้างช่องหมายเหตุและตัดข้อความมาบรรทัดใหม่ */
+        /* 📝 ช่องหมายเหตุ — ตอนนี้เก็บหลายบรรทัด (แผนราคา/คำขอพิเศษ/บันทึกเจ้าหน้าที่)
+           จึงต้องแสดงแยกบรรทัดจริง ไม่ใช่ไหลติดกันเป็นก้อนเดียวในคอลัมน์ 150px */
         .remark-column {
-            max-width: 150px;
+            max-width: 250px;
+            min-width: 190px;
             word-wrap: break-word;
-            word-break: break-word;
-            white-space: normal;
             overflow-wrap: break-word;
+            white-space: normal;
             vertical-align: top;
-            font-size: 0.9em;
-            line-height: 1.4;
+            font-size: 0.85em;
+            line-height: 1.45;
+            text-align: left;
         }
+
+        .rm-line { color: #6b625c; }
+
+        /* หมายเหตุที่ผูกกับแผนราคาในตาราง mapping — ตัวสำคัญที่หน้างานต้องเห็นก่อน */
+        .rm-plan {
+            display: inline-block;
+            background: #fff3e0;
+            border: 1px solid #ffcc80;
+            color: #a35400;
+            font-weight: 700;
+            border-radius: 6px;
+            padding: 2px 7px;
+            margin: 3px 0;
+        }
+
+        .rm-req {
+            background: #e8f1fb;
+            border-left: 3px solid #4a90d9;
+            color: #1d4e79;
+            padding: 3px 6px;
+            margin: 3px 0;
+            border-radius: 4px;
+        }
+
+        .rm-staff-head {
+            margin-top: 5px;
+            padding-top: 4px;
+            border-top: 1px dashed #d6cec8;
+            color: #9a8f88;
+            font-size: 0.92em;
+        }
+
+        .rm-staff { color: #2f3b35; font-weight: 600; }
 
         /* แสดงห้องพักคนละบรรทัด */
         .room-list {
@@ -380,50 +417,19 @@
                 text-align: center;
             }
 
-            /* ให้ table scroll ได้แนวนอน แต่แสดงข้อมูลสำคัญ */
+            /* ตารางข้อมูล: จัดการโดย /Content/responsive-table.css
+               (มุมมองการ์ดเป็นค่าเริ่มต้น, สลับเป็นตารางเต็มแบบเลื่อนแนวนอนได้ด้วยปุ่ม)
+               เดิมตรงนี้บีบทุกคอลัมน์ให้อยู่ในความกว้างจอ ⇒ เหลือคำละบรรทัด อ่านไม่ออก */
             .table-container {
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                border: 1px solid #ddd;
-                border-radius: 5px;
+                padding: 10px;
+                border-radius: 8px;
             }
 
-            /* ปรับ font ให้เล็กลงแต่ยังอ่านได้ */
-            .mydatagrid {
-                font-size: 10px;
-                white-space: nowrap;
-            }
-
-            .mydatagrid th, .mydatagrid td {
-                padding: 4px 2px !important;
-                font-size: 10px;
-            }
-
-            /* 📱 ปรับช่องสำคัญให้มีขนาดเท่ากัน - ลดความกว้างลง 25% (450px → 340px) */
-            .name-column,
-            .room-list,
-            .items-column,
-            .remark-column {
-                max-width: 340px !important;
-                min-width: 150px;
-                word-wrap: break-word !important;
-                word-break: break-word !important;
-                white-space: pre-line !important;
-                font-size: 10px;
-                line-height: 1.4;
-            }
-
-            /* แสดงห้องพักคนละบรรทัดบนมือถือ */
-            .room-list {
-                white-space: pre-line !important;
-                font-size: 10px;
-            }
-
-            /* ปรับปุ่มให้เล็กแต่กดได้ */
+            /* ปุ่มในการ์ด — เดิม 9px เล็กจนกดพลาด/อ่านไม่ออก */
             .btn-sm {
-                font-size: 9px;
-                padding: 2px 4px;
-                margin-bottom: 1px;
+                font-size: 12px;
+                padding: 5px 10px;
+                margin-bottom: 2px;
             }
 
             /* ปรับ calendar */
@@ -436,25 +442,6 @@
                 font-size: 1.3rem;
             }
 
-            /* ซ่อนเฉพาะคอลัมน์ที่ไม่จำเป็นบนมือถือ */
-            .mydatagrid th:nth-child(4),  /* จำนวนคืน */
-            .mydatagrid td:nth-child(4) {
-                display: none;
-            }
-
-            /* 📱 แสดงคอลัมน์สำคัญ: ชื่อผู้จอง, รายชื่อห้องพัก, รายการของเช่า/สินค้า, หมายเหตุ */
-            .mydatagrid th:nth-child(2),  /* ชื่อผู้จอง */
-            .mydatagrid td:nth-child(2),
-            .mydatagrid th:nth-child(3),  /* รายชื่อห้องพัก */
-            .mydatagrid td:nth-child(3),
-            .mydatagrid th:nth-child(5),  /* รายการของเช่า/สินค้า */
-            .mydatagrid td:nth-child(5),
-            .mydatagrid th:nth-child(9),  /* หมายเหตุ */
-            .mydatagrid td:nth-child(9) {
-                display: table-cell !important;
-                max-width: 340px !important;
-                min-width: 150px;
-            }
         }
     </style>
 
@@ -493,7 +480,7 @@
                         <asp:Label ID="Label1" runat="server" Text="" CssClass="h4 text-primary mb-3"></asp:Label>
                         
                         <asp:GridView ID="GridView1" DataKeyNames="ID" runat="server" 
-                            AutoGenerateColumns="False" CssClass="mydatagrid table-responsive"
+                            AutoGenerateColumns="False" CssClass="mydatagrid rt-table"
                             HeaderStyle-CssClass="header" RowStyle-CssClass="rows" PagerStyle-CssClass="pager"
                             BorderStyle="Solid" OnRowCommand="GridView1_RowCommand">
                             <Columns>
@@ -538,17 +525,23 @@
                                     ItemStyle-CssClass="header-center"
                                     DataFormatString="{0:N0}" HtmlEncode="false" />
 
-                                <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ"
-                                    HeaderStyle-Width="10%" HeaderStyle-CssClass="header-center"
-                                    ItemStyle-CssClass="remark-column" />
+                                <asp:TemplateField HeaderText="หมายเหตุ">
+                                    <ItemTemplate><%# RemarkHtml(Eval("Remark")) %></ItemTemplate>
+                                    <HeaderStyle Width="12%" CssClass="header-center" />
+                                    <ItemStyle CssClass="remark-column" />
+                                </asp:TemplateField>
 
                                 <asp:BoundField DataField="Reserve_By" HeaderText="จองโดย" 
                                     HeaderStyle-Width="6%" HeaderStyle-CssClass="header-center" 
                                     ItemStyle-CssClass="header-center" />
 
-                                <asp:BoundField DataField="Status" HeaderText="สถานะ" 
-                                    HeaderStyle-Width="6%" HeaderStyle-CssClass="header-center" 
-                                    ItemStyle-CssClass="header-center" />
+                                <asp:TemplateField HeaderText="สถานะ" HeaderStyle-Width="8%"
+                                    HeaderStyle-CssClass="header-center" ItemStyle-CssClass="header-center">
+                                    <ItemTemplate>
+                                        <%# Eval("Status") %>
+                                        <%# EtaxBadge(Eval("ID")) == "" ? "" : "<div style='margin-top:4px;'>" + EtaxBadge(Eval("ID")) + "</div>" %>
+                                    </ItemTemplate>
+                                </asp:TemplateField>
 
                                 <asp:TemplateField HeaderText="ดำเนินการ" HeaderStyle-Width="15%" HeaderStyle-CssClass="header-center">
                                     <ItemTemplate>
@@ -568,9 +561,8 @@
                                                 onclientclick="return confirm('ยืนยันการยกเลิกไม่คืนเงินหรือไม่');"/>
                                             
                                             <asp:Button ID="Button4" runat="server" Text="ยกเลิกคืนเงิน"
-                                                CommandArgument='<%# Eval("ID") %>' CommandName="CancelRefund"
                                                 CssClass="btn btn-secondary btn-sm mb-1"
-                                                onclientclick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');"/>
+                                                OnClientClick='<%# "showRefundModal(" + Eval("ID") + "); return false;" %>'/>
 
                                             <asp:Button ID="btnCheckout" runat="server" Text="เช็คเอาท์"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="Checkout"
@@ -580,6 +572,17 @@
                                             <asp:Button ID="Button7" runat="server" Text="รายละเอียด"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="Detail"
                                                 CssClass="btn btn-primary btn-sm" />
+
+                                            <asp:Button ID="btnNextAcc" runat="server" Text="💼 บัญชี NextAcc"
+                                                CssClass="btn btn-info btn-sm" Visible='<%# IsNaAdmin %>'
+                                                OnClientClick='<%# "showNaModal(" + Eval("ID") + "); return false;" %>' />
+
+                                            <asp:HyperLink ID="lnkGuestChat" runat="server" Target="_blank"
+                                                Text='<%# GuestChatLabel(Eval("ID")) %>'
+                                                CssClass='<%# GuestChatCss(Eval("ID")) %>'
+                                                ToolTip="เปิดบทสนทนากับลูกค้า — ข้อความจากช่องทางที่ผูกกับการจองนี้ (LINE / Facebook / TikTok / อีเมล OTA / แชทหน้าเว็บ)"
+                                                Visible='<%# GuestChatConvId(Eval("ID")) > 0 %>'
+                                                NavigateUrl='<%# ResolveUrl("~/Admin/Chat/OmniChannelInbox") + "?conv=" + GuestChatConvId(Eval("ID")) %>' />
                                         </div>
                                         <div class="print-only">
                                             &nbsp;
@@ -623,6 +626,10 @@
     </div>
 
     <script type="text/javascript">
+        function escapeForPrint(t) {
+            return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         function printTable() {
             // ✅ All platforms (including Android) now use the same HTML generation method
             // This ensures consistent print output across all devices
@@ -719,7 +726,7 @@
                         else if (headerText === 'ราคาทั้งหมด') data.totalPrice = cellContent;
                         else if (headerText === 'ยอดเงินรับมา') data.deposit = cellContent;
                         else if (headerText === 'ส่วนที่เหลือ') data.remain = cellContent;
-                        else if (headerText === 'หมายเหตุ') data.remark = cellContent;
+                        else if (headerText === 'หมายเหตุ') data.remark = (cells[j].innerText || cellContent);
                     }
                 }
 
@@ -732,7 +739,7 @@
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3; height: 90px; vertical-align: top;">' + (data.totalPrice || '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3%; height: 90px; vertical-align: top;">' + (data.deposit || '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 3%; height: 90px; vertical-align: top;">' + (data.remain || '&nbsp;') + '</td>';
-                tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: left; width: 10%; height: 90px; vertical-align: top;">' + (data.remark || '&nbsp;') + '</td>';
+                tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: left; width: 10%; height: 90px; vertical-align: top;">' + (data.remark ? escapeForPrint(data.remark).replace(/\n+/g, '<br>') : '&nbsp;') + '</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 15%; height: 90px; background-color: #f9f9f9; vertical-align: top;">&nbsp;</td>';
                 tableHTML += '<td style="border: 1px solid #000; padding: 2px; text-align: center; width: 15%; height: 90px; background-color: #f9f9f9; vertical-align: top;">&nbsp;</td>';
 
@@ -897,5 +904,291 @@
                 }
             }, 1000);
         }
+
+        // ── ยกเลิกคืนเงิน: เลือกบัญชีที่จ่ายคืน (auto = บัญชีเดิม / เลือกช่องทางอื่นได้) ──
+        function showRefundModal(resId) {
+            document.getElementById('<%= hfRefundResId.ClientID %>').value = resId;
+            var lbl = document.getElementById('refundModalResIdLabel');
+            if (lbl) lbl.textContent = resId;
+            if (window.jQuery) { jQuery('#refundAccountModal').modal('show'); }
+            else { document.getElementById('refundAccountModal').style.display = 'block'; }
+        }
+
+        // ══ จัดการบัญชี NextAcc ราย "การจอง" ══
+        var naCurrentResId = 0;
+        var naPageUrl = '<%= ResolveUrl("~/ReserveTable") %>';
+        var naBusy = false;   // กันกดซ้ำ/ทำหลาย action พร้อมกัน
+
+        // fetch + timeout (AbortController) กัน UI ค้างถาวรถ้า server ไม่ตอบ
+        function naFetch(url, timeoutMs) {
+            var ctrl = new AbortController();
+            var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs || 120000);
+            return fetch(url, { signal: ctrl.signal })
+                .then(function (r) { clearTimeout(timer); return r.json(); })
+                .catch(function (err) {
+                    clearTimeout(timer);
+                    throw (err && err.name === 'AbortError')
+                        ? new Error('หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับ (ลองใหม่/ตรวจสถานะอีกครั้ง)')
+                        : err;
+                });
+        }
+
+        // เปิด/ปิดสถานะ busy: disable ปุ่มทั้งหมดในโมดัล + เปลี่ยน cursor
+        function naSetBusy(on, label) {
+            naBusy = on;
+            var modal = document.getElementById('naModal');
+            if (!modal) return;
+            var btns = modal.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].getAttribute('data-dismiss') === 'modal') continue;  // ปุ่มปิดยังกดได้
+                btns[i].disabled = on;
+                btns[i].style.opacity = on ? '0.5' : '';
+                btns[i].style.cursor = on ? 'wait' : '';
+            }
+            var ov = document.getElementById('naBusyBar');
+            if (ov) ov.innerHTML = on ? ('<div class="alert alert-info" style="margin:0;">⏳ ' + naEsc(label || 'กำลังดำเนินการ...') + '</div>') : '';
+        }
+
+        function naEsc(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        // ค่าที่ฝังใน onclick="fn('...')" — escape สำหรับ JS-string (\ ' ) ก่อน แล้ว HTML-attr (& < > ")
+        function naJsArg(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function naNum(n) {
+            var v = (typeof n === 'number') ? n : parseFloat(n || 0);
+            if (isNaN(v)) v = 0;
+            return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function showNaModal(resId) {
+            naCurrentResId = resId;
+            naLastResult = null;   // เคลียร์ผลลัพธ์ของการจองก่อนหน้า
+            var lbl = document.getElementById('naModalResIdLabel');
+            if (lbl) lbl.textContent = resId;
+            if (window.jQuery) { jQuery('#naModal').modal('show'); }
+            else { document.getElementById('naModal').style.display = 'block'; }
+            naLoadOverview();
+        }
+
+        function naLoadOverview() {
+            var body = document.getElementById('naModalBody');
+            body.innerHTML = '<div style="text-align:center; padding:24px; color:#888;">⏳ กำลังตรวจสถานะบน NextAcc...</div>';
+            naSetBusy(true, 'กำลังตรวจสถานะบน NextAcc...');
+            naFetch(naPageUrl + '?naAction=overview&resId=' + naCurrentResId + '&_=' + Date.now(), 100000)
+                .then(function (d) { body.innerHTML = naRenderOverview(d); naSetBusy(false); })
+                .catch(function (err) {
+                    body.innerHTML = '<div class="alert alert-danger">⚠ ' + naEsc(err.message) +
+                        '</div><div style="text-align:center; margin-top:8px;"><button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ลองใหม่</button></div>';
+                    naSetBusy(false);
+                });
+        }
+
+        function naStateBadge(rc) {
+            var map = {
+                'DOCUMENT':   ['#28a745', '#e7f7ec'],
+                'JE_ONLY':    ['#8a6d3b', '#fcf8e3'],
+                'NONE':       ['#777',    '#eee'],
+                'PENDING':    ['#31708f', '#d9edf7'],
+                'FAILED':     ['#c0392b', '#fdecea'],
+                'DELETED':    ['#c0392b', '#fdecea'],
+                'DOC_VOIDED': ['#777',    '#f2f2f2']
+            };
+            var c = map[rc.State] || map['NONE'];
+            return '<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:'
+                + c[0] + '; background:' + c[1] + ';">' + naEsc(rc.StateLabel || rc.State) + '</span>';
+        }
+
+        function naRenderOverview(d) {
+            if (!d || !d.Success) return '<div class="alert alert-danger">⚠ ' + naEsc(d ? d.Message : 'ไม่มีข้อมูล') + '</div>';
+            var html = '';
+            html += '<div style="margin-bottom:10px; font-size:14px;"><b>' + naEsc(d.GuestName || '-') + '</b>'
+                 + ' · มัดจำจ่าย <b>' + naNum(d.DepositPaid) + '</b>'
+                 + ' · ถูกหักในใบเช็คเอาท์ <b>' + naNum(d.DepositAppliedTotal) + '</b></div>';
+
+            if (!d.Receipts || d.Receipts.length === 0)
+                return html + '<div class="alert alert-info">' + naEsc(d.Message || 'การจองนี้ไม่มีใบเสร็จในระบบ')
+                     + '<div style="margin-top:10px;">'
+                     + '<button type="button" class="btn btn-primary btn-sm" onclick="naRestoreReceipts()" '
+                     + 'title="เคสใบเสร็จถูกลบในระบบแล้วไปกดกู้คืนเอกสารบน NextAcc — กู้ใบเสร็จ + ผูกการจอง + คืนยอดมัดจำจากประวัติ sync">'
+                     + '📥 ดึงใบเสร็จกลับจาก NextAcc</button>'
+                     + '<div style="font-size:12px; color:#666; margin-top:6px;">ถ้าเอกสารของการจองนี้เคยถูกลบในระบบ แล้วถูก "กู้คืนจากยกเลิก" บน NextAcc — ปุ่มนี้จะกู้ใบเสร็จ+มัดจำกลับเข้าการจองให้จากประวัติ sync</div>'
+                     + '</div></div>'
+                     + '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
+
+            html += '<div style="overflow-x:auto;"><table class="table table-condensed table-bordered" style="font-size:13px;">';
+            html += '<thead><tr style="background:#f5f5f5;"><th>ใบเสร็จ</th><th>วันที่</th><th style="text-align:right;">ยอด</th>'
+                 + '<th>ประเภท</th><th>สลิป</th><th>สถานะบน NextAcc</th><th>JE</th><th>จัดการ</th></tr></thead><tbody>';
+            d.Receipts.forEach(function (rc) {
+                var cancelled = rc.LocalStatus !== 'Normal';
+                html += '<tr' + (cancelled ? ' style="color:#999; background:#fafafa;"' : '') + '>';
+                html += '<td>' + naEsc(rc.ReceiptNumber) + (cancelled ? ' <small>(' + naEsc(rc.LocalStatus) + ')</small>' : '') + '</td>';
+                html += '<td>' + naEsc(rc.Date) + '</td>';
+                html += '<td style="text-align:right;">' + naNum(rc.Amount) + '</td>';
+                html += '<td>' + (rc.IsDeposit ? '💰 มัดจำ' : (rc.DepositApplied > 0 ? 'เช็คเอาท์ (หักมัดจำ ' + naNum(rc.DepositApplied) + ')' : 'รับชำระ')) + '</td>';
+                html += '<td>' + (rc.SlipCount > 0 ? '📎 ' + rc.SlipCount + ' ไฟล์' : '-') + '</td>';
+                html += '<td>' + naStateBadge(rc)
+                     + (rc.DocNumber && rc.State === 'DOCUMENT'
+                        ? '<br/><small>' + naEsc(rc.DocStatus) + (rc.BalanceDue > 0.01 ? ' · <span style="color:#c0392b;">ค้าง ' + naNum(rc.BalanceDue) + '</span>' : '') + '</small>'
+                        : '') + '</td>';
+                html += '<td style="text-align:center;">' + (rc.JeCount || 0) + '</td>';
+                html += '<td style="white-space:nowrap;">';
+                if (!cancelled) {
+                    var keeps = rc.ResyncKeepsNumber;
+                    var rLabel = keeps ? '🔁 Resync (คงเลขเดิม)' : '🔁 Resync (เลขเปลี่ยน)';
+                    var rTitle = keeps
+                        ? 'แก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสารเดิม (in-place resyncUpdate)'
+                        : 'เอกสารนี้เป็น company doc (RECEIPT) — resync ต้อง void แล้วสร้างใหม่ เลขเอกสารจะเปลี่ยน';
+                    html += '<button type="button" class="btn btn-warning btn-xs" style="margin:2px 4px 2px 0;" onclick="naReceiptAction(\'resyncReceipt\', \'' + naJsArg(rc.ReceiptNumber) + '\')" title="' + rTitle + '">' + rLabel + '</button>';
+                    if (rc.State === 'DOCUMENT')
+                        html += '<button type="button" class="btn btn-danger btn-xs" style="margin:2px 0;" onclick="naReceiptAction(\'voidReceipt\', \'' + naJsArg(rc.ReceiptNumber) + '\')" title="ยกเลิก (void) เอกสารบน NextAcc — JE ถูกยกเลิกตาม cascade, เลขเอกสารถูกใช้ไปแล้วจะไม่กลับมา">🚫 ยกเลิก (void)</button>';
+                }
+                html += '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+
+            html += '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
+            return html;
+        }
+
+        function naShowResult(ok, msg) {
+            naLastResult = '<div class="alert ' + (ok ? 'alert-success' : 'alert-danger') + '" style="margin-top:8px;">'
+                    + (ok ? '✅ ' : '⚠ ') + naEsc(msg).replace(/\n/g, '<br/>') + '</div>';
+            var el = document.getElementById('naActionResult') || document.getElementById('naModalBody');
+            if (el.id === 'naActionResult') el.innerHTML = naLastResult; else el.innerHTML += naLastResult;
+        }
+
+        function naReceiptAction(action, doc) {
+            if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }   // กัน refresh ค้างชนกับ action ใหม่
+            var confirmMsg = action === 'voidReceipt'
+                ? '🚫 ยกเลิก (void) เอกสารของใบ ' + doc + ' บน NextAcc?\n\nเอกสาร + JE ที่ผูกกันจะถูกยกเลิก (void cascade)\nเลขเอกสารที่ใช้ไปแล้วจะไม่กลับมา — ใบเสร็จฝั่งระบบนี้ไม่ถูกแตะ'
+                : '🔁 Resync ใบ ' + doc + ' (คงเลขเอกสารเดิม)?\n\nแก้เอกสารเดิมบน NextAcc ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม (ที่ส่งลูกค้าไปแล้วใช้ได้ต่อ)\n• ถ้าเอกสารเดิมถูกลบไปแล้ว → สร้างใหม่สะอาด\n• ถ้าแก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขจะเปลี่ยน)\n• งวด/เดือนภาษี "ปิดแล้ว" เท่านั้นที่แก้/ลบไม่ได้ → จะแจ้งเหตุผล เลขคงเดิม\n\nอาจใช้เวลา 10-30 วินาที';
+            if (!confirm(confirmMsg)) return;
+            naSetBusy(true, action === 'voidReceipt' ? ('กำลังยกเลิกเอกสาร ' + doc + '...') : ('กำลัง Resync ' + doc + '... (10-30 วินาที)'));
+            naFetch(naPageUrl + '?naAction=' + action + '&doc=' + encodeURIComponent(doc) + '&resId=' + naCurrentResId + '&_=' + Date.now(), 180000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    // in-place resync เห็นผลทันที → refresh เลย; void ผ่านคิว → หน่วง 3 วิให้คิวประมวลก่อน
+                    if (d.Success) naScheduleRefresh(action === 'voidReceipt' ? 3500 : 800);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
+        }
+
+        // ข้อความผลลัพธ์ล่าสุด — คงไว้ข้ามการ refresh ตาราง (naRenderOverview จะแสดงต่อท้าย)
+        var naLastResult = null;
+        var naRefreshTimer = null;
+        function naScheduleRefresh(ms) {
+            if (naRefreshTimer) clearTimeout(naRefreshTimer);
+            naRefreshTimer = setTimeout(function () { naLoadOverview(); }, ms || 800);
+        }
+
+        function naRestoreReceipts() {
+            if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }
+            if (!confirm('📥 ดึงใบเสร็จของการจอง #' + naCurrentResId + ' กลับจาก NextAcc?\n\nสำหรับเคส: ใบเสร็จถูกลบในระบบ แล้วเอกสารบน NextAcc ถูก "กู้คืนจากยกเลิก"\n• กู้ใบเสร็จ + ผูกการจอง + คืนยอดชำระ/มัดจำ จากประวัติ sync\n• กู้เฉพาะใบที่เอกสารบน NextAcc ยัง active (ใบที่ยัง void อยู่จะข้าม พร้อมบอกเหตุผล)\n• กดซ้ำไม่เบิ้ล (ใบที่กลับมาแล้วจะถูกข้าม)')) return;
+            naSetBusy(true, 'กำลังดึงใบเสร็จกลับจาก NextAcc... (10-60 วินาที)');
+            naFetch(naPageUrl + '?naAction=restoreReceipts&resId=' + naCurrentResId + '&_=' + Date.now(), 180000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    if (d.Success) naScheduleRefresh(1200);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
+        }
+
+        function naSetCheckedIn() {
+            if (naBusy) return;
+            if (!confirm('✓ ตั้งสถานะการจอง #' + naCurrentResId + ' เป็น "เช็คอินแล้ว"?\n\nสำหรับเคสที่รับเงินครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะค้าง\nจะแก้เฉพาะสถานะ — ไม่แตะเงิน/เอกสาร NextAcc')) return;
+            naSetBusy(true, 'กำลังตั้งสถานะเช็คอิน...');
+            naFetch(naPageUrl + '?naAction=setCheckedIn&resId=' + naCurrentResId + '&_=' + Date.now(), 30000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    if (d.Success) setTimeout(function () { location.reload(); }, 1800);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
+        }
+
+        function naReservationAction(action) {
+            var confirmMsg = action === 'resyncAll'
+                ? '🔁 Resync การจอง #' + naCurrentResId + ' ทั้งชุด (คงเลขเอกสารเดิม)?\n\nไล่แก้เอกสารทุกใบ (มัดจำ→เช็คเอาท์) ให้ข้อมูลถูกต้องตาม logic ปัจจุบัน\n• แก้แบบ in-place — เลขเอกสาร NextAcc คงเดิม\n• ใบที่ไม่เคย sync → สร้างครั้งแรก / ใบที่ถูกลบ → สร้างใหม่สะอาด\n• แก้ทับไม่ได้แต่งวดยังเปิด → void แล้วสร้างใหม่ (เลขเปลี่ยน)\n• งวด/เดือนภาษีปิดแล้วเท่านั้นที่แก้ไม่ได้ → รายงานเป็นรายใบ\n\nอาจใช้เวลาถึง 1-2 นาที'
+                : '🧹 ลบเอกสารเดิมของการจอง #' + naCurrentResId + ' บน NextAcc?\n\n⚠ ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (ไม่สร้างใหม่)\nเลขเอกสารเดิมทั้งหมดจะเสีย (ใบใหม่ได้เลขใหม่)\nGL ของการจองนี้ (21510/21913/ลูกหนี้) กลับเป็น 0\nidempotent — กดซ้ำไม่เบิ้ล';
+            if (!confirm(confirmMsg)) return;
+            if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }   // กัน refresh ค้างชนกับ action ใหม่
+            naSetBusy(true, action === 'resyncAll' ? 'กำลัง Resync ทั้งการจอง... (อาจถึง 1-2 นาที)' : 'กำลังล้างเอกสารทั้งหมด...');
+            naFetch(naPageUrl + '?naAction=' + (action === 'resyncAll' ? 'resyncAll' : 'reset') + '&resId=' + naCurrentResId + '&_=' + Date.now(), 240000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    // resyncAll = in-place เห็นผลทันที; reset ผ่านการ void ตรง → refresh ได้เลย
+                    if (d.Success) naScheduleRefresh(1500);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
+        }
     </script>
+
+    <!-- Modal: เลือกบัญชีจ่ายคืนมัดจำ -->
+    <div class="modal fade" id="refundAccountModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header" style="background:#6d4c41; color:#fff;">
+                    <h5 class="modal-title">ยกเลิกคืนเงิน — การจอง #<span id="refundModalResIdLabel"></span></h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color:#fff;">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom:8px;">เลือกบัญชีที่ <b>จ่ายเงินคืน</b> ออก:</p>
+                    <asp:DropDownList ID="ddlRefundAccountModal" runat="server" CssClass="form-control" />
+                    <div class="help-block" style="font-size:12px; color:#777; margin-top:8px;">
+                        <b>อัตโนมัติ (บัญชีเดิม)</b> = กลับรายการใบเสร็จมัดจำ เงินคืนออกบัญชีเดิมที่รับเข้ามา (แนะนำ).<br />
+                        เลือกบัญชีเจาะจง = คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยกออกบัญชีที่เลือก
+                        (เช่น รับผ่านธนาคาร คืนเป็นเงินสด).
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <asp:HiddenField ID="hfRefundResId" runat="server" />
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">ปิด</button>
+                    <asp:Button ID="btnConfirmRefund" runat="server" Text="ยืนยันยกเลิกคืนเงิน"
+                        CssClass="btn btn-danger" OnClick="btnConfirmRefund_Click"
+                        OnClientClick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: จัดการบัญชี NextAcc รายการจอง -->
+    <div class="modal fade" id="naModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document" style="max-width:920px;">
+            <div class="modal-content">
+                <div class="modal-header" style="background:#2c3e50; color:#fff;">
+                    <h5 class="modal-title">บัญชี NextAcc — การจอง #<span id="naModalResIdLabel"></span></h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color:#fff;">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body" id="naModalBody" style="max-height:62vh; overflow:auto;"></div>
+                <div id="naBusyBar" style="padding:0 15px;"></div>
+                <div class="modal-footer" style="display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; text-align:right;">
+                    <button type="button" class="btn btn-success btn-sm" onclick="naSetCheckedIn()"
+                        title="ตั้งสถานะการจองเป็น 'เช็คอินแล้ว' โดยตรง — สำหรับเคสที่จ่ายครบแล้วแต่เช็คอินไม่สำเร็จ/สถานะค้าง (ไม่แตะเงิน/เอกสาร)">✓ ตั้งเช็คอินแล้ว</button>
+                    <button type="button" class="btn btn-default btn-sm" onclick="naLoadOverview()">🔄 ตรวจสถานะใหม่</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="naRestoreReceipts()"
+                        title="กู้ใบเสร็จที่ถูกลบในระบบกลับจากเอกสาร NextAcc ที่ถูกกู้คืน — ผูกการจอง + คืนยอดมัดจำจากประวัติ sync (idempotent)">📥 ดึงใบเสร็จกลับ</button>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="naReservationAction('resyncAll')"
+                        title="แก้เอกสารทุกใบให้ข้อมูลถูกตาม logic ปัจจุบัน — คงเลขเอกสาร NextAcc เดิม (in-place)">🔁 Resync ทั้งการจอง (คงเลขเดิม)</button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="naReservationAction('reset')"
+                        title="ทางเลือกสุดท้าย: กลับทุก JE + void ทุกเอกสาร (เลขเอกสารเดิมเสีย ไม่สร้างใหม่)">🧹 ล้างทั้งหมด (void — เลขเสีย)</button>
+                    <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">ปิด</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </asp:Content>

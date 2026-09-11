@@ -23,6 +23,34 @@ namespace Take_Time_BangPhra
         /// </remarks>
         protected global::System.Web.UI.WebControls.PlaceHolder pnlAdminNav;
 
+        /// <summary>Feature-flag menu placeholders (ซ่อนเมนูตามสวิตช์ฟีเจอร์)</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavActivitiesPub;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavAffiliatePub;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavGuestPortal;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavMemberPub;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavHousekeeping;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavChat;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavRoomService;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavLoyalty;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavReviews;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavChannelMgr;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavMaintenance;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavActivityMgmt;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavAIReport;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavHR;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavAssets;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavAffiliateAdmin;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavWebAnalytics;
+
+        /// <summary>Role-scoped menu columns (Admin/Owner)</summary>
+        protected global::System.Web.UI.WebControls.Panel pnlFinanceNav;
+        protected global::System.Web.UI.WebControls.Panel pnlCrmNav;
+
+        /// <summary>Public floating customer chat widget</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phPublicChat;
+        protected global::System.Web.UI.WebControls.Panel pnlSettingsNav;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavSettingsOwner;
+
         /// <summary>
         /// Label1 control.
         /// </summary>

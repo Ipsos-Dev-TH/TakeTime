@@ -39,6 +39,12 @@ namespace Take_Time_BangPhra.Product
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesPos)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            // กันเบราว์เซอร์ (โดยเฉพาะมือถือ) เก็บหน้า POS ลง cache แล้ว restore ฟอร์มเก่า →
+            // ViewState ไม่ตรง session → Invalid postback ตอนกดปุ่ม / ตะกร้าแสดงค่าค้าง
+            Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            Response.Cache.SetNoStore();
+
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);
@@ -112,7 +118,22 @@ namespace Take_Time_BangPhra.Product
                 }
                 else
                 {
-                    renderProduct();
+                    // เพิ่มสินค้าลงตะกร้า "เฉพาะ" เมื่อ postback มาจากช่องค้นหา/สแกน หรือปุ่ม ➕ เพิ่ม เท่านั้น
+                    // (เดิมเรียก renderProduct() ทุก postback → กดปุ่มอะไรก็ตาม เช่น ลบ/+/-/แก้ไข ระบบจะ
+                    //  เอาชื่อสินค้าที่ค้างอยู่ในช่องค้นหาไปเพิ่ม/บวกจำนวนซ้ำทุกครั้ง)
+                    string evTarget = Request["__EVENTTARGET"] ?? "";
+                    bool fromSearch = evTarget == TextBox1.UniqueID
+                                      || Request[Button3.UniqueID] != null;
+                    if (fromSearch)
+                    {
+                        renderProduct();
+                    }
+                    else
+                    {
+                        // ล้างค่าค้างในช่องค้นหา — กัน TextChanged ที่จะยิงหลัง Page_Load
+                        // ไปเรียก renderProduct() เพิ่มสินค้าซ้ำโดยที่ผู้ใช้ไม่ได้สั่ง
+                        TextBox1.Text = string.Empty;
+                    }
                 }
             }
 
@@ -146,18 +167,32 @@ namespace Take_Time_BangPhra.Product
             }
         }
 
+        // กันเพิ่มซ้ำใน postback เดียว: กด "➕ เพิ่ม" หลังพิมพ์ชื่อ → TextChanged ยิงก่อน (เพิ่มสินค้า
+        // + ล้างช่องค้นหา) แล้ว Button3_Click เรียก renderProduct ซ้ำอีกรอบในคำขอเดียวกัน
+        private bool _productAddedThisRequest = false;
+
         public void renderProduct()
         {
+            // ⛔ ช่องค้นหาว่าง = ไม่มีอะไรให้เพิ่ม — ห้าม query ต่อ!
+            // เดิมค้น "Product_Name = '' OR Barcode = ''" → แมตช์สินค้าที่ไม่มีบาร์โค้ด (ค่าว่าง)
+            // ในตาราง Product เช่น ฮูการ์เดน → ทุก postback ที่ช่องว่างจะเพิ่ม/บวกสินค้าตัวนั้นตลอด
+            string searchText = (TextBox1.Text ?? "").Trim();
+            if (searchText.Length == 0) return;
+            if (_productAddedThisRequest) return;
+            _productAddedThisRequest = true;
+
             // SECURE: Use parameterized query to prevent SQL Injection
             var parameters = new Dictionary<string, object>
             {
-                { "@ProductName", TextBox1.Text ?? "" },
-                { "@Barcode", TextBox1.Text ?? "" }
+                { "@ProductName", searchText },
+                { "@Barcode", searchText }
             };
 
+            // เทียบ Barcode เฉพาะที่มีค่าจริง — สินค้าที่ไม่มีบาร์โค้ด (NULL/ว่าง) ห้ามติดมากับการค้น
             DataTable dtProduct = code.DatabaseQuerySafe(conn,
                 "SELECT * FROM [Taketime].[dbo].[Product] " +
-                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                "WHERE [Product_Name] = @ProductName " +
+                "   OR (Barcode = @Barcode AND LTRIM(RTRIM(ISNULL(Barcode,''))) <> '')",
                 parameters);
             if (dtProduct.Rows.Count > 0)
             {
@@ -942,9 +977,12 @@ namespace Take_Time_BangPhra.Product
 
                 // ✅ Use discounted total (already calculated above)
                 int vatpercent = Convert.ToInt32(code.DatabaseQuery(conn, "SELECT [Vat_Percent] FROM [Taketime].[dbo].[Account_Vat_Type] Where ID = 1").Rows[0][0].ToString());
-                double vat = Math.Round(((total * 100) / (100+vatpercent)), 2);
-                double Total_Amount_Exclude_Vat = total - vat;
-                string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                // total เป็นยอด gross รวม VAT: ฐานก่อน VAT = total*100/(100+p), VAT = total − ฐาน
+                // (เดิมสองค่านี้สลับกัน → Account_Receipt.Vat เก็บ "ฐาน" และ Exclude_Vat เก็บ "VAT"
+                //  แล้วไหลไปผิดใน e-Tax XML: tax_basis/invoice_tax_total สลับข้าง)
+                double Total_Amount_Exclude_Vat = Math.Round(((total * 100) / (100 + vatpercent)), 2);
+                double vat = total - Total_Amount_Exclude_Vat;
+                string path = AppCfg.Get("ReceiptFolderPath").ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -1307,7 +1345,7 @@ namespace Take_Time_BangPhra.Product
                         try
                         {
                             string xmlFilePath = path + "\\" + Year + "\\" + Month + "\\" + docNum +"_"+uid+ ".xml";
-                            string xmlString = System.IO.File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
+                            string xmlString = System.IO.File.ReadAllText(AppCfg.Get("BaseFolderPath").ToString() + "\\Resources\\template.xml");
                             xmlString = xmlString.Replace("*invoice_id", docNum);
                             xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                             xmlString = xmlString.Replace("*invoice_typecode", "T03");
@@ -1445,7 +1483,7 @@ namespace Take_Time_BangPhra.Product
                                     }
                                     //DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");
 
-                                    //string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                                    //string path = AppCfg.Get("ReceiptFolderPath").ToString();
                                     //string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
 
                                     //string pdfFilePath = pdfpath;
@@ -1490,7 +1528,7 @@ namespace Take_Time_BangPhra.Product
                                     string subject = "[" + docCreateThaiDate + "][INV][" + dtReceipt.Rows[0]["ID"].ToString() + "]";
                                     string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
-                                    NumberHelper.SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox10.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                                    NumberHelper.SendEmail(AppCfg.Get("SMTP").ToString(), Convert.ToInt32(AppCfg.Get("SMTP_Port").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_EnableSsl").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_UseDefaultCredentials").ToString()), AppCfg.Get("Email_From").ToString(), AppCfg.Get("Email_Password_From").ToString(), TextBox10.Text, AppCfg.Get("Email_CC").ToString(), subject, body, dataall);
 
 
                                 }
@@ -1545,6 +1583,42 @@ namespace Take_Time_BangPhra.Product
                         "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,@ReceiptID,@PaidHowID,N'ขาย')",
                         productOutParams);
                 }
+
+                // ขายแบบออกใบกำกับ (docNum จริง): แถวถูก exclude จาก POS daily rollup
+                // (rollup กรอง Account_Receipt_ID='0') → ต้อง enqueue COGS + ตัด qty ฝั่ง NextAcc ที่นี่เอง
+                // (เดิมไม่มี → รายได้ลงแต่สต๊อก/ต้นทุนไม่ตัด: Inventory เกินจริง, COGS ขาด)
+                if (!string.IsNullOrEmpty(docNum) && docNum != "0")
+                {
+                    try
+                    {
+                        var cogsCfg = new Integration.AccountingConfig(conn);
+                        if (cogsCfg.IsConfigured && cogsCfg.Enabled)
+                        {
+                            var cogsSync = new Integration.AccountingSyncService(conn);
+                            DateTime saleDate = Convert.ToDateTime(TextBox12.Text);
+                            for (int i = 0; i < dtOrder.Rows.Count; i++)
+                            {
+                                int pid = Convert.ToInt32(dtOrder.Rows[i]["ID"]);
+                                decimal qty = Convert.ToDecimal(dtOrder.Rows[i]["Amount"]);
+                                string pname = dtOrder.Rows[i].Table.Columns.Contains("Product_Name")
+                                    ? dtOrder.Rows[i]["Product_Name"]?.ToString() ?? "" : "";
+                                decimal costPrice = 0m;
+                                var costDt = code.DatabaseQuerySafe(conn,
+                                    "SELECT ISNULL(Cost_Price, 0) FROM Product WHERE ID = @pid",
+                                    new Dictionary<string, object> { { "@pid", pid } });
+                                if (costDt != null && costDt.Rows.Count > 0)
+                                    costPrice = Convert.ToDecimal(costDt.Rows[0][0]);
+                                // EnqueueStockOutCogs กัน cost<=0 เองอยู่แล้ว; stockRef ผูกใบเสร็จ+สินค้า → idempotent
+                                cogsSync.EnqueueStockOutCogs(pid, pname, qty, costPrice, saleDate,
+                                    $"ขายหน้าร้าน (ใบกำกับ {docNum})", $"POSINV-{docNum}-{pid}");
+                            }
+                        }
+                    }
+                    catch (Exception cogsEx)
+                    {
+                        code.Logs(conn, "Accounting Sync", $"POS invoiced COGS enqueue error ({docNum}): {cogsEx.Message}", "SYSTEM");
+                    }
+                }
             }
 
             // Sync POS sale to accounting
@@ -1592,6 +1666,22 @@ namespace Take_Time_BangPhra.Product
 
         protected void GridView1_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            // ปุ่มตะกร้า (+/-/ลบ) อ้าง index ของแถว — กันเคสหน้า stale (เปิดค้าง/ย้อนจาก cache มือถือ)
+            // ที่ index ไม่ตรงตะกร้าปัจจุบัน หรือ session หมดอายุ → รีเฟรชตารางแทนการ error
+            if (e.CommandName == "Add" || e.CommandName == "Reduce" || e.CommandName == "DeleteItem")
+            {
+                var cart = Session["dtOrder"] as DataTable;
+                int cartIdx;
+                if (cart == null || !int.TryParse(e.CommandArgument?.ToString(), out cartIdx)
+                    || cartIdx < 0 || cartIdx >= cart.Rows.Count)
+                {
+                    if (cart != null) { GridView1.DataSource = cart; GridView1.DataBind(); }
+                    ClientScript.RegisterStartupScript(GetType(), "cartStale",
+                        "alert('หน้าจอไม่ตรงกับตะกร้าปัจจุบัน — รีเฟรชให้แล้ว กรุณาลองใหม่อีกครั้ง');", true);
+                    return;
+                }
+            }
+
             if (e.CommandName == "Add")
             {
                 DataTable dtOrder = (DataTable)Session["dtOrder"];

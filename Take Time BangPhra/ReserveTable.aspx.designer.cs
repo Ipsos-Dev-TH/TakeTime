@@ -49,5 +49,20 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.GridView GridView1;
+
+        /// <summary>
+        /// ddlRefundAccountModal control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlRefundAccountModal;
+
+        /// <summary>
+        /// hfRefundResId control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HiddenField hfRefundResId;
+
+        /// <summary>
+        /// btnConfirmRefund control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnConfirmRefund;
     }
 }

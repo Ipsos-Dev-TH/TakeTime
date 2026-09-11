@@ -21,6 +21,8 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmAffiliate)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "Affiliate", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             documentHelper = new DocumentHelper(conn);
             try
             {
@@ -352,7 +354,7 @@ namespace Take_Time_BangPhra.Admin
                     new code().Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentAffiliate): {accEx.Message}", "SYSTEM");
                 }
 
-                string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                string path = AppCfg.Get("PaymentFolderPath").ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);

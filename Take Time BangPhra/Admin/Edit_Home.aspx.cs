@@ -11,6 +11,7 @@ namespace Take_Time_BangPhra.Admin
     {
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.WebContent)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Owner only — เมนูเข้าหน้าแก้ไขข้อมูลดิบ (Admin/Business_Info/Customer)
             try
             {

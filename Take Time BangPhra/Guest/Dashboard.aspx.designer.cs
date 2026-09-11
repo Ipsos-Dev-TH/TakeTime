@@ -94,5 +94,20 @@ namespace Take_Time_BangPhra.Guest
         /// To modify move the field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnLogout;
+
+        /// <summary>Feature-flag placeholders (ซ่อนการ์ด/ปุ่มตามสวิตช์ฟีเจอร์)</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phQaRoomService;
+        protected global::System.Web.UI.WebControls.PlaceHolder phQaHousekeeping;
+        protected global::System.Web.UI.WebControls.PlaceHolder phPromoReview;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcRoomService;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcHousekeeping;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcActivities;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcActivityBooking;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcPoints;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcReview;
+        protected global::System.Web.UI.WebControls.PlaceHolder phSvcChat;
+        protected global::System.Web.UI.WebControls.PlaceHolder phBnRoomService;
+        protected global::System.Web.UI.WebControls.PlaceHolder phBnActivities;
+        protected global::System.Web.UI.WebControls.PlaceHolder phBnReview;
     }
 }

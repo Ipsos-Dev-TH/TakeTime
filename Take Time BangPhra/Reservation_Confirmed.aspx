@@ -489,7 +489,7 @@
                     <asp:Panel ID="pnlReceiptLinks" runat="server" Visible="false"
                         style="margin-top: 8px; padding: 6px; background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 4px; border: 1px solid #c8e6c9;">
                         <div style="font-size: 0.7em; color: #2e7d32; font-weight: bold; margin-bottom: 4px;">
-                            🧾 ใบกำกับภาษี
+                            🧾 เอกสารการชำระเงิน (ใบเสร็จ/ใบกำกับภาษี)
                         </div>
                         <asp:Repeater ID="rptReceipts" runat="server">
                             <ItemTemplate>
@@ -497,7 +497,7 @@
                                     <a href='<%# GetReceiptPDFUrl(Eval("ID"), Eval("UID"), Eval("Created_Date")) %>'
                                        target="_blank"
                                        style="color: #4caf50; text-decoration: none; font-weight: bold; font-size: 0.75em;">
-                                        📄 <%# Eval("ID") %> (<%# Eval("Total_Amount", "{0:N2}") %> บาท)
+                                        📄 <%# GetReceiptDocLabel(Eval("IsDeposit")) %> <%# Eval("ID") %> (<%# Eval("Total_Amount", "{0:N2}") %> บาท)
                                     </a>
                                 </div>
                             </ItemTemplate>

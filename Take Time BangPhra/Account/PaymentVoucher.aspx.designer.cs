@@ -150,6 +150,21 @@ namespace Take_Time_BangPhra.Account.Report
         protected global::System.Web.UI.WebControls.DropDownList ddlLineCategory;
 
         /// <summary>
+        /// ddlPaidHowNexaacc control (แหล่งจ่ายเงินจากผังบัญชี NextAcc โดยตรง).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlPaidHowNexaacc;
+
+        /// <summary>
+        /// ddlLineChargeNexaacc control (ผังบัญชีค่าใช้จ่ายจาก NextAcc โดยตรง ต่อรายการ).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlLineChargeNexaacc;
+
+        /// <summary>
+        /// ddlVatClaim control (เคลม/ไม่เคลมภาษีซื้อ §82/5).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlVatClaim;
+
+        /// <summary>
         /// TextBox1 control.
         /// </summary>
         /// <remarks>

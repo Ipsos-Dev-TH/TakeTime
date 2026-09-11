@@ -15,15 +15,19 @@ namespace Take_Time_BangPhra.Admin
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         protected void Page_Load(object sender, EventArgs e)
         {
+            bool loggedIn = false;
             try
             {
                 if (Session["permission"].ToString() == "True")
                 {
-                    //Response.Redirect("/ReserveTable.aspx");
+                    // โหมดเปลี่ยนรหัสผ่าน (ล็อกอินอยู่แล้ว)
+                    loggedIn = true;
                     Button1.Visible = false;
                     Button2.Visible = true;
                     Label9.Text = "Password";
                     Label10.Text = "Confirm Pssword";
+                    litTitle.Text = "เปลี่ยนรหัสผ่าน";
+                    litSub.Text = "ตั้งรหัสผ่านใหม่สำหรับบัญชีของคุณ";
                 }
             }
             catch
@@ -32,6 +36,53 @@ namespace Take_Time_BangPhra.Admin
                 Button2.Visible = false;
                 Label9.Text = "User";
                 Label10.Text = "Pssword";
+            }
+
+            // ปุ่ม "เข้าสู่ระบบด้วย LINE" — โชว์เฉพาะตอนยังไม่ล็อกอิน และตั้งค่า LINE Login ครบแล้ว
+            if (!loggedIn)
+            {
+                try
+                {
+                    var line = new Take_Time_BangPhra.Services.LineLoginService(conn);
+                    pnlLineLogin.Visible = line.IsEnabled && line.IsConfigured;
+                }
+                catch { pnlLineLogin.Visible = false; }
+            }
+        }
+
+        /// <summary>
+        /// เข้าสู่ระบบด้วย LINE — จับคู่จาก Line_UserId ที่ผูกไว้
+        /// ยังไม่เคยผูก → ระบบพาไปหน้าเลือกชื่อตัวเองให้เอง (Mobile/LineLink)
+        /// </summary>
+        protected void btnLineLogin_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var line = new Take_Time_BangPhra.Services.LineLoginService(conn);
+                if (!line.IsEnabled || !line.IsConfigured)
+                {
+                    ClientScript.RegisterStartupScript(GetType(), "nocfg",
+                        "alert('ยังไม่ได้ตั้งค่า LINE Login กรุณาติดต่อผู้ดูแลระบบ');", true);
+                    return;
+                }
+
+                // กลับไปหน้าที่ตั้งใจจะไป (ถ้าถูกส่งมาจากหน้าอื่น) — เฉพาะ path ภายใน กัน open redirect
+                string ret = Request.QueryString["returnUrl"];
+                if (string.IsNullOrEmpty(ret) || !ret.StartsWith("/") || ret.StartsWith("//"))
+                    ret = "/ReserveTable";
+
+                string state = Guid.NewGuid().ToString("N");
+                Session["LineLinkState"] = state;
+                Session["LineLinkPurpose"] = "login";
+                Session["LineLinkReturn"] = ret;
+                Response.Redirect(line.BuildAuthorizeUrl(state), false);
+                Context.ApplicationInstance.CompleteRequest();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("LINE login start error: " + ex.Message);
+                ClientScript.RegisterStartupScript(GetType(), "lnerr",
+                    "alert('เริ่มเข้าสู่ระบบด้วย LINE ไม่สำเร็จ กรุณาลองใหม่');", true);
             }
         }
 

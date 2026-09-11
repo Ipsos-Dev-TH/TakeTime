@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -470,7 +470,7 @@ namespace Take_Time_BangPhra.API
                 string uid = row["UID"].ToString();
                 string receiptId = row["ID"].ToString();
 
-                string basePath = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"];
+                string basePath = AppCfg.Get("ReceiptFolderPath");
                 string year = createdDate.Year.ToString();
                 string month = createdDate.Month.ToString("00");
 
@@ -513,7 +513,7 @@ namespace Take_Time_BangPhra.API
                 return false;
 
             // ดึง API Key จาก database หรือ config
-            string validApiKey = System.Configuration.ConfigurationManager.AppSettings["TaxInvoiceApiKey"];
+            string validApiKey = AppCfg.Get("TaxInvoiceApiKey");
 
             // ถ้ายังไม่ได้ตั้งค่า API Key ให้ใช้ค่า default (ควรเปลี่ยนในระบบ production)
             if (string.IsNullOrEmpty(validApiKey))
@@ -607,6 +607,10 @@ namespace Take_Time_BangPhra.API
                           Address = CASE WHEN @address = '' THEN Address ELSE @address END
                           WHERE MobilePhone = @phone",
                         updateParams);
+
+                    // แก้ข้อมูลลูกค้าผ่าน API → sync ผู้ติดต่อไป NextAcc ด้วย (background, กลืน error)
+                    Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(
+                        _connectionString, customer.Phone);
                 }
 
                 return dt.Rows[0]["ID"].ToString();
@@ -627,6 +631,10 @@ namespace Take_Time_BangPhra.API
                 @"INSERT INTO Customer (MobilePhone, FullName, Email, IDNumber, Address, Customer_Type_ID)
                   VALUES (@phone, @name, @email, @idNumber, @address, @customerType)",
                 insertParams);
+
+            // ลูกค้าใหม่จาก API → sync ผู้ติดต่อไป NextAcc ด้วย (background, กลืน error)
+            Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(
+                _connectionString, customer.Phone);
 
             // ดึง ID ของลูกค้าที่สร้าง
             DataTable dtNew = _code.DatabaseQuerySafe(_connectionString,

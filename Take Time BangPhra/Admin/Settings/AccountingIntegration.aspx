@@ -1,4 +1,4 @@
-<%@ Page Title="Accounting Integration Settings" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AccountingIntegration.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AccountingIntegration" %>
+﻿<%@ Page Title="Accounting Integration Settings" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AccountingIntegration.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AccountingIntegration" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -32,8 +32,12 @@
         .btn-success:hover { background: #388E3C; }
         .btn-warning { padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
         .btn-warning:hover { background: #F57C00; }
+        .btn-secondary { padding: 10px 20px; background: #607D8B; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
+        .btn-secondary:hover { background: #455A64; }
+        .btn-danger { padding: 10px 20px; background: #E53935; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: 'Prompt', sans-serif; }
+        .btn-danger:hover { background: #C62828; }
 
-        .test-result { margin-top: 10px; padding: 10px 15px; border-radius: 8px; font-size: 13px; display: none; }
+        .test-result { margin-top: 10px; padding: 10px 15px; border-radius: 8px; font-size: 13px; display: none; white-space: pre-line; }
         .test-result.success { display: block; background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9; }
         .test-result.error { display: block; background: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
         .test-result.loading { display: block; background: #E3F2FD; color: #1565C0; border: 1px solid #BBDEFB; }
@@ -111,9 +115,19 @@
                     <div class="help-text">URL ของ Nexaacc API Server</div>
                 </div>
                 <div class="config-item">
-                    <label>API Key</label>
-                    <input type="password" id="cfgApiKey" placeholder="ใส่ API Key จากระบบ Nexaacc" />
-                    <div class="help-text">API Key สร้างได้จากหน้า Settings ของระบบ Nexaacc (ส่งผ่าน X-Api-Key header)</div>
+                    <label>Integration Key (int_) <span style="color:#c0392b;">*จำเป็น</span></label>
+                    <input type="password" id="cfgApiKey" placeholder="int_..." />
+                    <div id="cfgApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
+                    <div class="help-text">สร้างจาก NextAcc → เมนู <b>Integrations</b> (ไม่ใช่ API Keys). ใช้กับ sync หลัก
+                        (/api/integration/* ผ่าน X-Integration-Key). คีย์นี้ครอบคลุม company endpoints ได้ด้วย</div>
+                </div>
+                <div class="config-item">
+                    <label>Company API Key (acc_) <span style="color:#7f8c8d;">— ไม่บังคับ</span></label>
+                    <input type="password" id="cfgCompanyApiKey" placeholder="acc_... (เว้นว่าง = ใช้ int_ ตัวเดียว)" />
+                    <div id="cfgCompanyApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
+                    <div class="help-text">สร้างจาก NextAcc → เมนู <b>API Keys</b>. ตั้งคู่กับ int_ เพื่อให้ company endpoints
+                        (/api/companies/* — ใบเสร็จ/เอกสาร, OCR, บังคับแหล่งเงิน, E-Tax, WHT, chart) auth ด้วย acc_ โดยตรง
+                        ผ่าน X-Api-Key (robust สุด ไม่พึ่ง fallback). เว้นว่าง → ใช้ int_ ตัวเดียว</div>
                 </div>
                 <div class="config-item">
                     <label>Company ID (GUID)</label>
@@ -121,7 +135,7 @@
                 </div>
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ API Key</button>
+                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ Key (int_ + acc_)</button>
                     <button type="button" class="btn-primary" onclick="syncAccounts()"><i class="fas fa-cloud-download-alt"></i> Sync บัญชี</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
@@ -130,6 +144,19 @@
             <!-- Sync Settings -->
             <div class="acc-card">
                 <h3><i class="fas fa-sync-alt"></i> Sync Settings</h3>
+
+                <!-- ⭐ ตั้งค่าแนะนำ (กดทีเดียว ตั้งค่าถูกทั้งชุด) -->
+                <div style="background:#e8f0fe; border:1px solid #4285f4; border-radius:6px; padding:12px; margin-bottom:14px;">
+                    <label style="font-weight:700; color:#1a56c4; font-size:15px;"><i class="fas fa-star"></i> ตั้งค่าแนะนำ (Production) — กดทีเดียวจบ</label>
+                    <div style="font-size:12px; color:#444; margin:6px 0;">
+                        ตั้งค่าทั้งชุดเป็น<b>เส้นทางที่ทดสอบแล้วถูกต้อง</b>: เอกสารรับ B2B = <b>company Receipt(3)</b> หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำในใบ + e-Tax T03,
+                        หักมัดจำ = <b>drives (JE เดียว Dr แหล่งเงินสุทธิ + Dr 21510)</b>, มัดจำ VAT = รับรู้ตอนเช็คเอาท์, เปิด safety-net.
+                        <br/><b style="color:#c0392b;">แก้ต้นเหตุ:</b> เดิมไปเส้น isCashSale → หัวขึ้น "ใบเสร็จรับเงิน" + มัดจำไม่หักในใบ (6,400 เต็ม). กดปุ่มนี้เคลียร์ toggle ที่เปิดซ้อน/ตายแล้ว กลับสู่ค่ามาตรฐาน.
+                    </div>
+                    <button type="button" class="btn-success" onclick="applyRecommendedPreset()"><i class="fas fa-star"></i> ใช้ค่าแนะนำ (Production)</button>
+                    <div class="test-result" id="presetResult"></div>
+                </div>
+
                 <div class="config-item">
                     <label>เปิดใช้งาน Sync</label>
                     <select id="cfgEnabled">
@@ -168,9 +195,91 @@
                     <select id="cfgPayrollSyncMode">
                         <option value="">ใช้ค่าเริ่มต้น</option>
                         <option value="LOCAL">LOCAL — ไม่ส่ง NextAcc</option>
-                        <option value="DOCUMENT">DOCUMENT — สร้างเอกสารค่าใช้จ่ายใน NextAcc</option>
-                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — บันทึกสมุดบัญชีอย่างเดียว</option>
+                        <option value="JOURNAL_ONLY">JOURNAL_ONLY — โพสต์ GL จากยอดเรา (ค่าเริ่มต้น, ไม่ออก ภงด.1/สปส/payslip)</option>
+                        <option value="DOCUMENT_IMPORT">DOCUMENT_IMPORT — ส่งยอดที่เราคำนวณ → NextAcc ออกเอกสารครบ (GL+ภงด.1+สปส+50ทวิ+payslip) ตามยอดเรา ✅ แนะนำสำหรับยอดผันแปร</option>
+                        <option value="DOCUMENT">DOCUMENT — NextAcc คำนวณใหม่เอง (เฉพาะเงินเดือนคงที่)</option>
                     </select>
+                </div>
+                <div class="config-item">
+                    <label>ขายหน้าร้านไม่ออกใบกำกับ → รวบรายวัน</label>
+                    <select id="cfgPosDailyRollup">
+                        <option value="false">ปิด — ไม่รวบ (ขายไม่ออกใบกำกับจะไม่ขึ้น NextAcc)</option>
+                        <option value="true">เปิด — รวบเป็นใบรับเงินสดสรุปรายวันอัตโนมัติ</option>
+                    </select>
+                    <div class="help-text">
+                        เปิดแล้ว ระบบจะรวบการขายหน้าร้านที่ <b>ไม่ติ๊ก "ออกใบกำกับภาษีในระบบ"</b> ของแต่ละวัน
+                        เป็น <b>ใบรับเงินสดสรุป 1 ใบ/วัน/แหล่งรับเงิน</b> → ส่ง NextAcc (Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย)
+                        + ตัดต้นทุน (Dr COGS/Cr สินค้าคงเหลือ) อัตโนมัติเบื้องหลัง (ไม่ต้องกดรายวัน).
+                        กรณีที่ออกใบกำกับในระบบยังยิงทีละใบเหมือนเดิม.
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>อ่านอีเมลตอบกลับจากกรมสรรพากร → มาร์ค e-Tax สำเร็จ</label>
+                    <select id="cfgEtaxRdWatch">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — อ่านอีเมลตอบกลับแล้วมาร์คใบกำกับว่า "สรรพากรรับแล้ว"</option>
+                    </select>
+                    <div class="help-text">
+                        ใช้กล่องอีเมลเดียวกับระบบอ่านอีเมลจอง (ตั้งค่าด้านล่าง) — ระบบจะอ่านอีเมลจากผู้ส่งที่ระบุ
+                        หาเลขเอกสาร/เลขใบเสร็จในอีเมล แล้วมาร์คใบนั้นว่านำส่งสำเร็จ
+                        <b>แสดงผลที่หน้า ส่ง e-Tax และหน้าผู้เข้าพักรายวัน</b><br />
+                        มาร์คเฉพาะอีเมลที่มีคำยืนยันความสำเร็จ — อีเมลแจ้งข้อผิดพลาดจะไม่ถูกนับ
+                    </div>
+                    <label style="margin-top:8px;">อีเมลผู้ส่งที่ถือว่าเป็นกรมสรรพากร (คั่นจุลภาค)</label>
+                    <input type="text" id="cfgEtaxRdFrom" placeholder="rd.go.th, etax, teda.th" />
+                </div>
+                <div class="config-item">
+                    <label>รูมเซอร์วิส (สั่งอาหารผ่าน Guest Portal) → ลงบัญชี</label>
+                    <select id="cfgRoomServiceRevenue">
+                        <option value="false">ปิด — ไม่ลงบัญชี (ออเดอร์ที่ลูกค้าจ่ายเองจะไม่มีรายได้ในระบบบัญชี และไม่ตัดต้นทุน)</option>
+                        <option value="true">เปิด — ลงรายได้ + ตัดต้นทุนอัตโนมัติ</option>
+                    </select>
+                    <div class="help-text">
+                        เปิดแล้วระบบจะจัดการออเดอร์รูมเซอร์วิสของ <b>วันที่ผ่านไปแล้ว</b> ให้อัตโนมัติ:<br />
+                        • <b>ลูกค้าจ่ายเอง (โอน/เงินสด)</b> → รวบเป็น <b>ใบรับเงินสด 1 ใบ/วัน/วิธีจ่าย</b>
+                        (Dr เงินสด/ธนาคาร · Cr รายได้สินค้า · Cr ภาษีขาย) + ตัดต้นทุน (Dr COGS · Cr สินค้าคงเหลือ)<br />
+                        • <b>ลงบิลห้อง (Charge to room)</b> → <b>ตัดต้นทุนอย่างเดียว</b> เพราะรายได้ไปกับใบเสร็จตอนเช็คเอาท์อยู่แล้ว
+                        (ไม่โพสต์รายได้ซ้ำ)<br />
+                        ต้องรัน migration <code>PHASE18_20</code> ก่อน — ออเดอร์เก่าก่อนติดตั้งถูกทำเครื่องหมาย LEGACY ไม่ถูกลงย้อนหลัง
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>รายได้ค่าห้องจาก OTA (Agoda/Booking) → ลงบัญชี</label>
+                    <select id="cfgOtaRoomRevenue">
+                        <option value="false">ปิด — ไม่ลงบัญชี (การจองจาก OTA ไม่มีใบเสร็จ รายได้ค่าห้องจึงไม่เข้าบัญชีเลย)</option>
+                        <option value="true">เปิด — ลงรายได้ตามการจองจริง เป็นลูกหนี้ OTA</option>
+                    </select>
+                    <div class="help-text">
+                        การจองที่เข้ามาทางอีเมล OTA ถูกสร้างแบบ "ไม่ออกใบเสร็จ" → รายได้ค่าห้องไม่เคยเข้าบัญชี
+                        เปิดตัวเลือกนี้ ระบบจะโพสต์ <b>ต่อการจอง</b> หลังเลยวันเช็คเอาท์:
+                        <b>Dr ลูกหนี้ OTA · Cr รายได้ห้อง · Cr ภาษีขาย</b> (ยอดขายเต็มที่ลูกค้าจ่าย OTA)
+                        แล้วเงินที่ OTA โอนเข้ามาจริงค่อยไปตัดลูกหนี้ก้อนนี้ตอนปิดงวด payout (ค่าคอมเป็นค่าใช้จ่ายแยก)<br />
+                        <b>ต้องตั้งก่อน:</b> map บัญชี <code>OTA_RECEIVABLE</code> (ลูกหนี้ OTA) ในผังบัญชี + กด "ดึง Chart of Accounts"
+                        + ตั้ง Company ID ให้ใช้ company endpoints ได้ — ถ้ายังไม่ครบ ระบบจะ<b>ข้ามและเขียน log แจ้ง</b>
+                        (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน migration <code>PHASE18_20</code> และ <code>PHASE18_11</code>
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>Sync จำนวนสต๊อก → NextAcc (ขาออก)</label>
+                    <select id="cfgStockQtySync">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ดันจำนวนรับเข้า/ตัดออก ไป NextAcc (/product/stock/adjust)</option>
+                    </select>
+                    <div class="help-text">
+                        ดันจำนวนสต๊อก (รับเข้า/ขาย/ปรับ/ตัดจำหน่าย) ของ TakeTime ไปอัปเดต qty ฝั่ง NextAcc แบบ qty-only
+                        (ไม่ซ้ำ GL กับ journal ที่ส่งอยู่). ต้อง Sync ผังสินค้า (product master) ให้ map ก่อน
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>Sync จำนวนสต๊อก ← NextAcc (ขากลับ)</label>
+                    <select id="cfgStockQtyPull">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ดึงการปรับสต๊อกที่ทำฝั่ง NextAcc กลับเข้า TakeTime</option>
+                    </select>
+                    <div class="help-text">
+                        ดึง stock movement ที่ <b>ปรับ/นับ/โอนในฝั่ง NextAcc เอง</b> กลับมาลง Product_In/Out ของ TakeTime
+                        (กัน echo ด้วย movement id). เปิดคู่กับขาออกเพื่อให้สต๊อกตรงกัน 2 ทาง
+                    </div>
                 </div>
                 <div class="config-item">
                     <label>แนบไฟล์เอกสาร</label>
@@ -190,6 +299,152 @@
                         RECEIPT: เมื่อรับมัดจำ ระบบจะแยก VAT ยิงเข้าบัญชีภาษีขาย (OUTPUT_VAT) ทันที —
                         ถูกต้องตามประมวลรัษฎากร ม.78/1 (ธุรกิจบริการ จุดความรับผิด VAT = วันรับเงิน).
                         CHECKOUT: เลื่อนรับรู้ VAT ไปตอนตัดมัดจำเป็นรายได้
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDeferOutputVat" />
+                        พักภาษีขายมัดจำไว้ที่ "ภาษีขายรอเรียกเก็บ" (21913) แล้วโอนเข้าภาษีขายตอนเช็คเอาท์
+                    </label>
+                    <div class="help-text">
+                        ใช้ได้เฉพาะโหมด RECEIPT — เมื่อเปิด ตอนรับมัดจำจะ Cr บัญชี OUTPUT_VAT_DEFERRED (21913)
+                        แทน OUTPUT_VAT แล้วโอนกลับเข้า OUTPUT_VAT (21911) ตอนเช็คเอาท์ (VAT ขึ้น ภ.พ.30 ตอนรับรู้รายได้).
+                        ⚠ ต้อง map บัญชี OUTPUT_VAT_DEFERRED ก่อนเปิด มิฉะนั้นระบบจะ fallback กลับไปใช้ OUTPUT_VAT
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDrivesJournal" />
+                        ลง JE หักมัดจำไว้ในใบกำกับ/ใบเสร็จเช็คเอาท์ใบเดียว (NextAcc "โหมดขับ JE")
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        เมื่อเปิด: ใบเช็คเอาท์ที่หักมัดจำจะลง JE self-contained ในใบเดียว
+                        (Dr เงินสดสุทธิ + Dr เงินมัดจำ 217xx + Dr ภาษีขายรอเรียกเก็บ 21913 / Cr รายได้ / Cr ภาษีขาย)
+                        แทนการยิง JV หักมัดจำแยกอีกใบ.
+                        <br /><strong style="color:#c0392b;">⚠ เปิดได้เมื่อ NextAcc deploy รองรับ depositAppliedDrivesJournal แล้วเท่านั้น</strong> —
+                        ถ้าเปิดก่อน NextAcc พร้อม บัญชี 217xx/21913 จะไม่ถูกกลับ (GL ไม่บาลานซ์).
+                        ปิดไว้ (default) = โชว์ "หักเงินมัดจำ/ยอดสุทธิ" บนใบ แต่ JE หักมัดจำยังยิงเป็น JV แยก (GL ถูกเหมือนเดิม)
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgDepositDrivesJournalRef" />
+                        รองรับมัดจำที่เป็น JV-INT journal ในโหมดขับ JE (NextAcc cb55e3b)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        (ใช้คู่กับตัวบน) เมื่อเปิด: มัดจำที่ sync มาเป็น "journal (JV-INT-…)" ไม่ใช่ใบเสร็จ (REC-)
+                        จะส่งเลข JE ให้ NextAcc กลับ deferred ในใบเดียว (self-contained). ปิดไว้ (default) =
+                        มัดจำ JV-INT ใช้ reverse-JE แยก (GL ถูก ไม่ค้าง draft).
+                        <br /><strong style="color:#c0392b;">⚠ เปิดได้เมื่อ NextAcc deploy cb55e3b แล้วเท่านั้น</strong> —
+                        ถ้าเปิดก่อน NextAcc พร้อม เอกสารจะค้าง draft (approve ไม่ผ่าน; มี auto-fallback แต่ควรเปิดตามลำดับ)
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgAutoRecoverDeposit" />
+                        Auto-recover มัดจำเก่าที่ถูกกลับค้าง (un-reverse → drives ทำ JE เดียว)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        booking เก่าที่รับมัดจำสมัย drives ปิด แล้ว void+sync ใหม่หลายรอบ → มัดจำถูก reverse ค้าง
+                        → drives กลับซ้ำไม่ได้ (NextAcc "ไม่พบใบมัดจำ"). เปิดตัวนี้: ตอนเช็คเอาท์จะ un-reverse
+                        (กลับตัว reversal) คืนมัดจำให้ active → drives ทำ JE เดียว (Dr เงินสดสุทธิ) ได้. idempotent.
+                        <br />ปิดไว้ (default) = ใช้ guard เดิม (2 JE, ยอดสุทธิถูก, ปลอดภัยสุด).
+                        <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test + ตรวจ GL 1-2 ใบ</strong> — booking ที่ churn
+                        หนักควรดู GL ด้วยตา (un-reverse คืนเฉพาะ JE มัดจำ ไม่แตะ adjustment ค้างอื่น)
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgPostSyncVerify" />
+                        ตรวจย้อนกลับหลัง sync (Post-sync verify) — make sure ลงถูกบน NextAcc
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #27ae60; padding-left:8px;">
+                        หลัง sync สำเร็จ ระบบอ่านเอกสาร+JE+ไฟล์แนบกลับจาก NextAcc มาเทียบกับความจริงฝั่งเรา —
+                        <b>ทั้งฝั่งรับ (ใบเสร็จ/เช็คเอาท์)</b>: ยอดตรง / JE บาลานซ์ / 21510 ไม่ติดลบ / สลิปแนบครบ,
+                        และ <b>ฝั่งจ่าย (ใบสำคัญจ่าย)</b>: JE บาลานซ์ / โพสต์แล้ว / ยอดตรง / ไฟล์แนบครบ
+                        → แสดง ✅/⚠ คอลัมน์ "ตรวจสอบ" ในคิว (⚠ = พบผิดปกติ, ชี้เมาส์ดูรายละเอียด). read-only
+                        ไม่แก้อะไรบน NextAcc. เปิดไว้ (default) แนะนำ; ปิดเพื่อลด API call ต่อการ sync.
+                    </div>
+                </div>
+                <div class="config-item">
+                    <label>
+                        <input type="checkbox" id="cfgAutoReconcileDeposit" />
+                        Auto-reconcile 21510 ติดลบ (ล้าง adjustment มัดจำค้างอัตโนมัติ)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #e67e22; padding-left:8px;">
+                        (ต่อยอดจาก verify) ถ้า verify เจอ <b>บัญชีมัดจำ 21510 ติดลบ</b> + เช็คเอาท์รอบนี้ใช้ drives
+                        สำเร็จ → ระบบ reverse <b>adjustment มัดจำค้าง (-DEPADJ)</b> ที่เหลือจาก churn เท่าที่จำเป็น
+                        (หยุดเมื่อ 21510 กลับ ~0 ไม่ over-correct) แล้ว <b>ตรวจซ้ำ</b> บันทึกผลจริง. ทุก movement เป็น
+                        JE reversal จริง (audit ครบ). ถ้ายังไม่ 0 (สาเหตุอื่น) → คงเตือนให้ตรวจมือ.
+                        <br />ปิดไว้ (default) = verify แจ้งเตือนเฉย ๆ เคลียร์มือ.
+                        <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test</strong> — จัดการเคส churn ช่วง dev; booking ใหม่ปกติไม่ติดลบอยู่แล้ว
+                    </div>
+                </div>
+                <div class="config-item" style="background:#f1f3f4; border:1px dashed #bbb; border-radius:4px; padding:8px;">
+                    <label style="color:#666;"><i class="fas fa-info-circle"></i> การออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำ</label>
+                    <div class="help-text" style="padding-left:4px;">
+                        จัดการอัตโนมัติผ่าน<b>ปุ่ม "⭐ ใช้ค่าแนะนำ" ด้านบน</b> — route เอกสารรับ B2B ไปเส้น
+                        <b>ใบกำกับขายสด (isCashSale)</b>: ใบเดียว หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน", หักมัดจำในใบ, ออก e-Tax ได้.
+                        <br/><small style="color:#999;">(toggle ทดลอง isCashSale เดิม — TaxReceipt_SingleDoc / CashSale_Deposit / NativeA — <b>เอาออกแล้ว</b>: ตัวแรก 2 ตัวไม่มีผลต่อโค้ด, การหักมัดจำใช้ drives ผ่านค่าแนะนำแทน)</small>
+                    </div>
+                </div>
+                <div class="config-item" style="background:#e8f5e9; border:1px solid #a5d6a7; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleCompanyDoc" />
+                        📄 ขายสด B2B ออก <b>เอกสารใบเดียว</b> (ใบกำกับภาษี/ใบเสร็จรับเงิน) — แก้ปัญหาได้ 3 ใบ
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #43a047; padding-left:8px;">
+                        ปิดอยู่ = ใช้เส้น integration invoice ซึ่ง production NextAcc <b>ยังไม่ honor isCashSale</b>
+                        → ใบกำกับเปิดลูกหนี้ แล้วระบบต้องปิดด้วยใบรับชำระทีละงวด ⇒ ลูกค้าได้ <b>3 ใบ</b>
+                        (ใบกำกับ 1 + ใบรับชำระ 2 ซึ่งใบยอดมัดจำดูเหมือนออกซ้ำกับใบเสร็จมัดจำเดิม)
+                        <br />เปิด = ยิงผ่าน company <code>/document</code> ด้วย <code>TaxInvoice + IssuedAsCashReceipt</code>
+                        → NextAcc ลง <b>Dr เงินสด + กลับมัดจำ ในใบเดียว ไม่เปิดลูกหนี้ ไม่มีใบรับชำระแยก</b>
+                        + หัว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + e-Tax
+                        <br /><strong style="color:#c0392b;">⚠ ต้องตรวจ JE ใบแรกจริงก่อนใช้ต่อ</strong> — ถ้า NextAcc
+                        ยังเปิดลูกหนี้ ระบบจะ fallback settle ให้เอง (GL ยังถูก แต่ได้ใบเสร็จเพิ่มเหมือนเดิม) และเขียน log ไว้
+                    </div>
+                </div>
+                <div class="config-item" style="background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgCashSaleUseReceipt" />
+                        🚑 ใช้ "ใบเสร็จรับเงิน (Receipt)" แทนใบกำกับ — <b>ปกติควรปิด</b>
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #f57c00; padding-left:8px;">
+                        เช็คเอาท์ลูกค้ามีเลขภาษี → ออกเป็น <b>Receipt (type 3)</b> ซึ่ง NextAcc AutoPost เป็น
+                        <b>Dr เงินสด / Cr รายได้ราย line / Cr ภาษีขาย — ไม่มีลูกหนี้การค้า</b> + หักมัดจำในใบ (Dr 21510/21913)
+                        <br /><strong style="color:#c0392b;">⚠ ข้อแลก: หัวเอกสารจะเป็น "ใบเสร็จรับเงิน" เสมอ และไม่ออก e-Tax XML</strong>
+                        — ตรวจกับ NextAcc แล้ว: หัวเอกสารมาจาก flag บนตัวเอกสาร
+                        (<code>ComputeDocumentTitle</code>: ขายสด/IssuedAsCashReceipt → "ใบกำกับภาษี/ใบเสร็จรับเงิน",
+                        ไม่ประสงค์รับใบกำกับ → "ใบเสร็จรับเงิน") <b>Receipt(3) จึงไม่ upgrade หัวไม่ว่าผู้ซื้อมีเลขภาษีครบแค่ไหน</b>
+                        <br /><b>ลูกค้าขอใบกำกับภาษี = ต้องปิด checkbox นี้</b> (ปิดแล้วไปเส้นใบกำกับขายสด ใบเดียว หักมัดจำในใบ + e-Tax)
+                        <br />เปิด <b>ชั่วคราว</b> ระหว่างรอ NextAcc deploy isCashSale → deploy เสร็จให้ <b>ปิด flag นี้</b> กลับไปใช้ใบกำกับ+e-Tax.
+                    </div>
+                </div>
+                <div class="config-item" style="background:#e8f5e9; border:1px solid #a5d6a7; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgStockInUseGRNI" />
+                        📦 GR/IR — รับสินค้าเข้าสต๊อกเครดิต <b>GRNI (พักรับของ)</b> แทนเจ้าหนี้การค้า
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #43a047; padding-left:8px;">
+                        รับของ (Product/In) → <b>Dr สินค้าคงเหลือ / Cr GRNI 21240</b> (ไม่มี VAT ไม่แตะเจ้าหนี้).
+                        ใบกำกับซื้อที่ผู้ใช้ OCR ทีหลัง → เลือกบัญชีเดบิต <b>"🔄 ล้างรับของ GRNI"</b> → NextAcc โพสต์
+                        <b>Dr GRNI + Dr ภาษีซื้อ / Cr เงินสด-เจ้าหนี้</b> = ล้างพักรับของ + เคลมภาษีซื้อได้ ไม่โพสต์ต้นทุนซ้ำ.
+                        <br /><strong style="color:#c0392b;">⚠ ต้อง map บัญชี GRNI (21240) ให้ตรงกับ CoA ของ NextAcc</strong> + เปิดใช้แล้ว
+                        ผู้ใช้ <b>ต้องเลือก "ล้างรับของ GRNI" ตอน OCR ใบกำกับสินค้า</b> มิฉะนั้นต้นทุนซ้ำ. ตรวจยอดค้างได้ที่ปุ่ม "ตรวจยอดคงค้าง GRNI".
+                        <br />ปิด = พฤติกรรมเดิม (รับของ Cr เจ้าหนี้การค้า).
+                    </div>
+                </div>
+                <div class="config-item" style="background:#fff3e0; border:1px solid #ffb74d; border-radius:4px; padding:8px;">
+                    <label>
+                        <input type="checkbox" id="cfgStockInSkipJournal" />
+                        🚫 ปิด JE ตอนรับของ — ให้ <b>ใบกำกับซื้อ (OCR) โพสต์บัญชีทั้งหมดอย่างเดียว</b> (invoice-only)
+                    </label>
+                    <div class="help-text" style="border-left:3px solid #fb8c00; padding-left:8px;">
+                        รับของ (Product/In) จะ <b>ไม่ยิง JE ไป NextAcc เลย</b> (ทับ GR/IR ด้านบน). ใบกำกับซื้อที่ OCR เป็นตัวโพสต์
+                        สินค้า/ค่าใช้จ่าย + VAT + เจ้าหนี้ ทั้งหมด → ไม่มี GRNI ไม่ต้องแมพ ไม่มีทางเบิ้ล.
+                        <br /><strong style="color:#c0392b;">⚠ ใบกำกับต้องเดบิต "สินค้าคงเหลือ"</strong> (ไม่ใช่ค่าใช้จ่าย) มิฉะนั้น COGS ตอนขาย
+                        (Dr COGS / Cr สินค้าคงเหลือ) จะทำให้ <b>สต๊อกติดลบ</b> เพราะไม่มี Dr สินค้าคงเหลือตอนรับของ.
+                        เหมาะกับกิจการที่ให้ใบกำกับเป็นตัวลงต้นทุนสินค้าเสมอ. ปกติ (ยังตัด COGS รายการขาย) แนะนำใช้ GR/IR แทน.
                     </div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
@@ -232,6 +487,11 @@
                     <label>หัวข้ออีเมล E-Tax</label>
                     <input type="text" id="cfgEtaxEmailSubject" placeholder="ใบกำกับภาษีอิเล็กทรอนิกส์ {ReceiptNumber}" />
                     <div class="help-text">ตัวแปร: {ReceiptNumber}, {GuestName}, {Amount}, {Date}</div>
+                </div>
+                <div class="config-item">
+                    <label>สำเนา (CC) เริ่มต้น — อีเมล E-Tax</label>
+                    <input type="text" id="cfgEtaxEmailCc" placeholder="acc@company.com, boss@company.com" />
+                    <div class="help-text">เติมอัตโนมัติในหน้าส่ง e-Tax (แก้รายใบได้) — คั่นหลายอีเมลด้วย , หรือ ;</div>
                 </div>
                 <div class="config-item">
                     <label>เนื้อหาอีเมล E-Tax</label>
@@ -281,9 +541,347 @@
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
                     <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
+                    <button type="button" class="btn-danger" onclick="reconcileDeleted()"><i class="fas fa-trash-alt"></i> ตรวจ &amp; ลบใบที่หายจาก NextAcc</button>
+                    <button type="button" class="btn-warning" onclick="cleanupOrphanReceipts()"><i class="fas fa-broom"></i> เก็บกวาดใบรับเงิน orphan</button>
+                    <button type="button" class="btn-danger" onclick="cleanupDepositDebris()"><i class="fas fa-undo"></i> กลับ JV มัดจำค้าง (churn)</button>
                 </div>
+                <div class="help-text" style="margin-top:6px;">ตรวจใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว: ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะ <b>ลบ record ในระบบนี้ถาวร</b> — ลบเฉพาะ 404 ชัดเจน, error ชั่วคราวจะข้าม</div>
                 <div class="test-result" id="syncTestResult"></div>
+
+                <!-- 🧹 รีเซ็ตบัญชีของ "การจองเดียว" (churn หนัก กดทีเดียวจบ) -->
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed #ddd;">
+                    <label style="font-weight:600;"><i class="fas fa-eraser"></i> รีเซ็ตบัญชีการจอง (กดทีเดียว กลับ GL ทั้งหมดของการจอง)</label>
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap;">
+                        <input type="number" id="resetResId" placeholder="Reservation ID (เช่น 148936)" min="1" style="width:220px;" />
+                        <button type="button" class="btn-danger" onclick="resetReservation()"><i class="fas fa-eraser"></i> รีเซ็ตบัญชีการจอง</button>
+                    </div>
+                    <div class="help-text" style="margin-top:6px;">กลับ (reverse) <b>ทุก JE ที่ TakeTime post ให้การจองนี้</b> (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn ทุกแพทเทิร์น RES-{id}* และเลขใบเสร็จทุกใบ) → 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0 <b>พร้อม void เอกสาร (TIV/REC) ทุกใบของการจองบน NextAcc</b> = กดทีเดียวจบทั้ง GL และเอกสาร. <b>idempotent</b> (กดซ้ำไม่เบิ้ล — ข้ามใบที่ voided แล้ว) + reset marker → re-sync ใหม่ได้สะอาด</div>
+                    <div class="test-result" id="resetResResult"></div>
+                </div>
+
+                <!-- 🔎 GR/IR — reconcile ยอดคงค้าง GRNI (รับของ ↔ ใบกำกับ) -->
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed #ddd;">
+                    <label style="font-weight:600;"><i class="fas fa-scale-balanced"></i> GR/IR — ยอดคงค้าง GRNI (รับสินค้ายังไม่วางบิล)</label>
+                    <div style="margin-top:6px;">
+                        <button type="button" class="btn-warning" onclick="grniReconcile()"><i class="fas fa-scale-balanced"></i> ตรวจยอดคงค้าง GRNI</button>
+                    </div>
+                    <div class="help-text" style="margin-top:6px;">รับของ (Product/In) เครดิต GRNI 21240 / ใบกำกับที่ OCR ล้าง GRNI + เพิ่มภาษีซื้อ. ยอดคงค้าง <b>ควรใกล้ 0</b> — บวก = ของมายังไม่วางบิล (ตามใบกำกับ), ลบ = วางบิลแล้วของยังไม่มา (ตามของ / ใบกำกับลงบัญชีผิด)</div>
+                    <div class="test-result" id="grniResult"></div>
+                </div>
             </div>
+        </div>
+
+        <!-- 📧 อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ -->
+        <div class="journey-card">
+            <h3><i class="fas fa-envelope-open-text"></i> อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) จาก Gmail แล้วลงจองในระบบให้อัตโนมัติ — แทนโปรแกรมภายนอกเดิม.<br/>
+                เก็บตัวเลขทั้งสองตัวที่อีเมลให้มา — <b>refsell_amt</b> (ระดับ booking) และ <b>AMOUNT</b> (เรตต่อคืนต่อห้อง) —
+    แยกกันไว้ให้กระทบยอดได้. <b>หมายเหตุ:</b> อีเมล STAAH <u>ไม่ได้บอกค่าคอมมิชชั่นหรือยอดที่ OTA จะโอนจริง</u>
+    ยอดโอนต้องกระทบกับ statement ของ OTA อีกที (กดปุ่ม "ดูข้อมูลที่อ่านได้จากอีเมลจริง" เพื่อตรวจ).
+                ต้องใช้ <b>Gmail App Password</b> (ไม่ใช่รหัสผ่านปกติ) และเปิด IMAP ในบัญชี Gmail.
+            </p>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="cfgEmailRsvEnabled" style="width:100%; padding:8px;">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — อ่านอีเมลอัตโนมัติ</option>
+                    </select>
+                </div>
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">หลังลงจอง (สำคัญ)</label>
+                    <select id="cfgEmailRsvCreateDocument" style="width:100%; padding:8px;">
+                        <option value="false">ลงจองเฉย ๆ (เอกสารออกตอนเช็คอิน/เช็คเอาท์ตามปกติ)</option>
+                        <option value="true">ยิงสร้างเอกสารบัญชีทันที (ต้องเปิด OTA settlement)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:220px; flex:2;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">IMAP Server</label>
+                    <input type="text" id="cfgEmailRsvImapServer" placeholder="imap.gmail.com" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:90px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Port</label>
+                    <input type="number" id="cfgEmailRsvImapPort" value="993" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">
+                        ⏱ ความถี่ในการดึงอีเมล (ทุกกี่นาที)
+                    </label>
+                    <input type="number" id="cfgEmailRsvPollMinutes" value="5" min="1" max="1440" style="width:100%; padding:8px;" />
+                    <div style="font-size:11px; color:#777; margin-top:4px;">
+                        ระบบดึงเองอัตโนมัติตามรอบนี้ (5 = ทุก 5 นาที) — ต่ำสุด 1 นาที
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Gmail address</label>
+                    <input type="text" id="cfgEmailRsvUsername" placeholder="booking@yourhotel.com" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">App Password <span id="cfgEmailRsvPwStatus" style="font-weight:400; font-size:12px;"></span></label>
+                    <input type="password" id="cfgEmailRsvPassword" placeholder="Gmail App Password (16 ตัว)" autocomplete="new-password" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:160px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่อ่านแล้ว</label>
+                    <input type="text" id="cfgEmailRsvProcessedLabel" placeholder="STAAH-Processed" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่ล้มเหลว</label>
+                    <input type="text" id="cfgEmailRsvFailedLabel" placeholder="STAAH-Failed" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Label อีเมลที่ไม่ใช่ใบจอง</label>
+                    <input type="text" id="cfgEmailRsvIgnoredLabel" placeholder="STAAH-Other" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:280px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">
+                        ถ้าอีเมลไม่บอกว่าใครเก็บเงิน ให้ถือว่า
+                    </label>
+                    <select id="cfgEmailRsvDefaultCollect" style="width:100%; padding:8px;">
+                        <option value="CHANNEL">OTA เก็บเงินแล้ว — ลงมัดจำเต็มจำนวน</option>
+                        <option value="HOTEL">เก็บเงินหน้างาน — ลงมัดจำ 0</option>
+                    </select>
+                    <div style="font-size:12px; color:#666; margin-top:5px; line-height:1.6;">
+                        ใช้เฉพาะกรณีที่อ่านจากอีเมลไม่ได้ — คำที่ระบบรู้จักอยู่แล้ว เช่น
+                        Hotel Collect / Pay at Hotel / Expedia Collect / Prepaid / VCC
+                        จะถูกแยกให้อัตโนมัติและแจ้งเตือนว่าเดาให้เสมอ
+                    </div>
+                </div>
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">กรองผู้ส่ง (มีคำ)</label>
+                    <input type="text" id="cfgEmailRsvFromContains" placeholder="staah" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">คืนสูงสุด</label>
+                    <input type="number" id="cfgEmailRsvMaxStayDays" value="30" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">จองล่วงหน้าสูงสุด (วัน)</label>
+                    <input type="number" id="cfgEmailRsvMaxDaysFuture" value="365" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">แจ้ง Telegram</label>
+                    <select id="cfgEmailRsvNotifyTelegram" style="width:100%; padding:8px;">
+                        <option value="true">แจ้ง</option>
+                        <option value="false">ไม่แจ้ง</option>
+                    </select>
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">อีเมลที่ล้มเหลว</label>
+                    <select id="cfgEmailRsvMoveFailed" style="width:100%; padding:8px;">
+                        <option value="true">ย้ายไป folder Failed</option>
+                        <option value="false">แค่ mark อ่านแล้ว</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลองใหม่อีเมลที่ล้มเหลวอัตโนมัติ</label>
+                    <select id="cfgEmailRsvRetryFailed" style="width:100%; padding:8px;">
+                        <option value="true">ลองใหม่ทุกรอบจนสำเร็จ</option>
+                        <option value="false">ไม่ลองใหม่ (ต้องลากอีเมลกลับเอง)</option>
+                    </select>
+                </div>
+                <div style="min-width:160px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลองใหม่ภายใน (ชั่วโมง)</label>
+                    <input type="number" id="cfgEmailRsvRetryHours" value="72" min="1" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:260px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ถ้าชื่อ Agency ไม่ตรงตาราง map</label>
+                    <select id="cfgEmailRsvMapAnyChannel" style="width:100%; padding:8px;">
+                        <option value="true">ยอม match ด้วยชื่อห้องอย่างเดียว (กันจองหล่น)</option>
+                        <option value="false">ต้องตรง Agency เท่านั้น</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ลำดับห้องที่จัดให้ก่อน (ID คั่นจุลภาค)</label>
+                    <input type="text" id="cfgEmailRsvRoomPriority" placeholder="เช่น 16,15,3,1,2,4,5 — เว้นว่าง = เรียงตามลำดับที่พัก" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เบอร์สำรองเมื่ออีเมลไม่มีเบอร์</label>
+                    <input type="text" id="cfgEmailRsvDefaultPhone" placeholder="เว้นว่าง = ใช้ OTA_{BookingID}" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะเมื่อยกเลิกจากอีเมล</label>
+                    <select id="cfgEmailRsvCancelStatus" style="width:100%; padding:8px;">
+                        <option value="ยกเลิก">ยกเลิก</option>
+                        <option value="ยกเลิกคืนเงิน">ยกเลิกคืนเงิน (แบบโปรแกรมเดิม)</option>
+                        <option value="ยกเลิกไม่คืนเงิน">ยกเลิกไม่คืนเงิน</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;">
+                <button type="button" class="btn-primary" onclick="saveEmailIntake()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
+                <button type="button" class="btn-default" onclick="testEmailIntake()"><i class="fas fa-plug"></i> ทดสอบการเชื่อมต่อ</button>
+                <button type="button" class="btn-warning" onclick="runEmailIntake()"><i class="fas fa-download"></i> ดึงตอนนี้</button>
+                <button type="button" class="btn-warning" onclick="recoverEmailBacklog()"><i class="fas fa-history"></i> กู้อีเมลย้อนหลัง</button>
+                <button type="button" class="btn-default" onclick="getAction('emailIntakeTestTelegram','emailRsvResult')"><i class="fab fa-telegram"></i> ทดสอบข้อความ Telegram</button>
+                <button type="button" class="btn-default" onclick="previewEmailIntake()"><i class="fas fa-eye"></i> ดูข้อมูลที่อ่านได้จากอีเมลจริง</button>
+                <button type="button" class="btn-default" onclick="loadEmailLog()"><i class="fas fa-list-alt"></i> ดู logs ล่าสุด</button>
+            </div>
+            <div class="help-text" style="margin-top:8px;">
+                ⓘ เปิด IMAP: Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP. สร้าง App Password: Google Account → Security → 2-Step Verification → App passwords.
+                ระบบดึงอัตโนมัติทุก N นาทีตามที่ตั้ง (อาศัย background timer เดียวกับ accounting sync). dedup ด้วย Booking ID — รันคู่โปรแกรมเดิมได้ไม่สร้างซ้ำ.
+            </div>
+
+            <!-- 🔎 ตรวจว่าทำไมอีเมลลงจองไม่ได้ (map ห้อง / ห้องว่าง) -->
+            <div style="margin-top:16px; padding:12px; background:#f7f9fc; border:1px solid #dde5ef; border-radius:8px;">
+                <div style="font-weight:600; margin-bottom:8px;">
+                    <i class="fas fa-stethoscope"></i> ตรวจสอบ mapping / ห้องว่าง (ทำไมอีเมลลงจองไม่สำเร็จ)
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                    <div style="min-width:170px; flex:1;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">Channel Name (ในอีเมล)</label>
+                        <input type="text" id="dgChannel" placeholder="Booking.com" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:190px; flex:1;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">ROOM TYPE (ในอีเมล)</label>
+                        <input type="text" id="dgRoomType" placeholder="Nordic Tent" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:140px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">เช็คอิน</label>
+                        <input type="date" id="dgCheckin" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:140px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">เช็คเอาท์</label>
+                        <input type="date" id="dgCheckout" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:80px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">กี่ห้อง</label>
+                        <input type="number" id="dgRooms" value="1" min="1" style="width:100%; padding:8px;" />
+                    </div>
+                    <div style="min-width:80px;">
+                        <label style="display:block; font-size:12px; margin-bottom:4px;">กี่คน</label>
+                        <input type="number" id="dgAdults" value="1" min="1" style="width:100%; padding:8px;" />
+                    </div>
+                    <div>
+                        <button type="button" class="btn-default" onclick="diagnoseEmailIntake()"><i class="fas fa-search"></i> ตรวจสอบ</button>
+                    </div>
+                </div>
+                <div class="help-text" style="margin-top:6px;">
+                    บอกว่า map ไปห้องจริงห้องไหนบ้าง และห้องที่ไม่ว่างติดใบจองเลขที่เท่าไร — ใช้เงื่อนไขเดียวกับตัวอ่านอีเมลเป๊ะ ๆ (ไม่บันทึกอะไร)
+                </div>
+            </div>
+
+            <div class="test-result" id="emailRsvResult"></div>
+            <div id="emailRsvLog" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- 📱 ส่งรูปตารางจองรายวันเข้า LINE -->
+        <div class="journey-card">
+            <h3><i class="fab fa-line" style="color:#06C755;"></i> ส่งรูปตารางจองรายวันเข้า LINE (อัตโนมัติ)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">
+                render หน้า <b>DisplayToday</b> เป็นรูป แล้ว push เข้า LINE ให้อัตโนมัติทุกวันตามเวลาที่ตั้ง — แทนโปรแกรมภายนอกเดิม.
+                ใช้ token ของ <b>LINE OA เดิม</b> (ตั้งไว้แล้วในระบบ) หรือระบุเฉพาะงานนี้ก็ได้.
+                ความสูงรูปวัดจากเนื้อหาจริง (ไม่ตัด/ไม่เหลือขอบ).
+            </p>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สถานะ</label>
+                    <select id="cfgLineDailyEnabled" style="width:100%; padding:8px;">
+                        <option value="false">ปิด</option>
+                        <option value="true">เปิด — ส่งอัตโนมัติ</option>
+                    </select>
+                </div>
+                <div style="min-width:120px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">เวลาส่ง (HH:mm)</label>
+                    <input type="time" id="cfgLineDailySendTime" value="08:00" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:220px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ข้อความประกอบ (ไม่บังคับ)</label>
+                    <input type="text" id="cfgLineDailyCaption" placeholder="เว้นว่าง = ส่งเฉพาะรูป (แนะนำ)" style="width:100%; padding:8px;" />
+                    <div class="help-text" style="margin-top:4px;">เว้นว่าง = ส่งเฉพาะรูป · ใส่ข้อความจะส่งเป็นอีก 1 ข้อความก่อนรูป ({date} = วันที่ไทย)</div>
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">ผู้รับ (LINE userId / groupId / roomId) — คั่นด้วย comma หรือขึ้นบรรทัดใหม่</label>
+                <textarea id="cfgLineDailyRecipients" rows="2" placeholder="Cxxxxxxxx...&#10;Uxxxxxxxx..." style="width:100%; padding:8px; font-family:monospace;"></textarea>
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:110px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">กว้าง (px)</label>
+                    <input type="number" id="cfgLineDailyImageWidth" value="1600" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:130px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">สูงพื้นฐาน (px)</label>
+                    <input type="number" id="cfgLineDailyImageHeight" value="700" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ปรับสูงอัตโนมัติ</label>
+                    <select id="cfgLineDailyAutoHeight" style="width:100%; padding:8px;">
+                        <option value="true">วัดจากเนื้อหาจริง</option>
+                        <option value="false">ใช้ค่าคงที่</option>
+                    </select>
+                </div>
+                <div style="min-width:120px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">คุณภาพ JPEG</label>
+                    <input type="number" id="cfgLineDailyJpegQuality" value="90" min="1" max="100" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:150px;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">ขนาดตัวอักษร (%)</label>
+                    <input type="number" id="cfgLineDailyFontScale" value="100" min="100" max="300" step="10" style="width:100%; padding:8px;" />
+                    <div class="help-text" style="margin-top:4px;">100 = ตามหน้าเว็บ · 150 = ใหญ่ขึ้น 1.5 เท่า (อ่านง่ายบนมือถือ)</div>
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">URL หน้าที่จะ render</label>
+                <input type="text" id="cfgLineDailySourceUrl" placeholder="https://taketimebangphra.com/displaytoday" style="width:100%; padding:8px;" />
+            </div>
+
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="min-width:240px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">URL สาธารณะของโฟลเดอร์รูป (HTTPS — LINE ต้องเข้าถึงได้)</label>
+                    <input type="text" id="cfgLineDailyPublicBaseUrl" placeholder="https://taketimebangphra.com/Images/Reservation" style="width:100%; padding:8px;" />
+                </div>
+                <div style="min-width:200px; flex:1;">
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">โฟลเดอร์เก็บรูป (~/... หรือ physical path)</label>
+                    <input type="text" id="cfgLineDailyImageFolder" placeholder="~/Images/Reservation" style="width:100%; padding:8px;" />
+                </div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <label style="display:block; font-weight:600; margin-bottom:6px;">
+                    LINE token เฉพาะงานนี้ (ไม่บังคับ) <span id="cfgLineDailyTokenStatus" style="font-weight:400; font-size:12px;"></span>
+                </label>
+                <input type="password" id="cfgLineDailyTokenOverride" autocomplete="new-password" placeholder="เว้นว่าง = ใช้ token ของ LINE OA เดิม (ใส่ &quot;-&quot; เพื่อล้าง)" style="width:100%; padding:8px;" />
+            </div>
+
+            <div style="margin-top:16px;">
+                <button type="button" class="btn-primary" onclick="saveLineDaily()"><i class="fas fa-save"></i> บันทึกการตั้งค่า</button>
+                <button type="button" class="btn-default" onclick="previewLineDaily()"><i class="fas fa-image"></i> พรีวิวรูป</button>
+                <button type="button" class="btn-warning" onclick="sendLineDaily()"><i class="fab fa-line"></i> ส่งตอนนี้</button>
+                <button type="button" class="btn-default" onclick="testLineDaily()"><i class="fas fa-vial"></i> ทดสอบข้อความ</button>
+                <button type="button" class="btn-default" onclick="loadLineDailyLog()"><i class="fas fa-list-alt"></i> ดู logs</button>
+            </div>
+            <div class="help-text" style="margin-top:8px;">
+                ⓘ ต้องรันบน Windows+IIS ที่ติดตั้งฟอนต์ไทย และตั้ง App Pool → Load User Profile = True (GDI+ ต้องใช้).
+                LINE รับเฉพาะรูปที่เข้าถึงได้ผ่าน HTTPS สาธารณะ. หา groupId: เชิญ OA เข้ากลุ่มแล้วดู source.groupId จาก webhook.
+            </div>
+            <div class="test-result" id="lineDailyResult"></div>
+            <div id="lineDailyPreview" style="margin-top:10px;"></div>
+            <div id="lineDailyLog" style="margin-top:12px;"></div>
         </div>
 
         <!-- Deposit Lifecycle / สถานะเจ้าหนี้มัดจำ -->
@@ -511,6 +1109,36 @@
         <div class="journey-card">
             <h3><i class="fas fa-tasks"></i> Sync Queue Monitor</h3>
 
+            <!-- 🩺 ตรวจสุขภาพ integration: จับปัญหา (mapping ชี้บัญชีที่ไม่มี, แหล่งเงินยังไม่ผูก,
+                 คิวตายค้าง, NextAcc ล่ม) ก่อนที่เอกสารจริงจะ sync ไม่ผ่าน -->
+            <div style="margin-bottom:14px;">
+                <button type="button" class="btn-default" onclick="runHealthCheck()">
+                    <i class="fas fa-stethoscope"></i> ตรวจสุขภาพการเชื่อมต่อ
+                </button>
+                <span style="font-size:11.5px; color:#888; margin-left:8px;">
+                    ตรวจ mapping/ผังบัญชี/แหล่งเงิน/คิว — ทำก่อนออกเอกสารจริงจะได้ไม่ค้างคิว
+                </span>
+                <div id="healthResult" style="margin-top:10px;"></div>
+            </div>
+
+            <!-- 🔗 เครื่องมือผูก/ปลดการจับคู่เอกสาร — ไม่ต้องพึ่งแถวในหน้าเอกสาร
+                 (ปุ่มที่นั่นขึ้นกับช่วงวันที่ที่ค้นและสถานะจับคู่ พอพันกันจะไม่โผล่เลย) -->
+            <div style="margin-bottom:14px; border:1px solid #d0d7de; border-radius:6px; padding:10px;">
+                <div style="font-weight:600; font-size:13px; margin-bottom:6px;">🔗 ผูก / ปลดการจับคู่เอกสาร</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <input type="text" id="rlReceipt" placeholder="เลขใบเสร็จในระบบ เช่น REC260809004" style="padding:6px; min-width:250px;" />
+                    <input type="text" id="rlDoc" placeholder="เลขเอกสาร NextAcc เช่น REC-20260809-0004 (ว่าง = ปลดการผูก)" style="padding:6px; min-width:330px;" />
+                    <button type="button" class="btn-primary" onclick="relinkDoc()"><i class="fas fa-link"></i> ผูก / ปลด</button>
+                    <button type="button" class="btn-default" onclick="inspectReceipt()"><i class="fas fa-search"></i> 🔎 ตรวจผู้ซื้อของใบนี้</button>
+                    <button type="button" class="btn-warning" onclick="pushBuyerContact()"><i class="fas fa-user-check"></i> 📤 ส่งผู้ติดต่อขึ้น NextAcc</button>
+                </div>
+                <div style="font-size:11px; color:#888; margin-top:5px;">
+                    แก้เฉพาะการจับคู่ — ไม่แตะบัญชี ไม่สร้าง/ลบเอกสารใด ๆ ·
+                    เลขใบในระบบไม่มีขีดคั่น (REC260809004) เลขเอกสาร NextAcc มีขีด (REC-20260809-0004)
+                </div>
+                <div id="rlResult" style="margin-top:8px;"></div>
+            </div>
+
             <div class="queue-stats" id="queueStats">
                 <div class="queue-stat" onclick="filterByStatus('')" id="qsAll"><div class="num" id="qsTotal" style="color:#333;">-</div><div class="lbl">ทั้งหมด</div></div>
                 <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
@@ -547,6 +1175,7 @@
                             <th>Action</th>
                             <th>Status</th>
                             <th>NextAcc Doc</th>
+                            <th>ตรวจสอบ</th>
                             <th>Retry</th>
                             <th>Error</th>
                             <th>Created</th>
@@ -554,12 +1183,25 @@
                         </tr>
                     </thead>
                     <tbody id="queueBody">
-                        <tr><td colspan="9" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
+                        <tr><td colspan="11" style="text-align:center; color:#999;">กำลังโหลด...</td></tr>
                     </tbody>
                 </table>
             </div>
 
             <div class="pagination" id="queuePagination" style="margin-top:15px; justify-content:center;"></div>
+        </div>
+
+        <!-- Log Detail Modal (ดู log AccountingSync เต็ม ไม่ตัด) -->
+        <div id="logModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999;" onclick="if(event.target===this)closeLogModal()">
+            <div style="max-width:900px; margin:40px auto; background:#fff; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.3); max-height:85vh; display:flex; flex-direction:column;">
+                <div style="padding:14px 18px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                    <strong id="logModalTitle" style="font-size:15px;"><i class="fas fa-file-alt"></i> Log รายละเอียด</strong>
+                    <button type="button" onclick="closeLogModal()" style="border:none; background:none; font-size:22px; cursor:pointer; color:#888;">&times;</button>
+                </div>
+                <div id="logModalBody" style="padding:16px 18px; overflow:auto;">
+                    <div style="text-align:center; color:#999;">กำลังโหลด...</div>
+                </div>
+            </div>
         </div>
 
         <!-- Account Mapping Management -->
@@ -736,23 +1378,109 @@
                 if (cfg.receiptSyncMode) document.getElementById('cfgReceiptSyncMode').value = cfg.receiptSyncMode;
                 if (cfg.voucherSyncMode) document.getElementById('cfgVoucherSyncMode').value = cfg.voucherSyncMode;
                 if (cfg.payrollSyncMode) document.getElementById('cfgPayrollSyncMode').value = cfg.payrollSyncMode;
+                document.getElementById('cfgPosDailyRollup').value = cfg.posDailyRollup ? 'true' : 'false';
+                document.getElementById('cfgRoomServiceRevenue').value = cfg.roomServiceRevenue ? 'true' : 'false';
+                document.getElementById('cfgEtaxRdWatch').value = cfg.etaxRdWatch ? 'true' : 'false';
+                document.getElementById('cfgEtaxRdFrom').value = cfg.etaxRdFrom || '';
+                document.getElementById('cfgOtaRoomRevenue').value = cfg.otaRoomRevenue ? 'true' : 'false';
+                document.getElementById('cfgStockQtySync').value = cfg.stockQtySync ? 'true' : 'false';
+                document.getElementById('cfgStockQtyPull').value = cfg.stockQtyPull ? 'true' : 'false';
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
+                document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
+                document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
+                document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
+                document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
+                document.getElementById('cfgPostSyncVerify').checked = !!cfg.postSyncVerify;
+                document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
+                document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
+                document.getElementById('cfgCashSaleCompanyDoc').checked = !!cfg.cashSaleCompanyDoc;
+                document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
+                document.getElementById('cfgStockInSkipJournal').checked = !!cfg.stockInSkipJournal;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSign').value = cfg.etaxAutoSign ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSubmit').value = cfg.etaxAutoSubmit ? 'true' : 'false';
                 document.getElementById('cfgEtaxAutoSendEmail').value = cfg.etaxAutoSendEmail ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailSubject').value = cfg.etaxEmailSubject || '';
+                document.getElementById('cfgEtaxEmailCc').value = cfg.etaxEmailCc || '';
                 document.getElementById('cfgEtaxEmailBody').value = cfg.etaxEmailBody || '';
                 document.getElementById('cfgEtaxEmailAttachPdf').value = cfg.etaxEmailAttachPdf ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailAttachXml').value = cfg.etaxEmailAttachXml ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailLocalOnly').value = cfg.etaxEmailLocalOnly ? 'true' : 'false';
                 document.getElementById('cfgEtaxEmailFallback').value = cfg.etaxEmailFallback ? 'true' : 'false';
+                var intStatus = document.getElementById('cfgApiKeyStatus');
                 if (cfg.hasApiKey) {
-                    document.getElementById('cfgApiKey').placeholder = '••••••••  (มี API Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    document.getElementById('cfgApiKey').placeholder = '••••••••  (มี Integration Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    intStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว: <code>' + (cfg.apiKeyMask || '••••') + '</code></span>';
+                } else {
+                    intStatus.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง Integration Key (จำเป็น)</span>';
+                }
+                var accStatus = document.getElementById('cfgCompanyApiKeyStatus');
+                if (cfg.hasCompanyApiKey) {
+                    document.getElementById('cfgCompanyApiKey').placeholder = '••••••••  (มี acc_ key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน / ใส่ "-" เพื่อล้าง)';
+                    accStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว (acc_ แยก): <code>' + (cfg.companyApiKeyMask || '••••') + '</code></span>';
+                } else {
+                    accStatus.innerHTML = '<span style="color:#7f8c8d;">ℹ ยังไม่ได้ตั้ง acc_ แยก — company endpoints จะใช้ Integration Key (int_) ผ่าน X-Api-Key fallback</span>';
+                }
+                // Email reservation intake (STAAH)
+                setVal('cfgEmailRsvEnabled', cfg.emailRsvEnabled ? 'true' : 'false');
+                setVal('cfgEmailRsvCreateDocument', cfg.emailRsvCreateDocument ? 'true' : 'false');
+                setVal('cfgEmailRsvImapServer', cfg.emailRsvImapServer || 'imap.gmail.com');
+                setVal('cfgEmailRsvImapPort', cfg.emailRsvImapPort || 993);
+                setVal('cfgEmailRsvPollMinutes', cfg.emailRsvPollMinutes || 5);
+                setVal('cfgEmailRsvUsername', cfg.emailRsvUsername || '');
+                setVal('cfgEmailRsvProcessedLabel', cfg.emailRsvProcessedLabel || 'STAAH-Processed');
+                setVal('cfgEmailRsvFailedLabel', cfg.emailRsvFailedLabel || 'STAAH-Failed');
+                setVal('cfgEmailRsvDefaultCollect', cfg.emailRsvDefaultCollect || 'CHANNEL');
+                setVal('cfgEmailRsvIgnoredLabel', cfg.emailRsvIgnoredLabel || 'STAAH-Other');
+                setVal('cfgEmailRsvFromContains', cfg.emailRsvFromContains || 'staah');
+                setVal('cfgEmailRsvMaxStayDays', cfg.emailRsvMaxStayDays || 30);
+                setVal('cfgEmailRsvMaxDaysFuture', cfg.emailRsvMaxDaysFuture || 365);
+                setVal('cfgEmailRsvNotifyTelegram', cfg.emailRsvNotifyTelegram ? 'true' : 'false');
+                setVal('cfgEmailRsvMoveFailed', cfg.emailRsvMoveFailed ? 'true' : 'false');
+                setVal('cfgEmailRsvRetryFailed', cfg.emailRsvRetryFailed ? 'true' : 'false');
+                setVal('cfgEmailRsvRetryHours', cfg.emailRsvRetryHours || 72);
+                setVal('cfgEmailRsvMapAnyChannel', cfg.emailRsvMapAnyChannel ? 'true' : 'false');
+                setVal('cfgEmailRsvRoomPriority', cfg.emailRsvRoomPriority || '');
+                setVal('cfgEmailRsvDefaultPhone', cfg.emailRsvDefaultPhone || '');
+                setVal('cfgEmailRsvCancelStatus', cfg.emailRsvCancelStatus || 'ยกเลิก');
+                var pwStat = document.getElementById('cfgEmailRsvPwStatus');
+                if (pwStat) {
+                    if (cfg.emailRsvHasPassword) {
+                        pwStat.innerHTML = '<span style="color:#27ae60;">✓ ตั้งไว้แล้ว — ปล่อยว่างเพื่อคงเดิม</span>';
+                        document.getElementById('cfgEmailRsvPassword').placeholder = '•••••••• (มีอยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
+                    } else {
+                        pwStat.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง</span>';
+                    }
+                }
+                // Daily reservation board → LINE
+                setVal('cfgLineDailyEnabled', cfg.lineDailyEnabled ? 'true' : 'false');
+                setVal('cfgLineDailySendTime', cfg.lineDailySendTime || '08:00');
+                setVal('cfgLineDailyCaption', cfg.lineDailyCaption || '');
+                setVal('cfgLineDailyRecipients', cfg.lineDailyRecipients || '');
+                setVal('cfgLineDailyImageWidth', cfg.lineDailyImageWidth || 1600);
+                setVal('cfgLineDailyImageHeight', cfg.lineDailyImageHeight || 700);
+                setVal('cfgLineDailyAutoHeight', cfg.lineDailyAutoHeight ? 'true' : 'false');
+                setVal('cfgLineDailyJpegQuality', cfg.lineDailyJpegQuality || 90);
+                setVal('cfgLineDailyFontScale', cfg.lineDailyFontScale || 100);
+                setVal('cfgLineDailySourceUrl', cfg.lineDailySourceUrl || '');
+                setVal('cfgLineDailyPublicBaseUrl', cfg.lineDailyPublicBaseUrl || '');
+                setVal('cfgLineDailyImageFolder', cfg.lineDailyImageFolder || '~/Images/Reservation');
+                var lts = document.getElementById('cfgLineDailyTokenStatus');
+                if (lts) lts.innerHTML = cfg.lineDailyHasTokenOverride
+                    ? '<span style="color:#27ae60;">✓ ตั้ง token เฉพาะไว้แล้ว</span>'
+                    : '<span style="color:#7f8c8d;">ℹ ใช้ token ของ LINE OA เดิม</span>';
+                if (cfg.lineDailyLastSent) {
+                    var lr = document.getElementById('lineDailyResult');
+                    if (lr) lr.innerHTML = '<span style="color:#7f8c8d;">ส่งอัตโนมัติล่าสุด: ' + cfg.lineDailyLastSent + '</span>';
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
+        }
+
+        function setVal(id, v) {
+            var el = document.getElementById(id);
+            if (el) el.value = v;
         }
 
         function saveConfig() {
@@ -760,6 +1488,7 @@
                 action: 'saveApi',
                 baseUrl: document.getElementById('cfgBaseUrl').value,
                 apiKey: document.getElementById('cfgApiKey').value,
+                companyApiKey: document.getElementById('cfgCompanyApiKey').value,
                 companyId: document.getElementById('cfgCompanyId').value
             };
             postAction(data, 'apiTestResult');
@@ -776,13 +1505,31 @@
                 receiptSyncMode: document.getElementById('cfgReceiptSyncMode').value,
                 voucherSyncMode: document.getElementById('cfgVoucherSyncMode').value,
                 payrollSyncMode: document.getElementById('cfgPayrollSyncMode').value,
+                posDailyRollup: document.getElementById('cfgPosDailyRollup').value === 'true',
+                roomServiceRevenue: document.getElementById('cfgRoomServiceRevenue').value === 'true',
+                etaxRdWatch: document.getElementById('cfgEtaxRdWatch').value === 'true',
+                etaxRdFrom: document.getElementById('cfgEtaxRdFrom').value.trim(),
+                otaRoomRevenue: document.getElementById('cfgOtaRoomRevenue').value === 'true',
+                stockQtySync: document.getElementById('cfgStockQtySync').value === 'true',
+                stockQtyPull: document.getElementById('cfgStockQtyPull').value === 'true',
                 attachFiles: document.getElementById('cfgAttachFiles').value,
                 depositVatRecognition: document.getElementById('cfgDepositVatRecognition').value,
+                depositDeferOutputVat: document.getElementById('cfgDepositDeferOutputVat').checked,
+                depositDrivesJournal: document.getElementById('cfgDepositDrivesJournal').checked,
+                depositDrivesJournalRef: document.getElementById('cfgDepositDrivesJournalRef').checked,
+                autoRecoverDeposit: document.getElementById('cfgAutoRecoverDeposit').checked,
+                postSyncVerify: document.getElementById('cfgPostSyncVerify').checked,
+                autoReconcileDeposit: document.getElementById('cfgAutoReconcileDeposit').checked,
+                cashSaleUseReceipt: document.getElementById('cfgCashSaleUseReceipt').checked,
+                cashSaleCompanyDoc: document.getElementById('cfgCashSaleCompanyDoc').checked,
+                stockInUseGRNI: document.getElementById('cfgStockInUseGRNI').checked,
+                stockInSkipJournal: document.getElementById('cfgStockInSkipJournal').checked,
                 etaxAutoGenerate: document.getElementById('cfgEtaxAutoGenerate').value,
                 etaxAutoSign: document.getElementById('cfgEtaxAutoSign').value,
                 etaxAutoSubmit: document.getElementById('cfgEtaxAutoSubmit').value,
                 etaxAutoSendEmail: document.getElementById('cfgEtaxAutoSendEmail').value,
                 etaxEmailSubject: document.getElementById('cfgEtaxEmailSubject').value,
+                etaxEmailCc: document.getElementById('cfgEtaxEmailCc').value,
                 etaxEmailBody: document.getElementById('cfgEtaxEmailBody').value,
                 etaxEmailAttachPdf: document.getElementById('cfgEtaxEmailAttachPdf').value,
                 etaxEmailAttachXml: document.getElementById('cfgEtaxEmailAttachXml').value,
@@ -824,6 +1571,376 @@
 
         function processQueue() {
             getAction('processQueue', 'syncTestResult');
+        }
+
+        // ── Email reservation intake (STAAH) ──
+        function saveEmailIntake() {
+            var data = {
+                action: 'saveEmailIntake',
+                emailRsvEnabled: document.getElementById('cfgEmailRsvEnabled').value === 'true',
+                emailRsvCreateDocument: document.getElementById('cfgEmailRsvCreateDocument').value === 'true',
+                emailRsvImapServer: document.getElementById('cfgEmailRsvImapServer').value,
+                emailRsvImapPort: document.getElementById('cfgEmailRsvImapPort').value,
+                emailRsvPollMinutes: document.getElementById('cfgEmailRsvPollMinutes').value,
+                emailRsvUsername: document.getElementById('cfgEmailRsvUsername').value,
+                emailRsvPassword: document.getElementById('cfgEmailRsvPassword').value,
+                emailRsvProcessedLabel: document.getElementById('cfgEmailRsvProcessedLabel').value,
+                emailRsvFailedLabel: document.getElementById('cfgEmailRsvFailedLabel').value,
+                emailRsvDefaultCollect: document.getElementById('cfgEmailRsvDefaultCollect').value,
+                emailRsvIgnoredLabel: document.getElementById('cfgEmailRsvIgnoredLabel').value,
+                emailRsvFromContains: document.getElementById('cfgEmailRsvFromContains').value,
+                emailRsvMaxStayDays: document.getElementById('cfgEmailRsvMaxStayDays').value,
+                emailRsvMaxDaysFuture: document.getElementById('cfgEmailRsvMaxDaysFuture').value,
+                emailRsvNotifyTelegram: document.getElementById('cfgEmailRsvNotifyTelegram').value === 'true',
+                emailRsvMoveFailed: document.getElementById('cfgEmailRsvMoveFailed').value === 'true',
+                emailRsvRetryFailed: document.getElementById('cfgEmailRsvRetryFailed').value === 'true',
+                emailRsvRetryHours: document.getElementById('cfgEmailRsvRetryHours').value,
+                emailRsvMapAnyChannel: document.getElementById('cfgEmailRsvMapAnyChannel').value === 'true',
+                emailRsvRoomPriority: document.getElementById('cfgEmailRsvRoomPriority').value,
+                emailRsvDefaultPhone: document.getElementById('cfgEmailRsvDefaultPhone').value,
+                emailRsvCancelStatus: document.getElementById('cfgEmailRsvCancelStatus').value
+            };
+            postAction(data, 'emailRsvResult');
+        }
+
+        function testEmailIntake() {
+            getAction('emailIntakeTest', 'emailRsvResult');
+        }
+
+        // อ่านอีเมล STAAH ล่าสุดแบบ read-only แล้วโชว์ว่า parser แยกฟิลด์อะไรออกมาได้บ้าง
+        // ใช้ยืนยันว่าอีเมลมี/ไม่มีข้อมูลบางอย่างจริง ๆ (เช่น ค่าคอมมิชชั่น) แทนการเดา
+        function previewEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังอ่านอีเมลล่าสุด...';
+            fetch(pageUrl + '?action=emailIntakePreview&count=3&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = '<pre style="margin:0; white-space:pre-wrap; font-size:12px;">' + escHtml(data.message || '') + '</pre>';
+                })
+                .catch(function(err) {
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                });
+        }
+
+        function diagnoseEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            var rt = document.getElementById('dgRoomType').value.trim();
+            if (!rt) { alert('ใส่ชื่อห้อง (ROOM TYPE ในอีเมล) ก่อน'); return; }
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตรวจสอบ...';
+            var q = '?action=emailIntakeDiagnose'
+                  + '&channel=' + encodeURIComponent(document.getElementById('dgChannel').value.trim())
+                  + '&roomType=' + encodeURIComponent(rt)
+                  + '&checkin=' + encodeURIComponent(document.getElementById('dgCheckin').value)
+                  + '&checkout=' + encodeURIComponent(document.getElementById('dgCheckout').value)
+                  + '&rooms=' + encodeURIComponent(document.getElementById('dgRooms').value)
+                  + '&adults=' + encodeURIComponent(document.getElementById('dgAdults').value)
+                  + '&_=' + Date.now();
+            fetch(pageUrl + q)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = '<pre style="margin:0; white-space:pre-wrap; font-size:12px;">' + escHtml(data.message || '') + '</pre>';
+                })
+                .catch(function(err) {
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                });
+        }
+
+        function runEmailIntake() {
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังดึงอีเมล...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=emailIntakeRun&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        // ♻️ กวาดทุก folder ในกล่องเมลย้อนหลัง N วัน แล้วลงจองที่ยังไม่มีในระบบ
+        // ใช้ตอนระบบเคยหยุดอ่าน หรือมีโปรแกรมอื่นแย่งอ่านอีเมลไป — ปลอดภัย ไม่สร้างซ้ำ (dedup Booking ID)
+        function recoverEmailBacklog() {
+            var days = prompt('กู้อีเมลจองย้อนหลังกี่วัน? (1-90)\n\nระบบจะกวาดทุกโฟลเดอร์ในกล่องเมล '
+                + 'แล้วลงจองใบที่ยังไม่มีในระบบ — ใบที่ลงแล้วจะถูกนับเป็น "ซ้ำ" ไม่สร้างซ้อน', '7');
+            if (days === null) return;
+            days = parseInt(days, 10);
+            if (!days || days < 1) { alert('ใส่จำนวนวันเป็นตัวเลข 1-90'); return; }
+            if (days > 90) days = 90;
+
+            var el = document.getElementById('emailRsvResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังกวาดกล่องเมลย้อนหลัง ' + days + ' วัน... (อาจใช้เวลาหลายนาที)';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 300000);
+            fetch(pageUrl + '?action=emailIntakeRecover&days=' + days + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 5 นาที (งานอาจยังทำต่อเบื้องหลัง ดู logs)' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        // ✔ ปิดรายการคิวที่งานเสร็จจริงบน NextAcc แล้ว — ไม่ยิง API ซ้ำ เปลี่ยนแค่สถานะฝั่งเรา
+        function closeItem(id) {
+            var note = prompt('ปิดรายการคิว #' + id + ' โดยไม่ยิง API ซ้ำ\n\n'
+                + 'ใช้เมื่อยืนยันแล้วว่างานนี้เสร็จถูกต้องบน NextAcc (เอกสาร/บัญชีขึ้นครบ) '
+                + 'แต่คิวฝั่งเราปิดตัวเองไม่ได้\n\nหมายเหตุ (ไม่บังคับ) — จะถูกเก็บไว้ในประวัติ:',
+                'ตรวจแล้วข้อมูลบน NextAcc ถูกต้องครบถ้วน');
+            if (note === null) return;
+            fetch(pageUrl + '?action=closeQueueItem&queueId=' + id + '&note=' + encodeURIComponent(note) + '&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    alert(data.message || (data.success ? 'ปิดรายการแล้ว' : 'ปิดไม่สำเร็จ'));
+                    if (data.success) loadQueueData();
+                })
+                .catch(function(err) { alert('ปิดไม่สำเร็จ: ' + err.message); });
+        }
+
+        function escHtml(s) {
+            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function loadEmailLog() {
+            var el = document.getElementById('emailRsvLog');
+            el.innerHTML = '<div class="test-result loading">กำลังโหลด logs...</div>';
+            fetch(pageUrl + '?action=emailIntakeLog&limit=100&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + (data.message || 'โหลด logs ไม่สำเร็จ') + '</div>';
+                        return;
+                    }
+                    if (!data.items || data.items.length === 0) {
+                        el.innerHTML = '<div class="test-result">ยังไม่มี log (ลองกด "ดึงตอนนี้" หรือรอ timer รอบถัดไป)</div>';
+                        return;
+                    }
+                    var html = '<div style="max-height:340px; overflow:auto; border:1px solid #e0e0e0; border-radius:4px;">' +
+                        '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+                        '<thead><tr style="background:#f5f5f5; position:sticky; top:0;">' +
+                        '<th style="text-align:left; padding:6px 8px; white-space:nowrap;">เวลา</th>' +
+                        '<th style="text-align:left; padding:6px 8px;">รายละเอียด</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.items.length; i++) {
+                        var it = data.items[i];
+                        var d = it.detail || '';
+                        var isErr = /error|failed|ล้มเหลว|ไม่สำเร็จ|ไม่พบ|no mapping|not enough/i.test(d);
+                        html += '<tr style="border-top:1px solid #eee;">' +
+                            '<td style="padding:6px 8px; white-space:nowrap; color:#777;">' + escHtml(it.time) + '</td>' +
+                            '<td style="padding:6px 8px; color:' + (isErr ? '#c0392b' : '#333') + ';">' + escHtml(d) + '</td></tr>';
+                    }
+                    html += '</tbody></table></div>' +
+                        '<div style="font-size:11px; color:#999; margin-top:4px;">แสดง ' + data.items.length + ' รายการล่าสุด (LogAction = EmailReservation)</div>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                });
+        }
+
+        // ── Daily reservation board → LINE ──
+        function saveLineDaily() {
+            var data = {
+                action: 'saveLineDaily',
+                lineDailyEnabled: document.getElementById('cfgLineDailyEnabled').value === 'true',
+                lineDailySendTime: document.getElementById('cfgLineDailySendTime').value,
+                lineDailyCaption: document.getElementById('cfgLineDailyCaption').value,
+                lineDailyRecipients: document.getElementById('cfgLineDailyRecipients').value,
+                lineDailyImageWidth: document.getElementById('cfgLineDailyImageWidth').value,
+                lineDailyImageHeight: document.getElementById('cfgLineDailyImageHeight').value,
+                lineDailyAutoHeight: document.getElementById('cfgLineDailyAutoHeight').value === 'true',
+                lineDailyJpegQuality: document.getElementById('cfgLineDailyJpegQuality').value,
+                lineDailyFontScale: document.getElementById('cfgLineDailyFontScale').value,
+                lineDailySourceUrl: document.getElementById('cfgLineDailySourceUrl').value,
+                lineDailyPublicBaseUrl: document.getElementById('cfgLineDailyPublicBaseUrl').value,
+                lineDailyImageFolder: document.getElementById('cfgLineDailyImageFolder').value,
+                lineDailyTokenOverride: document.getElementById('cfgLineDailyTokenOverride').value
+            };
+            postAction(data, 'lineDailyResult');
+        }
+
+        function lineDailyRun(action, withImage) {
+            var el = document.getElementById('lineDailyResult');
+            var prev = document.getElementById('lineDailyPreview');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังดำเนินการ...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=' + action + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
+                    el.innerHTML = html;
+                    if (withImage && data.imageUrl && prev) {
+                        prev.innerHTML = '<div style="font-size:12px; color:#777; margin-bottom:4px;">พรีวิว:</div>' +
+                            '<img src="' + escHtml(data.imageUrl) + '" style="max-width:100%; border:1px solid #ddd; border-radius:4px;" />';
+                    }
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา (120 วินาที)' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        function previewLineDaily() { lineDailyRun('lineDailyPreview', true); }
+        function sendLineDaily() {
+            if (!confirm('ส่งรูปตารางจองวันนี้เข้า LINE ถึงผู้รับที่ตั้งไว้เลยหรือไม่?')) return;
+            lineDailyRun('lineDailySend', true);
+        }
+        function testLineDaily() { lineDailyRun('lineDailyTest', false); }
+
+        function loadLineDailyLog() {
+            var el = document.getElementById('lineDailyLog');
+            el.innerHTML = '<div class="test-result loading">กำลังโหลด logs...</div>';
+            fetch(pageUrl + '?action=lineDailyLog&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { el.innerHTML = '<div class="test-result error">' + (data.message || 'โหลดไม่สำเร็จ') + '</div>'; return; }
+                    if (!data.items || data.items.length === 0) { el.innerHTML = '<div class="test-result">ยังไม่มี log</div>'; return; }
+                    var html = '<div style="max-height:280px; overflow:auto; border:1px solid #e0e0e0; border-radius:4px;">' +
+                        '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+                        '<thead><tr style="background:#f5f5f5; position:sticky; top:0;">' +
+                        '<th style="text-align:left; padding:6px 8px; white-space:nowrap;">เวลา</th>' +
+                        '<th style="text-align:left; padding:6px 8px;">รายละเอียด</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.items.length; i++) {
+                        var it = data.items[i];
+                        var isErr = /error|ล้มเหลว|ผิดพลาด|ไม่/i.test(it.detail || '');
+                        html += '<tr style="border-top:1px solid #eee;">' +
+                            '<td style="padding:6px 8px; white-space:nowrap; color:#777;">' + escHtml(it.time) + '</td>' +
+                            '<td style="padding:6px 8px; color:' + (isErr ? '#c0392b' : '#333') + ';">' + escHtml(it.detail) + '</td></tr>';
+                    }
+                    html += '</tbody></table></div>';
+                    el.innerHTML = html;
+                })
+                .catch(function(err) { el.innerHTML = '<div class="test-result error">' + err.message + '</div>'; });
+        }
+
+        function reconcileDeleted() {
+            if (!confirm('⚠️ ยืนยันตรวจสอบ & ลบเอกสารที่หายจาก NextAcc?\n\nใบเสร็จ/ใบสำคัญจ่ายที่ sync แล้ว ถ้า NextAcc ตอบ 404 (ไม่มีเอกสารแล้ว) จะถูก "ลบถาวร" ออกจากระบบนี้\n(ลบเฉพาะ 404 ชัดเจน — error ชั่วคราวจะข้าม)')) return;
+            getAction('reconcileDeleted', 'syncTestResult');
+        }
+
+        function cleanupOrphanReceipts() {
+            if (!confirm('เก็บกวาดใบเสร็จรับเงิน (หลักฐานรับเงิน) ที่ orphan บน NextAcc?\n\nลบเฉพาะใบที่ "ใบกำกับต้นทางถูกลบ/ยกเลิกไปแล้ว" (soft-delete บน NextAcc ไม่กระทบ GL).\nใบที่ยังมีใบกำกับใช้งานอยู่จะไม่ถูกแตะ (NextAcc กันให้).')) return;
+            getAction('cleanupOrphanReceipts', 'syncTestResult');
+        }
+
+        function cleanupDepositDebris() {
+            if (!confirm('กลับ (reverse) JV มัดจำที่ค้างเป็นซาก GL จากการ resync ซ้ำ?\n\nกลับเฉพาะ JV ที่ TakeTime post เอง (215xx/217xx/21913 ที่ไม่ผูกเอกสาร).\nⓘ ทำหลัง NextAcc deploy + หยุด resync แล้วเท่านั้น\nⓘ ยอดที่เหลือหลังกลับต้องให้นักบัญชีตรวจ/ยืนยัน (churn แก้อัตโนมัติ 100% ไม่ได้)')) return;
+            getAction('cleanupDepositDebris', 'syncTestResult');
+        }
+
+        function resetReservation() {
+            var input = document.getElementById('resetResId');
+            var resId = (input.value || '').trim();
+            var el = document.getElementById('resetResResult');
+            if (!resId || parseInt(resId, 10) <= 0) {
+                el.className = 'test-result error';
+                el.innerHTML = '<i class="fas fa-times-circle"></i> กรอกรหัสการจอง (Reservation ID) ก่อน';
+                return;
+            }
+            if (!confirm('🧹 รีเซ็ตบัญชีการจอง #' + resId + '?\n\nจะกลับ (reverse) ทุก JE ที่ TakeTime post ให้การจองนี้ (มัดจำ/ใบกำกับ/ตัดมัดจำ/VAT/churn)\n→ 21510/21913/ลูกหนี้ ของการจองนี้กลับเป็น 0\nพร้อม void เอกสาร (TIV/REC) ทุกใบของการจองบน NextAcc\n\nⓘ idempotent (กดซ้ำไม่เบิ้ล — ข้ามใบที่ voided แล้ว) + reset marker เพื่อ re-sync ใหม่ได้สะอาด')) return;
+
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังรีเซ็ตบัญชีการจอง #' + resId + '...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+            fetch(pageUrl + '?action=resetReservation&resId=' + encodeURIComponent(resId) + '&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                });
+        }
+
+        function applyRecommendedPreset() {
+            if (!confirm('⭐ ใช้ค่าแนะนำ (Production)?\n\nจะตั้งค่าทั้งชุดเป็นเส้นทางที่ทดสอบแล้วถูกต้อง:\n• เอกสารรับ/จ่าย = DOCUMENT\n• หักมัดจำ = drives (JE เดียว หักมัดจำในใบ)\n• ปิดเส้นทดลอง isCashSale / cash-sale-deposit\n• มัดจำ VAT = รับรู้ตอนเช็คเอาท์\n• เปิด safety-net (auto-recover / reconcile / verify)\n\nทับค่า toggle เดิมที่เปิดซ้อนกัน — บันทึกทันที')) return;
+            var el = document.getElementById('presetResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตั้งค่า...';
+            fetch(pageUrl + '?action=applyRecommendedPreset&_=' + Date.now())
+                .then(function(r){ return r.json(); })
+                .then(function(d){
+                    el.className = 'test-result ' + (d.success ? 'success' : 'error');
+                    el.innerHTML = (d.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + d.message;
+                    if (d.success) setTimeout(function(){ location.reload(); }, 2500);
+                })
+                .catch(function(err){ el.className = 'test-result error'; el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message; });
+        }
+
+        function grniReconcile() {
+            var el = document.getElementById('grniResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังตรวจยอดคงค้าง GRNI...';
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+            fetch(pageUrl + '?action=grniReconcile&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timeoutId); return r.json(); })
+                .then(function(d) {
+                    if (!d.success) {
+                        el.className = 'test-result error';
+                        el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (d.message || 'ไม่สำเร็จ');
+                        return;
+                    }
+                    el.className = 'test-result success';
+                    var net = parseFloat(d.netOpen || 0);
+                    var color = Math.abs(net) < 0.01 ? '#28a745' : '#c0392b';
+                    var html = '<div style="font-size:14px;">บัญชี GRNI <b>' + (d.accountCode || '-') + '</b> · คงค้างสุทธิ '
+                        + '<b style="color:' + color + ';">' + net.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</b></div>';
+                    html += '<div style="margin:4px 0 8px;">' + (d.interpretation || '') + '</div>';
+                    if (d.items && d.items.length) {
+                        html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">'
+                            + '<thead><tr style="background:#f5f5f5;"><th style="padding:4px 6px; text-align:left;">อ้างอิง</th>'
+                            + '<th style="padding:4px 6px; text-align:left;">เลข JE</th><th style="padding:4px 6px;">วันที่</th>'
+                            + '<th style="padding:4px 6px; text-align:right;">รับของ (Cr GRNI)</th></tr></thead><tbody>';
+                        d.items.forEach(function(it) {
+                            html += '<tr' + (it.Voided ? ' style="color:#999;text-decoration:line-through;"' : '') + '>'
+                                + '<td style="padding:3px 6px;">' + (it.Reference||'') + '</td>'
+                                + '<td style="padding:3px 6px;">' + (it.DocNumber||'-') + '</td>'
+                                + '<td style="padding:3px 6px; text-align:center;">' + (it.Date||'') + '</td>'
+                                + '<td style="padding:3px 6px; text-align:right;">' + parseFloat(it.Amount||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
+                        });
+                        html += '</tbody></table>';
+                    }
+                    el.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(timeoutId);
+                    el.className = 'test-result error';
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (err.name === 'AbortError' ? 'หมดเวลา 60 วินาที' : err.message);
+                });
         }
 
         // ── Deposit Lifecycle ──
@@ -1067,11 +2184,25 @@
                     queueState.page = data.page || 1;
                     queueState.totalPages = data.totalPages || 1;
 
+                    if (data.success === false && data.message) {
+                        // เซิร์ฟเวอร์ตอบว่าอ่านคิวไม่สำเร็จ — ต้องบอกผู้ใช้ ไม่ใช่เงียบ
+                        var tb = document.getElementById('queueBody');
+                        if (tb) tb.innerHTML = '<tr><td colspan="20" style="padding:16px;color:#C62828;">'
+                            + '⚠️ ' + escHtml(data.message) + '</td></tr>';
+                    }
                     renderQueue(data.items || []);
                     renderPagination(data.page, data.totalPages, data.totalItems);
                     updateFilterUI();
                 })
-                .catch(function(err) { console.error(err); });
+                .catch(function(err) {
+                    // เดิม log ลง console อย่างเดียว → หน้าที่โหลดไม่ได้จะดูเหมือน "กดแล้วไม่ไปไหน"
+                    console.error(err);
+                    var tb = document.getElementById('queueBody');
+                    if (tb) tb.innerHTML = '<tr><td colspan="20" style="padding:16px;color:#C62828;">'
+                        + '⚠️ โหลดหน้านี้ไม่สำเร็จ: ' + escHtml(err && err.message ? err.message : String(err))
+                        + '<br><span style="color:#666;font-size:12px;">ดูสาเหตุจริงได้ที่ Logs หมวด AccountingIntegration</span>'
+                        + '</td></tr>';
+                });
         }
 
         function renderQueue(items) {
@@ -1082,7 +2213,7 @@
 
             if (!items.length) {
                 var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#999;">' + msg + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999;">' + msg + '</td></tr>';
                 return;
             }
             var html = '';
@@ -1116,6 +2247,16 @@
                     html += '-';
                 }
                 html += '</td>';
+                // ตรวจสอบ (post-sync verify) ✅ PASS / ⚠ WARN — tooltip = รายละเอียด
+                html += '<td style="text-align:center;">';
+                if (item.verifyStatus === 'PASS') {
+                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#2E7D32; cursor:help;">✅</span>';
+                } else if (item.verifyStatus === 'WARN') {
+                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#C62828; cursor:help; font-weight:600;">⚠</span>';
+                } else {
+                    html += '<span style="color:#ccc;">–</span>';
+                }
+                html += '</td>';
                 html += '<td>' + item.retryCount + '/' + item.maxRetries + '</td>';
                 html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + (item.error || '').replace(/"/g, '&quot;') + '">' + (item.error || '-') + '</td>';
                 html += '<td>' + item.created + '</td>';
@@ -1127,13 +2268,96 @@
                         html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
                     }
                     if (item.status === 'COMPLETED' || item.status === 'FAILED') {
-                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button>';
+                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';
                     }
+                    // ปิดรายการที่ "เสร็จจริงบน NextAcc แล้ว" โดยไม่ยิง API ซ้ำ
+                    if (item.status === 'FAILED') {
+                        html += '<button type="button" class="btn-success" style="padding:4px 10px; font-size:11px;" onclick="closeItem(' + item.id + ')" title="ปิดรายการ — งานเสร็จบน NextAcc แล้ว (ไม่ยิง API ซ้ำ)"><i class="fas fa-check"></i></button> ';
+                    }
+                    html += '<button type="button" class="btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.id + ')" title="ดู log ละเอียด (เต็ม ไม่ตัด)"><i class="fas fa-file-alt"></i> Log</button>';
                 }
                 html += '</td>';
                 html += '</tr>';
             });
             tbody.innerHTML = html;
+        }
+
+        function escapeHtml(s) {
+            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function showItemLogs(queueId) {
+            var modal = document.getElementById('logModal');
+            var body = document.getElementById('logModalBody');
+            var title = document.getElementById('logModalTitle');
+            title.innerHTML = '<i class="fas fa-file-alt"></i> Log รายละเอียด — คิว #' + queueId;
+            body.innerHTML = '<div style="text-align:center; color:#999;">กำลังโหลด...</div>';
+            modal.style.display = 'block';
+
+            // กันค้าง: ถ้าเซิร์ฟเวอร์ไม่ตอบใน 40 วิ ให้ยกเลิกและแจ้งผู้ใช้ (เดิมหมุนค้างไปเรื่อย ๆ)
+            var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            var giveUp = setTimeout(function () { if (ctrl) ctrl.abort(); }, 40000);
+
+            fetch(pageUrl + '?action=itemLogs&queueId=' + queueId + '&_=' + Date.now(),
+                  ctrl ? { signal: ctrl.signal } : undefined)
+                .then(function(r) { return r.text(); })
+                .then(function(txt) {
+                    clearTimeout(giveUp);
+                    var data;
+                    try { data = JSON.parse(txt); }
+                    catch (e) {
+                        body.innerHTML = '<div class="test-result error" style="display:block;">เซิร์ฟเวอร์ตอบไม่ใช่ JSON</div>'
+                                       + '<pre style="white-space:pre-wrap; word-break:break-word; font-size:11px; max-height:300px; overflow:auto;">'
+                                       + escapeHtml(txt.substring(0, 3000)) + '</pre>';
+                        return;
+                    }
+                    if (!data.success) {
+                        body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message) + '</div>';
+                        return;
+                    }
+                    var html = '';
+                    // Key identifiers
+                    if (data.keys) {
+                        html += '<div style="font-size:12px; color:#666; margin-bottom:10px;">ค้นจาก: <code>' + escapeHtml(data.keys) + '</code></div>';
+                    }
+                    // Full error (untruncated)
+                    if (data.error) {
+                        html += '<div style="margin-bottom:14px;"><div style="font-weight:600; margin-bottom:4px; color:#C62828;">Error (เต็ม):</div>'
+                              + '<pre style="white-space:pre-wrap; word-break:break-word; background:#FFF5F5; border:1px solid #FFCDD2; border-radius:6px; padding:10px; font-size:12px; margin:0;">' + escapeHtml(data.error) + '</pre></div>';
+                    }
+                    // Log lines
+                    html += '<div style="font-weight:600; margin-bottom:6px;">AccountingSync log (' + (data.logs ? data.logs.length : 0) + ' บรรทัด):</div>';
+                    if (data.note) {
+                        html += '<div style="font-size:11.5px; color:#8a6d3b; background:#fcf8e3; border:1px solid #faebcc; border-radius:5px; padding:6px 8px; margin-bottom:8px;">'
+                              + escapeHtml(data.note) + '</div>';
+                    }
+                    if (!data.logs || !data.logs.length) {
+                        html += '<div style="color:#999; font-size:13px;">ไม่พบ log ที่เกี่ยวข้อง (ลองกด Retry ก่อนเพื่อให้เกิด log ใหม่ หรือค้นจากเลขใบเสร็จโดยตรง)</div>';
+                    } else {
+                        html += '<div style="border:1px solid #eee; border-radius:6px; overflow:hidden;">';
+                        data.logs.forEach(function(lg, i) {
+                            var bg = i % 2 ? '#fafafa' : '#fff';
+                            var isWarn = (lg.detail || '').indexOf('⚠') >= 0 || /ล้มเหลว|ไม่สำเร็จ|error/i.test(lg.detail || '');
+                            html += '<div style="padding:8px 10px; background:' + bg + '; border-bottom:1px solid #f0f0f0;">'
+                                  + '<div style="font-size:11px; color:#999; margin-bottom:2px;">' + escapeHtml(lg.time) + '</div>'
+                                  + '<div style="font-size:12.5px; white-space:pre-wrap; word-break:break-word;' + (isWarn ? ' color:#C62828;' : '') + '">' + escapeHtml(lg.detail) + '</div></div>';
+                        });
+                        html += '</div>';
+                    }
+                    body.innerHTML = html;
+                })
+                .catch(function(err) {
+                    clearTimeout(giveUp);
+                    var msg = (err && err.name === 'AbortError')
+                        ? 'โหลด log ไม่สำเร็จ: เกิน 40 วินาที (ตาราง Logs ใหญ่/DB ช้า) — ลองใหม่ หรือค้นจากหน้า Logs โดยตรง'
+                        : (err && err.message) || 'โหลด log ไม่สำเร็จ';
+                    body.innerHTML = '<div class="test-result error" style="display:block;"><i class="fas fa-times-circle"></i> ' + escapeHtml(msg) + '</div>';
+                });
+        }
+
+        function closeLogModal() {
+            document.getElementById('logModal').style.display = 'none';
         }
 
         function toggleSelectAll(el) {
@@ -1225,6 +2449,106 @@
                 .catch(function(err) { alert(err.message); });
         }
 
+        function pushBuyerContact() {
+            var el = document.getElementById('rlResult');
+            var r = document.getElementById('rlReceipt').value.trim();
+            if (!r) { el.innerHTML = '<div class="test-result error" style="display:block;">ใส่เลขใบเสร็จในระบบก่อน</div>'; return; }
+            el.innerHTML = '<div class="test-result loading">กำลังส่งข้อมูลผู้ติดต่อ...</div>';
+            fetch(pageUrl + '?action=pushBuyerContact&receipt=' + encodeURIComponent(r) + '&_=' + Date.now())
+                .then(function (x) { return x.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-word; padding:10px; border-radius:6px; font-size:12px; margin:0; '
+                                 + (data.success ? 'background:#E8F5E9;border:1px solid #A5D6A7;' : 'background:#FFF5F5;border:1px solid #FFCDD2;')
+                                 + '">' + escapeHtml(data.message) + '</pre>';
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
+        function inspectReceipt() {
+            var el = document.getElementById('rlResult');
+            var r = document.getElementById('rlReceipt').value.trim();
+            if (!r) { el.innerHTML = '<div class="test-result error" style="display:block;">ใส่เลขใบเสร็จในระบบก่อน</div>'; return; }
+            el.innerHTML = '<div class="test-result loading">กำลังตรวจ...</div>';
+            fetch(pageUrl + '?action=inspectReceipt&receipt=' + encodeURIComponent(r) + '&_=' + Date.now())
+                .then(function (x) { return x.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-word; background:#F8FAFC; border:1px solid #E2E8F0;'
+                                 + ' border-radius:6px; padding:10px; font-size:12px; margin:0;">'
+                                 + escapeHtml(data.message) + '</pre>';
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
+        function relinkDoc() {
+            var el = document.getElementById('rlResult');
+            var r = document.getElementById('rlReceipt').value.trim();
+            var d = document.getElementById('rlDoc').value.trim();
+            if (!r) { el.innerHTML = '<div class="test-result error" style="display:block;">ใส่เลขใบเสร็จในระบบก่อน</div>'; return; }
+            el.innerHTML = '<div class="test-result loading">กำลังดำเนินการ...</div>';
+            fetch(pageUrl + '?action=relinkDoc&receipt=' + encodeURIComponent(r) + '&doc=' + encodeURIComponent(d) + '&_=' + Date.now())
+                .then(function (x) { return x.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<div class="test-result ' + (data.success ? 'success' : 'error') + '" style="display:block; white-space:pre-wrap;">'
+                                 + (data.success ? '✅ ' : '❌ ') + escapeHtml(data.message) + '</div>';
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
+        function runHealthCheck() {
+            var el = document.getElementById('healthResult');
+            el.innerHTML = '<div class="test-result loading">กำลังตรวจ...</div>';
+            fetch(pageUrl + '?action=healthCheck&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.success) {
+                        el.innerHTML = '<div class="test-result error" style="display:block;">ตรวจไม่สำเร็จ: ' + escapeHtml(data.message) + '</div>';
+                        return;
+                    }
+                    // แถบรุ่นโค้ดที่รันอยู่จริง — ใช้ยืนยันว่า deploy DLL ใหม่แล้วหรือยัง
+                    var build = '<div style="font-size:11px; color:#555; background:#F3F4F6; border:1px solid #E5E7EB;'
+                              + ' border-radius:5px; padding:6px 9px; margin-bottom:8px;">'
+                              + '<b>รุ่นโค้ดที่รันอยู่:</b> ' + escapeHtml(data.build || '?')
+                              + ' <span style="color:#888;">· DLL deploy เมื่อ ' + escapeHtml(data.buildDate || '?') + '</span></div>';
+
+                    var list = data.issues || [];
+                    if (!list.length) {
+                        el.innerHTML = build
+                                     + '<div class="test-result success" style="display:block;"><i class="fas fa-check-circle"></i> '
+                                     + 'ไม่พบปัญหา — mapping/ผังบัญชี/แหล่งเงิน/คิว ปกติทั้งหมด '
+                                     + '<span style="color:#888;font-size:11px;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
+                        return;
+                    }
+                    var html = build
+                             + '<div style="font-size:12px; color:#666; margin-bottom:6px;">พบ ' + list.length
+                             + ' เรื่องที่ควรดู <span style="color:#999;">(' + escapeHtml(data.checkedAt) + ')</span></div>';
+                    list.forEach(function (it) {
+                        var err = it.level === 'error';
+                        var info = it.level === 'info';   // สถานะปกติ/บอกผลลัพธ์ ไม่ใช่ปัญหา
+                        var bar = err ? '#C62828' : (info ? '#1565C0' : '#F9A825');
+                        var bg = err ? '#FFF5F5' : (info ? '#F4F8FD' : '#FFFDF3');
+                        var fg = err ? '#C62828' : (info ? '#1565C0' : '#8a6d3b');
+                        var icon = err ? '❌ ' : (info ? 'ℹ️ ' : '⚠️ ');
+                        html += '<div style="border-left:4px solid ' + bar
+                              + '; background:' + bg
+                              + '; border-radius:5px; padding:9px 12px; margin-bottom:7px;">'
+                              + '<div style="font-weight:600; color:' + fg + '; font-size:13px;">'
+                              + icon + escapeHtml(it.title) + '</div>'
+                              + '<div style="font-size:12px; color:#555; white-space:pre-wrap; margin-top:3px;">'
+                              + escapeHtml(it.detail) + '</div></div>';
+                    });
+                    el.innerHTML = html;
+                })
+                .catch(function (err) {
+                    el.innerHTML = '<div class="test-result error" style="display:block;">ตรวจไม่สำเร็จ: ' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
         function retryAllFailed() {
             getAction('retryAllFailed', 'syncTestResult');
             setTimeout(loadQueueData, 1000);
@@ -1252,15 +2576,23 @@
                 });
         }
 
+        var _postActionBusy = false;
         function postAction(data, resultId) {
             var el = document.getElementById(resultId);
+            if (_postActionBusy) return;          // กันกดบันทึกซ้ำระหว่างรอ
+            _postActionBusy = true;
             el.className = 'test-result loading';
             el.textContent = 'กำลังบันทึก...';
+
+            // timeout 60s กันค้าง "กำลังบันทึก..." ถาวรถ้าเครือข่าย/เซิร์ฟเวอร์ไม่ตอบ
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 60000);
 
             fetch(pageUrl + '?action=' + data.action, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+                body: JSON.stringify(data),
+                signal: controller.signal
             })
             .then(function(r) { return r.json(); })
             .then(function(result) {
@@ -1272,8 +2604,10 @@
             })
             .catch(function(err) {
                 el.className = 'test-result error';
-                el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
-            });
+                el.innerHTML = '<i class="fas fa-times-circle"></i> ' +
+                    (err.name === 'AbortError' ? 'หมดเวลาการเชื่อมต่อ (60 วินาที) — ลองใหม่อีกครั้ง' : err.message);
+            })
+            .then(function() { clearTimeout(timer); _postActionBusy = false; });
         }
         // ── Account Sync & Mapping ──
 
@@ -1623,5 +2957,92 @@
                     el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
                 });
         }
+    </script>
+
+    <style>
+        /* ── แถบนำทางหัวข้อ (หน้านี้ยาว ~15 หัวข้อ เดิมต้องเลื่อนหาเอง) ── */
+        .acc-toc { position: sticky; top: 0; z-index: 40; background: rgba(245,246,248,.97);
+                   padding: 8px 0 10px; margin: 0 0 6px; display: flex; gap: 7px; overflow-x: auto;
+                   -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+        .acc-toc a { flex: none; font-size: 12.5px; padding: 6px 12px; border-radius: 18px;
+                     background: #fff; border: 1px solid #e3e6ea; color: #555; text-decoration: none;
+                     white-space: nowrap; }
+        .acc-toc a:hover { border-color: #FF9800; color: #e65100; text-decoration: none; }
+        .acc-toc a.hot { background: #fff3e0; border-color: #FF9800; color: #e65100; font-weight: 600; }
+        .acc-card > h3 { cursor: pointer; }
+        .acc-card.acc-folded > *:not(h3) { display: none; }
+        .acc-card > h3 .fold-caret { margin-left: auto; font-size: 12px; color: #b0b6bd;
+                                     transition: transform .15s; }
+        .acc-card.acc-folded > h3 .fold-caret { transform: rotate(-90deg); }
+    </style>
+    <script>
+        // สร้างแถบนำทางจากหัวข้อการ์ดจริงบนหน้า + หัวข้อกดพับได้ (จำสถานะไว้ในเครื่อง)
+        // เป็นส่วนเสริมล้วน ๆ — ไม่แตะคอนโทรลฝั่งเซิร์ฟเวอร์ ฟอร์มทำงานเหมือนเดิมทุกอย่าง
+        (function () {
+            var cards = document.querySelectorAll('.acc-card');
+            var heads = [];
+            for (var i = 0; i < cards.length; i++) {
+                var h = cards[i].querySelector('h3');
+                if (!h) continue;
+                if (!cards[i].id) cards[i].id = 'accsec' + i;
+                heads.push({ card: cards[i], h3: h });
+            }
+            if (heads.length < 4) return;   // หน้าเล็ก ๆ ไม่ต้องมีแถบนำทาง
+
+            var toc = document.createElement('div');
+            toc.className = 'acc-toc';
+            for (var t = 0; t < heads.length; t++) {
+                var a = document.createElement('a');
+                a.href = '#' + heads[t].card.id;
+                a.textContent = (heads[t].h3.textContent || '').replace(/\s+/g, ' ').trim();
+                (function (card) {
+                    a.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        card.classList.remove('acc-folded');
+                        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                })(heads[t].card);
+                toc.appendChild(a);
+            }
+            var header = document.querySelector('.acc-page .page-header');
+            if (header && header.parentNode)
+                header.parentNode.insertBefore(toc, header.nextSibling);
+
+            // พับ/กาง — เก็บสถานะราย section (อิงข้อความหัวข้อ ให้ทนต่อการสลับลำดับ)
+            function skey(h3) { return 'accfold:' + (h3.textContent || '').trim().substring(0, 40); }
+            for (var f = 0; f < heads.length; f++) {
+                (function (card, h3) {
+                    var caret = document.createElement('span');
+                    caret.className = 'fold-caret';
+                    caret.textContent = '▾';
+                    h3.appendChild(caret);
+                    try { if (localStorage.getItem(skey(h3)) === '1') card.classList.add('acc-folded'); }
+                    catch (e) { }
+                    h3.addEventListener('click', function (ev) {
+                        if (ev.target && (ev.target.tagName === 'A' || ev.target.tagName === 'BUTTON'
+                            || ev.target.tagName === 'INPUT')) return;
+                        card.classList.toggle('acc-folded');
+                        try {
+                            localStorage.setItem(skey(h3), card.classList.contains('acc-folded') ? '1' : '0');
+                        } catch (e) { }
+                    });
+                })(heads[f].card, heads[f].h3);
+            }
+
+            // ไฮไลต์หัวข้อที่กำลังดูอยู่
+            if ('IntersectionObserver' in window) {
+                var links = toc.querySelectorAll('a');
+                var io = new IntersectionObserver(function (entries) {
+                    for (var e = 0; e < entries.length; e++) {
+                        if (!entries[e].isIntersecting) continue;
+                        for (var L = 0; L < links.length; L++)
+                            links[L].classList.toggle('hot',
+                                links[L].getAttribute('href') === '#' + entries[e].target.id);
+                        break;
+                    }
+                }, { rootMargin: '-10% 0px -70% 0px' });
+                for (var c = 0; c < heads.length; c++) io.observe(heads[c].card);
+            }
+        })();
     </script>
 </asp:Content>

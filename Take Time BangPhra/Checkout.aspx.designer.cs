@@ -177,6 +177,15 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.CheckBox chkRoomCondition;
 
         /// <summary>
+        /// txtDamageAmount control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtDamageAmount;
+
+        /// <summary>
         /// chkMissingItems control.
         /// </summary>
         /// <remarks>
@@ -184,6 +193,15 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.CheckBox chkMissingItems;
+
+        /// <summary>
+        /// txtMissingAmount control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtMissingAmount;
 
         /// <summary>
         /// chkKeyReturn control.
@@ -283,5 +301,45 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.HyperLink lnkCancel;
+
+        /// <summary>
+        /// pnlSecurityHold control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlSecurityHold;
+
+        /// <summary>
+        /// litHoldInfo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litHoldInfo;
+
+        /// <summary>
+        /// litHoldMsg control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litHoldMsg;
+
+        /// <summary>
+        /// pnlHoldActions control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlHoldActions;
+
+        /// <summary>
+        /// txtCaptureAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCaptureAmount;
+
+        /// <summary>
+        /// txtCaptureReason control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCaptureReason;
+
+        /// <summary>
+        /// btnCaptureHold control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnCaptureHold;
+
+        /// <summary>
+        /// btnReleaseHold control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnReleaseHold;
     }
 }

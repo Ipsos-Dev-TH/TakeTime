@@ -593,6 +593,12 @@ namespace Take_Time_BangPhra
                 }
             }
 
+            // Hook กลาง: ทุกจุดที่บันทึก/แก้ข้อมูลลูกค้าผ่านเมธอดนี้ (จอง/เช็คอิน/เช็คเอาท์/ใบเสร็จ/
+            // ใบสำคัญจ่าย/ขายสินค้า) → enqueue sync ผู้ติดต่อไป NextAcc ให้ contact ตรงกับระบบเสมอ
+            // (background queue — ไม่บล็อกหน้าเว็บ; TryEnqueue กลืน error ทุกชนิด ห้ามพังการเซฟลูกค้า)
+            if (customerId > 0)
+                Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(connStr, mobilePhone);
+
             return customerId;
         }
 
@@ -929,7 +935,7 @@ namespace Take_Time_BangPhra
             string status = "";
             try
             {
-                string channelAccessToken = ConfigurationManager.AppSettings["linechannelaccesstokentaketime"]?.ToString() ?? "";
+                string channelAccessToken = AppCfg.Get("linechannelaccesstokentaketime")?.ToString() ?? "";
                 var lineMessagingClient = new LineMessagingClient(channelAccessToken);
 
                 // สร้างข้อความ

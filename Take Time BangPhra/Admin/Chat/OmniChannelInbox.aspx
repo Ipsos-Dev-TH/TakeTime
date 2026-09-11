@@ -1,4 +1,4 @@
-<%@ Page Title="Omni-Channel Inbox" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="OmniChannelInbox.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Chat.OmniChannelInbox" %>
+﻿<%@ Page Title="Omni-Channel Inbox" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="OmniChannelInbox.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Chat.OmniChannelInbox" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -18,10 +18,19 @@
         .omni-layout { display: grid; grid-template-columns: 360px 1fr; gap: 0; height: calc(100vh - 180px); min-height: 500px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 
         /* Sidebar */
-        .conv-sidebar { border-right: 1px solid #e8e8e8; display: flex; flex-direction: column; }
+        /* min-height:0 + overflow:hidden — จำเป็น ห้ามตัดออก
+           flex/grid item มีค่าเริ่มต้น min-height:auto = "ห้ามเล็กกว่าเนื้อหา"
+           ⇒ .conv-list ที่มี flex:1 จะถูกดันสูงเท่ารายการทั้งหมด แทนที่จะหดแล้วมี scrollbar
+           ⇒ เนื้อหาล้นออกนอก .omni-layout ซึ่ง overflow:hidden → ถูกตัดทิ้ง เลื่อนลงไปดูไม่ได้ */
+        .conv-sidebar { border-right: 1px solid #e8e8e8; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
         .conv-filters { padding: 12px; border-bottom: 1px solid #e8e8e8; background: #fafafa; }
         .filter-row { display: flex; gap: 6px; margin-bottom: 8px; }
         .filter-row:last-child { margin-bottom: 0; }
+        .filter-chk { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #555; white-space: nowrap; cursor: pointer; }
+        .conv-count { padding: 6px 12px; font-size: 11.5px; color: #888; border-bottom: 1px solid #f0f0f0; background: #fafafa; }
+        .conv-needsreply { font-size: 10px; font-weight: 700; color: #c62828; background: #ffebee; padding: 1px 6px; border-radius: 8px; }
+        .btn-loadmore { width: 100%; padding: 10px; border: none; background: #f5f5f5; color: #5D4037; font-weight: 600; font-size: 12.5px; cursor: pointer; font-family: 'Prompt',sans-serif; }
+        .btn-loadmore:hover { background: #EFEBE9; }
         .filter-row input, .filter-row select { flex: 1; padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; font-family: 'Prompt',sans-serif; }
         .filter-row input:focus, .filter-row select:focus { outline: none; border-color: #5D4037; }
 
@@ -34,7 +43,7 @@
         .ch-pill.active .pill-count { background: rgba(255,255,255,0.3); }
 
         /* Conversation List */
-        .conv-list { flex: 1; overflow-y: auto; }
+        .conv-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .conv-item { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; display: flex; gap: 12px; align-items: flex-start; position: relative; }
         .conv-item:hover { background: #f9f9f9; }
         .conv-item.active { background: #EFEBE9; }
@@ -57,12 +66,34 @@
         .conv-assigned { font-size: 10px; color: #7C4DFF; }
 
         /* Chat Detail */
-        .chat-panel { display: flex; flex-direction: column; }
-        .chat-header { padding: 14px 20px; border-bottom: 1px solid #e8e8e8; background: #fafafa; display: flex; justify-content: space-between; align-items: center; }
+        /* เหตุผลเดียวกับ .conv-sidebar — ถ้าไม่ใส่ .messages-area จะสูงเท่าข้อความทั้งหมด
+           แล้วดัน .reply-area (กล่องพิมพ์ตอบ) ตกไปนอกพื้นที่ที่มองเห็น = "ตอบไม่ได้" */
+        .chat-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .chat-content { height: 100%; min-height: 0; flex-direction: column; }
+        .chat-header { flex-shrink: 0; padding: 14px 20px; border-bottom: 1px solid #e8e8e8; background: #fafafa; display: flex; justify-content: space-between; align-items: center; }
         .chat-header-left { display: flex; align-items: center; gap: 12px; }
         .chat-header-left .ch-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
         .chat-header-info h4 { margin: 0; font-size: 15px; color: #333; }
         .chat-header-info p { margin: 2px 0 0; font-size: 12px; color: #888; }
+
+        /* แถบผูกการจอง */
+        .link-bar { flex-shrink: 0; padding: 7px 20px; font-size: 12.5px; display: flex; align-items: center;
+                    gap: 10px; flex-wrap: wrap; border-bottom: 1px solid #eee; }
+        .link-bar.linked { background: #e8f5e9; color: #1e7e42; }
+        .link-bar.unlinked { background: #fff8e1; color: #8a6100; }
+        .link-bar button { background: #fff; border: 1px solid #cfcfcf; border-radius: 6px; padding: 3px 10px;
+                           font-size: 11.5px; cursor: pointer; color: #444; }
+        .link-bar button:hover { background: #f3f3f3; }
+        .link-search { flex-shrink: 0; padding: 10px 20px; background: #fafafa; border-bottom: 1px solid #eee; }
+        .link-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .link-search-row input { flex: 1 1 220px; min-width: 0; padding: 6px 10px; border: 1px solid #ddd;
+                                 border-radius: 6px; font-size: 13px; }
+        .link-results { max-height: 190px; overflow-y: auto; margin-top: 8px; }
+        .link-result { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+                       padding: 7px 10px; border: 1px solid #eee; border-radius: 6px; background: #fff;
+                       margin-bottom: 6px; font-size: 12.5px; }
+        .link-result small { color: #888; display: block; }
+        @media (max-width: 600px) { .link-bar, .link-search { padding-left: 12px; padding-right: 12px; } }
         .chat-actions { display: flex; gap: 6px; }
         .btn-act { padding: 6px 12px; border: 1px solid #ddd; background: white; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: 'Prompt',sans-serif; display: flex; align-items: center; gap: 4px; transition: all 0.2s; }
         .btn-act:hover { background: #f5f5f5; }
@@ -72,7 +103,7 @@
         .btn-act.danger { background: #F44336; color: white; border-color: #F44336; }
 
         /* Messages Area */
-        .messages-area { flex: 1; overflow-y: auto; padding: 20px; background: #f5f5f5; }
+        .messages-area { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px; background: #f5f5f5; }
         .msg-date-sep { text-align: center; margin: 15px 0; font-size: 11px; color: #999; }
         .msg-date-sep span { background: #e8e8e8; padding: 3px 12px; border-radius: 10px; }
         .msg { display: flex; margin-bottom: 10px; }
@@ -85,7 +116,7 @@
         .msg.incoming .msg-sender { font-size: 11px; color: #7C4DFF; font-weight: 600; margin-bottom: 3px; }
 
         /* Reply Area */
-        .reply-area { padding: 12px 16px; border-top: 1px solid #e8e8e8; background: white; }
+        .reply-area { padding: 12px 16px; border-top: 1px solid #e8e8e8; background: white; flex-shrink: 0; }
         .canned-bar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; max-height: 60px; overflow-y: auto; }
         .canned-btn { padding: 4px 10px; border: 1px solid #e0e0e0; background: white; border-radius: 12px; font-size: 11px; cursor: pointer; font-family: 'Prompt',sans-serif; color: #555; transition: all 0.2s; }
         .canned-btn:hover { background: #5D4037; color: white; border-color: #5D4037; }
@@ -112,9 +143,9 @@
         <div class="omni-header">
             <h2><i class="fas fa-comments"></i> Omni-Channel Inbox</h2>
             <div class="header-badges">
-                <span class="stat-pill unread" id="pillUnread">0 ยังไม่อ่าน</span>
-                <span class="stat-pill open" id="pillOpen">0 เปิดอยู่</span>
-                <span class="stat-pill pending" id="pillPending">0 รอดำเนินการ</span>
+                <span class="stat-pill unread" id="pillUnread" style="cursor:pointer" title="กดเพื่อกรอง" onclick="pillFilter('unread')">0 ยังไม่อ่าน</span>
+                <span class="stat-pill open" id="pillOpen" style="cursor:pointer" title="กดเพื่อกรอง" onclick="pillFilter('open')">0 เปิดอยู่</span>
+                <span class="stat-pill pending" id="pillPending" style="cursor:pointer" title="กดเพื่อกรอง" onclick="pillFilter('pending')">0 รอดำเนินการ</span>
                 <button id="btnPendingBookings" onclick="openBookings()" style="padding:6px 14px; border-radius:20px; font-size:12px; font-weight:600; background:#FFF3E0; color:#E65100; border:1px solid #FFB74D; cursor:pointer; font-family:'Prompt',sans-serif; display:none;">
                     <i class="fas fa-concierge-bell"></i> <span id="pendingBookingCount">0</span> จองรอยืนยัน
                 </button>
@@ -129,12 +160,30 @@
                         <input type="text" id="txtSearch" placeholder="ค้นหาชื่อ เบอร์ ข้อความ..." oninput="debounceLoad()" />
                     </div>
                     <div class="filter-row">
-                        <select id="ddlStatus" onchange="loadConversations()">
+                        <select id="ddlStatus" onchange="resetAndLoad()">
                             <option value="ALL">ทุกสถานะ</option>
                             <option value="OPEN" selected>เปิดอยู่</option>
                             <option value="PENDING">รอดำเนินการ</option>
                             <option value="RESOLVED">แก้ไขแล้ว</option>
                         </select>
+                        <select id="ddlSort" onchange="resetAndLoad()" title="เรียงลำดับ">
+                            <option value="NEWEST">ใหม่สุดก่อน</option>
+                            <option value="WAITING">รอตอบนานสุดก่อน</option>
+                            <option value="UNREAD">ยังไม่อ่านก่อน</option>
+                            <option value="OLDEST">เก่าสุดก่อน</option>
+                            <option value="NAME">ชื่อ A-Z</option>
+                        </select>
+                    </div>
+                    <div class="filter-row">
+                        <!-- ตัวกรองที่ขาดไป: "อ่านแล้วแต่ยังไม่ได้ตอบ" คือกองที่ต้องตามงานจริง ๆ -->
+                        <select id="ddlReply" onchange="resetAndLoad()" title="สถานะการตอบ">
+                            <option value="">ตอบ/ยังไม่ตอบ — ทั้งหมด</option>
+                            <option value="NEEDS_REPLY">🔴 ยังไม่ได้ตอบ</option>
+                            <option value="REPLIED">✅ ตอบแล้ว</option>
+                        </select>
+                        <label class="filter-chk" title="เฉพาะที่ยังไม่ได้เปิดอ่าน">
+                            <input type="checkbox" id="chkUnread" onchange="resetAndLoad()" /> ยังไม่อ่าน
+                        </label>
                     </div>
                 </div>
 
@@ -160,8 +209,19 @@
                     <p>เลือกการสนทนาจากรายการด้านซ้าย</p>
                 </div>
 
-                <div id="chatContent" style="display:none; height:100%; display:none; flex-direction:column;">
+                <div id="chatContent" class="chat-content" style="display:none;">
                     <div class="chat-header" id="chatHeader"></div>
+                    <!-- แถบผูกการจอง: ตัวชี้ขาดว่าปุ่ม 💬 บนตารางจองรายวันจะขึ้นกับแขกคนนี้หรือไม่ -->
+                    <div class="link-bar" id="bookingLinkBar"></div>
+                    <div class="link-search" id="bookingLinkSearch" style="display:none;">
+                        <div class="link-search-row">
+                            <input type="text" id="txtLinkSearch" placeholder="ค้นชื่อผู้เข้าพัก / เบอร์โทร / เลขการจอง / เลข OTA"
+                                   onkeypress="if(event.key==='Enter'){event.preventDefault();doLinkSearch();}" />
+                            <button type="button" class="btn-act primary" onclick="doLinkSearch()"><i class="fas fa-search"></i> ค้นหา</button>
+                            <button type="button" class="btn-act" onclick="toggleLinkSearch(false)">ปิด</button>
+                        </div>
+                        <div id="linkSearchResults" class="link-results"></div>
+                    </div>
                     <div class="messages-area" id="messagesArea"></div>
                     <div class="reply-area">
                         <div class="canned-bar" id="cannedBar"></div>
@@ -234,6 +294,10 @@
             loadPendingBookings(true);
             pollTimer = setInterval(function () { loadConversations(true); loadStats(); loadPendingBookings(true); }, 5000);
 
+            // deep link จากหน้าอื่น (เช่น ปุ่ม 💬 แชทลูกค้า ในตารางจองรายวัน): ?conv={id} → เปิดบทสนทนาทันที
+            var deepConv = parseInt((window.location.search.match(/[?&]conv=(\d+)/) || [])[1] || '0', 10);
+            if (deepConv > 0) openConversation(deepConv);
+
             // Auto-resize reply textarea
             $('#txtReply').on('input', function () {
                 this.style.height = 'auto';
@@ -272,21 +336,70 @@
             debounceTimer = setTimeout(loadConversations, 300);
         }
 
-        function loadConversations(silent) {
+        var convOffset = 0;          // แถวที่โหลดมาแล้ว (ใช้กับปุ่มโหลดเพิ่ม)
+        var convLoaded = [];         // รายการสะสม — โหลดเพิ่มต้องต่อท้าย ไม่ใช่แทนที่
+        var convPageSize = 50;
+
+        function resetAndLoad() { convOffset = 0; convLoaded = []; loadConversations(); }
+
+        function loadConversations(silent, append) {
             var data = {
                 channel: currentChannel,
                 status: $('#ddlStatus').val(),
-                search: $('#txtSearch').val().trim()
+                search: $('#txtSearch').val().trim(),
+                reply: $('#ddlReply').val(),
+                sort: $('#ddlSort').val(),
+                unreadOnly: $('#chkUnread').is(':checked'),
+                limit: convPageSize,
+                offset: append ? convOffset : 0
             };
+            if (!append) { convOffset = 0; convLoaded = []; }
 
             $.ajax({
                 url: window.location.pathname + '?action=conversations',
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify(data),
                 success: function (r) {
-                    if (r && r.conversations) renderConvList(r.conversations);
+                    if (!r || !r.conversations) return;
+                    convLoaded = append ? convLoaded.concat(r.conversations) : r.conversations;
+                    convOffset = convLoaded.length;
+                    renderConvList(convLoaded, r.total || convLoaded.length, r.hasMore);
                 }
             });
+        }
+
+        function loadMoreConvs() { loadConversations(true, true); }
+
+        /// รีเฟรชรายการเดิมทั้งชุด (ไม่ย้อนกลับไปหน้าแรก) — ใช้หลังอ่าน/ตอบ/เปลี่ยนสถานะ
+        function refreshConvList() {
+            var keep = Math.max(convPageSize, convLoaded.length || 0);
+            $.ajax({
+                url: window.location.pathname + '?action=conversations',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({
+                    channel: currentChannel,
+                    status: $('#ddlStatus').val(),
+                    search: $('#txtSearch').val().trim(),
+                    reply: $('#ddlReply').val(),
+                    sort: $('#ddlSort').val(),
+                    unreadOnly: $('#chkUnread').is(':checked'),
+                    limit: keep, offset: 0
+                }),
+                success: function (r) {
+                    if (!r || !r.conversations) return;
+                    convLoaded = r.conversations;
+                    convOffset = convLoaded.length;
+                    renderConvList(convLoaded, r.total || convLoaded.length, r.hasMore);
+                }
+            });
+        }
+
+        /// กดที่ตัวเลขด้านบนเพื่อกรองทันที
+        function pillFilter(kind) {
+            if (kind === 'unread') { $('#chkUnread').prop('checked', true); $('#ddlStatus').val('ALL'); $('#ddlReply').val(''); }
+            else if (kind === 'open') { $('#chkUnread').prop('checked', false); $('#ddlStatus').val('OPEN'); $('#ddlReply').val(''); }
+            else if (kind === 'pending') { $('#chkUnread').prop('checked', false); $('#ddlStatus').val('PENDING'); $('#ddlReply').val(''); }
+            resetAndLoad();
         }
 
         function loadStats() {
@@ -303,12 +416,14 @@
             });
         }
 
-        function renderConvList(convs) {
+        function renderConvList(convs, total, hasMore) {
             if (!convs || convs.length === 0) {
-                $('#convList').html('<div class="empty-state" style="padding:40px;"><i class="fas fa-inbox"></i><p>ไม่มีการสนทนา</p></div>');
+                $('#convList').html('<div class="empty-state" style="padding:40px;"><i class="fas fa-inbox"></i>'
+                    + '<p>ไม่มีการสนทนาตามตัวกรองนี้</p></div>');
                 return;
             }
-            var html = '';
+            // บอกจำนวนเสมอ — เดิมตัดที่ 50 เงียบ ๆ ไม่มีทางรู้ว่ายังมีอีก
+            var html = '<div class="conv-count">แสดง ' + convs.length + ' จาก ' + (total || convs.length) + ' รายการ</div>';
             for (var i = 0; i < convs.length; i++) {
                 var c = convs[i];
                 var cls = 'conv-item' + (c.id === selectedConvId ? ' active' : '') + (c.unread > 0 ? ' has-unread' : '');
@@ -321,17 +436,19 @@
                 html += '<div class="conv-meta">';
                 html += '<span class="conv-channel-badge" style="background:' + c.brandColor + '">' + escHtml(c.channelName) + '</span>';
                 if (c.unread > 0) html += '<span class="conv-unread-badge">' + c.unread + '</span>';
+                if (c.needsReply) html += '<span class="conv-needsreply">ยังไม่ตอบ' + (c.waitingLabel ? ' · ' + escHtml(c.waitingLabel) : '') + '</span>';
                 if (c.assigned) html += '<span class="conv-assigned"><i class="fas fa-user"></i> ' + escHtml(c.assigned) + '</span>';
                 html += '</div></div></div>';
             }
+            if (hasMore) html += '<button type="button" class="btn-loadmore" onclick="loadMoreConvs()">โหลดเพิ่ม ↓</button>';
             $('#convList').html(html);
         }
 
         function openConversation(id) {
             selectedConvId = id;
             $('.conv-item').removeClass('active');
-            // Highlight in list
-            loadConversations(true);
+            // รีเฟรชรายการโดยคงจำนวนที่โหลดมาแล้ว — ไม่งั้นกดอ่านทีเดียวเด้งกลับหน้าแรก
+            refreshConvList();
 
             $('#emptyState').hide();
             $('#chatContent').css('display', 'flex');
@@ -364,6 +481,8 @@
             headerHtml += '</div>';
             $('#chatHeader').html(headerHtml);
 
+            renderBookingLink(c);
+
             // Messages
             var msgs = data.messages || [];
             var msgHtml = '';
@@ -377,7 +496,12 @@
                 var cls = m.direction === 'IN' ? 'incoming' : 'outgoing';
                 msgHtml += '<div class="msg ' + cls + '"><div>';
                 if (m.direction === 'IN' && m.sender) msgHtml += '<div class="msg-sender">' + escHtml(m.sender) + '</div>';
-                msgHtml += '<div class="bubble">' + escHtml(m.content) + '</div>';
+                if (m.mediaUrl && m.type === 'IMAGE')
+                    msgHtml += '<div class="bubble"><a href="' + escHtml(m.mediaUrl) + '" target="_blank"><img src="' + escHtml(m.mediaUrl) + '" style="max-width:100%; border-radius:8px; display:block;" alt="" /></a></div>';
+                else if (m.mediaUrl)
+                    msgHtml += '<div class="bubble"><a href="' + escHtml(m.mediaUrl) + '" target="_blank">📎 ' + escHtml(m.content || 'ไฟล์แนบ') + '</a></div>';
+                else
+                    msgHtml += '<div class="bubble">' + escHtml(m.content) + '</div>';
                 msgHtml += '<div class="msg-meta">' + (m.time || '') + '</div>';
                 msgHtml += '</div></div>';
             }
@@ -403,9 +527,97 @@
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ conversationId: selectedConvId, content: text }),
                 success: function (r) {
-                    if (!r || !r.success) alert(r ? r.message : 'ส่งไม่สำเร็จ');
+                    if (!r || !r.success) { alert(r ? r.message : 'ส่งไม่สำเร็จ'); return; }
+                    // บันทึกสำเร็จแต่ส่งออกช่องทางไม่ได้ — ต้องบอก ไม่งั้นเข้าใจว่าลูกค้าได้รับแล้ว
+                    if (r.warning) {
+                        alert('⚠ ' + r.warning);
+                        $('#messagesArea .msg.outgoing').last()
+                            .find('.msg-meta').append(' · <span style="color:#c62828">ส่งไม่ออก</span>');
+                    }
                     loadConversations(true);
-                }
+                },
+                error: function () { alert('ส่งไม่สำเร็จ — เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
+            });
+        }
+
+        // ── ผูกบทสนทนากับการจอง ────────────────────────────────────────────────
+        // บทสนทนาที่ไม่ได้ผูกการจอง = ปุ่ม 💬 บนตารางจองรายวัน "ไม่ขึ้น" พนักงานจึงไม่รู้ว่า
+        // แขกคนนี้ทักมาค้างไว้ ระบบจับคู่อัตโนมัติจงใจไม่เดาเมื่อกำกวม → ให้ชี้เองตรงนี้ได้
+        function renderBookingLink(c) {
+            toggleLinkSearch(false);
+            var html;
+            if (c.reservationId > 0) {
+                html = '<span><i class="fas fa-link"></i> ผูกกับการจอง <b>' +
+                       escHtml(c.reservationLabel || ('#' + c.reservationId)) + '</b></span>' +
+                       '<button type="button" onclick="toggleLinkSearch(true)">เปลี่ยน</button>' +
+                       '<button type="button" onclick="unlinkBooking()">ยกเลิกการผูก</button>';
+                $('#bookingLinkBar').removeClass('unlinked').addClass('linked');
+            } else {
+                html = '<span><i class="fas fa-unlink"></i> <b>ยังไม่ได้ผูกกับการจอง</b> — ' +
+                       'ปุ่มแชทในตารางจองรายวันจะยังไม่ขึ้นกับแขกรายนี้</span>' +
+                       '<button type="button" onclick="toggleLinkSearch(true)">ผูกการจอง</button>';
+                $('#bookingLinkBar').removeClass('linked').addClass('unlinked');
+            }
+            $('#bookingLinkBar').html(html);
+        }
+
+        function toggleLinkSearch(show) {
+            $('#bookingLinkSearch').toggle(!!show);
+            if (show) {
+                $('#linkSearchResults').html('');
+                var c = $('#chatHeader .chat-header-info h4').text() || '';
+                $('#txtLinkSearch').val(c).focus();
+                if (c) doLinkSearch();
+            }
+        }
+
+        function doLinkSearch() {
+            var q = ($('#txtLinkSearch').val() || '').trim();
+            if (q.length < 2) { $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">พิมพ์อย่างน้อย 2 ตัวอักษร</div>'); return; }
+            $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">กำลังค้นหา...</div>');
+            $.ajax({
+                url: window.location.pathname + '?action=linkSearch',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ q: q }),
+                success: function (r) {
+                    var rs = (r && r.results) || [];
+                    if (!rs.length) { $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">ไม่พบการจองที่ตรง</div>'); return; }
+                    var h = '';
+                    for (var i = 0; i < rs.length; i++) {
+                        var b = rs[i];
+                        h += '<div class="link-result"><div><b>#' + b.id + ' ' + escHtml(b.name || '(ไม่มีชื่อ)') + '</b>' +
+                             '<small>' + escHtml(b.rooms || '-') + ' • ' + escHtml(b.dates) +
+                             ' • ' + escHtml(b.status || '') + (b.phone ? ' • ' + escHtml(b.phone) : '') + '</small></div>' +
+                             '<button type="button" class="btn-act primary" onclick="linkBooking(' + b.id + ')">ผูก</button></div>';
+                    }
+                    $('#linkSearchResults').html(h);
+                },
+                error: function () { $('#linkSearchResults').html('<div style="color:#c00;font-size:12px;">ค้นหาไม่สำเร็จ</div>'); }
+            });
+        }
+
+        function linkBooking(resId) {
+            if (!selectedConvId) return;
+            $.ajax({
+                url: window.location.pathname + '?action=linkBooking',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ conversationId: selectedConvId, reservationId: resId }),
+                success: function (r) {
+                    if (r && r.success) { openConversation(selectedConvId); refreshConvList(); }
+                    else alert('ผูกไม่สำเร็จ: ' + ((r && r.message) || ''));
+                },
+                error: function () { alert('ผูกไม่สำเร็จ — เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
+            });
+        }
+
+        function unlinkBooking() {
+            if (!selectedConvId) return;
+            if (!confirm('ยกเลิกการผูกบทสนทนานี้กับการจอง?')) return;
+            $.ajax({
+                url: window.location.pathname + '?action=unlinkBooking',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ conversationId: selectedConvId }),
+                success: function () { openConversation(selectedConvId); refreshConvList(); }
             });
         }
 
@@ -415,7 +627,7 @@
                 url: window.location.pathname + '?action=updateStatus',
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ conversationId: selectedConvId, status: 'RESOLVED' }),
-                success: function () { openConversation(selectedConvId); loadConversations(); loadStats(); }
+                success: function () { openConversation(selectedConvId); refreshConvList(); loadStats(); }
             });
         }
 
@@ -425,7 +637,7 @@
                 url: window.location.pathname + '?action=updateStatus',
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ conversationId: selectedConvId, status: 'OPEN' }),
-                success: function () { openConversation(selectedConvId); loadConversations(); loadStats(); }
+                success: function () { openConversation(selectedConvId); refreshConvList(); loadStats(); }
             });
         }
 
@@ -436,7 +648,7 @@
                 url: window.location.pathname + '?action=assign',
                 type: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ conversationId: selectedConvId, assignedTo: name }),
-                success: function () { openConversation(selectedConvId); loadConversations(); }
+                success: function () { openConversation(selectedConvId); refreshConvList(); }
             });
         }
 

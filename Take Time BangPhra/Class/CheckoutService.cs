@@ -41,6 +41,35 @@ namespace Take_Time_BangPhra
         {
             try
             {
+                // ── บล็อกเช็คเอาท์เมื่อยังมีชาร์จเข้าห้องค้างชำระ (PENDING) ──
+                // charge PENDING ลง COGS ไปแล้วตอนชาร์จ แต่รายได้จะลงก็ต่อเมื่อถูกยัดเข้าใบเสร็จ
+                // (AddProductChargesToReceipt) — ถ้าปล่อยเช็คเอาท์ทั้งที่ยังค้าง รายได้ส่วนนี้จะหาย
+                // ถาวร (มีแต่ต้นทุน ไม่มีรายได้ บน NextAcc). เดิม gate อยู่แค่หน้า UI — บังคับที่ service ด้วย
+                try
+                {
+                    var pendDt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(TotalAmount), 0) FROM Reservation_Product_Charges
+                          WHERE Reservation_ID = @rid AND Status = 'PENDING'",
+                        new Dictionary<string, object> { { "@rid", reservationId } });
+                    decimal pendingCharges = pendDt != null && pendDt.Rows.Count > 0
+                        ? Convert.ToDecimal(pendDt.Rows[0][0]) : 0m;
+                    if (pendingCharges > 0.01m)
+                    {
+                        return new CheckoutResult
+                        {
+                            Success = false,
+                            Message = $"มีสินค้าชาร์จเข้าห้องค้างชำระ {pendingCharges:N2} บาท — " +
+                                      "กรุณาชำระ/ออกใบเสร็จ (รวมรายการชาร์จ) ที่หน้า Reserve ก่อนเช็คเอาท์ " +
+                                      "เพื่อให้รายได้ลงบัญชี NextAcc ครบ"
+                        };
+                    }
+                }
+                catch (Exception pex)
+                {
+                    _code.Logs(_connectionString, "Checkout",
+                        $"Pending-charge check failed for Reservation #{reservationId}: {pex.Message} (ไม่บล็อก)", "SYSTEM");
+                }
+
                 // Capture reservation data BEFORE sp_ProcessCheckout, because the SP
                 // may zero out Reservation.Deposit during checkout processing.
                 var resData = GetReservationData(reservationId);

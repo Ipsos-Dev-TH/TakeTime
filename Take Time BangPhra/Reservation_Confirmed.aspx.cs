@@ -307,9 +307,9 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                // Query all receipts for this reservation
+                // Query all receipts for this reservation (IsDeposit → เลือกป้ายชื่อ ใบเสร็จ/ใบกำกับ)
                 string query = @"
-                    SELECT ID, UID, Created_Date, Total_Amount, Status
+                    SELECT ID, UID, Created_Date, Total_Amount, Status, ISNULL(IsDeposit, 0) AS IsDeposit
                     FROM Account_Receipt
                     WHERE Reservation_ID = @ReservationId
                       AND Status = 'Normal'
@@ -346,24 +346,31 @@ namespace Take_Time_BangPhra
             }
         }
 
-        // Helper method for generating receipt PDF URL
+        // ลิงก์เอกสาร: ผ่าน handler ที่เสิร์ฟ "เอกสารทางการจาก NextAcc" ก่อน (ใบเสร็จมัดจำ/ใบกำกับภาษี
+        // ที่ออกจริงในโหมด DOCUMENT) แล้วค่อย fallback PDF ที่ระบบ render เอง
         protected string GetReceiptPDFUrl(object receiptId, object uid, object createdDate)
         {
             try
             {
                 string id = receiptId?.ToString() ?? "";
-                string receiptUID = uid?.ToString() ?? "";
-                DateTime created = Convert.ToDateTime(createdDate);
-
-                string year = created.Year.ToString();
-                string month = created.Month.ToString("00");
-
-                return $"/Documents/Receipt/{year}/{month}/{id}_{receiptUID}.pdf";
+                if (string.IsNullOrEmpty(id)) return "#";
+                return "/API/ViewReceiptDoc.ashx?doc=" + HttpUtility.UrlEncode(id);
             }
             catch
             {
                 return "#";
             }
+        }
+
+        // ป้ายชื่อเอกสารตามชนิดจริง: มัดจำ = ใบเสร็จรับเงิน / รับชำระ = ใบกำกับภาษี
+        protected string GetReceiptDocLabel(object isDeposit)
+        {
+            try
+            {
+                bool dep = isDeposit != DBNull.Value && Convert.ToBoolean(isDeposit);
+                return dep ? "ใบเสร็จรับเงิน (มัดจำ)" : "ใบกำกับภาษี";
+            }
+            catch { return "เอกสาร"; }
         }
 
         private void GenerateAndDownloadReceipt(string reservationId)

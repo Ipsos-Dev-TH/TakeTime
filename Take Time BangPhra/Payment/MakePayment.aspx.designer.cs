@@ -220,5 +220,20 @@ namespace Take_Time_BangPhra.Payment
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.GridView gvPaymentHistory;
+
+        /// <summary>
+        /// pnlOnlineLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlOnlineLink;
+
+        /// <summary>
+        /// txtPayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPayLink;
+
+        /// <summary>
+        /// lnkOpenPay control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.HyperLink lnkOpenPay;
     }
 }

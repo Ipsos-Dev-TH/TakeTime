@@ -125,15 +125,16 @@ namespace Take_Time_BangPhra
                         string custName = GetCustomerName(reservationId);
                         var sync = new AccountingSyncService(_connectionString);
                         string psPayAccId = sync.LookupPaidHowAccountId(paymentMethod);
+                        decimal payVat = ComputeVatFromGross(amount);
                         if (config.IsDocumentMode)
                         {
-                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, payVat, DateTime.Now, custName,
                                 isDeposit: false, paymentMethod: paymentMethod,
                                 revenueType: "ROOM_REVENUE", paymentAccountId: psPayAccId);
                         }
                         else if (!string.IsNullOrEmpty(receiptId) && receiptId != "0")
                         {
-                            sync.EnqueueReceipt(reservationId, receiptId, amount, 0, DateTime.Now, custName,
+                            sync.EnqueueReceipt(reservationId, receiptId, amount, payVat, DateTime.Now, custName,
                                 isDeposit: false, paymentMethod: paymentMethod,
                                 revenueType: "ROOM_REVENUE", paymentAccountId: psPayAccId);
                         }
@@ -262,7 +263,7 @@ namespace Take_Time_BangPhra
                         string custName = GetCustomerName(reservationId);
                         var sync = new AccountingSyncService(_connectionString);
                         string depPayAccId = sync.LookupPaidHowAccountId(paymentMethod);
-                        sync.EnqueueReceipt(reservationId, receiptId, depositAmount, 0, DateTime.Now, custName,
+                        sync.EnqueueReceipt(reservationId, receiptId, depositAmount, ComputeVatFromGross(depositAmount), DateTime.Now, custName,
                             isDeposit: isDeposit, paymentMethod: paymentMethod, paymentAccountId: depPayAccId);
                     }
                 }
@@ -492,15 +493,17 @@ namespace Take_Time_BangPhra
                 throw new Exception("ไม่พบข้อมูลการจอง");
             }
 
-            // Insert receipt
+            // Insert receipt — แยก VAT ตาม Business_Info.Use_Vat (ราคาเป็น gross รวม VAT)
+            // เดิม hardcode Vat=0 → กิจการจด VAT รายงานภาษีขายขาดทุกการจ่ายผ่านช่องทางนี้
+            decimal receiptVat = ComputeVatFromGross(amount);
             var parameters = new Dictionary<string, object>
             {
                 { "@receiptId", receiptId },
                 { "@reservationId", reservationId },
                 { "@createdDate", DateTime.Now },
                 { "@totalAmount", amount },
-                { "@vat", 0 }, // Calculate if needed
-                { "@totalExcludeVat", amount },
+                { "@vat", receiptVat },
+                { "@totalExcludeVat", amount - receiptVat },
                 { "@isDeposit", isDeposit },
                 { "@useDeposit", false },
                 { "@paidType", paymentMethod },
@@ -522,6 +525,26 @@ namespace Take_Time_BangPhra
                 parameters);
 
             return receiptId;
+        }
+
+        /// <summary>
+        /// ถอด VAT 7% จากยอด gross เมื่อกิจการจด VAT (Business_Info.Use_Vat) — ไม่จด → 0.
+        /// สูตรเดียวกับ ReceiptService/POS rollup: net = round(gross*100/107), vat = gross − net
+        /// </summary>
+        private decimal ComputeVatFromGross(decimal grossAmount)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Use_Vat FROM Business_Info", null);
+                bool useVat = dt != null && dt.Rows.Count > 0
+                    && dt.Rows[0]["Use_Vat"] != DBNull.Value
+                    && Convert.ToBoolean(dt.Rows[0]["Use_Vat"]);
+                if (!useVat || grossAmount <= 0) return 0m;
+                decimal net = Math.Round(grossAmount * 100m / 107m, 2, MidpointRounding.AwayFromZero);
+                return grossAmount - net;
+            }
+            catch { return 0m; }
         }
 
         /// <summary>
