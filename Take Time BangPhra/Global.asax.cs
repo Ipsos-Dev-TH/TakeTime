@@ -174,6 +174,16 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception cex) { System.Diagnostics.Trace.TraceError($"EmailChat timer error: {(cex.InnerException ?? cex).Message}"); }
 
+                // จับคู่ "บทสนทนา ↔ การจอง" ย้อนหลัง — ทำให้ปุ่ม 💬 บนตารางจองรายวันขึ้นครบ
+                // (ข้อความที่เข้ามาก่อนการจองถูกสร้าง หรือตอนที่ยังไม่มีสัญญาณให้จับคู่ จะค้างเป็น
+                //  Reservation_ID = NULL ตลอดไปถ้าไม่กวาดซ้ำ) — กวาดทุก 10 นาที ทุกช่องทาง
+                try
+                {
+                    string linkConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    ChatBookingLinker.SweepIfDue(linkConn);
+                }
+                catch (Exception lkx) { System.Diagnostics.Trace.TraceError($"ChatBookingLink timer error: {(lkx.InnerException ?? lkx).Message}"); }
+
                 // ชำระเงินออนไลน์: ปิดรายการที่หมดอายุ + ตามสถานะรายการที่ค้าง (เผื่อ webhook หาย)
                 // — no-op ทันทีถ้าฟีเจอร์ปิด/ยังไม่ได้รัน migration
                 try

@@ -137,6 +137,15 @@ namespace Take_Time_BangPhra.Admin.Chat
                 case "pendingBookings":
                     result = GetPendingBookings();
                     break;
+                case "linkSearch":
+                    result = LinkSearch(data);
+                    break;
+                case "linkBooking":
+                    result = LinkBooking(data);
+                    break;
+                case "unlinkBooking":
+                    result = UnlinkBooking(data);
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -282,7 +291,11 @@ namespace Take_Time_BangPhra.Admin.Chat
                         brandColor = conv["BrandColor"]?.ToString(),
                         status = conv["Status"]?.ToString(),
                         phone = conv["MobilePhone"]?.ToString(),
-                        email = conv["Email"]?.ToString()
+                        email = conv["Email"]?.ToString(),
+                        // การจองที่ผูกอยู่ — ตัวกำหนดว่าปุ่ม 💬 ในตารางจองรายวันจะขึ้นหรือไม่
+                        // (หน้านั้น query เฉพาะ OmniChannel_Contacts.Reservation_ID IS NOT NULL)
+                        reservationId = conv["Reservation_ID"] == DBNull.Value ? 0 : Convert.ToInt32(conv["Reservation_ID"]),
+                        reservationLabel = DescribeReservation(conv["Reservation_ID"])
                     }},
                     { "messages", messages }
                 };
@@ -483,6 +496,185 @@ namespace Take_Time_BangPhra.Admin.Chat
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "bookings", new List<object>() }, { "error", ex.Message } };
+            }
+        }
+
+        // ── ผูกบทสนทนากับการจอง "ด้วยมือ" ─────────────────────────────────────────
+        // ระบบจับคู่อัตโนมัติ (ChatBookingLinker) จงใจ "ไม่เดา" เมื่อสัญญาณกำกวม เช่น ชื่อซ้ำกัน
+        // หลายใบ ⇒ ต้องมีทางให้พนักงานชี้เองด้วย ไม่งั้นบทสนทนานั้นจะไม่มีวันโผล่ปุ่ม 💬
+        // บนตารางจองรายวัน (หน้านั้นอ่านจาก OmniChannel_Contacts.Reservation_ID เท่านั้น)
+
+        private readonly code _code = new code();
+
+        /// <summary>ข้อความสั้น ๆ อธิบายการจอง เช่น "#123 สมชาย • A1 • 12/09–14/09"</summary>
+        private string DescribeReservation(object resIdObj)
+        {
+            try
+            {
+                if (resIdObj == null || resIdObj == DBNull.Value) return "";
+                int id = Convert.ToInt32(resIdObj);
+                if (id <= 0) return "";
+
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 1 r.ID, r.CheckinDate, r.CheckoutDate, r.Status,
+                             ISNULL(cu.Name, N'') AS CustName,
+                             ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'') AS RoomNames
+                        FROM Reservation r
+                        LEFT JOIN Customer cu ON cu.MobilePhone = r.Customer_MobilePhone
+                       WHERE r.ID = @id",
+                    new Dictionary<string, object> { { "@id", id } });
+                if (dt == null || dt.Rows.Count == 0) return "#" + id;
+
+                DataRow r0 = dt.Rows[0];
+                string s = "#" + id;
+                string nm = r0["CustName"].ToString();
+                if (nm.Length > 0) s += " " + nm;
+                string rooms = r0["RoomNames"].ToString();
+                if (rooms.Length > 0) s += " • " + rooms;
+                s += " • " + Convert.ToDateTime(r0["CheckinDate"]).ToString("dd/MM") +
+                     "–" + Convert.ToDateTime(r0["CheckoutDate"]).ToString("dd/MM");
+                return s;
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>ค้นการจองให้พนักงานเลือกผูก — ค้นจากชื่อ / เบอร์ / เลขจอง / เลข OTA</summary>
+        private Dictionary<string, object> LinkSearch(Dictionary<string, object> data)
+        {
+            var list = new List<object>();
+            try
+            {
+                string q = (data.ContainsKey("q") ? data["q"] : null)?.ToString()?.Trim() ?? "";
+                if (q.Length < 2)
+                    return new Dictionary<string, object> { { "success", true }, { "results", list } };
+
+                bool hasOta = false;
+                try
+                {
+                    var chk = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT CASE WHEN COL_LENGTH('Reservation','OTA_Booking_ID') IS NULL THEN 0 ELSE 1 END", null);
+                    hasOta = chk != null && chk.Rows.Count > 0 && Convert.ToInt32(chk.Rows[0][0]) == 1;
+                }
+                catch { }
+
+                int qId;
+                bool isId = int.TryParse(q, out qId);
+
+                string sql =
+                    @"SELECT TOP 20 r.ID, r.CheckinDate, r.CheckoutDate, r.Status,
+                             ISNULL(cu.Name, N'') AS CustName,
+                             ISNULL(r.Customer_MobilePhone, N'') AS Phone,
+                             ISNULL(dbo.fn_GetReservationRoomNames(r.ID), N'') AS RoomNames
+                        FROM Reservation r
+                        LEFT JOIN Customer cu ON cu.MobilePhone = r.Customer_MobilePhone
+                       WHERE (cu.Name LIKE @like OR r.Customer_MobilePhone LIKE @like" +
+                    (hasOta ? " OR r.OTA_Booking_ID LIKE @like OR r.OTA_Guest_Name LIKE @like" : "") +
+                    (isId ? " OR r.ID = @id" : "") + @")
+                       ORDER BY r.CheckinDate DESC, r.ID DESC";
+
+                var ps = new Dictionary<string, object> { { "@like", "%" + q + "%" } };
+                if (isId) ps["@id"] = qId;
+
+                var dt = _code.DatabaseQuerySafe(ConnStr, sql, ps);
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        list.Add(new
+                        {
+                            id = Convert.ToInt32(r["ID"]),
+                            name = r["CustName"].ToString(),
+                            phone = r["Phone"].ToString(),
+                            rooms = r["RoomNames"].ToString(),
+                            status = r["Status"]?.ToString(),
+                            dates = Convert.ToDateTime(r["CheckinDate"]).ToString("dd/MM/yyyy") + " – " +
+                                    Convert.ToDateTime(r["CheckoutDate"]).ToString("dd/MM/yyyy")
+                        });
+
+                return new Dictionary<string, object> { { "success", true }, { "results", list } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object>
+                { { "success", false }, { "message", ex.Message }, { "results", list } };
+            }
+        }
+
+        private Dictionary<string, object> LinkBooking(Dictionary<string, object> data)
+        {
+            try
+            {
+                long convId = Convert.ToInt64(data["conversationId"]);
+                int resId = Convert.ToInt32(data["reservationId"]);
+                if (convId <= 0 || resId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ข้อมูลไม่ครบ" } };
+
+                var exists = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT TOP 1 ID FROM Reservation WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", resId } });
+                if (exists == null || exists.Rows.Count == 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบการจองนี้" } };
+
+                // ผูกที่ "ผู้ติดต่อ" (ไม่ใช่บทสนทนา) — ลูกค้าคนเดียวอาจมีหลายบทสนทนา
+                // ผูกด้วยมือ = ทับของเดิมได้ (ต่างจากตัวอัตโนมัติที่เขียนเฉพาะตอนยังว่าง)
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE ct SET ct.Reservation_ID = @res, ct.Updated_Date = GETDATE()
+                        FROM OmniChannel_Contacts ct
+                        JOIN OmniChannel_Conversations c ON c.ContactID = ct.ID
+                       WHERE c.ID = @conv",
+                    new Dictionary<string, object> { { "@res", resId }, { "@conv", convId } });
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE OmniChannel_Conversations
+                         SET Tags = @tag, Updated_Date = GETDATE()
+                       WHERE ID = @conv",
+                    new Dictionary<string, object> { { "@tag", "จอง #" + resId }, { "@conv", convId } });
+
+                try
+                {
+                    _code.Logs(ConnStr, "ChatBookingLink",
+                        $"ผูกด้วยมือ: บทสนทนา {convId} → การจอง #{resId}",
+                        Session["UserName"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true }, { "reservationId", resId },
+                    { "reservationLabel", DescribeReservation(resId) }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> UnlinkBooking(Dictionary<string, object> data)
+        {
+            try
+            {
+                long convId = Convert.ToInt64(data["conversationId"]);
+                if (convId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ข้อมูลไม่ครบ" } };
+
+                _code.DatabaseInsertSafe(ConnStr,
+                    @"UPDATE ct SET ct.Reservation_ID = NULL, ct.Updated_Date = GETDATE()
+                        FROM OmniChannel_Contacts ct
+                        JOIN OmniChannel_Conversations c ON c.ContactID = ct.ID
+                       WHERE c.ID = @conv",
+                    new Dictionary<string, object> { { "@conv", convId } });
+
+                try
+                {
+                    _code.Logs(ConnStr, "ChatBookingLink", $"ยกเลิกการผูก: บทสนทนา {convId}",
+                        Session["UserName"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
+
+                return new Dictionary<string, object> { { "success", true } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
         }
 

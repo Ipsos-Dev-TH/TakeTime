@@ -75,6 +75,25 @@
         .chat-header-left .ch-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
         .chat-header-info h4 { margin: 0; font-size: 15px; color: #333; }
         .chat-header-info p { margin: 2px 0 0; font-size: 12px; color: #888; }
+
+        /* แถบผูกการจอง */
+        .link-bar { flex-shrink: 0; padding: 7px 20px; font-size: 12.5px; display: flex; align-items: center;
+                    gap: 10px; flex-wrap: wrap; border-bottom: 1px solid #eee; }
+        .link-bar.linked { background: #e8f5e9; color: #1e7e42; }
+        .link-bar.unlinked { background: #fff8e1; color: #8a6100; }
+        .link-bar button { background: #fff; border: 1px solid #cfcfcf; border-radius: 6px; padding: 3px 10px;
+                           font-size: 11.5px; cursor: pointer; color: #444; }
+        .link-bar button:hover { background: #f3f3f3; }
+        .link-search { flex-shrink: 0; padding: 10px 20px; background: #fafafa; border-bottom: 1px solid #eee; }
+        .link-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .link-search-row input { flex: 1 1 220px; min-width: 0; padding: 6px 10px; border: 1px solid #ddd;
+                                 border-radius: 6px; font-size: 13px; }
+        .link-results { max-height: 190px; overflow-y: auto; margin-top: 8px; }
+        .link-result { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+                       padding: 7px 10px; border: 1px solid #eee; border-radius: 6px; background: #fff;
+                       margin-bottom: 6px; font-size: 12.5px; }
+        .link-result small { color: #888; display: block; }
+        @media (max-width: 600px) { .link-bar, .link-search { padding-left: 12px; padding-right: 12px; } }
         .chat-actions { display: flex; gap: 6px; }
         .btn-act { padding: 6px 12px; border: 1px solid #ddd; background: white; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: 'Prompt',sans-serif; display: flex; align-items: center; gap: 4px; transition: all 0.2s; }
         .btn-act:hover { background: #f5f5f5; }
@@ -192,6 +211,17 @@
 
                 <div id="chatContent" class="chat-content" style="display:none;">
                     <div class="chat-header" id="chatHeader"></div>
+                    <!-- แถบผูกการจอง: ตัวชี้ขาดว่าปุ่ม 💬 บนตารางจองรายวันจะขึ้นกับแขกคนนี้หรือไม่ -->
+                    <div class="link-bar" id="bookingLinkBar"></div>
+                    <div class="link-search" id="bookingLinkSearch" style="display:none;">
+                        <div class="link-search-row">
+                            <input type="text" id="txtLinkSearch" placeholder="ค้นชื่อผู้เข้าพัก / เบอร์โทร / เลขการจอง / เลข OTA"
+                                   onkeypress="if(event.key==='Enter'){event.preventDefault();doLinkSearch();}" />
+                            <button type="button" class="btn-act primary" onclick="doLinkSearch()"><i class="fas fa-search"></i> ค้นหา</button>
+                            <button type="button" class="btn-act" onclick="toggleLinkSearch(false)">ปิด</button>
+                        </div>
+                        <div id="linkSearchResults" class="link-results"></div>
+                    </div>
                     <div class="messages-area" id="messagesArea"></div>
                     <div class="reply-area">
                         <div class="canned-bar" id="cannedBar"></div>
@@ -451,6 +481,8 @@
             headerHtml += '</div>';
             $('#chatHeader').html(headerHtml);
 
+            renderBookingLink(c);
+
             // Messages
             var msgs = data.messages || [];
             var msgHtml = '';
@@ -505,6 +537,87 @@
                     loadConversations(true);
                 },
                 error: function () { alert('ส่งไม่สำเร็จ — เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
+            });
+        }
+
+        // ── ผูกบทสนทนากับการจอง ────────────────────────────────────────────────
+        // บทสนทนาที่ไม่ได้ผูกการจอง = ปุ่ม 💬 บนตารางจองรายวัน "ไม่ขึ้น" พนักงานจึงไม่รู้ว่า
+        // แขกคนนี้ทักมาค้างไว้ ระบบจับคู่อัตโนมัติจงใจไม่เดาเมื่อกำกวม → ให้ชี้เองตรงนี้ได้
+        function renderBookingLink(c) {
+            toggleLinkSearch(false);
+            var html;
+            if (c.reservationId > 0) {
+                html = '<span><i class="fas fa-link"></i> ผูกกับการจอง <b>' +
+                       escHtml(c.reservationLabel || ('#' + c.reservationId)) + '</b></span>' +
+                       '<button type="button" onclick="toggleLinkSearch(true)">เปลี่ยน</button>' +
+                       '<button type="button" onclick="unlinkBooking()">ยกเลิกการผูก</button>';
+                $('#bookingLinkBar').removeClass('unlinked').addClass('linked');
+            } else {
+                html = '<span><i class="fas fa-unlink"></i> <b>ยังไม่ได้ผูกกับการจอง</b> — ' +
+                       'ปุ่มแชทในตารางจองรายวันจะยังไม่ขึ้นกับแขกรายนี้</span>' +
+                       '<button type="button" onclick="toggleLinkSearch(true)">ผูกการจอง</button>';
+                $('#bookingLinkBar').removeClass('linked').addClass('unlinked');
+            }
+            $('#bookingLinkBar').html(html);
+        }
+
+        function toggleLinkSearch(show) {
+            $('#bookingLinkSearch').toggle(!!show);
+            if (show) {
+                $('#linkSearchResults').html('');
+                var c = $('#chatHeader .chat-header-info h4').text() || '';
+                $('#txtLinkSearch').val(c).focus();
+                if (c) doLinkSearch();
+            }
+        }
+
+        function doLinkSearch() {
+            var q = ($('#txtLinkSearch').val() || '').trim();
+            if (q.length < 2) { $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">พิมพ์อย่างน้อย 2 ตัวอักษร</div>'); return; }
+            $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">กำลังค้นหา...</div>');
+            $.ajax({
+                url: window.location.pathname + '?action=linkSearch',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ q: q }),
+                success: function (r) {
+                    var rs = (r && r.results) || [];
+                    if (!rs.length) { $('#linkSearchResults').html('<div style="color:#888;font-size:12px;">ไม่พบการจองที่ตรง</div>'); return; }
+                    var h = '';
+                    for (var i = 0; i < rs.length; i++) {
+                        var b = rs[i];
+                        h += '<div class="link-result"><div><b>#' + b.id + ' ' + escHtml(b.name || '(ไม่มีชื่อ)') + '</b>' +
+                             '<small>' + escHtml(b.rooms || '-') + ' • ' + escHtml(b.dates) +
+                             ' • ' + escHtml(b.status || '') + (b.phone ? ' • ' + escHtml(b.phone) : '') + '</small></div>' +
+                             '<button type="button" class="btn-act primary" onclick="linkBooking(' + b.id + ')">ผูก</button></div>';
+                    }
+                    $('#linkSearchResults').html(h);
+                },
+                error: function () { $('#linkSearchResults').html('<div style="color:#c00;font-size:12px;">ค้นหาไม่สำเร็จ</div>'); }
+            });
+        }
+
+        function linkBooking(resId) {
+            if (!selectedConvId) return;
+            $.ajax({
+                url: window.location.pathname + '?action=linkBooking',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ conversationId: selectedConvId, reservationId: resId }),
+                success: function (r) {
+                    if (r && r.success) { openConversation(selectedConvId); refreshConvList(); }
+                    else alert('ผูกไม่สำเร็จ: ' + ((r && r.message) || ''));
+                },
+                error: function () { alert('ผูกไม่สำเร็จ — เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
+            });
+        }
+
+        function unlinkBooking() {
+            if (!selectedConvId) return;
+            if (!confirm('ยกเลิกการผูกบทสนทนานี้กับการจอง?')) return;
+            $.ajax({
+                url: window.location.pathname + '?action=unlinkBooking',
+                type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ conversationId: selectedConvId }),
+                success: function () { openConversation(selectedConvId); refreshConvList(); }
             });
         }
 

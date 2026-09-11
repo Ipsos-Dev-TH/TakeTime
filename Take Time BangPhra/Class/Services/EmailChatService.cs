@@ -250,6 +250,21 @@ namespace Take_Time_BangPhra.Services
                 res.Error = ex.Message;
                 _code.Logs(_conn, "EmailChat", $"IMAP error: {ex.Message}", "SYSTEM");
             }
+
+            // ── กวาดจับคู่ย้อนหลัง ──
+            // `TryLink` ทำงานตอนรับข้อความเท่านั้น ⇒ บทสนทนาที่ข้อความเข้ามา "ก่อน" การจองถูกสร้าง
+            // (หรือเข้ามาตอนที่ยังไม่มีสัญญาณชื่อ) จะค้างไม่ผูกตลอดไป ⇒ ปุ่ม 💬 ในตารางจองไม่ขึ้น
+            // ทำนอก try ของ IMAP เพื่อให้กวาดได้แม้อ่านเมลไม่สำเร็จ
+            try
+            {
+                int relinked = new ChatBookingLinker(_conn).RelinkUnlinked();
+                if (relinked > 0) res.Messages.Add($"จับคู่บทสนทนากับการจองย้อนหลังได้ {relinked} รายการ");
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_conn, "EmailChat", $"relink sweep: {ex.Message}", "SYSTEM"); } catch { }
+            }
+
             return res;
         }
 
@@ -506,7 +521,12 @@ namespace Take_Time_BangPhra.Services
             // (เบอร์โทรที่ลูกค้าพิมพ์, contact ที่มีเบอร์อยู่แล้ว, การจองที่เกิดในแชทนี้)
             // ต้องผูกให้ได้ ไม่งั้น OmniChannel_Contacts.Reservation_ID เป็น NULL แล้ว
             // ปุ่ม 💬 บนตารางจองรายวันจะไม่ขึ้น (หน้านั้น query เฉพาะ Reservation_ID IS NOT NULL)
-            try { new ChatBookingLinker(_conn).TryLink(result.ConversationID, subject + "\n" + text); }
+            // ⚠ ต้องส่ง "ต้นฉบับ" (rawText) ไม่ใช่ตัวที่ตัด boilerplate แล้ว —
+            //   ตัวตัดจะลบส่วนหัวทิ้งตั้งแต่บรรทัด "หมายเลขการจอง: xxx" ⇒ ตัวจับคู่มองไม่เห็นเลขจอง
+            //   (regression จากตอนเพิ่มตัวตัดของแถม OTA — FindReservationId แก้ไปแล้ว ตกตัวนี้ไว้)
+            //   ส่งชื่อผู้ส่งไปด้วย ใช้เป็นสัญญาณจับคู่เพิ่มเมื่ออีเมลไม่มีเลขจอง
+            try { new ChatBookingLinker(_conn).TryLink(result.ConversationID,
+                      subject + "\n" + rawText, guestName); }
             catch (Exception ex) { _code.Logs(_conn, "EmailChat", $"link booking failed: {ex.Message}", "SYSTEM"); }
 
             // ไฟล์แนบ (รูป/เอกสาร) → ข้อความแยกในแชท
