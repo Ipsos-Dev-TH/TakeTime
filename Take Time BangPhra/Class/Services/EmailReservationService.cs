@@ -240,8 +240,12 @@ namespace Take_Time_BangPhra.Services
             else if (LooksSwept(head.GuestName))
                 h.Warnings.Add("ชื่อผู้เข้าพักมีชื่อฟิลด์อื่นปนมา: " + Trunc(head.GuestName, 40));
 
-            if (string.IsNullOrWhiteSpace(head.MobilePhone) || head.MobilePhone.StartsWith("OTA_"))
-                h.Warnings.Add("อีเมลไม่มีเบอร์โทรลูกค้า (ใช้รหัสอ้างอิงแทน)");
+            // เบอร์โทร: ถ้าใช้รหัสอ้างอิงแทน ต้องบอกด้วยว่า "ทำไม" — เคส OTA ส่งค่าคงที่
+            // (01111111111111) ต่างจากเคส "อีเมลไม่มีเบอร์มาเลย" คนละปัญหา คนละวิธีแก้
+            if (GuestPhone.IsReference(head.MobilePhone) || string.IsNullOrWhiteSpace(head.MobilePhone))
+                h.Warnings.Add(string.IsNullOrWhiteSpace(_lastPhoneNote)
+                    ? "อีเมลไม่มีเบอร์โทรลูกค้า (ใช้รหัสอ้างอิงแทน)"
+                    : "เบอร์โทรลูกค้าใช้ไม่ได้: " + _lastPhoneNote);
 
             if (string.IsNullOrWhiteSpace(head.ChannelName))
                 h.Warnings.Add("อ่านชื่อช่องทาง (Channel Name) ไม่ได้");
@@ -1267,7 +1271,7 @@ namespace Take_Time_BangPhra.Services
             apply("PaymentType", v => string.IsNullOrWhiteSpace(pt) || OtaFieldReader.LooksSwept(pt), v => pt = v);
             apply("ChannelName", v => string.IsNullOrWhiteSpace(ch), v => ch = v);
             apply("GuestName", v => string.IsNullOrWhiteSpace(gn), v => gn = v);
-            apply("MobilePhone", v => string.IsNullOrWhiteSpace(phv) || phv.StartsWith("OTA_"),
+            apply("MobilePhone", v => string.IsNullOrWhiteSpace(phv) || GuestPhone.IsReference(phv),
                   v => phv = ResolvePhone(SanitizePhone(v), bid));
             bookingId = bid; paymentType = pt; channel = ch; guest = gn; phone = phv;
 
@@ -1311,6 +1315,7 @@ namespace Take_Time_BangPhra.Services
         {
             var list = new List<RoomBooking>();
             if (string.IsNullOrEmpty(html)) return list;
+            _lastPhoneNote = null;   // เริ่มอ่านอีเมลฉบับใหม่ — ล้างหมายเหตุเรื่องเบอร์ของฉบับก่อน
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
             string text = doc.DocumentNode.InnerText;
@@ -1572,8 +1577,12 @@ namespace Take_Time_BangPhra.Services
                         using (var cmd = new SqlCommand(ReservationInsertSql(), con, tx))
                         {
                             // ⚠️ "??" ไม่ทำงานกับสตริงว่าง — เคยหลุดเป็น Customer_MobilePhone = '' ที่ไม่มีลูกค้าผูก
+                            // ⚠️ อย่าใช้ "OTA_" + BookingId ดิบ — BookingId ของ STAAH คือ
+                            //    "1114600000001741 (2557213715)" (มีช่องว่าง+วงเล็บ ยาว 33 ตัว)
+                            //    ล้นคอลัมน์เบอร์โทร; ReferenceKey ย่อให้เหลือ OTA_2557213715
                             string phone = string.IsNullOrWhiteSpace(head.MobilePhone)
-                                ? "OTA_" + head.BookingId : head.MobilePhone;
+                                ? GuestPhone.ReferenceKey(head.BookingId) : head.MobilePhone;
+                            if (string.IsNullOrWhiteSpace(phone)) phone = GuestPhone.RefPrefix + "UNKNOWN";
                             EnsureCustomer(con, tx, phone, head.GuestName, head.ChannelName);
                             cmd.Parameters.AddWithValue("@Phone", phone);
                             cmd.Parameters.AddWithValue("@In", head.CheckIn);
@@ -1998,7 +2007,15 @@ namespace Take_Time_BangPhra.Services
             using (var chk = new SqlCommand("SELECT COUNT(*) FROM Customer WHERE MobilePhone = @p", con, tx))
             {
                 chk.Parameters.AddWithValue("@p", phone);
-                if (Convert.ToInt32(chk.ExecuteScalar()) > 0) return;
+                if (Convert.ToInt32(chk.ExecuteScalar()) > 0)
+                {
+                    // มีแถวอยู่แล้ว — ปกติไม่แตะ (ลูกค้าเบอร์จริงอาจแก้ชื่อเองไว้ ห้ามทับ)
+                    // ยกเว้น key ที่เป็น "รหัสอ้างอิง OTA_xxx" ซึ่งผูกกับใบจองใบเดียวเท่านั้น
+                    // → ชื่อต้องเป็นชื่อผู้เข้าพักของใบนั้นเสมอ (อีเมลแก้ไขเปลี่ยนชื่อได้)
+                    if (GuestPhone.IsReference(phone) && !string.IsNullOrWhiteSpace(name))
+                        SyncReferenceCustomerName(con, tx, phone, name);
+                    return;
+                }
             }
             using (var ins = new SqlCommand(CustomerInsertSql(), con, tx))
             {
@@ -2007,6 +2024,31 @@ namespace Take_Time_BangPhra.Services
                 ins.Parameters.AddWithValue("@from", (object)(comeFrom ?? "") ?? DBNull.Value);
                 ins.Parameters.AddWithValue("@ctype", _customerTypeId);
                 ins.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>อัปเดตชื่อของลูกค้าที่ผูกด้วยรหัสอ้างอิง (OTA_xxx) ให้ตรงกับชื่อผู้เข้าพักปัจจุบัน</summary>
+        private void SyncReferenceCustomerName(SqlConnection con, SqlTransaction tx, string phone, string name)
+        {
+            try
+            {
+                var cols = TableColumns("Customer");
+                string set = "Name = @n";
+                if (cols.Contains("FullName")) set += ", FullName = @n";
+                using (var up = new SqlCommand(
+                    $"UPDATE Customer SET {set} WHERE MobilePhone = @p AND ISNULL(Name, N'') <> @n", con, tx))
+                {
+                    up.Parameters.AddWithValue("@n", name);
+                    up.Parameters.AddWithValue("@p", phone);
+                    if (up.ExecuteNonQuery() > 0)
+                        _code.Logs(_conn, "EmailReservation",
+                            $"อัปเดตชื่อลูกค้าอ้างอิง {phone} → {name}", "SYSTEM");
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_conn, "EmailReservation",
+                    $"อัปเดตชื่อลูกค้าอ้างอิง {phone} ไม่สำเร็จ: {ex.Message}", "SYSTEM");
             }
         }
 
@@ -2310,9 +2352,9 @@ namespace Take_Time_BangPhra.Services
                         }
 
                         // เบอร์ผู้จองเปลี่ยนในอีเมลแก้ไข → ย้ายการจองไปผูกลูกค้าเบอร์ใหม่
-                        // (เฉพาะเบอร์จริง — ไม่ใช่ค่า fallback OTA_xxx และไม่ใช่ค่าว่าง)
-                        if (!string.IsNullOrWhiteSpace(head.MobilePhone) && head.MobilePhone.Length >= 9
-                            && !head.MobilePhone.StartsWith("OTA_"))
+                        // (เฉพาะ "เบอร์ไทยที่โทรออกได้จริง" — ค่าคงที่ที่ OTA ส่งมา เช่น 01111111111111
+                        //  ต้องไม่ผ่านตรงนี้ ไม่งั้นใบจองจะถูกย้ายไปผูกลูกค้าแถวรวมอีกครั้ง)
+                        if (GuestPhone.IsUsable(head.MobilePhone))
                         {
                             string curPhone = "";
                             using (var ph = new SqlCommand(
@@ -2334,6 +2376,20 @@ namespace Take_Time_BangPhra.Services
                                 _code.Logs(_conn, "EmailReservation",
                                     $"modification: จอง #{resId} เปลี่ยนเบอร์ผู้จอง {curPhone} → {head.MobilePhone}", "SYSTEM");
                             }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(head.GuestName))
+                        {
+                            // ไม่มีเบอร์จริงให้ย้าย — แต่ชื่อผู้เข้าพักอาจเปลี่ยนในอีเมลแก้ไข
+                            // ใบที่ผูกด้วยรหัสอ้างอิงต้องให้ชื่อตามมาด้วย ไม่งั้นค้างชื่อเดิม
+                            string curPhone = "";
+                            using (var ph = new SqlCommand(
+                                "SELECT ISNULL(Customer_MobilePhone, N'') FROM Reservation WHERE ID = @id", con, tx))
+                            {
+                                ph.Parameters.AddWithValue("@id", resId);
+                                curPhone = ph.ExecuteScalar()?.ToString() ?? "";
+                            }
+                            if (GuestPhone.IsReference(curPhone))
+                                SyncReferenceCustomerName(con, tx, curPhone, head.GuestName);
                         }
 
                         using (var cmd = new SqlCommand(
@@ -2548,7 +2604,10 @@ namespace Take_Time_BangPhra.Services
                 {
                     sb.AppendLine();
                     if (!string.IsNullOrWhiteSpace(h.GuestName)) sb.AppendLine($"👤 <b>ผู้เข้าพัก:</b> {E(h.GuestName)}");
-                    if (!string.IsNullOrWhiteSpace(h.MobilePhone)) sb.AppendLine($"📞 <b>เบอร์โทร:</b> {E(h.MobilePhone)}");
+                    // อย่าโชว์รหัสอ้างอิงเป็น "เบอร์โทร" — พนักงานจะพยายามโทรตามหาลูกค้า
+                    if (GuestPhone.IsReference(h.MobilePhone))
+                        sb.AppendLine("📞 <b>เบอร์โทร:</b> — <i>OTA ไม่ส่งเบอร์ลูกค้ามา (ใช้เลขที่จองเป็นรหัสอ้างอิง) ติดต่อผ่านแชทของ OTA</i>");
+                    else if (!string.IsNullOrWhiteSpace(h.MobilePhone)) sb.AppendLine($"📞 <b>เบอร์โทร:</b> {E(h.MobilePhone)}");
                 }
                 if (h.CheckIn != default && h.CheckOut != default)
                 {
@@ -3033,49 +3092,29 @@ namespace Take_Time_BangPhra.Services
         /// <summary>ยุบช่องว่างซ้ำ/ตัดหัวท้าย — ชื่อห้องจาก HTML มักติด \r\n และเว้นวรรคหลายตัว จนเทียบกับตาราง map ไม่ตรง</summary>
         private static string Norm(string s) =>
             string.IsNullOrEmpty(s) ? "" : Regex.Replace(s.Replace('\u00A0', ' '), @"\s+", " ").Trim();
-        private static string SanitizePhone(string p)
-        {
-            if (string.IsNullOrWhiteSpace(p)) return "";
-            p = p.Replace("66 66", "0").Replace("+66", "0");
-            p = Regex.Replace(p, @"[^\d]", "");
-            if (p.StartsWith("66") && p.Length > 9) p = "0" + p.Substring(2);
-            if (p.Length > 0 && !p.StartsWith("0")) p = "0" + p;
-            return p;
-        }
-        private static string PhoneFromBookingId(string bookingId)
-        {
-            if (string.IsNullOrWhiteSpace(bookingId)) return "";
-            // Booking.com ใส่ PIN ในวงเล็บ เช่น "1114600000001674 (6502832396)"
-            var m = Regex.Match(bookingId, @"\((\d{9,10})\)");
-            if (m.Success)
-            {
-                string v = m.Groups[1].Value;
-                if (v.Length == 9 && !v.StartsWith("0")) v = "0" + v;
-                return v;
-            }
-            // สุดท้าย: ตัวเลขจากท่อนแรกของ Booking Id (ถ้ายาวพอจะเป็นเบอร์)
-            string first = Regex.Replace(bookingId.Split(' ')[0] ?? "", @"[^\d]", "");
-            return first.Length >= 9 && first.Length <= 20 ? first : "";
-        }
+        private static string SanitizePhone(string p) => GuestPhone.Sanitize(p);
 
         /// <summary>
-        /// เบอร์โทรคือ key ของตาราง Customer — ห้ามปล่อยว่าง ไม่งั้นได้ใบจองที่ไม่มีลูกค้าผูกอยู่
-        /// (ตรรกะเดียวกับ ValidateAndFixPhoneNumber ของโปรแกรมเดิม: ข้ามเบอร์บ้าน 02 →
-        ///  ลองดึงจาก Booking Id → สุดท้ายใช้ค่า default เพื่อให้การจองผ่าน ไม่ตกทั้งใบ)
+        /// เบอร์โทรคือ key ของตาราง Customer — ห้ามปล่อยว่าง และ **ห้ามปล่อยค่าคงที่ผ่าน**
+        ///
+        /// เคสจริง (ก.ย. 2569): STAAH/Expedia ส่ง "01111111111111" มาทุกใบแทนเบอร์ลูกค้า
+        /// กฎเดิม (ยาว 9-20 และไม่ขึ้นต้น 02 = ผ่าน) ปล่อยผ่าน ⇒ ใบจอง Expedia ทุกใบผูกกับ
+        /// Customer แถวเดียวกัน → ชื่อผู้จองที่แสดงเป็นชื่อคนแรกที่เคยจองด้วยค่านี้ตลอดไป
+        /// (EnsureCustomer เจอแถวแล้ว return ไม่แก้ชื่อ) — ใบ 149419 "Samput Ekapan"
+        /// ขึ้นชื่อ "Kanthicha Suparojwathin"
+        ///
+        /// ตอนนี้ตรวจรูปแบบเบอร์ไทยจริง (มือถือ 10 หลัก 06/08/09) + ดักค่าซ้ำ/ค่าเรียง
+        /// ไม่ผ่าน → ใช้ **เลขที่จองเป็นรหัสอ้างอิง** (OTA_xxxx) ซึ่งไม่ซ้ำข้ามใบ
         /// </summary>
         private string ResolvePhone(string phone, string bookingId)
         {
-            if (!string.IsNullOrWhiteSpace(phone) && phone.Length >= 9 && phone.Length <= 20
-                && !phone.StartsWith("02"))
-                return phone;
-
-            string fromBooking = PhoneFromBookingId(bookingId);
-            if (!string.IsNullOrWhiteSpace(fromBooking)) return fromBooking;
-            if (!string.IsNullOrWhiteSpace(phone)) return phone;   // เบอร์บ้านยังดีกว่าไม่มี
-
-            string def = Cfg("Email_Rsv_DefaultPhone", "");
-            if (!string.IsNullOrWhiteSpace(def)) return def;
-            return "OTA_" + (bookingId ?? "UNKNOWN");
+            string note;
+            string key = GuestPhone.ResolveKey(phone, bookingId, Cfg("Email_Rsv_DefaultPhone", ""), out note);
+            if (!string.IsNullOrEmpty(note)) _lastPhoneNote = note;
+            return key;
         }
+
+        /// <summary>เหตุผลที่ไม่ได้ใช้เบอร์ที่ OTA ส่งมา (ไว้แสดงใน health check / สรุป Telegram)</summary>
+        private string _lastPhoneNote;
     }
 }

@@ -55,7 +55,16 @@ namespace Take_Time_BangPhra
 
             for (int i = 0; i < dtReservation.Rows.Count; i++)
             {
-                dtReservation.Rows[i]["Name"] = dtReservation.Rows[i]["Name"].ToString() + " - " + dtReservation.Rows[i]["NickName"].ToString() + " - " + dtReservation.Rows[i]["Customer_MobilePhone"].ToString();
+                // ชื่อ - ชื่อเล่น - เบอร์  (เว้นท่อนที่ว่าง ไม่ให้เหลือ " - - " ลอย ๆ)
+                // ⚠ ใบจาก OTA อาจไม่มีเบอร์จริง (ผูกด้วยรหัสอ้างอิง OTA_xxx) — อย่าโชว์เป็นเบอร์โทร
+                string dispPhone = dtReservation.Rows[i]["Customer_MobilePhone"].ToString();
+                if (Take_Time_BangPhra.Services.GuestPhone.IsReference(dispPhone))
+                    dispPhone = "ไม่มีเบอร์ (จองผ่าน OTA)";
+                var nameParts = new System.Collections.Generic.List<string>();
+                foreach (string part in new[] { dtReservation.Rows[i]["Name"].ToString(),
+                                                dtReservation.Rows[i]["NickName"].ToString(), dispPhone })
+                    if (!string.IsNullOrWhiteSpace(part)) nameParts.Add(part.Trim());
+                dtReservation.Rows[i]["Name"] = string.Join(" - ", nameParts);
                 string AccomName = "";
                 int order = 99;
                 int orderID = 99;
