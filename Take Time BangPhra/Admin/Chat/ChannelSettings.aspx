@@ -151,6 +151,7 @@
             ],
             'EMAIL': [
                 { key: 'fromDomains', label: 'โดเมนอีเมลลูกค้า OTA', hint: 'คั่นด้วยจุลภาค — ค่าเริ่มต้น agoda-messaging.com, mchat.booking.com, guest.booking.com (อีเมลจากโดเมนเหล่านี้ = ข้อความลูกค้า จะเข้ากล่องแชทอัตโนมัติ)' },
+                { key: 'ignoreDomains', label: 'โดเมนที่ไม่ต้องเตือน (ไม่ใช่ลูกค้า)', hint: 'คั่นด้วยจุลภาค — ใส่โดเมนที่ระบบเคยเตือนว่า "อาจเป็นข้อความลูกค้า" แต่จริง ๆ เป็นโฆษณา/ผู้ให้บริการระบบ แล้วจะไม่ขึ้นเตือนอีก. ระบบกัน littlehotelier.com, siteminder.com, cloudbeds.com, staah.com, mailchimp ฯลฯ ไว้ให้อยู่แล้ว — ช่องนี้เป็นการ "เพิ่ม" ไม่ใช่แทนที่ (ปล่อยว่างได้)' },
                 { key: 'pollMinutes', label: 'รอบดึงอีเมล (นาที)', hint: 'ค่าเริ่มต้น 3 นาที — ใช้กล่องอีเมล IMAP เดียวกับระบบอ่านอีเมลจอง (ตั้งที่ Admin → Accounting Integration)' },
                 { key: 'processedLabel', label: 'โฟลเดอร์เก็บอีเมลที่อ่านแล้ว', hint: 'ค่าเริ่มต้น Chat-Processed' },
                 { key: 'extraFolders', label: 'โฟลเดอร์/label เพิ่มเติมที่ให้ไล่อ่าน', hint: 'คั่นจุลภาค เช่น OTA-Chat, งาน/Agoda — สำหรับกรณีตั้ง filter ใน Gmail ให้ติด label แล้วย้ายอีเมลข้าม Inbox ไป (ปกติเว้นว่าง = อ่านเฉพาะ INBOX)' },

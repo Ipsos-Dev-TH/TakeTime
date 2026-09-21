@@ -45,6 +45,7 @@ namespace Take_Time_BangPhra.Services
         // ── config (channel EMAIL) ──
         private readonly bool _enabled;
         private readonly string[] _fromDomains;
+        private readonly string[] _ignoreDomains;
         private readonly int _pollMinutes;
         private readonly string _processedLabel;
         private readonly string[] _extraFolders;
@@ -77,6 +78,13 @@ namespace Take_Time_BangPhra.Services
             _fromDomains = Get("fromDomains",
                     "agoda-messaging.com, mchat.booking.com, guest.booking.com, "
                   + "trip.com, ctrip.com, expedia.com, airbnb.com")
+                .Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(d => d.Trim().ToLowerInvariant()).Where(d => d.Length > 3).Distinct().ToArray();
+            // โดเมนที่ "ไม่ใช่ลูกค้า" — ตัวค้นหาโดเมนใหม่จะไม่เตือนถึงโดเมนพวกนี้อีก
+            // (ผู้ให้บริการระบบ/อีเมลขายของ เช่น littlehotelier.com ที่ส่งโฆษณามีคำว่า "การจอง")
+            // ⚠ รวมกับค่าเริ่มต้นเสมอ ไม่ใช่แทนที่ — ผู้ใช้จะได้ "เพิ่ม" อย่างเดียว
+            //   ไม่ต้องกลัวว่าพิมพ์ทับแล้วเจ้าที่ระบบกันไว้ให้หายไป
+            _ignoreDomains = (DefaultIgnoreDomains + "," + Get("ignoreDomains", ""))
                 .Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(d => d.Trim().ToLowerInvariant()).Where(d => d.Length > 3).Distinct().ToArray();
             _pollMinutes = int.TryParse(Get("pollMinutes", "3"), out var pm) && pm >= 1 ? pm : 3;
@@ -289,6 +297,7 @@ namespace Take_Time_BangPhra.Services
                 string.IsNullOrWhiteSpace(_imapUser) ? "ตั้งที่ Admin → Accounting Integration (ใช้กล่องเดียวกับอีเมลจอง)" : _imapUser);
             chk(_fromDomains.Length > 0, "กำหนดโดเมนอีเมลลูกค้า OTA แล้ว",
                 _fromDomains.Length > 0 ? string.Join(", ", _fromDomains) : "ยังไม่ได้ตั้ง fromDomains");
+            sb.AppendLine("ℹ️ โดเมนที่สั่งไม่ต้องเตือน — " + string.Join(", ", _ignoreDomains));
 
             // เชื่อมต่อจริง + นับอีเมลที่เข้าเกณฑ์ในกล่อง
             int matched = -1;
@@ -361,11 +370,33 @@ namespace Take_Time_BangPhra.Services
         private static DateTime _lastDiscover = DateTime.MinValue;
 
         /// <summary>คำในหัวเรื่องที่บอกว่าน่าจะเป็นข้อความจากลูกค้าผ่าน OTA</summary>
+        /// <summary>
+        /// คำในหัวเรื่องที่บอกว่า "นี่คือแจ้งเตือนข้อความจากลูกค้า" — ต้องเจออย่างน้อยหนึ่งคำ
+        ///
+        /// ⚠ เดิมมี "booking / reservation / การจอง / guest / ผู้เข้าพัก" อยู่ในชุดนี้ด้วย ซึ่งกว้างเกินไป:
+        ///   อีเมลขายของอย่าง "เว็บไซต์ของคุณกำลังทำให้คุณเสียยอด<b>การจอง</b>พักหรือไม่?" ก็เข้าเกณฑ์
+        ///   → เตือนว่าเป็นโดเมนลูกค้าที่ยังไม่ได้ตั้งค่า ทั้งที่เป็นโฆษณา
+        ///   แจ้งเตือนข้อความจริงของทุก OTA มีคำว่า message/ข้อความ/reply/สอบถาม เสมอ จึงตัดชุดกว้างออก
+        /// </summary>
         private static readonly string[] GuestMsgHints =
         {
-            "message", "ข้อความ", "question", "คำถาม", "inquiry", "สอบถาม",
-            "guest", "ผู้เข้าพัก", "booking", "reservation", "การจอง", "reply"
+            "message", "ข้อความ", "inquiry", "สอบถาม", "question", "คำถาม",
+            "reply", "ตอบกลับ", "chat", "แชท", "wrote to you", "sent you"
         };
+
+        /// <summary>คำที่บอกชัดว่าเป็นอีเมลการตลาด/ข่าวสาร — เจอแล้วข้ามทันที แม้จะมีคำข้างบนปนอยู่</summary>
+        private static readonly string[] MarketingHints =
+        {
+            "unsubscribe", "newsletter", "webinar", "promotion", "promo code", "sale",
+            "ยกเลิกการรับข่าวสาร", "ข่าวสาร", "โปรโมชั่น", "โปรโมชัน", "ส่วนลด", "สัมมนา",
+            "อบรม", "เชิญร่วม", "ทดลองใช้ฟรี", "free trial", "upgrade your", "boost your"
+        };
+
+        /// <summary>โดเมนที่ "ไม่ใช่ลูกค้าแน่ ๆ" ตั้งต้น — ผู้ให้บริการระบบ/การตลาดของโรงแรมเอง</summary>
+        private const string DefaultIgnoreDomains =
+            "littlehotelier.com, siteminder.com, cloudbeds.com, staah.com, staah.net, "
+          + "mailchimp.com, mailchi.mp, sendgrid.net, hubspot.com, salesforce.com, "
+          + "noreply@google.com, facebookmail.com, linkedin.com";
 
         private void DiscoverUnknownOtaSenders(List<IMailFolder> folders, ChatPollResult res)
         {
@@ -405,8 +436,10 @@ namespace Take_Time_BangPhra.Services
                         string dom = addr.Split('@').Last();
                         if (dom == ourDomain) continue;                                  // เมลของเราเอง
                         if (_fromDomains.Any(d => addr.IndexOf(d, StringComparison.Ordinal) >= 0)) continue; // ตั้งไว้แล้ว
+                        if (_ignoreDomains.Any(d => addr.IndexOf(d, StringComparison.Ordinal) >= 0)) continue; // สั่งไม่ต้องเตือน
 
                         string subj = (env.Subject ?? "").ToLowerInvariant();
+                        if (MarketingHints.Any(h => subj.IndexOf(h, StringComparison.Ordinal) >= 0)) continue;
                         if (!GuestMsgHints.Any(h => subj.IndexOf(h, StringComparison.Ordinal) >= 0)) continue;
 
                         if (!hits.ContainsKey(dom)) hits[dom] = env.Subject ?? "";
@@ -419,24 +452,99 @@ namespace Take_Time_BangPhra.Services
 
             if (hits.Count == 0) return;
 
+            // เตือนโดเมนเดิมซ้ำ ๆ ทุก 6 ชม. = สแปมตัวเอง → เตือนโดเมนละครั้ง แล้วเงียบ 60 วัน
+            // (จำไว้ใน Accounting_Integration_Config — อยู่รอดแม้ IIS recycle)
+            var alerted = LoadAlertedDomains();
+            var fresh = hits.Where(kv => !alerted.ContainsKey(kv.Key)
+                                      || (DateTime.Now - alerted[kv.Key]).TotalDays > 60)
+                            .ToList();
+            if (fresh.Count == 0)
+            {
+                _code.Logs(_conn, "EmailChat",
+                    "unknown OTA senders (เตือนไปแล้ว ไม่เตือนซ้ำ): " + string.Join(", ", hits.Keys), "SYSTEM");
+                return;
+            }
+            foreach (var kv in fresh) alerted[kv.Key] = DateTime.Now;
+            SaveAlertedDomains(alerted);
+
             var sb = new StringBuilder();
             sb.AppendLine("📬 <b>พบอีเมลที่น่าจะเป็นข้อความลูกค้า แต่ยังไม่ได้ตั้งโดเมนไว้</b>");
             sb.AppendLine();
-            foreach (var kv in hits)
+            foreach (var kv in fresh)
                 sb.AppendLine("• <b>" + WebUtility.HtmlEncode(kv.Key) + "</b> — "
                             + WebUtility.HtmlEncode(Truncate(kv.Value, 70)));
             sb.AppendLine();
             sb.AppendLine("ข้อความจากโดเมนพวกนี้<b>ยังไม่ถูกดึงเข้ากล่องแชท</b> ลูกค้าอาจทักมาแล้วไม่มีใครเห็น");
-            sb.AppendLine("เพิ่มได้ที่ ศูนย์ตั้งค่า → กล่องแชท → ตั้งค่าช่องทาง EMAIL → fromDomains");
+            sb.AppendLine();
+            sb.AppendLine("ไปที่ <b>ศูนย์ตั้งค่า → กล่องแชท → ตั้งค่าช่องทาง EMAIL</b> แล้ว");
+            sb.AppendLine("• <b>ใช่ลูกค้า</b> → เพิ่มโดเมนในช่อง <code>โดเมนอีเมลลูกค้า OTA</code>");
+            sb.AppendLine("• <b>ไม่ใช่ลูกค้า</b> (โฆษณา/ผู้ให้บริการระบบ) → เพิ่มในช่อง "
+                        + "<code>โดเมนที่ไม่ต้องเตือน</code>");
+            sb.AppendLine();
+            sb.AppendLine("<i>ไม่ทำอะไรก็ได้ — โดเมนเดิมจะไม่เตือนซ้ำอีก 60 วัน</i>");
             sb.AppendLine();
             sb.AppendLine("ตอนนี้ตั้งไว้: " + WebUtility.HtmlEncode(string.Join(", ", _fromDomains)));
 
             string msg = sb.ToString();
-            res.Messages.Add("[info] พบโดเมนที่ยังไม่ได้ตั้งค่า: " + string.Join(", ", hits.Keys));
-            _code.Logs(_conn, "EmailChat", "unknown OTA senders: " + string.Join(", ", hits.Keys), "SYSTEM");
+            res.Messages.Add("[info] พบโดเมนที่ยังไม่ได้ตั้งค่า: " + string.Join(", ", fresh.Select(k => k.Key)));
+            _code.Logs(_conn, "EmailChat", "unknown OTA senders: " + string.Join(", ", fresh.Select(k => k.Key)), "SYSTEM");
             if (_notifyTelegram)
             {
                 try { global::Notify.Send(global::Notify.Ev.ChatOtaEmail, msg); } catch { }
+            }
+        }
+
+        private const string AlertedKey = "Chat_Unknown_Sender_Alerted";
+
+        /// <summary>โดเมนที่เคยเตือนไปแล้ว → วันที่เตือน (เก็บเป็น "domain|yyyyMMdd,..." แถวเดียว)</summary>
+        private Dictionary<string, DateTime> LoadAlertedDomains()
+        {
+            var map = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ISNULL(ConfigValue, '') FROM Accounting_Integration_Config WHERE ConfigKey = @k",
+                    new Dictionary<string, object> { { "@k", AlertedKey } });
+                if (dt == null || dt.Rows.Count == 0) return map;
+
+                foreach (string part in (dt.Rows[0][0]?.ToString() ?? "")
+                         .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var bits = part.Split('|');
+                    if (bits.Length != 2) continue;
+                    DateTime when;
+                    if (DateTime.TryParseExact(bits[1].Trim(), "yyyyMMdd",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out when))
+                        map[bits[0].Trim()] = when;
+                }
+            }
+            catch { }
+            return map;
+        }
+
+        private void SaveAlertedDomains(Dictionary<string, DateTime> map)
+        {
+            try
+            {
+                // ทิ้งของเก่าเกิน 120 วัน ไม่ให้แถวยาวไม่จำกัด
+                var keep = map.Where(kv => (DateTime.Now - kv.Value).TotalDays <= 120)
+                              .OrderByDescending(kv => kv.Value).Take(60);
+                string val = string.Join(",", keep.Select(kv => kv.Key + "|" + kv.Value.ToString("yyyyMMdd")));
+
+                _code.DatabaseInsertSafe(_conn,
+                    "UPDATE Accounting_Integration_Config SET ConfigValue = @v, Updated_Date = GETDATE() WHERE ConfigKey = @k; " +
+                    "IF @@ROWCOUNT = 0 INSERT INTO Accounting_Integration_Config (ConfigKey, ConfigValue, Description, Updated_Date) " +
+                    "VALUES (@k, @v, @d, GETDATE());",
+                    new Dictionary<string, object>
+                    {
+                        { "@k", AlertedKey }, { "@v", val },
+                        { "@d", "โดเมนผู้ส่งที่เคยเตือนไปแล้ว (ระบบเขียนเอง — ลบค่านี้ = ให้เตือนใหม่ทั้งหมด)" }
+                    });
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_conn, "EmailChat", "จำโดเมนที่เตือนแล้วไม่สำเร็จ: " + ex.Message, "SYSTEM"); } catch { }
             }
         }
 
