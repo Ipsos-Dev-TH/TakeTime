@@ -1737,6 +1737,104 @@ namespace Take_Time_BangPhra.Services
             return _mapNoteCol;
         }
 
+        /// <summary>
+        /// กรอง "หมายเหตุแผนราคา" ที่อ่านมาจากแถว mapping ให้เหลือเฉพาะหมายเหตุจริง
+        ///
+        /// เคสจริง (ก.ย. 2569): กล่องไฮไลต์ในตารางจองขึ้นว่า
+        ///   "Agoda · Booking dot com · hotelbedsnew · Trip dot com"
+        /// ทั้งที่ควรเป็นเรื่อง "รวม/ไม่รวมอาหารเช้า" — สาเหตุซ้อนกันสองชั้น:
+        ///   (ก) คอลัมน์หมายเหตุใน MapDataWithSTAAH หลายแถวกรอกไว้แค่ "ชื่อช่องทาง" ไม่ใช่หมายเหตุ
+        ///   (ข) ตอนจับคู่ห้องตกมาถึงชั้น "ROOM_TYPE ตรง (ข้าม Agency)" จึงกวาดแถวของ OTA เจ้าอื่น
+        ///       มาด้วย แล้วเอาหมายเหตุของเจ้าอื่นมาต่อกันด้วย " · "
+        ///
+        /// กฎที่ใช้:
+        ///   1. หมายเหตุของแถวที่เป็นของ "คนละช่องทาง" กับใบจองนี้ → ทิ้ง (ไม่เกี่ยวกับใบนี้)
+        ///   2. ตัดชื่อช่องทางที่นำหน้าออก ("Agoda ไม่รวมอาหารเช้า" → "ไม่รวมอาหารเช้า")
+        ///   3. เหลือแต่ชื่อช่องทางล้วน ๆ → ทิ้ง (ไม่ใช่หมายเหตุ)
+        /// </summary>
+        private string CleanMapNote(SqlConnection con, SqlTransaction tx,
+                                    string note, string rowAgency, string channel)
+        {
+            if (string.IsNullOrWhiteSpace(note)) return "";
+            note = note.Trim();
+
+            // 1) แถวนี้เป็นของช่องทางอื่น → หมายเหตุไม่เกี่ยวกับใบจองนี้
+            if (!string.IsNullOrWhiteSpace(channel) && !string.IsNullOrWhiteSpace(rowAgency)
+                && !ChannelAlike(rowAgency, channel))
+                return "";
+
+            // 2) ตัดชื่อช่องทางที่เขียนนำหน้าไว้ออก (ทั้งของแถวและของใบจอง)
+            foreach (string prefix in new[] { rowAgency, channel })
+            {
+                if (string.IsNullOrWhiteSpace(prefix)) continue;
+                if (note.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    note = note.Substring(prefix.Length).Trim().TrimStart('-', '–', '—', ':', '|').Trim();
+            }
+            if (note.Length == 0) return "";
+
+            // 3) เหลือแค่ชื่อช่องทาง = คนกรอกใส่ชื่อ OTA ไว้ในช่องหมายเหตุ ไม่ใช่หมายเหตุจริง
+            if (AgencyNames(con, tx).Contains(NormChannel(note)))
+            {
+                LogMapNoteNoise(note);
+                return "";
+            }
+            return note;
+        }
+
+        /// <summary>ชื่อช่องทางสองค่านี้หมายถึงเจ้าเดียวกันไหม ("Booking dot com" = "Booking.com")</summary>
+        private static bool ChannelAlike(string a, string b)
+        {
+            string x = NormChannel(a), y = NormChannel(b);
+            if (x.Length < 4 || y.Length < 4) return x == y;
+            return x == y || x.IndexOf(y, StringComparison.Ordinal) >= 0
+                          || y.IndexOf(x, StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>ยุบชื่อช่องทางให้เทียบกันได้ — ตัดอักขระพิเศษ + คำว่า "dot" ที่คนพิมพ์แทนจุด</summary>
+        private static string NormChannel(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            string v = Regex.Replace(s.ToLowerInvariant(), @"\bdot\b", ".");
+            return Regex.Replace(v, @"[^a-z0-9ก-๙]", "");
+        }
+
+        /// <summary>ชื่อ Agency ทั้งหมดในตาราง mapping (แบบยุบแล้ว) — ใช้ดูว่าหมายเหตุเป็นแค่ชื่อช่องทางไหม</summary>
+        private HashSet<string> _agencyNames;
+        private HashSet<string> AgencyNames(SqlConnection con, SqlTransaction tx)
+        {
+            if (_agencyNames != null) return _agencyNames;
+            _agencyNames = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                using (var cmd = new SqlCommand(
+                    "SELECT DISTINCT ISNULL(Agency, N'') FROM MapDataWithSTAAH", con, tx))
+                using (var rd = cmd.ExecuteReader())
+                    while (rd.Read())
+                    {
+                        string n = NormChannel(rd[0]?.ToString());
+                        if (n.Length >= 4) _agencyNames.Add(n);
+                    }
+            }
+            catch { }
+            return _agencyNames;
+        }
+
+        /// <summary>เตือนครั้งเดียวต่อรอบว่าคอลัมน์หมายเหตุถูกใช้เก็บชื่อช่องทาง (ไม่ใช่หมายเหตุ)</summary>
+        private bool _loggedMapNoteNoise;
+        private void LogMapNoteNoise(string sample)
+        {
+            if (_loggedMapNoteNoise) return;
+            _loggedMapNoteNoise = true;
+            try
+            {
+                _code.Logs(_conn, "EmailReservation",
+                    $"หมายเหตุแผนราคา '{Trunc(sample, 40)}' เป็นแค่ชื่อช่องทาง — ข้ามไม่แสดง. "
+                  + $"ถ้าต้องการให้ขึ้นเรื่องอาหารเช้า ให้กรอกคอลัมน์ "
+                  + $"MapDataWithSTAAH.{MapNoteColumn()} เป็นข้อความจริง เช่น 'ไม่รวมอาหารเช้า'", "SYSTEM");
+            }
+            catch { }
+        }
+
         private MapResult MappedAccommodations(SqlConnection con, SqlTransaction tx, string channel, string roomType)
         {
             var res = new MapResult();
@@ -1806,11 +1904,13 @@ namespace Take_Time_BangPhra.Services
                                   ISNULL(CONVERT(nvarchar(10), a.Status), '0'),
                                   ISNULL(CONVERT(nvarchar(10), a.LimitWithPeople), 'False'),
                                   ISNULL(TRY_CONVERT(int, a.People), 0),
-                                  ISNULL(TRY_CONVERT(int, a.OrderID), 0)" + noteSel + @"
+                                  ISNULL(TRY_CONVERT(int, a.OrderID), 0)" + noteSel + @",
+                                  ISNULL(m.Agency, N'')
                              FROM MapDataWithSTAAH m
                              LEFT JOIN Accommodation a ON a.ID = m.Accommodation_ID
                             WHERE " + where;
             string like = EscapeLike(roomType ?? "");
+            var countedDisabled = new HashSet<int>();
             using (var cmd = new SqlCommand(sql, con, tx))
             {
                 cmd.Parameters.AddWithValue("@c", channel ?? "");
@@ -1823,13 +1923,15 @@ namespace Take_Time_BangPhra.Services
                     {
                         if (rd[0] == DBNull.Value) continue;
 
-                        string note = rd.FieldCount > 6 && rd[6] != DBNull.Value ? rd[6].ToString().Trim() : "";
+                        string rawNote = rd.FieldCount > 6 && rd[6] != DBNull.Value ? rd[6].ToString().Trim() : "";
+                        string rowAgency = rd.FieldCount > 7 && rd[7] != DBNull.Value ? rd[7].ToString().Trim() : "";
+                        string note = CleanMapNote(con, tx, rawNote, rowAgency, channel);
                         if (note.Length > 0 && !res.Notes.Contains(note)) res.Notes.Add(note);
 
                         int id = Convert.ToInt32(rd[0]);
                         string st = rd[2]?.ToString() ?? "0";
                         bool active = st == "1" || st.Equals("True", StringComparison.OrdinalIgnoreCase);
-                        if (!active) { res.DisabledCount++; continue; }
+                        if (!active) { if (countedDisabled.Add(id)) res.DisabledCount++; continue; }
                         if (res.Rooms.Any(x => x.Id == id)) continue;
                         string lim = rd[3]?.ToString() ?? "False";
                         res.Rooms.Add(new RoomInfo
