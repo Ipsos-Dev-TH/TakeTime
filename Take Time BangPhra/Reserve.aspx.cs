@@ -4917,9 +4917,12 @@ namespace Take_Time_BangPhra
                 double amount = Convert.ToDouble(row["Price_Amount"]);
                 string productTypeId = row["ProductType_ID"].ToString();
 
-                if (productTypeId == "3")
+                // ⚠ บรรทัดติดลบ (หักมัดจำ/ส่วนลด) = ยอดตายตัวเหมือนสินค้าชาร์จ — ห้ามขยายตามสัดส่วน
+                //   เคสจริง REC260919007: หมูกระทะหาย → ขยาย ×1.09 ทุกบรรทัด มัดจำ −2,000 กลายเป็น −2,180
+                //   ทั้งที่ลูกค้าจ่ายจริง 2,000 → sync NextAcc ติด "มัดจำ 2,180 > ที่ลงไว้ 2,000" ถาวร
+                if (productTypeId == "3" || amount < 0)
                 {
-                    // สินค้าชาร์จ - เก็บยอดแยก
+                    // สินค้าชาร์จ / บรรทัดหัก - เก็บยอดแยก ไม่ปรับ
                     productChargesTotal += amount;
                 }
                 else
@@ -4934,6 +4937,10 @@ namespace Take_Time_BangPhra
 
             // ถ้ายอดตรงกันอยู่แล้ว (ผิดพลาดไม่เกิน 0.5 บาท) ไม่ต้องปรับ
             if (Math.Abs(currentTotal - expectedTotalExcludingCharges) <= 0.5)
+                return;
+
+            // ไม่มีบรรทัดบวกให้ปรับ (หรือยอดที่ต้องการติดลบ) → หารศูนย์/ได้ราคาติดลบ — คงเดิม
+            if (currentTotal <= 0.005 || expectedTotalExcludingCharges <= 0)
                 return;
 
             // คำนวณอัตราส่วนการปรับ
@@ -4961,6 +4968,7 @@ namespace Take_Time_BangPhra
 
                 double originalPricePerPiece = Convert.ToDouble(row["Price_PerPeice"]);
                 double originalPriceAmount = Convert.ToDouble(row["Price_Amount"]);
+                if (originalPriceAmount < 0) continue;   // บรรทัดหักมัดจำ/ส่วนลด — คงเดิม (ไม่ใช่แถวรับเศษด้วย)
 
                 // ปรับราคาต่อหน่วยและราคารวมตามอัตราส่วน
                 double adjustedPricePerPiece = TwoDecimalPoints(originalPricePerPiece * adjustmentRatio);

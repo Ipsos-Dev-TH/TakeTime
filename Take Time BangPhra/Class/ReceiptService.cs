@@ -232,23 +232,45 @@ namespace Take_Time_BangPhra.Services
             if (Math.Abs(currentTotal - expectedTotal) <= 0.5)
                 return;
 
+            // ⚠ บรรทัดติดลบ (หักมัดจำ/ส่วนลด) เป็น "ยอดตายตัว" — ห้ามขยายตามสัดส่วน
+            //   เคสจริง REC260919007: บรรทัดหมูกระทะ 450 หาย → ขยายทุกบรรทัด ×1.09 รวมบรรทัดมัดจำ
+            //   −2,000 กลายเป็น −2,180 ทั้งที่ลูกค้าจ่ายมัดจำ 2,000 จริง → sync NextAcc ติด
+            //   "มัดจำ 2,180 > ที่ลงไว้ 2,000" ถาวร. ส่วนต่างต้องไปลงเฉพาะบรรทัดบวก (ห้อง/บริการ)
+            double fixedTotal = 0, adjustableTotal = 0;
+            int lastAdjustable = -1;
+            for (int i = 0; i < dtReserve.Rows.Count; i++)
+            {
+                double amt = Convert.ToDouble(dtReserve.Rows[i]["Price_Amount"]);
+                if (amt < 0) fixedTotal += amt;
+                else { adjustableTotal += amt; if (amt > 0) lastAdjustable = i; }
+            }
+            double expectedAdjustable = expectedTotal - fixedTotal;
+            if (adjustableTotal <= 0.005 || lastAdjustable < 0 || expectedAdjustable <= 0)
+            {
+                _codeHelper.Log(_dbHelper.ConnectionString, "Receipt Amount Adjustment",
+                    $"Reservation {reservationId}: ปรับยอดรายละเอียดไม่ได้ (บรรทัดบวก {adjustableTotal:F2}, " +
+                    $"ยอดที่ต้องการ {expectedTotal:F2}, บรรทัดหัก {fixedTotal:F2}) — คงรายละเอียดเดิม", "SYSTEM");
+                return;
+            }
+
             // คำนวณอัตราส่วนการปรับ
-            double adjustmentRatio = expectedTotal / currentTotal;
+            double adjustmentRatio = expectedAdjustable / adjustableTotal;
 
             // Log การปรับสัดส่วน
             _codeHelper.Log(_dbHelper.ConnectionString, "Receipt Amount Adjustment",
-                $"Reservation {reservationId}: Adjusting details from {currentTotal:F2} to {expectedTotal:F2} (ratio: {adjustmentRatio:F4})",
+                $"Reservation {reservationId}: Adjusting details from {currentTotal:F2} to {expectedTotal:F2} " +
+                $"(ratio: {adjustmentRatio:F4}, บรรทัดหักคงที่ {fixedTotal:F2} ไม่ปรับ)",
                 "SYSTEM");
 
             double adjustedTotal = 0;
-            int lastIndex = dtReserve.Rows.Count - 1;
 
-            // ปรับทุกแถวตามอัตราส่วน
+            // ปรับเฉพาะบรรทัดบวกตามอัตราส่วน
             for (int i = 0; i < dtReserve.Rows.Count; i++)
             {
                 DataRow row = dtReserve.Rows[i];
                 double originalPricePerPiece = Convert.ToDouble(row["Price_PerPeice"]);
                 double originalPriceAmount = Convert.ToDouble(row["Price_Amount"]);
+                if (originalPriceAmount < 0) continue;   // บรรทัดหักมัดจำ/ส่วนลด — คงเดิม
 
                 // ปรับราคาต่อหน่วยและราคารวมตามอัตราส่วน
                 double adjustedPricePerPiece = CalculateTwoDecimalPoints(originalPricePerPiece * adjustmentRatio);
@@ -260,11 +282,11 @@ namespace Take_Time_BangPhra.Services
                 adjustedTotal += adjustedPriceAmount;
             }
 
-            // ปรับส่วนต่างจากการปัดเศษให้กับรายการสุดท้าย
-            double difference = CalculateTwoDecimalPoints(expectedTotal - adjustedTotal);
+            // ปรับส่วนต่างจากการปัดเศษให้กับ "บรรทัดบวกสุดท้าย" (เดิมใส่แถวสุดท้าย = มักเป็นบรรทัดมัดจำ)
+            double difference = CalculateTwoDecimalPoints(expectedAdjustable - adjustedTotal);
             if (Math.Abs(difference) > 0.01)
             {
-                DataRow lastRow = dtReserve.Rows[lastIndex];
+                DataRow lastRow = dtReserve.Rows[lastAdjustable];
                 double lastPriceAmount = Convert.ToDouble(lastRow["Price_Amount"]);
                 lastRow["Price_Amount"] = CalculateTwoDecimalPoints(lastPriceAmount + difference);
 

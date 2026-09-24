@@ -6052,10 +6052,9 @@ namespace Take_Time_BangPhra.Integration
                 // เพื่อให้ MapMultiLinePaymentToJournal คิด VAT ถูกและ checkout clearing ไม่ double-debit
                 if (depositFromLines > 0)
                 {
-                    // กันบวกซ้ำตอน queue retry: รอบแรกเรา persist Deposit_Applied_Amount (= รวม lines แล้ว)
-                    // → รอบ retry LookupDepositAppliedFromReceipt คืนค่าที่รวม lines ไว้แล้ว ถ้าบวกอีกจะเบิล
-                    if (depositApplied < depositFromLines)
-                        depositApplied += depositFromLines;
+                    // บรรทัดหักมัดจำในใบ = ความจริง (ใบอาจถูกแก้หลังออกครั้งแรก) — ไม่ใช่ payload/ค่าที่ persist
+                    // กำหนดค่า ไม่ได้บวกเพิ่ม ⇒ retry ซ้ำกี่รอบก็ได้ค่าเดิม ไม่เบิล (ดู ReconcileDepositApplied)
+                    depositApplied = ReconcileDepositApplied(receiptNumber, depositApplied, depositFromLines);
                     // GROSS = ผลรวม "บรรทัดบวก" (room/service จริง จาก LookupReceiptLinesEx ที่ตัด negative ออก)
                     // — deterministic ไม่ขึ้นกับว่า Total_Amount ที่ store เป็น net หรือ gross.
                     // ⚠ เดิม `totalAmount += depositFromLines` สมมติ Total_Amount = net เสมอ → ถ้าบางใบ store
@@ -6065,14 +6064,9 @@ namespace Take_Time_BangPhra.Integration
                         totalAmount = grossFromLines;         // ยอดเต็มจากบรรทัดจริง (กันเบิ้ล)
                     else
                         totalAmount += depositFromLines;      // ไม่มี lines → fallback เดิม
-                    // Persist depositApplied ลง Account_Receipt เพื่อให้ TryEnqueueDepositClearing เห็น (anti-double-clear)
-                    try
-                    {
-                        _code.DatabaseInsertSafe(_connectionString,
-                            "UPDATE Account_Receipt SET Deposit_Applied_Amount = @amt WHERE ID = @num AND ISNULL(Deposit_Applied_Amount, 0) < @amt",
-                            new Dictionary<string, object> { { "@amt", depositApplied }, { "@num", receiptNumber } });
-                    }
-                    catch { }
+                    // Deposit_Applied_Amount ถูก ReconcileDepositApplied เขียนให้ตรงบรรทัดแล้ว (ทั้งขึ้นและลง)
+                    // ⚠ เดิม UPDATE ... WHERE Deposit_Applied_Amount < @amt = ขึ้นได้อย่างเดียว ลงไม่ได้
+                    //   ใบที่เคยพองเป็น 2,180 แล้วแก้กลับเป็น 2,000 จึงค้าง 2,180 ถาวร (REC260919007)
                 }
 
                 // ── GUARD กันเรียกใช้มัดจำซ้ำ (double-use) ────────────────────────────────────
@@ -7702,6 +7696,48 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { /* fallback to 0 */ }
             return 0m;
+        }
+
+        /// <summary>
+        /// ยอดมัดจำที่ใบเสร็จนี้ "หักจริง" — ถ้าใบมีบรรทัดติดลบ (บรรทัดหักมัดจำ) **บรรทัดคือความจริง**
+        ///
+        /// เคสจริง REC260919007 / การจอง 149385 (ก.ย. 2569):
+        ///   ตอนออกใบครั้งแรก บรรทัดหมูกระทะหายไป → AdjustReserveDataToMatch ขยายทุกบรรทัดตามสัดส่วน
+        ///   (×1.09) รวมถึงบรรทัดมัดจำ −2,000 → −2,180 → sync persist Deposit_Applied_Amount = 2,180
+        ///   ผู้ใช้แก้ใบให้ถูก (มัดจำกลับเป็น −2,000) แต่ sync ยังใช้ 2,180 ตลอด เพราะกฎเดิม
+        ///     depositApplied = payload ?? Deposit_Applied_Amount;  if (depositApplied &lt; lines) += lines
+        ///   และตอน persist ใช้ WHERE Deposit_Applied_Amount &lt; @amt (ขึ้นได้อย่างเดียว ลงไม่ได้)
+        ///   ⇒ ค่าเก่าที่สูงกว่าชนะบรรทัดที่แก้แล้วทุกครั้ง → "มัดจำ 2,180 &gt; ที่ลง NextAcc 2,000"
+        ///   → ตัวกู้ภัยหาใบมัดจำเพิ่มไม่เจอ (0 ใบ) → FAILED 5/5 ถาวร แก้ใบกี่รอบก็ไม่หาย
+        ///
+        /// กฎใหม่: มีบรรทัดติดลบ → ใช้ยอดจากบรรทัด (ไม่ใช่ payload/ค่าที่ persist) แล้ว
+        /// **แก้ค่าที่ persist ให้ตรง** (ทั้งขึ้นและลง) เพราะหน้าตารางจอง/ตัดมัดจำอ่านค่านี้ต่อ
+        /// ไม่มีบรรทัดติดลบ → ใช้ค่าเดิม (ใบที่หักมัดจำผ่าน Deposit_Applied_Amount อย่างเดียว)
+        /// retry ซ้ำ = ได้ค่าเดิม (กำหนดค่า ไม่ได้บวกเพิ่ม) จึงไม่มีทางเบิล
+        /// </summary>
+        private decimal ReconcileDepositApplied(string receiptNumber, decimal storedOrPayload, decimal depositFromLines)
+        {
+            if (depositFromLines <= 0.005m) return storedOrPayload;
+
+            if (storedOrPayload > 0.005m && Math.Abs(storedOrPayload - depositFromLines) > 0.005m)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ReconcileDepositApplied: receipt={receiptNumber} ยอดหักมัดจำที่เก็บไว้ {storedOrPayload:N2} " +
+                    $"ไม่ตรงกับบรรทัดหักมัดจำในใบ {depositFromLines:N2} → ใช้ตามบรรทัด (ใบถูกแก้ไขหลังออกครั้งแรก)", "SYSTEM");
+            }
+
+            if (!string.IsNullOrEmpty(receiptNumber))
+            {
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Account_Receipt SET Deposit_Applied_Amount = @amt, UseDeposit = 'True' " +
+                        "WHERE ID = @num AND ISNULL(Deposit_Applied_Amount, 0) <> @amt",
+                        new Dictionary<string, object> { { "@amt", depositFromLines }, { "@num", receiptNumber } });
+                }
+                catch { }
+            }
+            return depositFromLines;
         }
 
         // ──────────────────────────────────────────────
@@ -12378,9 +12414,8 @@ namespace Take_Time_BangPhra.Integration
                     }
                     if (depositFromLines > 0)
                     {
-                        // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
-                        if (depositApplied < depositFromLines)
-                            depositApplied += depositFromLines;
+                        // บรรทัดหักมัดจำ = ความจริง (เหมือน ProcessReceiptDocument)
+                        depositApplied = ReconcileDepositApplied(receiptNumber, depositApplied, depositFromLines);
                         // GROSS = ผลรวมบรรทัดบวกจริง (กันเบิ้ลถ้า Total_Amount store เป็น gross อยู่แล้ว)
                         decimal grossFromLines = lines != null ? lines.Sum(l => l.Amount) : 0m;
                         if (grossFromLines > 0.005m) totalAmount = grossFromLines;
@@ -12504,9 +12539,8 @@ namespace Take_Time_BangPhra.Integration
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
                 if (depositFromLines > 0)
                 {
-                    // กันบวกซ้ำ (Deposit_Applied_Amount ที่ persist ไว้รวม lines แล้ว)
-                    if (depositApplied < depositFromLines)
-                        depositApplied += depositFromLines;
+                    // บรรทัดหักมัดจำ = ความจริง (เหมือน ProcessReceiptDocument)
+                    depositApplied = ReconcileDepositApplied(receiptNumber, depositApplied, depositFromLines);
                     // GROSS = ผลรวมบรรทัดบวกจริง (กันเบิ้ลถ้า Total_Amount store เป็น gross อยู่แล้ว)
                     decimal grossFromLinesJ = lines != null ? lines.Sum(l => l.Amount) : 0m;
                     if (grossFromLinesJ > 0.005m) totalAmount = grossFromLinesJ;
