@@ -3950,21 +3950,13 @@ namespace Take_Time_BangPhra.Integration
                         throw new Exception($"SettleReceipt: ตัดมัดจำเป็น payment ไม่สำเร็จ receipt={receiptNumber}: {depResult?.message ?? "null response"}");
                     Guid depPayId = depResult.data.Id;
 
-                    // "ยังไม่มีตัวที่ใช้งานอยู่" (DEPVAT − DEPVAT-REV ≤ 0) — ไม่ใช่แค่ "เคยมี"
-                    // เดิมเช็ค exists ⇒ หลัง void (ลง -REV) แล้วสร้างใหม่ จะไม่โพสต์ซ้ำ → VAT มัดจำหายไปหลังแก้ใบ
-                    if (hasVat && _config.IsDepositVatAtReceipt
-                        && !await JournalRefIsLiveAsync($"RES-{reservationId}-DEPVAT"))
-                    {
-                        // ADVANCE เก็บเฉพาะ net → ย้ายส่วน VAT: Dr 21913(defer)/21911 / Cr ADVANCE
-                        // guard RES-{id}-DEPVAT กัน post ซ้ำถ้า crash หลังโพสต์ก่อนเขียน marker (idempotent)
-                        var vatFix = _mapper.MapDepositVatCorrection(reservationId, depositApplied,
-                            receiptNumber, _config.IsDepositOutputVatDeferred);
-                        var vatResult = await _apiClient.CreateJournalAsync(vatFix);
-                        Guid vatFixId = RequireValidDocId(vatResult?.data?.Id, $"DepositVatCorrection receipt={receiptNumber}");
-                        await SafePostJournalAsync(vatFixId);
-                    }
-
+                    // ⚠ จด marker "ทันที" ที่ payment ตัดมัดจำเกิดแล้ว — payment endpoint ไม่ dedupe
+                    //   เดิมจดหลังขั้น VAT: ถ้าขั้น VAT ล้ม (ค้นไม่ได้/โพสต์ไม่ได้) รอบ retry ไม่เห็น marker
+                    //   → ตัดมัดจำเป็น payment ซ้ำอีกก้อน (ด่าน BalanceDue กันได้เฉพาะเมื่อยอดค้าง < มัดจำ)
                     SetReceiptPaymentMarker(receiptNumber, "ADJ:" + depPayId);
+
+                    // ขั้นแก้ VAT มัดจำแยกเป็นขั้น idempotent — ล้มตรงนี้ retry จะมาทำต่อ (ดู catch-up ด้านล่าง)
+                    await EnsureDepositVatCorrectionAsync(reservationId, depositApplied, receiptNumber, hasVat);
                     _code.Logs(_connectionString, "AccountingSync",
                         $"SettleReceipt: ตัดมัดจำเป็น payment สำเร็จ receipt={receiptNumber} deposit={depositApplied:N2} paymentId={depPayId} (BalanceDue ลดครบ)", "SYSTEM");
                 }
@@ -3990,6 +3982,18 @@ namespace Take_Time_BangPhra.Integration
                     _code.Logs(_connectionString, "AccountingSync",
                         $"SettleReceipt: deposit adjustment (journal) posted receipt={receiptNumber} deposit={depositApplied:N2} journalId={adjId2} — BalanceDue เอกสารจะค้างเท่ามัดจำ (ไม่มี company endpoint)", "SYSTEM");
                 }
+            }
+            else if (depositApplied > 0 && adjDone)
+            {
+                // retry หลังตัดมัดจำเป็น payment ไปแล้ว (marker ADJ:/final) — ขั้นแก้ VAT มัดจำอาจล้มค้างไว้
+                // ทำต่อให้ครบ (idempotent: มี DEPVAT ที่ยังมีผลอยู่แล้ว = ข้าม). ไม่ทำเมื่อเป็น ADJ:EXTERNAL
+                // (มัดจำไม่ได้ถูกตัดโดยเรา) และเฉพาะเส้นที่ตัดมัดจำเป็น payment (config เดียวกับตอนสร้าง)
+                string mkNow = LookupReceiptPaymentMarker(receiptNumber);
+                Guid advChk;
+                bool depAsPay = _config.CanUseCompanyEndpoints
+                    && _mapper.TryGetAccountId("ADVANCE_DEPOSIT", out advChk) && advChk != Guid.Empty;
+                if (depAsPay && mkNow != "ADJ:EXTERNAL")
+                    await EnsureDepositVatCorrectionAsync(reservationId, depositApplied, receiptNumber, hasVat);
             }
 
             // 2) บันทึกรับเงินสดจริง (= total − depositApplied) → Dr เงินสด / Cr ลูกหนี้
@@ -4584,6 +4588,21 @@ namespace Take_Time_BangPhra.Integration
         /// (DEPVAT / DEPREV): มีผล = จำนวนตัวจริงที่ยังไม่ถูกกลับ &gt; จำนวน -REV
         /// ใช้แทน JournalExistsByReferenceAsync ตรงที่ต้องรองรับรอบ void→สร้างใหม่หลายรอบ
         /// </summary>
+        /// <summary>
+        /// journal แก้ VAT มัดจำ (ADVANCE เก็บเฉพาะ net → ย้ายส่วน VAT: Dr 21913(defer)/21911 / Cr ADVANCE)
+        /// idempotent: โพสต์เฉพาะเมื่อยังไม่มี RES-{id}-DEPVAT ที่ยังมีผลอยู่ (หลัง void→สร้างใหม่จะโพสต์ใหม่ได้)
+        /// </summary>
+        private async Task EnsureDepositVatCorrectionAsync(int reservationId, decimal depositApplied, string receiptNumber, bool hasVat)
+        {
+            if (!hasVat || !_config.IsDepositVatAtReceipt || depositApplied <= 0.005m) return;
+            if (await JournalRefIsLiveAsync($"RES-{reservationId}-DEPVAT")) return;
+            var vatFix = _mapper.MapDepositVatCorrection(reservationId, depositApplied,
+                receiptNumber, _config.IsDepositOutputVatDeferred);
+            var vatResult = await _apiClient.CreateJournalAsync(vatFix);
+            Guid vatFixId = RequireValidDocId(vatResult?.data?.Id, $"DepositVatCorrection receipt={receiptNumber}");
+            await SafePostJournalAsync(vatFixId);
+        }
+
         /// <remarks>ไม่กลืน error: ค้นไม่ได้ = ไม่รู้ → ให้คิว retry ดีกว่าเดาผิดแล้วโพสต์ซ้ำ/ข้ามการกลับรายการเงียบ ๆ</remarks>
         private async Task<bool> JournalRefIsLiveAsync(string reference)
         {
@@ -4606,7 +4625,9 @@ namespace Take_Time_BangPhra.Integration
             if (foundRev?.data?.Items != null)
                 foreach (var j in foundRev.data.Items)
                     if (!IsVoidedStatus(j.Status)
-                        && string.Equals(j.Reference, revRef, StringComparison.OrdinalIgnoreCase))
+                        && string.Equals(j.Reference, revRef, StringComparison.OrdinalIgnoreCase)
+                        && j.OriginalEntryId == null
+                        && (j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty))
                         counters++;
             return live > counters;
         }
@@ -4664,7 +4685,8 @@ namespace Take_Time_BangPhra.Integration
                 var found = await _apiClient.SearchJournalsAsync(reff, 50);
                 orig = (found?.data?.Items ?? new List<JournalEntryResponse>())
                     .Where(j => string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase)
-                             && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null)
+                             && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null
+                             && (j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty))
                     .OrderByDescending(j => j.CreatedAt)
                     .FirstOrDefault();
             }
@@ -8225,8 +8247,9 @@ namespace Take_Time_BangPhra.Integration
                                 // → void doc ไม่ cascade ให้ ต้องกลับเอง (เดิมไม่มีขั้นนี้ ⇒ void→สร้างใหม่ = ตัดมัดจำซ้ำ)
                                 // ไม่ใช่ใบขายสด → helper คืน false ไม่ทำอะไร (payment ถูก cascade กลับแล้ว)
                                 var infoV = LookupReceiptHeaderInfo(receiptNumber);
+                                bool cashSaleHandled = false;
                                 if (infoV != null)
-                                    await TryReverseCashSaleDepositOnVoidAsync(infoV.Value.reservationId, applied,
+                                    cashSaleHandled = await TryReverseCashSaleDepositOnVoidAsync(infoV.Value.reservationId, applied,
                                         infoV.Value.paymentMethod, infoV.Value.paymentAccountId,
                                         infoV.Value.customerName ?? "", receiptNumber, docId);
                                 if (_config.IsDepositVatAtReceipt && !_config.IsDepositOutputVatDeferred)
@@ -8236,7 +8259,8 @@ namespace Take_Time_BangPhra.Integration
                                     // ที่โพสต์ไป (แม่นแม้ revenueType ต่าง) + idempotent
                                     await ReverseDepositRevenueRecognitionAsync(resIdV, receiptNumber);
                                 }
-                                else if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt
+                                else if (!cashSaleHandled   // ใบขายสด: VAT อยู่ใน JV -CSDEPADJ ที่กลับแล้ว; DEPVAT (ถ้ามีผล) เป็นของใบอื่นในการจองเดียวกัน
+                                         && LookupBusinessHasVat() && _config.IsDepositVatAtReceipt
                                          // กลับเฉพาะเมื่อมี DEPVAT ที่ยังใช้งานอยู่จริง — ใบขายสดไม่เคยโพสต์ DEPVAT
                                          // (VAT อยู่ใน JV -CSDEPADJ ซึ่งกลับไปแล้วด้านบน) เดิมลง counter ทุกครั้ง
                                          // ⇒ กลับ VAT มัดจำ 2 รอบ (ADVANCE เกิน +VAT, 21913 ถูก Cr ซ้ำ) ทุกรอบแก้ใบ
@@ -8274,9 +8298,11 @@ namespace Take_Time_BangPhra.Integration
                                         _code.Logs(_connectionString, "AccountingSync",
                                             $"ProcessVoidReceipt(RECEIPT doc): reversed actual -DEPADJ ({depadjRef}) account-for-account receipt={receiptNumber}", "SYSTEM");
                                     }
-                                    else if (await JournalExistsByReferenceAsync(depadjRef))
+                                    else if (await JournalRefIsLiveAsync(depadjRef))
                                     {
                                         // reverse ตัวจริงไม่ได้ (NextAcc เก่า/งวดปิด) → counter จาก config (พฤติกรรมเดิม)
+                                        // เฉพาะเมื่อยังมีผลอยู่ (ตัวจริง > counter -REV) — void ที่ทำต่อจากรอบค้าง
+                                        // ครึ่งทางต้องไม่ลง counter ซ้ำ
                                         var counterAdj = _mapper.MapDepositAppliedReceiptAdjustmentReverse(
                                             info.Value.reservationId, applied, info.Value.paymentMethod, DateTime.Now,
                                             info.Value.customerName ?? "", info.Value.paymentAccountId, receiptNumber,
@@ -9305,6 +9331,8 @@ namespace Take_Time_BangPhra.Integration
                             || (marker != null && marker.StartsWith("VOIDING:", StringComparison.OrdinalIgnoreCase)))
                         {
                             // ยกเลิกแล้ว (หรือ void สำเร็จแล้ว กำลังกลับรายการประกอบ) — ไม่มีหนี้สินบน NextAcc
+                            // แต่ถ้ายังมีคิวค้าง (กำลัง void/สร้างใหม่หลังแก้ใบมัดจำ) = รอ ไม่ใช่ "ยังไม่ sync"
+                            if (HasActiveReceiptQueue(num)) state.PendingSync = true;
                         }
                         else if (!string.IsNullOrEmpty(marker)
                                  && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:") || marker == "NOCASH"
