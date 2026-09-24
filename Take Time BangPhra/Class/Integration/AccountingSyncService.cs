@@ -1275,7 +1275,7 @@ namespace Take_Time_BangPhra.Integration
         // ──────────────────────────────────────────────
 
         /// <summary>
-        /// VOID_RECEIPT ของเลขใบเดียวกันที่เข้าคิว "ก่อน" รายการนี้และยังไม่จบ (PENDING/PROCESSING/FAILED)
+        /// VOID_RECEIPT ของเลขใบเดียวกันที่ยังไม่จบ (PENDING/PROCESSING/FAILED)
         /// คืน "VOID #id (สถานะ)" หรือ null ถ้าไม่มี — ใช้บังคับลำดับ VOID เก่า → CREATE ใหม่
         /// </summary>
         private string FindUnsentVoidBefore(long queueId, string payloadJson)
@@ -1286,8 +1286,11 @@ namespace Take_Time_BangPhra.Integration
                 string rn = pl != null && pl.ContainsKey("receiptNumber") ? pl["receiptNumber"]?.ToString() : null;
                 if (string.IsNullOrEmpty(rn)) return null;
                 var dt = _code.DatabaseQuerySafe(_connectionString,
+                    // ⚠ ไม่กรอง ID < @qid: การแก้ใบอาจ "ใช้แถว CREATE เดิมที่ค้างอยู่" (TryRefreshQueuePayload)
+                    //   ซึ่ง ID ต่ำกว่า VOID ที่เพิ่งใส่ → จะมองไม่เห็น VOID แล้ววิ่งก่อน. VOID ไม่เคยรอ CREATE
+                    //   จึงรอ VOID ที่ยังไม่จบ "ทุกตัว" ของเลขนี้ได้โดยไม่ deadlock
                     @"SELECT TOP 1 ID, Status FROM Accounting_Sync_Queue
-                      WHERE Action_Type = 'VOID_RECEIPT' AND ID < @qid
+                      WHERE Action_Type = 'VOID_RECEIPT' AND ID <> @qid
                         AND Status IN ('PENDING', 'PROCESSING', 'FAILED')
                         AND Payload LIKE @pat
                       ORDER BY ID",
@@ -2806,6 +2809,14 @@ namespace Take_Time_BangPhra.Integration
                         UpdateQueueStatus(queueId, "PENDING",
                             $"รอ {waitingOn} (ยกเลิกเอกสารเก่าของใบนี้) ให้สำเร็จก่อน — ไม่นับ retry. " +
                             "ถ้ารายการ VOID นั้นล้ม ให้แก้/Retry ที่ตัว VOID ก่อน", null);
+                        // พัก 5 นาที (ไม่นับ retry) — ไม่ให้รายการที่รออยู่ถูกหยิบทุกรอบจนกินโควตา batch
+                        try
+                        {
+                            _code.DatabaseInsertSafe(_connectionString,
+                                "UPDATE Accounting_Sync_Queue SET Next_Retry_Date = DATEADD(MINUTE, 5, GETDATE()) WHERE ID = @id",
+                                new Dictionary<string, object> { { "@id", queueId } });
+                        }
+                        catch { }
                         continue;
                     }
                 }
@@ -3939,8 +3950,10 @@ namespace Take_Time_BangPhra.Integration
                         throw new Exception($"SettleReceipt: ตัดมัดจำเป็น payment ไม่สำเร็จ receipt={receiptNumber}: {depResult?.message ?? "null response"}");
                     Guid depPayId = depResult.data.Id;
 
+                    // "ยังไม่มีตัวที่ใช้งานอยู่" (DEPVAT − DEPVAT-REV ≤ 0) — ไม่ใช่แค่ "เคยมี"
+                    // เดิมเช็ค exists ⇒ หลัง void (ลง -REV) แล้วสร้างใหม่ จะไม่โพสต์ซ้ำ → VAT มัดจำหายไปหลังแก้ใบ
                     if (hasVat && _config.IsDepositVatAtReceipt
-                        && !await JournalExistsByReferenceAsync($"RES-{reservationId}-DEPVAT"))
+                        && !await JournalRefIsLiveAsync($"RES-{reservationId}-DEPVAT"))
                     {
                         // ADVANCE เก็บเฉพาะ net → ย้ายส่วน VAT: Dr 21913(defer)/21911 / Cr ADVANCE
                         // guard RES-{id}-DEPVAT กัน post ซ้ำถ้า crash หลังโพสต์ก่อนเขียน marker (idempotent)
@@ -4566,6 +4579,38 @@ namespace Take_Time_BangPhra.Integration
             catch { return false; }
         }
 
+        /// <summary>
+        /// JE ที่ใช้ ref นี้ "ยังมีผลอยู่" ไหม — สำหรับ ref ที่กลับรายการด้วย JE ตรงข้ามชื่อ "{ref}-REV"
+        /// (DEPVAT / DEPREV): มีผล = จำนวนตัวจริงที่ยังไม่ถูกกลับ &gt; จำนวน -REV
+        /// ใช้แทน JournalExistsByReferenceAsync ตรงที่ต้องรองรับรอบ void→สร้างใหม่หลายรอบ
+        /// </summary>
+        /// <remarks>ไม่กลืน error: ค้นไม่ได้ = ไม่รู้ → ให้คิว retry ดีกว่าเดาผิดแล้วโพสต์ซ้ำ/ข้ามการกลับรายการเงียบ ๆ</remarks>
+        private async Task<bool> JournalRefIsLiveAsync(string reference)
+        {
+            if (string.IsNullOrEmpty(reference)) return false;
+            string revRef = reference + "-REV";
+            int live = 0, counters = 0;
+
+            var found = await _apiClient.SearchJournalsAsync(reference, 50);
+            if (found?.data?.Items != null)
+                foreach (var j in found.data.Items)
+                    if (!IsVoidedStatus(j.Status)
+                        && string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase)
+                        && j.OriginalEntryId == null
+                        && (j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty))
+                        live++;
+            if (live == 0) return false;
+
+            // ค้น -REV แยก (ไม่พึ่งว่า search ของ NextAcc เป็นแบบ "มีคำนี้" หรือ "ตรงเป๊ะ")
+            var foundRev = await _apiClient.SearchJournalsAsync(revRef, 50);
+            if (foundRev?.data?.Items != null)
+                foreach (var j in foundRev.data.Items)
+                    if (!IsVoidedStatus(j.Status)
+                        && string.Equals(j.Reference, revRef, StringComparison.OrdinalIgnoreCase))
+                        counters++;
+            return live > counters;
+        }
+
         private async Task<bool> JournalExistsByReferenceAsync(string reference)
         {
             if (string.IsNullOrEmpty(reference)) return false;
@@ -4585,7 +4630,9 @@ namespace Take_Time_BangPhra.Integration
         private async Task PostDepositRevenueRecognitionAsync(int reservationId, decimal depositApplied, string receiptNumber, string revenueType, bool hasVat)
         {
             string reff = $"RES-{reservationId}-DEPREV";
-            if (await JournalExistsByReferenceAsync(reff))
+            // มีตัวที่ยังใช้งานอยู่ (DEPREV − DEPREV-REV > 0) จึงข้าม — เดิมเช็คแค่ "เคยมี" ⇒ หลัง void→สร้างใหม่
+            // ไม่โพสต์ซ้ำ รายได้มัดจำหายไปหลังแก้ใบ (โหมด §78/1)
+            if (await JournalRefIsLiveAsync(reff))
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"PostDepositRevenueRecognition: {reff} โพสต์แล้ว — ข้าม (idempotent) receipt={receiptNumber}", "SYSTEM");
@@ -4602,7 +4649,9 @@ namespace Take_Time_BangPhra.Integration
         {
             string reff = $"RES-{reservationId}-DEPREV";
             string revRef = reff + "-REV";
-            if (await JournalExistsByReferenceAsync(revRef))
+            // ไม่มีตัวที่ยังใช้งานอยู่ (กลับครบแล้ว) → ข้าม — เดิมเช็คแค่ "เคยมี -REV" ⇒ รอบแก้ใบที่ 2 เป็นต้นไป
+            // ไม่กลับ DEPREV ของรอบปัจจุบัน
+            if (!await JournalRefIsLiveAsync(reff))
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ReverseDepositRevenueRecognition: {revRef} กลับรายการแล้ว — ข้าม receipt={receiptNumber}", "SYSTEM");
@@ -4611,11 +4660,13 @@ namespace Take_Time_BangPhra.Integration
             JournalEntryResponse orig = null;
             try
             {
-                var found = await _apiClient.SearchJournalsAsync(reff, 10);
-                if (found?.data?.Items != null)
-                    foreach (var j in found.data.Items)
-                        if (string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase) && !IsVoidedStatus(j.Status))
-                        { orig = j; break; }
+                // ตัวล่าสุด = ของรอบปัจจุบัน (ยอดอาจต่างจากรอบก่อนถ้ามัดจำเปลี่ยน) — กลับให้ตรงตัวที่ใช้งานอยู่
+                var found = await _apiClient.SearchJournalsAsync(reff, 50);
+                orig = (found?.data?.Items ?? new List<JournalEntryResponse>())
+                    .Where(j => string.Equals(j.Reference, reff, StringComparison.OrdinalIgnoreCase)
+                             && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null)
+                    .OrderByDescending(j => j.CreatedAt)
+                    .FirstOrDefault();
             }
             catch { }
             if (orig?.Lines == null || orig.Lines.Count < 2)
@@ -4756,7 +4807,18 @@ namespace Take_Time_BangPhra.Integration
             return null;
         }
 
+        /// <summary>
+        /// marker ของใบ — ค่า "VOIDING:*" (void สำเร็จบน NextAcc แล้ว กำลังกลับรายการประกอบ) ถูกรายงานเป็น
+        /// "VOIDED" ให้ผู้อ่านทั่วไปทั้งระบบ (เอกสารถูกยกเลิกแล้วจริง) — มีแค่ ProcessVoidReceipt ที่ต้องเห็นค่าดิบ
+        /// </summary>
         private string LookupReceiptPaymentMarker(string receiptNumber)
+        {
+            string raw = LookupReceiptPaymentMarkerRaw(receiptNumber);
+            if (raw != null && raw.StartsWith("VOIDING:", StringComparison.OrdinalIgnoreCase)) return "VOIDED";
+            return raw;
+        }
+
+        private string LookupReceiptPaymentMarkerRaw(string receiptNumber)
         {
             try
             {
@@ -6937,8 +6999,12 @@ namespace Take_Time_BangPhra.Integration
 
             // Option A (native): marker "CSNATIVE:" → 21510 reversal อยู่ใน JE ของใบ → void cascade กลับให้แล้ว
             //   → ไม่ต้องโพสต์ counter-adj (คืน true = จัดการแล้ว กัน AR reverse ผิด)
-            string mk = LookupReceiptPaymentMarker(receiptNumber);
-            if (!string.IsNullOrEmpty(mk) && mk.StartsWith("CSNATIVE:"))
+            string mk = LookupReceiptPaymentMarkerRaw(receiptNumber);
+            bool wasNative = !string.IsNullOrEmpty(mk)
+                && (mk.StartsWith("CSNATIVE:")
+                    // ระหว่าง void marker ถูกเปลี่ยนเป็น "VOIDING:{doc}:N" (N = เดิมเป็น CSNATIVE)
+                    || (mk.StartsWith("VOIDING:", StringComparison.OrdinalIgnoreCase) && mk.EndsWith(":N")));
+            if (wasNative)
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ProcessVoidReceipt: cash-sale native (A) receipt={receiptNumber} — 21510 reversal อยู่ใน JE ของใบ, void cascade กลับให้แล้ว → ไม่โพสต์ counter-adj", "SYSTEM");
@@ -8102,6 +8168,10 @@ namespace Take_Time_BangPhra.Integration
                     //     เหลือแค่กลับ journal แก้ VAT มัดจำ (ถ้ามี)
                     int voidedDocType = 0;
                     bool docAlreadyGone = false;
+                    // รอบก่อนของ VOID นี้ void บน NextAcc สำเร็จแล้วแต่ล้มระหว่างกลับรายการประกอบ (marker VOIDING:{doc})
+                    // → เอกสาร "ถูก void แล้ว" ไม่ได้แปลว่าผู้ใช้เคลียร์มือ ต้องกลับรายการที่ค้างให้ครบ (ทุกขั้น idempotent)
+                    string rawMarkerBefore = LookupReceiptPaymentMarkerRaw(receiptNumber) ?? "";
+                    bool resumingOurVoid = rawMarkerBefore.StartsWith("VOIDING:" + docId.ToString(), StringComparison.OrdinalIgnoreCase);
                     try
                     {
                         var docInfo = await _apiClient.GetDocumentAsync(docId);
@@ -8127,13 +8197,21 @@ namespace Take_Time_BangPhra.Integration
 
                     // เอกสารถูกลบ/void มือบน NextAcc แล้ว → ผู้ใช้เคลียร์เอง (รวม journal ปรับปรุง)
                     // ห้ามโพสต์กลับรายการซ้ำ — ไม่งั้นได้ reversal ลอยไม่มีคู่
-                    if (docAlreadyGone)
+                    // (ยกเว้นเป็น void ของเราเองที่ค้างครึ่งทาง — resumingOurVoid)
+                    if (docAlreadyGone && !resumingOurVoid)
                     {
                         SetReceiptPaymentMarker(receiptNumber, "VOIDED");
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt: doc {docId} ถูกลบ/void บน NextAcc แล้ว receipt={receiptNumber} — ข้ามการกลับรายการ (เคลียร์มือ)", "SYSTEM");
                         return $"VOIDED:{nexaaccId}";
                     }
+
+                    // จด "void สำเร็จแล้ว กำลังกลับรายการประกอบ" ก่อนเริ่มกลับ — ถ้าขั้นใดล้ม รอบ retry จะรู้ว่า
+                    // เอกสารที่เห็นว่าถูก void เป็นฝีมือเรา แล้วกลับรายการที่เหลือต่อ (เดิมข้ามทั้งหมด ⇒ CREATE ใหม่
+                    // หักมัดจำซ้ำ). ":N" = เดิมเป็นใบขายสด native (ให้ helper รู้ว่าไม่ต้องลง counter)
+                    if (!string.IsNullOrEmpty(receiptNumber) && !resumingOurVoid)
+                        SetReceiptPaymentMarker(receiptNumber, "VOIDING:" + docId +
+                            (rawMarkerBefore.StartsWith("CSNATIVE:") ? ":N" : ""));
 
                     if (!string.IsNullOrEmpty(receiptNumber))
                     {
@@ -8158,7 +8236,11 @@ namespace Take_Time_BangPhra.Integration
                                     // ที่โพสต์ไป (แม่นแม้ revenueType ต่าง) + idempotent
                                     await ReverseDepositRevenueRecognitionAsync(resIdV, receiptNumber);
                                 }
-                                else if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt)
+                                else if (LookupBusinessHasVat() && _config.IsDepositVatAtReceipt
+                                         // กลับเฉพาะเมื่อมี DEPVAT ที่ยังใช้งานอยู่จริง — ใบขายสดไม่เคยโพสต์ DEPVAT
+                                         // (VAT อยู่ใน JV -CSDEPADJ ซึ่งกลับไปแล้วด้านบน) เดิมลง counter ทุกครั้ง
+                                         // ⇒ กลับ VAT มัดจำ 2 รอบ (ADVANCE เกิน +VAT, 21913 ถูก Cr ซ้ำ) ทุกรอบแก้ใบ
+                                         && await JournalRefIsLiveAsync($"RES-{resIdV}-DEPVAT"))
                                 {
                                     // โหมดเต็มยอด: payment ตัดมัดจำถูก cascade-reverse โดย void doc แล้ว (Cr ADVANCE คืน)
                                     // → กลับเฉพาะ journal แก้ VAT มัดจำ (Dr ADVANCE / Cr 21913-21911)
@@ -9219,9 +9301,10 @@ namespace Take_Time_BangPhra.Integration
                         decimal amt = r["Amt"] != DBNull.Value ? Convert.ToDecimal(r["Amt"]) : 0m;
                         string marker = r["Marker"] == DBNull.Value ? null : r["Marker"]?.ToString();
 
-                        if (marker == "VOIDED")
+                        if (marker == "VOIDED"
+                            || (marker != null && marker.StartsWith("VOIDING:", StringComparison.OrdinalIgnoreCase)))
                         {
-                            // ยกเลิกแล้ว — ไม่มีหนี้สินบน NextAcc
+                            // ยกเลิกแล้ว (หรือ void สำเร็จแล้ว กำลังกลับรายการประกอบ) — ไม่มีหนี้สินบน NextAcc
                         }
                         else if (!string.IsNullOrEmpty(marker)
                                  && (marker.StartsWith("APR:") || marker.StartsWith("ADJ:") || marker == "NOCASH"
@@ -12999,9 +13082,10 @@ namespace Take_Time_BangPhra.Integration
 
                     // ผู้เรียก (repost fallback) อาจใส่ VOID ของเอกสารเดียวกันไว้แล้ว — ตอนนี้ VOID ไม่ถูกยกเลิก
                     // ใน Step 3 แล้ว จึงต้องกันไม่ให้ซ้อนสองตัว (เส้น int_ กลับรายการมัดจำซ้ำได้)
+                    string existingVoidStatus;
                     bool voidAlreadyQueued = !string.IsNullOrEmpty(oldNexaaccId)
-                        && FindPendingEntry(entityType, entityType == "RECEIPT" ? "VOID_RECEIPT" : "VOID_VOUCHER",
-                                            "nexaaccId", oldNexaaccId) > 0;
+                        && FindUnsentEntry(entityType, entityType == "RECEIPT" ? "VOID_RECEIPT" : "VOID_VOUCHER",
+                                           "nexaaccId", oldNexaaccId, out existingVoidStatus) > 0;
                     if (!string.IsNullOrEmpty(oldNexaaccId) && !voidAlreadyQueued)
                     {
                         // ProcessVoidReceipt อ่าน "receiptNumber" (ProcessVoidVoucher อ่าน "documentNumber")
