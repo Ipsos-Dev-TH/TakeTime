@@ -1401,6 +1401,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                             "(อนุมัติแล้วก็แก้ได้ ถ้างวดบัญชียังไม่ปิด) / เอกสารใบเสร็จ-ใบกำกับ ใช้ปุ่มแก้ไขที่หน้าเอกสาร (void→สร้างใหม่)" } };
                 }
 
+                if (rowStatus == "PROCESSING")
+                {
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "รายการนี้กำลังส่งไป NextAcc อยู่ — รอให้จบรอบก่อน (ถ้าค้างเกิน 15 นาที ระบบจะคืนเป็นรอส่งเอง)" } };
+                }
+
                 sync.RetryItem(queueId);
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
             }
