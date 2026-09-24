@@ -6493,7 +6493,11 @@ namespace Take_Time_BangPhra.Integration
                     && customerContact?.NexaaccContactId != null)
                 {
                     // ✅ ลูกค้า walk-in / B2C (ไม่มีเลขผู้เสียภาษีครบ §86/4) แต่มี company endpoints:
-                    //    เช็คเอาท์ = company Receipt(3) + VAT = "ใบกำกับภาษี/ใบเสร็จรับเงิน" จ่ายจบในใบ
+                    //    เช็คเอาท์ = company Receipt(3) + VAT จ่ายจบในใบ
+                    //    ⚠ หัวเอกสารที่ NextAcc พิมพ์ = "ใบเสร็จรับเงิน" เสมอ (ComputeDocumentTitle ดู flag
+                    //      ไม่ใช่ชนิด — ตรวจกับ NextAcc @HEAD ส.ค. 2026, ดู AccountingConfig.IsCashSaleUseReceipt)
+                    //      แม้จะแสดง VAT ก็ "ไม่ใช่ใบกำกับภาษี" — คอมเมนต์เดิม (ก.ค.) ที่ว่าได้ "ใบกำกับภาษี/
+                    //      ใบเสร็จรับเงิน" ผิด (เคสจริง REC-20260919-0006)
                     //    (Dr เงินสดตามแหล่งเงิน / Cr รายได้ราย line / Cr ภาษีขาย 21911). ใช้ Receipt(3)
                     //    ไม่ใช่ TaxInvoice(4) เพราะ walk-in ไม่ผ่าน §86/4 (ไม่มีเลขภาษี+ที่อยู่) → TaxInvoice
                     //    ถูก NextAcc ปฏิเสธ; Receipt/ใบกำกับ-ใบเสร็จเงินสดไม่ติด gate นั้น. ได้ครบ: จ่ายแล้ว
@@ -6678,7 +6682,7 @@ namespace Take_Time_BangPhra.Integration
                     _lastDocType = "RECEIPT";
                     _lastReceiptUsedDrives = doc.DepositAppliedDrivesJournal;   // ให้ post-sync verify รู้ว่า safe จะ reconcile -DEPADJ ค้าง
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT (ใบกำกับ/ใบเสร็จ) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
+                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT หัวเอกสาร 'ใบเสร็จรับเงิน' (ไม่ใช่ใบกำกับภาษี) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
                     // ลูกค้ามีเลขภาษีครบ §86/4 (B2B ที่ route มาที่นี่ผ่าน CashSale_UseReceipt) → Receipt(3) เป็น
                     // "ใบกำกับภาษี/ใบเสร็จรับเงิน" ออก e-Tax T03 ได้ (NextAcc รองรับ Receipt→T03). walk-in ไม่มีเลขภาษี
                     // → ข้าม (TryAutoGenerate จะ fail-soft เองอยู่แล้ว แต่ gate กันเรียกเปล่า)
